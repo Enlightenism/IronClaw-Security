@@ -1,0 +1,5 @@
+files:
+  - ".env"
+  - "config.json"
+  - "install.sh"
+  - "postinstall.js"

@@ -1,0 +1,5 @@
+patterns:
+  - "ignore previous instructions"
+  - "exfiltrate"
+  - "download and execute"
+  - "powershell -enc"

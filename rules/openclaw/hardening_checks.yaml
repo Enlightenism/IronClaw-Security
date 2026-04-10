@@ -1,0 +1,5 @@
+checks:
+  - name: localhost_only
+  - name: auth_enabled
+  - name: unsafe_exec_disabled
+  - name: trusted_skill_source
