@@ -1,0 +1,115 @@
+{
+  "project_root": "C:\\Users\\Jesse\\Downloads\\ironclaw-gen1",
+  "summary": {
+    "overall_status": "passed",
+    "passed": 2,
+    "failed_required": 0,
+    "failed_optional": 0,
+    "skipped": 4
+  },
+  "results": [
+    {
+      "name": "pytest",
+      "category": "tests",
+      "required": true,
+      "command": [
+        "C:\\Python314\\python.exe",
+        "-m",
+        "pytest",
+        "-q"
+      ],
+      "command_display": "'C:\\Python314\\python.exe' -m pytest -q",
+      "returncode": 0,
+      "duration_seconds": 46.753,
+      "status": "passed",
+      "stdout": "........................................................................ [ 11%]\n........................................................................ [ 23%]\n........................................................................ [ 35%]\n......................................................................s. [ 47%]\nsss..s.................................................................. [ 59%]\n........................................................................ [ 71%]\n........................................................................ [ 83%]\n........................................................................ [ 95%]\n...........................                                              [100%]\n598 passed, 5 skipped in 45.53s",
+      "stderr": ""
+    },
+    {
+      "name": "pytest-warnings-as-errors",
+      "category": "warnings",
+      "required": true,
+      "command": [
+        "C:\\Python314\\python.exe",
+        "-m",
+        "pytest",
+        "-q",
+        "-W",
+        "error"
+      ],
+      "command_display": "'C:\\Python314\\python.exe' -m pytest -q -W error",
+      "returncode": 0,
+      "duration_seconds": 46.731,
+      "status": "passed",
+      "stdout": "........................................................................ [ 11%]\n........................................................................ [ 23%]\n........................................................................ [ 35%]\n......................................................................s. [ 47%]\nsss..s.................................................................. [ 59%]\n........................................................................ [ 71%]\n........................................................................ [ 83%]\n........................................................................ [ 95%]\n...........................                                              [100%]\n598 passed, 5 skipped in 45.48s",
+      "stderr": ""
+    },
+    {
+      "name": "ruff",
+      "category": "lint-missing-tool",
+      "required": false,
+      "command": [
+        "ruff",
+        "check",
+        "."
+      ],
+      "command_display": "ruff check .",
+      "returncode": 0,
+      "duration_seconds": 0.0,
+      "status": "skipped",
+      "stdout": "",
+      "stderr": "missing dependency: ruff"
+    },
+    {
+      "name": "mypy",
+      "category": "types-missing-tool",
+      "required": false,
+      "command": [
+        "mypy",
+        "app"
+      ],
+      "command_display": "mypy app",
+      "returncode": 0,
+      "duration_seconds": 0.0,
+      "status": "skipped",
+      "stdout": "",
+      "stderr": "missing dependency: mypy"
+    },
+    {
+      "name": "bandit",
+      "category": "security-missing-tool",
+      "required": false,
+      "command": [
+        "bandit",
+        "-r",
+        "app",
+        "-x",
+        "tests,.venv"
+      ],
+      "command_display": "bandit -r app -x tests,.venv",
+      "returncode": 0,
+      "duration_seconds": 0.0,
+      "status": "skipped",
+      "stdout": "",
+      "stderr": "missing dependency: bandit"
+    },
+    {
+      "name": "semgrep",
+      "category": "security-missing-tool",
+      "required": false,
+      "command": [
+        "semgrep",
+        "--config",
+        "auto",
+        "--error",
+        "app"
+      ],
+      "command_display": "semgrep --config auto --error app",
+      "returncode": 0,
+      "duration_seconds": 0.0,
+      "status": "skipped",
+      "stdout": "",
+      "stderr": "missing dependency: semgrep"
+    }
+  ]
+}

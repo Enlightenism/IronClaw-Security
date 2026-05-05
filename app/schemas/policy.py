@@ -1,0 +1,10 @@
+from typing import Dict
+from pydantic import BaseModel, Field
+
+
+class PolicyStatus(BaseModel):
+    heuristic_threshold: int
+    heuristic_threshold_env: str | None = None
+    severity_counts: Dict[str, int] = Field(default_factory=dict)
+    category_counts: Dict[str, int] = Field(default_factory=dict)
+    unicode_normalization_enabled: bool

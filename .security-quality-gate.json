@@ -1,0 +1,32 @@
+{
+  "status": "fail",
+  "generated_at": "2026-05-02T19:13:06.843367+00:00",
+  "minimum_coverage": 80,
+  "checks": [
+    {
+      "name": "project-surface",
+      "ok": true,
+      "detail": "app, tests, and requirements are present"
+    },
+    {
+      "name": "pytest",
+      "ok": true,
+      "detail": "test suite passed"
+    },
+    {
+      "name": "coverage",
+      "ok": false,
+      "detail": "ERROR: usage: python.exe -m pytest [options] [file_or_dir] [file_or_dir] [...]\npython.exe -m pytest: error: unrecognized arguments: --cov=app --cov-fail-under=80 --cov-report=term-missing:skip-covered\n  inifile: C:\\Users\\Jesse\\Downloads\\ironclaw-gen1\\pyproject.toml\n  rootdir: C:\\Users\\Jesse\\Downloads\\ironclaw-gen1"
+    },
+    {
+      "name": "bandit",
+      "ok": true,
+      "detail": "no Bandit issues detected at current threshold"
+    },
+    {
+      "name": "pip-audit",
+      "ok": false,
+      "detail": "pip-audit is not installed"
+    }
+  ]
+}

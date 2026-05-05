@@ -1,0 +1,222 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
+
+from core.apikeys import ApiKeyRecord, KeyScope, KeyStatus, registry
+from core.auth import AuthPrincipal, require_scope, resolve_api_key
+
+
+router = APIRouter(prefix="/customerkeys", tags=["customer-keys"])
+
+CustomerKeyStatus = Literal["active", "revoked"]
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class CustomerApiKeyCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    owner_id: str | None = Field(
+        default=None,
+        description="Optional owner identifier. Defaults to the authenticated principal subject.",
+    )
+
+
+class CustomerApiKeyResponse(BaseModel):
+    key_id: str
+    name: str
+    key_prefix: str
+    key_hint: str
+    scope: KeyScope
+    status: KeyStatus
+    owner_id: str | None = None
+    created_at: str
+    updated_at: str
+    last_used_at: str | None = None
+    revoked_at: str | None = None
+    # Only returned on creation/rotation
+    raw_key: str | None = None
+
+
+class CustomerApiKeyListResponse(BaseModel):
+    items: list[CustomerApiKeyResponse] = Field(default_factory=list)
+
+
+class CustomerApiKeyRotateResponse(BaseModel):
+    key_id: str
+    name: str
+    key_prefix: str
+    key_hint: str
+    scope: KeyScope
+    status: KeyStatus
+    owner_id: str | None = None
+    created_at: str
+    updated_at: str
+    last_used_at: str | None = None
+    revoked_at: str | None = None
+    raw_key: str
+
+
+def _to_response(record: ApiKeyRecord, raw_key: str | None = None) -> CustomerApiKeyResponse:
+    return CustomerApiKeyResponse(
+        key_id=record.key_id,
+        name=record.name,
+        key_prefix=record.key_prefix,
+        key_hint=record.key_hint,
+        scope=record.scope,
+        status=record.status,
+        owner_id=record.owner_id,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+        last_used_at=record.last_used_at,
+        revoked_at=record.revoked_at,
+        raw_key=raw_key,
+    )
+
+
+@router.get("", response_model=CustomerApiKeyListResponse)
+def list_customer_keys(
+    principal: AuthPrincipal = Depends(resolve_api_key),
+) -> CustomerApiKeyListResponse:
+    # Only customer or system principals can list customer keys
+    require_scope(principal, "customer", "internal")
+
+    records = registry.list_keys(
+        owner_id=principal.subject,
+        scope="customer",
+    )
+    items = [_to_response(r) for r in records]
+    return CustomerApiKeyListResponse(items=items)
+
+
+@router.post(
+    "",
+    response_model=CustomerApiKeyResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_customer_key(
+    body: CustomerApiKeyCreateRequest,
+    principal: AuthPrincipal = Depends(resolve_api_key),
+) -> CustomerApiKeyResponse:
+    # Customers can only create keys for themselves; internal/system can override owner_id
+    if principal.principal_type == "customer":
+        owner_id = principal.subject
+    else:
+        owner_id = body.owner_id or principal.subject
+
+    require_scope(principal, "customer", "internal")
+
+    record, raw_key = registry.create_key(
+        name=body.name,
+        scope="customer",
+        owner_id=owner_id,
+        prefix="icpk",
+    )
+    return _to_response(record, raw_key=raw_key)
+
+
+@router.post(
+    "/{key_id}/rotate",
+    response_model=CustomerApiKeyRotateResponse,
+)
+def rotate_customer_key(
+    key_id: str,
+    principal: AuthPrincipal = Depends(resolve_api_key),
+) -> CustomerApiKeyRotateResponse:
+    require_scope(principal, "customer", "internal")
+
+    record = registry.get_key(key_id)
+    if record is None or record.scope != "customer":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer API key not found",
+        )
+
+    if principal.principal_type == "customer" and record.owner_id != principal.subject:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not allowed to rotate this API key",
+        )
+
+    rotated, raw_key = registry.rotate_key(key_id=key_id, prefix="icpk")
+
+    return CustomerApiKeyRotateResponse(
+        key_id=rotated.key_id,
+        name=rotated.name,
+        key_prefix=rotated.key_prefix,
+        key_hint=rotated.key_hint,
+        scope=rotated.scope,
+        status=rotated.status,
+        owner_id=rotated.owner_id,
+        created_at=rotated.created_at,
+        updated_at=rotated.updated_at,
+        last_used_at=rotated.last_used_at,
+        revoked_at=rotated.revoked_at,
+        raw_key=raw_key,
+    )
+
+
+@router.post(
+    "/{key_id}/revoke",
+    response_model=CustomerApiKeyResponse,
+)
+def revoke_customer_key(
+    key_id: str,
+    principal: AuthPrincipal = Depends(resolve_api_key),
+) -> CustomerApiKeyResponse:
+    require_scope(principal, "customer", "internal")
+
+    record = registry.get_key(key_id)
+    if record is None or record.scope != "customer":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer API key not found",
+        )
+
+    if principal.principal_type == "customer" and record.owner_id != principal.subject:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not allowed to revoke this API key",
+        )
+
+    if record.status == "revoked":
+        # Idempotent revoke; just return existing record
+        return _to_response(record)
+
+    now = _utc_now_iso()
+    record.status = "revoked"
+    record.revoked_at = now
+    record.updated_at = now
+
+    return _to_response(record)
+
+
+@router.get(
+    "/{key_id}",
+    response_model=CustomerApiKeyResponse,
+)
+def get_customer_key(
+    key_id: str,
+    principal: AuthPrincipal = Depends(resolve_api_key),
+) -> CustomerApiKeyResponse:
+    require_scope(principal, "customer", "internal")
+
+    record = registry.get_key(key_id)
+    if record is None or record.scope != "customer":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer API key not found",
+        )
+
+    if principal.principal_type == "customer" and record.owner_id != principal.subject:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not allowed to view this API key",
+        )
+
+    return _to_response(record)

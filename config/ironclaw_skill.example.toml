@@ -1,0 +1,49 @@
+# IronClaw-Security skill integration example configuration.
+# Copy and adapt for local development or paid unit-backed deployments.
+
+[ironclaw]
+environment = "development"
+base_url = "http://127.0.0.1:8000"
+policy_mode = "review"
+timeout_seconds = 10.0
+skill_enabled = true
+provider_targets = ["claude", "openclaw"]
+
+[service]
+host = "127.0.0.1"
+port = 8000
+app_import = "app.main:app"
+log_level = "info"
+reload = false
+
+[targets]
+backup_target = "primary"
+restore_target = "primary"
+
+[auth]
+# Keep secrets out of source control in real deployments.
+api_secret = "replace_me"
+jwt_secret = "replace_me"
+
+[providers]
+openai_api_key = "replace_me"
+groq_api_key = "replace_me"
+
+[units]
+enabled = false
+provider = "stub"
+default_balance = 0
+block_on_exhausted = true
+
+[paths]
+config_dir = "~/.ironclaw"
+env_file = "./.env"
+log_dir = "./.ironclaw"
+
+[features]
+health = true
+ui = true
+backup = true
+restore = true
+guarded_execution = true
+skill_integration = true

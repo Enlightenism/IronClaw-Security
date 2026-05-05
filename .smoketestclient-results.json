@@ -1,0 +1,73 @@
+{
+  "base_url": "http://127.0.0.1:8000",
+  "generated_at": "2026-05-02T23:34:15.402523Z",
+  "overall_status": "ok",
+  "passed": 7,
+  "failed": 0,
+  "total_duration_ms": 434,
+  "checks": [
+    {
+      "name": "health",
+      "path": "/health",
+      "ok": true,
+      "status_code": 200,
+      "duration_ms": 10,
+      "detail": "healthy status=ok",
+      "required": true
+    },
+    {
+      "name": "health-liveness",
+      "path": "/health/liveness",
+      "ok": true,
+      "status_code": 200,
+      "duration_ms": 3,
+      "detail": "healthy status=ok",
+      "required": true
+    },
+    {
+      "name": "health-readiness",
+      "path": "/health/readiness",
+      "ok": true,
+      "status_code": 200,
+      "duration_ms": 2,
+      "detail": "healthy status=ok",
+      "required": true
+    },
+    {
+      "name": "system-status",
+      "path": "/system/status",
+      "ok": true,
+      "status_code": 200,
+      "duration_ms": 2,
+      "detail": "healthy status=ok",
+      "required": true
+    },
+    {
+      "name": "ui-manifest",
+      "path": "/ui/manifest",
+      "ok": true,
+      "status_code": 200,
+      "duration_ms": 2,
+      "detail": "ui endpoint reachable",
+      "required": true
+    },
+    {
+      "name": "ui-status",
+      "path": "/ui/status",
+      "ok": true,
+      "status_code": 200,
+      "duration_ms": 2,
+      "detail": "ui endpoint reachable",
+      "required": true
+    },
+    {
+      "name": "ui-runtime-status",
+      "path": "/ui/runtime-status",
+      "ok": true,
+      "status_code": 200,
+      "duration_ms": 3,
+      "detail": "ui endpoint reachable",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,1247 @@
+from __future__ import annotations
+
+from collections import Counter, defaultdict
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from hashlib import sha1
+from statistics import mean
+from typing import Any, Iterable, Mapping, Sequence
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
+
+
+def _isoformat(value: datetime | None = None) -> str:
+    return (value or _utcnow()).astimezone(UTC).isoformat()
+
+
+def _coerce_str(value: Any, default: str = "") -> str:
+    if value is None:
+        return default
+    return str(value).strip()
+
+
+def _coerce_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, tuple):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, set):
+        return [str(item).strip() for item in value if str(item).strip()]
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def _coerce_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _parse_timestamp(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value.astimezone(UTC) if value.tzinfo else value.replace(tzinfo=UTC)
+    text = _coerce_str(value)
+    if not text:
+        return _utcnow()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+        return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+    except ValueError:
+        return _utcnow()
+
+
+def _severity_rank(value: str) -> int:
+    return {
+        "info": 0,
+        "low": 1,
+        "medium": 2,
+        "high": 3,
+        "critical": 4,
+    }.get(value.lower(), 0)
+
+
+def _severity_from_score(score: int) -> str:
+    if score >= 90:
+        return "critical"
+    if score >= 75:
+        return "high"
+    if score >= 45:
+        return "medium"
+    if score > 0:
+        return "low"
+    return "info"
+
+
+def _priority_from_score(score: int) -> str:
+    if score >= 90:
+        return "p1"
+    if score >= 75:
+        return "p2"
+    if score >= 45:
+        return "p3"
+    return "p4"
+
+
+def _risk_band(score: int) -> str:
+    if score >= 90:
+        return "critical"
+    if score >= 70:
+        return "high"
+    if score >= 40:
+        return "moderate"
+    return "low"
+
+
+def _stable_id(prefix: str, *parts: Any) -> str:
+    material = "|".join(_coerce_str(part, "-") for part in parts)
+    digest = sha1(material.encode("utf-8")).hexdigest()[:12]
+    return f"{prefix}_{digest}"
+
+
+@dataclass(slots=True)
+class CorrelationSignal:
+    signal_id: str
+    signal_type: str
+    source: str
+    title: str
+    summary: str
+    risk_score: int
+    severity: str
+    confidence: float
+    status: str
+    timestamp: str
+    session_id: str | None = None
+    client_id: str | None = None
+    request_id: str | None = None
+    trace_id: str | None = None
+    verdict: str | None = None
+    incident_id: str | None = None
+    quarantine_id: str | None = None
+    review_item_id: str | None = None
+    playbook_ids: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+    indicators: list[str] = field(default_factory=list)
+    evidence: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "signal_id": self.signal_id,
+            "signal_type": self.signal_type,
+            "source": self.source,
+            "title": self.title,
+            "summary": self.summary,
+            "risk_score": self.risk_score,
+            "severity": self.severity,
+            "confidence": round(self.confidence, 3),
+            "status": self.status,
+            "timestamp": self.timestamp,
+            "session_id": self.session_id,
+            "client_id": self.client_id,
+            "request_id": self.request_id,
+            "trace_id": self.trace_id,
+            "verdict": self.verdict,
+            "incident_id": self.incident_id,
+            "quarantine_id": self.quarantine_id,
+            "review_item_id": self.review_item_id,
+            "playbook_ids": list(self.playbook_ids),
+            "tags": list(self.tags),
+            "indicators": list(self.indicators),
+            "evidence": dict(self.evidence),
+            "metadata": dict(self.metadata),
+        }
+
+
+class AttackCorrelationService:
+    """
+    Correlates security signals from scan, execution, quarantine, review,
+    hostile-context, detonation, malware, telemetry, and threat-intel surfaces.
+
+    The service is intentionally dependency-light so Gen1 can use it immediately
+    from routes, orchestration, or tests before deeper persistence wiring lands.
+    """
+
+    DEFAULT_PLAYBOOKS: tuple[dict[str, Any], ...] = (
+        {
+            "playbook_id": "prompt-injection-containment",
+            "title": "Prompt Injection Containment",
+            "category": "promptinjection",
+            "triggers": {"promptinjection", "hostilecontext", "policybypass"},
+            "min_score": 55,
+            "summary": "Contain hostile prompt activity, preserve evidence, and require review.",
+            "recommended_actions": [
+                "Escalate to review queue",
+                "Preserve prompt and tool evidence",
+                "Block downstream tool execution",
+                "Link session for repeated hostile context",
+            ],
+        },
+        {
+            "playbook_id": "data-exfiltration-response",
+            "title": "Data Exfiltration Response",
+            "category": "exfiltration",
+            "triggers": {"exfiltration", "secretexposure", "download", "outbound"},
+            "min_score": 65,
+            "summary": "Quarantine risky artifacts and restrict outbound delivery paths.",
+            "recommended_actions": [
+                "Quarantine related artifacts",
+                "Redact or suppress outbound payload",
+                "Require operator review",
+                "Capture network and file-return evidence",
+            ],
+        },
+        {
+            "playbook_id": "malware-detonation-escalation",
+            "title": "Malware / Detonation Escalation",
+            "category": "malware",
+            "triggers": {"malware", "detonation", "artifact"},
+            "min_score": 70,
+            "summary": "Escalate suspicious binaries or artifacts for quarantine and containment.",
+            "recommended_actions": [
+                "Create or update incident",
+                "Quarantine artifact",
+                "Attach detonation verdict and malware enrichment",
+                "Mark session as elevated risk",
+            ],
+        },
+        {
+            "playbook_id": "runtime-abuse-response",
+            "title": "Runtime Abuse Response",
+            "category": "unsafeexecution",
+            "triggers": {"runtime", "toolmisuse", "unsafeexecution", "sandbox"},
+            "min_score": 60,
+            "summary": "Contain unsafe tool actions and preserve runtime evidence for review.",
+            "recommended_actions": [
+                "Hold execution",
+                "Create review task",
+                "Record runtime boundary decision",
+                "Link to related policy violations",
+            ],
+        },
+    )
+
+    def __init__(
+        self,
+        *,
+        playbooks: Sequence[Mapping[str, Any]] | None = None,
+        incident_store: Any | None = None,
+        review_queue_service: Any | None = None,
+        quarantine_store: Any | None = None,
+    ) -> None:
+        self._playbooks = [dict(item) for item in (playbooks or self.DEFAULT_PLAYBOOKS)]
+        self._incident_store = incident_store
+        self._review_queue_service = review_queue_service
+        self._quarantine_store = quarantine_store
+
+    def correlate(
+        self,
+        *,
+        scans: Sequence[Mapping[str, Any]] | None = None,
+        executions: Sequence[Mapping[str, Any]] | None = None,
+        incidents: Sequence[Mapping[str, Any]] | None = None,
+        quarantines: Sequence[Mapping[str, Any]] | None = None,
+        reviews: Sequence[Mapping[str, Any]] | None = None,
+        telemetry_events: Sequence[Mapping[str, Any]] | None = None,
+        hostile_context_events: Sequence[Mapping[str, Any]] | None = None,
+        session_risk_events: Sequence[Mapping[str, Any]] | None = None,
+        detonation_events: Sequence[Mapping[str, Any]] | None = None,
+        malware_findings: Sequence[Mapping[str, Any]] | None = None,
+        threat_intel_hits: Sequence[Mapping[str, Any]] | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        reference_now = now.astimezone(UTC) if isinstance(now, datetime) else _utcnow()
+
+        normalized = self._normalize_sources(
+            scans=scans or (),
+            executions=executions or (),
+            incidents=incidents or (),
+            quarantines=quarantines or (),
+            reviews=reviews or (),
+            telemetry_events=telemetry_events or (),
+            hostile_context_events=hostile_context_events or (),
+            session_risk_events=session_risk_events or (),
+            detonation_events=detonation_events or (),
+            malware_findings=malware_findings or (),
+            threat_intel_hits=threat_intel_hits or (),
+        )
+
+        signals = self._build_signals(normalized)
+        grouped_sessions = self._group_by_key(signals, "session_id")
+        grouped_requests = self._group_by_key(signals, "request_id")
+        grouped_traces = self._group_by_key(signals, "trace_id")
+        grouped_clients = self._group_by_key(signals, "client_id")
+
+        campaigns = self._build_campaigns(
+            grouped_sessions=grouped_sessions,
+            grouped_requests=grouped_requests,
+            grouped_traces=grouped_traces,
+            reference_now=reference_now,
+        )
+        session_risk = self._build_session_risk(grouped_sessions, reference_now)
+        incident_links = self._build_incident_links(signals, normalized["incidents"])
+        escalation = self._build_escalations(
+            signals=signals,
+            campaigns=campaigns,
+            session_risk=session_risk,
+            incident_links=incident_links,
+        )
+        playbook_matches = self._build_playbook_matches(signals, campaigns)
+
+        response = {
+            "generated_at": _isoformat(reference_now),
+            "summary": self._build_summary(signals, campaigns, escalation, session_risk),
+            "signals": [signal.to_dict() for signal in signals],
+            "campaigns": campaigns,
+            "session_risk": session_risk,
+            "incident_links": incident_links,
+            "playbook_matches": playbook_matches,
+            "escalations": escalation,
+            "metrics": self._build_metrics(signals, campaigns, session_risk, incident_links, reference_now),
+        }
+        return response
+
+    def create_signal(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        signal = self._signal_from_generic_event(payload)
+        return signal.to_dict()
+
+    def summarize_session(
+        self,
+        session_id: str,
+        *,
+        signals: Sequence[Mapping[str, Any]] | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        session_key = _coerce_str(session_id)
+        reference_now = now.astimezone(UTC) if isinstance(now, datetime) else _utcnow()
+        normalized_signals = [self._mapping_to_signal(item) for item in (signals or [])]
+        matched = [signal for signal in normalized_signals if signal.session_id == session_key]
+        matched.sort(key=lambda item: item.timestamp)
+
+        risk_score = self._compute_session_score(matched)
+        last_seen = matched[-1].timestamp if matched else None
+
+        return {
+            "session_id": session_key,
+            "generated_at": _isoformat(reference_now),
+            "total_signals": len(matched),
+            "risk_score": risk_score,
+            "risk_level": _risk_band(risk_score),
+            "latest_signal_at": last_seen,
+            "signals": [signal.to_dict() for signal in matched],
+        }
+
+    def _normalize_sources(self, **sources: Sequence[Mapping[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+        normalized: dict[str, list[dict[str, Any]]] = {}
+        for name, items in sources.items():
+            normalized[name] = [dict(item) for item in items]
+        return normalized
+
+    def _build_signals(self, normalized: Mapping[str, Sequence[Mapping[str, Any]]]) -> list[CorrelationSignal]:
+        signals: list[CorrelationSignal] = []
+        for item in normalized.get("scans", ()):
+            signals.append(self._signal_from_scan(item))
+        for item in normalized.get("executions", ()):
+            signals.append(self._signal_from_execution(item))
+        for item in normalized.get("quarantines", ()):
+            signals.append(self._signal_from_quarantine(item))
+        for item in normalized.get("reviews", ()):
+            signals.append(self._signal_from_review(item))
+        for item in normalized.get("telemetry_events", ()):
+            signals.append(self._signal_from_telemetry(item))
+        for item in normalized.get("hostile_context_events", ()):
+            signals.append(self._signal_from_hostile_context(item))
+        for item in normalized.get("session_risk_events", ()):
+            signals.append(self._signal_from_session_risk(item))
+        for item in normalized.get("detonation_events", ()):
+            signals.append(self._signal_from_detonation(item))
+        for item in normalized.get("malware_findings", ()):
+            signals.append(self._signal_from_malware(item))
+        for item in normalized.get("threat_intel_hits", ()):
+            signals.append(self._signal_from_threat_intel(item))
+        signals.sort(key=lambda item: item.timestamp)
+        return signals
+
+    def _group_by_key(self, signals: Sequence[CorrelationSignal], key: str) -> dict[str, list[CorrelationSignal]]:
+        grouped: dict[str, list[CorrelationSignal]] = defaultdict(list)
+        for signal in signals:
+            value = getattr(signal, key)
+            if value:
+                grouped[value].append(signal)
+        return grouped
+
+    def _build_campaigns(
+        self,
+        *,
+        grouped_sessions: Mapping[str, Sequence[CorrelationSignal]],
+        grouped_requests: Mapping[str, Sequence[CorrelationSignal]],
+        grouped_traces: Mapping[str, Sequence[CorrelationSignal]],
+        reference_now: datetime,
+    ) -> list[dict[str, Any]]:
+        campaigns: list[dict[str, Any]] = []
+
+        for namespace, groups in (
+            ("session", grouped_sessions),
+            ("request", grouped_requests),
+            ("trace", grouped_traces),
+        ):
+            for correlation_key, items in groups.items():
+                if len(items) < 2:
+                    continue
+                risk_score = self._compute_session_score(items)
+                if risk_score < 45:
+                    continue
+
+                tags = sorted({tag for item in items for tag in item.tags})
+                indicators = sorted({indicator for item in items for indicator in item.indicators})
+                playbook_ids = self._match_playbooks(items, risk_score)
+                incident_ids = sorted({item.incident_id for item in items if item.incident_id})
+                severity = _severity_from_score(risk_score)
+
+                campaigns.append(
+                    {
+                        "campaign_id": _stable_id("campaign", namespace, correlation_key, risk_score, len(items)),
+                        "namespace": namespace,
+                        "correlation_key": correlation_key,
+                        "severity": severity,
+                        "risk_score": risk_score,
+                        "confidence": round(min(0.99, 0.45 + (len(items) * 0.08)), 3),
+                        "status": "active" if self._is_recent(items, reference_now) else "historical",
+                        "signal_count": len(items),
+                        "signal_types": sorted({item.signal_type for item in items}),
+                        "sources": sorted({item.source for item in items}),
+                        "first_seen_at": items[0].timestamp,
+                        "last_seen_at": items[-1].timestamp,
+                        "session_id": next((item.session_id for item in items if item.session_id), None),
+                        "client_id": next((item.client_id for item in items if item.client_id), None),
+                        "request_id": next((item.request_id for item in items if item.request_id), None),
+                        "trace_id": next((item.trace_id for item in items if item.trace_id), None),
+                        "incident_ids": incident_ids,
+                        "playbook_ids": playbook_ids,
+                        "tags": tags,
+                        "indicators": indicators,
+                        "summary": self._campaign_summary(namespace, correlation_key, items, risk_score),
+                    }
+                )
+
+        campaigns.sort(key=lambda item: (item["risk_score"], item["signal_count"]), reverse=True)
+        return campaigns
+
+    def _build_session_risk(
+        self,
+        grouped_sessions: Mapping[str, Sequence[CorrelationSignal]],
+        reference_now: datetime,
+    ) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for session_id, signals in grouped_sessions.items():
+            score = self._compute_session_score(signals)
+            items.append(
+                {
+                    "session_id": session_id,
+                    "client_id": next((signal.client_id for signal in signals if signal.client_id), None),
+                    "risk_score": score,
+                    "risk_level": _risk_band(score),
+                    "severity": _severity_from_score(score),
+                    "signal_count": len(signals),
+                    "high_severity_count": sum(1 for signal in signals if _severity_rank(signal.severity) >= 3),
+                    "open_incident_count": len({signal.incident_id for signal in signals if signal.incident_id}),
+                    "quarantine_count": len({signal.quarantine_id for signal in signals if signal.quarantine_id}),
+                    "review_count": len({signal.review_item_id for signal in signals if signal.review_item_id}),
+                    "first_seen_at": signals[0].timestamp,
+                    "last_seen_at": signals[-1].timestamp,
+                    "is_active": self._is_recent(signals, reference_now),
+                    "signal_types": sorted({signal.signal_type for signal in signals}),
+                    "recommended_priority": _priority_from_score(score),
+                    "summary": self._session_summary(session_id, signals, score),
+                }
+            )
+        items.sort(key=lambda item: item["risk_score"], reverse=True)
+        return items
+
+    def _build_incident_links(
+        self,
+        signals: Sequence[CorrelationSignal],
+        incidents: Sequence[Mapping[str, Any]],
+    ) -> list[dict[str, Any]]:
+        incident_map = {
+            _coerce_str(item.get("incidentid") or item.get("incident_id") or item.get("id")): dict(item)
+            for item in incidents
+        }
+        linked: dict[str, dict[str, Any]] = {}
+
+        for signal in signals:
+            incident_id = signal.incident_id
+            if not incident_id:
+                continue
+
+            related_signals = [
+                candidate
+                for candidate in signals
+                if candidate.incident_id == incident_id
+                or (candidate.request_id and candidate.request_id == signal.request_id)
+                or (candidate.trace_id and candidate.trace_id == signal.trace_id)
+                or (candidate.session_id and candidate.session_id == signal.session_id)
+            ]
+            related_signals.sort(key=lambda item: item.timestamp)
+            highest_score = max((item.risk_score for item in related_signals), default=signal.risk_score)
+            incident_record = incident_map.get(incident_id, {})
+
+            linked[incident_id] = {
+                "incident_id": incident_id,
+                "title": _coerce_str(incident_record.get("title"), signal.title),
+                "status": _coerce_str(incident_record.get("status"), "open"),
+                "severity": _coerce_str(incident_record.get("severity"), _severity_from_score(highest_score)),
+                "source": _coerce_str(incident_record.get("source"), signal.source),
+                "risk_score": highest_score,
+                "linked_signal_count": len(related_signals),
+                "signal_ids": [item.signal_id for item in related_signals],
+                "session_ids": sorted({item.session_id for item in related_signals if item.session_id}),
+                "request_ids": sorted({item.request_id for item in related_signals if item.request_id}),
+                "trace_ids": sorted({item.trace_id for item in related_signals if item.trace_id}),
+                "quarantine_ids": sorted({item.quarantine_id for item in related_signals if item.quarantine_id}),
+                "review_item_ids": sorted({item.review_item_id for item in related_signals if item.review_item_id}),
+                "playbook_ids": self._match_playbooks(related_signals, highest_score),
+                "summary": self._incident_summary(incident_id, related_signals, incident_record),
+            }
+
+        items = list(linked.values())
+        items.sort(key=lambda item: item["risk_score"], reverse=True)
+        return items
+
+    def _build_playbook_matches(
+        self,
+        signals: Sequence[CorrelationSignal],
+        campaigns: Sequence[Mapping[str, Any]],
+    ) -> list[dict[str, Any]]:
+        matches: list[dict[str, Any]] = []
+        campaigns_by_playbook: dict[str, list[str]] = defaultdict(list)
+        for campaign in campaigns:
+            for playbook_id in campaign.get("playbook_ids", []):
+                campaigns_by_playbook[playbook_id].append(campaign["campaign_id"])
+
+        for playbook in self._playbooks:
+            playbook_id = _coerce_str(playbook.get("playbook_id"))
+            trigger_terms = {term.lower() for term in _coerce_list(playbook.get("triggers"))}
+            candidate_signals = [
+                signal
+                for signal in signals
+                if trigger_terms.intersection({signal.signal_type.lower(), *[tag.lower() for tag in signal.tags]})
+            ]
+            if not candidate_signals:
+                continue
+
+            max_score = max(signal.risk_score for signal in candidate_signals)
+            if max_score < _coerce_int(playbook.get("min_score"), 0):
+                continue
+
+            matches.append(
+                {
+                    "playbook_id": playbook_id,
+                    "title": _coerce_str(playbook.get("title")),
+                    "category": _coerce_str(playbook.get("category")),
+                    "summary": _coerce_str(playbook.get("summary")),
+                    "matched_signal_count": len(candidate_signals),
+                    "matched_signal_ids": [signal.signal_id for signal in candidate_signals],
+                    "related_campaign_ids": campaigns_by_playbook.get(playbook_id, []),
+                    "recommended_actions": _coerce_list(playbook.get("recommended_actions")),
+                    "risk_score": max_score,
+                    "severity": _severity_from_score(max_score),
+                }
+            )
+
+        matches.sort(key=lambda item: item["risk_score"], reverse=True)
+        return matches
+
+    def _build_escalations(
+        self,
+        *,
+        signals: Sequence[CorrelationSignal],
+        campaigns: Sequence[Mapping[str, Any]],
+        session_risk: Sequence[Mapping[str, Any]],
+        incident_links: Sequence[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        actions: list[dict[str, Any]] = []
+
+        for session in session_risk:
+            if session["risk_score"] >= 85:
+                actions.append(
+                    self._action(
+                        action_type="review",
+                        priority=_priority_from_score(session["risk_score"]),
+                        target=f"session:{session['session_id']}",
+                        reason=session["summary"],
+                        risk_score=session["risk_score"],
+                        severity=session["severity"],
+                    )
+                )
+            if session["risk_score"] >= 90:
+                actions.append(
+                    self._action(
+                        action_type="quarantine",
+                        priority="p1",
+                        target=f"session:{session['session_id']}",
+                        reason="Session exceeds critical correlation risk threshold.",
+                        risk_score=session["risk_score"],
+                        severity="critical",
+                    )
+                )
+
+        for campaign in campaigns:
+            if campaign["risk_score"] >= 75:
+                actions.append(
+                    self._action(
+                        action_type="incident",
+                        priority=_priority_from_score(campaign["risk_score"]),
+                        target=f"{campaign['namespace']}:{campaign['correlation_key']}",
+                        reason=campaign["summary"],
+                        risk_score=campaign["risk_score"],
+                        severity=campaign["severity"],
+                    )
+                )
+
+        for incident in incident_links:
+            if incident["risk_score"] >= 80 and incident["status"] not in {"contained", "resolved"}:
+                actions.append(
+                    self._action(
+                        action_type="remediation",
+                        priority=_priority_from_score(incident["risk_score"]),
+                        target=f"incident:{incident['incident_id']}",
+                        reason=incident["summary"],
+                        risk_score=incident["risk_score"],
+                        severity=incident["severity"],
+                    )
+                )
+
+        unique_actions = self._dedupe_actions(actions)
+        return {
+            "total_actions": len(unique_actions),
+            "review_actions": sum(1 for item in unique_actions if item["action_type"] == "review"),
+            "quarantine_actions": sum(1 for item in unique_actions if item["action_type"] == "quarantine"),
+            "incident_actions": sum(1 for item in unique_actions if item["action_type"] == "incident"),
+            "remediation_actions": sum(1 for item in unique_actions if item["action_type"] == "remediation"),
+            "items": unique_actions,
+        }
+
+    def _build_summary(
+        self,
+        signals: Sequence[CorrelationSignal],
+        campaigns: Sequence[Mapping[str, Any]],
+        escalation: Mapping[str, Any],
+        session_risk: Sequence[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        highest_signal_score = max((signal.risk_score for signal in signals), default=0)
+        highest_session_score = max((item["risk_score"] for item in session_risk), default=0)
+        overall = max(highest_signal_score, highest_session_score)
+        return {
+            "overall_risk_score": overall,
+            "overall_risk_level": _risk_band(overall),
+            "overall_severity": _severity_from_score(overall),
+            "total_signals": len(signals),
+            "active_campaigns": sum(1 for campaign in campaigns if campaign["status"] == "active"),
+            "sessions_tracked": len(session_risk),
+            "recommended_actions": escalation.get("total_actions", 0),
+            "high_confidence_signals": sum(1 for signal in signals if signal.confidence >= 0.8),
+        }
+
+    def _build_metrics(
+        self,
+        signals: Sequence[CorrelationSignal],
+        campaigns: Sequence[Mapping[str, Any]],
+        session_risk: Sequence[Mapping[str, Any]],
+        incident_links: Sequence[Mapping[str, Any]],
+        reference_now: datetime,
+    ) -> dict[str, Any]:
+        source_counts = Counter(signal.source for signal in signals)
+        type_counts = Counter(signal.signal_type for signal in signals)
+        severity_counts = Counter(signal.severity for signal in signals)
+        recent_cutoff = reference_now - timedelta(hours=24)
+
+        recent_signals = [
+            signal for signal in signals if _parse_timestamp(signal.timestamp) >= recent_cutoff
+        ]
+
+        return {
+            "generated_at": _isoformat(reference_now),
+            "average_signal_risk_score": round(mean([signal.risk_score for signal in signals]), 2) if signals else 0.0,
+            "highest_signal_risk_score": max((signal.risk_score for signal in signals), default=0),
+            "signals_last_24h": len(recent_signals),
+            "campaign_count": len(campaigns),
+            "incident_link_count": len(incident_links),
+            "sessions_over_70": sum(1 for item in session_risk if item["risk_score"] >= 70),
+            "source_counts": dict(source_counts),
+            "signal_type_counts": dict(type_counts),
+            "severity_counts": dict(severity_counts),
+        }
+
+    def _signal_from_scan(self, item: Mapping[str, Any]) -> CorrelationSignal:
+        risk_score = _coerce_int(item.get("riskscore") or item.get("risk_score"))
+        verdict = _coerce_str(item.get("verdict"))
+        matched_patterns = _coerce_list(item.get("matchedpatterns") or item.get("matched_patterns"))
+        risky_files = _coerce_list(item.get("riskyfiles") or item.get("risky_files"))
+        primary_category = _coerce_str(item.get("primarycategory") or item.get("primary_category"))
+        timestamp = _isoformat(_parse_timestamp(item.get("timestamp")))
+
+        tags = sorted(
+            {
+                "scan",
+                primary_category or "",
+                *(self._tags_from_patterns(matched_patterns)),
+            }
+        )
+        indicators = [*matched_patterns, *risky_files]
+
+        return CorrelationSignal(
+            signal_id=_coerce_str(item.get("scanid") or item.get("scan_id")) or _stable_id("scan", timestamp, verdict, risk_score),
+            signal_type=primary_category or ("promptinjection" if "prompt" in " ".join(matched_patterns).lower() else "scan"),
+            source="scan",
+            title="Scan detection",
+            summary=_coerce_str(item.get("summary"), "Scan generated a security signal."),
+            risk_score=risk_score,
+            severity=_coerce_str(item.get("maxseverity"), _severity_from_score(risk_score)),
+            confidence=0.78,
+            status=_coerce_str(item.get("reviewstatus") or item.get("review_status"), "observed"),
+            timestamp=timestamp,
+            session_id=_coerce_str(item.get("sessionid") or item.get("session_id")) or None,
+            client_id=_coerce_str(item.get("clientid") or item.get("client_id")) or None,
+            request_id=_coerce_str(item.get("requestid") or item.get("request_id")) or None,
+            trace_id=_coerce_str(item.get("traceid") or item.get("trace_id")) or None,
+            verdict=verdict or None,
+            quarantine_id=_coerce_str(item.get("quarantineid") or item.get("quarantine_id")) or None,
+            tags=[tag for tag in tags if tag],
+            indicators=[indicator for indicator in indicators if indicator],
+            evidence={
+                "target_type": item.get("targettype") or item.get("target_type"),
+                "target_value": item.get("targetvalue") or item.get("target_value"),
+                "matched_patterns": matched_patterns,
+                "risky_files": risky_files,
+            },
+            metadata=_coerce_mapping(item.get("metadata")),
+        )
+
+    def _signal_from_execution(self, item: Mapping[str, Any]) -> CorrelationSignal:
+        risk_score = _coerce_int(item.get("riskscore") or item.get("risk_score"))
+        action_type = _coerce_str(item.get("actiontype") or item.get("action_type"), "execution")
+        execution_state = _coerce_str(item.get("executionstate") or item.get("execution_state"))
+        response_status = _coerce_str(item.get("responsestatus") or item.get("response_status"))
+        policy_verdict = _coerce_str(item.get("policyverdict") or item.get("policy_verdict"))
+        timestamp = _isoformat(_parse_timestamp(item.get("timestamp")))
+
+        signal_type = "unsafeexecution"
+        tags = {"runtime", action_type}
+        if policy_verdict == "block":
+            tags.add("policyblock")
+        if execution_state in {"denied", "failed"}:
+            tags.add("executionfailure")
+
+        return CorrelationSignal(
+            signal_id=_coerce_str(item.get("executionid") or item.get("execution_id")) or _stable_id("exec", timestamp, action_type, risk_score),
+            signal_type=signal_type,
+            source="execution",
+            title="Execution security event",
+            summary=_coerce_str(item.get("reason"), f"Execution {execution_state or 'observed'} for {action_type}."),
+            risk_score=risk_score,
+            severity=_severity_from_score(risk_score),
+            confidence=0.74,
+            status=response_status or "observed",
+            timestamp=timestamp,
+            session_id=_coerce_str(item.get("sessionid") or item.get("session_id")) or None,
+            client_id=_coerce_str(item.get("clientid") or item.get("client_id")) or None,
+            request_id=_coerce_str(item.get("requestid") or item.get("request_id")) or None,
+            trace_id=_coerce_str(item.get("traceid") or item.get("trace_id")) or None,
+            verdict=policy_verdict or None,
+            review_item_id=_coerce_str(item.get("reviewitemid") or item.get("review_item_id")) or None,
+            tags=sorted(tags),
+            indicators=[action_type, execution_state, policy_verdict],
+            evidence={
+                "target": item.get("target"),
+                "execution_state": execution_state,
+                "response_status": response_status,
+                "policy_verdict": policy_verdict,
+                "executor_name": item.get("executorname") or item.get("executor_name"),
+            },
+            metadata=_coerce_mapping(item.get("metadata")),
+        )
+
+    def _signal_from_quarantine(self, item: Mapping[str, Any]) -> CorrelationSignal:
+        risk_level = _coerce_str(item.get("risklevel") or item.get("risk_level"))
+        risk_score = {"low": 35, "medium": 55, "high": 78, "critical": 95}.get(risk_level, 60)
+        timestamp = _isoformat(_parse_timestamp(item.get("createdat") or item.get("timestamp")))
+
+        return CorrelationSignal(
+            signal_id=_coerce_str(item.get("quarantineid") or item.get("quarantine_id")) or _stable_id("quarantine", timestamp, item.get("title")),
+            signal_type="quarantine",
+            source="quarantine",
+            title=_coerce_str(item.get("title"), "Quarantine item created"),
+            summary=_coerce_str(item.get("summary"), "Security material isolated for containment."),
+            risk_score=risk_score,
+            severity=risk_level or _severity_from_score(risk_score),
+            confidence=0.86,
+            status=_coerce_str(item.get("status"), "isolated"),
+            timestamp=timestamp,
+            session_id=_coerce_str(item.get("sessionid") or item.get("session_id")) or None,
+            client_id=_coerce_str(item.get("clientid") or item.get("client_id")) or None,
+            request_id=_coerce_str(item.get("requestid") or item.get("request_id")) or None,
+            trace_id=_coerce_str(item.get("traceid") or item.get("trace_id")) or None,
+            incident_id=_coerce_str(item.get("incidentid") or item.get("incident_id")) or None,
+            quarantine_id=_coerce_str(item.get("quarantineid") or item.get("quarantine_id")) or None,
+            tags=["quarantine", _coerce_str(item.get("source"), "system")],
+            indicators=_coerce_list(item.get("tags")),
+            evidence={
+                "asset_ref": item.get("assetref") or item.get("asset_ref"),
+                "owner": item.get("owner"),
+                "release_reason": item.get("releasereason") or item.get("release_reason"),
+            },
+            metadata=_coerce_mapping(item.get("metadata")),
+        )
+
+    def _signal_from_review(self, item: Mapping[str, Any]) -> CorrelationSignal:
+        risk_score = _coerce_int(item.get("riskscore") or item.get("risk_score"), 50)
+        timestamp = _isoformat(_parse_timestamp(item.get("createdat") or item.get("timestamp")))
+
+        return CorrelationSignal(
+            signal_id=_coerce_str(item.get("reviewid") or item.get("reviewitemid") or item.get("review_item_id")) or _stable_id("review", timestamp, item.get("target")),
+            signal_type="review",
+            source="review",
+            title="Review queue escalation",
+            summary=_coerce_str(item.get("reason"), "Security action escalated for human review."),
+            risk_score=risk_score,
+            severity=_severity_from_score(risk_score),
+            confidence=0.72,
+            status=_coerce_str(item.get("status") or item.get("reviewstatus") or item.get("review_status"), "pending"),
+            timestamp=timestamp,
+            session_id=_coerce_str(item.get("sessionid") or item.get("session_id")) or None,
+            client_id=_coerce_str(item.get("clientid") or item.get("client_id")) or None,
+            request_id=_coerce_str(item.get("requestid") or item.get("request_id")) or None,
+            trace_id=_coerce_str(item.get("traceid") or item.get("trace_id")) or None,
+            verdict=_coerce_str(item.get("verdict")) or None,
+            review_item_id=_coerce_str(item.get("reviewid") or item.get("reviewitemid") or item.get("review_item_id")) or None,
+            tags=["review", _coerce_str(item.get("priority"), "standard")],
+            indicators=[_coerce_str(item.get("actiontype") or item.get("action_type")), _coerce_str(item.get("target"))],
+            evidence={
+                "actor_id": item.get("actorid") or item.get("actor_id"),
+                "action_type": item.get("actiontype") or item.get("action_type"),
+                "target": item.get("target"),
+            },
+            metadata=_coerce_mapping(item.get("metadata")),
+        )
+
+    def _signal_from_telemetry(self, item: Mapping[str, Any]) -> CorrelationSignal:
+        details = _coerce_mapping(item.get("details"))
+        summary = _coerce_str(item.get("summary") or item.get("message"), "Telemetry recorded a security-relevant event.")
+        event_type = _coerce_str(item.get("eventtype") or item.get("event_type"), "telemetry")
+        timestamp = _isoformat(_parse_timestamp(item.get("timestamp") or item.get("createdat")))
+
+        risk_score = max(
+            _coerce_int(item.get("riskscore") or item.get("risk_score")),
+            _coerce_int(details.get("risk_score")),
+        )
+        if risk_score == 0 and "block" in summary.lower():
+            risk_score = 70
+        if risk_score == 0 and "quarantine" in summary.lower():
+            risk_score = 80
+
+        return CorrelationSignal(
+            signal_id=_coerce_str(item.get("eventid") or item.get("id")) or _stable_id("telemetry", timestamp, event_type, summary),
+            signal_type=self._infer_signal_type(summary, event_type, details),
+            source="telemetry",
+            title=_coerce_str(item.get("title"), event_type.replace("_", " ").title()),
+            summary=summary,
+            risk_score=risk_score,
+            severity=_coerce_str(item.get("severity"), _severity_from_score(risk_score)),
+            confidence=0.64,
+            status=_coerce_str(item.get("status"), "observed"),
+            timestamp=timestamp,
+            session_id=_coerce_str(item.get("sessionid") or item.get("session_id") or details.get("session_id")) or None,
+            client_id=_coerce_str(item.get("clientid") or item.get("client_id") or details.get("client_id")) or None,
+            request_id=_coerce_str(item.get("requestid") or item.get("request_id") or details.get("request_id")) or None,
+            trace_id=_coerce_str(item.get("traceid") or item.get("trace_id") or details.get("trace_id")) or None,
+            verdict=_coerce_str(item.get("verdict") or details.get("verdict")) or None,
+            incident_id=_coerce_str(item.get("incidentid") or item.get("incident_id") or details.get("incident_id")) or None,
+            review_item_id=_coerce_str(item.get("reviewitemid") or item.get("review_item_id") or details.get("review_item_id")) or None,
+            tags=sorted({"telemetry", event_type}),
+            indicators=_coerce_list(details.get("indicators")),
+            evidence=details,
+            metadata=_coerce_mapping(item.get("metadata")),
+        )
+
+    def _signal_from_hostile_context(self, item: Mapping[str, Any]) -> CorrelationSignal:
+        risk_score = max(
+            _coerce_int(item.get("riskscore") or item.get("risk_score")),
+            _coerce_int(item.get("score")),
+        )
+        risk_score = risk_score or 68
+        indicators = _coerce_list(item.get("signals") or item.get("matchedpatterns") or item.get("matched_patterns"))
+        timestamp = _isoformat(_parse_timestamp(item.get("timestamp")))
+
+        return CorrelationSignal(
+            signal_id=_coerce_str(item.get("id")) or _stable_id("hostile", timestamp, risk_score, len(indicators)),
+            signal_type="hostilecontext",
+            source="hostile-context",
+            title="Hostile context detected",
+            summary=_coerce_str(item.get("summary"), "Retrieved or supplied context appears adversarial."),
+            risk_score=risk_score,
+            severity=_coerce_str(item.get("severity"), _severity_from_score(risk_score)),
+            confidence=max(0.6, min(0.95, _coerce_float(item.get("confidence"), 0.82))),
+            status=_coerce_str(item.get("status"), "observed"),
+            timestamp=timestamp,
+            session_id=_coerce_str(item.get("sessionid") or item.get("session_id")) or None,
+            client_id=_coerce_str(item.get("clientid") or item.get("client_id")) or None,
+            request_id=_coerce_str(item.get("requestid") or item.get("request_id")) or None,
+            trace_id=_coerce_str(item.get("traceid") or item.get("trace_id")) or None,
+            tags=["hostilecontext", "promptinjection"],
+            indicators=indicators,
+            evidence={"factors": _coerce_list(item.get("factors")), "signals": indicators},
+            metadata=_coerce_mapping(item.get("metadata")),
+        )
+
+    def _signal_from_session_risk(self, item: Mapping[str, Any]) -> CorrelationSignal:
+        risk_score = _coerce_int(item.get("riskscore") or item.get("risk_score"))
+        risk_score = risk_score or 50
+        timestamp = _isoformat(_parse_timestamp(item.get("timestamp")))
+
+        return CorrelationSignal(
+            signal_id=_coerce_str(item.get("id")) or _stable_id("sessionrisk", timestamp, item.get("sessionid"), risk_score),
+            signal_type="sessionrisk",
+            source="session-risk",
+            title="Session risk score updated",
+            summary=_coerce_str(item.get("summary"), "Session risk posture changed."),
+            risk_score=risk_score,
+            severity=_coerce_str(item.get("severity"), _severity_from_score(risk_score)),
+            confidence=max(0.5, min(0.95, _coerce_float(item.get("confidence"), 0.7))),
+            status=_coerce_str(item.get("status"), "observed"),
+            timestamp=timestamp,
+            session_id=_coerce_str(item.get("sessionid") or item.get("session_id")) or None,
+            client_id=_coerce_str(item.get("clientid") or item.get("client_id")) or None,
+            request_id=_coerce_str(item.get("requestid") or item.get("request_id")) or None,
+            trace_id=_coerce_str(item.get("traceid") or item.get("trace_id")) or None,
+            tags=["sessionrisk", _risk_band(risk_score)],
+            indicators=_coerce_list(item.get("reasons") or item.get("signals")),
+            evidence={"inputs": _coerce_mapping(item.get("inputs"))},
+            metadata=_coerce_mapping(item.get("metadata")),
+        )
+
+    def _signal_from_detonation(self, item: Mapping[str, Any]) -> CorrelationSignal:
+        score = max(
+            _coerce_int(item.get("riskscore") or item.get("risk_score")),
+            _coerce_int(item.get("maliciousscore") or item.get("malicious_score")),
+        )
+        score = score or 82
+        verdict = _coerce_str(item.get("verdict"), "suspicious")
+        timestamp = _isoformat(_parse_timestamp(item.get("timestamp") or item.get("createdat")))
+
+        return CorrelationSignal(
+            signal_id=_coerce_str(item.get("detonationid") or item.get("id")) or _stable_id("detonation", timestamp, verdict, score),
+            signal_type="detonation",
+            source="detonation",
+            title="Detonation finding",
+            summary=_coerce_str(item.get("summary"), "Artifact detonation produced a suspicious result."),
+            risk_score=score,
+            severity=_coerce_str(item.get("severity"), _severity_from_score(score)),
+            confidence=max(0.7, min(0.99, _coerce_float(item.get("confidence"), 0.88))),
+            status=_coerce_str(item.get("status"), "observed"),
+            timestamp=timestamp,
+            session_id=_coerce_str(item.get("sessionid") or item.get("session_id")) or None,
+            client_id=_coerce_str(item.get("clientid") or item.get("client_id")) or None,
+            request_id=_coerce_str(item.get("requestid") or item.get("request_id")) or None,
+            trace_id=_coerce_str(item.get("traceid") or item.get("trace_id")) or None,
+            verdict=verdict,
+            incident_id=_coerce_str(item.get("incidentid") or item.get("incident_id")) or None,
+            quarantine_id=_coerce_str(item.get("quarantineid") or item.get("quarantine_id")) or None,
+            tags=["detonation", "artifact", "malware"],
+            indicators=_coerce_list(item.get("iocs") or item.get("indicators")),
+            evidence={
+                "artifact_name": item.get("artifactname") or item.get("artifact_name"),
+                "sandbox_verdict": verdict,
+                "network_contacts": _coerce_list(item.get("networkcontacts") or item.get("network_contacts")),
+            },
+            metadata=_coerce_mapping(item.get("metadata")),
+        )
+
+    def _signal_from_malware(self, item: Mapping[str, Any]) -> CorrelationSignal:
+        score = max(
+            _coerce_int(item.get("riskscore") or item.get("risk_score")),
+            _coerce_int(item.get("malwarescore") or item.get("malware_score")),
+        )
+        score = score or 84
+        family = _coerce_str(item.get("family"), "unknown")
+        timestamp = _isoformat(_parse_timestamp(item.get("timestamp") or item.get("createdat")))
+
+        return CorrelationSignal(
+            signal_id=_coerce_str(item.get("findingid") or item.get("id")) or _stable_id("malware", timestamp, family, score),
+            signal_type="malware",
+            source="malware",
+            title="Malware enrichment",
+            summary=_coerce_str(item.get("summary"), f"Malware indicators aligned with family {family}."),
+            risk_score=score,
+            severity=_coerce_str(item.get("severity"), _severity_from_score(score)),
+            confidence=max(0.7, min(0.99, _coerce_float(item.get("confidence"), 0.9))),
+            status=_coerce_str(item.get("status"), "observed"),
+            timestamp=timestamp,
+            session_id=_coerce_str(item.get("sessionid") or item.get("session_id")) or None,
+            client_id=_coerce_str(item.get("clientid") or item.get("client_id")) or None,
+            request_id=_coerce_str(item.get("requestid") or item.get("request_id")) or None,
+            trace_id=_coerce_str(item.get("traceid") or item.get("trace_id")) or None,
+            incident_id=_coerce_str(item.get("incidentid") or item.get("incident_id")) or None,
+            quarantine_id=_coerce_str(item.get("quarantineid") or item.get("quarantine_id")) or None,
+            tags=["malware", family],
+            indicators=_coerce_list(item.get("indicators") or item.get("signatures")),
+            evidence={
+                "family": family,
+                "classification": item.get("classification"),
+                "engine": item.get("engine"),
+            },
+            metadata=_coerce_mapping(item.get("metadata")),
+        )
+
+    def _signal_from_threat_intel(self, item: Mapping[str, Any]) -> CorrelationSignal:
+        score = max(
+            _coerce_int(item.get("riskscore") or item.get("risk_score")),
+            _coerce_int(item.get("reputationscore") or item.get("reputation_score")),
+        )
+        score = score or 72
+        indicator = _coerce_str(item.get("indicator") or item.get("observable"))
+        timestamp = _isoformat(_parse_timestamp(item.get("timestamp") or item.get("createdat")))
+
+        return CorrelationSignal(
+            signal_id=_coerce_str(item.get("hitid") or item.get("id")) or _stable_id("ti", timestamp, indicator, score),
+            signal_type="threatintel",
+            source="threat-intel",
+            title="Threat intelligence hit",
+            summary=_coerce_str(item.get("summary"), "Threat intelligence enrichment matched an indicator."),
+            risk_score=score,
+            severity=_coerce_str(item.get("severity"), _severity_from_score(score)),
+            confidence=max(0.65, min(0.98, _coerce_float(item.get("confidence"), 0.84))),
+            status=_coerce_str(item.get("status"), "observed"),
+            timestamp=timestamp,
+            session_id=_coerce_str(item.get("sessionid") or item.get("session_id")) or None,
+            client_id=_coerce_str(item.get("clientid") or item.get("client_id")) or None,
+            request_id=_coerce_str(item.get("requestid") or item.get("request_id")) or None,
+            trace_id=_coerce_str(item.get("traceid") or item.get("trace_id")) or None,
+            incident_id=_coerce_str(item.get("incidentid") or item.get("incident_id")) or None,
+            tags=["threatintel", _coerce_str(item.get("feed"), "feed")],
+            indicators=[indicator] if indicator else [],
+            evidence={
+                "indicator_type": item.get("indicatortype") or item.get("indicator_type"),
+                "feed": item.get("feed"),
+                "reputation": item.get("reputation"),
+            },
+            metadata=_coerce_mapping(item.get("metadata")),
+        )
+
+    def _signal_from_generic_event(self, item: Mapping[str, Any]) -> CorrelationSignal:
+        timestamp = _isoformat(_parse_timestamp(item.get("timestamp")))
+        score = _coerce_int(item.get("risk_score") or item.get("riskscore"))
+        signal_type = _coerce_str(item.get("signal_type"), "generic")
+        source = _coerce_str(item.get("source"), "generic")
+        summary = _coerce_str(item.get("summary"), "Generic correlation signal.")
+
+        return CorrelationSignal(
+            signal_id=_coerce_str(item.get("signal_id")) or _stable_id("signal", timestamp, source, signal_type, summary),
+            signal_type=signal_type,
+            source=source,
+            title=_coerce_str(item.get("title"), signal_type.replace("_", " ").title()),
+            summary=summary,
+            risk_score=score,
+            severity=_coerce_str(item.get("severity"), _severity_from_score(score)),
+            confidence=_coerce_float(item.get("confidence"), 0.5),
+            status=_coerce_str(item.get("status"), "observed"),
+            timestamp=timestamp,
+            session_id=_coerce_str(item.get("session_id")) or None,
+            client_id=_coerce_str(item.get("client_id")) or None,
+            request_id=_coerce_str(item.get("request_id")) or None,
+            trace_id=_coerce_str(item.get("trace_id")) or None,
+            verdict=_coerce_str(item.get("verdict")) or None,
+            incident_id=_coerce_str(item.get("incident_id")) or None,
+            quarantine_id=_coerce_str(item.get("quarantine_id")) or None,
+            review_item_id=_coerce_str(item.get("review_item_id")) or None,
+            playbook_ids=_coerce_list(item.get("playbook_ids")),
+            tags=_coerce_list(item.get("tags")),
+            indicators=_coerce_list(item.get("indicators")),
+            evidence=_coerce_mapping(item.get("evidence")),
+            metadata=_coerce_mapping(item.get("metadata")),
+        )
+
+    def _mapping_to_signal(self, item: Mapping[str, Any]) -> CorrelationSignal:
+        return CorrelationSignal(
+            signal_id=_coerce_str(item.get("signal_id")),
+            signal_type=_coerce_str(item.get("signal_type")),
+            source=_coerce_str(item.get("source")),
+            title=_coerce_str(item.get("title")),
+            summary=_coerce_str(item.get("summary")),
+            risk_score=_coerce_int(item.get("risk_score")),
+            severity=_coerce_str(item.get("severity")),
+            confidence=_coerce_float(item.get("confidence")),
+            status=_coerce_str(item.get("status")),
+            timestamp=_coerce_str(item.get("timestamp")),
+            session_id=_coerce_str(item.get("session_id")) or None,
+            client_id=_coerce_str(item.get("client_id")) or None,
+            request_id=_coerce_str(item.get("request_id")) or None,
+            trace_id=_coerce_str(item.get("trace_id")) or None,
+            verdict=_coerce_str(item.get("verdict")) or None,
+            incident_id=_coerce_str(item.get("incident_id")) or None,
+            quarantine_id=_coerce_str(item.get("quarantine_id")) or None,
+            review_item_id=_coerce_str(item.get("review_item_id")) or None,
+            playbook_ids=_coerce_list(item.get("playbook_ids")),
+            tags=_coerce_list(item.get("tags")),
+            indicators=_coerce_list(item.get("indicators")),
+            evidence=_coerce_mapping(item.get("evidence")),
+            metadata=_coerce_mapping(item.get("metadata")),
+        )
+
+    def _tags_from_patterns(self, patterns: Iterable[str]) -> set[str]:
+        tags: set[str] = set()
+        for pattern in patterns:
+            lowered = pattern.lower()
+            if "prompt" in lowered or "inject" in lowered:
+                tags.add("promptinjection")
+            if "secret" in lowered or "token" in lowered or "credential" in lowered:
+                tags.add("secretexposure")
+            if "exfil" in lowered or "download" in lowered:
+                tags.add("exfiltration")
+            if "tool" in lowered or "shell" in lowered or "exec" in lowered:
+                tags.add("unsafeexecution")
+        return tags
+
+    def _infer_signal_type(self, summary: str, event_type: str, details: Mapping[str, Any]) -> str:
+        material = " ".join(
+            [
+                summary.lower(),
+                event_type.lower(),
+                " ".join(_coerce_list(details.get("tags"))).lower(),
+                " ".join(_coerce_list(details.get("indicators"))).lower(),
+            ]
+        )
+        if "prompt" in material or "inject" in material:
+            return "promptinjection"
+        if "hostile" in material:
+            return "hostilecontext"
+        if "malware" in material:
+            return "malware"
+        if "detonation" in material:
+            return "detonation"
+        if "quarantine" in material:
+            return "quarantine"
+        if "review" in material:
+            return "review"
+        if "secret" in material or "credential" in material:
+            return "secretexposure"
+        if "exfil" in material or "download" in material or "outbound" in material:
+            return "exfiltration"
+        if "runtime" in material or "sandbox" in material or "tool" in material:
+            return "unsafeexecution"
+        return "telemetry"
+
+    def _compute_session_score(self, signals: Sequence[CorrelationSignal]) -> int:
+        if not signals:
+            return 0
+        peak = max(signal.risk_score for signal in signals)
+        average_score = mean(signal.risk_score for signal in signals)
+        source_bonus = min(20, len({signal.source for signal in signals}) * 4)
+        severity_bonus = sum(3 for signal in signals if signal.severity in {"high", "critical"})
+        verdict_bonus = 10 if any(signal.verdict in {"block", "quarantine"} for signal in signals) else 0
+        review_bonus = 8 if any(signal.review_item_id for signal in signals) else 0
+        quarantine_bonus = 12 if any(signal.quarantine_id for signal in signals) else 0
+        score = int(min(100, max(peak, average_score) + source_bonus + severity_bonus + verdict_bonus + review_bonus + quarantine_bonus))
+        return score
+
+    def _match_playbooks(self, signals: Sequence[CorrelationSignal], risk_score: int) -> list[str]:
+        signal_terms = {
+            signal.signal_type.lower()
+            for signal in signals
+        } | {
+            tag.lower()
+            for signal in signals
+            for tag in signal.tags
+        }
+        matched: list[str] = []
+        for playbook in self._playbooks:
+            triggers = {term.lower() for term in _coerce_list(playbook.get("triggers"))}
+            if risk_score >= _coerce_int(playbook.get("min_score"), 0) and signal_terms.intersection(triggers):
+                matched.append(_coerce_str(playbook.get("playbook_id")))
+        return matched
+
+    def _is_recent(self, signals: Sequence[CorrelationSignal], reference_now: datetime) -> bool:
+        if not signals:
+            return False
+        latest = max(_parse_timestamp(signal.timestamp) for signal in signals)
+        return latest >= (reference_now - timedelta(hours=6))
+
+    def _campaign_summary(self, namespace: str, correlation_key: str, items: Sequence[CorrelationSignal], risk_score: int) -> str:
+        types = ", ".join(sorted({item.signal_type for item in items})[:4])
+        return (
+            f"Correlated {len(items)} signals across {namespace} {correlation_key}; "
+            f"observed types: {types or 'mixed'}; aggregated risk score {risk_score}."
+        )
+
+    def _session_summary(self, session_id: str, signals: Sequence[CorrelationSignal], score: int) -> str:
+        high_count = sum(1 for signal in signals if _severity_rank(signal.severity) >= 3)
+        return (
+            f"Session {session_id} accumulated {len(signals)} correlated signals, "
+            f"{high_count} high-severity events, and session risk score {score}."
+        )
+
+    def _incident_summary(
+        self,
+        incident_id: str,
+        related_signals: Sequence[CorrelationSignal],
+        incident_record: Mapping[str, Any],
+    ) -> str:
+        title = _coerce_str(incident_record.get("title"), incident_id)
+        return (
+            f"Incident {title} links {len(related_signals)} correlated signals across "
+            f"{', '.join(sorted({signal.source for signal in related_signals}))}."
+        )
+
+    def _action(
+        self,
+        *,
+        action_type: str,
+        priority: str,
+        target: str,
+        reason: str,
+        risk_score: int,
+        severity: str,
+    ) -> dict[str, Any]:
+        return {
+            "action_id": _stable_id("action", action_type, target, priority, risk_score),
+            "action_type": action_type,
+            "priority": priority,
+            "target": target,
+            "reason": reason,
+            "risk_score": risk_score,
+            "severity": severity,
+            "created_at": _isoformat(),
+        }
+
+    def _dedupe_actions(self, actions: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        seen: set[tuple[str, str]] = set()
+        deduped: list[dict[str, Any]] = []
+        for item in sorted(actions, key=lambda row: (row["risk_score"], row["priority"]), reverse=True):
+            key = (_coerce_str(item.get("action_type")), _coerce_str(item.get("target")))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(dict(item))
+        return deduped
+
+
+attack_correlation_service = AttackCorrelationService()

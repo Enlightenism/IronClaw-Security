@@ -1,14 +1,52 @@
 services:
   ironclaw:
-    build: .
-    container_name: ironclaw-gen1
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ironclaw-security
+    restart: unless-stopped
+    init: true
+
     ports:
       - "8000:8000"
+
+    env_file:
+      - .env
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PORT: "8000"
+
     volumes:
-      - "./data:/app/data"
+      - ./data:/app/data
+
+    security_opt:
+      - no-new-privileges:true
+
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      test:
+        [
+          "CMD-SHELL",
+          "curl --fail --silent http://127.0.0.1:8000/api/health || curl --fail --silent http://127.0.0.1:8000/api/health/liveness || exit 1",
+        ]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 20s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    tmpfs:
+      - /tmp
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 1024M
+        reservations:
+          cpus: "0.25"
+          memory: 256M

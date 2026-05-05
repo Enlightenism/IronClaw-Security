@@ -1,0 +1,133 @@
+from __future__ import annotations
+
+from collections.abc import Iterable
+from importlib import import_module
+from typing import Any, Final, cast
+
+from fastapi import APIRouter, FastAPI
+
+
+def _optional_router(module_path: str) -> APIRouter | None:
+    try:
+        module = import_module(module_path)
+    except ModuleNotFoundError as exc:
+        if exc.name != module_path:
+            raise
+        return None
+
+    router = getattr(module, "router", None)
+    if router is None:
+        return None
+    return cast(APIRouter, router)
+
+
+router = APIRouter(tags=["ui"])
+
+
+UI_ROUTERS: Final[tuple[APIRouter | None, ...]] = (
+    _optional_router("app.ui.executions.dashboard"),
+    _optional_router("app.ui.executions.detail"),
+    _optional_router("app.ui.reviews.queue"),
+    _optional_router("app.ui.reviews.detail"),
+    _optional_router("app.ui.insights.policy"),
+    _optional_router("app.ui.activity.clientsession"),
+    _optional_router("app.ui.activity.clientprofile"),
+    _optional_router("app.ui.activity.sessiontimeline"),
+    _optional_router("app.ui.executions.explorer"),
+    _optional_router("app.ui.settings.configuration"),
+    _optional_router("app.ui.runtime.status"),
+    _optional_router("app.ui.audit.log"),
+    _optional_router("app.ui.executions.testconsole"),
+    _optional_router("app.ui.alerts.notifications"),
+    _optional_router("app.ui.system.diagnostics"),
+    _optional_router("app.ui.integrations.settings"),
+    _optional_router("app.ui.data.retention"),
+    _optional_router("app.ui.incidents.triage"),
+    _optional_router("app.ui.admin.operators"),
+    _optional_router("app.ui.admin.roles"),
+    _optional_router("app.ui.groq"),
+    _optional_router("app.ui.billing_manifest"),
+    _optional_router("app.ui.billing_registry"),
+    _optional_router("app.ui.billing_index"),
+    _optional_router("app.ui.billing_summary"),
+    _optional_router("app.ui.billing_packages"),
+)
+
+
+def get_ui_routers() -> tuple[APIRouter, ...]:
+    return tuple(ui_router for ui_router in UI_ROUTERS if ui_router is not None)
+
+
+def iter_ui_routers() -> Iterable[APIRouter]:
+    return iter(get_ui_routers())
+
+
+def _router_label(ui_router: APIRouter) -> str:
+    prefix = str(getattr(ui_router, "prefix", "") or "<no-prefix>")
+    route_count = len(getattr(ui_router, "routes", ()))
+    return f"{prefix} ({route_count} routes)"
+
+
+def _route_signature(route: object) -> tuple[str, tuple[str, ...], str]:
+    path = str(getattr(route, "path", ""))
+    methods = tuple(sorted(cast(set[str], getattr(route, "methods", set()) or set())))
+    name = str(getattr(route, "name", ""))
+    return (path, methods, name)
+
+
+def validate_ui_routers() -> None:
+    seen_router_objects: set[int] = set()
+    seen_route_signatures: dict[tuple[str, tuple[str, ...], str], str] = {}
+
+    for ui_router in get_ui_routers():
+        router_id = id(ui_router)
+        label = _router_label(ui_router)
+
+        if router_id in seen_router_objects:
+            raise ValueError(f"duplicate UI router object registration detected: {label}")
+        seen_router_objects.add(router_id)
+
+        if not ui_router.routes:
+            raise ValueError(f"UI router has no routes: {label}")
+
+        for route in ui_router.routes:
+            signature = _route_signature(route)
+            path, methods, _ = signature
+
+            if not path:
+                raise ValueError(f"UI router contains a route with an empty path: {label}")
+
+            if signature in seen_route_signatures:
+                raise ValueError(
+                    f"duplicate UI route registration detected: {path} {methods} "
+                    f"already registered under {seen_route_signatures[signature]}"
+                )
+
+            seen_route_signatures[signature] = label
+
+
+def include_ui_routers(app: FastAPI) -> None:
+    validate_ui_routers()
+
+    existing_route_signatures = {
+        _route_signature(route)
+        for route in app.routes
+        if getattr(route, "path", "")
+    }
+
+    for ui_router in get_ui_routers():
+        router_signatures = {
+            _route_signature(route)
+            for route in ui_router.routes
+            if getattr(route, "path", "")
+        }
+
+        if router_signatures and router_signatures.issubset(existing_route_signatures):
+            continue
+
+        app.include_router(ui_router)
+        existing_route_signatures.update(router_signatures)
+
+
+def includeuirouters(app: FastAPI) -> None:
+    include_ui_routers(app)
