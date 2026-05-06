@@ -6,6 +6,8 @@ from time import monotonic
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.dependencies.action_execute import get_action_execute_pipeline
+
 SERVICE_NAME = "ironclaw-security"
 SERVICE_VERSION = "1.0.0"
 PROCESS_STARTED_AT = monotonic()
@@ -57,7 +59,13 @@ def _uptime_seconds() -> int:
 
 
 def _readiness_checks() -> list[ComponentStatus]:
+    pipeline_ok = get_action_execute_pipeline() is not None
     return [
+        ComponentStatus(
+            name="action_execute_pipeline",
+            status="ok" if pipeline_ok else "unavailable",
+            details={"initialized": pipeline_ok},
+        ),
         ComponentStatus(
             name="api_router",
             status="ok",

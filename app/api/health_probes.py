@@ -1,20 +1,14 @@
 from __future__ import annotations
 
-
 from datetime import UTC, datetime
-
 
 from fastapi import APIRouter, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-
 from app.dependencies.action_execute import get_action_execute_pipeline
 
-
-
 router = APIRouter(prefix="/health", tags=["health-probes"])
-
 
 
 class HealthProbeResponse(BaseModel):
@@ -24,13 +18,16 @@ class HealthProbeResponse(BaseModel):
     timestamp: str
 
 
-
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
-
-@router.get("/live", response_model=HealthProbeResponse)
+@router.get(
+    "/live",
+    response_model=HealthProbeResponse,
+    summary="Liveness probe",
+    description="Minimal k8s-style liveness check. Returns ok if the process is alive and serving requests.",
+)
 def liveness_probe() -> HealthProbeResponse:
     return HealthProbeResponse(
         status="ok",
@@ -40,12 +37,15 @@ def liveness_probe() -> HealthProbeResponse:
     )
 
 
-
-@router.get("/ready", response_model=HealthProbeResponse)
+@router.get(
+    "/ready",
+    response_model=HealthProbeResponse,
+    summary="Readiness probe",
+    description="K8s-style readiness check. Returns 503 if the action_execute_pipeline is not initialized.",
+)
 def readiness_probe(request: Request) -> JSONResponse | HealthProbeResponse:
     pipeline = get_action_execute_pipeline()
     app_pipeline = getattr(request.app.state, "action_execute_pipeline", None)
-
 
     if pipeline is None or app_pipeline is None:
         body = HealthProbeResponse(
@@ -58,7 +58,6 @@ def readiness_probe(request: Request) -> JSONResponse | HealthProbeResponse:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content=body.model_dump(),
         )
-
 
     return HealthProbeResponse(
         status="ok",
