@@ -7,10 +7,8 @@ from typing import Literal, Optional, get_args, get_origin
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
 try:
     from pydantic_settings import BaseSettings, SettingsConfigDict
-
     _HAS_PYDANTIC_SETTINGS = True
 except ModuleNotFoundError:  # pragma: no cover
     _HAS_PYDANTIC_SETTINGS = False
@@ -82,6 +80,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
+        env_file_override=False,  # os.environ always wins over .env
     )
 
     app_name: str = Field(default="IronClaw-Security", alias="APP_NAME")

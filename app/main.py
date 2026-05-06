@@ -125,7 +125,7 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
     """
     dependencies = _protected_dependencies()
     return [
-        (_optional_router("app.api.request_context"), {"dependencies": dependencies}),
+        (_optional_router("app.api.requestcontext"), {"dependencies": dependencies}),
         (_optional_router("app.api.history"), {"prefix": "/history", "dependencies": dependencies}),
         (_optional_router("app.api.action_guard"), {"prefix": "/guard", "dependencies": dependencies}),
         (_optional_router("app.api.action_execute"), {"prefix": "/guard", "dependencies": dependencies}),

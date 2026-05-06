@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+
 from datetime import UTC, datetime
 from typing import Any
 
+
 from app.models.uipages import PageSection, UIPageDefinition
+
 
 
 _RUNTIME_OVERVIEW_ITEMS: list[dict[str, Any]] = [
@@ -29,6 +32,7 @@ _RUNTIME_OVERVIEW_ITEMS: list[dict[str, Any]] = [
     },
 ]
 
+
 _RISK_THRESHOLD_ITEMS: list[dict[str, Any]] = [
     {
         "range": "0-49",
@@ -46,6 +50,7 @@ _RISK_THRESHOLD_ITEMS: list[dict[str, Any]] = [
         "detail": "Requests are halted before executor invocation.",
     },
 ]
+
 
 _ACTIVE_EXECUTOR_ITEMS: list[dict[str, Any]] = [
     {
@@ -69,6 +74,7 @@ _ACTIVE_EXECUTOR_ITEMS: list[dict[str, Any]] = [
         "value": "app/api/actionexecute.py",
     },
 ]
+
 
 _RUNTIME_METRIC_ITEMS: list[dict[str, Any]] = [
     {
@@ -103,6 +109,7 @@ _RUNTIME_METRIC_ITEMS: list[dict[str, Any]] = [
     },
 ]
 
+
 _RUNTIME_NOTE_ITEMS: list[dict[str, str]] = [
     {
         "text": "Guarded execution pipeline is available.",
@@ -119,8 +126,10 @@ _RUNTIME_NOTE_ITEMS: list[dict[str, str]] = [
 ]
 
 
+
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
 
 
 def _lookup(items: list[dict[str, Any]], label: str, default: Any = None) -> Any:
@@ -128,6 +137,7 @@ def _lookup(items: list[dict[str, Any]], label: str, default: Any = None) -> Any
         if item.get("label") == label:
             return item.get("value", default)
     return default
+
 
 
 def _to_bool(value: Any, *, true_values: set[str] | None = None) -> bool:
@@ -140,11 +150,13 @@ def _to_bool(value: Any, *, true_values: set[str] | None = None) -> bool:
     return bool(value)
 
 
+
 def _to_int(value: Any, default: int = 0) -> int:
     try:
         return int(value)
     except (TypeError, ValueError):
         return default
+
 
 
 def build_runtime_status_page() -> UIPageDefinition:
@@ -198,6 +210,7 @@ def build_runtime_status_page() -> UIPageDefinition:
     )
 
 
+
 def get_runtime_status_page() -> dict[str, Any]:
     page = build_runtime_status_page()
     section_map = {section.sectionid: section for section in page.sections}
@@ -207,6 +220,7 @@ def get_runtime_status_page() -> dict[str, Any]:
     metrics_items = section_map["runtime-metrics"].items
 
     return {
+        "status": "ok",
         "pageid": page.pageid,
         "title": page.title,
         "path": page.path,

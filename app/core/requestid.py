@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 import uuid
 from contextvars import ContextVar
 from typing import Callable
@@ -8,7 +7,6 @@ from typing import Callable
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
-
 
 REQUEST_ID_HEADER_NAME = "X-Request-ID"
 
@@ -38,6 +36,14 @@ def _normalize_request_id(value: str | None) -> str | None:
 
 def generate_request_id() -> str:
     return uuid.uuid4().hex
+
+
+def get_or_create_request_id(request: Request) -> str:
+    request_id = getattr(request.state, "request_id", None)
+    if request_id:
+        return str(request_id)
+    incoming = _normalize_request_id(request.headers.get(REQUEST_ID_HEADER_NAME))
+    return incoming or generate_request_id()
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):

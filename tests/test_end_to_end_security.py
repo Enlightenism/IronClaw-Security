@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-
 from app.core.auth import API_KEY_HEADER_NAME
 from app.main import create_app
-
 
 
 def _make_app() -> FastAPI:
@@ -15,10 +12,8 @@ def _make_app() -> FastAPI:
     return app
 
 
-
 def _auth_headers() -> dict[str, str]:
     return {API_KEY_HEADER_NAME: "test-api-key"}
-
 
 
 def test_end_to_end_safe_http_fetch_flow_allows_execution() -> None:
@@ -68,7 +63,6 @@ def test_end_to_end_safe_http_fetch_flow_allows_execution() -> None:
     assert exec_body["execution_id"]
     assert exec_body["trace_id"]
     assert isinstance(exec_body.get("risk_score"), int)
-
 
 
 def test_end_to_end_high_risk_tool_call_is_quarantined_or_denied() -> None:
@@ -121,7 +115,6 @@ def test_end_to_end_high_risk_tool_call_is_quarantined_or_denied() -> None:
     assert exec_body["policy_verdict"] in {"quarantine", "block", "warn", "allow"}
 
 
-
 def test_end_to_end_history_and_audit_are_accessible() -> None:
     app = _make_app()
     client = TestClient(app)
@@ -132,7 +125,7 @@ def test_end_to_end_history_and_audit_are_accessible() -> None:
     history_response = client.get("/history/events?limit=5", headers=_auth_headers())
     assert history_response.status_code in {200, 401, 403}
 
-    ctx_response = client.get("/request-context")
+    ctx_response = client.get("/request-context", headers=_auth_headers())
     assert ctx_response.status_code == 200
     ctx_body = ctx_response.json()
     assert "path" in ctx_body

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+
 from datetime import UTC, datetime
 from typing import Any
 
+
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
+
 
 from app.services.review_queue_service import get_review_queue_summary
 from app.services.telemetry import (
@@ -13,7 +16,9 @@ from app.services.telemetry import (
     summarize_telemetry_events,
 )
 
+
 router = APIRouter(prefix="/ui-status", tags=["ui-status"])
+
 
 
 class UIStatusCounts(BaseModel):
@@ -23,11 +28,13 @@ class UIStatusCounts(BaseModel):
     recent_telemetry_events: int = 0
 
 
+
 class UIStatusFlags(BaseModel):
     has_pending_reviews: bool
     has_critical_reviews: bool
     telemetry_available: bool
     system_degraded: bool
+
 
 
 class UIStatusResponse(BaseModel):
@@ -41,8 +48,10 @@ class UIStatusResponse(BaseModel):
     recent_events: list[dict[str, Any]] = Field(default_factory=list)
 
 
+
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
 
 
 def _safe_append_telemetry_event(event_name: str, payload: dict[str, Any]) -> None:
@@ -52,14 +61,17 @@ def _safe_append_telemetry_event(event_name: str, payload: dict[str, Any]) -> No
         pass
 
 
+
 @router.get("", response_model=UIStatusResponse)
 def read_ui_status() -> UIStatusResponse:
     review_summary: dict[str, Any]
     telemetry_summary: dict[str, Any]
     recent_events: list[dict[str, Any]]
 
+
     review_error = False
     telemetry_error = False
+
 
     try:
         review_summary = get_review_queue_summary()
@@ -73,6 +85,7 @@ def read_ui_status() -> UIStatusResponse:
             "total_items": 0,
         }
 
+
     try:
         telemetry_summary = summarize_telemetry_events(limit=250)
     except Exception as exc:
@@ -81,6 +94,7 @@ def read_ui_status() -> UIStatusResponse:
             "status": "degraded",
             "error": str(exc),
         }
+
 
     try:
         recent_events = read_telemetry_events(limit=20)
@@ -93,13 +107,16 @@ def read_ui_status() -> UIStatusResponse:
             }
         ]
 
+
     pending_reviews = int(review_summary.get("pending_items") or 0)
     critical_reviews = int(review_summary.get("critical_items") or 0)
     total_reviews = int(review_summary.get("total_items") or 0)
     recent_telemetry_events = len(recent_events)
 
+
     system_degraded = review_error or telemetry_error
     telemetry_available = not telemetry_error
+
 
     result = UIStatusResponse(
         status="degraded" if system_degraded else "ok",
@@ -122,6 +139,7 @@ def read_ui_status() -> UIStatusResponse:
         recent_events=recent_events,
     )
 
+
     _safe_append_telemetry_event(
         "ui_status_requested",
         {
@@ -135,4 +153,11 @@ def read_ui_status() -> UIStatusResponse:
         },
     )
 
+
     return result
+
+
+
+# Consumed by app.main via _optional_attr("app.api.ui_status", "get_ui_status")
+def get_ui_status() -> dict[str, Any]:
+    return read_ui_status().model_dump()
