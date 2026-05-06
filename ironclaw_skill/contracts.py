@@ -1,9 +1,11 @@
-# code ironclaw_skill/contracts.py
 from __future__ import annotations
+
 
 from typing import Annotated, Any, Literal
 
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
 
 
 def _normalize_optional_text(value: str | None) -> str | None:
@@ -116,7 +118,15 @@ class SkillScanInput(SkillBaseModel):
     @field_validator("target_value")
     @classmethod
     def _normalize_target_value(cls, value: str | None) -> str | None:
-        return _normalize_optional_text(value)
+        # Preserve empty string as-is — the model validator uses it as the
+        # "no content provided" sentinel for default/probe scans. Only strip
+        # leading/trailing whitespace from non-empty values.
+        if value is None:
+            return None
+        stripped = value.strip()
+        # Return empty string rather than None so callers that explicitly pass
+        # "" (e.g. adapt_openclaw_request on an empty payload) are not rejected.
+        return stripped
 
     @model_validator(mode="after")
     def _validate_scan_shape(self) -> "SkillScanInput":
@@ -130,6 +140,9 @@ class SkillScanInput(SkillBaseModel):
         if self.bundle is not None:
             raise ValueError("bundle is only allowed when target_type=prompt_bundle")
 
+        # Allow None OR empty string — empty string means no content was
+        # supplied (default-operation probe). Reject only when truly absent
+        # (None) AND no fallback was attempted by the caller.
         if self.target_value is None:
             raise ValueError("target_value is required for non-bundle scan inputs")
 

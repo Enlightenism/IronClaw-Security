@@ -1,6 +1,6 @@
 from app.api.action_execute import router as action_execute_router
 from app.api.action_guard import router as action_guard_router
-from app.api.audit_log import router as audit_log_router
+from app.api.auditlog import router as audit_log_router
 from app.api.history import router as history_router
 from app.api.policy import router as policy_router
 from app.api.request_context import router as request_context_router
@@ -10,6 +10,7 @@ from app.api.scan import router as scan_router
 from app.api.system import router as system_router
 from app.api.telemetry_access import router as telemetry_access_router
 from app.api.ui_status import router as ui_status_router
+
 
 __all__ = [
     "action_execute_router",

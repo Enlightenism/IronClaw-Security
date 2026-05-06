@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import argparse
 import json
 import os
@@ -8,7 +9,9 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Final
 
+
 from ironclaw_installer import InstallConfig, build_install_config, run_install
+
 
 try:
     from ironclaw_skill import __version__
@@ -85,10 +88,15 @@ def _load_json_file(path: Path) -> dict[str, Any]:
 
 
 def _derive_status() -> SkillStatus:
-    config_payload = _load_json_file(_config_file()) if _config_file().exists() else {}
-    base_url = config_payload.get("base_url")
-    if not isinstance(base_url, str) or not base_url.strip():
-        base_url = os.getenv("IRONCLAW_BASE_URL")
+    # ENV VAR always takes priority over config file value.
+    env_base_url = os.getenv("IRONCLAW_BASE_URL", "").strip()
+
+    if env_base_url:
+        base_url: str | None = env_base_url.rstrip("/")
+    else:
+        config_payload = _load_json_file(_config_file()) if _config_file().exists() else {}
+        raw = config_payload.get("base_url")
+        base_url = raw.strip().rstrip("/") if isinstance(raw, str) and raw.strip() else None
 
     return SkillStatus(
         installed=_config_file().exists() and _skill_file().exists(),
@@ -96,7 +104,7 @@ def _derive_status() -> SkillStatus:
         config_file=_config_file(),
         skill_file=_skill_file(),
         env_file=_env_file(),
-        base_url=base_url.rstrip("/") if isinstance(base_url, str) and base_url.strip() else None,
+        base_url=base_url,
         version=__version__,
     )
 

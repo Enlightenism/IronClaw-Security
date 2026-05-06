@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+
 from typing import Any, Final, Literal
 
+
 from pydantic import TypeAdapter, ValidationError
+
 
 from ironclaw_skill.contracts import (
     SkillActionDecisionRequest,
@@ -20,6 +23,7 @@ from ironclaw_skill.contracts import (
     build_skill_error_response,
     build_skill_success_response,
 )
+
 
 OPENCLAW_PLATFORM: Final[Literal["openclaw"]] = "openclaw"
 REQUEST_ADAPTER: Final[TypeAdapter[SkillRequest]] = TypeAdapter(SkillRequest)
@@ -112,16 +116,23 @@ def _build_scan_request(raw: dict[str, Any]) -> SkillScanRequest:
             policy_mode=(_normalize_optional_text(raw.get("policy_mode")) or "review").lower(),
         )
     else:
-        input_model = SkillScanInput(
-            target_type=normalized_target_type,  # type: ignore[arg-type]
-            target_value=_normalize_optional_text(
+        # Resolve target_value from any recognized field; fall back to "" so
+        # SkillScanInput validation passes for payloads that omit content entirely
+        # (e.g. an empty dict sent during a default-operation probe).
+        resolved_target_value: str = (
+            _normalize_optional_text(
                 raw.get("target_value")
                 or raw.get("content")
                 or raw.get("input")
                 or raw.get("text")
                 or raw.get("url")
                 or raw.get("file_path")
-            ),
+            )
+            or ""
+        )
+        input_model = SkillScanInput(
+            target_type=normalized_target_type,  # type: ignore[arg-type]
+            target_value=resolved_target_value,
             policy_mode=(_normalize_optional_text(raw.get("policy_mode")) or "review").lower(),
         )
 

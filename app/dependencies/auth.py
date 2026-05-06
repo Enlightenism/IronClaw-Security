@@ -1,14 +1,66 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Mapping
 
-from fastapi import Header, Request
+from fastapi import Header, HTTPException, Request, Security
+from fastapi.security import APIKeyHeader
 
 from app.core.access_control import require_access
 from app.core.auth import AuthContext
 from app.core.org_isolation import require_same_org
 from app.core.permissions import require_permission
 
+# ---------------------------------------------------------------------------
+# API Key scheme
+# ---------------------------------------------------------------------------
+
+_API_KEY_HEADER_NAME = "X-API-Key"
+_api_key_scheme = APIKeyHeader(name=_API_KEY_HEADER_NAME, auto_error=False)
+
+def _get_valid_api_keys() -> set[str]:
+    """
+    Reads valid API keys from the environment.
+    Supports a single key (IRONCLAW_API_KEY) or a comma-separated list
+    (IRONCLAW_API_KEYS). Both are merged.
+    """
+    keys: set[str] = set()
+    single = os.environ.get("IRONCLAW_API_KEY", "").strip()
+    if single:
+        keys.add(single)
+    multi = os.environ.get("IRONCLAW_API_KEYS", "")
+    for k in multi.split(","):
+        k = k.strip()
+        if k:
+            keys.add(k)
+    return keys
+
+
+async def require_api_key(
+    api_key: str | None = Security(_api_key_scheme),
+) -> str:
+    """
+    FastAPI dependency — enforces a valid API key in the X-API-Key header.
+    Returns the validated key string on success.
+    Raises HTTP 401 if missing, HTTP 403 if invalid.
+    """
+    if not api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing API key. Provide a valid X-API-Key header.",
+        )
+    valid_keys = _get_valid_api_keys()
+    if valid_keys and api_key not in valid_keys:
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid API key.",
+        )
+    return api_key
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 def _clean(value: object) -> str:
     if not isinstance(value, str):
@@ -62,6 +114,10 @@ def _extract_auth_payload(request: Request) -> Mapping[str, Any]:
 
     return {}
 
+
+# ---------------------------------------------------------------------------
+# AuthContext builders
+# ---------------------------------------------------------------------------
 
 def build_auth_context(request: Request) -> AuthContext:
     payload = _extract_auth_payload(request)
