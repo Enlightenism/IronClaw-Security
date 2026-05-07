@@ -111,6 +111,8 @@ def _public_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (_optional_router("app.api.ui_pages"), {}),
         (_optional_router("app.api.telemetry_access"), {}),
         (_optional_router("app.api.scan"), {"prefix": "/scan"}),
+        # app.api.router is the /api prefix aggregator for legacy/compat modules
+        # (incidents, integrations, actionhistorytest, etc.) — must remain registered.
         (_optional_router("app.api.router"), {}),
     ]
 
@@ -122,6 +124,10 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
     Rule: treat app.api.* as the primary API surface. app.api.routes.* modules
     are considered legacy/compat and should NOT be wired here to avoid
     double-registration of the same logical endpoints.
+
+    Note: routers that already declare dependencies=[Depends(require_api_key)]
+    internally (e.g. customer_keys) are included without a redundant dependencies
+    kwarg to prevent double-registration.
     """
     dependencies = _protected_dependencies()
     return [
@@ -134,7 +140,8 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (_optional_router("app.api.policy"), {"prefix": "/policy", "dependencies": dependencies}),
         (_optional_router("app.api.release_policy_routes"), {"dependencies": dependencies}),
         (_optional_router("app.api.integrations"), {"dependencies": dependencies}),
-        (_optional_router("app.api.customer_keys"), {"dependencies": dependencies}),
+        # customer_keys has require_api_key baked in — no dependencies override needed
+        (_optional_router("app.api.customer_keys"), {}),
         (_optional_router("app.api.usage_reports"), {"dependencies": dependencies}),
         (_optional_router("app.api.auth"), {"dependencies": dependencies}),
         (_optional_router("app.api.operator_auth"), {"dependencies": dependencies}),

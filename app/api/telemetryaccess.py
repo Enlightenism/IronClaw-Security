@@ -6,8 +6,8 @@ from app.ui.telemetryaccesssummary import get_telemetry_access_summary
 from app.schemas.telemetry import TelemetryAccessSummaryResponse
 
 router = APIRouter(
-    prefix="/telemetry-access",
-    tags=["telemetry-access"],
+    prefix="/ui/telemetry-access",
+    tags=["ui-telemetry-access"],
 )
 
 
