@@ -1,22 +1,28 @@
 from __future__ import annotations
 
+
 from datetime import UTC, datetime
 from typing import Any
+
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from app.api.auth import require_api_key
+
+from app.dependencies.auth import require_api_key
+
 
 router = APIRouter(
     prefix="/ui",
-    tags=["data-retention"],
+    tags=["ui-data-retention"],
     dependencies=[Depends(require_api_key)],
 )
 
 
+
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
 
 
 class RetentionRuleView(BaseModel):
@@ -30,7 +36,8 @@ class RetentionRuleView(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class DataRetentionResponse(BaseModel):
+
+class UIDataRetentionResponse(BaseModel):
     status: str
     service: str
     timestamp: str
@@ -38,6 +45,7 @@ class DataRetentionResponse(BaseModel):
     rules: list[RetentionRuleView] = Field(default_factory=list)
     total_rules: int
     metadata: dict[str, Any] = Field(default_factory=dict)
+
 
 
 def _build_retention_rules() -> list[RetentionRuleView]:
@@ -85,12 +93,13 @@ def _build_retention_rules() -> list[RetentionRuleView]:
     ]
 
 
-@router.get("/data-retention", response_model=DataRetentionResponse)
+
+@router.get("/data-retention", response_model=UIDataRetentionResponse)
 def get_data_retention(
     requested_by: str = Query("ui-data-retention", min_length=1),
-) -> DataRetentionResponse:
+) -> UIDataRetentionResponse:
     rules = _build_retention_rules()
-    return DataRetentionResponse(
+    return UIDataRetentionResponse(
         status="ok",
         service="IronClaw-Security",
         timestamp=_utc_now_iso(),

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Request
 
 from app.core.auth import require_api_key
 
-router = APIRouter(tags=["system-diagnostics"])
+router = APIRouter(tags=["system-diagnostics-admin"])
 
 _DIAGNOSTIC_CHECKS: Final[tuple[dict[str, str], ...]] = (
     {
@@ -40,7 +40,7 @@ _DIAGNOSTIC_CHECKS: Final[tuple[dict[str, str], ...]] = (
 )
 
 
-def _build_checks() -> list[dict[str, str]]:
+def _build_admin_checks() -> list[dict[str, str]]:
     return [dict(check) for check in _DIAGNOSTIC_CHECKS]
 
 
@@ -62,12 +62,12 @@ def _overall_status(summary: dict[str, int]) -> str:
 
 
 @router.get("/admin/system-diagnostics")
-def get_system_diagnostics(
+def get_admin_system_diagnostics(
     request: Request,
     _: str | None = Depends(require_api_key),
 ) -> dict[str, object]:
     request_id = getattr(request.state, "request_id", None)
-    checks = _build_checks()
+    checks = _build_admin_checks()
     summary = _build_summary(checks)
 
     return {

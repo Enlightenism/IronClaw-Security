@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-
 from fastapi import APIRouter, Depends, Request
 
 from app.core.auth import require_api_key
-
 
 router = APIRouter(tags=["ui-admin"])
 
 
 @router.get("/admin/request-stream")
-def get_request_stream(
+def get_admin_request_stream(
     request: Request,
     _: str | None = Depends(require_api_key),
 ) -> dict[str, object]:

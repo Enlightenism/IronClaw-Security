@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, getcontext
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Mapping
 from uuid import uuid4
 
@@ -12,8 +12,12 @@ from app.persistencebootstrap import build_store
 DEFAULT_BILLING_TABLE = "billing_records"
 
 
+# ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
+
 def _utc_now() -> str:
-    return datetime.now(UTC).isoformat()  # [web:127]
+    return datetime.now(UTC).isoformat()
 
 
 def _normalize_timestamp(value: str | datetime | None) -> str:
@@ -38,7 +42,7 @@ def _mapping(value: Any) -> dict[str, Any]:
         return {}
     if isinstance(value, dict):
         return dict(value)
-    if isinstance(value, Mapping):  # [web:115][web:116]
+    if isinstance(value, Mapping):
         return dict(value)
     if hasattr(value, "model_dump") and callable(value.model_dump):
         dumped = value.model_dump()
@@ -71,12 +75,15 @@ def _decimal_text(value: Any, default: str = "0") -> str:
     if value is None or value == "":
         return default
     try:
-        amount = Decimal(str(value))  # [web:129][web:130]
+        amount = Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError) as exc:
         raise ValueError("invalid decimal amount") from exc
-    quantized = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)  # [web:125][web:126]
-    return format(quantized, "f")
+    return format(amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f")
 
+
+# ---------------------------------------------------------------------------
+# Payload normalizer
+# ---------------------------------------------------------------------------
 
 def _normalize_billing_payload(
     payload: dict[str, Any] | None = None,
@@ -113,76 +120,69 @@ def _normalize_billing_payload(
     paid_at: str | datetime | None = None,
     **extra: Any,
 ) -> dict[str, Any]:
-    source_payload = _mapping(payload)
-    source_payload.update({key: value for key, value in extra.items() if value is not None})
+    src = _mapping(payload)
+    src.update({k: v for k, v in extra.items() if v is not None})
 
     resolved_billing_id = (
         _string(billing_id)
-        or _string(source_payload.get("billing_id"))
-        or _string(source_payload.get("id"))
+        or _string(src.get("billing_id"))
+        or _string(src.get("id"))
         or str(uuid4())
     )
 
     resolved_owner_id = (
         _string(owner_id)
-        or _string(source_payload.get("owner_id"))
-        or _string(source_payload.get("account_id"))
+        or _string(src.get("owner_id"))
+        or _string(src.get("account_id"))
     )
 
     resolved_org = (
         _string(organization_id)
         or _string(org_id)
         or _string(customer_id)
-        or _string(source_payload.get("organization_id"))
-        or _string(source_payload.get("org_id"))
-        or _string(source_payload.get("customer_id"))
+        or _string(src.get("organization_id"))
+        or _string(src.get("org_id"))
+        or _string(src.get("customer_id"))
     )
 
     resolved_package_id = (
         _string(package_id)
         or _string(package_code)
         or _string(plan_id)
-        or _string(source_payload.get("package_id"))
-        or _string(source_payload.get("package_code"))
-        or _string(source_payload.get("plan_id"))
+        or _string(src.get("package_id"))
+        or _string(src.get("package_code"))
+        or _string(src.get("plan_id"))
     )
 
     resolved_package_name = (
         _string(package_name)
-        or _string(source_payload.get("package_name"))
-        or _string(source_payload.get("plan_name"))
+        or _string(src.get("package_name"))
+        or _string(src.get("plan_name"))
         or resolved_package_id
         or "standard"
     )
 
     resolved_currency = (
         _string(currency)
-        or _string(source_payload.get("currency"))
+        or _string(src.get("currency"))
         or "USD"
     ).upper()
 
     resolved_amount = _decimal_text(
-        amount
-        if amount is not None
-        else source_payload.get("amount", source_payload.get("price"))
+        amount if amount is not None else src.get("amount", src.get("price"))
     )
     resolved_subtotal = _decimal_text(
-        subtotal
-        if subtotal is not None
-        else source_payload.get("subtotal", resolved_amount)
+        subtotal if subtotal is not None else src.get("subtotal", resolved_amount)
     )
     resolved_tax_amount = _decimal_text(
-        tax_amount
-        if tax_amount is not None
-        else source_payload.get("tax_amount", source_payload.get("tax", "0"))
+        tax_amount if tax_amount is not None
+        else src.get("tax_amount", src.get("tax", "0"))
     )
-    # use Decimal from strings, not floats, for currency-safe math [web:129][web:130]
     resolved_total_amount = _decimal_text(
-        total_amount
-        if total_amount is not None
-        else source_payload.get(
+        total_amount if total_amount is not None
+        else src.get(
             "total_amount",
-            source_payload.get(
+            src.get(
                 "total",
                 Decimal(resolved_subtotal) + Decimal(resolved_tax_amount),
             ),
@@ -190,49 +190,39 @@ def _normalize_billing_payload(
     )
 
     resolved_units = int(
-        units
-        if units is not None
-        else source_payload.get("units", source_payload.get("credits", 0))
+        units if units is not None
+        else src.get("units", src.get("credits", 0))
     )
     resolved_quota = int(
-        quota
-        if quota is not None
-        else source_payload.get("quota", source_payload.get("limit", 0))
+        quota if quota is not None
+        else src.get("quota", src.get("limit", 0))
     )
 
     resolved_status = (
-        _string(status)
-        or _string(source_payload.get("status"))
-        or "pending"
+        _string(status) or _string(src.get("status")) or "pending"
     )
     resolved_billing_type = (
-        _string(billing_type)
-        or _string(source_payload.get("billing_type"))
-        or "package_purchase"
+        _string(billing_type) or _string(src.get("billing_type")) or "package_purchase"
     )
     resolved_interval = (
-        _string(interval)
-        or _string(source_payload.get("interval"))
-        or "monthly"
+        _string(interval) or _string(src.get("interval")) or "monthly"
     )
     resolved_source = (
-        _string(source)
-        or _string(source_payload.get("source"))
-        or "ironclaw"
+        _string(source) or _string(src.get("source")) or "ironclaw"
     )
 
     resolved_created_at = _normalize_timestamp(
-        created_at or source_payload.get("created_at") or billed_at or source_payload.get("billed_at")
+        created_at or src.get("created_at") or billed_at or src.get("billed_at")
     )
     resolved_updated_at = _normalize_timestamp(
-        updated_at or source_payload.get("updated_at") or resolved_created_at
+        updated_at or src.get("updated_at") or resolved_created_at
     )
     resolved_billed_at = _normalize_timestamp(
-        billed_at or source_payload.get("billed_at") or resolved_created_at
+        billed_at or src.get("billed_at") or resolved_created_at
     )
     resolved_paid_at = (
-        _normalize_timestamp(paid_at or source_payload.get("paid_at"))
-        if (paid_at is not None or source_payload.get("paid_at") is not None)
+        _normalize_timestamp(paid_at or src.get("paid_at"))
+        if (paid_at is not None or src.get("paid_at") is not None)
         else None
     )
 
@@ -246,10 +236,15 @@ def _normalize_billing_payload(
         "package_id": resolved_package_id or None,
         "package_code": resolved_package_id or None,
         "package_name": resolved_package_name,
-        "plan_id": _string(plan_id) or _string(source_payload.get("plan_id")) or resolved_package_id or None,
-        "invoice_id": _string(invoice_id) or _string(source_payload.get("invoice_id")) or None,
-        "purchase_id": _string(purchase_id) or _string(source_payload.get("purchase_id")) or None,
-        "transaction_id": _string(transaction_id) or _string(source_payload.get("transaction_id")) or None,
+        "plan_id": (
+            _string(plan_id)
+            or _string(src.get("plan_id"))
+            or resolved_package_id
+            or None
+        ),
+        "invoice_id": _string(invoice_id) or _string(src.get("invoice_id")) or None,
+        "purchase_id": _string(purchase_id) or _string(src.get("purchase_id")) or None,
+        "transaction_id": _string(transaction_id) or _string(src.get("transaction_id")) or None,
         "amount": resolved_amount,
         "subtotal": resolved_subtotal,
         "tax_amount": resolved_tax_amount,
@@ -261,9 +256,14 @@ def _normalize_billing_payload(
         "units": resolved_units,
         "quota": resolved_quota,
         "source": resolved_source,
-        "metadata": metadata if isinstance(metadata, dict) else _mapping(source_payload.get("metadata")),
-        "line_items": _listify(line_items if line_items is not None else source_payload.get("line_items")),
-        "tags": _listify(tags if tags is not None else source_payload.get("tags")),
+        "metadata": (
+            metadata if isinstance(metadata, dict)
+            else _mapping(src.get("metadata"))
+        ),
+        "line_items": _listify(
+            line_items if line_items is not None else src.get("line_items")
+        ),
+        "tags": _listify(tags if tags is not None else src.get("tags")),
         "created_at": resolved_created_at,
         "updated_at": resolved_updated_at,
         "billed_at": resolved_billed_at,
@@ -271,10 +271,21 @@ def _normalize_billing_payload(
     }
 
 
-@dataclass(slots=True)  # [web:121][web:124]
-class BillingStore:
+# ---------------------------------------------------------------------------
+# BillingTransactionStore  (renamed from BillingStore to eliminate collision
+# with billing_store.BillingStore / SubscriptionMeterStore — this file owns
+# billing-transaction records: invoices, package purchases, payments, refunds.
+# billing_store.py owns subscriptions + metering.)
+# ---------------------------------------------------------------------------
+
+@dataclass(slots=True)
+class BillingTransactionStore:
     backend: Any = field(default_factory=build_store)
     table_name: str = DEFAULT_BILLING_TABLE
+
+    # ------------------------------------------------------------------
+    # Introspection
+    # ------------------------------------------------------------------
 
     @property
     def backend_name(self) -> str:
@@ -293,10 +304,19 @@ class BillingStore:
     def healthcheck(self) -> bool:
         health = getattr(self.backend, "healthcheck", None)
         if callable(health):
-            return bool(health())
+            try:
+                return bool(health())
+            except Exception:
+                return False
         return True
 
-    def create_record(self, payload: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+    # ------------------------------------------------------------------
+    # Write
+    # ------------------------------------------------------------------
+
+    def create_record(
+        self, payload: dict[str, Any] | None = None, **kwargs: Any
+    ) -> dict[str, Any]:
         record = _normalize_billing_payload(payload, **kwargs)
         inserted = self.backend.insert(self.table_name, record)
         if isinstance(inserted, list) and inserted:
@@ -305,10 +325,14 @@ class BillingStore:
             return dict(inserted)
         return record
 
-    def create(self, payload: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+    def create(
+        self, payload: dict[str, Any] | None = None, **kwargs: Any
+    ) -> dict[str, Any]:
         return self.create_record(payload, **kwargs)
 
-    def charge(self, payload: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+    def charge(
+        self, payload: dict[str, Any] | None = None, **kwargs: Any
+    ) -> dict[str, Any]:
         return self.create_record(payload, **kwargs)
 
     def purchase_package(
@@ -340,6 +364,10 @@ class BillingStore:
             metadata=metadata or {},
         )
 
+    # ------------------------------------------------------------------
+    # Read
+    # ------------------------------------------------------------------
+
     def list_records(
         self,
         *,
@@ -370,7 +398,9 @@ class BillingStore:
         )
         items = [dict(row) for row in rows]
         items.sort(
-            key=lambda row: _normalize_timestamp(row.get("updated_at") or row.get("created_at")),
+            key=lambda row: _normalize_timestamp(
+                row.get("updated_at") or row.get("created_at")
+            ),
             reverse=True,
         )
         return items
@@ -381,52 +411,56 @@ class BillingStore:
     def get_record(self, billing_id: str) -> dict[str, Any] | None:
         if not _string(billing_id):
             raise ValueError("billing_id is required")
-        rows = self.backend.select(self.table_name, filters={"billing_id": billing_id}, limit=1)
-        if rows:
-            return dict(rows[0])
-        rows = self.backend.select(self.table_name, filters={"id": billing_id}, limit=1)
-        if rows:
-            return dict(rows[0])
+        for key in ("billing_id", "id"):
+            rows = self.backend.select(
+                self.table_name, filters={key: billing_id}, limit=1
+            )
+            if rows:
+                return dict(rows[0])
         return None
 
     def get(self, billing_id: str) -> dict[str, Any] | None:
         return self.get_record(billing_id)
 
-    def update_record(self, billing_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    # ------------------------------------------------------------------
+    # Update
+    # ------------------------------------------------------------------
+
+    def update_record(
+        self, billing_id: str, updates: dict[str, Any]
+    ) -> dict[str, Any] | None:
         existing = self.get_record(billing_id)
         if existing is None:
             return None
 
         merged = dict(existing)
         merged.update(_mapping(updates))
-        merged["billing_id"] = existing.get("billing_id") or existing.get("id") or billing_id
+        merged["billing_id"] = (
+            existing.get("billing_id") or existing.get("id") or billing_id
+        )
         merged["id"] = merged["billing_id"]
         merged["updated_at"] = _utc_now()
 
-        if _string(merged.get("status")).lower() in {"paid", "settled"} and not merged.get("paid_at"):
+        if (
+            _string(merged.get("status")).lower() in {"paid", "settled"}
+            and not merged.get("paid_at")
+        ):
             merged["paid_at"] = merged["updated_at"]
 
         normalized = _normalize_billing_payload(merged)
 
-        updated = self.backend.update(
-            self.table_name,
-            normalized,
-            filters={"billing_id": billing_id},
-        )
-        if isinstance(updated, list) and updated:
-            return dict(updated[0])
-
-        updated = self.backend.update(
-            self.table_name,
-            normalized,
-            filters={"id": billing_id},
-        )
-        if isinstance(updated, list) and updated:
-            return dict(updated[0])
+        for key in ("billing_id", "id"):
+            updated = self.backend.update(
+                self.table_name, normalized, filters={key: billing_id}
+            )
+            if isinstance(updated, list) and updated:
+                return dict(updated[0])
 
         return normalized
 
-    def update(self, billing_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    def update(
+        self, billing_id: str, updates: dict[str, Any]
+    ) -> dict[str, Any] | None:
         return self.update_record(billing_id, updates)
 
     def mark_paid(
@@ -436,17 +470,14 @@ class BillingStore:
         transaction_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
-        updates: dict[str, Any] = {
-            "status": "paid",
-            "paid_at": _utc_now(),
-        }
+        updates: dict[str, Any] = {"status": "paid", "paid_at": _utc_now()}
         if transaction_id is not None:
             updates["transaction_id"] = transaction_id
         if metadata:
             current = self.get_record(billing_id) or {}
-            merged_metadata = _mapping(current.get("metadata"))
-            merged_metadata.update(metadata)
-            updates["metadata"] = merged_metadata
+            merged_meta = _mapping(current.get("metadata"))
+            merged_meta.update(metadata)
+            updates["metadata"] = merged_meta
         return self.update_record(billing_id, updates)
 
     def cancel_record(self, billing_id: str) -> dict[str, Any] | None:
@@ -461,24 +492,29 @@ class BillingStore:
         updates: dict[str, Any] = {"status": "refunded"}
         if metadata:
             current = self.get_record(billing_id) or {}
-            merged_metadata = _mapping(current.get("metadata"))
-            merged_metadata.update(metadata)
-            updates["metadata"] = merged_metadata
+            merged_meta = _mapping(current.get("metadata"))
+            merged_meta.update(metadata)
+            updates["metadata"] = merged_meta
         return self.update_record(billing_id, updates)
+
+    # ------------------------------------------------------------------
+    # Delete
+    # ------------------------------------------------------------------
 
     def delete_record(self, billing_id: str) -> dict[str, Any] | None:
         if not _string(billing_id):
             raise ValueError("billing_id is required")
-
-        deleted = self.backend.delete(self.table_name, filters={"billing_id": billing_id})
-        if isinstance(deleted, list) and deleted:
-            return dict(deleted[0])
-
-        deleted = self.backend.delete(self.table_name, filters={"id": billing_id})
-        if isinstance(deleted, list) and deleted:
-            return dict(deleted[0])
-
+        for key in ("billing_id", "id"):
+            deleted = self.backend.delete(
+                self.table_name, filters={key: billing_id}
+            )
+            if isinstance(deleted, list) and deleted:
+                return dict(deleted[0])
         return None
+
+    # ------------------------------------------------------------------
+    # Analytics
+    # ------------------------------------------------------------------
 
     def summarize(
         self,
@@ -500,15 +536,19 @@ class BillingStore:
         for record in records:
             status = _string(record.get("status"), "unknown")
             currency = _string(record.get("currency"), "USD")
-            amount = Decimal(str(record.get("total_amount", "0")))  # [web:129]
+            amount = Decimal(str(record.get("total_amount", "0")))
             by_status[status] = by_status.get(status, 0) + 1
             total_amount += amount
             running = Decimal(by_currency.get(currency, "0.00")) + amount
-            by_currency[currency] = format(running.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f")
+            by_currency[currency] = format(
+                running.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f"
+            )
 
         return {
             "total_records": len(records),
-            "total_amount": format(total_amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f"),
+            "total_amount": format(
+                total_amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f"
+            ),
             "by_status": by_status,
             "by_currency": by_currency,
             "backend_name": self.backend_name,
@@ -516,14 +556,27 @@ class BillingStore:
         }
 
 
+# ---------------------------------------------------------------------------
+# Back-compat shim — keeps existing imports of `BillingStore` from this
+# module working until the consumer sweep is complete.  Remove after grep
+# confirms no remaining code does `from app.services.billingstore import
+# BillingStore` expecting the old name.
+# ---------------------------------------------------------------------------
+BillingStore = BillingTransactionStore
+
+
+# ---------------------------------------------------------------------------
+# Factories
+# ---------------------------------------------------------------------------
+
 def build_billing_store(
     *,
     backend: Any | None = None,
     table_name: str = DEFAULT_BILLING_TABLE,
     **store_kwargs: Any,
-) -> BillingStore:
+) -> BillingTransactionStore:
     resolved_backend = backend if backend is not None else build_store(**store_kwargs)
-    return BillingStore(backend=resolved_backend, table_name=table_name)
+    return BillingTransactionStore(backend=resolved_backend, table_name=table_name)
 
 
 def create_billing_store(
@@ -531,7 +584,7 @@ def create_billing_store(
     backend: Any | None = None,
     table_name: str = DEFAULT_BILLING_TABLE,
     **store_kwargs: Any,
-) -> BillingStore:
+) -> BillingTransactionStore:
     return build_billing_store(backend=backend, table_name=table_name, **store_kwargs)
 
 
@@ -540,5 +593,5 @@ def get_billing_store(
     backend: Any | None = None,
     table_name: str = DEFAULT_BILLING_TABLE,
     **store_kwargs: Any,
-) -> BillingStore:
+) -> BillingTransactionStore:
     return build_billing_store(backend=backend, table_name=table_name, **store_kwargs)

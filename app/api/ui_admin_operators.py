@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from app.api.auth import require_api_key
+from app.dependencies.auth import require_api_key
 
 router = APIRouter(
     prefix="/ui/admin",
@@ -56,26 +56,10 @@ def _build_operator_items() -> list[OperatorItemView]:
             status="active",
             last_active_at="2026-04-21T16:10:00Z",
             permissions=[
-                OperatorPermissionView(
-                    key="review.approve",
-                    label="Approve review items",
-                    enabled=True,
-                ),
-                OperatorPermissionView(
-                    key="review.reject",
-                    label="Reject review items",
-                    enabled=True,
-                ),
-                OperatorPermissionView(
-                    key="audit.read",
-                    label="Read audit log",
-                    enabled=True,
-                ),
-                OperatorPermissionView(
-                    key="operators.manage",
-                    label="Manage operators",
-                    enabled=True,
-                ),
+                OperatorPermissionView(key="review.approve", label="Approve review items", enabled=True),
+                OperatorPermissionView(key="review.reject", label="Reject review items", enabled=True),
+                OperatorPermissionView(key="audit.read", label="Read audit log", enabled=True),
+                OperatorPermissionView(key="operators.manage", label="Manage operators", enabled=True),
             ],
             metadata={"team": "security-ops"},
         ),
@@ -86,26 +70,10 @@ def _build_operator_items() -> list[OperatorItemView]:
             status="active",
             last_active_at="2026-04-21T15:42:00Z",
             permissions=[
-                OperatorPermissionView(
-                    key="review.approve",
-                    label="Approve review items",
-                    enabled=True,
-                ),
-                OperatorPermissionView(
-                    key="review.reject",
-                    label="Reject review items",
-                    enabled=True,
-                ),
-                OperatorPermissionView(
-                    key="audit.read",
-                    label="Read audit log",
-                    enabled=True,
-                ),
-                OperatorPermissionView(
-                    key="operators.manage",
-                    label="Manage operators",
-                    enabled=False,
-                ),
+                OperatorPermissionView(key="review.approve", label="Approve review items", enabled=True),
+                OperatorPermissionView(key="review.reject", label="Reject review items", enabled=True),
+                OperatorPermissionView(key="audit.read", label="Read audit log", enabled=True),
+                OperatorPermissionView(key="operators.manage", label="Manage operators", enabled=False),
             ],
             metadata={"team": "security-ops"},
         ),
@@ -116,26 +84,10 @@ def _build_operator_items() -> list[OperatorItemView]:
             status="suspended",
             last_active_at="2026-04-20T19:05:00Z",
             permissions=[
-                OperatorPermissionView(
-                    key="review.approve",
-                    label="Approve review items",
-                    enabled=False,
-                ),
-                OperatorPermissionView(
-                    key="review.reject",
-                    label="Reject review items",
-                    enabled=False,
-                ),
-                OperatorPermissionView(
-                    key="audit.read",
-                    label="Read audit log",
-                    enabled=True,
-                ),
-                OperatorPermissionView(
-                    key="operators.manage",
-                    label="Manage operators",
-                    enabled=False,
-                ),
+                OperatorPermissionView(key="review.approve", label="Approve review items", enabled=False),
+                OperatorPermissionView(key="review.reject", label="Reject review items", enabled=False),
+                OperatorPermissionView(key="audit.read", label="Read audit log", enabled=True),
+                OperatorPermissionView(key="operators.manage", label="Manage operators", enabled=False),
             ],
             metadata={"team": "incident-response"},
         ),
@@ -159,7 +111,5 @@ def get_operator_management(
         active_count=active_count,
         suspended_count=suspended_count,
         items=items,
-        metadata={
-            "requested_by": requested_by,
-        },
+        metadata={"requested_by": requested_by},
     )

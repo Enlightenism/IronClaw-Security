@@ -23,7 +23,6 @@ def _optional_router(module_path: str) -> APIRouter | None:
 
 router = APIRouter(tags=["ui"])
 
-
 UI_ROUTERS: Final[tuple[APIRouter | None, ...]] = (
     _optional_router("app.ui.executions.dashboard"),
     _optional_router("app.ui.executions.detail"),
@@ -43,7 +42,8 @@ UI_ROUTERS: Final[tuple[APIRouter | None, ...]] = (
     _optional_router("app.ui.integrations.settings"),
     _optional_router("app.ui.data.retention"),
     _optional_router("app.ui.incidents.triage"),
-    _optional_router("app.ui.admin.operators"),
+    # app.ui.admin.operators removed — superseded by app.api.ui_admin_operators
+    # which has auth, correct schema, and permissions model
     _optional_router("app.ui.admin.roles"),
     _optional_router("app.ui.groq"),
     _optional_router("app.ui.billing_manifest"),

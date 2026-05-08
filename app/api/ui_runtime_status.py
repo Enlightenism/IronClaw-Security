@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from app.api.auth import require_api_key
+from app.core.auth import require_api_key
 
 router = APIRouter(
     prefix="/ui",
@@ -26,7 +26,7 @@ class RuntimeDependencyView(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class RuntimeStatusResponse(BaseModel):
+class UIRuntimeStatusResponse(BaseModel):
     status: str
     service: str
     timestamp: str
@@ -68,13 +68,12 @@ def _build_dependencies() -> list[RuntimeDependencyView]:
     ]
 
 
-@router.get("/runtime-status", response_model=RuntimeStatusResponse)
-def get_runtime_status(
+@router.get("/runtime-status", response_model=UIRuntimeStatusResponse)
+def get_ui_runtime_status(
     requested_by: str = Query("ui-runtime-status", min_length=1),
-) -> RuntimeStatusResponse:
+) -> UIRuntimeStatusResponse:
     dependencies = _build_dependencies()
-
-    return RuntimeStatusResponse(
+    return UIRuntimeStatusResponse(
         status="ok",
         service="IronClaw-Security",
         timestamp=_utc_now_iso(),

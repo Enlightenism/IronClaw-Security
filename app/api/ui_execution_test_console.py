@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from app.api.auth import require_api_key
+from app.core.auth import require_api_key
 
 router = APIRouter(
     prefix="/ui/executions",
@@ -80,11 +80,53 @@ def _build_scenarios() -> list[TestConsoleScenarioView]:
                 "command": "Remove-Item -Recurse -Force C:\\sensitive",
             },
         ),
+        TestConsoleScenarioView(
+            scenario_id="guard-allow-smoke",
+            title="Guard Allow Smoke",
+            description="Standard guard evaluation that should pass and be allowed.",
+            action_type="guard_eval",
+            target="/guard",
+            expected_policy_verdict="allow",
+            expected_execution_state="completed",
+            sample_payload={
+                "method": "POST",
+                "path": "/guard",
+                "expected_outcome": "allow",
+            },
+        ),
+        TestConsoleScenarioView(
+            scenario_id="guard-quarantine-smoke",
+            title="Guard Quarantine Smoke",
+            description="Guard evaluation with suspicious payload that should be quarantined.",
+            action_type="guard_eval",
+            target="/guard",
+            expected_policy_verdict="quarantine",
+            expected_execution_state="review_required",
+            sample_payload={
+                "method": "POST",
+                "path": "/guard",
+                "expected_outcome": "quarantine",
+            },
+        ),
+        TestConsoleScenarioView(
+            scenario_id="scan-malicious-sample",
+            title="Scan Malicious Sample",
+            description="Scan of a known malicious payload that should be blocked.",
+            action_type="scan",
+            target="/scan",
+            expected_policy_verdict="block",
+            expected_execution_state="blocked",
+            sample_payload={
+                "method": "POST",
+                "path": "/scan",
+                "expected_outcome": "block",
+            },
+        ),
     ]
 
 
 @router.get("/test-console", response_model=TestConsolePageResponse)
-def get_execution_test_console(
+def get_ui_execution_test_console(
     requested_by: str = Query("ui-test-console", min_length=1),
 ) -> TestConsolePageResponse:
     scenarios = _build_scenarios()
@@ -97,6 +139,7 @@ def get_execution_test_console(
         scenarios=scenarios,
         metadata={
             "scenario_count": len(scenarios),
+            "ready": sum(1 for _ in scenarios),
             "requested_by": requested_by,
         },
     )

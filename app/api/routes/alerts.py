@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from app.core.auth import require_api_key
 from app.services.alert_store import (
     AlertEndpointRecord as StoredAlertEndpointRecord,
-    get_alert_store,
+    get_alert_endpoint_store,
 )
 
 
@@ -75,7 +75,7 @@ def _to_view(endpoint: StoredAlertEndpointRecord) -> AlertEndpointView:
 
 
 def _find_endpoint_or_404(endpoint_id: str) -> StoredAlertEndpointRecord:
-    endpoint = get_alert_store().get_endpoint(endpoint_id)
+    endpoint = get_alert_endpoint_store().get_endpoint(endpoint_id)
     if endpoint is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -89,11 +89,10 @@ def list_alert_endpoints(
     channel: AlertChannel | None = Query(default=None),
     status_filter: AlertDeliveryStatus | None = Query(default=None, alias="status"),
 ) -> AlertEndpointListResponse:
-    items = get_alert_store().list_endpoints(
+    items = get_alert_endpoint_store().list_endpoints(
         channel=channel,
         status=status_filter,
     )
-
     return AlertEndpointListResponse(
         status="ok",
         service="IronClaw-Security",
@@ -105,14 +104,13 @@ def list_alert_endpoints(
 
 @router.post("/endpoints", response_model=AlertEndpointResponse, status_code=status.HTTP_201_CREATED)
 def create_alert_endpoint(payload: AlertEndpointCreateRequest) -> AlertEndpointResponse:
-    endpoint = get_alert_store().create_endpoint(
+    endpoint = get_alert_endpoint_store().create_endpoint(
         channel=payload.channel,
         name=payload.name,
         target=payload.target,
         subscribed_events=payload.subscribed_events,
         metadata=payload.metadata,
     )
-
     return AlertEndpointResponse(
         status="ok",
         service="IronClaw-Security",
@@ -139,7 +137,7 @@ def update_alert_endpoint(
 ) -> AlertEndpointResponse:
     _find_endpoint_or_404(endpoint_id)
 
-    updated = get_alert_store().update_endpoint(
+    updated = get_alert_endpoint_store().update_endpoint(
         endpoint_id,
         subscribed_events=payload.subscribed_events,
         status=payload.status,
@@ -150,7 +148,6 @@ def update_alert_endpoint(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Unknown alert endpoint: {endpoint_id}",
         )
-
     return AlertEndpointResponse(
         status="ok",
         service="IronClaw-Security",

@@ -5,11 +5,10 @@ from typing import Any, Dict, Literal
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.auth import require_operator
+from app.core.auth import require_api_key
 from app.ui.runtimestatus import get_runtime_status_page
 
-
-router = APIRouter(tags=["runtime-status"])
+router = APIRouter(tags=["runtime-status-page"])
 
 
 class RuntimeExecutorStatus(BaseModel):
@@ -39,7 +38,7 @@ class RuntimePolicyStatus(BaseModel):
     defaultaction: Literal["allow", "review", "block"] = Field(default="review")
 
 
-class RuntimeStatusResponse(BaseModel):
+class RuntimeStatusPageResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     pageid: str
@@ -59,11 +58,11 @@ class RuntimeStatusResponse(BaseModel):
 
 @router.get(
     "/ui/runtime/status",
-    response_model=RuntimeStatusResponse,
+    response_model=RuntimeStatusPageResponse,
     summary="Get Runtime Status",
-    dependencies=[Depends(require_operator)],
+    dependencies=[Depends(require_api_key)],
 )
-def runtime_status_page() -> RuntimeStatusResponse:
+def runtime_status_page() -> RuntimeStatusPageResponse:
     payload: Dict[str, Any] = get_runtime_status_page()
 
     metrics: Dict[str, Any] = dict(payload.get("metrics", {}))
@@ -82,4 +81,4 @@ def runtime_status_page() -> RuntimeStatusResponse:
             "defaultaction": "review",
         }
 
-    return RuntimeStatusResponse.model_validate(payload)
+    return RuntimeStatusPageResponse.model_validate(payload)

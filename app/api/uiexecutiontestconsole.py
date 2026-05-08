@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-
 from fastapi import APIRouter, Depends, Request
 
 from app.core.auth import require_api_key
-
 
 router = APIRouter(tags=["ui-admin"])
 
 
 @router.get("/admin/execution-test-console")
-def get_execution_test_console(
+def get_admin_execution_test_console(
     request: Request,
     _: str | None = Depends(require_api_key),
 ) -> dict[str, object]:

@@ -71,7 +71,7 @@ class TokenBucket:
         self.updated_at = now
 
 
-class InMemoryRateLimiter:
+class TokenBucketRateLimiter:
     def __init__(self) -> None:
         self._buckets: dict[str, TokenBucket] = {}
         self._lock = threading.Lock()
@@ -98,11 +98,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self,
         app,
         *,
-        limiter: Optional[InMemoryRateLimiter] = None,
+        limiter: Optional[TokenBucketRateLimiter] = None,
         route_limits: Optional[dict[str, RateLimit]] = None,
     ) -> None:
         super().__init__(app)
-        self.limiter = limiter or InMemoryRateLimiter()
+        self.limiter = limiter or TokenBucketRateLimiter()
         self.route_limits = route_limits or DEFAULT_RATE_LIMITS
         self.logger = get_logger("ironclaw.ratelimit")
 
@@ -191,7 +191,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 def install_rate_limit_middleware(
     app: FastAPI,
     *,
-    limiter: Optional[InMemoryRateLimiter] = None,
+    limiter: Optional[TokenBucketRateLimiter] = None,
     route_limits: Optional[dict[str, RateLimit]] = None,
 ) -> None:
     app.add_middleware(

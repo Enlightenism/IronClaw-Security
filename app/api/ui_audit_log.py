@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from app.api.auth import require_api_key
+from app.core.auth import require_api_key
 
 router = APIRouter(
     prefix="/ui",

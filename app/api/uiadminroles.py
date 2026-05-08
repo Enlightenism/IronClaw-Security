@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-
 from fastapi import APIRouter, Depends, Request
 
-from app.core.auth import require_api_key
+from app.dependencies.auth import require_api_key
 
 
-router = APIRouter(tags=["ui-admin"])
+router = APIRouter(prefix="/ui", tags=["ui-admin"])
 
 
-@router.get("/admin/roles")
+@router.get("/admin/platform-roles")
 def get_admin_roles(
     request: Request,
     _: str | None = Depends(require_api_key),
@@ -65,7 +64,7 @@ def get_admin_roles(
     }
 
     return {
-        "title": "Admin Roles",
+        "title": "Admin Platform Roles",
         "status": "ok",
         "summary": summary,
         "roles": roles,

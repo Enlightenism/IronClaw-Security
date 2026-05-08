@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from app.core.auth import require_api_key
 
 router = APIRouter(tags=["ui-pages"])
 
@@ -192,6 +194,6 @@ def _pages() -> list[dict[str, str]]:
     ]
 
 
-@router.get("/ui/pages")
+@router.get("/ui/pages", dependencies=[Depends(require_api_key)])
 def list_ui_pages() -> list[dict[str, str]]:
     return _pages()

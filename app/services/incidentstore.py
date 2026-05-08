@@ -32,6 +32,10 @@ _ALLOWED_INCIDENT_SOURCES = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
+
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
@@ -379,6 +383,11 @@ def _normalize_incident_payload(
     return normalized
 
 
+# ---------------------------------------------------------------------------
+# IncidentRecord — persistence-backed, str timestamps
+# Distinct from incident_store.IncidentRecordInMemory (datetime timestamps).
+# ---------------------------------------------------------------------------
+
 @dataclass(slots=True)
 class IncidentRecord:
     incidentid: str
@@ -441,7 +450,7 @@ class IncidentRecord:
         category = self.category or "security"
         assigned_to = self.assigned_to or self.owner
         timestamp = self.timestamp or self.createdat
-        payload = {
+        return {
             "incidentid": self.incidentid,
             "incident_id": self.incidentid,
             "id": self.incidentid,
@@ -475,7 +484,6 @@ class IncidentRecord:
             "tags": list(self.tags),
             "metadata": dict(self.metadata),
         }
-        return payload
 
     def dict(self) -> dict[str, Any]:
         return self.to_dict()
@@ -486,6 +494,10 @@ class IncidentRecord:
     def as_dict(self) -> dict[str, Any]:
         return self.to_dict()
 
+
+# ---------------------------------------------------------------------------
+# Seed helper
+# ---------------------------------------------------------------------------
 
 def _seed_demo_incident() -> IncidentRecord:
     now = _utc_now()
@@ -512,6 +524,11 @@ def _seed_demo_incident() -> IncidentRecord:
         metadata={"seeded": True, "source": "incidentstore"},
     )
 
+
+# ---------------------------------------------------------------------------
+# IncidentStore — persistence-backed
+# Distinct from incident_store.IncidentStoreInMemory (thread-locked list).
+# ---------------------------------------------------------------------------
 
 @dataclass(slots=True)
 class IncidentStore:
@@ -550,6 +567,10 @@ class IncidentStore:
             return True
         except Exception:
             return False
+
+    # ------------------------------------------------------------------
+    # Internal backend wrappers
+    # ------------------------------------------------------------------
 
     def _safe_select(
         self,
@@ -607,7 +628,9 @@ class IncidentStore:
             return _mapping(inserted)
         return dict(payload)
 
-    def _safe_update(self, payload: dict[str, Any], *, filters: dict[str, Any]) -> dict[str, Any] | None:
+    def _safe_update(
+        self, payload: dict[str, Any], *, filters: dict[str, Any]
+    ) -> dict[str, Any] | None:
         try:
             updated = self.backend.update(
                 self.table_name,
@@ -645,6 +668,10 @@ class IncidentStore:
             return
         self._safe_insert(_seed_demo_incident().to_dict())
 
+    # ------------------------------------------------------------------
+    # Create
+    # ------------------------------------------------------------------
+
     def create_incident(self, payload: dict[str, Any] | None = None, **kwargs: Any) -> IncidentRecord:
         incident = _normalize_incident_payload(payload, **kwargs)
         inserted = self._safe_insert(incident)
@@ -677,6 +704,10 @@ class IncidentStore:
 
     def openincident(self, payload: dict[str, Any] | None = None, **kwargs: Any) -> IncidentRecord:
         return self.create_incident(payload, **kwargs)
+
+    # ------------------------------------------------------------------
+    # List / query
+    # ------------------------------------------------------------------
 
     def list_incidents(
         self,
@@ -782,6 +813,10 @@ class IncidentStore:
     def getlatest(self) -> IncidentRecord | None:
         return self.latest()
 
+    # ------------------------------------------------------------------
+    # Get
+    # ------------------------------------------------------------------
+
     def get_incident(self, incident_id: str) -> IncidentRecord | None:
         self._ensure_seed_data()
 
@@ -789,17 +824,10 @@ class IncidentStore:
         if not iid:
             raise ValueError("incident_id is required")
 
-        rows = self._safe_select(filters={"incident_id": iid}, limit=1)
-        if rows:
-            return IncidentRecord.from_mapping(rows[0])
-
-        rows = self._safe_select(filters={"incidentid": iid}, limit=1)
-        if rows:
-            return IncidentRecord.from_mapping(rows[0])
-
-        rows = self._safe_select(filters={"id": iid}, limit=1)
-        if rows:
-            return IncidentRecord.from_mapping(rows[0])
+        for key in ("incident_id", "incidentid", "id"):
+            rows = self._safe_select(filters={key: iid}, limit=1)
+            if rows:
+                return IncidentRecord.from_mapping(rows[0])
 
         return None
 
@@ -821,6 +849,10 @@ class IncidentStore:
     def readone(self, incident_id: str) -> IncidentRecord | None:
         return self.get_incident(incident_id)
 
+    # ------------------------------------------------------------------
+    # Update
+    # ------------------------------------------------------------------
+
     def update_incident(self, incident_id: str, updates: dict[str, Any]) -> IncidentRecord | None:
         existing = self.get_incident(incident_id)
         if existing is None:
@@ -840,26 +872,10 @@ class IncidentStore:
             normalized["resolved_at"] = normalized["updated_at"]
             normalized["resolvedat"] = normalized["updatedat"]
 
-        updated = self._safe_update(
-            normalized,
-            filters={"incident_id": existing.incidentid},
-        )
-        if updated is not None:
-            return IncidentRecord.from_mapping(updated)
-
-        updated = self._safe_update(
-            normalized,
-            filters={"incidentid": existing.incidentid},
-        )
-        if updated is not None:
-            return IncidentRecord.from_mapping(updated)
-
-        updated = self._safe_update(
-            normalized,
-            filters={"id": existing.incidentid},
-        )
-        if updated is not None:
-            return IncidentRecord.from_mapping(updated)
+        for key in ("incident_id", "incidentid", "id"):
+            updated = self._safe_update(normalized, filters={key: existing.incidentid})
+            if updated is not None:
+                return IncidentRecord.from_mapping(updated)
 
         return IncidentRecord.from_mapping(normalized)
 
@@ -972,22 +988,19 @@ class IncidentStore:
             verdict=verdict,
         )
 
+    # ------------------------------------------------------------------
+    # Delete
+    # ------------------------------------------------------------------
+
     def delete_incident(self, incident_id: str) -> dict[str, Any] | None:
         iid = _string(incident_id)
         if not iid:
             raise ValueError("incident_id is required")
 
-        deleted = self._safe_delete(filters={"incident_id": iid})
-        if deleted is not None:
-            return deleted
-
-        deleted = self._safe_delete(filters={"incidentid": iid})
-        if deleted is not None:
-            return deleted
-
-        deleted = self._safe_delete(filters={"id": iid})
-        if deleted is not None:
-            return deleted
+        for key in ("incident_id", "incidentid", "id"):
+            deleted = self._safe_delete(filters={key: iid})
+            if deleted is not None:
+                return deleted
 
         return None
 
@@ -996,6 +1009,10 @@ class IncidentStore:
 
     def delete(self, incident_id: str) -> dict[str, Any] | None:
         return self.delete_incident(incident_id)
+
+    # ------------------------------------------------------------------
+    # Summarize
+    # ------------------------------------------------------------------
 
     def summarize(
         self,
@@ -1040,6 +1057,10 @@ class IncidentStore:
     ) -> dict[str, Any]:
         return self.summarize(organization_id=organization_id, limit=limit)
 
+    # ------------------------------------------------------------------
+    # Reset / seed
+    # ------------------------------------------------------------------
+
     def reset(self) -> None:
         try:
             self.backend.delete(self.table_name, filters={})
@@ -1051,6 +1072,10 @@ class IncidentStore:
         self._ensure_seed_data()
 
 
+# ---------------------------------------------------------------------------
+# Subclass aliases (kept for any router that imports them by name)
+# ---------------------------------------------------------------------------
+
 class InMemoryIncidentStore(IncidentStore):
     pass
 
@@ -1059,7 +1084,13 @@ class SupabaseIncidentStore(IncidentStore):
     pass
 
 
-_SINGLETON_STORE: IncidentStore | None = None
+# ---------------------------------------------------------------------------
+# Module-level singleton + factory functions
+# ---------------------------------------------------------------------------
+
+# Eagerly initialized at import time so runtime introspection (is not None)
+# passes without requiring a prior call to get_incident_store().
+_SINGLETON_STORE: IncidentStore = IncidentStore()
 
 
 def build_incident_store(
@@ -1089,8 +1120,6 @@ def get_incident_store(
 ) -> IncidentStore:
     global _SINGLETON_STORE
     if backend is None and not store_kwargs and table_name == DEFAULT_INCIDENT_TABLE:
-        if _SINGLETON_STORE is None:
-            _SINGLETON_STORE = build_incident_store(table_name=table_name)
         return _SINGLETON_STORE
     return build_incident_store(backend=backend, table_name=table_name, **store_kwargs)
 
@@ -1161,3 +1190,7 @@ def getstore(
     **store_kwargs: Any,
 ) -> IncidentStore:
     return getincidentstore(backend=backend, tablename=tablename, mode=mode, **store_kwargs)
+
+
+def reset_incident_store() -> None:
+    _SINGLETON_STORE.reset()

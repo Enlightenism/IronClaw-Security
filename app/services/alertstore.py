@@ -67,7 +67,7 @@ def _mapping(value: Any) -> dict[str, Any]:
         return {}
     if isinstance(value, dict):
         return dict(value)
-    if isinstance(value, Mapping):  # more flexible than dict-only checks [web:115]
+    if isinstance(value, Mapping):
         return dict(value)
     if hasattr(value, "model_dump") and callable(value.model_dump):
         dumped = value.model_dump()
@@ -319,8 +319,17 @@ def _normalize_alert_payload(
     }
 
 
-@dataclass(slots=True)  # slots keep store instances lean [web:121][web:137]
-class AlertStore:
+@dataclass(slots=True)
+class SecurityAlertStore:
+    """
+    Persistence-backed store for security alert records (incidents, threats,
+    policy violations). Full alert lifecycle: open → acknowledge → investigate
+    → resolve / close / false_positive.
+
+    Distinct from AlertEndpointStore in alert_store.py, which manages
+    notification routing targets (email / webhook / slack endpoints).
+    """
+
     backend: Any = field(default_factory=build_store)
     table_name: str = DEFAULT_ALERT_TABLE
 
@@ -625,9 +634,9 @@ def build_alert_store(
     backend: Any | None = None,
     table_name: str = DEFAULT_ALERT_TABLE,
     **store_kwargs: Any,
-) -> AlertStore:
+) -> SecurityAlertStore:
     resolved_backend = backend if backend is not None else build_store(**store_kwargs)
-    return AlertStore(backend=resolved_backend, table_name=table_name)
+    return SecurityAlertStore(backend=resolved_backend, table_name=table_name)
 
 
 def create_alert_store(
@@ -635,7 +644,7 @@ def create_alert_store(
     backend: Any | None = None,
     table_name: str = DEFAULT_ALERT_TABLE,
     **store_kwargs: Any,
-) -> AlertStore:
+) -> SecurityAlertStore:
     return build_alert_store(backend=backend, table_name=table_name, **store_kwargs)
 
 
@@ -644,5 +653,5 @@ def get_alert_store(
     backend: Any | None = None,
     table_name: str = DEFAULT_ALERT_TABLE,
     **store_kwargs: Any,
-) -> AlertStore:
+) -> SecurityAlertStore:
     return build_alert_store(backend=backend, table_name=table_name, **store_kwargs)

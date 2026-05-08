@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from app.core.api_keys import get_api_key_registry, mask_api_key
+from app.core.apikeys import get_api_key_registry, mask_api_key
 
 
 router = APIRouter(prefix="/customer-keys", tags=["customer-keys"])

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+
 from datetime import UTC, datetime
 from typing import Any
+
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from app.api.auth import require_api_key
+
+from app.dependencies.auth import require_api_key
+
 
 router = APIRouter(
     prefix="/ui/admin",
@@ -15,8 +19,10 @@ router = APIRouter(
 )
 
 
+
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
 
 
 class RolePermissionView(BaseModel):
@@ -24,6 +30,7 @@ class RolePermissionView(BaseModel):
     label: str
     description: str
     granted: bool
+
 
 
 class AccessControlRoleView(BaseModel):
@@ -35,6 +42,7 @@ class AccessControlRoleView(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+
 class AccessControlRolesResponse(BaseModel):
     status: str
     service: str
@@ -43,6 +51,7 @@ class AccessControlRolesResponse(BaseModel):
     total: int
     roles: list[AccessControlRoleView] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
 
 
 def _build_roles() -> list[AccessControlRoleView]:
@@ -147,6 +156,7 @@ def _build_roles() -> list[AccessControlRoleView]:
             metadata={"tier": "incident-response"},
         ),
     ]
+
 
 
 @router.get("/roles", response_model=AccessControlRolesResponse)

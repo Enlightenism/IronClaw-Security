@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+
 from typing import Literal
+
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.core.auth import require_api_key
+
+from app.dependencies.auth import require_api_key
 
 
-router = APIRouter(tags=["data-retention"])
+
+router = APIRouter(prefix="/ui", tags=["admin-data-retention"])
+
 
 
 class DataRetentionPolicyItem(BaseModel):
@@ -20,6 +25,7 @@ class DataRetentionPolicyItem(BaseModel):
     status: Literal["active", "review_required"]
 
 
+
 class DataRetentionSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -28,7 +34,8 @@ class DataRetentionSummary(BaseModel):
     review_required: int = Field(ge=0)
 
 
-class DataRetentionResponse(BaseModel):
+
+class AdminDataRetentionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str
@@ -36,6 +43,7 @@ class DataRetentionResponse(BaseModel):
     summary: DataRetentionSummary
     policies: list[DataRetentionPolicyItem]
     request_id: str | None = None
+
 
 
 _POLICIES: tuple[DataRetentionPolicyItem, ...] = (
@@ -66,15 +74,16 @@ _POLICIES: tuple[DataRetentionPolicyItem, ...] = (
 )
 
 
+
 @router.get(
     "/admin/data-retention",
-    response_model=DataRetentionResponse,
-    summary="Get Data Retention",
+    response_model=AdminDataRetentionResponse,
+    summary="Get Admin Data Retention Policies",
 )
 def get_data_retention_settings(
     request: Request,
     _: str | None = Depends(require_api_key),
-) -> DataRetentionResponse:
+) -> AdminDataRetentionResponse:
     request_id = getattr(request.state, "request_id", None)
 
     policies = list(_POLICIES)
@@ -86,7 +95,7 @@ def get_data_retention_settings(
         ),
     )
 
-    return DataRetentionResponse(
+    return AdminDataRetentionResponse(
         title="Data Retention",
         status="ok",
         summary=summary,

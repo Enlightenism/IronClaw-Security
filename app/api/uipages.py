@@ -3,11 +3,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Literal
 
-from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
+from app.core.auth import require_api_key
 
-router = APIRouter(prefix="/ui-pages", tags=["ui-pages"])
+router = APIRouter(prefix="/ui-pages", tags=["ui-page-registry"])
 
 
 def _utc_now_iso() -> str:
@@ -166,6 +167,7 @@ BACKUP_RESTORE_PAGES: list[UIPageDefinition] = [
     "",
     response_model=UIPageRegistryResponse,
     summary="Expose completed UI section pages",
+    dependencies=[Depends(require_api_key)],
 )
 def get_ui_pages() -> UIPageRegistryResponse:
     return UIPageRegistryResponse(
@@ -178,6 +180,7 @@ def get_ui_pages() -> UIPageRegistryResponse:
     "/backup-restore",
     response_model=list[UIPageDefinition],
     summary="Expose backup and restore section pages only",
+    dependencies=[Depends(require_api_key)],
 )
 def get_backup_restore_ui_pages() -> list[UIPageDefinition]:
     return BACKUP_RESTORE_PAGES

@@ -6,10 +6,8 @@ from typing import Final, cast
 from fastapi import APIRouter
 from fastapi.routing import APIRoute
 
-
 router = APIRouter(prefix="/api", tags=["api"])
 inventory_router = APIRouter(tags=["api-inventory"])
-
 
 OPTIONAL_API_MODULES: Final[tuple[str, ...]] = (
     "app.api.routes.incidents",
@@ -51,17 +49,14 @@ def _router_label(api_router: APIRouter) -> str:
 
 def get_api_routers() -> list[APIRouter]:
     routers: list[APIRouter] = []
-
     for module_path in CORE_API_MODULES:
         core_router = _optional_router(module_path)
         if core_router is not None:
             routers.append(core_router)
-
     for module_path in OPTIONAL_API_MODULES:
         optional_router = _optional_router(module_path)
         if optional_router is not None:
             routers.append(optional_router)
-
     return routers
 
 
@@ -95,76 +90,38 @@ def validate_api_routers() -> None:
                     f"duplicate API route registration detected: {path} {methods} "
                     f"already registered under {seen_route_signatures[signature]}"
                 )
-
             seen_route_signatures[signature] = label
 
 
-@inventory_router.get(
-    "/ui-manifest",
-    summary="Api Ui Manifest Inventory",
-)
-def api_ui_manifest_inventory() -> dict[str, str]:
-    return {"resource": "ui-manifest", "path": "/api/ui-manifest"}
-
-
-@inventory_router.get(
-    "/groq-registry",
-    summary="Api Groq Registry Inventory",
-)
-def api_groq_registry_inventory() -> dict[str, str]:
-    return {"resource": "groq-registry", "path": "/api/groq-registry"}
-
-
-@inventory_router.get(
-    "/incidents",
-    summary="Api Incidents Inventory",
-)
+# NOTE: /ui-manifest and /groq-registry are intentionally OMITTED here.
+# Those paths are already served by app.api.ui_manifest and app.ui.groq_registry
+# (loaded via CORE_API_MODULES). Adding them here would cause duplicate route registration.
+@inventory_router.get("/incidents", summary="Api Incidents Inventory")
 def api_incidents_inventory() -> dict[str, str]:
     return {"resource": "incidents", "path": "/api/incidents"}
 
 
-@inventory_router.get(
-    "/integrations",
-    summary="Api Integrations Inventory",
-)
+@inventory_router.get("/integrations", summary="Api Integrations Inventory")
 def api_integrations_inventory() -> dict[str, str]:
     return {"resource": "integrations", "path": "/api/integrations"}
 
 
-@inventory_router.get(
-    "/review-queue",
-    summary="Api Review Queue Inventory",
-)
+@inventory_router.get("/review-queue", summary="Api Review Queue Inventory")
 def api_review_queue_inventory() -> dict[str, str]:
     return {"resource": "review-queue", "path": "/api/review-queue"}
 
 
-@inventory_router.get(
-    "/unit-ledger",
-    summary="Api Unit Ledger Inventory",
-)
+@inventory_router.get("/unit-ledger", summary="Api Unit Ledger Inventory")
 def api_unit_ledger_inventory() -> dict[str, str]:
     return {"resource": "unit-ledger", "path": "/api/unit-ledger"}
 
 
-@inventory_router.get(
-    "/unit-wallet",
-    summary="Api Unit Wallet Inventory",
-)
+@inventory_router.get("/unit-wallet", summary="Api Unit Wallet Inventory")
 def api_unit_wallet_inventory() -> dict[str, str]:
     return {"resource": "unit-wallet", "path": "/api/unit-wallet"}
 
 
 def include_api_routers() -> None:
-    """
-    Build the /api aggregate router from legacy/compat modules only.
-
-    Important:
-    - app.main now treats app.api.* as the canonical API surface.
-    - This file should remain a compat aggregator for modules mounted under /api.
-    - Do not include this router separately anywhere that already mounts the same
-      logical endpoints directly, or duplicate routes/OpenAPI collisions will occur.
-    """
     validate_api_routers()
 
     existing_route_signatures = {

@@ -7,7 +7,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from app.core import auth as auth_module
-from app.core.api_keys import create_api_key_registry
+from app.core.apikeys import APIKeyRegistry
 from app.core.auth import API_KEY_HEADER_NAME, get_api_key, require_api_key
 from app.core.errors import AppError
 
@@ -34,19 +34,19 @@ def test_get_api_key_accepts_registry_key_when_auth_required() -> None:
     def protected_route(value: str | None = Depends(get_api_key)) -> dict[str, str | None]:
         return {"api_key": value}
 
-    registry = create_api_key_registry()
+    registry = APIKeyRegistry()
     record = registry.create_key("Registry Test Key")
 
     original_get_registry = auth_module.get_api_key_registry
     auth_module.get_api_key_registry = lambda: registry
     try:
         client = TestClient(app)
-        response = client.get("/protected", headers={API_KEY_HEADER_NAME: record.raw_key or ""})
+        response = client.get("/protected", headers={API_KEY_HEADER_NAME: record.api_key})
     finally:
         auth_module.get_api_key_registry = original_get_registry
 
     assert response.status_code == 200
-    assert response.json() == {"api_key": record.raw_key}
+    assert response.json() == {"api_key": record.api_key}
 
 
 def test_require_api_key_accepts_registry_key_when_auth_required() -> None:
@@ -56,19 +56,19 @@ def test_require_api_key_accepts_registry_key_when_auth_required() -> None:
     def protected_route(value: str = Depends(require_api_key)) -> dict[str, str]:
         return {"api_key": value}
 
-    registry = create_api_key_registry()
+    registry = APIKeyRegistry()
     record = registry.create_key("Registry Require Key")
 
     original_get_registry = auth_module.get_api_key_registry
     auth_module.get_api_key_registry = lambda: registry
     try:
         client = TestClient(app)
-        response = client.get("/protected", headers={API_KEY_HEADER_NAME: record.raw_key or ""})
+        response = client.get("/protected", headers={API_KEY_HEADER_NAME: record.api_key})
     finally:
         auth_module.get_api_key_registry = original_get_registry
 
     assert response.status_code == 200
-    assert response.json() == {"api_key": record.raw_key}
+    assert response.json() == {"api_key": record.api_key}
 
 
 def test_get_api_key_raises_auth_not_configured_when_required_without_any_keys() -> None:
@@ -79,7 +79,7 @@ def test_get_api_key_raises_auth_not_configured_when_required_without_any_keys()
         return {"api_key": value}
 
     original_get_registry = auth_module.get_api_key_registry
-    auth_module.get_api_key_registry = lambda: create_api_key_registry()
+    auth_module.get_api_key_registry = lambda: APIKeyRegistry()
     try:
         client = TestClient(app)
         with pytest.raises(AppError) as exc_info:
@@ -99,7 +99,7 @@ def test_get_api_key_prefers_configured_key_over_invalid_registry_lookup() -> No
         return {"api_key": value}
 
     original_get_registry = auth_module.get_api_key_registry
-    auth_module.get_api_key_registry = lambda: create_api_key_registry()
+    auth_module.get_api_key_registry = lambda: APIKeyRegistry()
     try:
         client = TestClient(app)
         response = client.get("/protected", headers={API_KEY_HEADER_NAME: "configured-secret"})
@@ -117,7 +117,7 @@ def test_require_api_key_rejects_invalid_registry_key() -> None:
     def protected_route(value: str = Depends(require_api_key)) -> dict[str, str]:
         return {"api_key": value}
 
-    registry = create_api_key_registry()
+    registry = APIKeyRegistry()
     registry.create_key("Valid Registry Key")
 
     original_get_registry = auth_module.get_api_key_registry

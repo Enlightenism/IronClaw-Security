@@ -7,7 +7,7 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
-from app.core.api_keys import get_api_key_registry
+from app.core.apikeys import get_api_key_registry
 from app.core.auth import API_KEY_HEADER_NAME
 from app.core.usage_metering import get_usage_metering_registry
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.auth import require_api_key
+from app.core.auth import require_api_key
 from app.services.integration_registry import initialize_integration_registry
 from app.ui.integrations.controls import build_integration_controls_view
 from app.ui.integrations.governance import build_integration_governance_view

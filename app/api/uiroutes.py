@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-
 from fastapi import APIRouter, Depends, Request
 
 from app.core.auth import require_api_key
-
 
 router = APIRouter(tags=["ui-admin"])
 
@@ -41,7 +39,7 @@ def get_ui_routes(
         {
             "path": "/admin/request-stream",
             "method": "GET",
-            "name": "get_request_stream",
+            "name": "get_admin_request_stream",
             "category": "operations",
             "status": "active",
         },
@@ -55,7 +53,7 @@ def get_ui_routes(
         {
             "path": "/admin/execution-test-console",
             "method": "GET",
-            "name": "get_execution_test_console",
+            "name": "get_admin_execution_test_console",
             "category": "diagnostics",
             "status": "active",
         },

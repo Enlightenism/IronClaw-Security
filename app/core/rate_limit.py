@@ -10,7 +10,7 @@ from fastapi import Request, status
 from app.core.errors import AppError
 
 
-class InMemoryRateLimiter:
+class SlidingWindowRateLimiter:
     def __init__(self) -> None:
         self._events: dict[str, Deque[float]] = {}
         self._lock = Lock()
@@ -31,7 +31,7 @@ class InMemoryRateLimiter:
             return True
 
 
-rate_limiter = InMemoryRateLimiter()
+rate_limiter = SlidingWindowRateLimiter()
 
 
 def _get_client_ip(request: Request) -> str:

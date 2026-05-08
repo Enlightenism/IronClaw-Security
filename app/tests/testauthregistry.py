@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.core.api_keys import APIKeyRecord, get_api_key_registry
+from app.core.apikeys import APIKeyRecord, get_api_key_registry
 
 
 def _clear_registry() -> None:

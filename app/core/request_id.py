@@ -10,7 +10,7 @@ from starlette.responses import Response
 REQUEST_ID_HEADER_NAME = "X-Request-ID"
 
 
-class RequestIDMiddleware(BaseHTTPMiddleware):
+class SimpleRequestIDMiddleware(BaseHTTPMiddleware):
     """
     Attach a stable request ID to each request/response cycle.
 
@@ -32,7 +32,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def get_request_id(request: Request) -> str | None:
+def get_request_id_from_request(request: Request) -> str | None:
     value = getattr(request.state, "request_id", None)
     if value is None:
         return None

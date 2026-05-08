@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
 
 
-from app.core.api_keys import (
+from app.core.apikeys import (
     APIKeyRecord,
     generate_api_key,
     get_api_key_registry,

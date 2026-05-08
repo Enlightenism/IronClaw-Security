@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
-from app.core.api_keys import get_api_key_registry
+from app.core.apikeys import get_api_key_registry
 from app.main import app
 
 

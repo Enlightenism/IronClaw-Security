@@ -6,7 +6,7 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
-from app.core.api_keys import get_api_key_registry
+from app.core.apikeys import get_api_key_registry
 from app.core.auth import API_KEY_HEADER_NAME, get_api_key, require_api_key
 from app.core.errors import AppError
 from app.core.handlers import register_exception_handlers

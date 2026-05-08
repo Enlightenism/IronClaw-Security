@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from app.api.auth import require_api_key
+from app.core.auth import require_api_key
 
 router = APIRouter(
     prefix="/ui",
@@ -92,7 +92,7 @@ def _build_request_items() -> list[RequestStreamItemView]:
 
 
 @router.get("/request-stream", response_model=RequestStreamResponse)
-def get_request_stream(
+def get_ui_request_stream(
     requested_by: str = Query("ui-request-stream", min_length=1),
     limit: int = Query(50, ge=1, le=500),
 ) -> RequestStreamResponse:

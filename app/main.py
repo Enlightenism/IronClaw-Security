@@ -126,8 +126,8 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
     double-registration of the same logical endpoints.
 
     Note: routers that already declare dependencies=[Depends(require_api_key)]
-    internally (e.g. customer_keys) are included without a redundant dependencies
-    kwarg to prevent double-registration.
+    internally (e.g. customer_keys, ui_admin_operators) are included without a
+    redundant dependencies kwarg to prevent double-registration.
     """
     dependencies = _protected_dependencies()
     return [
@@ -149,6 +149,8 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (_optional_router("app.api.session_security"), {"dependencies": dependencies}),
         (_optional_router("app.api.access_control"), {"dependencies": dependencies}),
         (_optional_router("app.api.org_context"), {"dependencies": dependencies}),
+        # ui_admin_operators has require_api_key baked in — no dependencies override needed
+        (_optional_router("app.api.ui_admin_operators"), {}),
     ]
 
 
