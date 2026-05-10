@@ -1,8 +1,8 @@
-from ironclaw_client import IronclawClient
+from ironclawclient import IronClawClient
 
 
 def main() -> None:
-    client = IronclawClient("http://127.0.0.1:8000")
+    client = IronClawClient("http://127.0.0.1:8000")
 
     result = client.scan_text("hello world")
     print(result)

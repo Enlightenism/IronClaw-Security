@@ -1,10 +1,14 @@
+from __future__ import annotations
+
 import os
-from typing import Literal, TypedDict, List
+from typing import Final, Literal, TypedDict, List
 
 import httpx
 
 
 Verdict = Literal["allow", "warn", "quarantine", "block"]
+
+_DEFAULT_BASE_URL: Final[str] = "http://localhost:8000"
 
 
 class ScanResult(TypedDict):
@@ -33,9 +37,18 @@ class PromptBundleResult(TypedDict, total=False):
     should_warn: bool
 
 
-class IronclawClient:
-    def __init__(self, base_url: str | None = None, timeout: float = 5.0):
-        self.base_url = base_url or os.environ.get("IRONCLAW_BASE_URL", "http://localhost:8000")
+class IronClawScanClient:
+    """
+    Thin HTTP client for IronClaw scan and guard-bundle endpoints.
+
+    Renamed from IronclawClient to IronClawScanClient to prevent import
+    collision with IronClawClient in ironclawclient.py.
+    """
+
+    def __init__(self, base_url: str | None = None, timeout: float = 5.0) -> None:
+        self.base_url = (
+            base_url or os.environ.get("IRONCLAW_BASE_URL", _DEFAULT_BASE_URL)
+        ).rstrip("/")
         self.timeout = timeout
 
     def scan_text(self, text: str) -> ScanResult:
@@ -86,7 +99,6 @@ class IronclawClient:
         should_halt: bool = data.get("should_halt", True)
 
         if should_halt:
-            # Prefer the user_prompt summary; fall back to model_output or generic
             user_ctx = data.get("user_prompt") or {}
             model_ctx = data.get("model_output") or {}
             summary = (
@@ -107,3 +119,16 @@ class IronclawClient:
             "should_halt": should_halt,
             "should_warn": data.get("should_warn", True),
         }
+
+
+# Backward-compat alias — preserves any existing imports of the old name.
+IronclawClient = IronClawScanClient
+
+
+__all__ = [
+    "IronClawScanClient",
+    "IronclawClient",
+    "PromptBundleResult",
+    "ScanResult",
+    "Verdict",
+]

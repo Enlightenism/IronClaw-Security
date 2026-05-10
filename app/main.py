@@ -114,6 +114,8 @@ def _public_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         # app.api.router is the /api prefix aggregator for legacy/compat modules
         # (incidents, integrations, actionhistorytest, etc.) — must remain registered.
         (_optional_router("app.api.router"), {}),
+        # Public action usage router; exposes /action/usage/{ownerkey}
+        (_optional_router("app.api.actionusage"), {}),
     ]
 
 

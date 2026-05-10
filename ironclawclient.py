@@ -57,13 +57,15 @@ def _env_timeout() -> float:
     return timeout if timeout > 0 else DEFAULT_TIMEOUT_SECONDS
 
 
-class IronClawClient:
+class IronClawInfraClient:
     """
-    Synchronous API client for IronClaw.
+    Synchronous API client for IronClaw infrastructure endpoints.
 
-    This client provides a stable typed wrapper around the current
-    operational endpoints used in health checks, UI runtime inspection,
-    backup control, and restore control.
+    Renamed from IronClawClient to IronClawInfraClient to prevent import
+    collision with IronClawScanClient in ironclaw_client.py.
+
+    Covers health checks, UI runtime inspection, backup control,
+    and restore control.
     """
 
     def __init__(
@@ -92,7 +94,7 @@ class IronClawClient:
     def close(self) -> None:
         self._client.close()
 
-    def __enter__(self) -> "IronClawClient":
+    def __enter__(self) -> "IronClawInfraClient":
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
@@ -230,10 +232,27 @@ class IronClawClient:
                 return {"raw": text}
 
 
+# Backward-compat alias — preserves any existing imports of the old name.
+IronClawClient = IronClawInfraClient
+
+
 def build_ironclaw_client(
     base_url: str | None = None,
     *,
     timeout: float | None = None,
     headers: Mapping[str, str] | None = None,
-) -> IronClawClient:
-    return IronClawClient(base_url=base_url, timeout=timeout, headers=headers)
+) -> IronClawInfraClient:
+    return IronClawInfraClient(base_url=base_url, timeout=timeout, headers=headers)
+
+
+__all__ = [
+    "DEFAULT_BASE_URL",
+    "DEFAULT_TIMEOUT_SECONDS",
+    "IronClawClient",
+    "IronClawClientError",
+    "IronClawHTTPStatusError",
+    "IronClawInfraClient",
+    "IronClawRequestError",
+    "IronClawResponse",
+    "build_ironclaw_client",
+]

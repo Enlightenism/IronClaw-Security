@@ -9,6 +9,8 @@ from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException, Timeout
 from urllib3.util.retry import Retry
 
+from supabaseclient import SupabaseAPIError, SupabaseConnectionError
+
 SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 
@@ -17,14 +19,6 @@ DEFAULT_TIMEOUT = 10
 
 
 class SupabaseClientError(Exception):
-    pass
-
-
-class SupabaseConnectionError(SupabaseClientError):
-    pass
-
-
-class SupabaseAPIError(SupabaseClientError):
     pass
 
 
@@ -65,7 +59,7 @@ def _handle_response(response: Response) -> Any:
         detail = f"Supabase HTTP {response.status_code}"
         if body:
             detail = f"{detail}: {body}"
-        raise SupabaseAPIError(detail) from exc
+        raise SupabaseAPIError(response.status_code, detail) from exc
 
     if not response.content:
         return None
@@ -73,7 +67,7 @@ def _handle_response(response: Response) -> Any:
     try:
         return response.json()
     except ValueError as exc:
-        raise SupabaseAPIError("Supabase returned a non-JSON response.") from exc
+        raise SupabaseAPIError(response.status_code, "Supabase returned a non-JSON response.") from exc
 
 
 def _request(

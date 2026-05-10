@@ -23,6 +23,7 @@ def _optional_router(module_path: str) -> APIRouter | None:
 
 router = APIRouter(tags=["ui"])
 
+
 UI_ROUTERS: Final[tuple[APIRouter | None, ...]] = (
     _optional_router("app.ui.executions.dashboard"),
     _optional_router("app.ui.executions.detail"),
@@ -51,6 +52,8 @@ UI_ROUTERS: Final[tuple[APIRouter | None, ...]] = (
     _optional_router("app.ui.billing_index"),
     _optional_router("app.ui.billing_summary"),
     _optional_router("app.ui.billing_packages"),
+    # Usage UI router: exposes /ui/usage* family for action usage tests
+    _optional_router("app.ui.usage"),
 )
 
 
