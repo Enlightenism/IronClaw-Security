@@ -31,6 +31,7 @@ class AuthContext:
     roles: tuple[str, ...] = ()
     authenticated: bool = False
     auth_source: str = "none"
+    auth_method: Optional[str] = None
     metadata: dict[str, str] = field(default_factory=dict)
 
 
@@ -354,19 +355,38 @@ def get_auth_context(
     provided_org_id: Optional[str] = Depends(org_id_header),
 ) -> AuthContext:
     normalized_session_id = _clean_optional_string(session_id)
+    normalized_api_key = _clean_optional_string(api_key)
 
-    if not _is_auth_required(request):
+    # If a key is present, always authenticate regardless of enforcement mode.
+    if normalized_api_key:
+        registry_record = _resolve_registry_api_key(normalized_api_key)
+        principal_type = "platform"
+        auth_source = "passthrough"
+        auth_method = "api_key"
+
+        if registry_record is not None:
+            principal_type = "api_key"
+            auth_source = "registry"
+            auth_method = "registry_api_key"
+        elif _is_auth_required(request):
+            auth_source = "configured"
+
         return AuthContext(
-            api_key=api_key,
-            principal_type="anonymous",
-            principal_id=None,
+            api_key=normalized_api_key,
+            principal_type=principal_type,
+            principal_id=_coerce_principal_id(registry_record),
             session_id=normalized_session_id,
-            org_id=_clean_optional_string(provided_org_id),
-            authenticated=False,
-            auth_source="disabled",
+            org_id=_coerce_org_id(request, provided_org_id, registry_record),
+            permissions=_coerce_permissions(registry_record),
+            roles=_coerce_roles(registry_record),
+            authenticated=True,
+            auth_source=auth_source,
+            auth_method=auth_method,
+            metadata={"header": API_KEY_HEADER_NAME},
         )
 
-    if not api_key:
+    # No key present — enforce if required, otherwise anonymous.
+    if _is_auth_required(request):
         raise AppError(
             error="missing_api_key",
             message="Missing API key",
@@ -374,27 +394,15 @@ def get_auth_context(
             details={"header": API_KEY_HEADER_NAME},
         )
 
-    registry_record = _resolve_registry_api_key(api_key)
-    principal_type = "platform"
-    auth_source = "configured"
-
-    if registry_record is not None:
-        principal_type = "api_key"
-        auth_source = "registry"
-
     return AuthContext(
-        api_key=api_key,
-        principal_type=principal_type,
-        principal_id=_coerce_principal_id(registry_record),
+        api_key=None,
+        principal_type="anonymous",
+        principal_id=None,
         session_id=normalized_session_id,
-        org_id=_coerce_org_id(request, provided_org_id, registry_record),
-        permissions=_coerce_permissions(registry_record),
-        roles=_coerce_roles(registry_record),
-        authenticated=True,
-        auth_source=auth_source,
-        metadata={
-            "header": API_KEY_HEADER_NAME,
-        },
+        org_id=_clean_optional_string(provided_org_id),
+        authenticated=False,
+        auth_source="disabled",
+        auth_method=None,
     )
 
 

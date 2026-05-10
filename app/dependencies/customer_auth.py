@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from fastapi import Header, Request
+from fastapi import Depends, Header, Request
 
 from app.core.access_control import require_access
-from app.core.auth import AuthContext
+from app.core.auth import AuthContext, get_auth_context
 from app.core.org_isolation import require_same_org
-from app.dependencies.auth import build_auth_context
 
 
 def _clean(value: object) -> str:
@@ -14,8 +13,9 @@ def _clean(value: object) -> str:
     return value.strip()
 
 
-async def require_customer_auth(request: Request) -> AuthContext:
-    context = build_auth_context(request)
+async def require_customer_auth(
+    context: AuthContext = Depends(get_auth_context),
+) -> AuthContext:
     require_access(
         context,
         action="customer_authenticated",
@@ -32,8 +32,9 @@ async def require_customer_auth(request: Request) -> AuthContext:
     return context
 
 
-async def require_customer_read(request: Request) -> AuthContext:
-    context = await require_customer_auth(request)
+async def require_customer_read(
+    context: AuthContext = Depends(require_customer_auth),
+) -> AuthContext:
     require_access(
         context,
         action="customer_read",
@@ -43,8 +44,9 @@ async def require_customer_read(request: Request) -> AuthContext:
     return context
 
 
-async def require_customer_write(request: Request) -> AuthContext:
-    context = await require_customer_auth(request)
+async def require_customer_write(
+    context: AuthContext = Depends(require_customer_auth),
+) -> AuthContext:
     require_access(
         context,
         action="customer_write",
@@ -54,8 +56,9 @@ async def require_customer_write(request: Request) -> AuthContext:
     return context
 
 
-async def require_customer_session_access(request: Request) -> AuthContext:
-    context = await require_customer_auth(request)
+async def require_customer_session_access(
+    context: AuthContext = Depends(require_customer_auth),
+) -> AuthContext:
     require_access(
         context,
         action="customer_session_access",
@@ -66,10 +69,9 @@ async def require_customer_session_access(request: Request) -> AuthContext:
 
 
 async def require_customer_org_access(
-    request: Request,
     x_org_id: str | None = Header(default=None),
+    context: AuthContext = Depends(require_customer_read),
 ) -> AuthContext:
-    context = await require_customer_read(request)
     target_org_id = _clean(x_org_id) or context.org_id
     require_same_org(
         context,
@@ -80,8 +82,9 @@ async def require_customer_org_access(
 
 
 def require_customer_permission(permission: str):
-    async def dependency(request: Request) -> AuthContext:
-        context = await require_customer_auth(request)
+    async def dependency(
+        context: AuthContext = Depends(require_customer_auth),
+    ) -> AuthContext:
         require_access(
             context,
             action="customer_permission",

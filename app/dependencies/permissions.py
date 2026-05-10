@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from fastapi import Request
+from fastapi import Depends
 
-from app.core.auth import AuthContext
+from app.core.auth import AuthContext, get_auth_context
 from app.core.permissions import evaluate_permission, require_permission
-from app.dependencies.auth import build_auth_context
 
 
-async def require_permissions_read(request: Request) -> AuthContext:
-    context = build_auth_context(request)
+async def require_permissions_read(
+    context: AuthContext = Depends(get_auth_context),
+) -> AuthContext:
     require_permission(
         context,
         "permissions:read",
@@ -17,8 +17,9 @@ async def require_permissions_read(request: Request) -> AuthContext:
     return context
 
 
-async def require_permissions_write(request: Request) -> AuthContext:
-    context = build_auth_context(request)
+async def require_permissions_write(
+    context: AuthContext = Depends(get_auth_context),
+) -> AuthContext:
     require_permission(
         context,
         "permissions:write",
@@ -28,8 +29,9 @@ async def require_permissions_write(request: Request) -> AuthContext:
 
 
 def require_permission_dependency(permission: str):
-    async def dependency(request: Request) -> AuthContext:
-        context = build_auth_context(request)
+    async def dependency(
+        context: AuthContext = Depends(get_auth_context),
+    ) -> AuthContext:
         require_permission(
             context,
             permission,
@@ -50,9 +52,9 @@ def require_any_permission(*permissions: str):
         if isinstance(permission, str) and permission.strip()
     )
 
-    async def dependency(request: Request) -> AuthContext:
-        context = build_auth_context(request)
-
+    async def dependency(
+        context: AuthContext = Depends(get_auth_context),
+    ) -> AuthContext:
         for permission in normalized_permissions:
             decision = evaluate_permission(
                 context,
@@ -86,8 +88,9 @@ def require_all_permissions(*permissions: str):
         if isinstance(permission, str) and permission.strip()
     )
 
-    async def dependency(request: Request) -> AuthContext:
-        context = build_auth_context(request)
+    async def dependency(
+        context: AuthContext = Depends(get_auth_context),
+    ) -> AuthContext:
         for permission in normalized_permissions:
             require_permission(
                 context,

@@ -18,12 +18,13 @@ from app.dependencies.operator_auth import (
 from app.dependencies.org_context import get_org_context
 from app.dependencies.permissions import require_permissions_read
 
+
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 @router.get("/context")
 async def get_auth_context_endpoint(
-    context=Depends(get_auth_context),
+    context=Depends(require_authenticated),
 ) -> dict[str, Any]:
     return {
         "authenticated": context.authenticated,

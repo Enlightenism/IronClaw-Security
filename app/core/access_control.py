@@ -8,6 +8,8 @@ from app.core.errors import AppError
 from app.core.permissions import PermissionDecision, evaluate_permission
 from app.core.roles import get_role_definition
 
+_PLATFORM_PRINCIPAL_TYPES = frozenset({"platform", "system", "platform_admin"})
+
 
 @dataclass(frozen=True, slots=True)
 class AccessControlDecision:
@@ -43,7 +45,9 @@ def _clean_value(value: object) -> str:
     return value.strip().lower()
 
 
-def _normalize_role_names(values: tuple[str, ...] | list[str] | set[str] | None) -> tuple[str, ...]:
+def _normalize_role_names(
+    values: tuple[str, ...] | list[str] | set[str] | None,
+) -> tuple[str, ...]:
     if values is None:
         return ()
 
@@ -66,7 +70,10 @@ def _stringify_metadata(metadata: Mapping[str, object] | None) -> dict[str, str]
     return {str(key): str(value) for key, value in metadata.items()}
 
 
-def _role_matches(context: AuthContext, required_roles: tuple[str, ...]) -> tuple[str, ...]:
+def _role_matches(
+    context: AuthContext,
+    required_roles: tuple[str, ...],
+) -> tuple[str, ...]:
     held_roles = {_clean_value(role) for role in context.roles}
     matched = [role for role in required_roles if role in held_roles]
     return tuple(matched)
@@ -78,6 +85,10 @@ def _validate_roles(required_roles: tuple[str, ...]) -> tuple[str, ...]:
         if get_role_definition(role_name) is not None:
             valid.append(role_name)
     return tuple(valid)
+
+
+def _is_platform_principal(context: AuthContext) -> bool:
+    return _clean_value(context.principal_type) in _PLATFORM_PRINCIPAL_TYPES
 
 
 def evaluate_access(
@@ -118,6 +129,21 @@ def evaluate_access(
             permission=required_permission,
             required_roles=normalized_roles,
             matched_roles=(),
+            metadata=normalized_metadata,
+        )
+
+    # Platform principals bypass role and permission gates entirely.
+    if _is_platform_principal(context):
+        return AccessControlDecision(
+            allowed=True,
+            action=normalized_action,
+            principal_id=context.principal_id,
+            principal_type=context.principal_type,
+            org_id=context.org_id,
+            reason="platform_bypass",
+            permission=_clean_value(required_permission) or None,
+            required_roles=normalized_roles,
+            matched_roles=normalized_roles,
             metadata=normalized_metadata,
         )
 

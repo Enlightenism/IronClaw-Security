@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fastapi import Header, Query, Request
+from fastapi import Depends, Header, Query
 
-from app.core.auth import AuthContext
+from app.core.auth import AuthContext, get_auth_context
 from app.core.org_isolation import require_matching_org_ids, require_same_org
-from app.dependencies.auth import build_auth_context
 
 
 def _clean(value: object) -> str:
@@ -65,11 +64,10 @@ def build_org_context(
 
 
 async def get_org_context(
-    request: Request,
     x_org_id: str | None = Header(default=None),
     org_id: str | None = Query(default=None),
+    auth_context: AuthContext = Depends(get_auth_context),
 ) -> OrgContext:
-    auth_context = build_auth_context(request)
     target_org_id, source = resolve_target_org_id(
         auth_context=auth_context,
         header_org_id=x_org_id,
@@ -89,11 +87,10 @@ async def get_org_context(
 
 
 async def require_org_context(
-    request: Request,
     x_org_id: str | None = Header(default=None),
     org_id: str | None = Query(default=None),
+    auth_context: AuthContext = Depends(get_auth_context),
 ) -> OrgContext:
-    auth_context = build_auth_context(request)
     target_org_id, source = resolve_target_org_id(
         auth_context=auth_context,
         header_org_id=x_org_id,
@@ -114,11 +111,10 @@ async def require_org_context(
 
 def require_explicit_org_context():
     async def dependency(
-        request: Request,
         x_org_id: str | None = Header(default=None),
         org_id: str | None = Query(default=None),
+        auth_context: AuthContext = Depends(get_auth_context),
     ) -> OrgContext:
-        auth_context = build_auth_context(request)
         target_org_id, source = resolve_target_org_id(
             auth_context=auth_context,
             header_org_id=x_org_id,
