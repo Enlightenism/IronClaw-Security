@@ -1,135 +1,47 @@
 from __future__ import annotations
 
-
 from datetime import UTC, datetime
 from typing import Any
-
 
 from app.models.uipages import PageSection, UIPageDefinition
 
 
-
 _RUNTIME_OVERVIEW_ITEMS: list[dict[str, Any]] = [
-    {
-        "label": "Pipeline",
-        "value": "Available",
-        "tone": "success",
-    },
-    {
-        "label": "Boundary",
-        "value": "Active",
-        "tone": "success",
-    },
-    {
-        "label": "Review Queue",
-        "value": "Enabled",
-        "tone": "success",
-    },
-    {
-        "label": "Execution Mode",
-        "value": "Dry Run",
-        "tone": "neutral",
-    },
+    {"label": "Pipeline", "value": "Available", "tone": "success"},
+    {"label": "Boundary", "value": "Active", "tone": "success"},
+    {"label": "Review Queue", "value": "Enabled", "tone": "success"},
+    {"label": "Execution Mode", "value": "Dry Run", "tone": "neutral"},
 ]
-
 
 _RISK_THRESHOLD_ITEMS: list[dict[str, Any]] = [
-    {
-        "range": "0-49",
-        "decision": "Allow",
-        "detail": "Requests may continue through guarded dry-run execution.",
-    },
-    {
-        "range": "50-89",
-        "decision": "Review",
-        "detail": "Requests are diverted into review workflow before execution.",
-    },
-    {
-        "range": "90+",
-        "decision": "Block",
-        "detail": "Requests are halted before executor invocation.",
-    },
+    {"range": "0-49", "decision": "Allow", "detail": "Requests may continue through guarded dry-run execution."},
+    {"range": "50-89", "decision": "Review", "detail": "Requests are diverted into review workflow before execution."},
+    {"range": "90+", "decision": "Block", "detail": "Requests are halted before executor invocation."},
 ]
-
 
 _ACTIVE_EXECUTOR_ITEMS: list[dict[str, Any]] = [
-    {
-        "label": "Executor Name",
-        "value": "dryrunexecutor",
-    },
-    {
-        "label": "Mode",
-        "value": "dryrun",
-    },
-    {
-        "label": "Sandbox Required",
-        "value": "true",
-    },
-    {
-        "label": "Fallback Executor",
-        "value": "dryrunexecutor",
-    },
-    {
-        "label": "Default File Path",
-        "value": "app/api/actionexecute.py",
-    },
+    {"label": "Executor Name", "value": "dryrunexecutor"},
+    {"label": "Mode", "value": "dryrun"},
+    {"label": "Sandbox Required", "value": "true"},
+    {"label": "Fallback Executor", "value": "dryrunexecutor"},
+    {"label": "Default File Path", "value": "app/api/actionexecute.py"},
 ]
-
 
 _RUNTIME_METRIC_ITEMS: list[dict[str, Any]] = [
-    {
-        "label": "Total Events",
-        "value": 0,
-        "tone": "neutral",
-    },
-    {
-        "label": "Allowed",
-        "value": 0,
-        "tone": "success",
-    },
-    {
-        "label": "Review",
-        "value": 0,
-        "tone": "warning",
-    },
-    {
-        "label": "Blocked",
-        "value": 0,
-        "tone": "danger",
-    },
-    {
-        "label": "Quarantined",
-        "value": 0,
-        "tone": "danger",
-    },
-    {
-        "label": "Latest Event At",
-        "value": "Not yet recorded",
-        "tone": "neutral",
-    },
+    {"label": "Total Events", "value": 0, "tone": "neutral"},
+    {"label": "Allowed", "value": 0, "tone": "success"},
+    {"label": "Review", "value": 0, "tone": "warning"},
+    {"label": "Blocked", "value": 0, "tone": "danger"},
+    {"label": "Quarantined", "value": 0, "tone": "danger"},
+    {"label": "Latest Event At", "value": "Not yet recorded", "tone": "neutral"},
 ]
-
 
 _RUNTIME_NOTE_ITEMS: list[dict[str, str]] = [
-    {
-        "text": "Guarded execution pipeline is available.",
-    },
-    {
-        "text": "Runtime boundary is enforcing dry-run execution for safe requests.",
-    },
-    {
-        "text": "High-risk actions remain halted before executor invocation.",
-    },
-    {
-        "text": "Runtime metrics block is present and ready for future live wiring.",
-    },
+    {"text": "Guarded execution pipeline is available."},
+    {"text": "Runtime boundary is enforcing dry-run execution for safe requests."},
+    {"text": "High-risk actions remain halted before executor invocation."},
+    {"text": "Runtime metrics block is present and ready for future live wiring."},
 ]
-
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat()
-
 
 
 def _lookup(items: list[dict[str, Any]], label: str, default: Any = None) -> Any:
@@ -137,7 +49,6 @@ def _lookup(items: list[dict[str, Any]], label: str, default: Any = None) -> Any
         if item.get("label") == label:
             return item.get("value", default)
     return default
-
 
 
 def _to_bool(value: Any, *, true_values: set[str] | None = None) -> bool:
@@ -150,7 +61,6 @@ def _to_bool(value: Any, *, true_values: set[str] | None = None) -> bool:
     return bool(value)
 
 
-
 def _to_int(value: Any, default: int = 0) -> int:
     try:
         return int(value)
@@ -158,12 +68,11 @@ def _to_int(value: Any, default: int = 0) -> int:
         return default
 
 
-
 def build_runtime_status_page() -> UIPageDefinition:
     return UIPageDefinition(
         pageid="runtime-status",
         title="Runtime Status",
-        path="/ui/runtime-status",
+        path="/runtime/status",
         summary="Runtime health, execution boundary posture, active executor mode, and baseline counters.",
         sections=[
             PageSection(
@@ -210,7 +119,6 @@ def build_runtime_status_page() -> UIPageDefinition:
     )
 
 
-
 def get_runtime_status_page() -> dict[str, Any]:
     page = build_runtime_status_page()
     section_map = {section.sectionid: section for section in page.sections}
@@ -225,7 +133,6 @@ def get_runtime_status_page() -> dict[str, Any]:
         "title": page.title,
         "path": page.path,
         "summary": page.summary,
-        "generatedat": _utc_now_iso(),
         "runtimeavailable": _to_bool(_lookup(overview_items, "Pipeline")),
         "boundaryactive": _to_bool(_lookup(overview_items, "Boundary")),
         "reviewqueueenabled": _to_bool(_lookup(overview_items, "Review Queue")),

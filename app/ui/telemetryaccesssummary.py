@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+
 from datetime import UTC, datetime
 from typing import Any
+
 
 from app.models.uipages import PageSection, UIPageDefinition
 
@@ -12,86 +14,31 @@ def _utc_now_iso() -> str:
 
 def _build_access_overview_items() -> list[dict[str, Any]]:
     return [
-        {
-            "label": "Access Layer",
-            "value": "Available",
-            "tone": "success",
-        },
-        {
-            "label": "Audit Visibility",
-            "value": "Enabled",
-            "tone": "success",
-        },
-        {
-            "label": "Recent Events Feed",
-            "value": "Ready",
-            "tone": "success",
-        },
-        {
-            "label": "Export Posture",
-            "value": "Controlled",
-            "tone": "warning",
-        },
+        {"label": "Access Layer", "value": "Available", "tone": "success"},
+        {"label": "Audit Visibility", "value": "Enabled", "tone": "success"},
+        {"label": "Recent Events Feed", "value": "Ready", "tone": "success"},
+        {"label": "Export Posture", "value": "Controlled", "tone": "warning"},
     ]
 
 
 def _build_access_counts_items() -> list[dict[str, Any]]:
     return [
-        {
-            "label": "Total Access Events",
-            "value": 0,
-            "tone": "neutral",
-        },
-        {
-            "label": "Allowed Reads",
-            "value": 0,
-            "tone": "success",
-        },
-        {
-            "label": "Flagged Reads",
-            "value": 0,
-            "tone": "warning",
-        },
-        {
-            "label": "Denied Reads",
-            "value": 0,
-            "tone": "danger",
-        },
-        {
-            "label": "Sensitive Exports",
-            "value": 0,
-            "tone": "warning",
-        },
-        {
-            "label": "Latest Event At",
-            "value": "Not yet recorded",
-            "tone": "neutral",
-        },
+        {"label": "Total Access Events", "value": 0, "tone": "neutral"},
+        {"label": "Allowed Reads", "value": 0, "tone": "success"},
+        {"label": "Flagged Reads", "value": 0, "tone": "warning"},
+        {"label": "Denied Reads", "value": 0, "tone": "danger"},
+        {"label": "Sensitive Exports", "value": 0, "tone": "warning"},
+        {"label": "Latest Event At", "value": "Not yet recorded", "tone": "neutral"},
     ]
 
 
 def _build_control_flags_items() -> list[dict[str, Any]]:
     return [
-        {
-            "label": "Telemetry Retention",
-            "value": "Tracked",
-        },
-        {
-            "label": "Actor Attribution",
-            "value": "Required",
-        },
-        {
-            "label": "Session Correlation",
-            "value": "Enabled",
-        },
-        {
-            "label": "Request Correlation",
-            "value": "Enabled",
-        },
-        {
-            "label": "Redaction Guard",
-            "value": "Available",
-        },
+        {"label": "Telemetry Retention", "value": "Tracked"},
+        {"label": "Actor Attribution", "value": "Required"},
+        {"label": "Session Correlation", "value": "Enabled"},
+        {"label": "Request Correlation", "value": "Enabled"},
+        {"label": "Redaction Guard", "value": "Available"},
     ]
 
 
@@ -109,18 +56,10 @@ def _build_recent_events_items() -> list[dict[str, Any]]:
 
 def _build_operator_notes_items() -> list[dict[str, str]]:
     return [
-        {
-            "text": "Telemetry access summary is prepared for dashboard and audit-facing UI use.",
-        },
-        {
-            "text": "Counts remain stable-safe defaults until live telemetry access persistence is attached.",
-        },
-        {
-            "text": "Actor, session, and request correlation should remain first-class in future wiring.",
-        },
-        {
-            "text": "Avoid duplicate telemetry logic; keep this page as the UI-facing summary layer only.",
-        },
+        {"text": "Telemetry access summary is prepared for dashboard and audit-facing UI use."},
+        {"text": "Counts remain stable-safe defaults until live telemetry access persistence is attached."},
+        {"text": "Actor, session, and request correlation should remain first-class in future wiring."},
+        {"text": "Avoid duplicate telemetry logic; keep this page as the UI-facing summary layer only."},
     ]
 
 
@@ -245,3 +184,7 @@ def get_telemetry_access_summary_page() -> dict[str, Any]:
         "recentevents": recent_event_items,
         "metadata": page.metadata,
     }
+
+
+# Canonical alias expected by app.api.telemetryaccess
+get_telemetry_access_summary = get_telemetry_access_summary_page

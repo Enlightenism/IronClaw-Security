@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.dependencies.api_key import require_api_key
+from app.core.auth import require_api_key
 from app.models.review_queue import (
     ReviewActionRequest,
     ReviewItemResponse,

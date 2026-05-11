@@ -7,7 +7,7 @@ from app.ui.integrations.settings import (
     IntegrationSettingsResponse,
     IntegrationSettingsSummary,
     get_integration_settings,
-    read_integration_settings,
+    read_ui_integration_settings,
     router,
 )
 
@@ -19,5 +19,5 @@ __all__ = [
     "IntegrationSettingsActions",
     "IntegrationSettingsResponse",
     "get_integration_settings",
-    "read_integration_settings",
+    "read_ui_integration_settings",
 ]

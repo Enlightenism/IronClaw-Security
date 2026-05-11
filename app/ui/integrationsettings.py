@@ -19,7 +19,7 @@ def build_ui_integration_settings_page() -> dict[str, object]:
 
     for record in records:
         configurable = bool(record.settingsroute)
-        verified = bool(record.verified)
+        verified = bool(record.verifiedat)
 
         if configurable:
             configurable_count += 1

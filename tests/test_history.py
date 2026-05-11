@@ -13,12 +13,12 @@ def client() -> TestClient:
     return TestClient(app, raise_server_exceptions=True)
 
 
-def test_request_context_requires_auth(client: TestClient) -> None:
+def test_history_request_context_requires_auth(client: TestClient) -> None:
     response = client.get("/request-context")
     assert response.status_code in (200, 401, 403)
 
 
-def test_request_context_with_headers(client: TestClient) -> None:
+def test_history_request_context_with_headers(client: TestClient) -> None:
     response = client.get(
         "/request-context",
         headers={
@@ -35,7 +35,7 @@ def test_request_context_with_headers(client: TestClient) -> None:
         assert body["method"] == "GET"
 
 
-def test_history_events_endpoint_accepts_limit(client: TestClient) -> None:
+def test_history_events_limit_param(client: TestClient) -> None:
     response = client.get("/history/events?limit=10")
     assert response.status_code in (200, 401, 403)
     if response.status_code == 200:

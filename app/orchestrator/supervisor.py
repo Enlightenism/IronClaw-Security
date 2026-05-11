@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable
 from uuid import uuid4
+
 
 from app.orchestrator.coordination_state import CoordinationSnapshot
 from app.orchestrator.execution_plan import ExecutionPlan
@@ -14,6 +16,7 @@ from app.orchestrator.runtime_session import (
     create_runtime_session,
     execute_routed_task_in_session,
 )
+
 
 SupervisorStatus = str
 EscalationLevel = str
@@ -28,6 +31,27 @@ def _text(value: Any, default: str = "") -> str:
         return default
     result = str(value).strip()
     return result or default
+
+
+def _clamp_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    for method in ("as_dict", "to_dict", "model_dump", "dict"):
+        fn = getattr(value, method, None)
+        if callable(fn):
+            result = fn()
+            if isinstance(result, dict):
+                return dict(result)
+    return {}
 
 
 @dataclass(slots=True)
@@ -73,23 +97,9 @@ class SessionExecutionRecord:
     status: str
 
     def to_dict(self) -> dict[str, Any]:
-        session_dict = (
-            self.session.as_dict()  # RuntimeSession follows dataclass-style container pattern [web:124]
-            if hasattr(self.session, "as_dict")
-            else self.session.to_dict()
-            if hasattr(self.session, "to_dict")
-            else {}
-        )
-        plan_dict = (
-            self.execution_plan.as_dict()
-            if hasattr(self.execution_plan, "as_dict")
-            else self.execution_plan.to_dict()
-            if hasattr(self.execution_plan, "to_dict")
-            else {}
-        )
         return {
-            "session": session_dict,
-            "execution_plan": plan_dict,
+            "session": _as_dict(self.session),
+            "execution_plan": _as_dict(self.execution_plan),
             "status": self.status,
         }
 
@@ -113,19 +123,228 @@ class SupervisorSnapshot:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "active_sessions": {
-                key: (
-                    value.as_dict()
-                    if hasattr(value, "as_dict")
-                    else value.to_dict()
-                    if hasattr(value, "to_dict")
-                    else {}
-                )
+                key: _as_dict(value)
                 for key, value in self.active_sessions.items()
             },
             "execution_history": [record.to_dict() for record in self.execution_history],
             "escalations": [item.to_dict() for item in self.escalations],
         }
 
+
+# ---------------------------------------------------------------------------
+# Injected supervisor — used by build_supervisor / testsupervisor.py
+# ---------------------------------------------------------------------------
+
+def _merge_reasons(raw: Any) -> list[dict[str, Any]]:
+    seen: set[tuple[str, str]] = set()
+    merged: list[dict[str, Any]] = []
+    for item in (raw or []):
+        if isinstance(item, dict):
+            key = (_text(item.get("label")), _text(item.get("details")))
+            if key not in seen:
+                seen.add(key)
+                merged.append(dict(item))
+    return merged
+
+
+def _merge_rules(raw: Any) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for rule in (raw or []):
+        r = _text(rule)
+        if r and r not in seen:
+            seen.add(r)
+            result.append(r)
+    return result
+
+
+@dataclass(slots=True)
+class _SupervisedResult:
+    session_id: str
+    tool_name: str
+    verdict: str
+    allowed: bool
+    should_review: bool
+    should_block: bool
+    should_quarantine: bool
+    risk_delta: int
+    matched_rules: list[str]
+    reasons: list[dict[str, Any]]
+    pipeline_decision: dict[str, Any]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "verdict": self.verdict,
+            "allowed": self.allowed,
+            "sessionid": self.session_id,
+            "toolname": self.tool_name,
+            "shouldreview": self.should_review,
+            "shouldblock": self.should_block,
+            "shouldquarantine": self.should_quarantine,
+            "riskdelta": self.risk_delta,
+            "matchedrules": list(self.matched_rules),
+            "reasons": list(self.reasons),
+            "pipelinedecision": dict(self.pipeline_decision),
+        }
+
+
+class _InjectedSupervisor:
+    """Dependency-injected supervisor consumed by testsupervisor.py."""
+
+    def __init__(
+        self,
+        *,
+        secure_runtime_pipeline: Any,
+        review_queue: Any,
+        audit_sink: Any,
+    ) -> None:
+        self._pipeline = secure_runtime_pipeline
+        self._review_queue = review_queue
+        self._audit_sink = audit_sink
+
+    # ------------------------------------------------------------------
+    def _emit(self, event: dict[str, Any]) -> None:
+        sink = self._audit_sink
+        if sink is None:
+            return
+        for method_name in ("record", "emit", "write"):
+            fn = getattr(sink, method_name, None)
+            if callable(fn):
+                try:
+                    fn(event)
+                except Exception:
+                    pass
+                return
+
+    def _enqueue(self, item: dict[str, Any]) -> None:
+        q = self._review_queue
+        if q is None:
+            return
+        for method_name in ("enqueue", "submit"):
+            fn = getattr(q, method_name, None)
+            if callable(fn):
+                try:
+                    fn(item)
+                except Exception:
+                    pass
+                return
+
+    # ------------------------------------------------------------------
+    def evaluate(self, *, session_id: str = "", tool_name: str = "", **kwargs: Any) -> _SupervisedResult:
+        session_id = (session_id or "").strip()
+        tool_name = (tool_name or "").strip().lower()
+
+        if not session_id:
+            result = _SupervisedResult(
+                session_id=session_id,
+                tool_name=tool_name,
+                verdict="quarantine",
+                allowed=False,
+                should_review=False,
+                should_block=True,
+                should_quarantine=True,
+                risk_delta=0,
+                matched_rules=["supervisor:missing_session_id"],
+                reasons=[],
+                pipeline_decision={},
+            )
+            self._emit({"event": "quarantine", "reason": "missing_session_id", "session_id": session_id})
+            return result
+
+        if not tool_name:
+            result = _SupervisedResult(
+                session_id=session_id,
+                tool_name=tool_name,
+                verdict="quarantine",
+                allowed=False,
+                should_review=False,
+                should_block=True,
+                should_quarantine=True,
+                risk_delta=0,
+                matched_rules=["supervisor:missing_tool_name"],
+                reasons=[],
+                pipeline_decision={},
+            )
+            self._emit({"event": "quarantine", "reason": "missing_tool_name", "session_id": session_id})
+            return result
+
+        cwd = kwargs.get("cwd")
+        if isinstance(cwd, str):
+            kwargs["cwd"] = cwd.strip()
+
+        pipeline_decision = self._pipeline.evaluate(
+            session_id=session_id,
+            tool_name=tool_name,
+            **kwargs,
+        )
+
+        pipeline_dict = _as_dict(pipeline_decision)
+        verdict = _text(getattr(pipeline_decision, "verdict", pipeline_dict.get("verdict", "allow"))).lower() or "allow"
+        allowed = bool(getattr(pipeline_decision, "allowed", pipeline_dict.get("allowed", True)))
+        should_review = bool(getattr(pipeline_decision, "should_review", pipeline_dict.get("shouldreview", False)))
+        should_block = bool(getattr(pipeline_decision, "should_block", pipeline_dict.get("shouldblock", False)))
+        should_quarantine = bool(getattr(pipeline_decision, "should_quarantine", pipeline_dict.get("shouldquarantine", False)))
+        risk_delta = _clamp_int(getattr(pipeline_decision, "risk_delta", pipeline_dict.get("riskdelta", 0)))
+
+        raw_rules = getattr(pipeline_decision, "matched_rules", pipeline_dict.get("matchedrules", None)) or []
+        raw_reasons = getattr(pipeline_decision, "reasons", pipeline_dict.get("reasons", None)) or []
+
+        matched_rules = _merge_rules(raw_rules)
+        reasons = _merge_reasons(raw_reasons)
+
+        result = _SupervisedResult(
+            session_id=session_id,
+            tool_name=tool_name,
+            verdict=verdict,
+            allowed=allowed,
+            should_review=should_review,
+            should_block=should_block,
+            should_quarantine=should_quarantine,
+            risk_delta=risk_delta,
+            matched_rules=matched_rules,
+            reasons=reasons,
+            pipeline_decision=pipeline_dict,
+        )
+
+        self._emit({
+            "event": verdict,
+            "session_id": session_id,
+            "tool_name": tool_name,
+            "allowed": allowed,
+            "risk_delta": risk_delta,
+        })
+
+        if should_review and verdict == "review":
+            self._enqueue({
+                "session_id": session_id,
+                "tool_name": tool_name,
+                "verdict": verdict,
+                "risk_delta": risk_delta,
+                "matched_rules": matched_rules,
+            })
+
+        return result
+
+    def allow(self, *, session_id: str = "", tool_name: str = "", **kwargs: Any) -> bool:
+        return self.evaluate(session_id=session_id, tool_name=tool_name, **kwargs).allowed
+
+
+def build_supervisor(
+    *,
+    secure_runtime_pipeline: Any,
+    review_queue: Any = None,
+    audit_sink: Any = None,
+) -> _InjectedSupervisor:
+    return _InjectedSupervisor(
+        secure_runtime_pipeline=secure_runtime_pipeline,
+        review_queue=review_queue,
+        audit_sink=audit_sink,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator-pattern functions (preserved exactly)
+# ---------------------------------------------------------------------------
 
 def initialize_supervisor(orchestrator: IronClawOrchestrator) -> SupervisorSnapshot:
     now = _utc_now_iso()
@@ -169,7 +388,6 @@ def _status_from_history(
 ) -> SupervisorStatus:
     escalations_list = list(escalations)
     history_list = list(history)
-
     if any(item.level == "critical" for item in escalations_list):
         return "critical"
     if any(item.level == "high" for item in escalations_list):
@@ -192,19 +410,15 @@ def get_or_create_session(
     agent_id: str | None = None,
 ) -> tuple[SupervisorSnapshot, RuntimeSession]:
     key = _session_key(file_path, agent_id)
-
     if key in supervisor.active_sessions:
         return supervisor, supervisor.active_sessions[key]
-
     session = create_runtime_session(
         orchestrator,
         file_path=file_path,
         agent_id=agent_id,
     )
-
     updated_sessions = dict(supervisor.active_sessions)
     updated_sessions[key] = session
-
     updated_supervisor = SupervisorSnapshot(
         supervisor_id=supervisor.supervisor_id,
         project_root=supervisor.project_root,
@@ -230,7 +444,6 @@ def run_supervised_request(
         file_path=request.file_path,
         agent_id=request.agent_id,
     )
-
     updated_session, updated_coordination_snapshot, routed_result = execute_routed_task_in_session(
         orchestrator,
         coordination_snapshot,
@@ -240,20 +453,16 @@ def run_supervised_request(
         content=request.content,
         use_guard_api=request.use_guard_api,
     )
-
     key = _session_key(request.file_path, request.agent_id)
     updated_sessions = dict(supervisor.active_sessions)
     updated_sessions[key] = updated_session
-
     record = SessionExecutionRecord(
         session=updated_session,
         execution_plan=routed_result.execution_plan,
         status=getattr(updated_session, "status", "unknown"),
     )
-
     updated_history = [*supervisor.execution_history, record]
     updated_escalations = list(supervisor.escalations)
-
     escalation_level = _escalation_level_for_plan(routed_result.execution_plan)
     if escalation_level is not None:
         updated_escalations.append(
@@ -268,7 +477,6 @@ def run_supervised_request(
                 risk_score=int(getattr(routed_result.execution_plan, "risk_score", 0) or 0),
             )
         )
-
     updated_supervisor = SupervisorSnapshot(
         supervisor_id=supervisor.supervisor_id,
         project_root=supervisor.project_root,
@@ -279,7 +487,6 @@ def run_supervised_request(
         execution_history=updated_history,
         escalations=updated_escalations,
     )
-
     return updated_supervisor, updated_coordination_snapshot, record
 
 

@@ -41,21 +41,21 @@ def test_history_events_endpoint_accepts_limit(client: TestClient) -> None:
         assert isinstance(response.json(), list)
 
 
-def test_history_events_by_session_endpoint_accepts_limit(client: TestClient) -> None:
+def test_ui_history_events_by_session_endpoint_accepts_limit(client: TestClient) -> None:
     response = client.get("/history/events/by-session/test-session-xyz?limit=5")
     assert response.status_code in (200, 401, 403)
     if response.status_code == 200:
         assert isinstance(response.json(), list)
 
 
-def test_history_events_by_actor_endpoint_accepts_limit(client: TestClient) -> None:
+def test_ui_history_events_by_actor_endpoint_accepts_limit(client: TestClient) -> None:
     response = client.get("/history/events/by-actor/test-actor-xyz?limit=5")
     assert response.status_code in (200, 401, 403)
     if response.status_code == 200:
         assert isinstance(response.json(), list)
 
 
-def test_scan_history_list_endpoint_works(client: TestClient) -> None:
+def test_ui_scan_history_list_endpoint_works(client: TestClient) -> None:
     response = client.get("/history/")
     assert response.status_code in (200, 401, 403)
     if response.status_code == 200:

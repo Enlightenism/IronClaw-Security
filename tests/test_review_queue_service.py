@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 from app.orchestrator.review_queue import (
     create_review_item,
     enqueue_review_item,
@@ -58,7 +59,7 @@ def setup_function() -> None:
     reset_review_queue()
 
 
-def test_review_queue_summary_empty():
+def test_review_queue_service_summary_empty():
     summary = get_review_queue_summary()
 
     assert summary["total_items"] == 0

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+
 from dataclasses import dataclass
 from typing import Any
 
+
 import pytest
 
+
 from app.orchestrator.secureruntimepipeline import build_secure_runtime_pipeline
+
 
 
 @dataclass(slots=True)

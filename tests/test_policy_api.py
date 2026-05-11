@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+
 from fastapi.testclient import TestClient
 
+
 from app.main import app
+
 
 client = TestClient(app)
 
@@ -35,7 +38,7 @@ def test_policy_guard_bundle_accepts_valid_payload():
     assert "highest_verdict" in data
 
 
-def test_policy_guard_bundle_rejects_empty_payload():
+def test_policy_guard_bundle_rejects_empty_payload_via_policy_api():
     response = client.post(
         "/policy/guard-bundle",
         headers={"x-api-key": "test-api-key"},

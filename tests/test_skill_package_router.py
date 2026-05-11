@@ -795,7 +795,7 @@ class TestSkillMiddleware:
         result = run_middleware(mw, _action_policy_request(context=ctx))
         assert result.trace.request_id is None
 
-    def test_stub_billing_hook_charges_without_rejection(self):
+    def test_router_stub_billing_hook_charges_without_rejection(self):
         def handler(req):
             return build_skill_success_response(
                 operation="scan", verdict="allow", summary="ok", request_id=req.context.request_id
@@ -1001,11 +1001,11 @@ class TestAttachTrace:
 
 
 # ---------------------------------------------------------------------------
-# Billing — StubBillingHook
+# Billing — router-scoped StubBillingHook smoke tests
 # ---------------------------------------------------------------------------
 
 
-class TestStubBillingHook:
+class TestRouterStubBillingHook:
     def test_charge_always_succeeds(self):
         hook = StubBillingHook()
         result = hook.charge(operation="scan")
@@ -1038,11 +1038,11 @@ class TestStubBillingHook:
 
 
 # ---------------------------------------------------------------------------
-# Billing — MemoryBillingHook
+# Billing — router-scoped MemoryBillingHook smoke tests
 # ---------------------------------------------------------------------------
 
 
-class TestMemoryBillingHook:
+class TestRouterMemoryBillingHook:
     def test_initial_balance_from_policy(self):
         policy = BillingPolicy(provider="memory", default_balance=50, block_on_exhausted=False)
         hook = MemoryBillingHook(policy)
@@ -1108,11 +1108,11 @@ class TestMemoryBillingHook:
 
 
 # ---------------------------------------------------------------------------
-# BillingPolicy — cost_for method
+# BillingPolicy — router-scoped cost_for
 # ---------------------------------------------------------------------------
 
 
-class TestBillingPolicyCostFor:
+class TestRouterBillingPolicyCostFor:
     def test_scan_cost(self):
         policy = BillingPolicy(units_per_scan=2)
         assert policy.cost_for("scan") == 2

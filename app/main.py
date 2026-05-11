@@ -243,7 +243,7 @@ def _install_core_routes(app: FastAPI) -> None:
             },
         )
 
-    @app.get("/ui/runtime-status", tags=["ui"])
+    @app.get("/runtime/status", tags=["ui"])
     def ui_runtime_status() -> Any:
         return _safe_call(
             get_runtime_status,

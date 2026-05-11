@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-
 from datetime import datetime, timezone
 
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-
 router = APIRouter(
     prefix="/ui/integrations",
-    tags=["integration-settings"],
+    tags=["ui-integrations"],
 )
 
 
@@ -234,13 +232,8 @@ def get_integration_settings() -> IntegrationSettingsResponse:
 
 
 @router.get("/settings", response_model=IntegrationSettingsResponse)
-def read_integration_settings() -> IntegrationSettingsResponse:
+def read_ui_integration_settings() -> IntegrationSettingsResponse:
     return get_integration_settings()
-
-
-# ---------------------------------------------------------------------------
-# buildintegrationssettingsview — HTML view for testintegrationsettingsui.py
-# ---------------------------------------------------------------------------
 
 
 def buildintegrationssettingsview() -> HTMLResponse:

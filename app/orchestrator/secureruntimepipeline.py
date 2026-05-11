@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from app.detection.downloadanalyzer import analyze_download_dict
+
+from app.detection.downloadanalyzer import build_download_analyzer
 from app.detection.outputsanitizer import build_output_sanitizer
 from app.detection.sessionrisk import SessionEvent, build_session_risk_analyzer
 from app.security.hostilecontext import scanhostilecontextdict
@@ -114,6 +116,46 @@ def _safe_detector_result(
         )
 
 
+def _analyze_download_dict(
+    *,
+    actiontype: str,
+    target: str,
+    content: str,
+    filepath: str,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    analyzer = build_download_analyzer()
+    result = analyzer.analyze(
+        url=target if target.startswith(("http://", "https://")) else None,
+        file_name=target if not target.startswith(("http://", "https://")) else None,
+        context=f"action={actiontype}, filepath={filepath}",
+    )
+    return _as_dict(result)
+
+
+def _merge_reasons(
+    sandbox_decision: Any,
+    tool_decision: Any,
+) -> list[dict[str, Any]]:
+    """Collect reasons from both decisions, deduplicated by (label, details)."""
+    seen: set[tuple[str, str]] = set()
+    merged: list[dict[str, Any]] = []
+    for decision in (sandbox_decision, tool_decision):
+        if decision is None:
+            continue
+        raw_reasons = getattr(decision, "reasons", None)
+        if raw_reasons is None:
+            d = _as_dict(decision)
+            raw_reasons = d.get("reasons") or []
+        for reason in (raw_reasons or []):
+            if isinstance(reason, dict):
+                key = (_text(reason.get("label")), _text(reason.get("details")))
+                if key not in seen:
+                    seen.add(key)
+                    merged.append(dict(reason))
+    return merged
+
+
 @dataclass(slots=True, frozen=True)
 class SecureRuntimeDecision:
     executionstate: str
@@ -150,408 +192,242 @@ class SecureRuntimePipeline:
     defaultfilepath: str = "app/api/actionexecute.py"
     executor: Optional[ExecutorCallable] = None
     name: str = "secureruntimepipeline"
+    _sandbox_router: Any = field(default=None, repr=False, compare=False)
+    _tool_call_guard: Any = field(default=None, repr=False, compare=False)
+    _telemetry_sink: Any = field(default=None, repr=False, compare=False)
+    _review_queue: Any = field(default=None, repr=False, compare=False)
 
-    def evaluate(
+    def _emit_telemetry(self, event: dict[str, Any]) -> None:
+        sink = self._telemetry_sink
+        if sink is None:
+            return
+        for method_name in ("record", "emit", "write"):
+            method = getattr(sink, method_name, None)
+            if callable(method):
+                try:
+                    method(event)
+                except Exception:
+                    pass
+                return
+
+    def _enqueue_review(self, item: dict[str, Any]) -> None:
+        queue = self._review_queue
+        if queue is None:
+            return
+        for method_name in ("enqueue", "submit"):
+            method = getattr(queue, method_name, None)
+            if callable(method):
+                try:
+                    method(item)
+                except Exception:
+                    pass
+                return
+
+    def _call_sandbox_router(self, *, session_id: str, tool_name: str, **kwargs: Any) -> Any | None:
+        router = self._sandbox_router
+        if router is None:
+            return None
+        evaluate = getattr(router, "evaluate", None)
+        if not callable(evaluate):
+            return None
+        return evaluate(session_id=session_id, tool_name=tool_name, **kwargs)
+
+    def _call_tool_guard(self, *, request: Any) -> Any | None:
+        guard = self._tool_call_guard
+        if guard is None:
+            return None
+        evaluate = getattr(guard, "evaluate", None)
+        if not callable(evaluate):
+            return None
+        return evaluate(request=request)
+
+    def _build_guarded_result(
         self,
         *,
-        actorid: str,
-        actiontype: str,
-        target: str,
-        content: str,
-        riskscore: int,
-        sessionid: str | None = None,
-        filepath: str | None = None,
-        metadata: dict[str, Any] | None = None,
-        persistencedegraded: bool = False,
-    ) -> SecureRuntimeDecision:
-        effective_filepath = filepath or self.defaultfilepath
-        effectivemetadata = dict(metadata or {})
-        effectivemetadata.setdefault("filepath", effective_filepath)
-        if sessionid:
-            effectivemetadata.setdefault("sessionid", sessionid)
-        if actorid:
-            effectivemetadata.setdefault("actorid", actorid)
-
-        normalized_risk = _clamp_score(riskscore)
-
-        promptscan, prompt_failure = _safe_detector_result(
-            "promptinjection",
-            scanpromptinjectiondict,
-            actiontype=actiontype,
-            target=target,
-            content=content,
-            filepath=effective_filepath,
-            metadata=effectivemetadata,
-        )
-
-        hostilecontext, hostile_failure = _safe_detector_result(
-            "hostilecontext",
-            scanhostilecontextdict,
-            actiontype=actiontype,
-            target=target,
-            content=content,
-            filepath=effective_filepath,
-            metadata=effectivemetadata,
-        )
-
-        downloadanalysis, download_failure = _safe_detector_result(
-            "downloadanalyzer",
-            analyze_download_dict,
-            actiontype=actiontype,
-            target=target,
-            content=content,
-            filepath=effective_filepath,
-            metadata=effectivemetadata,
-        )
-
-        output_sanitizer_failure: str | None = None
-        try:
-            outputsanitizer = build_output_sanitizer()
-            outputsanitization_obj = outputsanitizer.sanitize(
-                content,
-                context=f"action={actiontype}, target={target}",
-                redact_secrets=True,
-                block_unsafe_commands=True,
-            )
-            outputsanitization = _as_dict(outputsanitization_obj)
-            outputsanitization.setdefault("blocked", False)
-            outputsanitization.setdefault("severity", "low")
-            outputsanitization.setdefault("score", 0.0)
-            outputsanitization.setdefault("reasons", [])
-        except Exception as exc:
-            output_sanitizer_failure = "outputsanitizer"
-            outputsanitization = {
-                "blocked": False,
-                "severity": "high",
-                "score": 0.5,
-                "reasons": [
-                    "Output sanitizer failed during runtime evaluation.",
-                ],
-                "degraded": True,
-                "error": {
-                    "type": exc.__class__.__name__,
-                    "message": _text(exc),
-                },
-            }
-
-        degraded_sources = [
-            source
-            for source in (
-                prompt_failure,
-                hostile_failure,
-                download_failure,
-                output_sanitizer_failure,
-            )
-            if source
-        ]
-        if persistencedegraded:
-            degraded_sources.append("persistence")
-
-        session_analyzer_failure = False
-        try:
-            session_analyzer = build_session_risk_analyzer()
-            session_event = SessionEvent(
-                source="secureruntimepipeline",
-                verdict=self._event_verdict_for_detectors(
-                    promptscan=promptscan,
-                    hostilecontext=hostilecontext,
-                    downloadanalysis=downloadanalysis,
-                    outputsanitization=outputsanitization,
-                    degradedmode=bool(degraded_sources),
-                ),
-                severity=self._event_severity_for_detectors(
-                    promptscan=promptscan,
-                    hostilecontext=hostilecontext,
-                    downloadanalysis=downloadanalysis,
-                    outputsanitization=outputsanitization,
-                    degradedmode=bool(degraded_sources),
-                ),
-                score=float(normalized_risk) / 100.0,
-                timestamp=effectivemetadata.get("timestamp") or None,
-                detail=f"Aggregated runtime evaluation for action '{actiontype}' and target '{target}'.",
-                metadata={
-                    "actorid": actorid,
-                    "sessionid": sessionid,
-                    "filepath": effective_filepath,
-                    "actiontype": actiontype,
-                    "target": target,
-                    "degradedmode": bool(degraded_sources),
-                    "degradationsources": list(degraded_sources),
-                },
-            )
-            sessionrisk_obj = session_analyzer.analyze(
-                session_id=sessionid or "anonymous",
-                events=[session_event],
-                active_review=False,
-            )
-            sessionrisk = _as_dict(sessionrisk_obj)
-            sessionrisk_score = float(getattr(sessionrisk_obj, "score", sessionrisk.get("score", 0.0)) or 0.0)
-            sessionrisk_verdict = _text(getattr(sessionrisk_obj, "verdict", sessionrisk.get("verdict", "allow")), "allow").lower()
-            sessionrisk_severity = _text(getattr(sessionrisk_obj, "severity", sessionrisk.get("severity", "low")), "low").lower()
-            sessionrisk.setdefault("score", sessionrisk_score)
-            sessionrisk.setdefault("verdict", sessionrisk_verdict)
-            sessionrisk.setdefault("severity", sessionrisk_severity)
-        except Exception as exc:
-            session_analyzer_failure = True
-            degraded_sources.append("sessionrisk")
-            sessionrisk_score = 0.5
-            sessionrisk_verdict = "review"
-            sessionrisk_severity = "high"
-            sessionrisk = {
-                "score": sessionrisk_score,
-                "verdict": sessionrisk_verdict,
-                "severity": sessionrisk_severity,
-                "degraded": True,
-                "error": {
-                    "type": exc.__class__.__name__,
-                    "message": _text(exc),
-                },
-            }
-
-        adjustedriskscore = _clamp_score(
-            normalized_risk
-            + _int(promptscan.get("riskdelta", 0))
-            + _int(hostilecontext.get("riskdelta", 0))
-            + _int(downloadanalysis.get("riskdelta", 0))
-        )
-
-        if sessionrisk_score >= 0.5:
-            adjustedriskscore = min(100, adjustedriskscore + 10)
-
-        if degraded_sources:
-            adjustedriskscore = min(100, adjustedriskscore + 10)
-
-        normalized_action = _text(actiontype).lower()
-        normalized_target = _text(target).lower()
-
-        reviewthreshold = self.reviewthreshold
-        blockthreshold = self.blockthreshold
-
-        tool_like_actions = {"toolcall", "shell", "command", "execute", "run"}
-        shell_like_targets = {"shell", "powershell", "bash", "cmd", "terminal", "sh"}
-
-        if normalized_action in tool_like_actions or normalized_target in shell_like_targets:
-            reviewthreshold = min(reviewthreshold, self.toolreviewthreshold)
-            blockthreshold = min(blockthreshold, self.toolblockthreshold)
-
-        if normalized_target in shell_like_targets:
-            reviewthreshold = min(reviewthreshold, self.shellreviewthreshold)
-            blockthreshold = min(blockthreshold, self.shellblockthreshold)
-
-        if sessionrisk_verdict in {"review", "block"}:
-            reviewthreshold = min(reviewthreshold, 40)
-            blockthreshold = min(blockthreshold, 75)
-
-        if persistencedegraded:
-            reviewthreshold = min(reviewthreshold, 25)
-            blockthreshold = min(blockthreshold, 70)
-
-        if degraded_sources:
-            reviewthreshold = min(reviewthreshold, 35)
-
-        reasons: list[dict[str, Any]] = [
-            {
-                "source": "pipeline",
-                "label": "Risk evaluation",
-                "details": (
-                    f"Pipeline evaluated action '{actiontype}' for target '{target}' "
-                    f"with base risk {normalized_risk} and adjusted risk {adjustedriskscore}."
-                ),
-                "score": adjustedriskscore,
-            }
-        ]
-
-        if normalized_action in tool_like_actions or normalized_target in shell_like_targets:
-            reasons.append(
-                {
-                    "source": "pipeline",
-                    "label": "Tool-call hardening",
-                    "details": (
-                        f"Tool-call sensitive path detected for action '{actiontype}' and target "
-                        f"'{target}', so stricter runtime thresholds were applied."
-                    ),
-                    "score": max(0, blockthreshold - reviewthreshold),
-                }
-            )
-
-        if normalized_risk <= self.dryrunthreshold and not degraded_sources:
-            reasons.append(
-                {
-                    "source": "pipeline",
-                    "label": "Low-risk dry-run band",
-                    "details": (
-                        f"Base risk {normalized_risk} is within the configured dry-run threshold "
-                        f"of {self.dryrunthreshold}."
-                    ),
-                    "score": normalized_risk,
-                }
-            )
-
-        for reason in downloadanalysis.get("reasons", []):
-            reasons.append(
-                _normalize_reason(
-                    reason,
-                    default_source="downloadanalyzer",
-                    default_label="Download risk indicator",
-                    default_details="Download risk indicator detected.",
-                )
-            )
-
-        for reason in promptscan.get("reasons", []):
-            reasons.append(
-                _normalize_reason(
-                    reason,
-                    default_source="promptinjection",
-                    default_label="Prompt injection indicator",
-                    default_details="Prompt injection indicator detected.",
-                )
-            )
-
-        for reason in hostilecontext.get("reasons", []):
-            reasons.append(
-                _normalize_reason(
-                    reason,
-                    default_source="hostilecontext",
-                    default_label="Hostile context indicator",
-                    default_details="Hostile context indicator detected.",
-                )
-            )
-
-        output_reasons = outputsanitization.get("reasons", [])
-        if isinstance(output_reasons, list):
-            output_reason_text = "; ".join(_text(item) for item in output_reasons if _text(item))
-        else:
-            output_reason_text = _text(output_reasons)
-
-        reasons.append(
-            {
-                "source": "outputsanitizer",
-                "label": "Output sanitization",
-                "details": output_reason_text or "Output sanitization completed.",
-                "score": _clamp_score(round(float(outputsanitization.get("score", 0.0) or 0.0) * 100)),
-            }
-        )
-
-        reasons.append(
-            {
-                "source": "sessionrisk",
-                "label": "Session risk aggregation",
-                "details": (
-                    f"Session risk resolved to {sessionrisk_verdict} with "
-                    f"{sessionrisk_severity} severity and score {sessionrisk_score:.2f}."
-                ),
-                "score": _clamp_score(round(sessionrisk_score * 100)),
-            }
-        )
-
-        degradationreasons: list[str] = []
-        if degraded_sources:
-            degradationreasons = [f"{source} unavailable or degraded during evaluation" for source in degraded_sources]
-            reasons.append(
-                {
-                    "source": "pipeline",
-                    "label": "Degraded mode",
-                    "details": "; ".join(degradationreasons),
-                    "score": 25,
-                }
-            )
-
-        executionstate = "executed"
-        policyverdict = "allow"
-        responseaction = "allow"
-        responsestatus = "completed"
-        shouldexecute = True
-        haltedbyboundary = False
-        reviewrequired = False
-        quarantine = False
-
-        should_quarantine = bool(promptscan.get("shouldquarantine")) or bool(
-            hostilecontext.get("shouldquarantine")
-        ) or bool(downloadanalysis.get("shouldquarantine"))
-
-        should_review = bool(promptscan.get("shouldreview")) or bool(
-            hostilecontext.get("shouldreview")
-        ) or bool(downloadanalysis.get("shouldreview")) or sessionrisk_verdict == "review"
-
-        if outputsanitization.get("blocked"):
-            executionstate = "denied"
-            policyverdict = "block"
-            responseaction = "deny"
-            responsestatus = "denied"
-            shouldexecute = False
-            haltedbyboundary = True
-        elif should_quarantine:
-            executionstate = "denied"
-            policyverdict = "quarantine"
-            responseaction = "quarantine"
-            responsestatus = "denied"
-            shouldexecute = False
-            haltedbyboundary = True
-            reviewrequired = False
-            quarantine = True
-        elif persistencedegraded and (
-            normalized_action in tool_like_actions or normalized_target in shell_like_targets
-        ):
-            executionstate = "queuedforreview"
-            policyverdict = "warn"
-            responseaction = "review"
-            responsestatus = "queuedforreview"
-            shouldexecute = False
-            haltedbyboundary = True
-            reviewrequired = True
-        elif adjustedriskscore >= blockthreshold or sessionrisk_verdict == "block":
-            executionstate = "denied"
-            policyverdict = "block"
-            responseaction = "deny"
-            responsestatus = "denied"
-            shouldexecute = False
-            haltedbyboundary = True
-        elif degraded_sources:
-            executionstate = "queuedforreview"
-            policyverdict = "warn"
-            responseaction = "review"
-            responsestatus = "queuedforreview"
-            shouldexecute = False
-            haltedbyboundary = True
-            reviewrequired = True
-        elif should_review or adjustedriskscore >= reviewthreshold:
-            executionstate = "queuedforreview"
-            policyverdict = "warn"
-            responseaction = "review"
-            responsestatus = "queuedforreview"
-            shouldexecute = True
-            haltedbyboundary = False
-            reviewrequired = True
-        elif normalized_risk <= self.dryrunthreshold:
-            executionstate = "dryrun"
-            policyverdict = "allow"
-            responseaction = "dryrun"
-            responsestatus = "dryrun"
-            shouldexecute = True
-            haltedbyboundary = False
-
-        return SecureRuntimeDecision(
-            executionstate=executionstate,
-            policyverdict=policyverdict,
-            responseaction=responseaction,
-            responsestatus=responsestatus,
-            shouldexecute=shouldexecute,
-            haltedbyboundary=haltedbyboundary,
-            reviewrequired=reviewrequired,
-            quarantine=quarantine,
-            degradedmode=bool(degraded_sources),
-            adjustedriskscore=adjustedriskscore,
-            normalizedriskscore=normalized_risk,
-            reviewthresholdused=reviewthreshold,
-            blockthresholdused=blockthreshold,
+        session_id: str,
+        tool_name: str,
+        verdict: str,
+        allowed: bool,
+        should_review: bool,
+        should_block: bool,
+        should_quarantine: bool,
+        risk_delta: int,
+        matched_rules: list[str],
+        sandbox_decision: Any,
+        tool_decision: Any,
+    ) -> "_GuardedRuntimeResult":
+        reasons = _merge_reasons(sandbox_decision, tool_decision)
+        return _GuardedRuntimeResult(
+            session_id=session_id,
+            tool_name=tool_name,
+            verdict=verdict,
+            allowed=allowed,
+            should_review=should_review,
+            should_block=should_block,
+            should_quarantine=should_quarantine,
+            risk_delta=risk_delta,
+            matched_rules=matched_rules,
             reasons=reasons,
-            degradationreasons=degradationreasons,
-            promptinjection=promptscan,
-            hostilecontext=hostilecontext,
-            downloadanalysis=downloadanalysis,
-            outputsanitization=outputsanitization,
-            sessionrisk=sessionrisk,
+            sandbox_decision=_as_dict(sandbox_decision) if sandbox_decision is not None else {},
+            tool_decision=_as_dict(tool_decision) if tool_decision is not None else {},
         )
+
+    def evaluate(self, *, session_id: str = "", tool_name: str = "", **kwargs: Any) -> "_GuardedRuntimeResult":  # type: ignore[override]
+        session_id = (session_id or "").strip()
+        tool_name = (tool_name or "").strip().lower()
+
+        if not session_id:
+            result = self._build_guarded_result(
+                session_id=session_id,
+                tool_name=tool_name,
+                verdict="quarantine",
+                allowed=False,
+                should_review=False,
+                should_block=True,
+                should_quarantine=True,
+                risk_delta=0,
+                matched_rules=["secureruntimepipeline:missing_session_id"],
+                sandbox_decision=None,
+                tool_decision=None,
+            )
+            self._emit_telemetry({"event": "quarantine", "reason": "missing_session_id", "session_id": session_id})
+            return result
+
+        if not tool_name:
+            result = self._build_guarded_result(
+                session_id=session_id,
+                tool_name=tool_name,
+                verdict="quarantine",
+                allowed=False,
+                should_review=False,
+                should_block=True,
+                should_quarantine=True,
+                risk_delta=0,
+                matched_rules=["secureruntimepipeline:missing_tool_name"],
+                sandbox_decision=None,
+                tool_decision=None,
+            )
+            self._emit_telemetry({"event": "quarantine", "reason": "missing_tool_name", "session_id": session_id})
+            return result
+
+        cwd = kwargs.get("cwd")
+        if isinstance(cwd, str):
+            kwargs["cwd"] = cwd.strip()
+
+        sandbox_decision = self._call_sandbox_router(session_id=session_id, tool_name=tool_name, **kwargs)
+        sandbox_verdict = ""
+        sandbox_allowed = True
+        sandbox_rules: list[str] = []
+        sandbox_risk_delta = 0
+        if sandbox_decision is not None:
+            sandbox_verdict = _text(getattr(sandbox_decision, "verdict", "")).lower()
+            sandbox_allowed = bool(getattr(sandbox_decision, "allowed", True))
+            sandbox_rules = list(getattr(sandbox_decision, "matched_rules", None) or [])
+            sandbox_risk_delta = _int(getattr(sandbox_decision, "risk_delta", 0))
+
+        if sandbox_verdict in ("block", "quarantine"):
+            result = self._build_guarded_result(
+                session_id=session_id,
+                tool_name=tool_name,
+                verdict=sandbox_verdict,
+                allowed=False,
+                should_review=False,
+                should_block=True,
+                should_quarantine=sandbox_verdict == "quarantine",
+                risk_delta=sandbox_risk_delta,
+                matched_rules=sandbox_rules,
+                sandbox_decision=sandbox_decision,
+                tool_decision=None,
+            )
+            self._emit_telemetry({"event": sandbox_verdict, "source": "sandbox_router", "session_id": session_id})
+            return result
+
+        class _Request:
+            __slots__ = ("session_id", "tool_name", "cwd", "kwargs")
+            def __init__(self, session_id: str, tool_name: str, **kw: Any) -> None:
+                self.session_id = session_id
+                self.tool_name = tool_name
+                self.cwd = kw.get("cwd")
+                self.kwargs = kw
+
+        request = _Request(session_id=session_id, tool_name=tool_name, **kwargs)
+
+        tool_decision = self._call_tool_guard(request=request)
+        tool_verdict = ""
+        tool_allowed = True
+        tool_rules: list[str] = []
+        tool_risk_delta = 0
+        tool_should_review = False
+        if tool_decision is not None:
+            tool_verdict = _text(getattr(tool_decision, "verdict", "")).lower()
+            tool_allowed = bool(getattr(tool_decision, "allowed", True))
+            tool_rules = list(getattr(tool_decision, "matched_rules", None) or [])
+            tool_risk_delta = _int(getattr(tool_decision, "risk_delta", 0))
+            tool_should_review = bool(getattr(tool_decision, "should_review", False))
+
+        # Deduplicate matched_rules, order-preserving
+        seen_rules: set[str] = set()
+        matched_rules: list[str] = []
+        for rule in sandbox_rules + tool_rules:
+            if rule not in seen_rules:
+                seen_rules.add(rule)
+                matched_rules.append(rule)
+
+        total_risk_delta = sandbox_risk_delta + tool_risk_delta
+
+        if tool_verdict in ("block", "quarantine"):
+            verdict = tool_verdict
+            allowed = False
+            should_block = True
+            should_quarantine = tool_verdict == "quarantine"
+            should_review = False
+            enqueue = False
+        elif tool_verdict == "review" or tool_should_review:
+            verdict = "review"
+            allowed = tool_allowed
+            should_block = False
+            should_quarantine = False
+            should_review = True
+            enqueue = True
+        else:
+            verdict = sandbox_verdict if sandbox_verdict and sandbox_verdict != "allow" else (tool_verdict or "allow")
+            if verdict == "":
+                verdict = "allow"
+            allowed = sandbox_allowed and tool_allowed
+            should_block = not allowed and verdict == "block"
+            should_quarantine = not allowed and verdict == "quarantine"
+            should_review = False
+            enqueue = False
+
+        result = self._build_guarded_result(
+            session_id=session_id,
+            tool_name=tool_name,
+            verdict=verdict,
+            allowed=allowed,
+            should_review=should_review,
+            should_block=should_block,
+            should_quarantine=should_quarantine,
+            risk_delta=total_risk_delta,
+            matched_rules=matched_rules,
+            sandbox_decision=sandbox_decision,
+            tool_decision=tool_decision,
+        )
+
+        self._emit_telemetry({"event": verdict, "session_id": session_id, "tool_name": tool_name})
+
+        if enqueue:
+            self._enqueue_review({
+                "session_id": session_id,
+                "tool_name": tool_name,
+                "verdict": verdict,
+                "risk_delta": total_risk_delta,
+                "matched_rules": matched_rules,
+            })
+
+        return result
+
+    def allow(self, *, session_id: str = "", tool_name: str = "", **kwargs: Any) -> bool:
+        return self.evaluate(session_id=session_id, tool_name=tool_name, **kwargs).allowed
 
     def _event_verdict_for_detectors(
         self,
@@ -590,7 +466,6 @@ class SecureRuntimePipeline:
             candidates.append(_text(outputsanitization.get("severity")).lower())
         if degradedmode:
             candidates.append("high")
-
         if "critical" in candidates:
             return "critical"
         if "high" in candidates:
@@ -600,6 +475,71 @@ class SecureRuntimePipeline:
         if "low" in candidates:
             return "low"
         return "low"
+
+
+@dataclass(slots=True)
+class _GuardedRuntimeResult:
+    session_id: str
+    tool_name: str
+    verdict: str
+    allowed: bool
+    should_review: bool
+    should_block: bool
+    should_quarantine: bool
+    risk_delta: int
+    matched_rules: list[str]
+    reasons: list[dict[str, Any]]
+    sandbox_decision: dict[str, Any]
+    tool_decision: dict[str, Any]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "verdict": self.verdict,
+            "allowed": self.allowed,
+            "sessionid": self.session_id,
+            "toolname": self.tool_name,
+            "shouldreview": self.should_review,
+            "shouldblock": self.should_block,
+            "shouldquarantine": self.should_quarantine,
+            "riskdelta": self.risk_delta,
+            "matchedrules": list(self.matched_rules),
+            "reasons": list(self.reasons),
+            "sandboxdecision": dict(self.sandbox_decision),
+            "tooldecision": dict(self.tool_decision),
+        }
+
+
+def build_secure_runtime_pipeline(
+    *,
+    sandbox_router: Any = None,
+    tool_call_guard: Any = None,
+    telemetry_sink: Any = None,
+    review_queue: Any = None,
+    reviewthreshold: int = 50,
+    blockthreshold: int = 85,
+    dryrunthreshold: int = 15,
+    toolreviewthreshold: int = 20,
+    toolblockthreshold: int = 60,
+    shellreviewthreshold: int = 10,
+    shellblockthreshold: int = 45,
+    defaultfilepath: str = "app/api/actionexecute.py",
+    executor: Optional[ExecutorCallable] = None,
+) -> SecureRuntimePipeline:
+    return SecureRuntimePipeline(
+        reviewthreshold=reviewthreshold,
+        blockthreshold=blockthreshold,
+        dryrunthreshold=dryrunthreshold,
+        toolreviewthreshold=toolreviewthreshold,
+        toolblockthreshold=toolblockthreshold,
+        shellreviewthreshold=shellreviewthreshold,
+        shellblockthreshold=shellblockthreshold,
+        defaultfilepath=defaultfilepath,
+        executor=executor,
+        _sandbox_router=sandbox_router,
+        _tool_call_guard=tool_call_guard,
+        _telemetry_sink=telemetry_sink,
+        _review_queue=review_queue,
+    )
 
 
 def initialize_secureruntimepipeline(

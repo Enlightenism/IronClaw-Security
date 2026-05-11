@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+
 from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Any
 
+
 from fastapi import APIRouter, Response, status
 from pydantic import BaseModel, Field
+
 
 from app.services.review_queue_service import get_review_queue_summary
 from app.services.telemetry import (
@@ -14,13 +17,18 @@ from app.services.telemetry import (
     summarize_telemetry_events,
 )
 
+
 router = APIRouter(prefix="/system", tags=["system"])
+
 
 SERVICE_NAME = "IronClaw-Security"
 SERVICE_VERSION = "1.0.0"
 DEGRADED_STATUS = "degraded"
 OK_STATUS = "ok"
 START_TIME = datetime.now(UTC)
+
+_diagnostics_cache: dict[str, Any] | None = None
+_diagnostics_cache_key: str | None = None
 
 
 class ComponentStatus(BaseModel):
@@ -68,6 +76,18 @@ class MetricsSummaryResponse(BaseModel):
     recent_telemetry_events: list[dict[str, Any]]
 
 
+class DiagnosticsResponse(BaseModel):
+    status: str
+    title: str
+    summary: str
+    service: str
+    version: str
+    timestamp: str
+    uptime_seconds: int
+    checks: list[ComponentStatus] = Field(default_factory=list)
+    items: list[dict[str, Any]] = Field(default_factory=list)
+
+
 def _utc_now() -> datetime:
     return datetime.now(UTC)
 
@@ -103,7 +123,6 @@ def _resolve_version() -> str:
 @lru_cache(maxsize=1)
 def _load_action_execute_pipeline_factory():
     from app.dependencies.action_execute import get_action_execute_pipeline
-
     return get_action_execute_pipeline
 
 
@@ -206,69 +225,78 @@ def _status_from_summary_payloads(*payloads: dict[str, Any]) -> str:
     return OK_STATUS
 
 
+def _build_diagnostics_snapshot() -> DiagnosticsResponse:
+    now = _utc_now()
+    frozen_timestamp = _iso(now)
+    frozen_uptime = max(0, int((now - START_TIME).total_seconds()))
+
+    checks = _build_readiness_checks()
+    overall_status, _ = _overall_status_from_checks(checks)
+
+    degraded_names = [c.name for c in checks if c.status == DEGRADED_STATUS]
+    summary = (
+        f"Degraded components: {', '.join(degraded_names)}."
+        if degraded_names
+        else "All components operational."
+    )
+
+    items: list[dict[str, Any]] = []
+    try:
+        recent = read_telemetry_events(limit=10)
+        items = [e for e in recent if isinstance(e, dict)]
+    except Exception:
+        pass
+
+    return DiagnosticsResponse(
+        status=overall_status,
+        title=f"{SERVICE_NAME} Diagnostics",
+        summary=summary,
+        service=SERVICE_NAME,
+        version=_resolve_version(),
+        timestamp=frozen_timestamp,
+        uptime_seconds=frozen_uptime,
+        checks=checks,
+        items=items,
+    )
+
+
 @router.get("/live", response_model=LivenessResponse, summary="Liveness probe")
 def get_liveness() -> LivenessResponse:
-    """
-    Fast, dependency-light probe that answers:
-    is the process alive and serving requests?
-    """
     response = LivenessResponse(
         status=OK_STATUS,
         **_base_response_fields(),
     )
-
     _safe_append_telemetry_event(
         "system_liveness_requested",
-        {
-            "status": response.status,
-            "uptime_seconds": response.uptime_seconds,
-        },
+        {"status": response.status, "uptime_seconds": response.uptime_seconds},
     )
-
     return response
 
 
 @router.get("/ready", response_model=ReadinessResponse, summary="Readiness probe")
 def get_readiness(response: Response) -> ReadinessResponse:
-    """
-    Readiness probe that checks whether core in-process services
-    are initialized enough to safely receive traffic.
-    """
     checks = _build_readiness_checks()
     overall_status, ready = _overall_status_from_checks(checks)
-
     if not ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-
     result = ReadinessResponse(
         status=overall_status,
         checks=checks,
         **_base_response_fields(),
     )
-
     _safe_append_telemetry_event(
         "system_readiness_requested",
-        {
-            "status": result.status,
-            "ready": ready,
-            "check_count": len(checks),
-        },
+        {"status": result.status, "ready": ready, "check_count": len(checks)},
     )
-
     return result
 
 
 @router.get("/health", response_model=HealthResponse, summary="Combined health snapshot")
 def get_health(response: Response) -> HealthResponse:
-    """
-    Combined operational health snapshot for dashboards and lightweight UI polling.
-    """
     checks = _build_readiness_checks()
     overall_status, ready = _overall_status_from_checks(checks)
-
     if not ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-
     result = HealthResponse(
         status=overall_status,
         live=True,
@@ -276,17 +304,10 @@ def get_health(response: Response) -> HealthResponse:
         checks=checks,
         **_base_response_fields(),
     )
-
     _safe_append_telemetry_event(
         "system_health_requested",
-        {
-            "status": result.status,
-            "live": result.live,
-            "ready": result.ready,
-            "check_count": len(checks),
-        },
+        {"status": result.status, "live": result.live, "ready": result.ready, "check_count": len(checks)},
     )
-
     return result
 
 
@@ -296,40 +317,25 @@ def get_health(response: Response) -> HealthResponse:
     summary="Lightweight metrics and telemetry summary",
 )
 def get_metrics_summary() -> MetricsSummaryResponse:
-    """
-    Lightweight operational summary intended for internal dashboards.
-    """
     telemetry_summary: dict[str, Any]
     try:
         telemetry_summary = summarize_telemetry_events(limit=500)
     except Exception as exc:
-        telemetry_summary = {
-            "status": DEGRADED_STATUS,
-            "error": str(exc),
-        }
+        telemetry_summary = {"status": DEGRADED_STATUS, "error": str(exc)}
 
     review_summary: dict[str, Any]
     try:
         review_summary = get_review_queue_summary()
     except Exception as exc:
-        review_summary = {
-            "status": DEGRADED_STATUS,
-            "error": str(exc),
-        }
+        review_summary = {"status": DEGRADED_STATUS, "error": str(exc)}
 
     recent_events: list[dict[str, Any]]
     try:
         recent_events = read_telemetry_events(limit=25)
     except Exception as exc:
-        recent_events = [
-            {
-                "type": "telemetry_read_error",
-                "error": str(exc),
-            }
-        ]
+        recent_events = [{"type": "telemetry_read_error", "error": str(exc)}]
 
     overall_status = _status_from_summary_payloads(telemetry_summary, review_summary)
-
     result = MetricsSummaryResponse(
         status=overall_status,
         telemetry_summary=telemetry_summary,
@@ -337,13 +343,40 @@ def get_metrics_summary() -> MetricsSummaryResponse:
         recent_telemetry_events=recent_events,
         **_base_response_fields(),
     )
-
     _safe_append_telemetry_event(
         "system_metrics_summary_requested",
         {
             "status": result.status,
             "telemetry_event_count": len(recent_events),
             "has_review_summary": bool(review_summary),
+        },
+    )
+    return result
+
+
+@router.get(
+    "/diagnostics",
+    response_model=DiagnosticsResponse,
+    summary="Full system diagnostics snapshot",
+)
+def get_diagnostics() -> DiagnosticsResponse:
+    global _diagnostics_cache, _diagnostics_cache_key
+
+    cache_key = _iso(_utc_now())[:19]  # truncate to second precision
+
+    if _diagnostics_cache is not None and _diagnostics_cache_key == cache_key:
+        return DiagnosticsResponse(**_diagnostics_cache)
+
+    result = _build_diagnostics_snapshot()
+    _diagnostics_cache = result.model_dump()
+    _diagnostics_cache_key = cache_key
+
+    _safe_append_telemetry_event(
+        "system_diagnostics_requested",
+        {
+            "status": result.status,
+            "check_count": len(result.checks),
+            "item_count": len(result.items),
         },
     )
 

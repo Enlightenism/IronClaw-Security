@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+
 from types import SimpleNamespace
+
 
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
+
 from app.core.auth import API_KEY_HEADER_NAME, get_api_key, require_api_key
 from app.core.errors import AppError
 
 
-def test_get_api_key_allows_when_auth_not_required() -> None:
+def test_get_api_key_allows_when_auth_not_required_no_settings() -> None:
     app = FastAPI()
 
     @app.get("/open")

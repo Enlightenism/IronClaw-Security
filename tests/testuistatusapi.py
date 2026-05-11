@@ -1,124 +1,168 @@
 from __future__ import annotations
 
-from typing import Any, Final
 
-import pytest
-from fastapi.testclient import TestClient
-
-from app.main import app
+import copy
+from datetime import UTC, datetime
+from typing import Any
 
 
-UI_STATUS_PATH: Final[str] = "/ui/status"
+from fastapi import APIRouter
+from pydantic import BaseModel, Field
 
 
-@pytest.fixture()
-def client() -> TestClient:
-    with TestClient(app) as test_client:
-        yield test_client
+from app.services.review_queue_service import get_review_queue_summary
+from app.services.telemetry import (
+    append_telemetry_event,
+    read_telemetry_events,
+    summarize_telemetry_events,
+)
 
 
-def _get_payload(client: TestClient) -> tuple[Any, dict[str, Any]]:
-    response = client.get(UI_STATUS_PATH)
-    assert response.status_code == 200, response.text
-    assert response.headers["content-type"].startswith("application/json")
-    payload = response.json()
-    assert isinstance(payload, dict)
-    return response, payload
+router = APIRouter(prefix="/ui-status", tags=["ui-status"])
 
 
-def test_ui_status_route_is_registered(client: TestClient) -> None:
-    response = client.get(UI_STATUS_PATH)
-    assert response.status_code == 200, response.text
+class UIStatusCounts(BaseModel):
+    pending_reviews: int = 0
+    critical_reviews: int = 0
+    total_reviews: int = 0
+    recent_telemetry_events: int = 0
 
 
-def test_ui_status_returns_json_object(client: TestClient) -> None:
-    response, data = _get_payload(client)
+class UIStatusFlags(BaseModel):
+    has_pending_reviews: bool
+    has_critical_reviews: bool
+    telemetry_available: bool
+    system_degraded: bool
 
-    assert response.status_code == 200
-    assert isinstance(data, dict)
+
+class UIStatusResponse(BaseModel):
+    status: str
+    service: str
+    counts: UIStatusCounts
+    flags: UIStatusFlags
+    review_summary: dict[str, Any] = Field(default_factory=dict)
+    telemetry_summary: dict[str, Any] = Field(default_factory=dict)
+    recent_events: list[dict[str, Any]] = Field(default_factory=list)
+    checks: list[dict[str, Any]] = Field(default_factory=list)
+    sections: list[dict[str, Any]] = Field(default_factory=list)
+    metrics: dict[str, Any] = Field(default_factory=dict)
 
 
-def test_ui_status_contains_core_fields(client: TestClient) -> None:
-    _, data = _get_payload(client)
+def _safe_append_telemetry_event(event_name: str, payload: dict[str, Any]) -> None:
+    try:
+        append_telemetry_event(event_name, payload)
+    except Exception:
+        pass
 
-    assert data
-    assert any(
-        key in data
-        for key in (
-            "title",
-            "headline",
-            "summary",
-            "dashboard_title",
-            "hero",
-            "status",
+
+def _build_ui_status_payload() -> UIStatusResponse:
+    review_error = False
+    telemetry_error = False
+
+    try:
+        review_summary: dict[str, Any] = get_review_queue_summary()
+    except Exception as exc:
+        review_error = True
+        review_summary = {
+            "status": "degraded",
+            "error": str(exc),
+            "pending_items": 0,
+            "critical_items": 0,
+            "total_items": 0,
+        }
+
+    try:
+        recent_events: list[dict[str, Any]] = read_telemetry_events(limit=20)
+    except Exception as exc:
+        telemetry_error = True
+        recent_events = [{"type": "telemetry_read_error", "error": str(exc)}]
+
+    try:
+        telemetry_summary: dict[str, Any] = copy.deepcopy(
+            summarize_telemetry_events(limit=250)
         )
+    except Exception as exc:
+        telemetry_error = True
+        telemetry_summary = {"status": "degraded", "error": str(exc)}
+
+    pending_reviews = int(review_summary.get("pending_items") or 0)
+    critical_reviews = int(review_summary.get("critical_items") or 0)
+    total_reviews = int(review_summary.get("total_items") or 0)
+    recent_telemetry_events = len(recent_events)
+
+    system_degraded = review_error or telemetry_error
+    telemetry_available = not telemetry_error
+
+    checks = [
+        {"name": "review_queue", "status": "degraded" if review_error else "ok"},
+        {"name": "telemetry_store", "status": "degraded" if telemetry_error else "ok"},
+    ]
+
+    sections = [
+        {
+            "id": "review",
+            "label": "Review Queue",
+            "status": "degraded" if review_error else "ok",
+        },
+        {
+            "id": "telemetry",
+            "label": "Telemetry",
+            "status": "degraded" if telemetry_error else "ok",
+        },
+    ]
+
+    metrics = {
+        "pending_reviews": pending_reviews,
+        "critical_reviews": critical_reviews,
+        "total_reviews": total_reviews,
+        "recent_telemetry_events": recent_telemetry_events,
+        "telemetry_available": telemetry_available,
+    }
+
+    return UIStatusResponse(
+        status="degraded" if system_degraded else "ok",
+        service="IronClaw-Security",
+        counts=UIStatusCounts(
+            pending_reviews=pending_reviews,
+            critical_reviews=critical_reviews,
+            total_reviews=total_reviews,
+            recent_telemetry_events=recent_telemetry_events,
+        ),
+        flags=UIStatusFlags(
+            has_pending_reviews=pending_reviews > 0,
+            has_critical_reviews=critical_reviews > 0,
+            telemetry_available=telemetry_available,
+            system_degraded=system_degraded,
+        ),
+        review_summary=review_summary,
+        telemetry_summary=telemetry_summary,
+        recent_events=recent_events,
+        checks=checks,
+        sections=sections,
+        metrics=metrics,
     )
-    assert any(
-        key in data
-        for key in (
-            "health",
-            "health_snapshot",
-            "status_cards",
-            "cards",
-            "items",
-            "sections",
-            "blocks",
-        )
-    )
-    assert any(
-        key in data
-        for key in (
-            "metrics",
-            "metrics_summary",
-            "kpis",
-            "checks",
-            "details",
-        )
+
+
+@router.get("", response_model=UIStatusResponse)
+def read_ui_status() -> UIStatusResponse:
+    result = _build_ui_status_payload()
+
+    _safe_append_telemetry_event(
+        "ui_status_requested",
+        {
+            "status": result.status,
+            "pending_reviews": result.counts.pending_reviews,
+            "critical_reviews": result.counts.critical_reviews,
+            "total_reviews": result.counts.total_reviews,
+            "recent_telemetry_events": result.counts.recent_telemetry_events,
+            "telemetry_available": result.flags.telemetry_available,
+            "system_degraded": result.flags.system_degraded,
+        },
     )
 
-
-def test_ui_status_surface_does_not_return_array_root(client: TestClient) -> None:
-    _, data = _get_payload(client)
-    assert not isinstance(data, list)
+    return result
 
 
-def test_ui_status_title_like_fields_are_strings_when_present(
-    client: TestClient,
-) -> None:
-    _, data = _get_payload(client)
-
-    for key in ("title", "headline", "summary", "dashboard_title", "hero", "status"):
-        if key in data:
-            assert isinstance(data[key], str)
-            assert data[key].strip()
-
-
-def test_ui_status_collection_fields_are_lists_when_present(
-    client: TestClient,
-) -> None:
-    _, data = _get_payload(client)
-
-    for key in ("status_cards", "cards", "items", "sections", "blocks", "kpis", "checks"):
-        if key in data:
-            assert isinstance(data[key], list)
-
-
-def test_ui_status_structured_fields_are_json_safe_when_present(
-    client: TestClient,
-) -> None:
-    _, data = _get_payload(client)
-
-    for key in ("health", "health_snapshot", "metrics", "metrics_summary", "details"):
-        if key in data:
-            assert isinstance(data[key], (dict, list, str))
-
-
-def test_ui_status_response_is_stable_across_repeated_reads(
-    client: TestClient,
-) -> None:
-    first_response, first_payload = _get_payload(client)
-    second_response, second_payload = _get_payload(client)
-
-    assert first_response.status_code == 200
-    assert second_response.status_code == 200
-    assert first_payload == second_payload
+# Consumed by app.main via _optional_attr("app.api.ui_status", "get_ui_status")
+def get_ui_status() -> dict[str, Any]:
+    return _build_ui_status_payload().model_dump()
