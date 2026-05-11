@@ -18,18 +18,18 @@ def _route_map(app: FastAPI) -> dict[str, APIRoute]:
     }
 
 
-def test_auth_registry_includes_organizations_route() -> None:
+def test_auth_registry_includes_health_route() -> None:
     app = _build_app()
     route_map = _route_map(app)
 
-    assert "/organizations" in route_map
+    assert "/health" in route_map
 
 
-def test_auth_registry_includes_dashboard_route() -> None:
+def test_auth_registry_includes_system_status_route() -> None:
     app = _build_app()
     route_map = _route_map(app)
 
-    assert "/dashboard/overview" in route_map
+    assert "/system/status" in route_map
 
 
 def test_auth_registry_includes_auth_api_routes() -> None:
@@ -48,11 +48,11 @@ def test_protected_routes_expose_get_methods() -> None:
     app = _build_app()
     route_map = _route_map(app)
 
-    organizations_methods = route_map["/organizations"].methods or set()
-    dashboard_methods = route_map["/dashboard/overview"].methods or set()
+    health_methods = route_map["/health"].methods or set()
+    system_methods = route_map["/system/status"].methods or set()
 
-    assert "GET" in organizations_methods
-    assert "GET" in dashboard_methods
+    assert "GET" in health_methods
+    assert "GET" in system_methods
 
 
 def test_auth_api_routes_expose_get_methods() -> None:
@@ -86,8 +86,8 @@ def test_auth_registry_routes_are_named() -> None:
     app = _build_app()
     route_map = _route_map(app)
 
-    assert route_map["/organizations"].name
-    assert route_map["/dashboard/overview"].name
+    assert route_map["/health"].name
+    assert route_map["/system/status"].name
 
 
 def test_auth_api_routes_are_named() -> None:

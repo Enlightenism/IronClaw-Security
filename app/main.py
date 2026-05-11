@@ -111,26 +111,12 @@ def _public_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (_optional_router("app.api.ui_pages"), {}),
         (_optional_router("app.api.telemetry_access"), {}),
         (_optional_router("app.api.scan"), {"prefix": "/scan"}),
-        # app.api.router is the /api prefix aggregator for legacy/compat modules
-        # (incidents, integrations, actionhistorytest, etc.) — must remain registered.
         (_optional_router("app.api.router"), {}),
-        # Public action usage router; exposes /action/usage/{ownerkey}
         (_optional_router("app.api.actionusage"), {}),
     ]
 
 
 def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
-    """
-    Canonical protected routers for the IronClaw-Security app.
-
-    Rule: treat app.api.* as the primary API surface. app.api.routes.* modules
-    are considered legacy/compat and should NOT be wired here to avoid
-    double-registration of the same logical endpoints.
-
-    Note: routers that already declare dependencies=[Depends(require_api_key)]
-    internally (e.g. customer_keys, ui_admin_operators) are included without a
-    redundant dependencies kwarg to prevent double-registration.
-    """
     dependencies = _protected_dependencies()
     return [
         (_optional_router("app.api.requestcontext"), {"dependencies": dependencies}),
@@ -142,7 +128,6 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (_optional_router("app.api.policy"), {"prefix": "/policy", "dependencies": dependencies}),
         (_optional_router("app.api.release_policy_routes"), {"dependencies": dependencies}),
         (_optional_router("app.api.integrations"), {"dependencies": dependencies}),
-        # customer_keys has require_api_key baked in — no dependencies override needed
         (_optional_router("app.api.customer_keys"), {}),
         (_optional_router("app.api.usage_reports"), {"dependencies": dependencies}),
         (_optional_router("app.api.auth"), {"dependencies": dependencies}),
@@ -151,23 +136,18 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (_optional_router("app.api.session_security"), {"dependencies": dependencies}),
         (_optional_router("app.api.access_control"), {"dependencies": dependencies}),
         (_optional_router("app.api.org_context"), {"dependencies": dependencies}),
-        # ui_admin_operators has require_api_key baked in — no dependencies override needed
         (_optional_router("app.api.ui_admin_operators"), {}),
     ]
 
 
 def _include_optional_protected_routers(app: FastAPI) -> None:
-    """
-    Optional legacy/compat routers under app.api.routes.*.
-
-    These are kept isolated from the main protected router configs so we can
-    phase them out safely once tests and imports stop relying on them.
-    """
     dependencies = _protected_dependencies()
     optional_modules = [
         "app.api.routes.reviewqueue",
         "app.api.routes.unitledger",
         "app.api.routes.unitwallet",
+        "app.api.routes.dashboard",
+        "app.api.routes.organizations",
     ]
     for module_path in optional_modules:
         _include_optional_router(
@@ -294,10 +274,6 @@ def _install_all_routers(app: FastAPI) -> None:
 
 
 def _initialize_scan_history_repository() -> None:
-    """
-    Wire the Supabase-backed scan history repository into the history service
-    at application startup so IronClaw persistence layer is active by default.
-    """
     set_scan_history_repository = _optional_attr(
         "app.services.history",
         "set_scan_history_repository",

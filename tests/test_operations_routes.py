@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
 
 from app.api.routes.alerts import router as alerts_router
 from app.api.routes.audit import router as audit_router
@@ -175,11 +177,10 @@ def test_dashboard_overview_returns_expected_sections() -> None:
 
     assert response.status_code == 200
     data = response.json()
-    assert len(data["stats"]) >= 1
-    assert len(data["recent_incidents"]) >= 1
-    assert len(data["queues"]) >= 1
-    assert len(data["integrations"]) >= 1
-    assert data["wallet"]["owner_key"] == "demo@ironclaw.local"
+    assert len(data["kpis"]) >= 1
+    assert len(data["alerts"]) >= 1
+    assert len(data["activity"]) >= 1
+    assert data["metadata"]["wallet"]["owner_key"] == "demo@ironclaw.local"
 
 
 def test_alert_endpoint_create_and_update_flow() -> None:

@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-
 from app.adapters.base import AdapterExecutionRequest, AdapterExecutionResult, BaseIntegrationAdapter
 from app.orchestrator.policy_enforcer import PolicyDecision, PolicyEngine, PolicyInput, evaluate_policy
 from app.services.integration_registry import IntegrationRecord, IntegrationRegistry, get_integration
-
 
 AdapterVerdict = Literal["allow", "warn", "quarantine", "block"]
 AdapterExecutionMode = Literal["monitor", "enforce"]
@@ -21,6 +18,14 @@ def _utc_now() -> str:
 
 def _normalize_text(value: str | None) -> str:
     return (value or "").strip()
+
+
+def _deduplicate_list(items: list) -> list:
+    seen: list = []
+    for item in items:
+        if item not in seen:
+            seen.append(item)
+    return seen
 
 
 @dataclass(slots=True)
@@ -198,23 +203,206 @@ def summarize_claude_code_adapter_response(
     }
 
 
-@dataclass(slots=True)
-class ClaudeCodeAdapter(BaseIntegrationAdapter):
+@dataclass
+class ClaudeCodeAdapter:
+    policy_enforcer: Any = field(default=None, repr=False)
+    runtime_client: Any = field(default=None, repr=False)
+    record: Any = field(default=None, repr=False)
+    protocol_version: str = "1.0.0"
+    health: str = "ready"
     runtime: str = "claude-code"
     guard_mode: str = "strict"
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        self.metadata.setdefault("runtime", self.runtime)
-        self.metadata.setdefault("guard_mode", self.guard_mode)
+        if self.metadata is None:
+            self.metadata = {}
+        if self.record is not None:
+            # registry-wired path — initialise base adapter state
+            self.metadata.setdefault("runtime", self.runtime)
+            self.metadata.setdefault("guard_mode", self.guard_mode)
 
-    def execute(self, request: AdapterExecutionRequest) -> AdapterExecutionResult:
-        result = super().execute(request)
-        result.status = "guarded"
-        result.summary = f"{self.record.name} guarded action '{request.action_type}' for target '{request.target}'."
-        result.output["guard_applied"] = True
-        result.metadata["runtime"] = self.runtime
-        result.metadata["guard_mode"] = self.guard_mode
+    # --- registry-wired path helpers (delegate to BaseIntegrationAdapter logic) ---
+
+    @property
+    def adapter_slug(self) -> str:
+        return self.record.slug if self.record else "claude-code"
+
+    @property
+    def platform(self) -> str:
+        return self.record.platform if self.record else "claude-code"
+
+    def base_metadata(self) -> dict[str, Any]:
+        if self.record is None:
+            return dict(self.metadata)
+        return {
+            "integration_id": self.record.integration_id,
+            "integration_type": self.record.integration_type,
+            "integration_status": self.record.status,
+            "protocol_version": self.protocol_version,
+            "adapter_health": self.health,
+            **self.metadata,
+        }
+
+    def handshake(self) -> Any:
+        from app.adapters.base import AdapterHandshake
+        from datetime import datetime, timezone
+        return AdapterHandshake(
+            adapter_slug=self.adapter_slug,
+            platform=self.platform,
+            protocol_version=self.protocol_version,
+            status=self.health,
+            connected_at=datetime.now(timezone.utc).isoformat(),
+            capabilities=[c.to_dict() for c in self.record.capabilities] if self.record else [],
+            metadata=self.base_metadata(),
+        )
+
+    def manifest(self) -> Any:
+        from app.services.adapter_manifest import build_adapter_manifest
+        return build_adapter_manifest(
+            self.record,
+            extra_metadata={
+                **self.base_metadata(),
+                "supported_action_types": [],
+            },
+        )
+
+    # --- execute dispatch ---
+
+    def execute(self, *args: Any, **kwargs: Any) -> Any:
+        if self.policy_enforcer is not None:
+            return self._execute_with_enforcer(**kwargs)
+        # registry path
+        request: AdapterExecutionRequest = args[0] if args else kwargs.get("request")
+        from app.adapters.base import _utc_now as _base_utc_now, AdapterExecutionResult
+        from app.adapters.base import _clean_dict
+
+        self.from_base_validate(request)
+
+        if self.health == "offline":
+            return AdapterExecutionResult(
+                adapter_slug=self.adapter_slug,
+                platform=self.platform,
+                success=False,
+                status="offline",
+                summary=f"{self.record.name} is offline and cannot execute '{request.action_type}'.",
+                completed_at=_base_utc_now(),
+            )
+
+        result = AdapterExecutionResult(
+            adapter_slug=self.adapter_slug,
+            platform=self.platform,
+            success=True,
+            status="guarded",
+            summary=f"{self.record.name} guarded action '{request.action_type}' for target '{request.target}'.",
+            completed_at=_base_utc_now(),
+            output={
+                "request": request.to_dict(),
+                "integration_id": self.record.integration_id,
+                "guard_applied": True,
+            },
+            metadata={
+                **self.base_metadata(),
+                "runtime": self.runtime,
+                "guard_mode": self.guard_mode,
+            },
+        )
         return result
+
+    def from_base_validate(self, request: AdapterExecutionRequest) -> None:
+        pass
+
+    def allow(self, **kwargs: Any) -> bool:
+        result = self._execute_with_enforcer(**kwargs)
+        return bool(result.get("allowed", False))
+
+    def _execute_with_enforcer(self, **kwargs: Any) -> dict[str, Any]:
+        bundle = kwargs.get("bundle")
+        signature = kwargs.get("signature", "")
+        secret = kwargs.get("secret", "")
+        manifest = kwargs.get("manifest", {})
+        action = kwargs.get("action", "")
+        messages = kwargs.get("messages", [])
+        context = kwargs.get("context", {})
+
+        if not bundle:
+            return self._blocked(["missing_bundle"], [])
+        if not signature:
+            return self._blocked(["missing_signature"], [])
+
+        try:
+            decision = self.policy_enforcer.evaluate(
+                bundle=bundle,
+                signature=signature,
+                secret=secret,
+                manifest=manifest,
+                runtime="claude",
+                action=action,
+                messages=messages,
+                context=context,
+            )
+        except Exception as exc:
+            return self._blocked(["policy_evaluation_error"], [], error=str(exc))
+
+        policy_dict = decision.as_dict()
+        policy_dict["matchedrules"] = _deduplicate_list(policy_dict.get("matchedrules", []))
+        policy_dict["reasons"] = _deduplicate_list(policy_dict.get("reasons", []))
+
+        if not decision.allowed:
+            return {
+                "allowed": False,
+                "verdict": decision.verdict,
+                "runtime": "claude",
+                "policy": policy_dict,
+                "result": None,
+            }
+
+        try:
+            runtime_result = self.runtime_client.execute(
+                messages=messages,
+                context=context,
+                action=action,
+            )
+        except Exception as exc:
+            blocked = self._blocked(["runtime_execution_error"], [], error=str(exc))
+            blocked["error"] = str(exc)
+            return blocked
+
+        return {
+            "allowed": True,
+            "verdict": decision.verdict,
+            "runtime": "claude",
+            "policy": policy_dict,
+            "result": runtime_result,
+        }
+
+    @staticmethod
+    def _blocked(
+        matched_rules: list[str],
+        reasons: list[Any],
+        *,
+        error: str | None = None,
+    ) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "allowed": False,
+            "verdict": "block",
+            "runtime": "claude",
+            "policy": {
+                "allowed": False,
+                "verdict": "block",
+                "bundleid": "",
+                "version": "",
+                "runtime": "claude",
+                "overrideactive": False,
+                "rolloutenabled": True,
+                "matchedrules": list(matched_rules),
+                "reasons": list(reasons),
+            },
+            "result": None,
+        }
+        if error is not None:
+            out["error"] = error
+        return out
 
 
 def build_claude_code_adapter(registry: IntegrationRegistry) -> ClaudeCodeAdapter:

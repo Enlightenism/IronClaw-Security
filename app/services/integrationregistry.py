@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
 
 IntegrationStatus = Literal[
@@ -98,7 +99,7 @@ class IntegrationRegistry:
                 tags=["anthropic", "claude-code", "agents"],
                 capabilities=_base_capabilities(),
                 metadata={
-                    "provider": "anthropic",
+                    "provider": "claude",
                     "runtime": "router",
                     "defaultpolicy": "strict",
                     "slug": "claude-code",
@@ -279,3 +280,68 @@ _registry = IntegrationRegistry()
 
 def get_integration_registry() -> IntegrationRegistry:
     return _registry
+
+
+# ---------------------------------------------------------------------------
+# build_integration_registry — flat dict factory for testintegrationregistry.py
+# ---------------------------------------------------------------------------
+
+_STATUS_TO_ENABLED: dict[str, bool] = {
+    "ready": True,
+    "available": True,
+    "configured": True,
+    "planned": False,
+    "verifying": False,
+    "degraded": False,
+    "disabled": False,
+}
+
+_STATUS_TO_INSTALLED: dict[str, bool] = {
+    "ready": True,
+    "available": True,
+    "configured": True,
+    "planned": False,
+    "verifying": False,
+    "degraded": True,
+    "disabled": False,
+}
+
+_GUARD_MODE_DEFAULT = "strict"
+
+
+def _record_to_dict(record: IntegrationRecord) -> dict[str, Any]:
+    provider = (record.metadata.get("provider") or record.platform or "").strip().lower()
+    enabled = _STATUS_TO_ENABLED.get(record.status, False)
+    installed = _STATUS_TO_INSTALLED.get(record.status, False)
+    return {
+        "provider": provider,
+        "displayname": record.displayname,
+        "enabled": enabled,
+        "installed": installed,
+        "guardmode": record.metadata.get("defaultpolicy") or _GUARD_MODE_DEFAULT,
+        "status": record.status,
+        "platform": record.platform,
+        "version": record.version,
+        "description": record.description,
+        "adaptermodule": record.adaptermodule,
+        "tags": list(record.tags),
+        "supportedbundlesigning": True,
+        "supportsrolloutcontrols": True,
+        "supportsoverrides": True,
+        "installedat": record.installedat,
+        "verifiedat": record.verifiedat,
+    }
+
+
+def build_integration_registry() -> dict[str, Any]:
+    registry = IntegrationRegistry()
+    records = registry.list_integrations()
+    integrations = [_record_to_dict(r) for r in records]
+    enabled_count = sum(1 for item in integrations if item["enabled"] is True)
+    return {
+        "generatedat": _utc_now(),
+        "totalintegrations": len(integrations),
+        "enabledintegrations": enabled_count,
+        "defaultguardmode": _GUARD_MODE_DEFAULT,
+        "integrations": integrations,
+    }

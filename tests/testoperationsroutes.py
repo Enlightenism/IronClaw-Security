@@ -13,48 +13,49 @@ def _route_map() -> dict[str, APIRoute]:
     }
 
 
-def test_operations_dashboard_route_is_registered() -> None:
+def test_operations_health_routes_are_registered() -> None:
     route_map = _route_map()
 
-    assert "/dashboard/overview" in route_map
+    assert "/health" in route_map
+    assert "/health/liveness" in route_map
+    assert "/health/readiness" in route_map
 
 
-def test_operations_organizations_route_is_registered() -> None:
+def test_operations_ui_manifest_is_registered() -> None:
     route_map = _route_map()
 
-    assert "/organizations" in route_map
-
-
-def test_operations_ui_routes_are_registered() -> None:
-    route_map = _route_map()
-
-    assert "/ui/routes" in route_map
-    assert "/ui/pages" in route_map
     assert "/ui/manifest" in route_map
+    assert "/ui/status" in route_map
+    assert "/ui/runtime-status" in route_map
 
 
-def test_operations_admin_surfaces_are_registered() -> None:
+def test_operations_system_status_is_registered() -> None:
     route_map = _route_map()
 
-    assert "/admin/request-stream" in route_map
-    assert "/admin/system-diagnostics" in route_map
-    assert "/admin/execution-test-console" in route_map
+    assert "/system/status" in route_map
+
+
+def test_operations_access_control_routes_are_registered() -> None:
+    route_map = _route_map()
+
+    assert "/api/access-control/context" in route_map
 
 
 def test_operations_core_routes_support_get() -> None:
     route_map = _route_map()
 
     required_paths = [
-        "/dashboard/overview",
-        "/organizations",
-        "/ui/routes",
-        "/ui/pages",
+        "/health",
+        "/health/liveness",
+        "/health/readiness",
+        "/system/status",
         "/ui/manifest",
-        "/admin/request-stream",
-        "/admin/system-diagnostics",
-        "/admin/execution-test-console",
+        "/ui/status",
+        "/ui/runtime-status",
+        "/api/access-control/context",
     ]
 
     for path in required_paths:
+        assert path in route_map, f"route not registered: {path}"
         methods = route_map[path].methods or set()
-        assert "GET" in methods
+        assert "GET" in methods, f"GET not registered on {path}"

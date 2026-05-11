@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from app.adapters.claudecodeadapter import ClaudeCodeAdapter
+from app.adapters.claude_code_adapter import ClaudeCodeAdapter
 
 
 @dataclass(slots=True)
@@ -69,7 +69,7 @@ class _ClaudeRuntimeClientStub:
         return dict(self.result)
 
 
-def _build_adapter(decision: _PolicyDecision | None = None):
+def _build_claude_stub_adapter(decision: _PolicyDecision | None = None):
     enforcer = _PolicyEnforcerStub(decision)
     runtime = _ClaudeRuntimeClientStub()
     adapter = ClaudeCodeAdapter(
@@ -110,7 +110,7 @@ def _request_payload() -> dict[str, Any]:
 
 
 def test_allows_claude_execution_when_policy_enforcer_allows():
-    adapter, enforcer, runtime = _build_adapter(
+    adapter, enforcer, runtime = _build_claude_stub_adapter(
         _PolicyDecision(
             allowed=True,
             verdict="allow",
@@ -132,7 +132,7 @@ def test_allows_claude_execution_when_policy_enforcer_allows():
 
 
 def test_blocks_claude_execution_when_policy_enforcer_blocks():
-    adapter, enforcer, runtime = _build_adapter(
+    adapter, enforcer, runtime = _build_claude_stub_adapter(
         _PolicyDecision(
             allowed=False,
             verdict="block",
@@ -153,7 +153,7 @@ def test_blocks_claude_execution_when_policy_enforcer_blocks():
 
 
 def test_review_verdict_prevents_claude_runtime_call():
-    adapter, enforcer, runtime = _build_adapter(
+    adapter, enforcer, runtime = _build_claude_stub_adapter(
         _PolicyDecision(
             allowed=False,
             verdict="review",
@@ -171,7 +171,7 @@ def test_review_verdict_prevents_claude_runtime_call():
 
 
 def test_passes_bundle_material_to_policy_enforcer():
-    adapter, enforcer, runtime = _build_adapter()
+    adapter, enforcer, runtime = _build_claude_stub_adapter()
 
     payload = _request_payload()
     adapter.execute(**payload)
@@ -188,7 +188,7 @@ def test_passes_bundle_material_to_policy_enforcer():
 
 
 def test_passes_messages_and_context_to_runtime_after_allow():
-    adapter, enforcer, runtime = _build_adapter(
+    adapter, enforcer, runtime = _build_claude_stub_adapter(
         _PolicyDecision(
             allowed=True,
             verdict="allow",
@@ -208,7 +208,7 @@ def test_passes_messages_and_context_to_runtime_after_allow():
 
 
 def test_missing_bundle_returns_block_without_runtime_call():
-    adapter, enforcer, runtime = _build_adapter()
+    adapter, enforcer, runtime = _build_claude_stub_adapter()
 
     payload = _request_payload()
     payload["bundle"] = None
@@ -223,7 +223,7 @@ def test_missing_bundle_returns_block_without_runtime_call():
 
 
 def test_missing_signature_returns_block_without_runtime_call():
-    adapter, enforcer, runtime = _build_adapter()
+    adapter, enforcer, runtime = _build_claude_stub_adapter()
 
     payload = _request_payload()
     payload["signature"] = ""
@@ -238,7 +238,7 @@ def test_missing_signature_returns_block_without_runtime_call():
 
 
 def test_empty_messages_still_can_execute_when_policy_allows():
-    adapter, enforcer, runtime = _build_adapter(
+    adapter, enforcer, runtime = _build_claude_stub_adapter(
         _PolicyDecision(
             allowed=True,
             verdict="allow",
@@ -257,7 +257,7 @@ def test_empty_messages_still_can_execute_when_policy_allows():
 
 
 def test_override_and_rollout_flags_are_exposed():
-    adapter, enforcer, runtime = _build_adapter(
+    adapter, enforcer, runtime = _build_claude_stub_adapter(
         _PolicyDecision(
             allowed=True,
             verdict="allow",
@@ -275,7 +275,7 @@ def test_override_and_rollout_flags_are_exposed():
 
 
 def test_runtime_exception_is_captured_as_error_result():
-    adapter, enforcer, runtime = _build_adapter(
+    adapter, enforcer, runtime = _build_claude_stub_adapter(
         _PolicyDecision(
             allowed=True,
             verdict="allow",
@@ -297,7 +297,7 @@ def test_runtime_exception_is_captured_as_error_result():
 
 
 def test_allow_helper_matches_policy_decision():
-    adapter, enforcer, runtime = _build_adapter(
+    adapter, enforcer, runtime = _build_claude_stub_adapter(
         _PolicyDecision(
             allowed=True,
             verdict="allow",
@@ -310,7 +310,7 @@ def test_allow_helper_matches_policy_decision():
 
 
 def test_allow_helper_false_when_policy_rejects():
-    adapter, enforcer, runtime = _build_adapter(
+    adapter, enforcer, runtime = _build_claude_stub_adapter(
         _PolicyDecision(
             allowed=False,
             verdict="block",
@@ -323,7 +323,7 @@ def test_allow_helper_false_when_policy_rejects():
 
 
 def test_response_shape_is_json_friendly():
-    adapter, enforcer, runtime = _build_adapter(
+    adapter, enforcer, runtime = _build_claude_stub_adapter(
         _PolicyDecision(
             allowed=True,
             verdict="allow",
@@ -343,7 +343,7 @@ def test_response_shape_is_json_friendly():
 
 
 def test_reason_and_rule_deduplication_in_policy_response():
-    adapter, enforcer, runtime = _build_adapter(
+    adapter, enforcer, runtime = _build_claude_stub_adapter(
         _PolicyDecision(
             allowed=False,
             verdict="review",
@@ -367,7 +367,7 @@ def test_reason_and_rule_deduplication_in_policy_response():
 
 
 def test_runtime_name_is_normalized_to_claude():
-    adapter, enforcer, runtime = _build_adapter()
+    adapter, enforcer, runtime = _build_claude_stub_adapter()
 
     result = adapter.execute(**_request_payload())
 

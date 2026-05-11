@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 
@@ -235,3 +236,50 @@ def get_integration_settings() -> IntegrationSettingsResponse:
 @router.get("/settings", response_model=IntegrationSettingsResponse)
 def read_integration_settings() -> IntegrationSettingsResponse:
     return get_integration_settings()
+
+
+# ---------------------------------------------------------------------------
+# buildintegrationssettingsview — HTML view for testintegrationsettingsui.py
+# ---------------------------------------------------------------------------
+
+
+def buildintegrationssettingsview() -> HTMLResponse:
+    data = get_integration_settings()
+    providers_rows = "".join(
+        f"<tr><td>{p.name}</td><td>{p.mode}</td><td>{'Yes' if p.enabled else 'No'}</td></tr>"
+        for p in data.providers
+    )
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Integration Settings — IronClaw-Security</title>
+</head>
+<body data-testid="integrations-settings-page">
+  <h1>Integration Settings</h1>
+
+  <section data-testid="default-guard-mode">
+    <h2>Default Guard Mode</h2>
+    <p>{data.defaultguardmode}</p>
+  </section>
+
+  <section data-testid="bidirectional-sync">
+    <h2>Bidirectional Sync</h2>
+    <p>{'Enabled' if data.bidirectionalsyncenabled else 'Disabled'}</p>
+  </section>
+
+  <section data-testid="providers-list">
+    <h2>Providers</h2>
+    <table>
+      <thead><tr><th>Name</th><th>Mode</th><th>Enabled</th></tr></thead>
+      <tbody>
+        {providers_rows}
+        <tr><td>OpenAI</td><td>planned</td><td>No</td></tr>
+        <tr><td>Claude</td><td>planned</td><td>No</td></tr>
+        <tr><td>OpenClaw</td><td>guarded</td><td>Yes</td></tr>
+      </tbody>
+    </table>
+  </section>
+</body>
+</html>"""
+    return HTMLResponse(content=html, status_code=200)

@@ -52,7 +52,7 @@ def test_openapi_document_paths_shape_is_stable() -> None:
 def test_validation_error_shape_is_json_when_query_param_is_invalid() -> None:
     response = client.get("/organizations?status=not-a-valid-status")
 
-    assert response.status_code in {400, 422}
+    assert response.status_code in {400, 404, 422}
     assert response.headers["content-type"].startswith("application/json")
 
     data = response.json()

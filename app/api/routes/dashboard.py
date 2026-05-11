@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+
 from datetime import datetime, timezone
 from typing import Any
 
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
+
 
 from app.core.auth import require_api_key
 from app.core.unit_wallet import get_unit_wallet_registry
@@ -65,11 +68,11 @@ class DashboardResponse(BaseModel):
     status: str
     service: str
     timestamp: str
-    stats: list[DashboardStatView] = Field(default_factory=list)
-    recent_incidents: list[DashboardIncidentView] = Field(default_factory=list)
-    queues: list[DashboardQueueView] = Field(default_factory=list)
-    integrations: list[DashboardIntegrationView] = Field(default_factory=list)
-    wallet: DashboardWalletView
+    environment: str
+    kpis: list[DashboardStatView] = Field(default_factory=list)
+    alerts: list[DashboardIncidentView] = Field(default_factory=list)
+    activity: list[DashboardQueueView] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 def _utc_now_iso() -> str:
@@ -93,12 +96,12 @@ def get_dashboard_overview() -> DashboardResponse:
     quarantine_items = quarantine_store.list_items()
     audit_events = audit_store.list_events(limit=500)
 
-    open_incidents = [item for item in incidents if item.status in {"open", "triaged"}]
+    open_incidents = [i for i in incidents if i.status in {"open", "triaged"}]
     blocked_events = [
-        item for item in audit_events if (item.verdict or "").lower() in {"block", "quarantine"}
+        e for e in audit_events if (e.verdict or "").lower() in {"block", "quarantine"}
     ]
-    integration_rollups: dict[str, dict[str, int | str]] = {}
 
+    integration_rollups: dict[str, dict[str, int | str]] = {}
     for event in audit_events:
         integration_id = event.integration_id or "core-system"
         bucket = integration_rollups.setdefault(
@@ -115,38 +118,21 @@ def get_dashboard_overview() -> DashboardResponse:
         if (event.verdict or "").lower() in {"block", "quarantine"}:
             bucket["blocked_events_24h"] = int(bucket["blocked_events_24h"]) + 1
 
-    integrations = [
-        DashboardIntegrationView(
-            integration_id=str(item["integration_id"]),
-            label=str(item["label"]),
-            status=str(item["status"]),
-            protected_requests_24h=int(item["protected_requests_24h"]),
-            blocked_events_24h=int(item["blocked_events_24h"]),
-        )
-        for item in sorted(
-            integration_rollups.values(),
-            key=lambda item: (-int(item["protected_requests_24h"]), str(item["integration_id"])),
-        )
-    ]
-
     wallet = wallet_registry.get_wallet("demo@ironclaw.local")
     if wallet is None:
         wallet = wallet_registry.get_or_create_wallet("demo@ironclaw.local")
 
-    recent_incidents = sorted(
-        incidents,
-        key=lambda item: item.created_at,
-        reverse=True,
-    )[:5]
+    recent_incidents = sorted(incidents, key=lambda i: i.created_at, reverse=True)[:5]
 
-    quarantine_pending = [item for item in quarantine_items if item.status in {"isolated", "under_review"}]
-    quarantine_completed = [item for item in quarantine_items if item.status in {"released", "destroyed"}]
+    quarantine_pending = [i for i in quarantine_items if i.status in {"isolated", "under_review"}]
+    quarantine_completed = [i for i in quarantine_items if i.status in {"released", "destroyed"}]
 
     return DashboardResponse(
         status="ok",
         service="IronClaw-Security",
         timestamp=now,
-        stats=[
+        environment="production",
+        kpis=[
             DashboardStatView(
                 key="protected_requests",
                 label="Protected Requests",
@@ -176,38 +162,55 @@ def get_dashboard_overview() -> DashboardResponse:
                 metadata={"window": "active"},
             ),
         ],
-        recent_incidents=[
+        alerts=[
             DashboardIncidentView(
-                incident_id=item.incident_id,
-                title=item.title,
-                severity=item.severity,
-                status=item.status,
-                source=item.source,
-                created_at=item.created_at.isoformat().replace("+00:00", "Z"),
-                verdict=item.verdict,
+                incident_id=i.incident_id,
+                title=i.title,
+                severity=i.severity,
+                status=i.status,
+                source=i.source,
+                created_at=i.created_at.isoformat().replace("+00:00", "Z"),
+                verdict=i.verdict,
             )
-            for item in recent_incidents
+            for i in recent_incidents
         ],
-        queues=[
+        activity=[
             DashboardQueueView(
                 queue_name="review_queue",
                 pending=len(open_incidents),
-                in_progress=len([item for item in open_incidents if item.owner]),
-                completed_today=len([item for item in incidents if item.status == "resolved"]),
+                in_progress=len([i for i in open_incidents if i.owner]),
+                completed_today=len([i for i in incidents if i.status == "resolved"]),
             ),
             DashboardQueueView(
                 queue_name="quarantine_queue",
                 pending=len(quarantine_pending),
-                in_progress=len([item for item in quarantine_pending if item.owner]),
+                in_progress=len([i for i in quarantine_pending if i.owner]),
                 completed_today=len(quarantine_completed),
             ),
         ],
-        integrations=integrations,
-        wallet=DashboardWalletView(
-            owner_key=wallet.owner_key,
-            balance_units=wallet.balance_units,
-            total_purchased_units=wallet.total_purchased_units,
-            total_consumed_units=wallet.total_consumed_units,
-            updated_at=wallet.updated_at.isoformat().replace("+00:00", "Z"),
-        ),
+        metadata={
+            "integrations": [
+                {
+                    "integration_id": str(item["integration_id"]),
+                    "label": str(item["label"]),
+                    "status": str(item["status"]),
+                    "protected_requests_24h": int(item["protected_requests_24h"]),
+                    "blocked_events_24h": int(item["blocked_events_24h"]),
+                }
+                for item in sorted(
+                    integration_rollups.values(),
+                    key=lambda item: (
+                        -int(item["protected_requests_24h"]),
+                        str(item["integration_id"]),
+                    ),
+                )
+            ],
+            "wallet": {
+                "owner_key": wallet.owner_key,
+                "balance_units": wallet.balance_units,
+                "total_purchased_units": wallet.total_purchased_units,
+                "total_consumed_units": wallet.total_consumed_units,
+                "updated_at": wallet.updated_at.isoformat().replace("+00:00", "Z"),
+            },
+        },
     )

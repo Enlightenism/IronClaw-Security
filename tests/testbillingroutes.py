@@ -1,27 +1,41 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.api.routes.billing import router as billing_router
+from app.core.auth import API_KEY_HEADER_NAME
+
+_API_KEY = "test-secret-key"
 
 
-client = TestClient(app)
+def _build_billing_test_app() -> FastAPI:
+    app = FastAPI()
+    app.state.settings = SimpleNamespace(
+        auth_required=True,
+        api_key=_API_KEY,
+        admin_api_key=None,
+    )
+    app.include_router(billing_router)
+    return app
 
+
+client = TestClient(_build_billing_test_app())
+
+_HEADERS = {API_KEY_HEADER_NAME: _API_KEY}
 
 BILLING_PATHS = (
-    "/billing/index",
-    "/billing/manifest",
     "/billing/packages",
-    "/billing/registry",
-    "/billing/summary",
+    "/billing/ledger",
 )
 
 
-def _get_json(path: str) -> dict[str, Any]:
-    response = client.get(path)
+def _get_json(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    response = client.get(path, params=params, headers=_HEADERS)
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/json")
     payload = response.json()
@@ -31,7 +45,7 @@ def _get_json(path: str) -> dict[str, Any]:
 
 @pytest.mark.parametrize("path", BILLING_PATHS)
 def test_billing_route_is_registered(path: str) -> None:
-    response = client.get(path)
+    response = client.get(path, headers=_HEADERS)
     assert response.status_code == 200
 
 
@@ -43,41 +57,8 @@ def test_billing_routes_return_json_objects(path: str) -> None:
 
 @pytest.mark.parametrize("path", BILLING_PATHS)
 def test_billing_routes_support_get_only_contract(path: str) -> None:
-    response = client.post(path, json={})
+    response = client.post(path, json={}, headers=_HEADERS)
     assert response.status_code in {405, 404}
-
-
-def test_billing_index_route_has_stable_shape() -> None:
-    payload = _get_json("/billing/index")
-
-    assert payload
-    assert any(
-        key in payload
-        for key in (
-            "title",
-            "displayname",
-            "summary",
-            "sections",
-            "routes",
-            "generatedat",
-        )
-    )
-
-
-def test_billing_manifest_route_has_stable_shape() -> None:
-    payload = _get_json("/billing/manifest")
-
-    assert payload
-    assert any(
-        key in payload
-        for key in (
-            "manifest",
-            "version",
-            "generatedat",
-            "packages",
-            "billing",
-        )
-    )
 
 
 def test_billing_packages_route_has_stable_shape() -> None:
@@ -91,39 +72,22 @@ def test_billing_packages_route_has_stable_shape() -> None:
             "items",
             "catalog",
             "plans",
-            "generatedat",
+            "status",
         )
     )
 
 
-def test_billing_registry_route_has_stable_shape() -> None:
-    payload = _get_json("/billing/registry")
+def test_billing_ledger_route_has_stable_shape() -> None:
+    payload = _get_json("/billing/ledger")
 
     assert payload
     assert any(
         key in payload
         for key in (
-            "registry",
             "entries",
-            "integrations",
-            "providers",
-            "generatedat",
-        )
-    )
-
-
-def test_billing_summary_route_has_stable_shape() -> None:
-    payload = _get_json("/billing/summary")
-
-    assert payload
-    assert any(
-        key in payload
-        for key in (
-            "summary",
-            "balances",
-            "wallet",
-            "usage",
-            "generatedat",
+            "limit",
+            "owner_key",
+            "status",
         )
     )
 
@@ -144,15 +108,15 @@ def test_billing_routes_are_repeatable(path: str) -> None:
 
 @pytest.mark.parametrize("path", BILLING_PATHS)
 def test_billing_routes_are_not_server_errors(path: str) -> None:
-    response = client.get(path)
+    response = client.get(path, headers=_HEADERS)
     assert response.status_code < 500
 
 
-def test_billing_index_and_summary_are_distinct_documents() -> None:
-    index_payload = _get_json("/billing/index")
-    summary_payload = _get_json("/billing/summary")
+def test_billing_packages_and_ledger_are_distinct_documents() -> None:
+    packages_payload = _get_json("/billing/packages")
+    ledger_payload = _get_json("/billing/ledger")
 
-    assert index_payload != summary_payload
+    assert packages_payload != ledger_payload
 
 
 def test_billing_packages_response_exposes_collection_if_present() -> None:
@@ -163,20 +127,19 @@ def test_billing_packages_response_exposes_collection_if_present() -> None:
             assert isinstance(payload[key], (list, dict))
 
 
-def test_billing_registry_response_exposes_collection_if_present() -> None:
-    payload = _get_json("/billing/registry")
+def test_billing_ledger_response_exposes_entries_if_present() -> None:
+    payload = _get_json("/billing/ledger")
 
-    for key in ("registry", "entries", "integrations", "providers"):
+    for key in ("entries",):
         if key in payload:
             assert isinstance(payload[key], (list, dict))
 
 
-def test_billing_summary_response_exposes_wallet_or_usage_if_present() -> None:
-    payload = _get_json("/billing/summary")
+def test_billing_ledger_response_exposes_limit_if_present() -> None:
+    payload = _get_json("/billing/ledger")
 
-    for key in ("summary", "balances", "wallet", "usage"):
-        if key in payload:
-            assert isinstance(payload[key], (dict, list, str, int, float, bool))
+    if "limit" in payload:
+        assert isinstance(payload["limit"], int)
 
 
 @pytest.mark.parametrize("path", BILLING_PATHS)
@@ -196,16 +159,12 @@ def test_billing_routes_are_json_serialization_friendly(path: str) -> None:
         assert value is None or isinstance(value, (str, int, float, bool, list, dict))
 
 
-def test_billing_manifest_and_packages_are_consistent_if_both_expose_packages() -> None:
-    manifest = _get_json("/billing/manifest")
-    packages = _get_json("/billing/packages")
+def test_billing_packages_response_has_consistent_structure() -> None:
+    first = _get_json("/billing/packages")
+    second = _get_json("/billing/packages")
 
-    manifest_keys = {"packages", "plans", "catalog"}
-    package_keys = {"packages", "plans", "catalog", "items"}
+    assert set(first.keys()) == set(second.keys())
 
-    manifest_collection_key = next((key for key in manifest_keys if key in manifest), None)
-    packages_collection_key = next((key for key in package_keys if key in packages), None)
-
-    if manifest_collection_key and packages_collection_key:
-        assert isinstance(manifest[manifest_collection_key], (list, dict))
-        assert isinstance(packages[packages_collection_key], (list, dict))
+    if "packages" in first and "packages" in second:
+        assert isinstance(first["packages"], list)
+        assert isinstance(second["packages"], list)

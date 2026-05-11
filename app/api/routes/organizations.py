@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+
 from datetime import datetime, timezone
 from typing import Any, Literal
 
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
+
 
 from app.core.auth import require_api_key
 from app.services.organization_store import (
@@ -111,12 +114,11 @@ def _find_organization_or_404(organization_id: str) -> StoredOrganizationRecord:
     return organization
 
 
-@router.get("/", response_model=OrganizationListResponse)
+@router.get("", response_model=OrganizationListResponse)
 def list_organizations(
     status_filter: Literal["active", "suspended"] | None = Query(default=None, alias="status"),
 ) -> OrganizationListResponse:
     items = get_organization_store().list_organizations(status=status_filter)
-
     return OrganizationListResponse(
         status="ok",
         service="IronClaw-Security",
@@ -126,7 +128,7 @@ def list_organizations(
     )
 
 
-@router.post("/", response_model=OrganizationResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=OrganizationResponse, status_code=status.HTTP_201_CREATED)
 def create_organization(payload: OrganizationCreateRequest) -> OrganizationResponse:
     result = get_organization_store().create_organization(
         name=payload.name,

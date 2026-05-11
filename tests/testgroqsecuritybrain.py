@@ -291,7 +291,7 @@ def test_groq_client_exception_is_captured_as_error_result():
     assert result["allowed"] is False
     assert result["verdict"] in {"error", "block"}
     assert "runtime_execution_error" in result["policy"]["matchedrules"]
-    assert result["result"] is None or "error" in result
+    assert result["result"] is None or "error" in result["result"]
 
 
 def test_allow_helper_matches_policy_decision():

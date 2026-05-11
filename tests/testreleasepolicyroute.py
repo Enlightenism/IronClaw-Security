@@ -108,12 +108,12 @@ def api(monkeypatch):
     service = _ReleasePolicyServiceStub()
 
     monkeypatch.setattr(
-        "app.api.releasepolicyroutes.build_release_policy_service",
+        "app.api.release_policy_routes.build_release_policy_service",
         lambda: service,
         raising=False,
     )
     monkeypatch.setattr(
-        "app.services.releasepolicy.build_release_policy_service",
+        "app.services.release_policy.build_release_policy_service",
         lambda: service,
         raising=False,
     )

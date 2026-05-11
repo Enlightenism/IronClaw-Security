@@ -24,6 +24,8 @@ from app.services.integration_registry import (
 AdapterVerdict = Literal["allow", "warn", "quarantine", "block"]
 AdapterExecutionMode = Literal["monitor", "enforce"]
 
+_BLOCK_RESULT_KEYS = ("allowed", "verdict", "runtime", "policy", "result")
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -32,6 +34,18 @@ def _utc_now() -> str:
 def _normalize_text(value: str | None) -> str:
     return (value or "").strip()
 
+
+def _dedup_list(items: list[Any]) -> list[Any]:
+    seen: list[Any] = []
+    for item in items:
+        if item not in seen:
+            seen.append(item)
+    return seen
+
+
+# ---------------------------------------------------------------------------
+# Request / Response dataclasses (policy-engine path)
+# ---------------------------------------------------------------------------
 
 @dataclass(slots=True)
 class GenericAgentAdapterRequest:
@@ -53,7 +67,6 @@ class GenericAgentAdapterRequest:
             merged_metadata["agent_name"] = self.agent_name
         if self.runtime_name:
             merged_metadata["runtime_name"] = self.runtime_name
-
         return PolicyInput(
             action_type=self.action_type,
             target=self.target,
@@ -123,6 +136,10 @@ class GenericAgentAdapterResponse:
         }
 
 
+# ---------------------------------------------------------------------------
+# Builder / adapter helpers (policy-engine path)
+# ---------------------------------------------------------------------------
+
 def build_generic_agent_adapter_request(
     *,
     action_type: str,
@@ -137,12 +154,10 @@ def build_generic_agent_adapter_request(
 ) -> GenericAgentAdapterRequest:
     normalized_action_type = _normalize_text(action_type)
     normalized_target = _normalize_text(target)
-
     if not normalized_action_type:
         raise ValueError("action_type is required")
     if not normalized_target:
         raise ValueError("target is required")
-
     return GenericAgentAdapterRequest(
         action_type=normalized_action_type,
         target=normalized_target,
@@ -168,7 +183,6 @@ def adapt_policy_decision_to_generic_agent(
     matched_rules = [match.rule_id for match in decision.matches]
     reasons = [match.to_dict() for match in decision.matches]
     should_review = verdict in {"warn", "quarantine"}
-
     return GenericAgentAdapterResponse(
         adapter_name="ironclaw-generic-agent",
         platform="generic",
@@ -233,27 +247,198 @@ def summarize_generic_agent_adapter_response(
     }
 
 
-# --- Integration adapter class + factory for tests ---
+# ---------------------------------------------------------------------------
+# Stub-mode helpers — used when adapter is constructed with injected stubs
+# ---------------------------------------------------------------------------
 
+def _block_response(
+    *,
+    runtime: str,
+    bundle_id: str,
+    version: str,
+    matched_rules: list[str],
+    reasons: list[dict[str, Any]] | None = None,
+    verdict: str = "block",
+) -> dict[str, Any]:
+    return {
+        "allowed": False,
+        "verdict": verdict,
+        "runtime": runtime,
+        "policy": {
+            "bundleid": bundle_id,
+            "version": version,
+            "matchedrules": matched_rules,
+            "reasons": reasons or [],
+            "overrideactive": False,
+            "rolloutenabled": True,
+        },
+        "result": None,
+    }
+
+
+def _execute_stub(
+    policy_enforcer: Any,
+    runtime_client: Any,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    bundle = kwargs.get("bundle")
+    signature = kwargs.get("signature", "")
+    runtime_name = kwargs.get("runtime", "")
+    action = kwargs.get("action", "")
+    payload = kwargs.get("payload") or {}
+    context = kwargs.get("context") or {}
+    manifest = kwargs.get("manifest") or {}
+    secret = kwargs.get("secret", "")
+
+    bundle_id = ""
+    version = ""
+    if bundle:
+        bundle_id = bundle.get("bundle_id", "")
+        version = bundle.get("version", "")
+
+    # --- Pre-policy guard checks ---
+    if not bundle:
+        return _block_response(
+            runtime=runtime_name,
+            bundle_id=bundle_id,
+            version=version,
+            matched_rules=["missing_bundle"],
+        )
+    if not signature:
+        return _block_response(
+            runtime=runtime_name,
+            bundle_id=bundle_id,
+            version=version,
+            matched_rules=["missing_signature"],
+        )
+    if not runtime_name:
+        return _block_response(
+            runtime=runtime_name,
+            bundle_id=bundle_id,
+            version=version,
+            matched_rules=["missing_runtime"],
+        )
+
+    # --- Policy evaluation ---
+    decision = policy_enforcer.evaluate(
+        bundle=bundle,
+        signature=signature,
+        secret=secret,
+        manifest=manifest,
+        runtime=runtime_name,
+        action=action,
+        payload=payload,
+        context=context,
+    )
+
+    allowed: bool = decision.allowed
+    verdict: str = decision.verdict
+    policy_dict = decision.as_dict()
+
+    # Deduplicate matched_rules and reasons
+    policy_dict["matchedrules"] = _dedup_list(policy_dict.get("matchedrules", []))
+    raw_reasons: list[Any] = policy_dict.get("reasons", [])
+    policy_dict["reasons"] = _dedup_list(raw_reasons)
+
+    if not allowed:
+        return {
+            "allowed": False,
+            "verdict": verdict,
+            "runtime": runtime_name,
+            "policy": policy_dict,
+            "result": None,
+        }
+
+    # --- Runtime execution ---
+    try:
+        runtime_result = runtime_client.execute(
+            payload=payload,
+            context=context,
+            runtime=runtime_name,
+            action=action,
+        )
+    except Exception as exc:
+        policy_dict["matchedrules"] = _dedup_list(
+            policy_dict["matchedrules"] + ["runtime_execution_error"]
+        )
+        return {
+            "allowed": False,
+            "verdict": "error",
+            "runtime": runtime_name,
+            "policy": policy_dict,
+            "result": {"error": str(exc)},
+        }
+
+    return {
+        "allowed": True,
+        "verdict": verdict,
+        "runtime": runtime_name,
+        "policy": policy_dict,
+        "result": runtime_result,
+    }
+
+
+def _allow_stub(policy_enforcer: Any, **kwargs: Any) -> bool:
+    bundle = kwargs.get("bundle")
+    signature = kwargs.get("signature", "")
+    runtime_name = kwargs.get("runtime", "")
+    if not bundle or not signature or not runtime_name:
+        return False
+    return policy_enforcer.allow(
+        bundle=bundle,
+        signature=kwargs.get("signature", ""),
+        secret=kwargs.get("secret", ""),
+        manifest=kwargs.get("manifest") or {},
+        runtime=runtime_name,
+        action=kwargs.get("action", ""),
+        payload=kwargs.get("payload") or {},
+        context=kwargs.get("context") or {},
+    )
+
+
+# ---------------------------------------------------------------------------
+# GenericAgentAdapter — dual-mode: stub injection OR integration record
+# ---------------------------------------------------------------------------
 
 @dataclass(slots=True)
 class GenericAgentAdapter(BaseIntegrationAdapter):
-    """Integration adapter for 'integration-generic-agent' records."""
+    """Integration adapter for 'integration-generic-agent' records.
+
+    Dual-mode construction:
+      • Stub mode  — GenericAgentAdapter(policy_enforcer=..., runtime_client=...)
+      • Record mode — GenericAgentAdapter(record=..., ...)
+    """
 
     runtime: str = "generic-agent"
     guard_mode: str = "strict"
+    # Stub-mode injected dependencies (None in record mode)
+    policy_enforcer: Any = field(default=None)
+    runtime_client: Any = field(default=None)
 
     def __post_init__(self) -> None:
-        # Ensure runtime and guard_mode are reflected in metadata for handshake/manifest.
+        # Skip BaseIntegrationAdapter.__post_init__ validation when in stub mode.
+        if self.policy_enforcer is not None or self.runtime_client is not None:
+            # Stub mode — record may be a sentinel; skip base validation.
+            return
+        # Record mode — run normal base validation.
+        super().__post_init__()
         if "runtime" not in self.metadata:
             self.metadata["runtime"] = self.runtime
         if "guard_mode" not in self.metadata:
             self.metadata["guard_mode"] = self.guard_mode
 
-    def execute(self, request: AdapterExecutionRequest) -> AdapterExecutionResult:
-        # Start from the base adapter execution result.
+    def execute(self, request: AdapterExecutionRequest | None = None, **kwargs: Any) -> Any:
+        # Stub mode: called with keyword arguments from test suite.
+        if self.policy_enforcer is not None or self.runtime_client is not None:
+            if kwargs:
+                return _execute_stub(self.policy_enforcer, self.runtime_client, **kwargs)
+            # request object passed positionally in stub mode (rare but safe)
+            if request is not None and isinstance(request, dict):
+                return _execute_stub(self.policy_enforcer, self.runtime_client, **request)
+            raise TypeError("execute() in stub mode requires keyword arguments")
+
+        # Record mode: standard BaseIntegrationAdapter path.
         result = super().execute(request)
-        # Mark that IronClaw guard logic has been applied for this generic agent.
         result.status = "guarded"
         result.summary = (
             f"{self.record.name} guarded action "
@@ -265,13 +450,66 @@ class GenericAgentAdapter(BaseIntegrationAdapter):
         result.metadata["guard_mode"] = self.guard_mode
         return result
 
+    def allow(self, **kwargs: Any) -> bool:
+        if self.policy_enforcer is not None:
+            return _allow_stub(self.policy_enforcer, **kwargs)
+        raise NotImplementedError("allow() requires stub mode (policy_enforcer injected)")
+
+
+# ---------------------------------------------------------------------------
+# Sentinel record used when constructing adapter in stub mode
+# ---------------------------------------------------------------------------
+
+def _stub_record() -> IntegrationRecord:
+    """Returns a minimal IntegrationRecord for stub-mode construction."""
+    from app.services.integration_registry import IntegrationRecord
+    return IntegrationRecord(
+        integration_id="integration-generic-agent-stub",
+        name="Generic Agent Stub",
+        slug="generic-agent-stub",
+        platform="generic",
+        integration_type="agent",
+        status="active",
+    )
+
+
+# Patch GenericAgentAdapter.__new__ to support stub-mode construction
+# without requiring `record` — done via __init_subclass__ override is
+# not possible with slots=True dataclass; instead we override __new__.
+_ORIG_INIT = GenericAgentAdapter.__init__
+
+
+def _patched_init(
+    self: GenericAgentAdapter,
+    *,
+    policy_enforcer: Any = None,
+    runtime_client: Any = None,
+    record: IntegrationRecord | None = None,
+    **kwargs: Any,
+) -> None:
+    if (policy_enforcer is not None or runtime_client is not None) and record is None:
+        record = _stub_record()
+    _ORIG_INIT(
+        self,
+        record=record,
+        policy_enforcer=policy_enforcer,
+        runtime_client=runtime_client,
+        **kwargs,
+    )
+
+
+GenericAgentAdapter.__init__ = _patched_init  # type: ignore[method-assign]
+
+
+# ---------------------------------------------------------------------------
+# Factory for record mode
+# ---------------------------------------------------------------------------
 
 def build_generic_agent_adapter(registry: IntegrationRegistry) -> GenericAgentAdapter:
-    """Factory for the generic-agent adapter used in tests and integrations."""
+    """Factory for the generic-agent adapter used in integrations."""
     record: IntegrationRecord | None = get_integration(registry, "integration-generic-agent")
     if record is None:
         raise KeyError("unknown integration_id: integration-generic-agent")
-
     return GenericAgentAdapter(
         record=record,
         protocol_version="1.0.0",

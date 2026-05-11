@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+
 from datetime import UTC, datetime
 from typing import Any
 
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
+
 
 from app.services.integrationinstaller import get_integration_installer
 from app.services.integrationregistry import get_integration_registry
@@ -126,11 +129,63 @@ class PolicyBundleVerificationResponse(BaseModel):
     reason: str
 
 
+# ---------------------------------------------------------------------------
+# Sub-route response models
+# ---------------------------------------------------------------------------
+
+class IntegrationCompatibilityResponse(BaseModel):
+    integration_id: str
+    compatible: bool
+    notes: list[str]
+
+
+class IntegrationSecretsResponse(BaseModel):
+    integration_id: str
+    secrets: list[str]
+
+
+class IntegrationRolloutsResponse(BaseModel):
+    integration_id: str
+    rollouts: list[dict[str, Any]]
+
+
+class IntegrationTelemetryResponse(BaseModel):
+    integration_id: str
+    telemetry: dict[str, Any]
+
+
+class IntegrationHealthResponse(BaseModel):
+    integration_id: str
+    healthy: bool
+    checks: list[dict[str, Any]]
+
+
+class IntegrationLifecycleResponse(BaseModel):
+    integration_id: str
+    lifecycle_state: str
+    events: list[dict[str, Any]]
+
+
+class IntegrationReadinessResponse(BaseModel):
+    integration_id: str
+    ready: bool
+    conditions: list[dict[str, Any]]
+
+
+class IntegrationObservabilityResponse(BaseModel):
+    integration_id: str
+    metrics: dict[str, Any]
+    traces: list[dict[str, Any]]
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
 def _record_slug(record: Any) -> str:
     slug = str(record.metadata.get("slug", "")).strip()
     if slug:
         return slug
-
     platform = str(record.platform).strip().lower()
     if platform == "claude":
         return "claude-code"
@@ -200,23 +255,88 @@ def _find_record(integration_id: str) -> Any | None:
     return None
 
 
-@router.get("", response_model=IntegrationRegistryResponse)
-def read_integrations(
-    platform: str | None = Query(default=None),
-    capability: str | None = Query(default=None),
-) -> IntegrationRegistryResponse:
-    registry = get_integration_registry()
-    items = [
-        item
-        for item in registry.list_integrations()
-        if _matches_platform(item, platform) and _matches_capability(item, capability)
-    ]
-    return IntegrationRegistryResponse(
-        total=len(items),
-        summary=registry.integration_summary(),
-        items=[_serialize_record(item) for item in items],
-    )
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
 
+
+def _installer_payload(integration_id: str) -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "service": "IronClaw-Security",
+        "timestamp": _now(),
+        "integration_id": integration_id,
+    }
+
+
+def _verifier_payload(integration_id: str) -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "service": "IronClaw-Security",
+        "timestamp": _now(),
+        "integration_id": integration_id,
+    }
+
+
+def _require_record(integration_id: str) -> Any:
+    record = _find_record(integration_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="integration not found")
+    return record
+
+
+# ---------------------------------------------------------------------------
+# Installer sub-routes  (before /{integration_id} catch-all)
+# ---------------------------------------------------------------------------
+
+@router.get("/installers", response_model=dict)
+def list_installers() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "service": "IronClaw-Security",
+        "timestamp": _now(),
+        "items": [
+            _installer_payload(_record_slug(r))
+            for r in get_integration_registry().list_integrations()
+        ],
+    }
+
+
+@router.get("/installers/{integration_id}", response_model=dict)
+def get_installer(integration_id: str) -> dict[str, Any]:
+    normalized = integration_id.strip()
+    if not normalized:
+        raise HTTPException(status_code=404, detail="integration not found")
+    return _installer_payload(normalized)
+
+
+# ---------------------------------------------------------------------------
+# Verifier sub-routes  (before /{integration_id} catch-all)
+# ---------------------------------------------------------------------------
+
+@router.get("/verifiers", response_model=dict)
+def list_verifiers() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "service": "IronClaw-Security",
+        "timestamp": _now(),
+        "items": [
+            _verifier_payload(_record_slug(r))
+            for r in get_integration_registry().list_integrations()
+        ],
+    }
+
+
+@router.get("/verifiers/{integration_id}", response_model=dict)
+def get_verifier(integration_id: str) -> dict[str, Any]:
+    normalized = integration_id.strip()
+    if not normalized:
+        raise HTTPException(status_code=404, detail="integration not found")
+    return _verifier_payload(normalized)
+
+
+# ---------------------------------------------------------------------------
+# Summary  (before /{integration_id} catch-all)
+# ---------------------------------------------------------------------------
 
 @router.get("/summary", response_model=IntegrationRegistrySummaryResponse)
 def read_integrations_summary() -> IntegrationRegistrySummaryResponse:
@@ -243,6 +363,137 @@ def read_integrations_summary() -> IntegrationRegistrySummaryResponse:
         one_command_ready_targets=one_command_ready_targets,
     )
 
+
+# ---------------------------------------------------------------------------
+# Registry list  (before /{integration_id} catch-all)
+# ---------------------------------------------------------------------------
+
+@router.get("", response_model=IntegrationRegistryResponse)
+def read_integrations(
+    platform: str | None = Query(default=None),
+    capability: str | None = Query(default=None),
+) -> IntegrationRegistryResponse:
+    registry = get_integration_registry()
+    items = [
+        item
+        for item in registry.list_integrations()
+        if _matches_platform(item, platform) and _matches_capability(item, capability)
+    ]
+    return IntegrationRegistryResponse(
+        total=len(items),
+        summary=registry.integration_summary(),
+        items=[_serialize_record(item) for item in items],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Per-integration detail sub-routes  (before generic catch-all)
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/{integration_id}/compatibility",
+    response_model=IntegrationCompatibilityResponse,
+)
+def get_integration_compatibility(integration_id: str) -> IntegrationCompatibilityResponse:
+    record = _require_record(integration_id)
+    return IntegrationCompatibilityResponse(
+        integration_id=record.integrationid,
+        compatible=record.status in ("active", "available", "ready"),
+        notes=[],
+    )
+
+
+@router.get(
+    "/{integration_id}/secrets",
+    response_model=IntegrationSecretsResponse,
+)
+def get_integration_secrets(integration_id: str) -> IntegrationSecretsResponse:
+    record = _require_record(integration_id)
+    return IntegrationSecretsResponse(
+        integration_id=record.integrationid,
+        secrets=[],
+    )
+
+
+@router.get(
+    "/{integration_id}/rollouts",
+    response_model=IntegrationRolloutsResponse,
+)
+def get_integration_rollouts(integration_id: str) -> IntegrationRolloutsResponse:
+    record = _require_record(integration_id)
+    return IntegrationRolloutsResponse(
+        integration_id=record.integrationid,
+        rollouts=[],
+    )
+
+
+@router.get(
+    "/{integration_id}/telemetry",
+    response_model=IntegrationTelemetryResponse,
+)
+def get_integration_telemetry(integration_id: str) -> IntegrationTelemetryResponse:
+    record = _require_record(integration_id)
+    return IntegrationTelemetryResponse(
+        integration_id=record.integrationid,
+        telemetry={},
+    )
+
+
+@router.get(
+    "/{integration_id}/health",
+    response_model=IntegrationHealthResponse,
+)
+def get_integration_health(integration_id: str) -> IntegrationHealthResponse:
+    record = _require_record(integration_id)
+    return IntegrationHealthResponse(
+        integration_id=record.integrationid,
+        healthy=record.status in ("active", "available", "ready"),
+        checks=[],
+    )
+
+
+@router.get(
+    "/{integration_id}/lifecycle",
+    response_model=IntegrationLifecycleResponse,
+)
+def get_integration_lifecycle(integration_id: str) -> IntegrationLifecycleResponse:
+    record = _require_record(integration_id)
+    return IntegrationLifecycleResponse(
+        integration_id=record.integrationid,
+        lifecycle_state=record.status,
+        events=[],
+    )
+
+
+@router.get(
+    "/{integration_id}/readiness",
+    response_model=IntegrationReadinessResponse,
+)
+def get_integration_readiness(integration_id: str) -> IntegrationReadinessResponse:
+    record = _require_record(integration_id)
+    return IntegrationReadinessResponse(
+        integration_id=record.integrationid,
+        ready=record.status in ("active", "available", "ready"),
+        conditions=[],
+    )
+
+
+@router.get(
+    "/{integration_id}/observability",
+    response_model=IntegrationObservabilityResponse,
+)
+def get_integration_observability(integration_id: str) -> IntegrationObservabilityResponse:
+    record = _require_record(integration_id)
+    return IntegrationObservabilityResponse(
+        integration_id=record.integrationid,
+        metrics={},
+        traces=[],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Per-integration catch-all routes  (must stay LAST)
+# ---------------------------------------------------------------------------
 
 @router.get("/{integration_id}", response_model=IntegrationRecordResponse)
 def read_integration(integration_id: str) -> IntegrationRecordResponse:

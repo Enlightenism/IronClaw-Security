@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
+
 
 from app.adapters.base import (
     AdapterExecutionRequest,
@@ -20,19 +22,24 @@ from app.services.integration_registry import (
     get_integration,
 )
 
+
 AdapterVerdict = Literal["allow", "warn", "quarantine", "block"]
 AdapterExecutionMode = Literal["monitor", "enforce"]
+
 
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+
 def _normalize_text(value: str | None) -> str:
     return (value or "").strip()
 
 
+
 # ---------- Policy-facing adapter request/response ----------
+
 
 
 @dataclass(slots=True)
@@ -53,6 +60,7 @@ class OpenClawAdapterRequest:
     session_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
+
     def to_policy_input(self) -> PolicyInput:
         """
         Convert this request into a PolicyInput for the policy engine.
@@ -70,10 +78,11 @@ class OpenClawAdapterRequest:
             action_type=self.action_type,
             target=self.target,
             content=self.content,
-            client_id=self.client_id,
+            agent_id=self.client_id,
             session_id=self.session_id,
             metadata=merged_metadata,
         )
+
 
     def to_dict(self) -> dict[str, Any]:
         """
@@ -89,6 +98,7 @@ class OpenClawAdapterRequest:
             "session_id": self.session_id,
             "metadata": dict(self.metadata),
         }
+
 
 
 @dataclass(slots=True)
@@ -120,6 +130,7 @@ class OpenClawAdapterResponse:
     request: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
+
     def to_dict(self) -> dict[str, Any]:
         """
         Serialize this response into a JSON-safe dict for logging/telemetry.
@@ -145,6 +156,7 @@ class OpenClawAdapterResponse:
             "request": dict(self.request),
             "metadata": dict(self.metadata),
         }
+
 
 
 def build_openclaw_adapter_request(
@@ -184,6 +196,7 @@ def build_openclaw_adapter_request(
     )
 
 
+
 def adapt_policy_decision_to_openclaw(
     decision: PolicyDecision,
     *,
@@ -195,12 +208,12 @@ def adapt_policy_decision_to_openclaw(
     """
     Map a PolicyDecision into an OpenClawAdapterResponse.
 
-    should_hold is when a decision is anything other than allow so the
+    should_hold is set when verdict is anything other than allow so the
     OpenClaw runtime can pause the workflow until a human reviews.
     """
     verdict: AdapterVerdict = decision.verdict
-    matched_rules = [match.rule_id for match in decision.matches]
-    reasons = [match.to_dict() for match in decision.matches]
+    matched_rules = [match.rule_id for match in decision.matched_rules]
+    reasons = [match.to_dict() for match in decision.matched_rules]
     should_hold = verdict in {"warn", "quarantine", "block"}
 
     return OpenClawAdapterResponse(
@@ -223,6 +236,7 @@ def adapt_policy_decision_to_openclaw(
         request=request.to_dict() if request else {},
         metadata=dict(metadata or {}),
     )
+
 
 
 def evaluate_openclaw_request(
@@ -251,6 +265,7 @@ def evaluate_openclaw_request(
     )
 
 
+
 def summarize_openclaw_adapter_response(
     response: OpenClawAdapterResponse,
 ) -> dict[str, Any]:
@@ -273,7 +288,9 @@ def summarize_openclaw_adapter_response(
     }
 
 
+
 # ---------- Integration-facing OpenClaw adapter class ----------
+
 
 
 @dataclass(slots=True)
@@ -289,29 +306,25 @@ class OpenClawAdapter(BaseIntegrationAdapter):
     workflow_mode: str = "builder-guard"
     metadata: dict[str, Any] = field(default_factory=dict)
 
+
     def __post_init__(self) -> None:
-        # Ensure core metadata keys are present and stable for handshakes/manifests.
         self.metadata.setdefault("integration_id", self.record.integration_id)
         self.metadata.setdefault("runtime", self.runtime)
         self.metadata.setdefault("workflow_mode", self.workflow_mode)
 
+
     def execute(self, request: AdapterExecutionRequest) -> AdapterExecutionResult:
         """
         Execute a guarded OpenClaw workflow action.
-
-        For now we delegate to the BaseIntegrationAdapter for any shared plumbing
-        and then mark the result as "guarded" with OpenClaw-specific metadata.
         """
         result = super().execute(request)
 
-        # Mark this as a guarded workflow execution for dashboards/telemetry.
         result.status = "guarded"
         result.summary = (
             f"{self.record.name} guarded workflow action "
             f"'{request.action_type}' for target '{request.target}'."
         )
 
-        # Attach guard-specific output details and a minimal echo of the request.
         result.output.setdefault("guard_applied", True)
         result.output.setdefault("execution_mode", "workflow-gated")
         result.output.setdefault(
@@ -323,18 +336,16 @@ class OpenClawAdapter(BaseIntegrationAdapter):
             },
         )
 
-        # Propagate runtime metadata so tests and UI can assert on it.
         result.metadata.setdefault("runtime", self.runtime)
         result.metadata.setdefault("workflow_mode", self.workflow_mode)
 
         return result
 
 
+
 def build_openclaw_adapter(registry: IntegrationRegistry) -> OpenClawAdapter:
     """
     Factory to construct an OpenClawAdapter from the integration registry.
-
-    Expected to back tests in tests/test_openclaw_adapter.py.
     """
     record = get_integration(registry, "integration-openclaw")
     if record is None:
