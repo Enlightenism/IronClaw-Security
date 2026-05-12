@@ -41,13 +41,15 @@ classifiers = [
 dependencies = [
   "fastapi>=0.115,<0.136",
   "uvicorn[standard]>=0.30,<0.45",
-  "httpx>=0.27,<0.29",
+  "httpx>=0.27,<0.28",
   "pydantic>=2.7,<3.0",
-  "python-dotenv>=1.0,<2.0",
-  "requests>=2.32,<3.0"
+  "python-dotenv>=1.0,<2.0"
 ]
 
 [project.optional-dependencies]
+supabase = [
+  "requests>=2.32,<3.0"
+]
 dev = [
   "black>=24.0,<26.0",
   "build>=1.2,<2.0",
@@ -61,14 +63,14 @@ docker = [
   "uvicorn[standard]>=0.30,<0.45"
 ]
 skill = [
-  "httpx>=0.27,<0.29",
+  "httpx>=0.27,<0.28",
   "python-dotenv>=1.0,<2.0"
 ]
 
 [project.urls]
-Homepage = "https://example.com/ironclaw-security"
-Repository = "https://example.com/ironclaw-security.git"
-Documentation = "https://example.com/ironclaw-security/docs"
+Homepage = "https://github.com/Enlightenism/IronClaw-Security"
+Repository = "https://github.com/Enlightenism/IronClaw-Security.git"
+Documentation = "https://github.com/Enlightenism/IronClaw-Security#readme"
 
 [project.scripts]
 ironclaw-skill = "ironclawskill.cli:main"
@@ -103,6 +105,11 @@ minversion = "8.0"
 testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
+addopts = "-m 'not integration'"
+filterwarnings = [
+  "ignore::DeprecationWarning",
+  "ignore::PendingDeprecationWarning"
+]
 markers = [
   "integration: marks integration tests that touch live services or scripts"
 ]
