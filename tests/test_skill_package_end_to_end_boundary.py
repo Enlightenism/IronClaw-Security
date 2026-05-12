@@ -8,7 +8,6 @@ import pytest
 import ironclaw_skill  # public top-level package
 
 # ── Public sub-module imports (the only layer external consumers may use) ──────
-
 from ironclaw_skill.contracts import (
     SkillActionDecisionRequest,
     SkillActionInput,
@@ -31,7 +30,6 @@ from ironclaw_skill.router import (
     IronClawSkillRouterError,
     route_skill_request,
 )
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Helpers / fixtures

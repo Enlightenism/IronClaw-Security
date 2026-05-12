@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List
 
 
 class ReadinessLevel(str, Enum):
@@ -32,7 +31,7 @@ class ReadinessFinding:
     level: ReadinessLevel
     message: str
 
-    def to_dict(self) -> Dict[str, str]:
+    def to_dict(self) -> dict[str, str]:
         return {
             "key": self.key,
             "level": self.level.value,
@@ -45,10 +44,10 @@ class DeploymentReadinessResult:
     level: ReadinessLevel
     ready: bool
     score: float
-    findings: List[ReadinessFinding] = field(default_factory=list)
-    next_actions: List[str] = field(default_factory=list)
+    findings: list[ReadinessFinding] = field(default_factory=list)
+    next_actions: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, object]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "level": self.level.value,
             "ready": self.ready,
@@ -61,8 +60,8 @@ class DeploymentReadinessResult:
 def evaluate_deployment_readiness(
     readiness_input: DeploymentReadinessInput,
 ) -> DeploymentReadinessResult:
-    findings: List[ReadinessFinding] = []
-    next_actions: List[str] = []
+    findings: list[ReadinessFinding] = []
+    next_actions: list[str] = []
 
     findings.extend(_evaluate_compatibility(readiness_input))
     findings.extend(_evaluate_telemetry(readiness_input))
@@ -93,13 +92,13 @@ def evaluate_deployment_readiness(
 
 def summarize_deployment_readiness(
     result: DeploymentReadinessResult,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     return result.to_dict()
 
 
 def _evaluate_compatibility(
     readiness_input: DeploymentReadinessInput,
-) -> List[ReadinessFinding]:
+) -> list[ReadinessFinding]:
     state = readiness_input.compatibility_state
     if state == "unsupported":
         return [
@@ -128,7 +127,7 @@ def _evaluate_compatibility(
 
 def _evaluate_telemetry(
     readiness_input: DeploymentReadinessInput,
-) -> List[ReadinessFinding]:
+) -> list[ReadinessFinding]:
     state = readiness_input.telemetry_state
     if state == "unsupported":
         return [
@@ -157,7 +156,7 @@ def _evaluate_telemetry(
 
 def _evaluate_lifecycle(
     readiness_input: DeploymentReadinessInput,
-) -> List[ReadinessFinding]:
+) -> list[ReadinessFinding]:
     state = readiness_input.lifecycle_state
     if state == "blocked":
         return [
@@ -202,7 +201,7 @@ def _evaluate_lifecycle(
 
 def _evaluate_rollout(
     readiness_input: DeploymentReadinessInput,
-) -> List[ReadinessFinding]:
+) -> list[ReadinessFinding]:
     recommendation = readiness_input.rollout_recommendation
     if recommendation == "hold":
         return [
@@ -239,8 +238,8 @@ def _evaluate_rollout(
 
 def _evaluate_controls(
     readiness_input: DeploymentReadinessInput,
-) -> List[ReadinessFinding]:
-    findings: List[ReadinessFinding] = []
+) -> list[ReadinessFinding]:
+    findings: list[ReadinessFinding] = []
 
     if readiness_input.has_open_blockers:
         findings.append(
@@ -330,7 +329,7 @@ def _evaluate_controls(
     return findings
 
 
-def _derive_level(findings: List[ReadinessFinding]) -> ReadinessLevel:
+def _derive_level(findings: list[ReadinessFinding]) -> ReadinessLevel:
     if any(finding.level == ReadinessLevel.FAIL for finding in findings):
         return ReadinessLevel.FAIL
     if any(finding.level == ReadinessLevel.WARN for finding in findings):
@@ -340,7 +339,7 @@ def _derive_level(findings: List[ReadinessFinding]) -> ReadinessLevel:
 
 def _calculate_readiness_score(
     readiness_input: DeploymentReadinessInput,
-    findings: List[ReadinessFinding],
+    findings: list[ReadinessFinding],
 ) -> float:
     score = min(max(readiness_input.risk_score, 0.0), 100.0)
 
@@ -353,9 +352,9 @@ def _calculate_readiness_score(
     return max(0.0, min(100.0, score))
 
 
-def _deduplicate(items: List[str]) -> List[str]:
+def _deduplicate(items: list[str]) -> list[str]:
     seen = set()
-    result: List[str] = []
+    result: list[str] = []
     for item in items:
         if item in seen:
             continue

@@ -14,8 +14,7 @@ from app.orchestrator.coordination_state import (
 )
 from app.orchestrator.execution_plan import ExecutionPlan
 from app.orchestrator.orchestrator import IronClawOrchestrator
-from app.orchestrator.task_router import RoutedTask, RoutedTaskResult, route_and_plan
-
+from app.orchestrator.task_router import RoutedTaskResult, route_and_plan
 
 RuntimeSessionStatus = str
 

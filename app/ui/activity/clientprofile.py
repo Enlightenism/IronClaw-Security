@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -21,7 +20,7 @@ class ClientExecutionItem(BaseModel):
     executionstate: str
     responsestatus: str
     policyverdict: str
-    reviewitemid: Optional[str] = None
+    reviewitemid: str | None = None
 
 
 class ClientProfileResponse(BaseModel):
@@ -37,14 +36,14 @@ class ClientProfileResponse(BaseModel):
 
 
 def _utc_iso(year: int, month: int, day: int, hour: int, minute: int = 0) -> str:
-    return datetime(year, month, day, hour, minute, 0, tzinfo=timezone.utc).isoformat()
+    return datetime(year, month, day, hour, minute, 0, tzinfo=UTC).isoformat()
 
 
 def _sample_client_profiles() -> dict[str, ClientProfileResponse]:
     return {
         "client-alpha": ClientProfileResponse(
             clientid="client-alpha",
-            generatedat=datetime.now(timezone.utc).isoformat(),
+            generatedat=datetime.now(UTC).isoformat(),
             totalexecutions=3,
             average_riskscore=32.67,
             highest_riskscore=74,
@@ -92,7 +91,7 @@ def _sample_client_profiles() -> dict[str, ClientProfileResponse]:
         ),
         "client-beta": ClientProfileResponse(
             clientid="client-beta",
-            generatedat=datetime.now(timezone.utc).isoformat(),
+            generatedat=datetime.now(UTC).isoformat(),
             totalexecutions=2,
             average_riskscore=74.0,
             highest_riskscore=96,

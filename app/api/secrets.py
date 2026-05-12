@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 
 from app.services.secretservice import build_secret_service
 
-
 router = APIRouter(prefix="/api/secrets", tags=["secrets"])
 
 

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Callable, Mapping
+from typing import Any
 from uuid import uuid4
 
 
@@ -23,7 +24,7 @@ class RuntimeSessionEvent:
     event_id: str
     kind: str
     message: str
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -56,8 +57,8 @@ class RuntimeSession:
     tags: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     events: list[RuntimeSessionEvent] = field(default_factory=list)
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     completed_at: str | None = None
 
     def add_event(self, kind: str, message: str, metadata: Mapping[str, Any] | None = None) -> RuntimeSessionEvent:
@@ -68,7 +69,7 @@ class RuntimeSession:
             metadata=dict(metadata or {}),
         )
         self.events.append(event)
-        self.updated_at = datetime.now(timezone.utc).isoformat()
+        self.updated_at = datetime.now(UTC).isoformat()
         return event
 
     def activate(self) -> None:
@@ -99,7 +100,7 @@ class RuntimeSession:
 
     def complete(self, reason: str = "Session completed.") -> None:
         self.status = RuntimeSessionStatus.COMPLETED
-        self.completed_at = datetime.now(timezone.utc).isoformat()
+        self.completed_at = datetime.now(UTC).isoformat()
         self.add_event("completed", reason)
 
     def attach_checkpoint(self, checkpoint_id: str) -> None:
@@ -323,7 +324,7 @@ class RuntimeSessionManager:
                 {
                     "event": event_name,
                     "session": session.to_dict(),
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             )
 

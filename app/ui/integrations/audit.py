@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter
@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 
 from app.dependencies import get_integration_registry
 from app.services.integration_registry import list_integrations
-
 
 router = APIRouter(
     prefix="/ui/integrations",
@@ -75,7 +74,7 @@ def _build_audit_entries(*, requested_by: str = "ui-audit") -> list[IntegrationA
             getattr(
                 record,
                 "updated_at",
-                getattr(record, "created_at", datetime.now(timezone.utc).isoformat()),
+                getattr(record, "created_at", datetime.now(UTC).isoformat()),
             )
         )
 
@@ -114,7 +113,7 @@ def _build_audit_entries(*, requested_by: str = "ui-audit") -> list[IntegrationA
 def get_integration_audit() -> IntegrationAuditResponse:
     entries = _build_audit_entries()
     return IntegrationAuditResponse(
-        generated_at=datetime.now(timezone.utc).isoformat(),
+        generated_at=datetime.now(UTC).isoformat(),
         total=len(entries),
         items=[IntegrationAuditEventView(**entry.to_dict()) for entry in entries],
     )

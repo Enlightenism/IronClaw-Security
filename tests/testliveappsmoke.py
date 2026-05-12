@@ -6,7 +6,6 @@ from typing import Final
 import httpx
 import pytest
 
-
 DEFAULT_BASE_URL: Final[str] = "http://127.0.0.1:8000"
 REQUEST_TIMEOUT_SECONDS: Final[float] = 5.0
 

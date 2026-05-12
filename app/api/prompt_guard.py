@@ -9,7 +9,6 @@ from app.services.prompt_service import (
     analyze_prompt_bundle,
 )
 
-
 router = APIRouter()
 
 

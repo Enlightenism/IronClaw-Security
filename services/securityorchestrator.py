@@ -1,15 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Mapping
+from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from orchestrator.orchestrator import (
     OrchestrationRequest,
-    OrchestrationResult,
     Orchestrator,
-    orchestrate_request,
 )
 
 
@@ -21,11 +20,11 @@ class SecurityOrchestrationRecord:
     outcome: str
     allowed: bool
     orchestration: dict[str, Any]
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     updated_at: str | None = None
 
-    def finalize(self) -> "SecurityOrchestrationRecord":
-        self.updated_at = datetime.now(timezone.utc).isoformat()
+    def finalize(self) -> SecurityOrchestrationRecord:
+        self.updated_at = datetime.now(UTC).isoformat()
         return self
 
     def to_dict(self) -> dict[str, Any]:

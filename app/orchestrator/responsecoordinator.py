@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from app.orchestrator.reviewqueue import ReviewQueue, build_review_queue
 from app.orchestrator.reviewstatestore import ReviewStateStore, build_review_state_store

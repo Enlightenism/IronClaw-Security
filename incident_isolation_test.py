@@ -1,4 +1,4 @@
-import importlib, sys
+import importlib
 
 mod_a = importlib.import_module('app.services.incident_store')
 mod_b = importlib.import_module('app.services.incidentstore')

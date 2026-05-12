@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Iterable
 import json
+from collections.abc import Iterable
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 from app.orchestrator.secureruntimepipeline import (
     SecureRuntimeDecision,
@@ -229,7 +230,7 @@ class SecurityOrchestrator:
         return f"{self.eventprefix}-{actorid or 'unknown'}-{sessionid}-{actiontype}-{compact_ts}"
 
     def _timestamp(self) -> str:
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(UTC).isoformat()
 
 
 def initializesecurityorchestrator(

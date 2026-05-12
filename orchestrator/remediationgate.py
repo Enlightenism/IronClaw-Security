@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any
 from uuid import uuid4
 
 
@@ -75,7 +76,7 @@ class GateDecision:
     redaction_required: bool = False
     sandbox_required: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -324,7 +325,7 @@ class RemediationGate:
                 {
                     "event": "remediation.gate.evaluated",
                     "decision": decision.to_dict(),
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             )
 

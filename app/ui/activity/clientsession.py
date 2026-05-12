@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -22,7 +22,7 @@ class ActivityExecutionItem(BaseModel):
     executionstate: str
     responsestatus: str
     policyverdict: str
-    reviewitemid: Optional[str] = None
+    reviewitemid: str | None = None
 
 
 class ClientActivitySummary(BaseModel):
@@ -37,7 +37,7 @@ class ClientActivitySummary(BaseModel):
 
 class SessionActivitySummary(BaseModel):
     sessionid: str
-    clientid: Optional[str] = None
+    clientid: str | None = None
     totalexecutions: int
     average_riskscore: float
     highest_riskscore: int
@@ -53,7 +53,7 @@ class ClientSessionActivityResponse(BaseModel):
 
 
 def _utc_iso(year: int, month: int, day: int, hour: int, minute: int = 0) -> str:
-    return datetime(year, month, day, hour, minute, 0, tzinfo=timezone.utc).isoformat()
+    return datetime(year, month, day, hour, minute, 0, tzinfo=UTC).isoformat()
 
 
 def _safe_str(value: Any, default: str) -> str:
@@ -156,7 +156,7 @@ def _sample_activity_records() -> list[dict[str, Any]]:
 def _to_execution_item(record: dict[str, Any]) -> ActivityExecutionItem:
     return ActivityExecutionItem(
         executionid=_safe_str(record.get("executionid"), "unknown-execution"),
-        timestamp=_safe_str(record.get("timestamp"), datetime.now(timezone.utc).isoformat()),
+        timestamp=_safe_str(record.get("timestamp"), datetime.now(UTC).isoformat()),
         actiontype=_safe_str(record.get("actiontype"), "unknown"),
         target=_safe_str(record.get("target"), "unknown"),
         riskscore=_safe_int(record.get("riskscore"), 0),
@@ -250,7 +250,7 @@ def _build_session_summaries(records: list[dict[str, Any]]) -> list[SessionActiv
 def get_client_session_activity() -> ClientSessionActivityResponse:
     records = _sample_activity_records()
     return ClientSessionActivityResponse(
-        generatedat=datetime.now(timezone.utc).isoformat(),
+        generatedat=datetime.now(UTC).isoformat(),
         clients=_build_client_summaries(records),
         sessions=_build_session_summaries(records),
     )

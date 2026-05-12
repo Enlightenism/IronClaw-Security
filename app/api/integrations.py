@@ -1,18 +1,14 @@
 from __future__ import annotations
 
-
 from datetime import UTC, datetime
 from typing import Any
-
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-
 from app.services.integrationinstaller import get_integration_installer
 from app.services.integrationregistry import get_integration_registry
 from app.services.integrationverifier import get_integration_verifier
-
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 

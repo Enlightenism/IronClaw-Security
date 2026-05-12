@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter
@@ -14,7 +14,6 @@ from app.ui.groq.prompt_guard_review_queue_summary import build_prompt_guard_rev
 from app.ui.groq.prompt_guard_risk_posture_summary import build_prompt_guard_risk_posture_summary
 from app.ui.groq.prompt_guard_signals_summary import build_prompt_guard_signals_summary
 
-
 router = APIRouter(
     prefix="/ui/groq",
     tags=["groq-prompt-guard-status-board-summary"],
@@ -22,7 +21,7 @@ router = APIRouter(
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 BoardStatus = Literal["healthy", "warning", "degraded", "critical"]

@@ -4,7 +4,6 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-
 DEFAULT_REVIEW_STATUS = "pending"
 DEFAULT_REVIEW_PRIORITY = "normal"
 ESCALATED_REVIEW_PRIORITY = "high"

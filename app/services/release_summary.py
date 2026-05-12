@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field, is_dataclass
-from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -15,8 +16,8 @@ class ReleaseSummaryInput:
     readiness_level: str
     risk_score: float
     ready: bool
-    reasons: List[str] = field(default_factory=list)
-    next_actions: List[str] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
+    next_actions: list[str] = field(default_factory=list)
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -31,19 +32,19 @@ class ReleaseSummary:
     readiness_level: str
     risk_score: float
     ready: bool
-    reasons: List[str] = field(default_factory=list)
-    next_actions: List[str] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
+    next_actions: list[str] = field(default_factory=list)
     generated_at: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return _normalize_value(asdict(self))
 
 
 def build_release_summary(
     summary_input: ReleaseSummaryInput,
 ) -> ReleaseSummary:
-    generated_at = datetime.now(timezone.utc).isoformat()
+    generated_at = datetime.now(UTC).isoformat()
     release_status = _derive_release_status(summary_input)
 
     return ReleaseSummary(
@@ -65,7 +66,7 @@ def build_release_summary(
 
 def summarize_release_summary(
     release_summary: ReleaseSummary,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     return release_summary.to_dict()
 
 
@@ -77,7 +78,7 @@ def build_release_summary_from_parts(
     compatibility_state: str,
     telemetry_state: str,
     lifecycle_state: str,
-    metadata: Optional[Mapping[str, Any]] = None,
+    metadata: Mapping[str, Any] | None = None,
 ) -> ReleaseSummary:
     rollout_recommendation = _read_attr(
         rollout_decision,
@@ -154,8 +155,8 @@ def _derive_release_status(summary_input: ReleaseSummaryInput) -> str:
     return "pending"
 
 
-def _extract_finding_messages(findings: Iterable[Any]) -> List[str]:
-    messages: List[str] = []
+def _extract_finding_messages(findings: Iterable[Any]) -> list[str]:
+    messages: list[str] = []
     for finding in findings:
         message = _read_attr(finding, "message", default=None)
         if message:
@@ -163,8 +164,8 @@ def _extract_finding_messages(findings: Iterable[Any]) -> List[str]:
     return messages
 
 
-def _coerce_string_list(values: Iterable[Any]) -> List[str]:
-    result: List[str] = []
+def _coerce_string_list(values: Iterable[Any]) -> list[str]:
+    result: list[str] = []
     for value in values:
         if value is None:
             continue
@@ -178,9 +179,9 @@ def _read_attr(obj: Any, name: str, default: Any = None) -> Any:
     return getattr(obj, name, default)
 
 
-def _deduplicate(values: Iterable[str]) -> List[str]:
+def _deduplicate(values: Iterable[str]) -> list[str]:
     seen = set()
-    result: List[str] = []
+    result: list[str] = []
     for value in values:
         if value in seen:
             continue

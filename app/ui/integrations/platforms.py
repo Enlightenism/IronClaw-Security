@@ -11,7 +11,6 @@ from app.services.integration_registry import (
 from app.services.platform_capabilities import (
     PlatformProfile,
     default_platform_profiles,
-    get_platform_profile,
     list_platform_profiles,
     summarize_platform_profile,
 )

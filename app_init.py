@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import Depends, FastAPI
 from pydantic import BaseModel, Field
@@ -23,7 +23,7 @@ class HealthResponse(BaseModel):
 class ReadinessComponent(BaseModel):
     name: str
     status: str
-    details: Dict[str, Any] = Field(default_factory=dict)
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class ReadinessResponse(BaseModel):
@@ -60,7 +60,7 @@ def _build_readiness_checks(settings: Settings, app: FastAPI) -> list[ReadinessC
         )
     )
 
-    scanner_service: Optional[Any] = getattr(app.state, "scanner_service", None)
+    scanner_service: Any | None = getattr(app.state, "scanner_service", None)
     checks.append(
         ReadinessComponent(
             name="scanner_service",
@@ -71,7 +71,7 @@ def _build_readiness_checks(settings: Settings, app: FastAPI) -> list[ReadinessC
         )
     )
 
-    history_service: Optional[Any] = getattr(app.state, "history_service", None)
+    history_service: Any | None = getattr(app.state, "history_service", None)
     checks.append(
         ReadinessComponent(
             name="history_service",

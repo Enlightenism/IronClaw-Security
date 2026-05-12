@@ -4,7 +4,6 @@ from fastapi import APIRouter
 
 from app.ui.integrationsettings import get_ui_integration_settings_page
 
-
 router = APIRouter(prefix="/ui/integrations", tags=["ui-integrations"])
 
 

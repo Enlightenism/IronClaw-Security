@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[1]
 APP_DIR = ROOT / "app"
 MIGRATIONS_DIR = ROOT / "migrations"

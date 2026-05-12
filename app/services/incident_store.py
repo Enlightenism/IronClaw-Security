@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from threading import Lock
 from typing import Any, Literal
 from uuid import uuid4
-
 
 IncidentSeverity = Literal["low", "medium", "high", "critical"]
 IncidentStatus = Literal["open", "triaged", "contained", "resolved", "closed", "investigating", "inprogress"]
@@ -17,7 +16,7 @@ _ALLOWED_SOURCES: frozenset[str] = frozenset({"scan", "guard", "sandbox", "revie
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _norm_severity(value: str | None, default: str = "medium") -> str:

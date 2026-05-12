@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.auth import API_KEY_HEADER_NAME
 from app.main import create_app
 
 

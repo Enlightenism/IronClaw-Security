@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-
 from typing import Annotated, Any, Literal
 
-
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
 
 
 def _normalize_optional_text(value: str | None) -> str | None:
@@ -96,7 +93,7 @@ class SkillPromptBundleInput(SkillBaseModel):
         return _normalize_optional_text(value)
 
     @model_validator(mode="after")
-    def _require_at_least_one_field(self) -> "SkillPromptBundleInput":
+    def _require_at_least_one_field(self) -> SkillPromptBundleInput:
         if not any(
             (
                 self.user_prompt,
@@ -129,7 +126,7 @@ class SkillScanInput(SkillBaseModel):
         return stripped
 
     @model_validator(mode="after")
-    def _validate_scan_shape(self) -> "SkillScanInput":
+    def _validate_scan_shape(self) -> SkillScanInput:
         if self.target_type == "prompt_bundle":
             if self.bundle is None:
                 raise ValueError("bundle is required when target_type=prompt_bundle")
@@ -245,7 +242,7 @@ class SkillResponsePayload(SkillBaseModel):
         return _normalize_required_text(value)
 
     @model_validator(mode="after")
-    def _sync_allowed_field(self) -> "SkillResponsePayload":
+    def _sync_allowed_field(self) -> SkillResponsePayload:
         if self.allowed is None:
             self.allowed = self.verdict == "allow"
         return self

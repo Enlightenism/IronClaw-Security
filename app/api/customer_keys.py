@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-
 from datetime import UTC, datetime
 from typing import Any
 
-
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
-
 
 from app.core.apikeys import (
     APIKeyRecord,
@@ -16,8 +13,6 @@ from app.core.apikeys import (
     mask_api_key,
 )
 from app.core.auth import require_api_key
-
-
 
 router = APIRouter(
     prefix="/customer-keys",

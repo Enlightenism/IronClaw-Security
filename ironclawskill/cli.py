@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 from typing import Any, Final, Literal
 
-from .adapterclaude import adaptclauderesponse, adaptclauderequest
-from .adapteropenclaw import adaptopenclawresponse, adaptopenclawrequest
+from .adapterclaude import adaptclauderequest, adaptclauderesponse
+from .adapteropenclaw import adaptopenclawrequest, adaptopenclawresponse
 from .billing import BillingResult, chargeunits, createbillinghook
 from .config import IronClawSkillConfig, loadconfig
 from .contracts import SkillExecutionRequest, SkillResponseEnvelope

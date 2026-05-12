@@ -2,17 +2,12 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
-import anyio
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-
-from app.api.routes.billing import PACKAGE_CATALOG  # If you need pricing context
-from app.core.unit_wallet import get_unit_wallet_registry
-
 
 router = APIRouter(prefix="/claude-guard-router", tags=["claude-guard-router"])
 
@@ -55,7 +50,7 @@ class GuardProxyResponse(BaseModel):
 
 class _GuardHttpClient:
     def __init__(self) -> None:
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
 
     async def startup(self) -> None:
         if self._client is None:

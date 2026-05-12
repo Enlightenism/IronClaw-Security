@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
@@ -85,7 +85,7 @@ def _health_state(*, status: str, verified: bool, configurationstate: str) -> st
 
 
 def get_integration_settings() -> IntegrationSettingsResponse:
-    generated_at = datetime.now(timezone.utc).isoformat()
+    generated_at = datetime.now(UTC).isoformat()
 
     providers = [
         IntegrationProviderView(

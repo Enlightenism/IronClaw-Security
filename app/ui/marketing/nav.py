@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-
 
 router = APIRouter(
     prefix="/ui/marketing",
@@ -66,7 +65,7 @@ class MarketingNavPageResponse(BaseModel):
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @router.get("/nav", response_model=MarketingNavPageResponse)

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Callable, Iterable, Mapping
+from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from orchestrator.policyengine import (
@@ -17,7 +18,7 @@ from orchestrator.policyengine import (
 @dataclass(slots=True)
 class EnforcementContext:
     request_id: str
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     source: str | None = None
     actor_id: str | None = None
     session_id: str | None = None
@@ -36,7 +37,7 @@ class EnforcementContext:
         organization_id: str | None = None,
         trace_id: str | None = None,
         metadata: Mapping[str, Any] | None = None,
-    ) -> "EnforcementContext":
+    ) -> EnforcementContext:
         return cls(
             request_id=request_id or f"req-{uuid4().hex}",
             source=source,
@@ -72,7 +73,7 @@ class EnforcementResult:
     blocked: bool = False
     audit_record: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -270,7 +271,7 @@ class PolicyEnforcer:
             "audit_id": f"aud-{uuid4().hex}",
             "request_id": context.request_id,
             "trace_id": context.trace_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "status": status,
             "target": request.target.value,
             "action": request.action,

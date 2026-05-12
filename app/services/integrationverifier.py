@@ -1,17 +1,14 @@
 from __future__ import annotations
 
-
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
-
 
 from app.services.integrationregistry import (
     CapabilityName,
     IntegrationRecord,
     get_integration_registry,
 )
-
 
 # ---------------------------------------------------------------------------
 # Existing verification types

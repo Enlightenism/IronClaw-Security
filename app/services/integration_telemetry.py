@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from collections.abc import Iterable, Mapping
+from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Dict, Iterable, List, Mapping, Optional
 
 
 class TelemetryState(str, Enum):
@@ -28,11 +28,11 @@ class AdapterTelemetry:
     state: TelemetryState
     reason: str = ""
     # Optional numeric score for the adapter, 0–100 where higher is better.
-    score: Optional[float] = None
+    score: float | None = None
     # Arbitrary extra fields from the adapter or compatibility layer.
     metadata: Mapping[str, str] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Convert to a JSON‑friendly dict."""
         data = asdict(self)
         data["state"] = self.state.value
@@ -49,15 +49,15 @@ class IntegrationTelemetrySummary:
 
     integration_id: str
     total_adapters: int
-    counts_by_state: Dict[TelemetryState, int]
+    counts_by_state: dict[TelemetryState, int]
     overall_state: TelemetryState
     # 0–100, where 100 is ideal (all supported, no warnings).
     risk_score: float
     # Expose a couple of exemplars to make debugging easier.
-    sample_unsupported_adapters: List[str] = field(default_factory=list)
-    sample_warning_adapters: List[str] = field(default_factory=list)
+    sample_unsupported_adapters: list[str] = field(default_factory=list)
+    sample_warning_adapters: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Convert to a JSON‑friendly dict with string enum values."""
         return {
             "integration_id": self.integration_id,
@@ -82,7 +82,7 @@ def summarize_integration_telemetry(
     adapter_telemetry: Iterable[AdapterTelemetry],
     # Optional explicit weights if we ever want to tweak behaviour without
     # changing the function signature.
-    weights: Optional[Mapping[TelemetryState, float]] = None,
+    weights: Mapping[TelemetryState, float] | None = None,
 ) -> IntegrationTelemetrySummary:
     """
     Aggregate adapter‑level telemetry into a single integration summary.
@@ -105,14 +105,14 @@ def summarize_integration_telemetry(
     telemetry_list = list(adapter_telemetry)
     total = len(telemetry_list)
 
-    counts: Dict[TelemetryState, int] = {
+    counts: dict[TelemetryState, int] = {
         TelemetryState.SUPPORTED: 0,
         TelemetryState.WARNING: 0,
         TelemetryState.UNSUPPORTED: 0,
     }
-    unsupported_ids: List[str] = []
-    warning_ids: List[str] = []
-    adapter_scores: List[float] = []
+    unsupported_ids: list[str] = []
+    warning_ids: list[str] = []
+    adapter_scores: list[float] = []
 
     for t in telemetry_list:
         counts[t.state] += 1

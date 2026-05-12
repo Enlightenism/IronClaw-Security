@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-
 from datetime import UTC, datetime
 from typing import Any
-
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-
 from app.dependencies.auth import require_api_key
-
 
 router = APIRouter(
     prefix="/ui",

@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import inspect
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Generic, Literal, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
 from ironclaw_skill.billing import (
     BillingContext,
@@ -182,7 +183,7 @@ def attach_trace(response: Any, trace: MiddlewareTrace) -> Any:
 
     if hasattr(response, "trace"):
         try:
-            setattr(response, "trace", trace.to_dict())
+            response.trace = trace.to_dict()
             return response
         except Exception:
             return response

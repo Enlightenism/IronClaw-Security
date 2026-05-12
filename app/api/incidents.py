@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -14,12 +14,12 @@ router = APIRouter(prefix="/incidents", tags=["incidents"])
 class CorrelateSignalEvidence(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    prompt_fingerprints: List[str] = Field(default_factory=list)
-    tools: List[str] = Field(default_factory=list)
-    files: List[str] = Field(default_factory=list)
-    hashes: List[str] = Field(default_factory=list)
-    domains: List[str] = Field(default_factory=list)
-    ips: List[str] = Field(default_factory=list)
+    prompt_fingerprints: list[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+    files: list[str] = Field(default_factory=list)
+    hashes: list[str] = Field(default_factory=list)
+    domains: list[str] = Field(default_factory=list)
+    ips: list[str] = Field(default_factory=list)
 
 
 class CorrelateSignal(BaseModel):
@@ -30,33 +30,33 @@ class CorrelateSignal(BaseModel):
     source: str = Field(min_length=1, max_length=100)
     severity: str = Field(min_length=1, max_length=40)
     summary: str = Field(min_length=1, max_length=2000)
-    score: Optional[int] = Field(default=None, ge=0, le=100)
+    score: int | None = Field(default=None, ge=0, le=100)
     evidence: CorrelateSignalEvidence = Field(default_factory=CorrelateSignalEvidence)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class CorrelateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    signals: List[CorrelateSignal] = Field(min_length=1)
-    session_id: Optional[str] = Field(default=None, min_length=1, max_length=120)
-    actor_id: Optional[str] = Field(default=None, min_length=1, max_length=120)
-    request_id: Optional[str] = Field(default=None, min_length=1, max_length=200)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    signals: list[CorrelateSignal] = Field(min_length=1)
+    session_id: str | None = Field(default=None, min_length=1, max_length=120)
+    actor_id: str | None = Field(default=None, min_length=1, max_length=120)
+    request_id: str | None = Field(default=None, min_length=1, max_length=200)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class IncidentIndicators(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    prompt_fingerprints: List[str] = Field(default_factory=list)
-    tools: List[str] = Field(default_factory=list)
-    files: List[str] = Field(default_factory=list)
-    hashes: List[str] = Field(default_factory=list)
-    domains: List[str] = Field(default_factory=list)
-    ips: List[str] = Field(default_factory=list)
-    campaigns: List[str] = Field(default_factory=list)
-    clusters: List[str] = Field(default_factory=list)
-    ttp_ids: List[str] = Field(default_factory=list)
+    prompt_fingerprints: list[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+    files: list[str] = Field(default_factory=list)
+    hashes: list[str] = Field(default_factory=list)
+    domains: list[str] = Field(default_factory=list)
+    ips: list[str] = Field(default_factory=list)
+    campaigns: list[str] = Field(default_factory=list)
+    clusters: list[str] = Field(default_factory=list)
+    ttp_ids: list[str] = Field(default_factory=list)
 
 
 class IncidentSummary(BaseModel):
@@ -67,12 +67,12 @@ class IncidentSummary(BaseModel):
     severity: str
     signal_count: int = Field(ge=0)
     indicators: IncidentIndicators
-    linked_reviews: List[str] = Field(default_factory=list)
-    linked_quarantine_records: List[str] = Field(default_factory=list)
-    escalation_actions: List[Dict[str, Any]] = Field(default_factory=list)
-    malware_summary: Optional[Dict[str, Any]] = None
-    detonation_summary: Optional[Dict[str, Any]] = None
-    hostile_context: Optional[Dict[str, Any]] = None
+    linked_reviews: list[str] = Field(default_factory=list)
+    linked_quarantine_records: list[str] = Field(default_factory=list)
+    escalation_actions: list[dict[str, Any]] = Field(default_factory=list)
+    malware_summary: dict[str, Any] | None = None
+    detonation_summary: dict[str, Any] | None = None
+    hostile_context: dict[str, Any] | None = None
 
 
 class CorrelateResponse(BaseModel):
@@ -82,11 +82,11 @@ class CorrelateResponse(BaseModel):
     risk_band: str
     confidence: float = Field(ge=0.0, le=1.0)
     incident: IncidentSummary
-    signals: List[Dict[str, Any]]
-    linked_reviews: List[str] = Field(default_factory=list)
-    linked_quarantine_records: List[str] = Field(default_factory=list)
-    recommended_playbooks: List[str] = Field(default_factory=list)
-    escalation_actions: List[Dict[str, Any]] = Field(default_factory=list)
+    signals: list[dict[str, Any]]
+    linked_reviews: list[str] = Field(default_factory=list)
+    linked_quarantine_records: list[str] = Field(default_factory=list)
+    recommended_playbooks: list[str] = Field(default_factory=list)
+    escalation_actions: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def get_attack_correlation_service() -> AttackCorrelationService:
@@ -102,8 +102,8 @@ def correlate_incidents(
     payload: CorrelateRequest,
     organization_id: str = Depends(get_current_organization_id),
     service: AttackCorrelationService = Depends(get_attack_correlation_service),
-    session_id: Optional[str] = Query(default=None, min_length=1, max_length=120),
-    actor_id: Optional[str] = Query(default=None, min_length=1, max_length=120),
+    session_id: str | None = Query(default=None, min_length=1, max_length=120),
+    actor_id: str | None = Query(default=None, min_length=1, max_length=120),
 ) -> CorrelateResponse:
     if not payload.signals:
         raise HTTPException(

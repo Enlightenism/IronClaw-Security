@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional
 
 
 class RolloutRecommendation(str, Enum):
@@ -27,10 +26,10 @@ class RolloutSignals:
 class RolloutDecision:
     recommendation: RolloutRecommendation
     score: float
-    reasons: List[str] = field(default_factory=list)
-    required_actions: List[str] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
+    required_actions: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, object]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "recommendation": self.recommendation.value,
             "score": self.score,
@@ -40,8 +39,8 @@ class RolloutDecision:
 
 
 def recommend_rollout(signals: RolloutSignals) -> RolloutDecision:
-    reasons: List[str] = []
-    required_actions: List[str] = []
+    reasons: list[str] = []
+    required_actions: list[str] = []
 
     score = _calculate_rollout_score(signals)
 
@@ -123,7 +122,7 @@ def recommend_rollout(signals: RolloutSignals) -> RolloutDecision:
     )
 
 
-def summarize_rollout_decision(decision: RolloutDecision) -> Dict[str, object]:
+def summarize_rollout_decision(decision: RolloutDecision) -> dict[str, object]:
     return decision.to_dict()
 
 

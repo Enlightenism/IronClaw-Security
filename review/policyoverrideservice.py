@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from threading import Lock
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from review.policyevaluator import PolicyOverride
 
@@ -17,9 +17,9 @@ class PolicyOverrideService:
     - Drop-in replaceable with a persistent store later.
     """
 
-    def __init__(self, overrides: Optional[List[PolicyOverride]] = None) -> None:
+    def __init__(self, overrides: list[PolicyOverride] | None = None) -> None:
         self._lock = Lock()
-        self._overrides: Dict[str, PolicyOverride] = {}
+        self._overrides: dict[str, PolicyOverride] = {}
         if overrides:
             for override in overrides:
                 self._overrides[override.override_id] = override
@@ -36,15 +36,15 @@ class PolicyOverrideService:
             self._overrides[override.override_id] = override
             return override
 
-    def get_override(self, override_id: str) -> Optional[PolicyOverride]:
+    def get_override(self, override_id: str) -> PolicyOverride | None:
         return self._overrides.get(override_id)
 
     def list_overrides(
         self,
         *,
         enabled_only: bool = False,
-        target_field: Optional[str] = None,
-    ) -> List[PolicyOverride]:
+        target_field: str | None = None,
+    ) -> list[PolicyOverride]:
         overrides = list(self._overrides.values())
 
         if enabled_only:
@@ -80,8 +80,8 @@ class PolicyOverrideService:
             self._overrides[override_id] = updated
             return updated
 
-    def find_applicable(self, payload: Dict[str, Any]) -> List[PolicyOverride]:
-        applicable: List[PolicyOverride] = []
+    def find_applicable(self, payload: dict[str, Any]) -> list[PolicyOverride]:
+        applicable: list[PolicyOverride] = []
         for override in self.list_overrides(enabled_only=True):
             if self._matches(override, payload):
                 applicable.append(override)
@@ -94,7 +94,7 @@ class PolicyOverrideService:
         with self._lock:
             self._overrides.clear()
 
-    def _matches(self, override: PolicyOverride, payload: Dict[str, Any]) -> bool:
+    def _matches(self, override: PolicyOverride, payload: dict[str, Any]) -> bool:
         if override.target_field is None:
             return True
 

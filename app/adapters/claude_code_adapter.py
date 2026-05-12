@@ -1,19 +1,30 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
-from app.adapters.base import AdapterExecutionRequest, AdapterExecutionResult, BaseIntegrationAdapter
-from app.orchestrator.policy_enforcer import PolicyDecision, PolicyEngine, PolicyInput, evaluate_policy
-from app.services.integration_registry import IntegrationRecord, IntegrationRegistry, get_integration
+from app.adapters.base import (
+    AdapterExecutionRequest,
+    AdapterExecutionResult,
+)
+from app.orchestrator.policy_enforcer import (
+    PolicyDecision,
+    PolicyEngine,
+    PolicyInput,
+    evaluate_policy,
+)
+from app.services.integration_registry import (
+    IntegrationRegistry,
+    get_integration,
+)
 
 AdapterVerdict = Literal["allow", "warn", "quarantine", "block"]
 AdapterExecutionMode = Literal["monitor", "enforce"]
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _normalize_text(value: str | None) -> str:
@@ -245,14 +256,15 @@ class ClaudeCodeAdapter:
         }
 
     def handshake(self) -> Any:
+        from datetime import datetime
+
         from app.adapters.base import AdapterHandshake
-        from datetime import datetime, timezone
         return AdapterHandshake(
             adapter_slug=self.adapter_slug,
             platform=self.platform,
             protocol_version=self.protocol_version,
             status=self.health,
-            connected_at=datetime.now(timezone.utc).isoformat(),
+            connected_at=datetime.now(UTC).isoformat(),
             capabilities=[c.to_dict() for c in self.record.capabilities] if self.record else [],
             metadata=self.base_metadata(),
         )
@@ -274,8 +286,7 @@ class ClaudeCodeAdapter:
             return self._execute_with_enforcer(**kwargs)
         # registry path
         request: AdapterExecutionRequest = args[0] if args else kwargs.get("request")
-        from app.adapters.base import _utc_now as _base_utc_now, AdapterExecutionResult
-        from app.adapters.base import _clean_dict
+        from app.adapters.base import _utc_now as _base_utc_now
 
         self.from_base_validate(request)
 

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import ipaddress
 import re
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 from urllib.parse import parse_qsl, urlparse
 
 from app.detection.secretscanner import build_secret_scanner
-
 
 DEFAULT_ALLOWED_SCHEMES = {"http", "https"}
 DEFAULT_BLOCKED_SCHEMES = {

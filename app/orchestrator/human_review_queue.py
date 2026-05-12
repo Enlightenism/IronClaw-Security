@@ -9,7 +9,6 @@ from app.orchestrator.decision_trace import DecisionTrace
 from app.orchestrator.remediation_gate import GateReviewOutcome
 from app.orchestrator.supervisor import SupervisorEscalation
 
-
 ReviewPriority = Literal["low", "medium", "high", "critical"]
 ReviewStatus = Literal["pending", "in_review", "approved", "rejected", "escalated", "expired"]
 ReviewDecision = Literal["approve", "reject", "escalate", "defer"]

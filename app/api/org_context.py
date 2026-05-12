@@ -4,12 +4,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, Query
 
+from app.core.auth import AuthContext
 from app.dependencies.auth import get_auth_context, require_authenticated
 from app.dependencies.customer_auth import require_customer_org_access
 from app.dependencies.operator_auth import require_operator_org_access, require_operator_read
 from app.dependencies.org_context import OrgContext, get_org_context, require_explicit_org_context
-from app.core.auth import AuthContext
-
 
 router = APIRouter(prefix="/api/org-context", tags=["org-context"])
 

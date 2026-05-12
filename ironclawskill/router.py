@@ -5,11 +5,10 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from .adapterclaude import ClaudeSkillAdapter, adaptclauderesponse, adaptclauderequest
-from .adapteropenclaw import OpenClawSkillAdapter, adaptopenclawresponse, adaptopenclawrequest
+from .adapterclaude import ClaudeSkillAdapter, adaptclauderequest, adaptclauderesponse
+from .adapteropenclaw import OpenClawSkillAdapter, adaptopenclawrequest, adaptopenclawresponse
 from .config import IronClawSkillConfig, loadconfig
 from .contracts import (
-    JsonValue,
     SkillDecision,
     SkillExecutionRequest,
     SkillExecutionResult,
@@ -42,7 +41,7 @@ def _new_router(*, config: IronClawSkillConfig | None = None) -> APIRouter:
         response_model="SkillExecutionEnvelope",
         status_code=status.HTTP_200_OK,
     )
-    async def execute(request: SkillExecutionAPIRequest) -> "SkillExecutionEnvelope":  # type: ignore[name-defined]
+    async def execute(request: SkillExecutionAPIRequest) -> SkillExecutionEnvelope:  # type: ignore[name-defined]
         return await state.execute(request)
 
     @router.post(

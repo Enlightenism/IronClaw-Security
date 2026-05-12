@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from threading import Lock
 from typing import Literal
 
-
 CompatibilityState = Literal[
     "unknown",
     "compatible",

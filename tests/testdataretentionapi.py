@@ -7,7 +7,6 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-
 DATA_RETENTION_PATH: Final[str] = "/data/retention"
 
 

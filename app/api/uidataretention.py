@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-
 from typing import Literal
-
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-
 from app.dependencies.auth import require_api_key
-
-
 
 router = APIRouter(prefix="/ui", tags=["admin-data-retention"])
 

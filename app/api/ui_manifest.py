@@ -1,17 +1,12 @@
 from __future__ import annotations
 
-
 from datetime import UTC, datetime
 from typing import Any
-
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-
 from app.ui.router import get_ui_routers
-
-
 
 router = APIRouter(prefix="/ui-manifest", tags=["ui-manifest"])
 

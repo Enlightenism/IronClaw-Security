@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from .errors import ProviderConfigurationError
 
@@ -136,7 +137,7 @@ class PathsConfig:
     output_dir: Path | None = None
 
     @staticmethod
-    def default(root_dir: Path | None = None) -> "PathsConfig":
+    def default(root_dir: Path | None = None) -> PathsConfig:
         root = (root_dir or Path.cwd()).resolve()
         return PathsConfig(
             root_dir=root,
@@ -228,7 +229,7 @@ class IronClawSkillConfig:
         *,
         root_dir: Path | None = None,
         config_file: Path | None = None,
-    ) -> "IronClawSkillConfig":
+    ) -> IronClawSkillConfig:
         raw = dict(data or {})
         resolved_root = (root_dir or Path.cwd()).resolve()
         base_dir = (config_file.parent if config_file is not None else resolved_root).resolve()
@@ -303,13 +304,13 @@ class IronClawSkillConfig:
         return config.with_env_overrides()
 
     @classmethod
-    def from_toml_file(cls, path: str | Path, *, root_dir: Path | None = None) -> "IronClawSkillConfig":
+    def from_toml_file(cls, path: str | Path, *, root_dir: Path | None = None) -> IronClawSkillConfig:
         file_path = Path(path).expanduser().resolve()
         data = _load_structured_config(file_path)
         return cls.from_mapping(data, root_dir=root_dir or file_path.parent, config_file=file_path)
 
     @classmethod
-    def from_env(cls, *, root_dir: Path | None = None) -> "IronClawSkillConfig":
+    def from_env(cls, *, root_dir: Path | None = None) -> IronClawSkillConfig:
         base = cls(
             app_name=_env("IRONCLAWSKILL_APP_NAME", "ironclawskill") or "ironclawskill",
             environment=_env("IRONCLAWSKILL_ENV", "development") or "development",
@@ -330,7 +331,7 @@ class IronClawSkillConfig:
         *,
         root_dir: Path | None = None,
         config_path: str | Path | None = None,
-    ) -> "IronClawSkillConfig":
+    ) -> IronClawSkillConfig:
         search_root = (root_dir or Path.cwd()).resolve()
         explicit = _resolve_path(str(config_path), base_dir=search_root) if config_path else None
         env_path = _resolve_path(_env("IRONCLAWSKILL_CONFIG"), base_dir=search_root)
@@ -347,7 +348,7 @@ class IronClawSkillConfig:
                 return cls.from_toml_file(candidate, root_dir=search_root)
         return cls.from_env(root_dir=search_root)
 
-    def with_env_overrides(self) -> "IronClawSkillConfig":
+    def with_env_overrides(self) -> IronClawSkillConfig:
         providers = {name: provider for name, provider in self.providers.items()}
 
         for provider_name in ("openclaw", "claude"):

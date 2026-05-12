@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import hmac
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import Depends, Request, status
 from fastapi.security import APIKeyHeader
 
 from app.core.apikeys import APIKeyRecord, get_api_key_registry
 from app.core.errors import AppError
-
 
 API_KEY_HEADER_NAME = "X-API-Key"
 SESSION_ID_HEADER_NAME = "X-Session-Id"
@@ -22,16 +21,16 @@ org_id_header = APIKeyHeader(name=ORG_ID_HEADER_NAME, auto_error=False)
 
 @dataclass(frozen=True, slots=True)
 class AuthContext:
-    api_key: Optional[str]
+    api_key: str | None
     principal_type: str
-    principal_id: Optional[str]
-    session_id: Optional[str]
-    org_id: Optional[str]
+    principal_id: str | None
+    session_id: str | None
+    org_id: str | None
     permissions: tuple[str, ...] = ()
     roles: tuple[str, ...] = ()
     authenticated: bool = False
     auth_source: str = "none"
-    auth_method: Optional[str] = None
+    auth_method: str | None = None
     metadata: dict[str, str] = field(default_factory=dict)
 
 
@@ -39,14 +38,14 @@ def _get_settings(request: Request) -> Any | None:
     return getattr(request.app.state, "settings", None)
 
 
-def _clean_optional_string(value: object) -> Optional[str]:
+def _clean_optional_string(value: object) -> str | None:
     if not isinstance(value, str):
         return None
     value = value.strip()
     return value or None
 
 
-def _extract_configured_api_key(request: Request) -> Optional[str]:
+def _extract_configured_api_key(request: Request) -> str | None:
     settings = _get_settings(request)
     if settings is None:
         return None
@@ -89,7 +88,7 @@ def _touch_record_if_possible(record: APIKeyRecord) -> APIKeyRecord:
     return updated
 
 
-def _resolve_registry_api_key(provided_api_key: str) -> Optional[APIKeyRecord]:
+def _resolve_registry_api_key(provided_api_key: str) -> APIKeyRecord | None:
     registry = get_api_key_registry()
 
     authenticate = getattr(registry, "authenticate", None)
@@ -237,7 +236,7 @@ def _is_auth_required(request: Request) -> bool:
     return _has_registry_keys()
 
 
-def _constant_time_match(left: Optional[str], right: Optional[str]) -> bool:
+def _constant_time_match(left: str | None, right: str | None) -> bool:
     if not left or not right:
         return False
     return hmac.compare_digest(left, right)
@@ -269,7 +268,7 @@ def _coerce_permissions(record: APIKeyRecord | None) -> tuple[str, ...]:
     return ()
 
 
-def _coerce_principal_id(record: APIKeyRecord | None) -> Optional[str]:
+def _coerce_principal_id(record: APIKeyRecord | None) -> str | None:
     if record is None:
         return None
 
@@ -283,9 +282,9 @@ def _coerce_principal_id(record: APIKeyRecord | None) -> Optional[str]:
 
 def _coerce_org_id(
     request: Request,
-    provided_org_id: Optional[str],
+    provided_org_id: str | None,
     record: APIKeyRecord | None,
-) -> Optional[str]:
+) -> str | None:
     header_org_id = _clean_optional_string(provided_org_id)
     if header_org_id is not None:
         return header_org_id
@@ -308,8 +307,8 @@ def _coerce_org_id(
 
 def get_api_key(
     request: Request,
-    provided_api_key: Optional[str] = Depends(api_key_header),
-) -> Optional[str]:
+    provided_api_key: str | None = Depends(api_key_header),
+) -> str | None:
     normalized_api_key = _clean_optional_string(provided_api_key)
 
     if not _is_auth_required(request):
@@ -350,9 +349,9 @@ def get_api_key(
 
 def get_auth_context(
     request: Request,
-    api_key: Optional[str] = Depends(get_api_key),
-    session_id: Optional[str] = Depends(session_id_header),
-    provided_org_id: Optional[str] = Depends(org_id_header),
+    api_key: str | None = Depends(get_api_key),
+    session_id: str | None = Depends(session_id_header),
+    provided_org_id: str | None = Depends(org_id_header),
 ) -> AuthContext:
     normalized_session_id = _clean_optional_string(session_id)
     normalized_api_key = _clean_optional_string(api_key)
@@ -408,8 +407,8 @@ def get_auth_context(
 
 def require_api_key(
     request: Request,
-    api_key: Optional[str] = Depends(get_api_key),
-) -> Optional[str]:
+    api_key: str | None = Depends(get_api_key),
+) -> str | None:
     if not _is_auth_required(request):
         return api_key
 

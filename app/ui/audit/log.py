@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -16,15 +15,15 @@ class AuditLogItem(BaseModel):
     eventid: str
     timestamp: str
     eventtype: str
-    actorid: Optional[str] = None
-    sessionid: Optional[str] = None
-    executionid: Optional[str] = None
-    reviewitemid: Optional[str] = None
-    actiontype: Optional[str] = None
-    target: Optional[str] = None
-    policyverdict: Optional[str] = None
-    executionstate: Optional[str] = None
-    responsestatus: Optional[str] = None
+    actorid: str | None = None
+    sessionid: str | None = None
+    executionid: str | None = None
+    reviewitemid: str | None = None
+    actiontype: str | None = None
+    target: str | None = None
+    policyverdict: str | None = None
+    executionstate: str | None = None
+    responsestatus: str | None = None
     message: str
 
 
@@ -35,7 +34,7 @@ class AuditLogResponse(BaseModel):
 
 
 def _utc_iso(year: int, month: int, day: int, hour: int, minute: int = 0) -> str:
-    return datetime(year, month, day, hour, minute, 0, tzinfo=timezone.utc).isoformat()
+    return datetime(year, month, day, hour, minute, 0, tzinfo=UTC).isoformat()
 
 
 def _build_placeholder_items() -> list[AuditLogItem]:
@@ -109,5 +108,5 @@ def get_audit_log() -> AuditLogResponse:
     return AuditLogResponse(
         items=items,
         total=len(items),
-        generatedat=datetime.now(timezone.utc).isoformat(),
+        generatedat=datetime.now(UTC).isoformat(),
     )

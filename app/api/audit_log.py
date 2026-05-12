@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-
 from typing import Any
 
-
 from fastapi import APIRouter, Query
-
 
 from app.services.audit_log_service import (
     list_audit_events,
@@ -14,7 +11,6 @@ from app.services.audit_log_service import (
     list_audit_events_for_session,
     list_audit_events_for_trace,
 )
-
 
 router = APIRouter(prefix="/audit", tags=["audit-log"])
 

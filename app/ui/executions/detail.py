@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -17,7 +17,7 @@ class ExecutionReasonView(BaseModel):
     source: str
     label: str
     details: str
-    score: Optional[int] = None
+    score: int | None = None
 
 
 class ExecutionDetailResponse(BaseModel):
@@ -27,9 +27,9 @@ class ExecutionDetailResponse(BaseModel):
     target: str
     content: str = ""
     riskscore: int
-    clientid: Optional[str] = None
-    sessionid: Optional[str] = None
-    filepath: Optional[str] = None
+    clientid: str | None = None
+    sessionid: str | None = None
+    filepath: str | None = None
     executionstate: str
     responseaction: str
     responsestatus: str
@@ -39,15 +39,15 @@ class ExecutionDetailResponse(BaseModel):
     traceid: str
     requestid: str
     decisionid: str
-    reviewitemid: Optional[str] = None
-    executorname: Optional[str] = None
-    executorresult: Optional[dict[str, Any]] = None
-    reason: Optional[str] = None
+    reviewitemid: str | None = None
+    executorname: str | None = None
+    executorresult: dict[str, Any] | None = None
+    reason: str | None = None
     reasons: list[ExecutionReasonView] = Field(default_factory=list)
 
 
 def _utcnow_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _object_to_dict(value: Any) -> dict[str, Any]:
@@ -100,7 +100,7 @@ def _normalize_timestamp(record: dict[str, Any]) -> str:
     for key in ("timestamp", "createdat", "occurredat", "executedat"):
         value = record.get(key)
         if isinstance(value, datetime):
-            return value.astimezone(timezone.utc).isoformat()
+            return value.astimezone(UTC).isoformat()
         if isinstance(value, str) and value.strip():
             return value.strip()
     return _utcnow_iso()
@@ -186,7 +186,7 @@ def _normalize_reasons(value: Any) -> list[ExecutionReasonView]:
     return [_normalize_reason_item(value)]
 
 
-def _build_placeholder_record(executionid: str) -> Optional[dict[str, Any]]:
+def _build_placeholder_record(executionid: str) -> dict[str, Any] | None:
     sample_records: dict[str, dict[str, Any]] = {
         "exec-demo-001": {
             "executionid": "exec-demo-001",

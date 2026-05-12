@@ -22,7 +22,6 @@ from app.orchestrator.security_audit_log import (
 )
 from app.services.telemetry import append_telemetry_event
 
-
 TOOL_CALL_ACTIONS = {
     "tool_call",
     "shell_command",

@@ -3,12 +3,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable
-
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SUPABASE_MIGRATIONS = REPO_ROOT / "supabase" / "migrations"

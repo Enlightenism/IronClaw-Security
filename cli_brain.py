@@ -8,7 +8,6 @@ from typing import Any
 
 import requests
 
-
 API_BASE = "http://127.0.0.1:8011"
 
 
@@ -113,7 +112,7 @@ def main() -> None:
         target_value = args.text
     else:
         try:
-            with open(args.file, "r", encoding="utf-8") as f:
+            with open(args.file, encoding="utf-8") as f:
                 target_value = f.read()
         except OSError as e:
             print(f"Error reading file {args.file}: {e}", file=sys.stderr)

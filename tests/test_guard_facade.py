@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from app.models.action_execute import ExecuteRequest
 from app.facade import guardandexecuteaction, guardandexecuteraw
+from app.models.action_execute import ExecuteRequest
 
 
 def test_guardandexecuteaction_returns_typed_response():

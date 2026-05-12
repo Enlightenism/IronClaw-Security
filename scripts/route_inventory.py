@@ -8,7 +8,6 @@ from fastapi.routing import APIRoute
 
 from app.main import app
 
-
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_FILE = ROOT / ".route-inventory.json"
 

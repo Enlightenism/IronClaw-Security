@@ -8,7 +8,6 @@ from app.ui.actionusage import build_action_usage_view
 from app.ui.actionusagedetail import build_action_usage_detail_view
 from app.ui.actionusagetest import build_action_usage_test_view
 
-
 app = FastAPI()
 app.include_router(actionusage_router)
 client = TestClient(app)

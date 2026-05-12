@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.api.actiondecision import decideaction
-
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
@@ -23,7 +22,7 @@ AuditSeverity = Literal["info", "warning", "high", "critical"]
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _newid(prefix: str) -> str:

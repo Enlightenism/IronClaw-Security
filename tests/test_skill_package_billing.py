@@ -1,22 +1,17 @@
 from __future__ import annotations
 
-
 import json
-import os
 import threading
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
-
+from unittest.mock import MagicMock
 
 import pytest
-
 
 from ironclaw_skill.billing import (
     BillingContext,
     BillingEvent,
     BillingPolicy,
-    BillingResult,
     IronClawBillingError,
     MemoryBillingHook,
     StubBillingHook,
@@ -25,8 +20,6 @@ from ironclaw_skill.billing import (
     create_billing_hook,
     load_billing_policy,
 )
-
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from threading import Lock
 from typing import Any, Literal
 from uuid import uuid4
-
 
 AlertChannel = Literal["email", "webhook", "slack"]
 AlertEventType = Literal[
@@ -24,7 +23,7 @@ _VALID_EVENTS: frozenset[str] = frozenset(
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _require_str(value: str, field_name: str) -> str:

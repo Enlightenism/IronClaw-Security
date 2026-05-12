@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -20,12 +20,12 @@ class IncidentCreateRequest(BaseModel):
     severity: str = Field(default="medium", description="Incident severity")
     source: str = Field(..., min_length=1, description="Origin system or detector")
     source_id: str = Field(..., min_length=1, description="Stable source entity identifier")
-    reasons: List[str] = Field(default_factory=list, description="Why the incident opened")
-    evidence: List[Dict[str, Any]] = Field(
+    reasons: list[str] = Field(default_factory=list, description="Why the incident opened")
+    evidence: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Compact evidence payloads for triage",
     )
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional incident metadata",
     )
@@ -40,12 +40,12 @@ class IncidentAssignRequest(BaseModel):
 
 
 class IncidentDismissRequest(BaseModel):
-    reason: Optional[str] = Field(default=None, description="Dismissal reason")
+    reason: str | None = Field(default=None, description="Dismissal reason")
 
 
 class IncidentListResponse(BaseModel):
-    items: List[IncidentRecord]
-    counts: Dict[str, int]
+    items: list[IncidentRecord]
+    counts: dict[str, int]
 
 
 def get_incident_service() -> IncidentService:
@@ -54,9 +54,9 @@ def get_incident_service() -> IncidentService:
 
 @router.get("", response_model=IncidentListResponse)
 def list_incidents(
-    status: Optional[str] = None,
-    severity: Optional[str] = None,
-    assigned_to: Optional[str] = None,
+    status: str | None = None,
+    severity: str | None = None,
+    assigned_to: str | None = None,
 ) -> IncidentListResponse:
     service = get_incident_service()
     items = service.list_incidents(

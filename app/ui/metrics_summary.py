@@ -6,7 +6,6 @@ from typing import Any
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
-
 router = APIRouter(prefix="/metrics-summary", tags=["metrics-summary"])
 
 

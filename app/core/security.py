@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-
-from typing import Iterable, Sequence
+from collections.abc import Iterable, Sequence
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,7 +9,6 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import Response
 
 from app.core.settings import Settings
-
 
 _DEFAULT_CSP = (
     "default-src 'none'; "

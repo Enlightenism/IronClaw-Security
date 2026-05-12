@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from threading import Lock
 from typing import Any, Literal
 from uuid import uuid4
-
 
 OrganizationRole = Literal["owner", "admin", "analyst", "viewer"]
 OrganizationStatus = Literal["active", "suspended", "invited"]
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _normalize_email(value: str) -> str:

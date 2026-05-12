@@ -7,7 +7,6 @@ from fastapi.routing import APIRoute
 
 from app.main import app
 
-
 EXPECTED_API_PATHS: Final[set[str]] = {
     "/api/actionhistorytest",
     "/api/groq-registry",

@@ -10,7 +10,6 @@ from app.orchestrator.security_audit_log import (
     read_security_audit_events,
 )
 
-
 _active_audit_log: SecurityAuditLog | None = None
 _DEFAULT_AUDIT_LOG_PATH = Path("output/security-events.jsonl")
 

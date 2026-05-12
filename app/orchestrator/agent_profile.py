@@ -5,7 +5,6 @@ from typing import Literal
 
 from app.orchestrator.agent_registry import AgentDescriptor, ProtectedAction
 
-
 AgentRole = Literal[
     "file_guardian",
     "security_sentinel",

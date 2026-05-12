@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -32,7 +32,7 @@ class EvaluateReleasePolicyRequest(BaseModel):
     runtime: str = Field(..., min_length=1)
     environment: str = Field(..., min_length=1)
     action: str = Field(..., min_length=1)
-    context: Optional[dict[str, Any]] = Field(default_factory=dict)
+    context: dict[str, Any] | None = Field(default_factory=dict)
 
 
 class PutReleasePolicyRequest(BaseModel):
@@ -41,17 +41,17 @@ class PutReleasePolicyRequest(BaseModel):
     rollout_percent: int = Field(..., ge=0, le=100)
     enabled: bool
     mode: str = Field(..., min_length=1)
-    bundle_id: Optional[str] = None
-    bundle_version: Optional[str] = None
+    bundle_id: str | None = None
+    bundle_version: str | None = None
 
 
 class CreateOverrideRequest(BaseModel):
     runtime: str = Field(..., min_length=1)
     environment: str = Field(..., min_length=1)
     action: str = Field(..., min_length=1)
-    scope: Optional[str] = None
-    scope_id: Optional[str] = None
-    reason: Optional[str] = None
+    scope: str | None = None
+    scope_id: str | None = None
+    reason: str | None = None
     active: bool = True
 
 

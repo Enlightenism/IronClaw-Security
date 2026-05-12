@@ -7,7 +7,6 @@ from typing import Any
 
 import requests
 
-
 API_BASE = "http://127.0.0.1:8000"
 
 
@@ -19,7 +18,7 @@ def _read_json_from_stdin() -> dict[str, Any]:
 
 
 def _read_json_from_file(path: str) -> dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 

@@ -4,7 +4,6 @@ import math
 import threading
 import time
 from dataclasses import dataclass
-from typing import Optional
 
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
@@ -98,8 +97,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self,
         app,
         *,
-        limiter: Optional[TokenBucketRateLimiter] = None,
-        route_limits: Optional[dict[str, RateLimit]] = None,
+        limiter: TokenBucketRateLimiter | None = None,
+        route_limits: dict[str, RateLimit] | None = None,
     ) -> None:
         super().__init__(app)
         self.limiter = limiter or TokenBucketRateLimiter()
@@ -155,7 +154,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         return response
 
-    def _match_limit(self, path: str) -> Optional[RateLimit]:
+    def _match_limit(self, path: str) -> RateLimit | None:
         return self.route_limits.get(path)
 
     def _build_client_key(self, request: Request, scope: str) -> str:
@@ -191,8 +190,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 def install_rate_limit_middleware(
     app: FastAPI,
     *,
-    limiter: Optional[TokenBucketRateLimiter] = None,
-    route_limits: Optional[dict[str, RateLimit]] = None,
+    limiter: TokenBucketRateLimiter | None = None,
+    route_limits: dict[str, RateLimit] | None = None,
 ) -> None:
     app.add_middleware(
         RateLimitMiddleware,

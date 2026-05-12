@@ -5,7 +5,6 @@ from typing import Any, Final
 
 import pytest
 
-
 MODULE_CANDIDATES: Final[tuple[str, ...]] = (
     "app.services.telemetry",
     "services.telemetry",
@@ -35,15 +34,15 @@ def _first_callable(target: Any, *names: str) -> Any | None:
 def _serialize(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
-    if hasattr(value, "model_dump") and callable(getattr(value, "model_dump")):
+    if hasattr(value, "model_dump") and callable(value.model_dump):
         data = value.model_dump()
         if isinstance(data, dict):
             return data
-    if hasattr(value, "dict") and callable(getattr(value, "dict")):
+    if hasattr(value, "dict") and callable(value.dict):
         data = value.dict()
         if isinstance(data, dict):
             return data
-    if hasattr(value, "as_dict") and callable(getattr(value, "as_dict")):
+    if hasattr(value, "as_dict") and callable(value.as_dict):
         data = value.as_dict()
         if isinstance(data, dict):
             return data
@@ -661,9 +660,9 @@ def test_telemetry_store_can_filter_by_request_id_when_supported() -> None:
         except TypeError:
             pytest.skip("writer signature unsupported")
 
-    if hasattr(store, "get_by_request_id") and callable(getattr(store, "get_by_request_id")):
+    if hasattr(store, "get_by_request_id") and callable(store.get_by_request_id):
         result = store.get_by_request_id(request_id)
-    elif hasattr(store, "find_by_request_id") and callable(getattr(store, "find_by_request_id")):
+    elif hasattr(store, "find_by_request_id") and callable(store.find_by_request_id):
         result = store.find_by_request_id(request_id)
     else:
         try:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any, Final
 
-
 RELEASE_POLICY_LIST_RESPONSE_EXAMPLE: Final[dict[str, Any]] = {
     "items": [
         {

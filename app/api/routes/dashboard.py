@@ -1,20 +1,16 @@
 from __future__ import annotations
 
-
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
-
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
-
 
 from app.core.auth import require_api_key
 from app.core.unit_wallet import get_unit_wallet_registry
 from app.services.audit_store import get_audit_store
 from app.services.incident_store import get_incident_store
 from app.services.quarantine_store import get_quarantine_store
-
 
 router = APIRouter(
     prefix="/dashboard",
@@ -76,7 +72,7 @@ class DashboardResponse(BaseModel):
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _normalize_label(value: str) -> str:

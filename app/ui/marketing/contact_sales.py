@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-
 
 router = APIRouter(
     prefix="/ui/marketing",
@@ -26,9 +24,9 @@ class ContactSalesFieldView(BaseModel):
     label: str
     inputtype: str
     required: bool = True
-    placeholder: Optional[str] = None
-    helptext: Optional[str] = None
-    value: Optional[str] = None
+    placeholder: str | None = None
+    helptext: str | None = None
+    value: str | None = None
 
 
 class ContactSalesReasonView(BaseModel):
@@ -72,7 +70,7 @@ class ContactSalesPageResponse(BaseModel):
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @router.get("/contact-sales", response_model=ContactSalesPageResponse)

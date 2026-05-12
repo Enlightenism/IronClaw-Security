@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
 
-
 from app.core.billing import BillingRegistry, get_billing_registry
 from app.core.unit_wallet import get_unit_wallet_registry
 

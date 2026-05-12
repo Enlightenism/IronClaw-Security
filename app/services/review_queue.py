@@ -2,15 +2,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.models.review_queue import ReviewActionRequest
 from app.services.review_queue_service import (
     approve_review,
     get_review_queue_summary,
     list_all_reviews,
     list_pending_reviews,
-    get_review_by_id as _get_review_by_id,
     reject_review,
 )
-from app.models.review_queue import ReviewActionRequest
+from app.services.review_queue_service import (
+    get_review_by_id as _get_review_by_id,
+)
 
 
 def get_review_summary() -> dict[str, Any]:

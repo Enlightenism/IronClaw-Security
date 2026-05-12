@@ -9,7 +9,6 @@ from app.orchestrator.execution_plan import ExecutionPlan
 from app.orchestrator.replay_controller import ReplayReport
 from app.orchestrator.supervisor import SupervisorEscalation
 
-
 ReviewAction = str
 GateStatus = str
 RemediationDecision = str

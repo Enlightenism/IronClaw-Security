@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-
 from app.services.usagemetering import (
     UsageAuthorization,
     UsageConsumptionResult,

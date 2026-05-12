@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from ironclaw_skill import __version__
 from ironclaw_skill.cli import (
     IronClawSkillCliError,
     SkillDoctorResult,
@@ -24,8 +24,6 @@ from ironclaw_skill.cli import (
     build_parser,
     main,
 )
-from ironclaw_skill import __version__
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -6,7 +6,6 @@ from typing import Any, Literal
 
 import httpx
 
-from ironclawshellguard import GuardedCommandResult, IronClawShellGuard, ShellGuardError
 from ironclaw_skill.context import IronClawSkillContext, require_skill_context
 from ironclaw_skill.contracts import (
     SkillActionInput,
@@ -15,6 +14,7 @@ from ironclaw_skill.contracts import (
     build_skill_error_response,
     build_skill_success_response,
 )
+from ironclawshellguard import GuardedCommandResult, IronClawShellGuard, ShellGuardError
 
 
 class IronClawSkillRuntimeError(RuntimeError):

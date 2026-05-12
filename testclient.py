@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-
 RESULT_FILE: Final[Path] = Path(__file__).resolve().with_name(".testclient-results.json")
 
 

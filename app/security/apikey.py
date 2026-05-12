@@ -51,7 +51,7 @@ def _resolve_settings_key(raw_key: str) -> APIKeyRecord | None:
 
     for expected_key, label, scopes in candidates:
         if hmac.compare_digest(raw_key, expected_key):
-            from app.core.apikeys import mask_api_key, fingerprint_api_key
+            from app.core.apikeys import fingerprint_api_key, mask_api_key
 
             return APIKeyRecord(
                 key_id=f"settings-{label}",
@@ -77,7 +77,7 @@ def _make_synthetic_record(
     scopes: tuple[str, ...],
     source: str,
 ) -> APIKeyRecord:
-    from app.core.apikeys import mask_api_key, fingerprint_api_key
+    from app.core.apikeys import fingerprint_api_key, mask_api_key
 
     return APIKeyRecord(
         key_id=key_id,

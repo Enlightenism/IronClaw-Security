@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter
@@ -11,7 +11,6 @@ from app.ui.groq.prompt_guard_alerts_overview import build_prompt_guard_alerts_o
 from app.ui.groq.prompt_guard_metrics import build_prompt_guard_metrics_view
 from app.ui.groq.prompt_guard_trends import build_prompt_guard_trend_series
 
-
 router = APIRouter(
     prefix="/ui/groq",
     tags=["groq-prompt-guard-performance-snapshot"],
@@ -19,7 +18,7 @@ router = APIRouter(
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @dataclass(slots=True)

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.detection.artifact_analyzer import analyze_artifact
 from app.detection.download_analyzer import analyze_download
-from app.detection.prompt_injection_analyzer import analyze_prompt_injection
 from app.detection.output_sanitizer import sanitize_output
+from app.detection.prompt_injection_analyzer import analyze_prompt_injection
 
 
 @dataclass(slots=True)

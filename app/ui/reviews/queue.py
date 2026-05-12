@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -17,8 +17,8 @@ class ReviewQueueItem(BaseModel):
     executionid: str
     timestamp: str
     reviewstatus: str
-    clientid: Optional[str] = None
-    sessionid: Optional[str] = None
+    clientid: str | None = None
+    sessionid: str | None = None
     actiontype: str
     target: str
     riskscore: int
@@ -27,11 +27,11 @@ class ReviewQueueItem(BaseModel):
     policyverdict: str
     shouldexecute: bool
     haltedbyboundary: bool
-    reason: Optional[str] = None
-    executorname: Optional[str] = None
-    traceid: Optional[str] = None
-    requestid: Optional[str] = None
-    decisionid: Optional[str] = None
+    reason: str | None = None
+    executorname: str | None = None
+    traceid: str | None = None
+    requestid: str | None = None
+    decisionid: str | None = None
 
 
 class ReviewQueueResponse(BaseModel):
@@ -43,7 +43,7 @@ class ReviewQueueResponse(BaseModel):
 
 
 def _utcnow_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _coerce_str(value: Any, default: str) -> str:

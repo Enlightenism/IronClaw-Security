@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from importlib import import_module
-from typing import Any, Final, cast
+from typing import Final, cast
 
 from fastapi import APIRouter, FastAPI
 

@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from typing import Literal, TypedDict
 
-
 from app.security.promptinjection import scanpromptinjectiondict
 from app.services.scanner import perform_scan
-
 
 ActionType = Literal[
     "file_write",

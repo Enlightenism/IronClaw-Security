@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -19,10 +18,10 @@ class AlertNotificationItem(BaseModel):
     category: str
     title: str
     message: str
-    executionid: Optional[str] = None
-    reviewitemid: Optional[str] = None
-    clientid: Optional[str] = None
-    sessionid: Optional[str] = None
+    executionid: str | None = None
+    reviewitemid: str | None = None
+    clientid: str | None = None
+    sessionid: str | None = None
     acknowledged: bool = False
 
 
@@ -37,7 +36,7 @@ class AlertNotificationResponse(BaseModel):
 
 
 def _utc_iso(year: int, month: int, day: int, hour: int, minute: int = 0) -> str:
-    return datetime(year, month, day, hour, minute, 0, tzinfo=timezone.utc).isoformat()
+    return datetime(year, month, day, hour, minute, 0, tzinfo=UTC).isoformat()
 
 
 def _build_placeholder_items() -> list[AlertNotificationItem]:
@@ -89,7 +88,7 @@ def get_alert_notifications() -> AlertNotificationResponse:
     items = _build_placeholder_items()
 
     return AlertNotificationResponse(
-        generatedat=datetime.now(timezone.utc).isoformat(),
+        generatedat=datetime.now(UTC).isoformat(),
         items=items,
         total=len(items),
         critical=sum(1 for item in items if item.severity == "critical"),

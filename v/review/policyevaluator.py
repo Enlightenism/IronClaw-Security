@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 
 class PolicyDecision(str, Enum):
@@ -31,17 +32,17 @@ class PolicyRule:
     decision: PolicyDecision = PolicyDecision.REVIEW
     severity: str = "medium"
     reason: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class PolicyOverride:
     override_id: str
-    target_field: Optional[str] = None
-    target_value: Optional[Any] = None
-    force_decision: Optional[PolicyDecision] = None
-    add_reasons: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    target_field: str | None = None
+    target_value: Any | None = None
+    force_decision: PolicyDecision | None = None
+    add_reasons: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
     enabled: bool = True
 
 
@@ -49,11 +50,11 @@ class PolicyOverride:
 class PolicyEvaluationResult:
     decision: PolicyDecision
     severity: str
-    matched_rules: List[str] = field(default_factory=list)
-    matched_overrides: List[str] = field(default_factory=list)
-    reasons: List[str] = field(default_factory=list)
-    signals: List[Dict[str, Any]] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    matched_rules: list[str] = field(default_factory=list)
+    matched_overrides: list[str] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
+    signals: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class PolicyEvaluator:
@@ -69,11 +70,11 @@ class PolicyEvaluator:
     def __init__(
         self,
         *,
-        rules: Optional[Sequence[PolicyRule]] = None,
-        overrides: Optional[Sequence[PolicyOverride]] = None,
+        rules: Sequence[PolicyRule] | None = None,
+        overrides: Sequence[PolicyOverride] | None = None,
     ) -> None:
-        self._rules: List[PolicyRule] = list(rules or [])
-        self._overrides: List[PolicyOverride] = list(overrides or [])
+        self._rules: list[PolicyRule] = list(rules or [])
+        self._overrides: list[PolicyOverride] = list(overrides or [])
 
     def set_rules(self, rules: Sequence[PolicyRule]) -> None:
         self._rules = list(rules)
@@ -89,20 +90,20 @@ class PolicyEvaluator:
 
     def evaluate(
         self,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         *,
-        rules: Optional[Sequence[PolicyRule]] = None,
-        overrides: Optional[Sequence[PolicyOverride]] = None,
+        rules: Sequence[PolicyRule] | None = None,
+        overrides: Sequence[PolicyOverride] | None = None,
         default_decision: PolicyDecision = PolicyDecision.ALLOW,
         default_severity: str = "low",
     ) -> PolicyEvaluationResult:
         active_rules = list(rules or self._rules)
         active_overrides = list(overrides or self._overrides)
 
-        matched_rules: List[PolicyRule] = []
-        matched_overrides: List[PolicyOverride] = []
-        reasons: List[str] = []
-        signals: List[Dict[str, Any]] = []
+        matched_rules: list[PolicyRule] = []
+        matched_overrides: list[PolicyOverride] = []
+        reasons: list[str] = []
+        signals: list[dict[str, Any]] = []
 
         final_decision = default_decision
         final_severity = default_severity
@@ -173,13 +174,13 @@ class PolicyEvaluator:
 
     def evaluate_many(
         self,
-        payloads: Sequence[Dict[str, Any]],
+        payloads: Sequence[dict[str, Any]],
         *,
-        rules: Optional[Sequence[PolicyRule]] = None,
-        overrides: Optional[Sequence[PolicyOverride]] = None,
+        rules: Sequence[PolicyRule] | None = None,
+        overrides: Sequence[PolicyOverride] | None = None,
         default_decision: PolicyDecision = PolicyDecision.ALLOW,
         default_severity: str = "low",
-    ) -> List[PolicyEvaluationResult]:
+    ) -> list[PolicyEvaluationResult]:
         return [
             self.evaluate(
                 payload,
@@ -191,7 +192,7 @@ class PolicyEvaluator:
             for payload in payloads
         ]
 
-    def _matches_rule(self, rule: PolicyRule, payload: Dict[str, Any]) -> bool:
+    def _matches_rule(self, rule: PolicyRule, payload: dict[str, Any]) -> bool:
         actual = self._extract_field(payload, rule.field)
 
         if rule.match_type is PolicyMatchType.PRESENT:
@@ -222,7 +223,7 @@ class PolicyEvaluator:
 
         return False
 
-    def _matches_override(self, override: PolicyOverride, payload: Dict[str, Any]) -> bool:
+    def _matches_override(self, override: PolicyOverride, payload: dict[str, Any]) -> bool:
         if override.target_field is None:
             return True
 
@@ -231,7 +232,7 @@ class PolicyEvaluator:
             return actual is not None
         return actual == override.target_value
 
-    def _extract_field(self, payload: Dict[str, Any], field_path: str) -> Any:
+    def _extract_field(self, payload: dict[str, Any], field_path: str) -> Any:
         current: Any = payload
         for part in field_path.split("."):
             if isinstance(current, dict):
@@ -271,9 +272,9 @@ class PolicyEvaluator:
             return float(value)
         return float(str(value).strip())
 
-    def _dedupe(self, values: Sequence[str]) -> List[str]:
+    def _dedupe(self, values: Sequence[str]) -> list[str]:
         seen = set()
-        result: List[str] = []
+        result: list[str] = []
         for value in values:
             if not value or value in seen:
                 continue

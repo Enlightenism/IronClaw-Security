@@ -6,8 +6,6 @@ import tarfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-import pytest
-
 from app.services.restoreservice import (
     RestoreService,
     resolve_manifest_sidecar,

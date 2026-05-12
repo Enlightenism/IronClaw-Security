@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-
 from fastapi import APIRouter, Depends, Request
-
 
 from app.dependencies.action_execute import get_action_execute_pipeline
 from app.facade import guardandexecuteaction
 from app.models.action_execute import ExecuteRequest, ExecuteResponse
 from app.orchestrator.secure_runtime_pipeline import SecureRuntimePipeline
 from app.services.telemetry import append_telemetry_event
-
 
 router = APIRouter()
 

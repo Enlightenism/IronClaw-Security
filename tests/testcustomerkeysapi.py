@@ -5,7 +5,6 @@ from fastapi.testclient import TestClient
 from app.core.api_keys import create_api_key_registry
 from app.main import app
 
-
 client = TestClient(app)
 
 

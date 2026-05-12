@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass(slots=True)
@@ -16,22 +16,22 @@ class ActionUsage:
     test suite (shape, key stability, numeric invariants).
     """
 
-    ownerid: Optional[str] = None
-    action: Optional[str] = None
-    units: Optional[Decimal] = None
-    unitcost: Optional[Decimal] = None
-    totalcost: Optional[Decimal] = None
-    status: Optional[str] = None
-    quota: Optional[Decimal] = None
-    remaining: Optional[Decimal] = None
-    usageid: Optional[str] = None
-    generatedat: Optional[str] = None
+    ownerid: str | None = None
+    action: str | None = None
+    units: Decimal | None = None
+    unitcost: Decimal | None = None
+    totalcost: Decimal | None = None
+    status: str | None = None
+    quota: Decimal | None = None
+    remaining: Decimal | None = None
+    usageid: str | None = None
+    generatedat: str | None = None
 
     # Optional collections – must be JSON-friendly when present
-    events: Optional[List[Dict[str, Any]]] = field(default=None)
-    metadata: Optional[Dict[str, Any]] = field(default=None)
+    events: list[dict[str, Any]] | None = field(default=None)
+    metadata: dict[str, Any] | None = field(default=None)
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         """
         Return a plain dict representation suitable for JSON or further
         transformation. Keys are stable so repeated builds have stable
@@ -53,7 +53,7 @@ class ActionUsage:
         }
 
 
-def _coerce_decimal(value: Any) -> Optional[Decimal]:
+def _coerce_decimal(value: Any) -> Decimal | None:
     if value is None:
         return None
     if isinstance(value, Decimal):
@@ -64,7 +64,7 @@ def _coerce_decimal(value: Any) -> Optional[Decimal]:
         return None
 
 
-def _ensure_non_negative(name: str, value: Optional[Decimal]) -> Optional[Decimal]:
+def _ensure_non_negative(name: str, value: Decimal | None) -> Decimal | None:
     if value is None:
         return None
     if value < Decimal("0"):
@@ -72,21 +72,21 @@ def _ensure_non_negative(name: str, value: Optional[Decimal]) -> Optional[Decima
     return value
 
 
-def _generate_usage_id(owner_id: Optional[str], action: Optional[str]) -> str:
+def _generate_usage_id(owner_id: str | None, action: str | None) -> str:
     prefix = "usage"
     owner_part = (owner_id or "").strip() or "anon"
     action_part = (action or "").strip() or "unknown"
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     return f"{prefix}-{owner_part}-{action_part}-{timestamp}"
 
 
 def build_action_usage(
     *,
-    owner_id: Optional[str] = None,
-    action: Optional[str] = None,
-    units: Optional[Any] = None,
-    unit_cost: Optional[Any] = None,
-    quota: Optional[Any] = None,
+    owner_id: str | None = None,
+    action: str | None = None,
+    units: Any | None = None,
+    unit_cost: Any | None = None,
+    quota: Any | None = None,
 ) -> ActionUsage:
     """
     Build a core ActionUsage object that satisfies the actionusage test suite.
@@ -106,7 +106,7 @@ def build_action_usage(
             raise TypeError("owner_id must be a string when provided")
         if not owner_id.strip():
             raise ValueError("owner_id must not be blank")
-        owner_id_normalized: Optional[str] = owner_id.strip()
+        owner_id_normalized: str | None = owner_id.strip()
     else:
         owner_id_normalized = None
 
@@ -115,7 +115,7 @@ def build_action_usage(
             raise TypeError("action must be a string when provided")
         if not action.strip():
             raise ValueError("action must not be blank")
-        action_normalized: Optional[str] = action.strip()
+        action_normalized: str | None = action.strip()
     else:
         action_normalized = None
 
@@ -138,7 +138,7 @@ def build_action_usage(
         quota_dec = _ensure_non_negative("quota", quota_dec)
 
     # Compute total cost when both inputs are present
-    total_cost_dec: Optional[Decimal] = None
+    total_cost_dec: Decimal | None = None
     if units_dec is not None and unit_cost_dec is not None:
         total_cost_dec = units_dec * unit_cost_dec
         total_cost_dec = _ensure_non_negative("totalcost", total_cost_dec)
@@ -149,7 +149,7 @@ def build_action_usage(
     #     * if units provided and <= quota, remaining = quota - units
     #     * if units not provided, remaining = quota
     # - otherwise, if units present, use units as both quota and remaining
-    remaining_dec: Optional[Decimal] = None
+    remaining_dec: Decimal | None = None
     if quota_dec is not None:
         if units_dec is not None:
             if units_dec > quota_dec:
@@ -162,16 +162,16 @@ def build_action_usage(
         remaining_dec = units_dec
 
     usage_id = _generate_usage_id(owner_id_normalized, action_normalized)
-    generated_at = datetime.now(timezone.utc).isoformat()
+    generated_at = datetime.now(UTC).isoformat()
 
     # Basic status when something is present; tests only require non-empty when present
-    status_value: Optional[str] = None
+    status_value: str | None = None
     if units_dec is not None or total_cost_dec is not None:
         status_value = "ok"
 
     # JSON-friendly collections; may be None, which tests accept
-    events: Optional[List[Dict[str, Any]]] = None
-    metadata: Optional[Dict[str, Any]] = None
+    events: list[dict[str, Any]] | None = None
+    metadata: dict[str, Any] | None = None
 
     return ActionUsage(
         ownerid=owner_id_normalized,

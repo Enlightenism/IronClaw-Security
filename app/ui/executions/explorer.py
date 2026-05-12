@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
-
 
 router = APIRouter(
     prefix="/ui/executions",
@@ -17,7 +16,7 @@ router = APIRouter(
 class ExecutionKpiView(BaseModel):
     label: str
     value: int
-    trendlabel: Optional[str] = None
+    trendlabel: str | None = None
     status: str = "neutral"
 
 
@@ -47,8 +46,8 @@ class ExecutionFilterView(BaseModel):
 class ExecutionExplorerItem(BaseModel):
     executionid: str
     timestamp: str
-    clientid: Optional[str] = None
-    sessionid: Optional[str] = None
+    clientid: str | None = None
+    sessionid: str | None = None
     actiontype: str
     target: str
     riskscore: int
@@ -57,9 +56,9 @@ class ExecutionExplorerItem(BaseModel):
     policyverdict: str
     shouldexecute: bool
     haltedbyboundary: bool
-    reviewitemid: Optional[str] = None
-    traceid: Optional[str] = None
-    reason: Optional[str] = None
+    reviewitemid: str | None = None
+    traceid: str | None = None
+    reason: str | None = None
 
 
 class ExecutionExplorerResponse(BaseModel):
@@ -78,7 +77,7 @@ class ExecutionExplorerResponse(BaseModel):
 
 
 def _utc_iso(year: int, month: int, day: int, hour: int, minute: int = 0) -> str:
-    return datetime(year, month, day, hour, minute, 0, tzinfo=timezone.utc).isoformat()
+    return datetime(year, month, day, hour, minute, 0, tzinfo=UTC).isoformat()
 
 
 def _safe_str(value: Any, default: str = "") -> str:
@@ -219,7 +218,7 @@ def _sample_execution_records() -> list[dict[str, Any]]:
 def _to_item(record: dict[str, Any]) -> ExecutionExplorerItem:
     return ExecutionExplorerItem(
         executionid=_safe_str(record.get("executionid"), "unknown-execution"),
-        timestamp=_safe_str(record.get("timestamp"), datetime.now(timezone.utc).isoformat()),
+        timestamp=_safe_str(record.get("timestamp"), datetime.now(UTC).isoformat()),
         clientid=record.get("clientid") if isinstance(record.get("clientid"), str) else None,
         sessionid=record.get("sessionid") if isinstance(record.get("sessionid"), str) else None,
         actiontype=_safe_str(record.get("actiontype"), "unknown"),
@@ -236,7 +235,7 @@ def _to_item(record: dict[str, Any]) -> ExecutionExplorerItem:
     )
 
 
-def _matches_text(value: Optional[str], expected: Optional[str]) -> bool:
+def _matches_text(value: str | None, expected: str | None) -> bool:
     if not expected:
         return True
     actual = _safe_str(value).lower()
@@ -309,15 +308,15 @@ def _build_filters(records: list[dict[str, Any]]) -> list[ExecutionFilterView]:
 
 @router.get("/explorer", response_model=ExecutionExplorerResponse)
 def get_execution_explorer(
-    actiontype: Optional[str] = Query(default=None),
-    target: Optional[str] = Query(default=None),
-    clientid: Optional[str] = Query(default=None),
-    sessionid: Optional[str] = Query(default=None),
-    executionstate: Optional[str] = Query(default=None),
-    responsestatus: Optional[str] = Query(default=None),
-    policyverdict: Optional[str] = Query(default=None),
-    minriskscore: Optional[int] = Query(default=None, ge=0, le=100),
-    maxriskscore: Optional[int] = Query(default=None, ge=0, le=100),
+    actiontype: str | None = Query(default=None),
+    target: str | None = Query(default=None),
+    clientid: str | None = Query(default=None),
+    sessionid: str | None = Query(default=None),
+    executionstate: str | None = Query(default=None),
+    responsestatus: str | None = Query(default=None),
+    policyverdict: str | None = Query(default=None),
+    minriskscore: int | None = Query(default=None, ge=0, le=100),
+    maxriskscore: int | None = Query(default=None, ge=0, le=100),
     reviewonly: bool = Query(default=False),
 ) -> ExecutionExplorerResponse:
     records = _sample_execution_records()
@@ -396,7 +395,7 @@ def get_execution_explorer(
         overallstatus = "attention"
 
     return ExecutionExplorerResponse(
-        generatedat=datetime.now(timezone.utc).isoformat(),
+        generatedat=datetime.now(UTC).isoformat(),
         environment="local",
         overallstatus=overallstatus,
         total=total,

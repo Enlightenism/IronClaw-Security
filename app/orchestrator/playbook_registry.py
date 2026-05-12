@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Iterable
+from typing import Any
 from uuid import uuid4
 
 from app.orchestrator.case_file import CaseFile
@@ -15,7 +16,6 @@ from app.orchestrator.response_playbook import (
     run_supervisor_escalation_playbook,
 )
 from app.orchestrator.supervisor import SupervisorEscalation
-
 
 TriggerType = str
 AutomationLevel = str

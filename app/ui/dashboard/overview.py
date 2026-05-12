@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-
 
 router = APIRouter(
     prefix="/ui/dashboard",
@@ -17,7 +15,7 @@ router = APIRouter(
 class DashboardKpiView(BaseModel):
     label: str
     value: int
-    trendlabel: Optional[str] = None
+    trendlabel: str | None = None
     status: str = "neutral"
 
 
@@ -40,16 +38,16 @@ class DashboardRiskTrendPoint(BaseModel):
 class DashboardRecentExecutionItem(BaseModel):
     executionid: str
     timestamp: str
-    clientid: Optional[str] = None
-    sessionid: Optional[str] = None
+    clientid: str | None = None
+    sessionid: str | None = None
     actiontype: str
     target: str
     riskscore: int
     executionstate: str
     responsestatus: str
     policyverdict: str
-    reviewitemid: Optional[str] = None
-    reason: Optional[str] = None
+    reviewitemid: str | None = None
+    reason: str | None = None
 
 
 class DashboardRecentReviewItem(BaseModel):
@@ -57,12 +55,12 @@ class DashboardRecentReviewItem(BaseModel):
     executionid: str
     timestamp: str
     reviewstatus: str
-    clientid: Optional[str] = None
-    sessionid: Optional[str] = None
+    clientid: str | None = None
+    sessionid: str | None = None
     riskscore: int
     policyverdict: str
     responsestatus: str
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 class DashboardRecentIncidentItem(BaseModel):
@@ -71,8 +69,8 @@ class DashboardRecentIncidentItem(BaseModel):
     status: str
     priority: str
     title: str
-    clientid: Optional[str] = None
-    sessionid: Optional[str] = None
+    clientid: str | None = None
+    sessionid: str | None = None
 
 
 class DashboardAlertItem(BaseModel):
@@ -82,8 +80,8 @@ class DashboardAlertItem(BaseModel):
     category: str
     title: str
     acknowledged: bool = False
-    executionid: Optional[str] = None
-    reviewitemid: Optional[str] = None
+    executionid: str | None = None
+    reviewitemid: str | None = None
 
 
 class DashboardOverviewResponse(BaseModel):
@@ -102,7 +100,7 @@ class DashboardOverviewResponse(BaseModel):
 
 
 def _utc_iso(year: int, month: int, day: int, hour: int, minute: int = 0) -> str:
-    return datetime(year, month, day, hour, minute, 0, tzinfo=timezone.utc).isoformat()
+    return datetime(year, month, day, hour, minute, 0, tzinfo=UTC).isoformat()
 
 
 def _sample_execution_records() -> list[dict[str, object]]:
@@ -296,7 +294,7 @@ def _sample_alerts() -> list[DashboardAlertItem]:
 def _to_recent_execution_item(record: dict[str, object]) -> DashboardRecentExecutionItem:
     return DashboardRecentExecutionItem(
         executionid=str(record.get("executionid") or "unknown-execution"),
-        timestamp=str(record.get("timestamp") or datetime.now(timezone.utc).isoformat()),
+        timestamp=str(record.get("timestamp") or datetime.now(UTC).isoformat()),
         clientid=record.get("clientid") if isinstance(record.get("clientid"), str) else None,
         sessionid=record.get("sessionid") if isinstance(record.get("sessionid"), str) else None,
         actiontype=str(record.get("actiontype") or "unknown"),
@@ -332,7 +330,7 @@ def _build_risk_trend(records: list[dict[str, object]]) -> list[DashboardRiskTre
     buckets: dict[str, list[int]] = {}
 
     for record in records:
-        timestamp = str(record.get("timestamp") or datetime.now(timezone.utc).isoformat())
+        timestamp = str(record.get("timestamp") or datetime.now(UTC).isoformat())
         bucket_key = timestamp[:13] + ":00:00+00:00"
         buckets.setdefault(bucket_key, []).append(int(record.get("riskscore") or 0))
 
@@ -404,7 +402,7 @@ def get_dashboard_overview() -> DashboardOverviewResponse:
         overallstatus = "attention"
 
     return DashboardOverviewResponse(
-        generatedat=datetime.now(timezone.utc).isoformat(),
+        generatedat=datetime.now(UTC).isoformat(),
         environment="local",
         overallstatus=overallstatus,
         kpis=kpis,

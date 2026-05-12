@@ -3,8 +3,9 @@ from __future__ import annotations
 import importlib
 import json
 import os
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Iterable, Literal, Mapping, Sequence, cast
+from typing import Any, Literal, cast
 
 GroqRole = Literal["system", "user", "assistant"]
 
@@ -40,7 +41,7 @@ class GroqChatClient:
     default_model: str = "groq-security-copilot"
 
     @classmethod
-    def default(cls) -> "GroqChatClient":
+    def default(cls) -> GroqChatClient:
         """
         Factory used throughout IronClaw (UI copilot, remediation, etc.).
 
@@ -130,7 +131,7 @@ def _call_groq_api(
     metadata: Mapping[str, Any] | None,
 ) -> str:
     groq_module = importlib.import_module("groq")
-    Groq = getattr(groq_module, "Groq")
+    Groq = groq_module.Groq
 
     client = Groq(api_key=api_key)
     model = model_override or default_model

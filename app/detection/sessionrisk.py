@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
-
 
 VERDICT_RANK = {
     "allow": 1,
@@ -52,7 +51,7 @@ class SessionRiskResult:
     escalated: bool
     first_seen_at: str | None
     last_seen_at: str | None
-    analyzed_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    analyzed_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -168,16 +167,16 @@ class SessionRiskAnalyzer:
     def _normalize_timestamp(self, value: Any) -> str:
         if isinstance(value, datetime):
             if value.tzinfo is None:
-                value = value.replace(tzinfo=timezone.utc)
-            return value.astimezone(timezone.utc).isoformat()
+                value = value.replace(tzinfo=UTC)
+            return value.astimezone(UTC).isoformat()
 
         if isinstance(value, str) and value.strip():
             parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
             if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
-            return parsed.astimezone(timezone.utc).isoformat()
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed.astimezone(UTC).isoformat()
 
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(UTC).isoformat()
 
     def _score_verdict_pressure(self, events: list[SessionEvent]) -> list[SessionRiskFactor]:
         factors: list[SessionRiskFactor] = []
@@ -315,7 +314,7 @@ class SessionRiskAnalyzer:
     ) -> list[SessionRiskFactor]:
         factors: list[SessionRiskFactor] = []
         last_seen = datetime.fromisoformat(events[-1].timestamp)
-        age = datetime.now(timezone.utc) - last_seen
+        age = datetime.now(UTC) - last_seen
 
         if age <= timedelta(minutes=recent_window_minutes):
             factors.append(

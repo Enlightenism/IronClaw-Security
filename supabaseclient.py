@@ -4,17 +4,18 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Tuple, Union
-from urllib.parse import urlencode, urljoin
+from typing import Any, Union
+from urllib.parse import urljoin
 
 import httpx
 
 logger = logging.getLogger("ironclaw.supabase")
 
 Json = Union[None, bool, int, float, str, "JsonDict", "JsonList"]
-JsonDict = Dict[str, Json]
-JsonList = List[Json]
+JsonDict = dict[str, Json]
+JsonList = list[Json]
 
 
 class SupabaseConfigurationError(RuntimeError):
@@ -28,7 +29,7 @@ class SupabaseConnectionError(RuntimeError):
 class SupabaseAPIError(RuntimeError):
     """Raised when Supabase returns a non-success HTTP status code."""
 
-    def __init__(self, status_code: int, message: str, details: Optional[Mapping[str, Any]] = None) -> None:
+    def __init__(self, status_code: int, message: str, details: Mapping[str, Any] | None = None) -> None:
         self.status_code = status_code
         self.message = message
         self.details = dict(details or {})
@@ -39,12 +40,12 @@ class SupabaseAPIError(RuntimeError):
 class SupabaseConfig:
     url: str
     key: str
-    service_role_key: Optional[str] = None
+    service_role_key: str | None = None
     schema: str = "public"
     timeout: float = 10.0
 
     @classmethod
-    def from_env(cls) -> "SupabaseConfig":
+    def from_env(cls) -> SupabaseConfig:
         """
         Load Supabase configuration from environment variables.
 
@@ -93,7 +94,7 @@ class SupabaseClient:
     - Is synchronous; callers control threading/async boundaries.
     """
 
-    def __init__(self, config: SupabaseConfig, client: Optional[httpx.Client] = None) -> None:
+    def __init__(self, config: SupabaseConfig, client: httpx.Client | None = None) -> None:
         self._config = config
         self._base_url = config.url.rstrip("/")
         self._schema = config.schema
@@ -112,8 +113,8 @@ class SupabaseClient:
         return self._schema
 
     @staticmethod
-    def _build_default_headers(config: SupabaseConfig) -> Dict[str, str]:
-        headers: Dict[str, str] = {
+    def _build_default_headers(config: SupabaseConfig) -> dict[str, str]:
+        headers: dict[str, str] = {
             "apikey": config.key,
             "Authorization": f"Bearer {config.key}",
             "Content-Type": "application/json",
@@ -160,9 +161,9 @@ class SupabaseClient:
         method: str,
         url: str,
         *,
-        params: Optional[Mapping[str, Any]] = None,
-        json_body: Optional[Json] = None,
-        headers: Optional[Mapping[str, str]] = None,
+        params: Mapping[str, Any] | None = None,
+        json_body: Json | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> Json:
         """
         Low-level request wrapper.
@@ -200,10 +201,10 @@ class SupabaseClient:
         self,
         table: str,
         *,
-        filters: Optional[Mapping[str, Any]] = None,
-        limit: Optional[int] = None,
-        order: Optional[Tuple[str, str]] = None,
-    ) -> List[JsonDict]:
+        filters: Mapping[str, Any] | None = None,
+        limit: int | None = None,
+        order: tuple[str, str] | None = None,
+    ) -> list[JsonDict]:
         """
         SELECT rows from a table.
 
@@ -211,7 +212,7 @@ class SupabaseClient:
         - limit: maximum number of rows.
         - order: (column, direction) where direction is 'asc' or 'desc'.
         """
-        params: Dict[str, Any] = {"select": "*"}
+        params: dict[str, Any] = {"select": "*"}
         filters = filters or {}
         for col, value in filters.items():
             # PostgREST filter syntax: column=eq.value
@@ -237,17 +238,17 @@ class SupabaseClient:
     def insert(
         self,
         table: str,
-        payload: Union[JsonDict, List[JsonDict]],
+        payload: JsonDict | list[JsonDict],
         *,
         returning: str = "representation",
-    ) -> List[JsonDict]:
+    ) -> list[JsonDict]:
         """
         INSERT rows into a table.
 
         - payload: single dict or list of dicts.
         - returning: 'representation' (default) to get inserted rows back.
         """
-        records: List[JsonDict]
+        records: list[JsonDict]
         if isinstance(payload, list):
             records = [dict(row) for row in payload]
         else:
@@ -270,7 +271,7 @@ class SupabaseClient:
         *,
         filters: Mapping[str, Any],
         returning: str = "representation",
-    ) -> List[JsonDict]:
+    ) -> list[JsonDict]:
         """
         UPDATE rows in a table.
 
@@ -279,7 +280,7 @@ class SupabaseClient:
         if not filters:
             raise ValueError("SupabaseClient.update requires non-empty filters.")
 
-        params: Dict[str, Any] = {}
+        params: dict[str, Any] = {}
         for col, value in filters.items():
             params[col] = f"eq.{value}"
 
@@ -293,7 +294,7 @@ class SupabaseClient:
             return [result]
         return []
 
-    def delete(self, table: str, *, filters: Mapping[str, Any]) -> List[JsonDict]:
+    def delete(self, table: str, *, filters: Mapping[str, Any]) -> list[JsonDict]:
         """
         DELETE rows from a table.
 
@@ -302,7 +303,7 @@ class SupabaseClient:
         if not filters:
             raise ValueError("SupabaseClient.delete requires non-empty filters.")
 
-        params: Dict[str, Any] = {}
+        params: dict[str, Any] = {}
         for col, value in filters.items():
             params[col] = f"eq.{value}"
 
@@ -320,10 +321,10 @@ class SupabaseClient:
     def rpc(
         self,
         function_name: str,
-        payload: Optional[Mapping[str, Any]] = None,
+        payload: Mapping[str, Any] | None = None,
         *,
         head: bool = False,
-        count: Optional[str] = None,
+        count: str | None = None,
     ) -> Json:
         """
         Call a Postgres function via the RPC endpoint.
@@ -334,7 +335,7 @@ class SupabaseClient:
         - count: if provided, sets Prefer: count=<value> (exact, planned, estimated).
         """
         url = f"/rest/v1/rpc/{function_name}"
-        headers: Dict[str, str] = {}
+        headers: dict[str, str] = {}
         if count:
             headers["Prefer"] = f"count={count}"
 

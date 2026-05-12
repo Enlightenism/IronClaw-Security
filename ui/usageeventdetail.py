@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Path, Query, status
-
 from telemetryaccess import get_usage_event_by_id
 
 router = APIRouter(prefix="/ui/usageevents", tags=["ui-usage-events"])

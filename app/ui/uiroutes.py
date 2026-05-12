@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-
 router = APIRouter(
     prefix="/ui/routes",
     tags=["ui-routes"],

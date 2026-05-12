@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -21,13 +20,13 @@ class SessionTimelineEvent(BaseModel):
     executionstate: str
     responsestatus: str
     policyverdict: str
-    reviewitemid: Optional[str] = None
-    reason: Optional[str] = None
+    reviewitemid: str | None = None
+    reason: str | None = None
 
 
 class SessionTimelineResponse(BaseModel):
     sessionid: str
-    clientid: Optional[str] = None
+    clientid: str | None = None
     generatedat: str
     totalexecutions: int
     pendingreviews: int
@@ -35,7 +34,7 @@ class SessionTimelineResponse(BaseModel):
 
 
 def _utc_iso(year: int, month: int, day: int, hour: int, minute: int = 0) -> str:
-    return datetime(year, month, day, hour, minute, 0, tzinfo=timezone.utc).isoformat()
+    return datetime(year, month, day, hour, minute, 0, tzinfo=UTC).isoformat()
 
 
 def _sample_session_timelines() -> dict[str, SessionTimelineResponse]:
@@ -43,7 +42,7 @@ def _sample_session_timelines() -> dict[str, SessionTimelineResponse]:
         "sess-alpha-001": SessionTimelineResponse(
             sessionid="sess-alpha-001",
             clientid="client-alpha",
-            generatedat=datetime.now(timezone.utc).isoformat(),
+            generatedat=datetime.now(UTC).isoformat(),
             totalexecutions=2,
             pendingreviews=1,
             events=[
@@ -76,7 +75,7 @@ def _sample_session_timelines() -> dict[str, SessionTimelineResponse]:
         "sess-beta-002": SessionTimelineResponse(
             sessionid="sess-beta-002",
             clientid="client-beta",
-            generatedat=datetime.now(timezone.utc).isoformat(),
+            generatedat=datetime.now(UTC).isoformat(),
             totalexecutions=1,
             pendingreviews=1,
             events=[

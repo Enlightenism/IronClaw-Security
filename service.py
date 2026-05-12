@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
@@ -558,7 +558,7 @@ async def review_history_item(id: str, body: ReviewUpdateRequest) -> ReviewUpdat
         )
 
     reviewer = (body.reviewer or "manual-review").strip() or "manual-review"
-    reviewed_at = datetime.now(timezone.utc).isoformat()
+    reviewed_at = datetime.now(UTC).isoformat()
 
     row = _update_scan_history_status_row(
         id=id,
@@ -588,7 +588,7 @@ async def stats_endpoint() -> StatsResponse:
     total_blocked = sum(1 for r in rows if r.get("verdict") == "block")
     total_threats_blocked = total_quarantined + total_blocked
 
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    cutoff = datetime.now(UTC) - timedelta(hours=24)
     threats_blocked_last_24h = 0
     for r in rows:
         if r.get("verdict") not in ("block", "quarantine"):

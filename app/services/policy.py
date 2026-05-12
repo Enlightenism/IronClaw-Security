@@ -1,13 +1,13 @@
 import os
-from typing import Dict, Any
+from typing import Any
 
-from app.services.rules import ALL_RULE_GROUPS
 from app.services.heuristics import _get_threshold  # type: ignore[attr-defined]
+from app.services.rules import ALL_RULE_GROUPS
 
 
-def get_policy_status() -> Dict[str, Any]:
-    severity_counts: Dict[str, int] = {"low": 0, "medium": 0, "high": 0, "critical": 0}
-    category_counts: Dict[str, int] = {}
+def get_policy_status() -> dict[str, Any]:
+    severity_counts: dict[str, int] = {"low": 0, "medium": 0, "high": 0, "critical": 0}
+    category_counts: dict[str, int] = {}
 
     for group in ALL_RULE_GROUPS:
         for rule in group:

@@ -5,7 +5,6 @@ from typing import Any, Final
 
 import pytest
 
-
 MODULE_CANDIDATES: Final[tuple[str, ...]] = (
     "app.supabaseclient",
     "supabaseclient",
@@ -243,7 +242,7 @@ def test_supabase_config_object_exposes_url_and_key_when_supported() -> None:
     if not hasattr(module, "SupabaseConfig"):
         pytest.skip("SupabaseConfig not implemented")
 
-    config_cls = getattr(module, "SupabaseConfig")
+    config_cls = module.SupabaseConfig
 
     try:
         config = config_cls(
@@ -275,7 +274,7 @@ def test_supabase_client_config_is_immutable_or_defensive_when_supported() -> No
     if not hasattr(module, "SupabaseConfig"):
         pytest.skip("SupabaseConfig not implemented")
 
-    config_cls = getattr(module, "SupabaseConfig")
+    config_cls = module.SupabaseConfig
 
     try:
         config = config_cls(

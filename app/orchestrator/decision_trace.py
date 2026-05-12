@@ -12,7 +12,6 @@ from app.orchestrator.policy_engine import PolicyEvaluation
 from app.orchestrator.runtime_session import RuntimeSession
 from app.orchestrator.supervisor import SessionExecutionRecord, SupervisorEscalation
 
-
 TraceOutcome = str
 
 

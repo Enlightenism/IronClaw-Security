@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-import importlib
 import os
 from unittest.mock import patch
 
-import pytest
-
-from app.services.secrets_vault import _SecretsVault, vault
-
+from app.services.secrets_vault import _SecretsVault
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -209,6 +205,7 @@ def test_get_returns_value_when_present():
 # ---------------------------------------------------------------------------
 
 def test_vault_singleton_is_same_object():
-    from app.services.secrets_vault import vault as v1, _vault_singleton
+    from app.services.secrets_vault import _vault_singleton
+    from app.services.secrets_vault import vault as v1
     v2 = _vault_singleton()
     assert v1 is v2

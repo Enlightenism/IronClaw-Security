@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 import argparse
 import json
 import os
@@ -9,9 +8,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Final
 
-
 from ironclaw_installer import InstallConfig, build_install_config, run_install
-
 
 try:
     from ironclaw_skill import __version__
@@ -320,7 +317,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        func = getattr(args, "func")
+        func = args.func
         return int(func(args))
     except IronClawSkillCliError as exc:
         print(f"[ironclaw-skill] failed: {exc}", file=sys.stderr)

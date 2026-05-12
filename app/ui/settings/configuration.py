@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -41,13 +40,13 @@ class SettingsConfigurationResponse(BaseModel):
     runtime: RuntimeConfigurationView
     executor: ExecutorConfigurationView
     policy: PolicyConfigurationView
-    activeenvironment: Optional[str] = None
+    activeenvironment: str | None = None
 
 
 @router.get("/configuration", response_model=SettingsConfigurationResponse)
 def get_settings_configuration() -> SettingsConfigurationResponse:
     return SettingsConfigurationResponse(
-        generatedat=datetime.now(timezone.utc).isoformat(),
+        generatedat=datetime.now(UTC).isoformat(),
         runtime=RuntimeConfigurationView(
             defaultfilepath="app/api/actionexecute.py",
             defaultresponsestatus="completed",

@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 
 from app.services.integrationregistry import get_integration_registry
 
-
 RolloutStage = str
 
 

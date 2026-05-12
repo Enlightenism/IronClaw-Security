@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 
 from app.services.integrationtelemetry import IntegrationTelemetry
 
-
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 
 _service = IntegrationTelemetry()

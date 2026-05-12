@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 from app.runtime.commandsupervisor import CommandPolicy, build_command_supervisor
 from app.runtime.filereturnguard import FileReturnPolicy, build_file_return_guard
 from app.runtime.networkguard import NetworkPolicy, build_network_guard
-
 
 COMMAND_TOOL_NAMES = {
     "shell",

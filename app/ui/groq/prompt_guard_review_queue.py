@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.services.groq_security_brain import GroqSecurityVerdict
-
 
 router = APIRouter(
     prefix="/ui/groq",
@@ -21,7 +20,7 @@ ReviewReason = Literal["false_positive", "operator_override", "needs_investigati
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @dataclass(slots=True)

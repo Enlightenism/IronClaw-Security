@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Dict, Mapping, Optional
+from typing import Any
 
 from app.services.release_policy import (
     ReleasePolicyInput,
@@ -33,7 +34,7 @@ class ReleasePolicyClient:
         has_test_evidence: bool = True,
         requires_manual_review: bool = False,
         manual_review_completed: bool = False,
-        metadata: Optional[Mapping[str, Any]] = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> ReleasePolicyResult:
         """
         Evaluate release policy and return the full typed result.
@@ -68,8 +69,8 @@ class ReleasePolicyClient:
         has_test_evidence: bool = True,
         requires_manual_review: bool = False,
         manual_review_completed: bool = False,
-        metadata: Optional[Mapping[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        metadata: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """
         Evaluate release policy and return a JSON‑safe dict suitable
         for API responses or logging.

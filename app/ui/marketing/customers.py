@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-
 
 router = APIRouter(
     prefix="/ui/marketing",
@@ -59,7 +57,7 @@ class CustomerStoryView(BaseModel):
     challenge: str
     whyironclaw: str
     outcomes: list[CustomerOutcomeView] = Field(default_factory=list)
-    operatorquote: Optional[str] = None
+    operatorquote: str | None = None
 
 
 class CustomerSegmentView(BaseModel):
@@ -82,7 +80,7 @@ class CustomersPageResponse(BaseModel):
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @router.get("/customers", response_model=CustomersPageResponse)

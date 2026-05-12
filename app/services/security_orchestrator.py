@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from app.models.guard_facade import GuardActionResponse
 from app.services.guard_facade import execute_guard_action
@@ -18,7 +18,7 @@ def orchestrate_security_action(
     client_id: str | None = None,
     session_id: str | None = None,
     file_path: str | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     scan_result = perform_scan(target_type=target_type, target_value=target_value)
 
     if scan_result["verdict"] == "block":

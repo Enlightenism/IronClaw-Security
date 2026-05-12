@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -27,18 +27,18 @@ class ResponseAction(BaseModel):
     )
     target_id: str = Field(..., description="Identifier of the target object")
     reason: str = Field(..., description="Human-readable action rationale")
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional structured context for downstream workflow handlers",
     )
 
 
 class CoordinatedResponse(BaseModel):
-    session_id: Optional[str] = Field(
+    session_id: str | None = Field(
         None,
         description="Runtime session being evaluated, if applicable",
     )
-    incident_id: Optional[str] = Field(
+    incident_id: str | None = Field(
         None,
         description="Incident identifier if one already exists or is assigned upstream",
     )
@@ -51,15 +51,15 @@ class CoordinatedResponse(BaseModel):
         ...,
         description="Whether automated escalation should occur immediately",
     )
-    playbook: Optional[str] = Field(
+    playbook: str | None = Field(
         None,
         description="Suggested playbook slug for downstream incident/remediation flow",
     )
-    reasons: List[str] = Field(
+    reasons: list[str] = Field(
         default_factory=list,
         description="Explainable reasons used for audit logs, UI, and downstream routing",
     )
-    actions: List[ResponseAction] = Field(
+    actions: list[ResponseAction] = Field(
         default_factory=list,
         description="Ordered actions that downstream handlers can execute",
     )
@@ -89,11 +89,11 @@ class ResponseCoordinator:
         self,
         *,
         cluster: CorrelationCluster,
-        session_snapshot: Optional[SessionRiskSnapshot] = None,
-        incident_id: Optional[str] = None,
+        session_snapshot: SessionRiskSnapshot | None = None,
+        incident_id: str | None = None,
     ) -> CoordinatedResponse:
-        reasons: List[str] = []
-        actions: List[ResponseAction] = []
+        reasons: list[str] = []
+        actions: list[ResponseAction] = []
 
         session_id = self._resolve_session_id(cluster, session_snapshot)
         playbook = cluster.playbook_suggestion
@@ -190,8 +190,8 @@ class ResponseCoordinator:
     def _resolve_session_id(
         self,
         cluster: CorrelationCluster,
-        session_snapshot: Optional[SessionRiskSnapshot],
-    ) -> Optional[str]:
+        session_snapshot: SessionRiskSnapshot | None,
+    ) -> str | None:
         if session_snapshot is not None:
             return session_snapshot.session_id
 
@@ -270,12 +270,12 @@ class ResponseCoordinator:
         self,
         *,
         disposition: ResponseDisposition,
-        session_id: Optional[str],
-        incident_id: Optional[str],
+        session_id: str | None,
+        incident_id: str | None,
         cluster: CorrelationCluster,
-        playbook: Optional[str],
-    ) -> List[ResponseAction]:
-        actions: List[ResponseAction] = []
+        playbook: str | None,
+    ) -> list[ResponseAction]:
+        actions: list[ResponseAction] = []
 
         if disposition is ResponseDisposition.ALLOW:
             actions.append(

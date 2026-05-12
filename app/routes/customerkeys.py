@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 
 from app.core.apikeys import APIKeyRecord, get_api_key_registry, mask_api_key
 
-
 router = APIRouter(prefix="/customer-keys", tags=["customer-keys-management"])
 
 

@@ -7,7 +7,6 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Final
 
-
 TELEMETRY_DIR: Final[Path] = Path.home() / ".ironclaw"
 TELEMETRY_PATH: Final[Path] = TELEMETRY_DIR / "telemetry_events.jsonl"
 TELEMETRY_SCHEMA_VERSION: Final[int] = 1

@@ -13,7 +13,6 @@ from app.orchestrator.review_queue import (
     summarize_review_queue,
 )
 
-
 _active_review_queue: ReviewQueue | None = None
 
 

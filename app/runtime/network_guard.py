@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from typing import Any, Mapping
+from typing import Any
 from urllib.parse import urlparse
 
 from app.runtime.sandbox_router import SandboxLane, route_to_sandbox
-
 
 LOCAL_HOSTS = {
     "localhost",

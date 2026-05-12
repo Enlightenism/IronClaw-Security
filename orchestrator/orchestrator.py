@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Mapping
+from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from orchestrator.executionplan import ExecutionPlan
@@ -31,7 +32,7 @@ class OrchestrationRequest:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "OrchestrationRequest":
+    def from_mapping(cls, data: Mapping[str, Any] | None) -> OrchestrationRequest:
         payload = dict(data or {})
         return cls(
             request_id=str(payload.get("request_id") or f"req-{uuid4().hex}"),
@@ -75,7 +76,7 @@ class OrchestrationStep:
     status: str
     message: str
     details: dict[str, Any] = field(default_factory=dict)
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -101,11 +102,11 @@ class OrchestrationResult:
     steps: list[OrchestrationStep] = field(default_factory=list)
     telemetry: list[dict[str, Any]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
-    started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     completed_at: str | None = None
 
-    def finalize(self) -> "OrchestrationResult":
-        self.completed_at = datetime.now(timezone.utc).isoformat()
+    def finalize(self) -> OrchestrationResult:
+        self.completed_at = datetime.now(UTC).isoformat()
         return self
 
     def to_dict(self) -> dict[str, Any]:
@@ -368,7 +369,7 @@ class Orchestrator:
             {
                 "event_id": f"tel-{uuid4().hex}",
                 "event": event,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "orchestration_id": result.orchestration_id,
                 "request_id": result.request_id,
                 "status": result.status,

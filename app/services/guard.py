@@ -2,7 +2,6 @@ from typing import Literal, TypedDict
 
 from app.services.scanner import perform_scan
 
-
 ContextType = Literal["user_prompt", "retrieved_doc", "tool_output", "model_output"]
 VerdictType = Literal["allow", "warn", "quarantine", "block"]
 

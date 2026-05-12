@@ -7,7 +7,6 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-
 router = APIRouter(
     prefix="/release-policy",
     tags=["release-policy"],

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -8,7 +8,11 @@ from pydantic import BaseModel, Field
 
 from app.services.organizationstore import (
     OrganizationMemberRecord as StoredOrganizationMemberRecord,
+)
+from app.services.organizationstore import (
     OrganizationRecord as StoredOrganizationRecord,
+)
+from app.services.organizationstore import (
     getorganizationstore,
 )
 
@@ -76,7 +80,7 @@ class OrganizationResponse(BaseModel):
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _member_to_view(member: StoredOrganizationMemberRecord) -> OrganizationMemberView:

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers / Fixtures
@@ -39,7 +37,7 @@ def _make_runtime_context(
         "tier": tier,
         "permissions": permissions or ["scan", "execute", "review"],
         "sandbox_enabled": sandbox_enabled,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
 
 
@@ -75,7 +73,7 @@ def _make_tool_call(
         "tool_name": tool_name,
         "args": args or {"path": "/tmp/safe.txt"},
         "package": package,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -628,7 +626,7 @@ class TestVerdictPropagation:
     def test_verdict_carries_timestamp(self):
         verdict_obj = {
             "verdict": "allow",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
         assert "timestamp" in verdict_obj
@@ -712,7 +710,7 @@ class TestAuditTrailIntegrity:
             "tool_name": call["tool_name"],
             "package": call["package"],
             "verdict": "allow",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
         required = {"record_id", "call_id", "org_id", "user_id", "session_id",
@@ -749,7 +747,7 @@ class TestAuditTrailIntegrity:
         assert len(audit_log) == 2
 
     def test_audit_timestamp_is_utc(self):
-        ts = datetime.now(timezone.utc).isoformat()
+        ts = datetime.now(UTC).isoformat()
         parsed = datetime.fromisoformat(ts)
         assert parsed.utcoffset().total_seconds() == 0
 
@@ -759,7 +757,8 @@ class TestAuditTrailIntegrity:
         assert len(call_ids) == 5
 
     def test_audit_log_captures_quarantine_payload_hash(self):
-        import hashlib, json
+        import hashlib
+        import json
 
         call = _make_tool_call(tool_name="exec_shell", args={"cmd": "rm -rf /"})
         payload_bytes = json.dumps(call, sort_keys=True).encode()

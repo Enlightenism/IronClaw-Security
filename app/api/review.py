@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.actiondecision import decideaction
-
 
 router = APIRouter(prefix="/review", tags=["review"])
 
@@ -18,7 +17,7 @@ ReviewResolution = Literal["allow", "deny", "quarantine", "needsreview"]
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class ReviewReasonView(BaseModel):

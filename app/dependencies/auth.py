@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
 
-from fastapi import Depends, Header, Request
+from fastapi import Depends, Header
 
 from app.core.access_control import require_access
 from app.core.auth import (
@@ -13,7 +13,6 @@ from app.core.auth import (
 )
 from app.core.org_isolation import require_same_org
 from app.core.permissions import require_permission
-
 
 # ---------------------------------------------------------------------------
 # Re-exports — canonical implementations live in app.core.auth

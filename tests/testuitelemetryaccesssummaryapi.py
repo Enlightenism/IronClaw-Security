@@ -7,7 +7,6 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-
 UI_TELEMETRY_ACCESS_SUMMARY_PATH: Final[str] = "/ui/telemetry-access-summary"
 
 

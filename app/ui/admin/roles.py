@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-
 
 router = APIRouter(
     prefix="/ui/admin",
@@ -79,7 +77,7 @@ def get_access_control_roles() -> AccessControlRolesResponse:
     ]
 
     return AccessControlRolesResponse(
-        generatedat=datetime.now(timezone.utc).isoformat(),
+        generatedat=datetime.now(UTC).isoformat(),
         summary=AccessControlRolesSummary(
             total=len(items),
             platformroles=sum(1 for item in items if item.scope == "platform"),

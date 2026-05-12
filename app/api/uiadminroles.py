@@ -4,7 +4,6 @@ from fastapi import APIRouter, Depends, Request
 
 from app.dependencies.auth import require_api_key
 
-
 router = APIRouter(prefix="/ui", tags=["ui-admin"])
 
 

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 from uuid import uuid4
-
 
 from app.orchestrator.coordination_state import CoordinationSnapshot
 from app.orchestrator.execution_plan import ExecutionPlan
@@ -16,7 +15,6 @@ from app.orchestrator.runtime_session import (
     create_runtime_session,
     execute_routed_task_in_session,
 )
-
 
 SupervisorStatus = str
 EscalationLevel = str

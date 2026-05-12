@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter
@@ -9,7 +9,9 @@ from pydantic import BaseModel, Field
 
 from app.ui.groq.prompt_guard_activity_feed import build_prompt_guard_activity_feed
 from app.ui.groq.prompt_guard_alerts_overview import build_prompt_guard_alerts_overview
-from app.ui.groq.prompt_guard_alerts_timeline_summary import build_prompt_guard_alerts_timeline_summary
+from app.ui.groq.prompt_guard_alerts_timeline_summary import (
+    build_prompt_guard_alerts_timeline_summary,
+)
 from app.ui.groq.prompt_guard_coverage_summary import build_prompt_guard_coverage_summary
 from app.ui.groq.prompt_guard_executive_summary import build_prompt_guard_executive_summary
 from app.ui.groq.prompt_guard_health_snapshot import build_prompt_guard_health_snapshot
@@ -23,7 +25,6 @@ from app.ui.groq.prompt_guard_status_board_summary import build_prompt_guard_sta
 from app.ui.groq.prompt_guard_timeline_summary import build_prompt_guard_timeline_summary
 from app.ui.groq.prompt_guard_trends_summary import build_prompt_guard_trends_summary
 
-
 router = APIRouter(
     prefix="/ui/groq",
     tags=["groq-prompt-guard-dashboard-index"],
@@ -31,7 +32,7 @@ router = APIRouter(
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @dataclass(slots=True)

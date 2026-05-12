@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from app.detection.outputsanitizer import OutputSanitizationResult, build_output_sanitizer
 from app.detection.secretscanner import SecretScanResult, build_secret_scanner

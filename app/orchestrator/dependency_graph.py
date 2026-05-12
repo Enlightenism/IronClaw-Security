@@ -8,7 +8,6 @@ from pathlib import Path
 
 from app.orchestrator.agent_registry import AgentRegistry, discover_agents
 
-
 IMPORT_RE = re.compile(
     r"""(?mx)
     ^

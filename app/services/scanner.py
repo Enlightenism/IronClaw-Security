@@ -1,6 +1,6 @@
 import re
 import unicodedata
-from typing import Any, Dict, List
+from typing import Any
 
 from app.services.heuristics import heuristic_prompt_injection_score
 from app.services.rules import ALL_RULE_GROUPS
@@ -32,8 +32,8 @@ def _normalize_text(text: str) -> str:
     return s
 
 
-def _build_rule_index() -> Dict[str, Dict[str, str]]:
-    index: Dict[str, Dict[str, str]] = {}
+def _build_rule_index() -> dict[str, dict[str, str]]:
+    index: dict[str, dict[str, str]] = {}
     for group in ALL_RULE_GROUPS:
         for rule in group:
             index[rule["id"]] = {
@@ -47,8 +47,8 @@ def _build_rule_index() -> Dict[str, Dict[str, str]]:
 RULE_INDEX = _build_rule_index()
 
 
-def get_rule_severities(matched_patterns: List[str]) -> List[str]:
-    severities: List[str] = []
+def get_rule_severities(matched_patterns: list[str]) -> list[str]:
+    severities: list[str] = []
     for match in matched_patterns:
         if match in RULE_INDEX:
             severities.append(RULE_INDEX[match]["severity"])
@@ -83,8 +83,8 @@ def _has_shell_download_execute_pattern(normalized: str) -> bool:
     return False
 
 
-def _has_exfiltration_pattern(normalized: str) -> List[str]:
-    exfil_matches: List[str] = []
+def _has_exfiltration_pattern(normalized: str) -> list[str]:
+    exfil_matches: list[str] = []
 
     compact = re.sub(r"[^a-z0-9]", "", normalized)
 
@@ -109,9 +109,9 @@ def _has_exfiltration_pattern(normalized: str) -> List[str]:
     return exfil_matches
 
 
-def scan_text(text: str) -> List[str]:
+def scan_text(text: str) -> list[str]:
     normalized = _normalize_text(text)
-    matches: List[str] = []
+    matches: list[str] = []
 
     if "download and execute" in normalized:
         matches.append("download and execute")
@@ -146,13 +146,13 @@ def scan_text(text: str) -> List[str]:
     return matches
 
 
-def _build_summary(verdict: str, matched_patterns: List[str]) -> str:
+def _build_summary(verdict: str, matched_patterns: list[str]) -> str:
     if matched_patterns:
         return f"Detected {len(matched_patterns)} risky pattern(s)."
     return "No risky patterns detected."
 
 
-def _build_risk_score(matched_patterns: List[str], heuristic_score: int) -> int:
+def _build_risk_score(matched_patterns: list[str], heuristic_score: int) -> int:
     severities = get_rule_severities(matched_patterns)
 
     severity_points = sum(_severity_weight(sev) for sev in severities)
@@ -163,7 +163,7 @@ def _build_risk_score(matched_patterns: List[str], heuristic_score: int) -> int:
     return max(0, min(100, base))
 
 
-def _decide_verdict(matched_patterns: List[str], risk_score: int) -> str:
+def _decide_verdict(matched_patterns: list[str], risk_score: int) -> str:
     if not matched_patterns:
         return "allow"
 
@@ -198,7 +198,7 @@ def _decide_verdict(matched_patterns: List[str], risk_score: int) -> str:
     return "allow"
 
 
-def _choose_sandbox_lane(matched_patterns: List[str]) -> str:
+def _choose_sandbox_lane(matched_patterns: list[str]) -> str:
     if "heuristic_prompt_injection_score" in matched_patterns:
         return "prompt_injection"
 
@@ -223,7 +223,7 @@ def _choose_sandbox_lane(matched_patterns: List[str]) -> str:
     return "none"
 
 
-def _build_quarantine_reason(verdict: str, matched_patterns: List[str]) -> str | None:
+def _build_quarantine_reason(verdict: str, matched_patterns: list[str]) -> str | None:
     if verdict != "quarantine":
         return None
 
@@ -233,8 +233,8 @@ def _build_quarantine_reason(verdict: str, matched_patterns: List[str]) -> str |
     return "Detection requires review."
 
 
-def _build_rule_details(matched_patterns: List[str]) -> List[Dict[str, Any]]:
-    details: List[Dict[str, Any]] = []
+def _build_rule_details(matched_patterns: list[str]) -> list[dict[str, Any]]:
+    details: list[dict[str, Any]] = []
     for rule_id in matched_patterns:
         meta = RULE_INDEX.get(rule_id)
         if not meta:
@@ -253,7 +253,7 @@ def _build_rule_details(matched_patterns: List[str]) -> List[Dict[str, Any]]:
     return details
 
 
-def perform_scan(target_type: str, target_value: str) -> Dict[str, Any]:
+def perform_scan(target_type: str, target_value: str) -> dict[str, Any]:
     normalized = _normalize_text(target_value)
     heuristic_score = heuristic_prompt_injection_score(normalized)
     matched_patterns = scan_text(target_value)

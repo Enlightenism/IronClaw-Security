@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from app.clients.release_policy_client import ReleasePolicyClient
 from app.providers.service_registry import ServiceRegistry, build_service_registry
 
 # Module-level singleton registry used across the app.
-_service_registry: Optional[ServiceRegistry] = None
+_service_registry: ServiceRegistry | None = None
 
 
 def get_service_registry() -> ServiceRegistry:

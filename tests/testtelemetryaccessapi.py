@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
 from app.ui.telemetryaccesssummary import get_telemetry_access_summary
-from app.schemas.telemetry import TelemetryAccessSummaryResponse
-
 
 router = APIRouter(
     prefix="/telemetry/access",

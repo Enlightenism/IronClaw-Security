@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Optional
 
 from fastapi import APIRouter
 from pydantic import BaseModel
-
 
 router = APIRouter(
     prefix="/ui/runtime",
@@ -30,7 +28,7 @@ class BoundaryThresholdView(BaseModel):
 
 class ActiveExecutorView(BaseModel):
     executorname: str
-    fallbackexecutorname: Optional[str] = None
+    fallbackexecutorname: str | None = None
     defaultmode: str
     sandboxrequired: bool
     mode: str
@@ -43,7 +41,7 @@ class RuntimeMetricsView(BaseModel):
     reviewcount: int
     blockedcount: int
     quarantinecount: int
-    latesteventat: Optional[str] = None
+    latesteventat: str | None = None
 
 
 class RuntimePolicyView(BaseModel):

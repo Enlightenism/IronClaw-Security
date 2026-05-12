@@ -15,7 +15,6 @@ from app.dependencies.operator_auth import (
 from app.dependencies.org_context import get_org_context
 from app.dependencies.permissions import require_any_permission
 
-
 router = APIRouter(prefix="/api/operator-auth", tags=["operator-auth"])
 
 

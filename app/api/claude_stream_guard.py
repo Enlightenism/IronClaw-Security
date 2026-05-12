@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, Dict, Optional
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from app.core.auth import require_api_key
-
 
 router = APIRouter(
     prefix="/claude/stream-guard",
@@ -22,7 +22,7 @@ class StreamGuardError(Exception):
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 async def _scan_chunk_with_policy_guard(
@@ -31,9 +31,9 @@ async def _scan_chunk_with_policy_guard(
     api_key: str,
     partial_text: str,
     *,
-    context: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "userprompt": context.get("userprompt") if context else None,
         "retrieveddoc": context.get("retrieveddoc") if context else None,
         "tooloutput": context.get("tooloutput") if context else None,
@@ -64,7 +64,7 @@ async def _proxy_stream_with_guard(
     *,
     guard_base_url: str,
     api_key: str,
-    request_body: Dict[str, Any],
+    request_body: dict[str, Any],
     guard_mode: str = "enforce",
     scan_interval_chars: int = 256,
 ) -> AsyncGenerator[bytes, None]:

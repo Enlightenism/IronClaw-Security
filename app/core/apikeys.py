@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import secrets
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from threading import RLock
 from typing import Any
 
@@ -17,7 +17,7 @@ _DEFAULT_CREATED_BY = "system"
 
 
 def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _normalize_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
@@ -67,10 +67,10 @@ class APIKeyRecord:
     rate_plan: str = _DEFAULT_RATE_PLAN
     metadata: dict[str, Any] = field(default_factory=dict)
 
-    def touch(self, when: str | None = None) -> "APIKeyRecord":
+    def touch(self, when: str | None = None) -> APIKeyRecord:
         return replace(self, last_used_at=when or utc_now_iso())
 
-    def revoke(self, revoked_by: str = _DEFAULT_CREATED_BY, when: str | None = None) -> "APIKeyRecord":
+    def revoke(self, revoked_by: str = _DEFAULT_CREATED_BY, when: str | None = None) -> APIKeyRecord:
         timestamp = when or utc_now_iso()
         return replace(
             self,

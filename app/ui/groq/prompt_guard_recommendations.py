@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter
@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 
 from app.ui.groq.prompt_guard_metrics import build_prompt_guard_metrics_view
 from app.ui.groq.prompt_guard_policy import build_prompt_guard_policy_view
-
 
 router = APIRouter(
     prefix="/ui/groq",
@@ -28,7 +27,7 @@ RecommendationType = Literal[
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @dataclass(slots=True)

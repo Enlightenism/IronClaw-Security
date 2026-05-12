@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 CorrelationVerdict = Literal["allow", "warn", "quarantine", "block"]
@@ -22,7 +22,7 @@ _RISK_SCORE_WEIGHT: list[tuple[int, int]] = [
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _normalize(value: str | None) -> str | None:

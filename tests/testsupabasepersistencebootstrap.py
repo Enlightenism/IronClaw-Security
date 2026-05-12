@@ -5,7 +5,6 @@ from typing import Any, Final
 
 import pytest
 
-
 MODULE_CANDIDATES: Final[tuple[str, ...]] = (
     "app.persistencebootstrap",
     "persistencebootstrap",

@@ -1,0 +1,4 @@
+[console_scripts]
+ironclaw-skill = ironclawskill.cli:main
+ironclaw-smoketest = smoketestclient:main
+ironclaw-testclient = testclient:main

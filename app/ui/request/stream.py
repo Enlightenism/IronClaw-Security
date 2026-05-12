@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-
 
 router = APIRouter(
     prefix="/ui/request",
@@ -16,8 +14,8 @@ router = APIRouter(
 class RequestStreamItem(BaseModel):
     requestid: str
     timestamp: str
-    clientid: Optional[str] = None
-    sessionid: Optional[str] = None
+    clientid: str | None = None
+    sessionid: str | None = None
     route: str
     method: str
     riskscore: int
@@ -41,7 +39,7 @@ class RequestStreamResponse(BaseModel):
 
 
 def _utc_iso(year: int, month: int, day: int, hour: int, minute: int = 0) -> str:
-    return datetime(year, month, day, hour, minute, 0, tzinfo=timezone.utc).isoformat()
+    return datetime(year, month, day, hour, minute, 0, tzinfo=UTC).isoformat()
 
 
 def _build_placeholder_items() -> list[RequestStreamItem]:
@@ -93,7 +91,7 @@ def get_request_stream() -> RequestStreamResponse:
     items = _build_placeholder_items()
 
     return RequestStreamResponse(
-        generatedat=datetime.now(timezone.utc).isoformat(),
+        generatedat=datetime.now(UTC).isoformat(),
         items=items,
         totals=RequestStreamTotals(
             total=len(items),

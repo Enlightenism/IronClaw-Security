@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-
 
 router = APIRouter(
     prefix="/ui/admin",
@@ -17,7 +15,7 @@ router = APIRouter(
 class OrganizationKpiView(BaseModel):
     label: str
     value: int
-    trendlabel: Optional[str] = None
+    trendlabel: str | None = None
     status: str = "neutral"
 
 
@@ -37,7 +35,7 @@ class OrganizationMemberView(BaseModel):
     displayname: str
     role: str
     status: str
-    lastseenat: Optional[str] = None
+    lastseenat: str | None = None
 
 
 class OrganizationApiKeyView(BaseModel):
@@ -46,7 +44,7 @@ class OrganizationApiKeyView(BaseModel):
     prefix: str
     status: str
     createdat: str
-    lastusedat: Optional[str] = None
+    lastusedat: str | None = None
     scopelabels: list[str] = Field(default_factory=list)
 
 
@@ -57,7 +55,7 @@ class OrganizationEnvironmentView(BaseModel):
     status: str
     policyname: str
     activekeycount: int
-    lastactivityat: Optional[str] = None
+    lastactivityat: str | None = None
 
 
 class OrganizationView(BaseModel):
@@ -99,7 +97,7 @@ class OrganizationsOverviewResponse(BaseModel):
 
 
 def _utc_iso(year: int, month: int, day: int, hour: int, minute: int = 0) -> str:
-    return datetime(year, month, day, hour, minute, 0, tzinfo=timezone.utc).isoformat()
+    return datetime(year, month, day, hour, minute, 0, tzinfo=UTC).isoformat()
 
 
 def _sample_organizations() -> list[OrganizationView]:
@@ -364,7 +362,7 @@ def get_organizations_overview() -> OrganizationsOverviewResponse:
         overallstatus = "attention"
 
     return OrganizationsOverviewResponse(
-        generatedat=datetime.now(timezone.utc).isoformat(),
+        generatedat=datetime.now(UTC).isoformat(),
         environment="local",
         overallstatus=overallstatus,
         kpis=kpis,

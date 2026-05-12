@@ -1,22 +1,23 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from hashlib import sha256
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any
 
 
 def _utcnow_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
-def _as_dict(value: Any) -> Dict[str, Any]:
+def _as_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
         return dict(value)
     return {}
 
 
-def _as_list(value: Any) -> List[Any]:
+def _as_list(value: Any) -> list[Any]:
     if value is None:
         return []
     if isinstance(value, list):
@@ -26,9 +27,9 @@ def _as_list(value: Any) -> List[Any]:
     return [value]
 
 
-def _uniq(values: Sequence[Any]) -> List[str]:
+def _uniq(values: Sequence[Any]) -> list[str]:
     seen: set[str] = set()
-    ordered: List[str] = []
+    ordered: list[str] = []
     for value in values:
         if value is None:
             continue
@@ -97,11 +98,11 @@ class CorrelatedSignal:
     severity: str
     summary: str
     score: int
-    evidence: Dict[str, Any] = field(default_factory=dict)
-    indicator_keys: List[str] = field(default_factory=list)
+    evidence: dict[str, Any] = field(default_factory=dict)
+    indicator_keys: list[str] = field(default_factory=list)
     created_at: str = field(default_factory=_utcnow_iso)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "signal_id": self.signal_id,
             "signal_type": self.signal_type,
@@ -145,7 +146,7 @@ class AttackCorrelationService:
         organization_id: str | None = None,
         request_id: str | None = None,
         metadata: Mapping[str, Any] | None = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         normalized_signals = [self._normalize_signal(signal) for signal in (signals or [])]
 
         malware_summary = self._lookup_malware_summary(
@@ -346,7 +347,7 @@ class AttackCorrelationService:
         session_id: str | None,
         actor_id: str | None,
         organization_id: str | None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         payload = {
             "session_id": session_id,
             "actor_id": actor_id,
@@ -367,7 +368,7 @@ class AttackCorrelationService:
         session_id: str | None,
         actor_id: str | None,
         organization_id: str | None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         payload = {
             "session_id": session_id,
             "actor_id": actor_id,
@@ -388,7 +389,7 @@ class AttackCorrelationService:
         session_id: str | None,
         actor_id: str | None,
         organization_id: str | None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         payload = {
             "session_id": session_id,
             "actor_id": actor_id,
@@ -401,8 +402,8 @@ class AttackCorrelationService:
             payload,
         )
 
-    def _extract_artifacts(self, signals: Sequence[CorrelatedSignal]) -> List[Dict[str, Any]]:
-        artifacts: List[Dict[str, Any]] = []
+    def _extract_artifacts(self, signals: Sequence[CorrelatedSignal]) -> list[dict[str, Any]]:
+        artifacts: list[dict[str, Any]] = []
         for signal in signals:
             evidence = signal.evidence
             for artifact in _as_list(evidence.get("artifacts")):
@@ -420,8 +421,8 @@ class AttackCorrelationService:
         malware_summary: Mapping[str, Any],
         detonation_summary: Mapping[str, Any],
         hostile_context: Mapping[str, Any],
-    ) -> List[CorrelatedSignal]:
-        derived: List[CorrelatedSignal] = []
+    ) -> list[CorrelatedSignal]:
+        derived: list[CorrelatedSignal] = []
 
         if malware_summary:
             verdict = str(malware_summary.get("verdict") or malware_summary.get("status") or "").lower()
@@ -499,8 +500,8 @@ class AttackCorrelationService:
         malware_summary: Mapping[str, Any],
         detonation_summary: Mapping[str, Any],
         hostile_context: Mapping[str, Any],
-    ) -> Dict[str, List[str]]:
-        indicators: Dict[str, List[str]] = {
+    ) -> dict[str, list[str]]:
+        indicators: dict[str, list[str]] = {
             "hashes": [],
             "domains": [],
             "ips": [],
@@ -549,7 +550,7 @@ class AttackCorrelationService:
         session_id: str | None,
         actor_id: str | None,
         organization_id: str | None,
-        indicators: Mapping[str, List[str]],
+        indicators: Mapping[str, list[str]],
         signals: Sequence[CorrelatedSignal],
     ) -> str:
         signal_types = ",".join(sorted(signal.signal_type for signal in signals))
@@ -636,7 +637,7 @@ class AttackCorrelationService:
         malware_summary: Mapping[str, Any],
         detonation_summary: Mapping[str, Any],
         hostile_context: Mapping[str, Any],
-    ) -> List[str]:
+    ) -> list[str]:
         signal_types = [signal.signal_type for signal in signals]
         tags = _uniq(
             [
@@ -664,7 +665,7 @@ class AttackCorrelationService:
         if isinstance(result, list):
             return _uniq(result)
 
-        playbooks: List[str] = []
+        playbooks: list[str] = []
         if risk_score >= 85:
             playbooks.append("critical-incident-response")
         if malware_summary:
@@ -691,7 +692,7 @@ class AttackCorrelationService:
         organization_id: str | None,
         signals: Sequence[CorrelatedSignal],
         playbooks: Sequence[str],
-    ) -> List[str]:
+    ) -> list[str]:
         if self.review_queue_service is None:
             return []
         if risk_score < 65 and _severity_rank(severity) < _severity_rank("high"):
@@ -735,7 +736,7 @@ class AttackCorrelationService:
         signals: Sequence[CorrelatedSignal],
         malware_summary: Mapping[str, Any],
         detonation_summary: Mapping[str, Any],
-    ) -> List[str]:
+    ) -> list[str]:
         if self.quarantine_store is None:
             return []
 
@@ -781,9 +782,9 @@ class AttackCorrelationService:
         session_id: str | None,
         actor_id: str | None,
         organization_id: str | None,
-        indicators: Mapping[str, List[str]],
+        indicators: Mapping[str, list[str]],
         playbooks: Sequence[str],
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         if self.remediation_gate is None:
             return []
         if risk_score < 65:

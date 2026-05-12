@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-
 import copy
-from datetime import UTC, datetime
 from typing import Any
-
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-
 
 from app.services.review_queue_service import get_review_queue_summary
 from app.services.telemetry import (
@@ -16,7 +12,6 @@ from app.services.telemetry import (
     read_telemetry_events,
     summarize_telemetry_events,
 )
-
 
 router = APIRouter(prefix="/ui-status", tags=["ui-status"])
 

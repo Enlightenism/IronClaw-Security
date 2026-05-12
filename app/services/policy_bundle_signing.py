@@ -1,21 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Literal
-
 import hashlib
 import hmac
 import json
 import secrets
-
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any, Literal
 
 PolicyBundleFormat = Literal["json", "compact"]
 PolicyBundleStatus = Literal["valid", "invalid", "expired", "unsigned"]
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _normalize_text(value: str | None) -> str:
@@ -251,7 +249,7 @@ def rotate_active_signing_key(
     algorithm: str = "hs256",
     metadata: dict[str, Any] | None = None,
 ) -> PolicySigningKeySet:
-    next_key_id = _normalize_text(key_id) or f"ironclaw-rotated-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    next_key_id = _normalize_text(key_id) or f"ironclaw-rotated-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"
     next_secret = _normalize_text(secret) or secrets.token_hex(32)
     next_metadata = dict(metadata or {})
     next_metadata.setdefault("scope", "local")

@@ -5,7 +5,6 @@ from fastapi.testclient import TestClient
 
 from app.api.actionusage import router as actionusage_router
 
-
 app = FastAPI()
 app.include_router(actionusage_router)
 client = TestClient(app)

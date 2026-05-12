@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Literal, Optional
+from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, Request, status
 from pydantic import BaseModel, Field
 
 from app.core.auth import require_api_key
-
 
 router = APIRouter(
     prefix="/claude/bootstrap",
@@ -74,7 +73,7 @@ class ClaudeBootstrapRequest(BaseModel):
         min_length=1,
         max_length=128,
     )
-    base_guard_url: Optional[str] = Field(
+    base_guard_url: str | None = Field(
         None,
         description=(
             "Optional override for IronClaw's externally reachable base URL. "
@@ -165,7 +164,7 @@ def bootstrap_claude_code_guard(
         use_guard_execute=True,
     )
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
 
     snippet = _build_one_command_snippet(
         config=client_config,

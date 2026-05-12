@@ -4,14 +4,13 @@ import base64
 import binascii
 import hashlib
 import io
-import json
 import re
 import zipfile
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 from app.services.secretservice import build_secret_service
-
 
 _TEXT_EXTENSIONS = {
     ".env",

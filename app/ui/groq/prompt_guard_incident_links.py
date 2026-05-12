@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -11,7 +11,6 @@ from app.services.groq_security_brain import GroqSecurityVerdict
 from app.ui.groq.incidents import _INCIDENTS
 from app.ui.groq.prompt_guard_audit_trail import _AUDIT_TRAIL
 
-
 router = APIRouter(
     prefix="/ui/groq",
     tags=["groq-prompt-guard-incident-links"],
@@ -19,7 +18,7 @@ router = APIRouter(
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @dataclass(slots=True)

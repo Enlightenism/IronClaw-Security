@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from app.security.promptinjection import scanpromptinjectiondict
-
 
 router = APIRouter(prefix="/policy", tags=["action-policy"])
 
@@ -20,9 +19,9 @@ class ActionPolicyRequest(BaseModel):
     target: str = Field(..., description="Target such as URL, shell, filesystem path, or tool id.")
     content: str = Field(..., description="Action content, prompt, or instruction text.")
     riskscore: int = Field(..., ge=0, le=100, description="Base risk score before policy adjustments.")
-    clientid: Optional[str] = Field(None, description="Client or actor id.")
-    sessionid: Optional[str] = Field(None, description="Session or conversation id.")
-    filepath: Optional[str] = Field(
+    clientid: str | None = Field(None, description="Client or actor id.")
+    sessionid: str | None = Field(None, description="Session or conversation id.")
+    filepath: str | None = Field(
         None,
         description="Optional source file path for audit attribution.",
     )

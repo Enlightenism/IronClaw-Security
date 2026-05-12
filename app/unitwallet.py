@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 @dataclass(slots=True)
@@ -16,9 +16,9 @@ class UnitWallet:
     - Shape is JSON-serializable via as_dict().
     """
 
-    ownerid: Optional[str] = None
+    ownerid: str | None = None
     balance: Decimal = field(default_factory=lambda: Decimal("0"))
-    status: Optional[str] = "active"
+    status: str | None = "active"
 
     def _ensure_decimal(self, amount: Any, *, field_name: str) -> Decimal:
         try:
@@ -35,7 +35,7 @@ class UnitWallet:
 
     # --- Public balance accessors used by tests ---
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         """
         Stable, JSON-friendly payload.
 
@@ -61,10 +61,10 @@ class UnitWallet:
 
     # --- Ownership helpers ---
 
-    def owner_id(self) -> Optional[str]:
+    def owner_id(self) -> str | None:
         return self.ownerid
 
-    def account_id(self) -> Optional[str]:
+    def account_id(self) -> str | None:
         return self.ownerid
 
     # --- Mutating operations required by tests ---
@@ -128,7 +128,7 @@ class UnitWallet:
         return None
 
 
-def build_unit_wallet(*, owner_id: Optional[str] = None) -> UnitWallet:
+def build_unit_wallet(*, owner_id: str | None = None) -> UnitWallet:
     """
     Factory used by tests.
 

@@ -5,7 +5,6 @@ from typing import Any, Literal
 
 from app.orchestrator.orchestrator import OrchestrationDecision
 
-
 ExecutionLane = Literal[
     "direct_allow",
     "review_required",

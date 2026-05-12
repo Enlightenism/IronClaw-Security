@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import os
-from typing import Final, Literal, TypedDict, List
+from typing import Final, Literal, TypedDict
 
 import httpx
-
 
 Verdict = Literal["allow", "warn", "quarantine", "block"]
 
@@ -18,10 +17,10 @@ class ScanResult(TypedDict):
     target_type: str
     target_value: str
     risk_score: int
-    matched_patterns: List[str]
-    risky_files: List[str]
-    checks_loaded: List[str]
-    failed_checks: List[str]
+    matched_patterns: list[str]
+    risky_files: list[str]
+    checks_loaded: list[str]
+    failed_checks: list[str]
     quarantine_reason: str | None
     review_status: str | None
     untrusted: bool

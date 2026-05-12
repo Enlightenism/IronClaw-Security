@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 from uuid import uuid4
 
 
@@ -66,7 +67,7 @@ class PolicyRule:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any]) -> "PolicyRule":
+    def from_mapping(cls, data: Mapping[str, Any]) -> PolicyRule:
         target = data.get("target", PolicyTarget.UNKNOWN)
         verdict = data.get("verdict", PolicyVerdict.WARN)
 
@@ -103,7 +104,7 @@ class PolicyRule:
             metadata={str(k): v for k, v in (data.get("metadata") or {}).items()},
         )
 
-    def matches(self, request: "PolicyRequest") -> bool:
+    def matches(self, request: PolicyRequest) -> bool:
         if not self.enabled:
             return False
 
@@ -130,7 +131,7 @@ class PolicyRule:
 
         return True
 
-    def build_evidence(self, request: "PolicyRequest") -> PolicyEvidence:
+    def build_evidence(self, request: PolicyRequest) -> PolicyEvidence:
         return PolicyEvidence(
             code=self.rule_id,
             message=self.description or f"Policy rule '{self.name}' matched.",
@@ -163,7 +164,7 @@ class PolicyRequest:
     fail_closed: bool = True
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "PolicyRequest":
+    def from_mapping(cls, data: Mapping[str, Any] | None) -> PolicyRequest:
         data = data or {}
 
         target_raw = data.get("target", PolicyTarget.UNKNOWN)
@@ -239,7 +240,7 @@ class PolicyDecision:
     requires_human_review: bool = False
     confidence: float = 1.0
     metadata: dict[str, Any] = field(default_factory=dict)
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def to_dict(self) -> dict[str, Any]:
         return {

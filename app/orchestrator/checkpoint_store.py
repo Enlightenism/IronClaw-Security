@@ -11,7 +11,6 @@ from app.orchestrator.decision_trace import DecisionTrace
 from app.orchestrator.runtime_session import RuntimeSession
 from app.orchestrator.supervisor import SupervisorSnapshot, summarize_supervisor
 
-
 CheckpointStatus = str
 
 

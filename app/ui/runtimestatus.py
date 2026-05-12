@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 
 from app.models.uipages import PageSection, UIPageDefinition
-
 
 _RUNTIME_OVERVIEW_ITEMS: list[dict[str, Any]] = [
     {"label": "Pipeline", "value": "Available", "tone": "success"},

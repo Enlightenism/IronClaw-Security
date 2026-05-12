@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
-
 from app.services.action_decision import evaluate_action_execution
 from app.services.action_guard import ActionType
-
-
 
 PolicyVerdict = Literal["allow", "warn", "quarantine", "block"]
 PolicyMode = Literal["enforce", "monitor"]

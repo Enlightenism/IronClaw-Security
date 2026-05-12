@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from fnmatch import fnmatch
-from typing import Any, Iterable
+from typing import Any
 from uuid import uuid4
 
 from app.orchestrator.execution_plan import ExecutionPlan
-
 
 PolicyEffect = str
 PolicyMode = str
@@ -36,7 +36,7 @@ class PolicyContext:
         action_type: str,
         target: str,
         metadata: dict[str, Any] | None = None,
-    ) -> "PolicyContext":
+    ) -> PolicyContext:
         return cls(
             agent_id=agent_id,
             file_path=file_path,

@@ -5,7 +5,6 @@ import json
 import shlex
 import subprocess
 import sys
-from typing import List
 
 from ironclawclient import IronClawClient, IronClawClientError
 
@@ -38,7 +37,7 @@ def _read_yes_no(prompt: str) -> bool:
 
 def _infer_target_from_command(command: str) -> str | None:
     try:
-        parts: List[str] = shlex.split(command, posix=False)
+        parts: list[str] = shlex.split(command, posix=False)
         if not parts:
             return None
         return parts[0]

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
-from typing import Any, Final, Mapping
+from typing import Any, Final
 
 import httpx
-
 
 DEFAULT_BASE_URL: Final[str] = "http://127.0.0.1:8000"
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 10.0
@@ -94,7 +94,7 @@ class IronClawInfraClient:
     def close(self) -> None:
         self._client.close()
 
-    def __enter__(self) -> "IronClawInfraClient":
+    def __enter__(self) -> IronClawInfraClient:
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:

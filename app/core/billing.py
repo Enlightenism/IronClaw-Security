@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from threading import Lock
 from typing import Any, Final, Literal, TypedDict
 
-
 PlanCode = Literal["starter-20k", "growth-100k", "scale-200k"]
 
 

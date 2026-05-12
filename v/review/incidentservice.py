@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -28,7 +29,7 @@ class IncidentSeverity(str, Enum):
 class IncidentEvidence(BaseModel):
     kind: str = Field(..., description="Evidence type such as signal, edge, session, artifact")
     value: str = Field(..., description="Stable identifier or compact value")
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional evidence context for analysts and UI",
     )
@@ -40,23 +41,23 @@ class IncidentRecord(BaseModel):
     status: IncidentStatus = Field(..., description="Current lifecycle state")
     severity: IncidentSeverity = Field(..., description="Incident severity")
     cluster_id: str = Field(..., description="Source correlation cluster identifier")
-    session_id: Optional[str] = Field(
+    session_id: str | None = Field(
         None,
         description="Primary linked session when a single session is identifiable",
     )
-    playbook: Optional[str] = Field(
+    playbook: str | None = Field(
         None,
         description="Suggested or assigned response playbook",
     )
-    disposition: Optional[ResponseDisposition] = Field(
+    disposition: ResponseDisposition | None = Field(
         None,
         description="Current coordinated response disposition",
     )
-    reasons: List[str] = Field(
+    reasons: list[str] = Field(
         default_factory=list,
         description="Analyst/audit reasons and explanation strings",
     )
-    evidence: List[IncidentEvidence] = Field(
+    evidence: list[IncidentEvidence] = Field(
         default_factory=list,
         description="Incident evidence linked from cluster/session response",
     )
@@ -76,13 +77,13 @@ class IncidentService:
     """
 
     def __init__(self) -> None:
-        self._incidents: Dict[str, IncidentRecord] = {}
+        self._incidents: dict[str, IncidentRecord] = {}
         self._counter = 1
 
-    def list_incidents(self) -> List[IncidentRecord]:
+    def list_incidents(self) -> list[IncidentRecord]:
         return list(self._incidents.values())
 
-    def get(self, incident_id: str) -> Optional[IncidentRecord]:
+    def get(self, incident_id: str) -> IncidentRecord | None:
         return self._incidents.get(incident_id)
 
     def create_from_cluster(
@@ -90,7 +91,7 @@ class IncidentService:
         *,
         cluster: CorrelationCluster,
         coordinated_response: CoordinatedResponse,
-        title: Optional[str] = None,
+        title: str | None = None,
     ) -> IncidentRecord:
         incident_id = self._next_incident_id()
         now = self._utcnow()
@@ -117,8 +118,8 @@ class IncidentService:
         *,
         cluster: CorrelationCluster,
         coordinated_response: CoordinatedResponse,
-        incident_id: Optional[str] = None,
-        title: Optional[str] = None,
+        incident_id: str | None = None,
+        title: str | None = None,
     ) -> IncidentRecord:
         if incident_id and incident_id in self._incidents:
             return self.update_from_cluster(
@@ -139,7 +140,7 @@ class IncidentService:
         incident_id: str,
         cluster: CorrelationCluster,
         coordinated_response: CoordinatedResponse,
-        title: Optional[str] = None,
+        title: str | None = None,
     ) -> IncidentRecord:
         existing = self._incidents.get(incident_id)
         if existing is None:
@@ -170,7 +171,7 @@ class IncidentService:
         *,
         clusters: Sequence[CorrelationCluster],
         coordinated_responses: Sequence[CoordinatedResponse],
-    ) -> List[IncidentRecord]:
+    ) -> list[IncidentRecord]:
         """
         Convenience method for batch orchestration flows.
 
@@ -179,8 +180,8 @@ class IncidentService:
         if len(clusters) != len(coordinated_responses):
             raise ValueError("clusters and coordinated_responses must have the same length")
 
-        incidents: List[IncidentRecord] = []
-        for cluster, response in zip(clusters, coordinated_responses):
+        incidents: list[IncidentRecord] = []
+        for cluster, response in zip(clusters, coordinated_responses, strict=False):
             incident_id = response.incident_id
             incidents.append(
                 self.upsert_from_cluster(
@@ -195,8 +196,8 @@ class IncidentService:
         self,
         cluster: CorrelationCluster,
         coordinated_response: CoordinatedResponse,
-    ) -> List[IncidentEvidence]:
-        evidence: List[IncidentEvidence] = []
+    ) -> list[IncidentEvidence]:
+        evidence: list[IncidentEvidence] = []
 
         evidence.append(
             IncidentEvidence(
@@ -325,8 +326,8 @@ class IncidentService:
         }
         return left if rank[left] >= rank[right] else right
 
-    def _merge_unique_strings(self, left: List[str], right: List[str]) -> List[str]:
-        merged: List[str] = []
+    def _merge_unique_strings(self, left: list[str], right: list[str]) -> list[str]:
+        merged: list[str] = []
         seen = set()
         for item in [*left, *right]:
             if item not in seen:
@@ -336,13 +337,13 @@ class IncidentService:
 
     def _merge_evidence(
         self,
-        left: List[IncidentEvidence],
-        right: List[IncidentEvidence],
-    ) -> List[IncidentEvidence]:
+        left: list[IncidentEvidence],
+        right: list[IncidentEvidence],
+    ) -> list[IncidentEvidence]:
         return self._dedupe_evidence([*left, *right])
 
-    def _dedupe_evidence(self, evidence: List[IncidentEvidence]) -> List[IncidentEvidence]:
-        deduped: List[IncidentEvidence] = []
+    def _dedupe_evidence(self, evidence: list[IncidentEvidence]) -> list[IncidentEvidence]:
+        deduped: list[IncidentEvidence] = []
         seen = set()
         for item in evidence:
             key = (item.kind, item.value, tuple(sorted(item.metadata.items())))
@@ -358,4 +359,4 @@ class IncidentService:
         return incident_id
 
     def _utcnow(self) -> str:
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(UTC).isoformat()

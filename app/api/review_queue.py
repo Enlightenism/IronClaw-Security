@@ -14,7 +14,6 @@ from app.services.review_queue_service import (
     reject_review,
 )
 
-
 router = APIRouter(prefix="/reviews", tags=["review-queue"])
 
 

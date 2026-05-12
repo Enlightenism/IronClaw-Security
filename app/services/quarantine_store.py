@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from threading import Lock
 from typing import Any, Literal
 from uuid import uuid4
-
 
 QuarantineStatus = Literal["isolated", "under_review", "released", "destroyed"]
 QuarantineSource = Literal["scan", "guard", "sandbox", "review", "system"]
@@ -13,7 +12,7 @@ RiskLevel = Literal["low", "medium", "high", "critical"]
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 @dataclass(slots=True)

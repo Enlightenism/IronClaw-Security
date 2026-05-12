@@ -10,7 +10,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
-
 ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 RESULT_FILE: Final[Path] = ROOT / ".security-quality-gate.json"
 APP_DIR: Final[Path] = ROOT / "app"

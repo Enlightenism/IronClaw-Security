@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-
-from dataclasses import dataclass, field
 from typing import Any
 
-
 import pytest
-
 
 from app.adapters.base import AdapterExecutionRequest
 from app.adapters.openclaw_adapter import (
@@ -22,7 +18,6 @@ from app.orchestrator.policy_enforcer import (
     initialize_policy_engine,
 )
 from app.services.integration_registry import initialize_integration_registry
-
 
 # ---------------------------------------------------------------------------
 # Stubs

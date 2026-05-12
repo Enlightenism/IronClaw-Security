@@ -6,7 +6,6 @@ from typing import Any, Final
 
 import pytest
 
-
 MODULE_CANDIDATES: Final[tuple[str, ...]] = (
     "app.services.organizationstore",
     "services.organizationstore",
@@ -50,15 +49,15 @@ def _first_callable(target: Any, *names: str) -> Any | None:
 def _serialize(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
-    if hasattr(value, "model_dump") and callable(getattr(value, "model_dump")):
+    if hasattr(value, "model_dump") and callable(value.model_dump):
         payload = value.model_dump()
         if isinstance(payload, dict):
             return payload
-    if hasattr(value, "dict") and callable(getattr(value, "dict")):
+    if hasattr(value, "dict") and callable(value.dict):
         payload = value.dict()
         if isinstance(payload, dict):
             return payload
-    if hasattr(value, "as_dict") and callable(getattr(value, "as_dict")):
+    if hasattr(value, "as_dict") and callable(value.as_dict):
         payload = value.as_dict()
         if isinstance(payload, dict):
             return payload

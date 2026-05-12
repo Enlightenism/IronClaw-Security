@@ -7,7 +7,6 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-
 UI_HEALTH_SNAPSHOT_PATH: Final[str] = "/ui/health-snapshot"
 
 

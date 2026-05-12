@@ -7,7 +7,6 @@ from typing import Final
 
 from app.schemas.release_policy import ReleaseChannel, ReleasePolicyDetail
 
-
 ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 DEFAULT_STORE_FILE: Final[Path] = ROOT / ".release-policy-catalog.json"
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter
@@ -16,7 +16,6 @@ from app.services.groq_security_brain import (
     summarize_groq_security_decision,
 )
 
-
 router = APIRouter(
     prefix="/ui/groq",
     tags=["groq-brain-status"],
@@ -27,7 +26,7 @@ HealthState = Literal["healthy", "warning", "critical", "disabled"]
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _health_from_mode_and_risk(

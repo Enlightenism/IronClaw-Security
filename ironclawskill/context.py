@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from typing import Any, Mapping
+from typing import Any
 from uuid import uuid4
-
 
 JsonValue = Any
 
@@ -105,32 +105,32 @@ class SkillRequestContext:
     def created_at(self) -> datetime:
         return self.createdat
 
-    def withmetadata(self, metadata: JsonValue) -> "SkillRequestContext":
+    def withmetadata(self, metadata: JsonValue) -> SkillRequestContext:
         merged = dict(self.metadata)
         if isinstance(metadata, Mapping):
             merged.update(metadata)
         return replace(self, metadata=merged)
 
-    def with_metadata(self, **metadata: JsonValue) -> "SkillRequestContext":
+    def with_metadata(self, **metadata: JsonValue) -> SkillRequestContext:
         merged = dict(self.metadata)
         merged.update(metadata)
         return replace(self, metadata=merged)
 
-    def withlabel(self, **labels: str) -> "SkillRequestContext":
+    def withlabel(self, **labels: str) -> SkillRequestContext:
         merged = dict(self.labels)
         merged.update(labels)
         return replace(self, labels=merged)
 
-    def with_labels(self, **labels: str) -> "SkillRequestContext":
+    def with_labels(self, **labels: str) -> SkillRequestContext:
         merged = dict(self.labels)
         merged.update(labels)
         return replace(self, labels=merged)
 
-    def withtags(self, *tags: str) -> "SkillRequestContext":
+    def withtags(self, *tags: str) -> SkillRequestContext:
         combined = tuple(dict.fromkeys((*self.tags, *tags)))
         return replace(self, tags=combined)
 
-    def with_tags(self, *tags: str) -> "SkillRequestContext":
+    def with_tags(self, *tags: str) -> SkillRequestContext:
         combined = tuple(dict.fromkeys((*self.tags, *tags)))
         return replace(self, tags=combined)
 
@@ -142,7 +142,7 @@ class SkillRequestContext:
         correlationid: str | None = None,
         sessionid: str | None = None,
         metadata: Mapping[str, JsonValue] | None = None,
-    ) -> "SkillRequestContext":
+    ) -> SkillRequestContext:
         mergedmetadata = dict(self.metadata)
         if metadata:
             mergedmetadata.update(metadata)
@@ -233,27 +233,27 @@ class SkillRuntimeContext:
     def started_at(self) -> datetime:
         return self.startedat
 
-    def withmetadata(self, metadata: JsonValue) -> "SkillRuntimeContext":
+    def withmetadata(self, metadata: JsonValue) -> SkillRuntimeContext:
         merged = dict(self.metadata)
         if isinstance(metadata, Mapping):
             merged.update(metadata)
         return replace(self, metadata=merged)
 
-    def with_metadata(self, **metadata: JsonValue) -> "SkillRuntimeContext":
+    def with_metadata(self, **metadata: JsonValue) -> SkillRuntimeContext:
         merged = dict(self.metadata)
         merged.update(metadata)
         return replace(self, metadata=merged)
 
-    def markreviewrequired(self, value: bool = True) -> "SkillRuntimeContext":
+    def markreviewrequired(self, value: bool = True) -> SkillRuntimeContext:
         return replace(self, reviewrequired=value)
 
-    def mark_review_required(self, value: bool = True) -> "SkillRuntimeContext":
+    def mark_review_required(self, value: bool = True) -> SkillRuntimeContext:
         return replace(self, reviewrequired=value)
 
-    def enablesandbox(self, value: bool = True) -> "SkillRuntimeContext":
+    def enablesandbox(self, value: bool = True) -> SkillRuntimeContext:
         return replace(self, sandboxenabled=value)
 
-    def enable_sandbox(self, value: bool = True) -> "SkillRuntimeContext":
+    def enable_sandbox(self, value: bool = True) -> SkillRuntimeContext:
         return replace(self, sandboxenabled=value)
 
     def toauditrecord(self) -> dict[str, JsonValue]:

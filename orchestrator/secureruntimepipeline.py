@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Callable, Iterable, Mapping
+from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from orchestrator.policyenforcer import (
@@ -20,7 +21,7 @@ class RuntimeStep:
     status: str
     message: str
     details: dict[str, Any] = field(default_factory=dict)
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -60,11 +61,11 @@ class RuntimeExecutionResult:
     artifacts: list[RuntimeArtifact] = field(default_factory=list)
     telemetry: list[dict[str, Any]] = field(default_factory=list)
     runtime_metadata: dict[str, Any] = field(default_factory=dict)
-    started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     completed_at: str | None = None
 
-    def finalize(self) -> "RuntimeExecutionResult":
-        self.completed_at = datetime.now(timezone.utc).isoformat()
+    def finalize(self) -> RuntimeExecutionResult:
+        self.completed_at = datetime.now(UTC).isoformat()
         return self
 
     def to_dict(self) -> dict[str, Any]:
@@ -407,7 +408,7 @@ class SecureRuntimePipeline:
         telemetry_event = {
             "event_id": f"tel-{uuid4().hex}",
             "event": event,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "execution_id": result.execution_id,
             "request_id": result.request_id,
             "status": result.status,

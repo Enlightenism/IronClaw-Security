@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Query
 
@@ -11,27 +11,27 @@ router = APIRouter(tags=["audit-log"])
 
 @router.get("/ui/audit-log")
 def get_audit_log(
-    selected_event_id: Optional[str] = Query(
+    selected_event_id: str | None = Query(
         default=None,
         description="Optional audit event identifier to focus in the UI response.",
     ),
-    actor_id: Optional[str] = Query(
+    actor_id: str | None = Query(
         default=None,
         description="Optional actor identifier filter for UI hydration.",
     ),
-    request_id: Optional[str] = Query(
+    request_id: str | None = Query(
         default=None,
         description="Optional request identifier filter for UI hydration.",
     ),
-    trace_id: Optional[str] = Query(
+    trace_id: str | None = Query(
         default=None,
         description="Optional trace identifier filter for UI hydration.",
     ),
-    verdict: Optional[str] = Query(
+    verdict: str | None = Query(
         default=None,
         description="Optional verdict filter for UI hydration.",
     ),
-    event_type: Optional[str] = Query(
+    event_type: str | None = Query(
         default=None,
         description="Optional event type filter for UI hydration.",
     ),
@@ -41,8 +41,8 @@ def get_audit_log(
         le=500,
         description="Maximum number of audit events to include in the UI response.",
     ),
-) -> Dict[str, Any]:
-    filters: Dict[str, Any] = {
+) -> dict[str, Any]:
+    filters: dict[str, Any] = {
         "actor_id": actor_id,
         "request_id": request_id,
         "trace_id": trace_id,
@@ -51,7 +51,7 @@ def get_audit_log(
         "limit": limit,
     }
 
-    normalized_filters: Dict[str, Any] = {
+    normalized_filters: dict[str, Any] = {
         key: value
         for key, value in filters.items()
         if value is not None and value != ""

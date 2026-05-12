@@ -8,7 +8,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Final, Literal, Protocol
 
-
 BillingOperation = Literal["scan", "action_policy", "action_decision", "execute", "unknown"]
 BillingProvider = Literal["stub", "memory"]
 BillingStatus = Literal["accepted", "rejected", "noop"]

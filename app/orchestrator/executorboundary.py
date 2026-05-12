@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Callable, Optional
+from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from app.security.hostilecontext import scanhostilecontextdict
@@ -65,7 +66,7 @@ def initialize_secureruntimepipeline() -> Any:
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _default_executor_for_pipeline(pipeline: Any) -> ExecutorCallable:
@@ -109,7 +110,7 @@ def executewithboundary(
     sessionid: str | None = None,
     filepath: str | None = None,
     metadata: dict[str, Any] | None = None,
-    executor: Optional[ExecutorCallable] = None,
+    executor: ExecutorCallable | None = None,
 ) -> tuple[ExecutionReceipt, Any]:
     active_pipeline = pipeline or initialize_secureruntimepipeline()
     effective_filepath = filepath or "app/api/actionexecute.py"

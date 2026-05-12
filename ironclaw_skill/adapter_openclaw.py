@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-
 from typing import Any, Final, Literal
 
-
 from pydantic import TypeAdapter, ValidationError
-
 
 from ironclaw_skill.contracts import (
     SkillActionDecisionRequest,
     SkillActionInput,
     SkillActionPolicyRequest,
-    SkillExecutionInput,
     SkillExecuteRequest,
+    SkillExecutionInput,
     SkillPromptBundleInput,
     SkillReason,
     SkillRequest,
@@ -23,7 +20,6 @@ from ironclaw_skill.contracts import (
     build_skill_error_response,
     build_skill_success_response,
 )
-
 
 OPENCLAW_PLATFORM: Final[Literal["openclaw"]] = "openclaw"
 REQUEST_ADAPTER: Final[TypeAdapter[SkillRequest]] = TypeAdapter(SkillRequest)

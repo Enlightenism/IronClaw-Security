@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -62,7 +62,7 @@ class ReleasePolicyRequest(BaseModel):
         False,
         description="Whether required manual review has been completed.",
     )
-    metadata: Optional[Dict[str, Any]] = Field(
+    metadata: dict[str, Any] | None = Field(
         default=None,
         description="Optional extra context to attach to the release summary.",
     )
@@ -70,9 +70,9 @@ class ReleasePolicyRequest(BaseModel):
 
 class ReleasePolicyResponse(BaseModel):
     integration_id: str
-    rollout_decision: Dict[str, Any]
-    readiness_result: Dict[str, Any]
-    release_summary: Dict[str, Any]
+    rollout_decision: dict[str, Any]
+    readiness_result: dict[str, Any]
+    release_summary: dict[str, Any]
 
 
 # ---------------------------------------------------------------------------

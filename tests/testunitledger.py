@@ -11,7 +11,7 @@ from app.unitledger import build_unit_ledger
 def _payload_of(result: Any) -> dict[str, Any]:
     if isinstance(result, dict):
         return result
-    if hasattr(result, "as_dict") and callable(getattr(result, "as_dict")):
+    if hasattr(result, "as_dict") and callable(result.as_dict):
         payload = result.as_dict()
         assert isinstance(payload, dict)
         return payload

@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-from app.services.integrationregistry import IntegrationRegistryService
-from app.services.integrationtelemetry import IntegrationTelemetryService
 from app.models.integrations import (
+    IntegrationCapability,
     IntegrationRecord,
     IntegrationStatus,
-    IntegrationCapability,
 )
+from app.services.integrationregistry import IntegrationRegistryService
+from app.services.integrationtelemetry import IntegrationTelemetryService
 
 
 class IntegrationsOverviewIntegrationItem(BaseModel):
@@ -31,12 +30,12 @@ class IntegrationsOverviewIntegrationItem(BaseModel):
     status: str
     configurable: bool = False
     verified: bool = False
-    configuration_state: Optional[str] = Field(default=None, alias="configurationstate")
-    settings_route: Optional[str] = Field(default=None, alias="settingsroute")
-    manifest_route: Optional[str] = Field(default=None, alias="manifestroute")
-    tags: List[str] = Field(default_factory=list)
-    capabilities: List[str] = Field(default_factory=list)
-    risk_score: Optional[int] = Field(
+    configuration_state: str | None = Field(default=None, alias="configurationstate")
+    settings_route: str | None = Field(default=None, alias="settingsroute")
+    manifest_route: str | None = Field(default=None, alias="manifestroute")
+    tags: list[str] = Field(default_factory=list)
+    capabilities: list[str] = Field(default_factory=list)
+    risk_score: int | None = Field(
         default=None,
         description="Optional normalized risk or posture score (0–100) from telemetry.",
     )
@@ -57,8 +56,8 @@ class IntegrationsOverviewSummary(BaseModel):
     configurable_integrations: int = Field(..., alias="configurableintegrations")
     verified_integrations: int = Field(..., alias="verifiedintegrations")
     pending_integrations: int = Field(..., alias="pendingintegrations")
-    platforms: List[str] = Field(default_factory=list)
-    capabilities: List[str] = Field(default_factory=list)
+    platforms: list[str] = Field(default_factory=list)
+    capabilities: list[str] = Field(default_factory=list)
 
     class Config:
         allow_population_by_field_name = True
@@ -74,7 +73,7 @@ class IntegrationsOverviewPage(BaseModel):
 
     generated_at: datetime = Field(..., alias="generatedat")
     summary: IntegrationsOverviewSummary
-    integrations: List[IntegrationsOverviewIntegrationItem]
+    integrations: list[IntegrationsOverviewIntegrationItem]
 
     class Config:
         allow_population_by_field_name = True
@@ -82,7 +81,7 @@ class IntegrationsOverviewPage(BaseModel):
 
 def _map_integration_record_to_item(
     record: IntegrationRecord,
-    risk_score: Optional[int] = None,
+    risk_score: int | None = None,
 ) -> IntegrationsOverviewIntegrationItem:
     """
     Map a core IntegrationRecord domain object into the compact
@@ -98,7 +97,7 @@ def _map_integration_record_to_item(
         else str(record.status)
     )
 
-    capabilities: List[str] = []
+    capabilities: list[str] = []
     if getattr(record, "capabilities", None):
         for cap in record.capabilities:
             if isinstance(cap, IntegrationCapability):
@@ -169,7 +168,7 @@ def get_page() -> IntegrationsOverviewPage:
     # risk_index is expected to be a mapping of integration_id -> int score (0–100),
     # but we treat it as a generic mapping to keep the page robust.
 
-    items: List[IntegrationsOverviewIntegrationItem] = []
+    items: list[IntegrationsOverviewIntegrationItem] = []
     for record in registry_snapshot.items:
         risk_score = None
         if risk_index and getattr(record, "integration_id", None):

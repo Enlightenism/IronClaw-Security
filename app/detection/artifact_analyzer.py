@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import PurePath
-from typing import Any, Mapping
-
+from typing import Any
 
 HIGH_RISK_EXTENSIONS = {
     ".exe",

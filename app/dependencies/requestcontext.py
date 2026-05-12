@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Annotated, Any
+from datetime import UTC, datetime
+from typing import Annotated
 
 from fastapi import Depends, Header, Request
 
@@ -76,7 +76,7 @@ async def get_request_context(
         path=request.url.path,
         client_ip=_derive_client_ip(request),
         user_agent=_clean_optional_header(request.headers.get("user-agent")),
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp=datetime.now(UTC).isoformat(),
     )
 
 

@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
-from app.services.integration_registry import IntegrationRecord, IntegrationRegistry, get_integration
+from app.services.integration_registry import (
+    IntegrationRecord,
+    IntegrationRegistry,
+    get_integration,
+)
 
 VerificationState = Literal["pass", "warn", "fail"]
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @dataclass(slots=True)

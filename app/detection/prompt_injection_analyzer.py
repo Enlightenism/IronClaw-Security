@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from typing import Any, Mapping
-
+from typing import Any
 
 HIGH_CONFIDENCE_PATTERNS = {
     "ignore previous instructions": 45,

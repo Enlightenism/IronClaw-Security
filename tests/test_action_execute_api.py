@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from app.main import app
 from app.dependencies.action_execute import reset_action_execute_pipeline
+from app.main import app
 from app.services.audit_log_service import reset_audit_log
 from app.services.review_queue_service import reset_review_queue
 

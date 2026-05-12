@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-import pytest
-
 from app.services.groqsecuritybrain import build_groq_security_brain
 
 

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -46,7 +45,7 @@ class PolicyInsightsResponse(BaseModel):
 
 
 def _utc_iso(year: int, month: int, day: int, hour: int = 0) -> str:
-    return datetime(year, month, day, hour, 0, 0, tzinfo=timezone.utc).isoformat()
+    return datetime(year, month, day, hour, 0, 0, tzinfo=UTC).isoformat()
 
 
 def _sample_execution_records() -> list[dict]:
@@ -145,7 +144,7 @@ def _build_risk_trend(records: list[dict]) -> list[RiskTrendPoint]:
     buckets: dict[str, list[int]] = {}
 
     for record in records:
-        timestamp = _safe_str(record.get("timestamp"), datetime.now(timezone.utc).isoformat())
+        timestamp = _safe_str(record.get("timestamp"), datetime.now(UTC).isoformat())
         bucket_key = timestamp[:13] + ":00:00+00:00"
         buckets.setdefault(bucket_key, []).append(_safe_int(record.get("riskscore"), 0))
 
@@ -191,7 +190,7 @@ def get_policy_insights() -> PolicyInsightsResponse:
     totalreviewitems = sum(1 for record in records if record.get("reviewitemid"))
 
     return PolicyInsightsResponse(
-        generatedat=datetime.now(timezone.utc).isoformat(),
+        generatedat=datetime.now(UTC).isoformat(),
         totalexecutions=len(records),
         totalreviewitems=totalreviewitems,
         verdictcounts=_build_verdict_counts(records),

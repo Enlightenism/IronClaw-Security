@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
 from app.services.adapter_manifest import AdapterManifest, build_adapter_manifest
 from app.services.integration_registry import IntegrationRecord
-
 
 AdapterHealth = Literal["ready", "degraded", "offline"]
 AdapterExecutionStatus = Literal[
@@ -20,7 +19,7 @@ AdapterExecutionStatus = Literal[
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _normalize_text(value: str | None) -> str:

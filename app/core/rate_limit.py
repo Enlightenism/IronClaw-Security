@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections import deque
 from threading import Lock
 from time import time
-from typing import Deque
 
 from fastapi import Request, status
 
@@ -12,7 +11,7 @@ from app.core.errors import AppError
 
 class SlidingWindowRateLimiter:
     def __init__(self) -> None:
-        self._events: dict[str, Deque[float]] = {}
+        self._events: dict[str, deque[float]] = {}
         self._lock = Lock()
 
     def allow(self, key: str, *, limit: int, window_seconds: int) -> bool:

@@ -7,7 +7,6 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-
 ADMIN_RUNTIME_STATUS_PATH: Final[str] = "/admin/runtime-status"
 
 

@@ -5,8 +5,9 @@ import json
 import logging
 import sys
 import time
-from datetime import datetime, timezone
-from typing import Any, Mapping, MutableMapping, Optional
+from collections.abc import Mapping, MutableMapping
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import FastAPI, Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -14,7 +15,6 @@ from starlette.responses import Response
 
 from app.core.request_id import REQUEST_ID_HEADER_NAME
 from app.core.settings import Settings
-
 
 request_id_context: contextvars.ContextVar[str] = contextvars.ContextVar(
     "request_id",
@@ -35,7 +35,7 @@ class RequestContextFilter(logging.Filter):
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, Any] = {
-            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
@@ -186,15 +186,15 @@ def bind_security_event(
     logger: logging.Logger,
     event: str,
     *,
-    scan_id: Optional[str] = None,
-    verdict: Optional[str] = None,
-    risk_score: Optional[int] = None,
-    target_type: Optional[str] = None,
-    target_value: Optional[str] = None,
-    action_type: Optional[str] = None,
-    review_status: Optional[str] = None,
-    matched_patterns: Optional[list[str]] = None,
-    extra_metadata: Optional[Mapping[str, Any]] = None,
+    scan_id: str | None = None,
+    verdict: str | None = None,
+    risk_score: int | None = None,
+    target_type: str | None = None,
+    target_value: str | None = None,
+    action_type: str | None = None,
+    review_status: str | None = None,
+    matched_patterns: list[str] | None = None,
+    extra_metadata: Mapping[str, Any] | None = None,
     level: int = logging.INFO,
 ) -> None:
     payload: MutableMapping[str, Any] = {
@@ -215,7 +215,7 @@ def bind_security_event(
     logger.log(level, event, extra=dict(payload))
 
 
-def _truncate_value(value: Optional[str], limit: int = 500) -> Optional[str]:
+def _truncate_value(value: str | None, limit: int = 500) -> str | None:
     if value is None:
         return None
     if len(value) <= limit:

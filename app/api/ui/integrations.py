@@ -3,12 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app.api.integrations import _record_slug
+from app.services.integrationregistry import get_integration_registry
 from app.services.integrationrollout import get_integration_rollout_service
 from app.services.integrationstatemachine import get_integration_state_machine
 from app.services.integrationtelemetry import get_integration_telemetry_service
-from app.services.integrationregistry import get_integration_registry
 from app.ui.uiintegrations import get_ui_integrations_page
-
 
 router = APIRouter(prefix="/ui/integrations", tags=["ui-integrations"])
 

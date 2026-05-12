@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 
 from app.api.routes.billing import PACKAGE_CATALOG
 
-
 router = APIRouter(prefix="/billing-summary", tags=["billing-summary"])
 
 

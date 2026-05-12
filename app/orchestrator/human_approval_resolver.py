@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 from app.orchestrator.executor_boundary import ExecutionReceipt
 from app.orchestrator.secure_runtime_pipeline import RuntimeRequest
-
 
 ReviewDecision = Literal["approved", "rejected", "pending"]
 ResolutionOutcome = Literal["execute", "deny", "hold"]

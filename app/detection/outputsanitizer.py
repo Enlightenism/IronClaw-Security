@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
 import re
-from typing import Any, Callable, Iterable
-
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any
 
 SECRET_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
     (
@@ -170,7 +170,7 @@ class OutputSanitizationResult:
     blocked: bool
     sanitized: bool
     analyzed_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
 
     def as_dict(self) -> dict[str, Any]:

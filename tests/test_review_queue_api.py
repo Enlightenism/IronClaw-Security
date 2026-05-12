@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-
 from fastapi.testclient import TestClient
-
 
 from app.main import app
 from app.orchestrator.review_queue import (
@@ -11,7 +9,6 @@ from app.orchestrator.review_queue import (
     initialize_review_queue,
 )
 from app.services.review_queue_service import reset_review_queue
-
 
 client = TestClient(app)
 

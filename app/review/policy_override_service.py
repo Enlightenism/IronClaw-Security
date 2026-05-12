@@ -4,7 +4,6 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-
 DEFAULT_POLICY_ACTION = "allow"
 DEFAULT_OVERRIDE_REASON = "manual review override"
 OVERRIDE_SOURCE = "policy_override_service"

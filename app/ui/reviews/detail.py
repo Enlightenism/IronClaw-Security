@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -16,7 +16,7 @@ class ReviewReasonView(BaseModel):
     source: str
     label: str
     details: str
-    score: Optional[int] = None
+    score: int | None = None
 
 
 class ReviewDecisionOptions(BaseModel):
@@ -31,12 +31,12 @@ class ReviewItemDetailResponse(BaseModel):
     timestamp: str
     updatedat: str
     executionid: str
-    clientid: Optional[str] = None
-    sessionid: Optional[str] = None
+    clientid: str | None = None
+    sessionid: str | None = None
     actiontype: str
     target: str
     content: str
-    filepath: Optional[str] = None
+    filepath: str | None = None
     riskscore: int
     executionstate: str
     responsestatus: str
@@ -46,15 +46,15 @@ class ReviewItemDetailResponse(BaseModel):
     traceid: str
     requestid: str
     decisionid: str
-    executorname: Optional[str] = None
-    executorresult: Optional[dict[str, Any]] = None
-    reason: Optional[str] = None
+    executorname: str | None = None
+    executorresult: dict[str, Any] | None = None
+    reason: str | None = None
     reasons: list[ReviewReasonView] = Field(default_factory=list)
     decisionoptions: ReviewDecisionOptions
 
 
 def _utc_iso(year: int, month: int, day: int, hour: int, minute: int = 0) -> str:
-    return datetime(year, month, day, hour, minute, 0, tzinfo=timezone.utc).isoformat()
+    return datetime(year, month, day, hour, minute, 0, tzinfo=UTC).isoformat()
 
 
 def _safe_str(value: Any, default: str) -> str:
@@ -94,7 +94,7 @@ def _normalize_reason(reason: dict[str, Any]) -> ReviewReasonView:
     )
 
 
-def _build_placeholder_record(reviewitemid: str) -> Optional[dict[str, Any]]:
+def _build_placeholder_record(reviewitemid: str) -> dict[str, Any] | None:
     sample_records: dict[str, dict[str, Any]] = {
         "review-202": {
             "reviewitemid": "review-202",
@@ -189,8 +189,8 @@ def get_review_item_detail(reviewitemid: str) -> ReviewItemDetailResponse:
     return ReviewItemDetailResponse(
         reviewitemid=_safe_str(record.get("reviewitemid"), "unknown-review"),
         reviewstatus=reviewstatus,
-        timestamp=_safe_str(record.get("timestamp"), datetime.now(timezone.utc).isoformat()),
-        updatedat=_safe_str(record.get("updatedat"), datetime.now(timezone.utc).isoformat()),
+        timestamp=_safe_str(record.get("timestamp"), datetime.now(UTC).isoformat()),
+        updatedat=_safe_str(record.get("updatedat"), datetime.now(UTC).isoformat()),
         executionid=_safe_str(record.get("executionid"), "unknown-execution"),
         clientid=record.get("clientid"),
         sessionid=record.get("sessionid"),

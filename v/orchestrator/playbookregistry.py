@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional
-
 from pydantic import BaseModel, Field
 
 
@@ -24,15 +22,15 @@ class PlaybookDefinition(BaseModel):
     name: str = Field(..., description="Human-readable playbook name")
     summary: str = Field(..., description="Short summary for UI and review workflows")
     severity: str = Field(..., description="Suggested severity bucket")
-    tags: List[str] = Field(
+    tags: list[str] = Field(
         default_factory=list,
         description="Index tags for capability matching and filtering",
     )
-    triggers: List[str] = Field(
+    triggers: list[str] = Field(
         default_factory=list,
         description="Signal / cluster conditions that should suggest this playbook",
     )
-    steps: List[PlaybookStep] = Field(
+    steps: list[PlaybookStep] = Field(
         default_factory=list,
         description="Ordered response steps",
     )
@@ -49,13 +47,13 @@ class PlaybookRegistry:
     """
 
     def __init__(self) -> None:
-        self._playbooks: Dict[str, PlaybookDefinition] = {}
+        self._playbooks: dict[str, PlaybookDefinition] = {}
         self._register_defaults()
 
-    def list_playbooks(self) -> List[PlaybookDefinition]:
+    def list_playbooks(self) -> list[PlaybookDefinition]:
         return list(self._playbooks.values())
 
-    def get(self, slug: str) -> Optional[PlaybookDefinition]:
+    def get(self, slug: str) -> PlaybookDefinition | None:
         return self._playbooks.get(slug)
 
     def has(self, slug: str) -> bool:

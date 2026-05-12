@@ -7,7 +7,6 @@ from typing import Any
 
 import requests
 
-
 SUPABASE_TIMEOUT_SECONDS = 15.0
 
 

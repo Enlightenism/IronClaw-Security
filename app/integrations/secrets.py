@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 
 from app.services.secretservice import SecretService
 
-
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 
 _service = SecretService()
@@ -112,7 +111,7 @@ def _list_secret_items(integration_id: str) -> list[IntegrationSecretValueView]:
                 if key:
                     iterable.append((key, entry))
             elif hasattr(entry, "key"):
-                iterable.append((getattr(entry, "key"), entry))
+                iterable.append((entry.key, entry))
 
     for key, record in iterable:
         items.append(_build_secret_view(str(key), record))

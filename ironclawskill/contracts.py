@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Literal, Mapping, Protocol, TypeAlias, runtime_checkable
+from typing import Any, Literal, Protocol, TypeAlias, runtime_checkable
 from uuid import uuid4
 
-
 from pydantic import BaseModel, Field
-
-
 
 JsonPrimitive = str | int | float | bool | None
 JsonValue: TypeAlias = JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"]
@@ -293,13 +290,13 @@ class SkillAdapter(Protocol):
     provider: SkillProvider
 
 
-    def execute(self, request: "SkillExecutionRequest") -> SkillExecutionResult: ...
+    def execute(self, request: SkillExecutionRequest) -> SkillExecutionResult: ...
 
 
 
 @runtime_checkable
 class SkillRuntime(Protocol):
-    def run(self, request: "SkillExecutionRequest") -> SkillExecutionResult: ...
+    def run(self, request: SkillExecutionRequest) -> SkillExecutionResult: ...
 
 
     def health(self) -> SkillHealthStatus: ...
@@ -308,7 +305,7 @@ class SkillRuntime(Protocol):
 
 @runtime_checkable
 class SkillBillingProvider(Protocol):
-    def estimate(self, request: "SkillExecutionRequest") -> SkillUsage: ...
+    def estimate(self, request: SkillExecutionRequest) -> SkillUsage: ...
 
 
 
@@ -825,19 +822,19 @@ class SkillRequestContextRuntime:
     createdat: datetime = field(default_factory=utcnow)
 
 
-    def withmetadata(self, metadata: Mapping[str, JsonValue]) -> "SkillRequestContextRuntime":
+    def withmetadata(self, metadata: Mapping[str, JsonValue]) -> SkillRequestContextRuntime:
         merged = dict(self.metadata)
         merged.update(metadata)
         return replace(self, metadata=merged)
 
 
-    def withlabels(self, labels: Mapping[str, str]) -> "SkillRequestContextRuntime":
+    def withlabels(self, labels: Mapping[str, str]) -> SkillRequestContextRuntime:
         merged = dict(self.labels)
         merged.update(labels)
         return replace(self, labels=merged)
 
 
-    def withtags(self, tags: tuple[str, ...]) -> "SkillRequestContextRuntime":
+    def withtags(self, tags: tuple[str, ...]) -> SkillRequestContextRuntime:
         combined = tuple(dict.fromkeys((*self.tags, *tags)))
         return replace(self, tags=combined)
 
@@ -850,7 +847,7 @@ class SkillRequestContextRuntime:
         correlationid: str | None = None,
         sessionid: str | None = None,
         metadata: Mapping[str, JsonValue] | None = None,
-    ) -> "SkillRequestContextRuntime":
+    ) -> SkillRequestContextRuntime:
         mergedmetadata = dict(self.metadata)
         if metadata:
             mergedmetadata.update(metadata)
@@ -912,17 +909,17 @@ class SkillRuntimeContext:
     startedat: datetime = field(default_factory=utcnow)
 
 
-    def withmetadata(self, metadata: Mapping[str, JsonValue]) -> "SkillRuntimeContext":
+    def withmetadata(self, metadata: Mapping[str, JsonValue]) -> SkillRuntimeContext:
         merged = dict(self.metadata)
         merged.update(metadata)
         return replace(self, metadata=merged)
 
 
-    def markreviewrequired(self, value: bool = True) -> "SkillRuntimeContext":
+    def markreviewrequired(self, value: bool = True) -> SkillRuntimeContext:
         return replace(self, reviewrequired=value)
 
 
-    def enablesandbox(self, value: bool = True) -> "SkillRuntimeContext":
+    def enablesandbox(self, value: bool = True) -> SkillRuntimeContext:
         return replace(self, sandboxenabled=value)
 
 

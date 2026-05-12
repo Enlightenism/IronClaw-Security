@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-
 import logging
-from typing import Any, Mapping, Optional
+from collections.abc import Mapping
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -15,7 +15,7 @@ from app.core.logging import get_logger, get_request_id
 class ErrorResponse(BaseModel):
     error: str
     message: str
-    request_id: Optional[str] = None
+    request_id: str | None = None
     details: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -26,7 +26,7 @@ class AppError(Exception):
         message: str,
         *,
         status_code: int = status.HTTP_400_BAD_REQUEST,
-        details: Optional[Mapping[str, Any]] = None,
+        details: Mapping[str, Any] | None = None,
         log_level: int = logging.WARNING,
     ) -> None:
         super().__init__(message)
@@ -62,7 +62,7 @@ class GuardRejectedError(AppError):
         self,
         message: str = "Action blocked by security guard",
         *,
-        details: Optional[Mapping[str, Any]] = None,
+        details: Mapping[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(
@@ -74,7 +74,7 @@ class GuardRejectedError(AppError):
         )
 
 
-def _request_id_from_request(request: Request) -> Optional[str]:
+def _request_id_from_request(request: Request) -> str | None:
     request_state_id = getattr(request.state, "request_id", None)
     if isinstance(request_state_id, str) and request_state_id.strip():
         return request_state_id.strip()
@@ -88,8 +88,8 @@ def build_error_response(
     *,
     error: str,
     message: str,
-    request_id: Optional[str] = None,
-    details: Optional[Mapping[str, Any]] = None,
+    request_id: str | None = None,
+    details: Mapping[str, Any] | None = None,
 ) -> ErrorResponse:
     return ErrorResponse(
         error=error,
@@ -108,7 +108,7 @@ def _log_exception(
     status_code: int,
     message: str,
     error: str,
-    details: Optional[Mapping[str, Any]] = None,
+    details: Mapping[str, Any] | None = None,
     exc_info: bool = False,
 ) -> None:
     logger.log(

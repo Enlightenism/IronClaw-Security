@@ -2,12 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-
 import pytest
 
-
 from app.history import build_history
-
 
 
 def _payload_of(result: Any) -> dict[str, Any]:

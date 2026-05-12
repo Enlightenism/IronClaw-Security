@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Dict, List
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends
 
@@ -197,20 +197,20 @@ def _pages() -> list[dict[str, str]]:
     ]
 
 
-def _group_sections(pages: List[Dict[str, str]]) -> Dict[str, List[Dict[str, str]]]:
-    sections: Dict[str, List[Dict[str, str]]] = {}
+def _group_sections(pages: list[dict[str, str]]) -> dict[str, list[dict[str, str]]]:
+    sections: dict[str, list[dict[str, str]]] = {}
     for page in pages:
         group = page.get("group", "other")
         sections.setdefault(group, []).append(page)
     return sections
 
 
-def get_ui_manifest() -> Dict[str, Any]:
+def get_ui_manifest() -> dict[str, Any]:
     pages = _pages()
     return {
         "status": "ok",
         "service": "IronClaw-Security",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "totalroutes": len(pages),
         "routes": pages,
         "metadata": {},
@@ -218,11 +218,11 @@ def get_ui_manifest() -> Dict[str, Any]:
 
 
 @router.get("/ui/pages", dependencies=[Depends(require_api_key)])
-def list_ui_pages() -> Dict[str, Any]:
+def list_ui_pages() -> dict[str, Any]:
     pages = _pages()
     sections = _group_sections(pages)
     return {
-        "generatedat": datetime.now(timezone.utc).isoformat(),
+        "generatedat": datetime.now(UTC).isoformat(),
         "summary": {"total": len(pages), "groups": len(sections)},
         "sections": sections,
         "items": pages,
@@ -231,12 +231,12 @@ def list_ui_pages() -> Dict[str, Any]:
 
 
 @router.get("/ui/routes", dependencies=[Depends(require_api_key)])
-def list_ui_routes() -> Dict[str, Any]:
+def list_ui_routes() -> dict[str, Any]:
     pages = _pages()
     return {
         "status": "ok",
         "service": "IronClaw-Security",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "totalroutes": len(pages),
         "routes": pages,
         "metadata": {},

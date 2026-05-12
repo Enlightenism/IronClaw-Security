@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any
 from uuid import uuid4
 
 from orchestrator.remediationgate import (
     GateDecision,
-    GateStatus,
     RemediationAction,
     RemediationGate,
 )
@@ -30,7 +30,7 @@ class SupervisorEvent:
     event_id: str
     kind: str
     message: str
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -57,7 +57,7 @@ class SupervisorDecision:
     redaction_required: bool = False
     events: list[SupervisorEvent] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def add_event(self, kind: str, message: str, metadata: Mapping[str, Any] | None = None) -> None:
         self.events.append(
@@ -246,7 +246,7 @@ class Supervisor:
                 {
                     "event": "supervisor.decision",
                     "decision": decision.to_dict(),
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             )
 

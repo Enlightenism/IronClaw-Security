@@ -2,7 +2,6 @@ import os
 import re
 from typing import Literal, TypedDict
 
-
 Severity = Literal["low", "medium", "high", "critical"]
 
 

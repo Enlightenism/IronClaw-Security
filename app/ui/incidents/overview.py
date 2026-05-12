@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-
 
 router = APIRouter(
     prefix="/ui/incidents",
@@ -17,7 +15,7 @@ router = APIRouter(
 class IncidentKpiView(BaseModel):
     label: str
     value: int
-    trendlabel: Optional[str] = None
+    trendlabel: str | None = None
     status: str = "neutral"
 
 
@@ -44,11 +42,11 @@ class IncidentOverviewItem(BaseModel):
     summary: str
     severity: str
     status: str
-    clientid: Optional[str] = None
-    sessionid: Optional[str] = None
-    executionid: Optional[str] = None
-    reviewitemid: Optional[str] = None
-    assignee: Optional[str] = None
+    clientid: str | None = None
+    sessionid: str | None = None
+    executionid: str | None = None
+    reviewitemid: str | None = None
+    assignee: str | None = None
     createdat: str
     updatedat: str
     source: str
@@ -57,7 +55,7 @@ class IncidentOverviewItem(BaseModel):
 
 class IncidentAlertItem(BaseModel):
     alertid: str
-    incidentid: Optional[str] = None
+    incidentid: str | None = None
     timestamp: str
     severity: str
     category: str
@@ -79,7 +77,7 @@ class IncidentOverviewResponse(BaseModel):
 
 
 def _utc_iso(year: int, month: int, day: int, hour: int, minute: int = 0) -> str:
-    return datetime(year, month, day, hour, minute, 0, tzinfo=timezone.utc).isoformat()
+    return datetime(year, month, day, hour, minute, 0, tzinfo=UTC).isoformat()
 
 
 def _sample_incident_records() -> list[dict[str, object]]:
@@ -195,8 +193,8 @@ def _to_incident_item(record: dict[str, object]) -> IncidentOverviewItem:
         executionid=record.get("executionid") if isinstance(record.get("executionid"), str) else None,
         reviewitemid=record.get("reviewitemid") if isinstance(record.get("reviewitemid"), str) else None,
         assignee=record.get("assignee") if isinstance(record.get("assignee"), str) else None,
-        createdat=str(record.get("createdat") or datetime.now(timezone.utc).isoformat()),
-        updatedat=str(record.get("updatedat") or datetime.now(timezone.utc).isoformat()),
+        createdat=str(record.get("createdat") or datetime.now(UTC).isoformat()),
+        updatedat=str(record.get("updatedat") or datetime.now(UTC).isoformat()),
         source=str(record.get("source") or "unknown"),
         tags=[str(tag) for tag in record.get("tags", []) if isinstance(tag, str)],
     )
@@ -319,7 +317,7 @@ def get_incidents_overview() -> IncidentOverviewResponse:
         overallstatus = "attention"
 
     return IncidentOverviewResponse(
-        generatedat=datetime.now(timezone.utc).isoformat(),
+        generatedat=datetime.now(UTC).isoformat(),
         environment="local",
         overallstatus=overallstatus,
         kpis=kpis,

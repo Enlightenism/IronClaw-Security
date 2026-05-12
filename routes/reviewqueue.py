@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -26,7 +24,7 @@ class AssignReviewRequest(BaseModel):
 
 
 class DismissReviewRequest(BaseModel):
-    reason: Optional[str] = Field(default=None, description="Optional dismissal reason")
+    reason: str | None = Field(default=None, description="Optional dismissal reason")
 
 
 def get_review_queue_service() -> ReviewQueueService:
@@ -35,8 +33,8 @@ def get_review_queue_service() -> ReviewQueueService:
 
 @router.get("", response_model=ReviewQueueListResponse)
 def list_review_queue(
-    status: Optional[ReviewStatus] = None,
-    assigned_to: Optional[str] = None,
+    status: ReviewStatus | None = None,
+    assigned_to: str | None = None,
 ) -> ReviewQueueListResponse:
     service = get_review_queue_service()
     items = service.list_items(status=status, assigned_to=assigned_to)

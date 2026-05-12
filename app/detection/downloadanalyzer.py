@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
 import hashlib
 import ipaddress
 import re
-from urllib.parse import urlparse
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlparse
 
 from app.detection.artifactanalyzer import ArtifactAnalyzer, build_artifact_analyzer
 from app.services.threatintel import ThreatIntelService, build_default_threatintel_service
-
 
 URL_SHORTENER_HOSTS = {
     "bit.ly",
@@ -100,7 +99,7 @@ class DownloadAnalysisResult:
     signals: list[DownloadSignal]
     metadata: dict[str, Any] = field(default_factory=dict)
     artifact_analysis: dict[str, Any] | None = None
-    analyzed_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    analyzed_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def as_dict(self) -> dict[str, Any]:
         return {

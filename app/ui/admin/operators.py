@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-
 
 router = APIRouter(
     prefix="/ui/admin",
@@ -19,9 +16,9 @@ class OperatorItem(BaseModel):
     displayname: str
     role: str
     status: str
-    email: Optional[str] = None
-    lastactiveat: Optional[str] = None
-    assignment: Optional[str] = None
+    email: str | None = None
+    lastactiveat: str | None = None
+    assignment: str | None = None
     capabilities: list[str] = Field(default_factory=list)
 
 
@@ -42,7 +39,7 @@ class OperatorManagementResponse(BaseModel):
 
 
 def _utc_iso(year: int, month: int, day: int, hour: int, minute: int = 0) -> str:
-    return datetime(year, month, day, hour, minute, 0, tzinfo=timezone.utc).isoformat()
+    return datetime(year, month, day, hour, minute, 0, tzinfo=UTC).isoformat()
 
 
 def _build_placeholder_items() -> list[OperatorItem]:
@@ -87,7 +84,7 @@ def get_operator_management() -> OperatorManagementResponse:
     inactive = sum(1 for item in items if item.status != "active")
 
     return OperatorManagementResponse(
-        generatedat=datetime.now(timezone.utc).isoformat(),
+        generatedat=datetime.now(UTC).isoformat(),
         summary=OperatorManagementSummary(
             total=len(items),
             active=active,

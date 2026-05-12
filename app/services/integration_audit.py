@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from hashlib import sha256
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from typing import Any
 from uuid import uuid4
 
 
@@ -23,11 +24,11 @@ class IntegrationAuditEvent:
     occurred_at: datetime
     message: str
     actor: str = "system"
-    adapter_id: Optional[str] = None
+    adapter_id: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
     content_hash: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "event_id": self.event_id,
             "integration_id": self.integration_id,
@@ -43,7 +44,7 @@ class IntegrationAuditEvent:
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _normalize_value(value: Any) -> Any:
@@ -58,7 +59,7 @@ def _normalize_value(value: Any) -> Any:
     return value
 
 
-def _normalize_mapping(metadata: Mapping[str, Any]) -> Dict[str, Any]:
+def _normalize_mapping(metadata: Mapping[str, Any]) -> dict[str, Any]:
     return {str(k): _normalize_value(v) for k, v in sorted(metadata.items(), key=lambda item: str(item[0]))}
 
 
@@ -74,9 +75,9 @@ def create_audit_event(
     severity: AuditSeverity,
     message: str,
     actor: str = "system",
-    adapter_id: Optional[str] = None,
-    metadata: Optional[Mapping[str, Any]] = None,
-    occurred_at: Optional[datetime] = None,
+    adapter_id: str | None = None,
+    metadata: Mapping[str, Any] | None = None,
+    occurred_at: datetime | None = None,
 ) -> IntegrationAuditEvent:
     timestamp = occurred_at or _utcnow()
     normalized_metadata = _normalize_mapping(metadata or {})
@@ -187,13 +188,13 @@ def state_changed_event(
 def filter_audit_events(
     events: Iterable[IntegrationAuditEvent],
     *,
-    integration_id: Optional[str] = None,
-    event_type: Optional[str] = None,
-    severity: Optional[AuditSeverity] = None,
-    actor: Optional[str] = None,
-    adapter_id: Optional[str] = None,
-) -> List[IntegrationAuditEvent]:
-    filtered: List[IntegrationAuditEvent] = []
+    integration_id: str | None = None,
+    event_type: str | None = None,
+    severity: AuditSeverity | None = None,
+    actor: str | None = None,
+    adapter_id: str | None = None,
+) -> list[IntegrationAuditEvent]:
+    filtered: list[IntegrationAuditEvent] = []
 
     for event in events:
         if integration_id is not None and event.integration_id != integration_id:
@@ -215,9 +216,9 @@ def sort_audit_events(
     events: Iterable[IntegrationAuditEvent],
     *,
     descending: bool = False,
-) -> List[IntegrationAuditEvent]:
+) -> list[IntegrationAuditEvent]:
     return sorted(events, key=lambda event: event.occurred_at, reverse=descending)
 
 
-def serialize_audit_events(events: Iterable[IntegrationAuditEvent]) -> List[Dict[str, Any]]:
+def serialize_audit_events(events: Iterable[IntegrationAuditEvent]) -> list[dict[str, Any]]:
     return [event.to_dict() for event in events]

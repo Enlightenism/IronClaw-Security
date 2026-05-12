@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-
 
 router = APIRouter(
     prefix="/ui/policy",
@@ -52,7 +50,7 @@ class PolicyAllowlistEntryView(BaseModel):
     valuetype: str
     value: str
     source: str
-    description: Optional[str] = None
+    description: str | None = None
 
 
 class PolicyRecentChangeView(BaseModel):
@@ -67,7 +65,7 @@ class PolicySimulationInputView(BaseModel):
     actiontype: str
     target: str
     riskscore: int
-    promptsample: Optional[str] = None
+    promptsample: str | None = None
 
 
 class PolicySimulationResultView(BaseModel):
@@ -101,7 +99,7 @@ class PolicySettingsResponse(BaseModel):
 
 
 def _utc_iso(year: int, month: int, day: int, hour: int, minute: int = 0) -> str:
-    return datetime(year, month, day, hour, minute, 0, tzinfo=timezone.utc).isoformat()
+    return datetime(year, month, day, hour, minute, 0, tzinfo=UTC).isoformat()
 
 
 @router.get("/settings", response_model=PolicySettingsResponse)
@@ -306,7 +304,7 @@ def get_policy_settings() -> PolicySettingsResponse:
     )
 
     return PolicySettingsResponse(
-        generatedat=datetime.now(timezone.utc).isoformat(),
+        generatedat=datetime.now(UTC).isoformat(),
         environment="local",
         policyname="IronClaw-Security Runtime Policy",
         policymode=policymode,

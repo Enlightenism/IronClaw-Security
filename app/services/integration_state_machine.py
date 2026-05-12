@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, FrozenSet, Mapping, Optional, Set
 
 
 class IntegrationState(str, Enum):
@@ -17,7 +17,7 @@ class IntegrationState(str, Enum):
 class TransitionContext:
     has_supported_configuration: bool = False
     has_blocking_findings: bool = False
-    telemetry_state: Optional[str] = None
+    telemetry_state: str | None = None
     actor: str = "system"
 
 
@@ -29,9 +29,9 @@ class TransitionResult:
     actor: str
     reason: str
     transition_key: str
-    metadata: Dict[str, str] = field(default_factory=dict)
+    metadata: dict[str, str] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, object]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "allowed": self.allowed,
             "from_state": self.from_state.value,
@@ -43,7 +43,7 @@ class TransitionResult:
         }
 
 
-_ALLOWED_TRANSITIONS: Mapping[IntegrationState, FrozenSet[IntegrationState]] = {
+_ALLOWED_TRANSITIONS: Mapping[IntegrationState, frozenset[IntegrationState]] = {
     IntegrationState.DRAFT: frozenset(
         {
             IntegrationState.ACTIVE,
@@ -76,7 +76,7 @@ _ALLOWED_TRANSITIONS: Mapping[IntegrationState, FrozenSet[IntegrationState]] = {
 }
 
 
-def list_allowed_transitions(state: IntegrationState) -> Set[IntegrationState]:
+def list_allowed_transitions(state: IntegrationState) -> set[IntegrationState]:
     return set(_ALLOWED_TRANSITIONS.get(state, frozenset()))
 
 
@@ -91,7 +91,7 @@ def transition_integration_state(
     *,
     from_state: IntegrationState,
     to_state: IntegrationState,
-    context: Optional[TransitionContext] = None,
+    context: TransitionContext | None = None,
 ) -> TransitionResult:
     ctx = context or TransitionContext()
     transition_key = f"{from_state.value}->{to_state.value}"
@@ -150,7 +150,7 @@ def _validate_transition_guards(
     from_state: IntegrationState,
     to_state: IntegrationState,
     context: TransitionContext,
-) -> Optional[str]:
+) -> str | None:
     if to_state == IntegrationState.ACTIVE and not context.has_supported_configuration:
         return "Integration cannot move to active without a supported configuration."
 
@@ -173,8 +173,8 @@ def _validate_transition_guards(
     return None
 
 
-def _context_metadata(context: TransitionContext) -> Dict[str, str]:
-    metadata: Dict[str, str] = {
+def _context_metadata(context: TransitionContext) -> dict[str, str]:
+    metadata: dict[str, str] = {
         "has_supported_configuration": str(context.has_supported_configuration).lower(),
         "has_blocking_findings": str(context.has_blocking_findings).lower(),
         "actor": context.actor,

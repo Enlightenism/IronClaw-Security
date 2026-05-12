@@ -5,7 +5,6 @@ from fastapi.testclient import TestClient
 
 from app.api.audit import createauditevent, router
 
-
 app = FastAPI()
 app.include_router(router)
 client = TestClient(app)

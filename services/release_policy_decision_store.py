@@ -9,7 +9,6 @@ from typing import Any, Final
 
 from schemas.release_policy import ReleaseChannel
 
-
 ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 DEFAULT_RESULT_FILE: Final[Path] = ROOT / ".release-policy-decisions.jsonl"
 MAX_RECENT_DECISIONS: Final[int] = 200

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
@@ -9,10 +9,11 @@ from pydantic import BaseModel, Field
 from app.core.auth import require_api_key
 from app.services.policy_store import (
     PolicySettingsRecord as StoredPolicySettingsRecord,
+)
+from app.services.policy_store import (
     PolicyThresholdRecord,
     get_policy_store,
 )
-
 
 router = APIRouter(
     prefix="/policy",
@@ -64,7 +65,7 @@ class PolicyUpdateRequest(BaseModel):
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _to_view(settings: StoredPolicySettingsRecord) -> PolicySettingsView:

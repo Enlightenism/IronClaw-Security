@@ -5,7 +5,6 @@ from fastapi import APIRouter
 from app.services.integrationregistry import get_integration_registry
 from app.services.integrationtelemetry import get_integration_telemetry_service
 
-
 router = APIRouter(
     prefix="/ui/telemetry-access-summary",
     tags=["ui-telemetry-access-summary"],

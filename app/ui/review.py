@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 from app.review.reviewqueueservice import ReviewQueueItem, ReviewStatus
 from app.routes.reviewqueue import get_review_queue_service
 
-
 router = APIRouter(prefix="/api/ui/reviews", tags=["ui-review-detail"])
 
 

@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-import pytest
-
 from app.adapters.claude_code_adapter import ClaudeCodeAdapter
 
 

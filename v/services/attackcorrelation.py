@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -35,39 +36,39 @@ class CorrelatedSignal(BaseModel):
     kind: CorrelatedSignalKind = Field(..., description="Normalized signal kind used for correlation")
     severity: float = Field(..., ge=0.0, le=10.0, description="Signal severity on a 0–10 scale")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Detector confidence in [0,1]")
-    session_id: Optional[str] = Field(
+    session_id: str | None = Field(
         None, description="Runtime session identifier when available"
     )
-    incident_id: Optional[str] = Field(
+    incident_id: str | None = Field(
         None, description="Existing incident identifier if the signal is already attached"
     )
-    actor_id: Optional[str] = Field(
+    actor_id: str | None = Field(
         None,
         description="Logical actor identifier (API key, integration ID, user, unit wallet, etc.)",
     )
-    tool_name: Optional[str] = Field(
+    tool_name: str | None = Field(
         None, description="Tool or integration associated with the signal, if any"
     )
     source: str = Field(
         ..., description="Source subsystem (promptguard, malware, secrets, runtime, etc.)"
     )
-    tags: Set[str] = Field(
+    tags: set[str] = Field(
         default_factory=set,
         description="Arbitrary tags (model id, integration name, environment, etc.)",
     )
-    hostile_context_ids: Set[str] = Field(
+    hostile_context_ids: set[str] = Field(
         default_factory=set,
         description="IDs of hostile context patterns matched by this signal",
     )
-    detonated_artifact_ids: Set[str] = Field(
+    detonated_artifact_ids: set[str] = Field(
         default_factory=set,
         description="Artifact/detonation IDs related to malware or sandbox execution",
     )
-    related_request_ids: Set[str] = Field(
+    related_request_ids: set[str] = Field(
         default_factory=set,
         description="Request or action IDs this signal is attached to",
     )
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Unstructured detector-specific metadata (kept for later enrichment)",
     )
@@ -88,8 +89,8 @@ class CorrelationEdge(BaseModel):
 
 class CorrelationCluster(BaseModel):
     cluster_id: str = Field(..., description="Deterministic cluster identifier")
-    signals: List[CorrelatedSignal]
-    edges: List[CorrelationEdge]
+    signals: list[CorrelatedSignal]
+    edges: list[CorrelationEdge]
     risk_score: float = Field(..., ge=0.0, le=10.0)
     priority: str = Field(
         ...,
@@ -99,7 +100,7 @@ class CorrelationCluster(BaseModel):
         ...,
         description="High-level recommendation (review, quarantine, auto-remediate, ignore)",
     )
-    playbook_suggestion: Optional[str] = Field(
+    playbook_suggestion: str | None = Field(
         None,
         description="Suggested response playbook slug for downstream automation",
     )
@@ -134,12 +135,12 @@ class AttackCorrelationService:
     is responsible for persistence and incident lifecycle management.
     """
 
-    def __init__(self, config: Optional[_CorrelationConfig] = None) -> None:
+    def __init__(self, config: _CorrelationConfig | None = None) -> None:
         self._config = config or _CorrelationConfig()
 
     def correlate(
         self, signals: Sequence[CorrelatedSignal]
-    ) -> List[CorrelationCluster]:
+    ) -> list[CorrelationCluster]:
         """
         Correlate a batch of signals into higher-level campaigns/incident candidates.
 
@@ -157,8 +158,8 @@ class AttackCorrelationService:
         if not signals:
             return []
 
-        signal_by_id: Dict[str, CorrelatedSignal] = {s.signal_id: s for s in signals}
-        edges: List[CorrelationEdge] = []
+        signal_by_id: dict[str, CorrelatedSignal] = {s.signal_id: s for s in signals}
+        edges: list[CorrelationEdge] = []
 
         edges.extend(self._link_same_session(signals))
         edges.extend(self._link_same_actor(signals))
@@ -172,13 +173,13 @@ class AttackCorrelationService:
 
     def _link_same_session(
         self, signals: Sequence[CorrelatedSignal]
-    ) -> List[CorrelationEdge]:
-        by_session: Dict[str, List[CorrelatedSignal]] = {}
+    ) -> list[CorrelationEdge]:
+        by_session: dict[str, list[CorrelatedSignal]] = {}
         for s in signals:
             if s.session_id:
                 by_session.setdefault(s.session_id, []).append(s)
 
-        edges: List[CorrelationEdge] = []
+        edges: list[CorrelationEdge] = []
         for bucket in by_session.values():
             if len(bucket) < 2:
                 continue
@@ -198,13 +199,13 @@ class AttackCorrelationService:
 
     def _link_same_actor(
         self, signals: Sequence[CorrelatedSignal]
-    ) -> List[CorrelationEdge]:
-        by_actor: Dict[str, List[CorrelatedSignal]] = {}
+    ) -> list[CorrelationEdge]:
+        by_actor: dict[str, list[CorrelatedSignal]] = {}
         for s in signals:
             if s.actor_id:
                 by_actor.setdefault(s.actor_id, []).append(s)
 
-        edges: List[CorrelationEdge] = []
+        edges: list[CorrelationEdge] = []
         for bucket in by_actor.values():
             if len(bucket) < 2:
                 continue
@@ -224,18 +225,18 @@ class AttackCorrelationService:
 
     def _link_shared_io(
         self, signals: Sequence[CorrelatedSignal]
-    ) -> List[CorrelationEdge]:
+    ) -> list[CorrelationEdge]:
         """
         Link signals that share IO artifacts (requests, tool calls, files).
 
         We currently approximate shared IO via overlapping related_request_ids.
         """
-        by_request: Dict[str, List[CorrelatedSignal]] = {}
+        by_request: dict[str, list[CorrelatedSignal]] = {}
         for s in signals:
             for req_id in s.related_request_ids:
                 by_request.setdefault(req_id, []).append(s)
 
-        edges: List[CorrelationEdge] = []
+        edges: list[CorrelationEdge] = []
         for bucket in by_request.values():
             if len(bucket) < 2:
                 continue
@@ -255,18 +256,18 @@ class AttackCorrelationService:
 
     def _link_hostile_context(
         self, signals: Sequence[CorrelatedSignal]
-    ) -> List[CorrelationEdge]:
+    ) -> list[CorrelationEdge]:
         """
         Link signals that share hostile context patterns.
 
         This ties prompt injection, evasive chains, and other hostile context matches together.
         """
-        by_hostile: Dict[str, List[CorrelatedSignal]] = {}
+        by_hostile: dict[str, list[CorrelatedSignal]] = {}
         for s in signals:
             for ctx_id in s.hostile_context_ids:
                 by_hostile.setdefault(ctx_id, []).append(s)
 
-        edges: List[CorrelationEdge] = []
+        edges: list[CorrelationEdge] = []
         for bucket in by_hostile.values():
             if len(bucket) < 2:
                 continue
@@ -286,18 +287,18 @@ class AttackCorrelationService:
 
     def _link_malware_artifacts(
         self, signals: Sequence[CorrelatedSignal]
-    ) -> List[CorrelationEdge]:
+    ) -> list[CorrelationEdge]:
         """
         Link signals that share malware artifacts or detonation runs.
 
         This ties malware sandbox output back into higher-level incident reasoning.
         """
-        by_artifact: Dict[str, List[CorrelatedSignal]] = {}
+        by_artifact: dict[str, list[CorrelatedSignal]] = {}
         for s in signals:
             for artifact_id in s.detonated_artifact_ids:
                 by_artifact.setdefault(artifact_id, []).append(s)
 
-        edges: List[CorrelationEdge] = []
+        edges: list[CorrelationEdge] = []
         for bucket in by_artifact.values():
             if len(bucket) < 2:
                 continue
@@ -317,18 +318,18 @@ class AttackCorrelationService:
 
     def _link_incidents(
         self, signals: Sequence[CorrelatedSignal]
-    ) -> List[CorrelationEdge]:
+    ) -> list[CorrelationEdge]:
         """
         Link signals that are already associated with the same incident.
 
         This helps keep enrichment from multiple detectors grouped coherently.
         """
-        by_incident: Dict[str, List[CorrelatedSignal]] = {}
+        by_incident: dict[str, list[CorrelatedSignal]] = {}
         for s in signals:
             if s.incident_id:
                 by_incident.setdefault(s.incident_id, []).append(s)
 
-        edges: List[CorrelationEdge] = []
+        edges: list[CorrelationEdge] = []
         for bucket in by_incident.values():
             if len(bucket) < 2:
                 continue
@@ -350,21 +351,21 @@ class AttackCorrelationService:
         self,
         signals: Mapping[str, CorrelatedSignal],
         edges: Sequence[CorrelationEdge],
-    ) -> List[CorrelationCluster]:
+    ) -> list[CorrelationCluster]:
         """
         Compute connected components over the correlation graph.
 
         Each connected component becomes a correlation cluster.
         """
-        adjacency: Dict[str, Set[str]] = {sid: set() for sid in signals.keys()}
+        adjacency: dict[str, set[str]] = {sid: set() for sid in signals.keys()}
         for edge in edges:
             if edge.from_signal_id not in adjacency or edge.to_signal_id not in adjacency:
                 continue
             adjacency[edge.from_signal_id].add(edge.to_signal_id)
             adjacency[edge.to_signal_id].add(edge.from_signal_id)
 
-        visited: Set[str] = set()
-        clusters: List[CorrelationCluster] = []
+        visited: set[str] = set()
+        clusters: list[CorrelationCluster] = []
         cluster_index = 0
 
         for sid in signals.keys():
@@ -395,11 +396,11 @@ class AttackCorrelationService:
     def _dfs_component(
         self,
         start: str,
-        adjacency: Mapping[str, Set[str]],
-        visited: Set[str],
-    ) -> Set[str]:
+        adjacency: Mapping[str, set[str]],
+        visited: set[str],
+    ) -> set[str]:
         stack = [start]
-        component: Set[str] = set()
+        component: set[str] = set()
         while stack:
             sid = stack.pop()
             if sid in visited:
@@ -429,7 +430,7 @@ class AttackCorrelationService:
         confidences = [s.confidence for s in cluster.signals]
         max_severity = max(severities)
         weighted_severity = (
-            sum(s * c for s, c in zip(severities, confidences)) / max(1e-6, sum(confidences))
+            sum(s * c for s, c in zip(severities, confidences, strict=False)) / max(1e-6, sum(confidences))
         )
 
         hostile_boost = self._config.hostile_context_boost if any(
@@ -478,7 +479,7 @@ class AttackCorrelationService:
         cluster: CorrelationCluster,
         score: float,
         priority: str,
-    ) -> Tuple[str, Optional[str]]:
+    ) -> tuple[str, str | None]:
         """
         Decide recommended action and playbook suggestion.
 

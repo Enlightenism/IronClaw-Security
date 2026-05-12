@@ -11,6 +11,7 @@ os.environ["SUPABASE_KEY"] = ""
 os.environ["SUPABASE_ANON_KEY"] = ""
 
 import pytest
+
 from app.core.settings import get_settings
 from app.services.audit_log_service import reset_audit_log
 

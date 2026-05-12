@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
 import hashlib
 import random
 import re
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
-
 
 NETWORK_PATTERNS = {
     "known_c2_port": (re.compile(r"\b(?:4444|1337|8081|9001)\b"), 0.18),
@@ -66,7 +65,7 @@ class DetonationAssessment:
     artifacts: list[DetonationArtifact] = field(default_factory=list)
     behavior_tags: list[str] = field(default_factory=list)
     rationale: list[str] = field(default_factory=list)
-    detonated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    detonated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def as_dict(self) -> dict[str, Any]:
         return {

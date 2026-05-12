@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Iterable, Literal
-
+from datetime import UTC, datetime
+from typing import Literal
 
 KeyScope = Literal["internal", "customer", "service"]
 KeyStatus = Literal["active", "revoked"]
 
 
 def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def hash_api_key(raw_key: str) -> str:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from collections import deque, defaultdict
+from collections import defaultdict, deque
 
 from fastapi import APIRouter, Request, Response
 

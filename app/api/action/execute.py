@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from http import HTTPStatus
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -28,7 +28,7 @@ class ExecuteRequest(BaseModel):
     riskscore: int = Field(..., ge=0, le=100, description="Pre-computed risk score 0-100.")
     clientid: str = Field(..., description="Logical client identifier.")
     sessionid: str = Field(..., description="Execution/session correlation id.")
-    filepath: Optional[str] = Field(
+    filepath: str | None = Field(
         None,
         description="Logical source filepath for this action; defaults to app/api/action/execute.py.",
     )
@@ -78,41 +78,41 @@ class ExecuteResponse(BaseModel):
         ...,
         description="True if boundary logic prevented real execution.",
     )
-    reviewitemid: Optional[str] = Field(
+    reviewitemid: str | None = Field(
         None,
         description="Identifier of a queued review item when queuedforreview.",
     )
 
     # Tracing / correlation
-    executionid: Optional[str] = Field(
+    executionid: str | None = Field(
         None,
         description="Opaque identifier for this guarded execution.",
     )
-    traceid: Optional[str] = Field(
+    traceid: str | None = Field(
         None,
         description="Distributed trace correlation id (if available).",
     )
-    requestid: Optional[str] = Field(
+    requestid: str | None = Field(
         None,
         description="Logical request id, may map to gateway / ingress id.",
     )
-    decisionid: Optional[str] = Field(
+    decisionid: str | None = Field(
         None,
         description="Identifier for the policy decision entry.",
     )
 
     # Executor details
-    executorname: Optional[str] = Field(
+    executorname: str | None = Field(
         None,
         description="Name of the executor used: dryrunexecutor, real executor, etc.",
     )
-    executorresult: Optional[dict[str, Any]] = Field(
+    executorresult: dict[str, Any] | None = Field(
         default=None,
         description="Opaque executor result payload, if available.",
     )
 
     # Human-readable explanation
-    reason: Optional[str] = Field(
+    reason: str | None = Field(
         None,
         description="Primary human-readable reason string for the decision.",
     )
@@ -150,7 +150,7 @@ def _map_http_status_to_execution_status(status_code: int) -> ExecutionStatus:
     return "denied"
 
 
-def _normalize_policy_verdict(raw: Optional[str]) -> PolicyVerdict:
+def _normalize_policy_verdict(raw: str | None) -> PolicyVerdict:
     """
     Ensure policyverdict stays within the allowed literal set.
     Some older components may emit 'deny'; tests expect block/quarantine
@@ -167,7 +167,7 @@ def _normalize_policy_verdict(raw: Optional[str]) -> PolicyVerdict:
     return "block"
 
 
-def _normalize_response_action(raw: Optional[str], verdict: PolicyVerdict) -> ResponseAction:
+def _normalize_response_action(raw: str | None, verdict: PolicyVerdict) -> ResponseAction:
     """
     Normalize the raw response action from lower layers to the allowed literals.
     Tests assert responseaction is in allow, warn, quarantine, block, review.[file:4]
@@ -195,7 +195,7 @@ def _normalize_response_action(raw: Optional[str], verdict: PolicyVerdict) -> Re
     return "review"
 
 
-def _normalize_execution_state(raw_state: Optional[str], status: ExecutionStatus) -> ExecutionStatus:
+def _normalize_execution_state(raw_state: str | None, status: ExecutionStatus) -> ExecutionStatus:
     """
     Normalize executionstate to the literal domain required by the tests,
     using either the raw state emitted by summarizeexecution or the
@@ -259,13 +259,13 @@ def guardedexecute(
     raw_status_code: int = int(_get("responsestatus", HTTPStatus.OK))
     mapped_status: ExecutionStatus = _map_http_status_to_execution_status(raw_status_code)
 
-    raw_exec_state: Optional[str] = _get("executionstate")
+    raw_exec_state: str | None = _get("executionstate")
     execution_state: ExecutionStatus = _normalize_execution_state(raw_exec_state, mapped_status)
 
-    raw_policy_verdict: Optional[str] = _get("policyverdict")
+    raw_policy_verdict: str | None = _get("policyverdict")
     policy_verdict: PolicyVerdict = _normalize_policy_verdict(raw_policy_verdict)
 
-    raw_response_action: Optional[str] = _get("responseaction")
+    raw_response_action: str | None = _get("responseaction")
     response_action: ResponseAction = _normalize_response_action(raw_response_action, policy_verdict)
 
     # Build the response with safe fallbacks where older components might omit fields.

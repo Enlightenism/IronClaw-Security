@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import asdict, is_dataclass
-from datetime import datetime, timezone
-from typing import Any, Iterable, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -21,8 +22,8 @@ router = APIRouter(
 class ExecutionDashboardItem(BaseModel):
     executionid: str
     timestamp: str
-    clientid: Optional[str] = None
-    sessionid: Optional[str] = None
+    clientid: str | None = None
+    sessionid: str | None = None
     actiontype: str
     target: str
     riskscore: int
@@ -31,13 +32,13 @@ class ExecutionDashboardItem(BaseModel):
     policyverdict: str
     shouldexecute: bool
     haltedbyboundary: bool
-    filepath: Optional[str] = None
-    traceid: Optional[str] = None
-    requestid: Optional[str] = None
-    decisionid: Optional[str] = None
-    reviewitemid: Optional[str] = None
-    executorname: Optional[str] = None
-    reason: Optional[str] = None
+    filepath: str | None = None
+    traceid: str | None = None
+    requestid: str | None = None
+    decisionid: str | None = None
+    reviewitemid: str | None = None
+    executorname: str | None = None
+    reason: str | None = None
 
 
 class ExecutionDashboardResponse(BaseModel):
@@ -46,7 +47,7 @@ class ExecutionDashboardResponse(BaseModel):
 
 
 def _utcnow_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _object_to_dict(value: Any) -> dict[str, Any]:
@@ -134,7 +135,7 @@ def _normalize_timestamp(record: dict[str, Any]) -> str:
     for key in ("timestamp", "createdat", "occurredat", "executedat"):
         value = record.get(key)
         if isinstance(value, datetime):
-            return value.astimezone(timezone.utc).isoformat()
+            return value.astimezone(UTC).isoformat()
         if isinstance(value, str) and value.strip():
             return value.strip()
     return _utcnow_iso()

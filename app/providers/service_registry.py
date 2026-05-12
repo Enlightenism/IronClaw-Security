@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 from app.clients.release_policy_client import ReleasePolicyClient
 
@@ -15,7 +14,7 @@ class ServiceRegistry:
     depend on stable, lazily‑created instances.
     """
 
-    _release_policy_client: Optional[ReleasePolicyClient] = field(
+    _release_policy_client: ReleasePolicyClient | None = field(
         default=None, init=False, repr=False
     )
 

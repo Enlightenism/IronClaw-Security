@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from http import HTTPStatus
-from typing import Any, Mapping
+from typing import Any
 
 from .contracts import JsonValue, RiskLevel, SkillDecision, SkillProvider
 

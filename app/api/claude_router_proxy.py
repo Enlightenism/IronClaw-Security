@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncGenerator, Dict
+from collections.abc import AsyncGenerator
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -9,7 +9,6 @@ from fastapi.responses import PlainTextResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 from app.core.auth import require_api_key
-
 
 router = APIRouter(
     prefix="/claude/router-proxy",

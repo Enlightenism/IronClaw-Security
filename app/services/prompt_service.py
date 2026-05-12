@@ -1,7 +1,6 @@
-from typing import Literal, TypedDict, Optional
+from typing import Literal, TypedDict
 
 from app.services.guard import guard_text
-
 
 ContextType = Literal["user_prompt", "retrieved_doc", "tool_output", "model_output"]
 VerdictType = Literal["allow", "warn", "quarantine", "block"]
@@ -10,7 +9,7 @@ VerdictType = Literal["allow", "warn", "quarantine", "block"]
 class GuardedText(TypedDict):
     context_type: ContextType
     verdict: VerdictType
-    scan_id: Optional[str]
+    scan_id: str | None
     summary: str
     risk_score: int
     matched_patterns: list[str]
@@ -18,20 +17,20 @@ class GuardedText(TypedDict):
     effective_text: str
     should_halt: bool
     should_warn: bool
-    client_id: Optional[str]
-    session_id: Optional[str]
+    client_id: str | None
+    session_id: str | None
 
 
 class PromptGuardBundle(TypedDict):
-    user_prompt: Optional[GuardedText]
-    retrieved_doc: Optional[GuardedText]
-    tool_output: Optional[GuardedText]
-    model_output: Optional[GuardedText]
+    user_prompt: GuardedText | None
+    retrieved_doc: GuardedText | None
+    tool_output: GuardedText | None
+    model_output: GuardedText | None
     highest_verdict: VerdictType
     should_halt: bool
     should_warn: bool
-    client_id: Optional[str]
-    session_id: Optional[str]
+    client_id: str | None
+    session_id: str | None
 
 
 def _verdict_rank(verdict: VerdictType) -> int:
@@ -47,8 +46,8 @@ def _verdict_rank(verdict: VerdictType) -> int:
 def analyze_text(
     context_type: ContextType,
     text: str,
-    client_id: Optional[str] = None,
-    session_id: Optional[str] = None,
+    client_id: str | None = None,
+    session_id: str | None = None,
 ) -> GuardedText:
     """
     Run the Ironclaw scan for the given context and return a structured
@@ -102,12 +101,12 @@ def analyze_text(
 
 
 def analyze_prompt_bundle(
-    user_prompt: Optional[str] = None,
-    retrieved_doc: Optional[str] = None,
-    tool_output: Optional[str] = None,
-    model_output: Optional[str] = None,
-    client_id: Optional[str] = None,
-    session_id: Optional[str] = None,
+    user_prompt: str | None = None,
+    retrieved_doc: str | None = None,
+    tool_output: str | None = None,
+    model_output: str | None = None,
+    client_id: str | None = None,
+    session_id: str | None = None,
 ) -> PromptGuardBundle:
     """
     Guard multiple text sources that may participate in one agent turn.

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Final
+from typing import Any, Final
 
 from ironclawshellguard import GuardedCommandResult, run_guarded_command
-
 
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 20.0
 DEFAULT_AUDIT_FILE: Final[Path] = Path(__file__).resolve().with_name(".ironclawtoolrunner-audit.json")

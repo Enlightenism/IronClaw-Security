@@ -5,20 +5,19 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header
 
 from app.dependencies.auth import require_authenticated
-from app.dependencies.org_context import get_org_context
 from app.dependencies.operator_auth import (
     require_operator_auth,
     require_operator_manage,
     require_operator_permission,
     require_operator_read,
 )
+from app.dependencies.org_context import get_org_context
 from app.dependencies.permissions import (
     require_all_permissions,
     require_any_permission,
     require_permissions_read,
     require_permissions_write,
 )
-
 
 router = APIRouter(prefix="/api/access-control", tags=["access-control"])
 

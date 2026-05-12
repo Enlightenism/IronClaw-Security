@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
 from fastapi.testclient import TestClient
 
 from app.main import app
-
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULT_FILE = ROOT / ".smoke-test-results.json"

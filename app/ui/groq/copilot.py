@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from math import floor
-from typing import Any, Literal, Sequence, cast
+from typing import Any, Literal, cast
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -22,7 +23,7 @@ router = APIRouter(
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 CopilotRole = Literal["user", "assistant", "system"]

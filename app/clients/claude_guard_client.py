@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Literal
 
 import httpx
-
 
 GuardMode = Literal["enforce", "assist", "dryrun"]
 
@@ -20,7 +19,7 @@ class ClaudeGuardClientConfig:
     use_guard_execute: bool = True
 
     @classmethod
-    def from_env(cls) -> "ClaudeGuardClientConfig":
+    def from_env(cls) -> ClaudeGuardClientConfig:
         import os
 
         base_url = os.environ.get("IRONCLAW_GUARD_BASE_URL", "").rstrip("/")
@@ -68,13 +67,13 @@ class ClaudeGuardClient:
         self,
         config: ClaudeGuardClientConfig,
         *,
-        client: Optional[httpx.Client] = None,
+        client: httpx.Client | None = None,
     ) -> None:
         self._config = config
         timeout_seconds = config.default_timeout_ms / 1000.0
         self._client = client or httpx.Client(timeout=timeout_seconds)
 
-    def _headers(self) -> Dict[str, str]:
+    def _headers(self) -> dict[str, str]:
         return {
             "X-API-Key": self._config.api_key,
             "Content-Type": "application/json",
@@ -83,7 +82,7 @@ class ClaudeGuardClient:
     def _guard_url(self, path: str) -> str:
         return f"{self._config.guard_base_url.rstrip('/')}/{path.lstrip('/')}"
 
-    def guard_execute(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def guard_execute(self, payload: dict[str, Any]) -> dict[str, Any]:
         """
         Send an ExecuteRequest-style payload to /guard/execute.
 
@@ -99,7 +98,7 @@ class ClaudeGuardClient:
         resp.raise_for_status()
         return resp.json()  # type: ignore[no-any-return]
 
-    def guard_bundle(self, bundle: Dict[str, Any]) -> Dict[str, Any]:
+    def guard_bundle(self, bundle: dict[str, Any]) -> dict[str, Any]:
         """
         Send a prompt/output bundle to /policy/guard-bundle.
 

@@ -10,7 +10,6 @@ from typing import Any, Final
 
 import pytest
 
-
 ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 SCRIPT_CANDIDATES: Final[tuple[Path, ...]] = (
     ROOT / "scripts" / "backup.py",

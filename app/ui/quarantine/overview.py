@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-
 
 router = APIRouter(
     prefix="/ui/quarantine",
@@ -17,7 +15,7 @@ router = APIRouter(
 class QuarantineKpiView(BaseModel):
     label: str
     value: int
-    trendlabel: Optional[str] = None
+    trendlabel: str | None = None
     status: str = "neutral"
 
 
@@ -40,11 +38,11 @@ class QuarantineTimelinePoint(BaseModel):
 
 class QuarantineItemView(BaseModel):
     quarantineid: str
-    executionid: Optional[str] = None
-    reviewitemid: Optional[str] = None
-    incidentid: Optional[str] = None
-    clientid: Optional[str] = None
-    sessionid: Optional[str] = None
+    executionid: str | None = None
+    reviewitemid: str | None = None
+    incidentid: str | None = None
+    clientid: str | None = None
+    sessionid: str | None = None
     target: str
     actiontype: str
     severity: str
@@ -59,7 +57,7 @@ class QuarantineItemView(BaseModel):
 
 class QuarantineAlertItem(BaseModel):
     alertid: str
-    quarantineid: Optional[str] = None
+    quarantineid: str | None = None
     timestamp: str
     severity: str
     category: str
@@ -81,7 +79,7 @@ class QuarantineOverviewResponse(BaseModel):
 
 
 def _utc_iso(year: int, month: int, day: int, hour: int, minute: int = 0) -> str:
-    return datetime(year, month, day, hour, minute, 0, tzinfo=timezone.utc).isoformat()
+    return datetime(year, month, day, hour, minute, 0, tzinfo=UTC).isoformat()
 
 
 def _sample_quarantine_records() -> list[dict[str, object]]:
@@ -207,8 +205,8 @@ def _to_quarantine_item(record: dict[str, object]) -> QuarantineItemView:
         status=str(record.get("status") or "unknown"),
         policyverdict=str(record.get("policyverdict") or "unknown"),
         riskscore=int(record.get("riskscore") or 0),
-        isolatedat=str(record.get("isolatedat") or datetime.now(timezone.utc).isoformat()),
-        updatedat=str(record.get("updatedat") or datetime.now(timezone.utc).isoformat()),
+        isolatedat=str(record.get("isolatedat") or datetime.now(UTC).isoformat()),
+        updatedat=str(record.get("updatedat") or datetime.now(UTC).isoformat()),
         reason=str(record.get("reason") or "No reason provided."),
         tags=[str(tag) for tag in record.get("tags", []) if isinstance(tag, str)],
     )
@@ -328,7 +326,7 @@ def get_quarantine_overview() -> QuarantineOverviewResponse:
         overallstatus = "attention"
 
     return QuarantineOverviewResponse(
-        generatedat=datetime.now(timezone.utc).isoformat(),
+        generatedat=datetime.now(UTC).isoformat(),
         environment="local",
         overallstatus=overallstatus,
         kpis=kpis,

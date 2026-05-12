@@ -1,5 +1,4 @@
-from typing import Literal, TypedDict, List
-
+from typing import Literal, TypedDict
 
 Severity = Literal["low", "medium", "high", "critical"]
 
@@ -12,7 +11,7 @@ class Rule(TypedDict):
     description: str
 
 
-POWERSHELL_RULES: List[Rule] = [
+POWERSHELL_RULES: list[Rule] = [
     {
         "id": "ps_encoded_command",
         "pattern": "powershell -enc",
@@ -65,7 +64,7 @@ POWERSHELL_RULES: List[Rule] = [
 ]
 
 
-SHELL_DOWNLOAD_EXEC_RULES: List[Rule] = [
+SHELL_DOWNLOAD_EXEC_RULES: list[Rule] = [
     {
         "id": "shell_curl_pipe_bash",
         "pattern": "curl | bash",
@@ -132,7 +131,7 @@ SHELL_DOWNLOAD_EXEC_RULES: List[Rule] = [
 ]
 
 
-YAML_RULES: List[Rule] = [
+YAML_RULES: list[Rule] = [
     {
         "id": "yaml_unsafe_load",
         "pattern": "yaml.load(",
@@ -150,7 +149,7 @@ YAML_RULES: List[Rule] = [
 ]
 
 
-EXFILTRATION_RULES: List[Rule] = [
+EXFILTRATION_RULES: list[Rule] = [
     {
         "id": "exfil_aws_s3_cp",
         "pattern": "aws s3 cp",
@@ -196,7 +195,7 @@ EXFILTRATION_RULES: List[Rule] = [
 ]
 
 
-PROMPT_INJECTION_RULES: List[Rule] = [
+PROMPT_INJECTION_RULES: list[Rule] = [
     {
         "id": "prompt_ignore_previous_instructions",
         "pattern": "ignore previous instructions",
@@ -375,7 +374,7 @@ PROMPT_INJECTION_RULES: List[Rule] = [
 ]
 
 
-ALL_RULE_GROUPS: List[List[Rule]] = [
+ALL_RULE_GROUPS: list[list[Rule]] = [
     POWERSHELL_RULES,
     SHELL_DOWNLOAD_EXEC_RULES,
     YAML_RULES,

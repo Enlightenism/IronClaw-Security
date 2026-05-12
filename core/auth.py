@@ -8,7 +8,6 @@ from fastapi import Header, HTTPException, Request, status
 from core.apikeys import ApiKeyRecord, registry
 from core.settings import get_settings
 
-
 PrincipalType = Literal["system", "customer", "service"]
 
 

@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
 import hashlib
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
-from app.services.threatintel import ThreatIntelService, build_default_threatintel_service
-from app.services.malwareservice import MalwareService, build_malware_service
 from app.services.detonationservice import DetonationService, build_detonation_service
-
+from app.services.malwareservice import MalwareService, build_malware_service
+from app.services.threatintel import ThreatIntelService, build_default_threatintel_service
 
 SEVERITY_RANK = {
     "low": 1,
@@ -47,7 +46,7 @@ class ArtifactAnalysisResult:
     reasons: list[str]
     indicators: list[str]
     components: list[ArtifactAnalysisComponent]
-    assessed_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    assessed_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def as_dict(self) -> dict[str, Any]:
         return {

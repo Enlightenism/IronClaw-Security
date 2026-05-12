@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from collections import deque
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from threading import Lock
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -39,18 +39,18 @@ class ReviewQueueItem(BaseModel):
     status: ReviewStatus = Field(default=ReviewStatus.PENDING, description="Queue state")
     title: str = Field(..., description="Human-readable review title")
     summary: str = Field(..., description="Short analyst-facing summary")
-    reasons: List[str] = Field(default_factory=list, description="Escalation reasons")
-    evidence: List[Dict[str, Any]] = Field(
+    reasons: list[str] = Field(default_factory=list, description="Escalation reasons")
+    evidence: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Compact evidence objects for analyst context",
     )
-    assigned_to: Optional[str] = Field(
+    assigned_to: str | None = Field(
         default=None,
         description="Reviewer currently assigned to this queue item",
     )
     created_at: str = Field(..., description="UTC ISO-8601 creation timestamp")
     updated_at: str = Field(..., description="UTC ISO-8601 update timestamp")
-    completed_at: Optional[str] = Field(
+    completed_at: str | None = Field(
         default=None,
         description="UTC ISO-8601 completion timestamp",
     )
@@ -68,18 +68,18 @@ class ReviewQueueService:
     """
 
     def __init__(self) -> None:
-        self._items: Dict[str, ReviewQueueItem] = {}
-        self._index_by_source: Dict[tuple[str, str], str] = {}
-        self._pending_order: Deque[str] = deque()
+        self._items: dict[str, ReviewQueueItem] = {}
+        self._index_by_source: dict[tuple[str, str], str] = {}
+        self._pending_order: deque[str] = deque()
         self._counter = 1
         self._lock = Lock()
 
     def list_items(
         self,
         *,
-        status: Optional[ReviewStatus] = None,
-        assigned_to: Optional[str] = None,
-    ) -> List[ReviewQueueItem]:
+        status: ReviewStatus | None = None,
+        assigned_to: str | None = None,
+    ) -> list[ReviewQueueItem]:
         items = list(self._items.values())
         if status is not None:
             items = [item for item in items if item.status == status]
@@ -87,7 +87,7 @@ class ReviewQueueService:
             items = [item for item in items if item.assigned_to == assigned_to]
         return sorted(items, key=self._sort_key)
 
-    def get(self, review_id: str) -> Optional[ReviewQueueItem]:
+    def get(self, review_id: str) -> ReviewQueueItem | None:
         return self._items.get(review_id)
 
     def enqueue(
@@ -98,8 +98,8 @@ class ReviewQueueService:
         priority: ReviewPriority,
         title: str,
         summary: str,
-        reasons: Optional[List[str]] = None,
-        evidence: Optional[List[Dict[str, Any]]] = None,
+        reasons: list[str] | None = None,
+        evidence: list[dict[str, Any]] | None = None,
     ) -> ReviewQueueItem:
         with self._lock:
             key = (source.value, source_id)
@@ -140,8 +140,8 @@ class ReviewQueueService:
         priority: str,
         title: str,
         summary: str,
-        reasons: Optional[List[str]] = None,
-        evidence: Optional[List[Dict[str, Any]]] = None,
+        reasons: list[str] | None = None,
+        evidence: list[dict[str, Any]] | None = None,
     ) -> ReviewQueueItem:
         return self.enqueue(
             source=ReviewSource.INCIDENT,
@@ -160,8 +160,8 @@ class ReviewQueueService:
         priority: str,
         title: str,
         summary: str,
-        reasons: Optional[List[str]] = None,
-        evidence: Optional[List[Dict[str, Any]]] = None,
+        reasons: list[str] | None = None,
+        evidence: list[dict[str, Any]] | None = None,
     ) -> ReviewQueueItem:
         return self.enqueue(
             source=ReviewSource.SESSION,
@@ -173,7 +173,7 @@ class ReviewQueueService:
             evidence=evidence,
         )
 
-    def claim_next(self, reviewer_id: str) -> Optional[ReviewQueueItem]:
+    def claim_next(self, reviewer_id: str) -> ReviewQueueItem | None:
         with self._lock:
             self._rebuild_pending_order()
 
@@ -223,7 +223,7 @@ class ReviewQueueService:
             self._remove_from_pending(review_id)
             return updated
 
-    def dismiss(self, review_id: str, reason: Optional[str] = None) -> ReviewQueueItem:
+    def dismiss(self, review_id: str, reason: str | None = None) -> ReviewQueueItem:
         with self._lock:
             item = self._require(review_id)
             reasons = list(item.reasons)
@@ -257,7 +257,7 @@ class ReviewQueueService:
             self._push_pending(review_id)
             return updated
 
-    def counts(self) -> Dict[str, int]:
+    def counts(self) -> dict[str, int]:
         values = {status.value: 0 for status in ReviewStatus}
         for item in self._items.values():
             values[item.status.value] += 1
@@ -270,8 +270,8 @@ class ReviewQueueService:
         priority: ReviewPriority,
         title: str,
         summary: str,
-        reasons: List[str],
-        evidence: List[Dict[str, Any]],
+        reasons: list[str],
+        evidence: list[dict[str, Any]],
     ) -> ReviewQueueItem:
         item = self._require(review_id)
         updated = item.model_copy(
@@ -358,9 +358,9 @@ class ReviewQueueService:
         }
         return left if rank[left] >= rank[right] else right
 
-    def _dedupe_strings(self, values: List[str]) -> List[str]:
+    def _dedupe_strings(self, values: list[str]) -> list[str]:
         seen = set()
-        result: List[str] = []
+        result: list[str] = []
         for value in values:
             if not value or value in seen:
                 continue
@@ -368,9 +368,9 @@ class ReviewQueueService:
             result.append(value)
         return result
 
-    def _dedupe_evidence(self, values: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _dedupe_evidence(self, values: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen = set()
-        result: List[Dict[str, Any]] = []
+        result: list[dict[str, Any]] = []
         for value in values:
             key = self._freeze(value)
             if key in seen:
@@ -400,4 +400,4 @@ class ReviewQueueService:
         return review_id
 
     def _utcnow(self) -> str:
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(UTC).isoformat()

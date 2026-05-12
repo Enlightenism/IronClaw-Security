@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, Dict, Optional
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -19,7 +20,7 @@ router = APIRouter(
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 async def _scan_with_policy_guard(
@@ -28,9 +29,9 @@ async def _scan_with_policy_guard(
     api_key: str,
     partial_text: str,
     *,
-    context: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "userprompt": context.get("userprompt") if context else None,
         "retrieveddoc": context.get("retrieveddoc") if context else None,
         "tooloutput": context.get("tooloutput") if context else None,
@@ -51,7 +52,7 @@ def _build_guard_warning(reason: str, verdict: str) -> bytes:
     return (
         "\n\n[IRONCLAW-GUARD] Stream truncated due to high-risk content. "
         f"Reason: {reason or 'policy guard verdict: ' + verdict}.\n"
-    ).encode("utf-8")
+    ).encode()
 
 
 async def _guarded_upstream_stream(
@@ -60,7 +61,7 @@ async def _guarded_upstream_stream(
     client: httpx.AsyncClient,
     guard_base_url: str,
     api_key: str,
-    request_body: Dict[str, Any],
+    request_body: dict[str, Any],
     guard_mode: str,
     scan_interval_chars: int = 256,
 ) -> AsyncGenerator[bytes, None]:

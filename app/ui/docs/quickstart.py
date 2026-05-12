@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-
 
 router = APIRouter(
     prefix="/ui/docs",
@@ -17,7 +15,7 @@ class QuickstartStepView(BaseModel):
     stepid: str
     title: str
     description: str
-    codeblock: Optional[str] = None
+    codeblock: str | None = None
 
 
 class QuickstartSdkOptionView(BaseModel):
@@ -56,7 +54,7 @@ class QuickstartPageResponse(BaseModel):
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @router.get("/quickstart", response_model=QuickstartPageResponse)

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from threading import Lock
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
-from review.reviewqueueservice import ReviewPriority, ReviewQueueItem, ReviewQueueService
+from review.reviewqueueservice import ReviewPriority, ReviewQueueService
 
 
 class IncidentStatus(str):
@@ -31,26 +31,26 @@ class IncidentRecord(BaseModel):
     status: str = Field(default=IncidentStatus.OPEN, description="Incident lifecycle state")
     source: str = Field(..., description="Origin of the incident")
     source_id: str = Field(..., description="Source entity identifier")
-    reasons: List[str] = Field(default_factory=list, description="Why the incident was opened")
-    evidence: List[Dict[str, Any]] = Field(
+    reasons: list[str] = Field(default_factory=list, description="Why the incident was opened")
+    evidence: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Compact evidence payloads for triage",
     )
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional orchestration metadata",
     )
-    review_id: Optional[str] = Field(
+    review_id: str | None = Field(
         default=None,
         description="Linked review queue item when human review is required",
     )
-    assigned_to: Optional[str] = Field(
+    assigned_to: str | None = Field(
         default=None,
         description="Assigned analyst or responder",
     )
     created_at: str = Field(..., description="UTC ISO-8601 creation timestamp")
     updated_at: str = Field(..., description="UTC ISO-8601 update timestamp")
-    resolved_at: Optional[str] = Field(
+    resolved_at: str | None = Field(
         default=None,
         description="UTC ISO-8601 resolution timestamp",
     )
@@ -69,21 +69,21 @@ class IncidentService:
 
     def __init__(
         self,
-        review_queue_service: Optional[ReviewQueueService] = None,
+        review_queue_service: ReviewQueueService | None = None,
     ) -> None:
         self._lock = Lock()
-        self._incidents: Dict[str, IncidentRecord] = {}
-        self._index_by_source: Dict[tuple[str, str], str] = {}
+        self._incidents: dict[str, IncidentRecord] = {}
+        self._index_by_source: dict[tuple[str, str], str] = {}
         self._counter = 1
         self._review_queue_service = review_queue_service
 
     def list_incidents(
         self,
         *,
-        status: Optional[str] = None,
-        severity: Optional[str] = None,
-        assigned_to: Optional[str] = None,
-    ) -> List[IncidentRecord]:
+        status: str | None = None,
+        severity: str | None = None,
+        assigned_to: str | None = None,
+    ) -> list[IncidentRecord]:
         incidents = list(self._incidents.values())
 
         if status is not None:
@@ -99,7 +99,7 @@ class IncidentService:
 
         return sorted(incidents, key=self._sort_key)
 
-    def get_incident(self, incident_id: str) -> Optional[IncidentRecord]:
+    def get_incident(self, incident_id: str) -> IncidentRecord | None:
         return self._incidents.get(incident_id)
 
     def open_incident(
@@ -110,9 +110,9 @@ class IncidentService:
         severity: str,
         source: str,
         source_id: str,
-        reasons: Optional[List[str]] = None,
-        evidence: Optional[List[Dict[str, Any]]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        reasons: list[str] | None = None,
+        evidence: list[dict[str, Any]] | None = None,
+        metadata: dict[str, Any] | None = None,
         escalate_for_review: bool = True,
     ) -> IncidentRecord:
         with self._lock:
@@ -194,7 +194,7 @@ class IncidentService:
 
             return updated
 
-    def dismiss_incident(self, incident_id: str, reason: Optional[str] = None) -> IncidentRecord:
+    def dismiss_incident(self, incident_id: str, reason: str | None = None) -> IncidentRecord:
         with self._lock:
             incident = self._require(incident_id)
             reasons = list(incident.reasons)
@@ -237,7 +237,7 @@ class IncidentService:
 
             return updated
 
-    def counts(self) -> Dict[str, int]:
+    def counts(self) -> dict[str, int]:
         counts = {
             IncidentStatus.OPEN: 0,
             IncidentStatus.TRIAGED: 0,
@@ -255,9 +255,9 @@ class IncidentService:
         title: str,
         summary: str,
         severity: str,
-        reasons: List[str],
-        evidence: List[Dict[str, Any]],
-        metadata: Dict[str, Any],
+        reasons: list[str],
+        evidence: list[dict[str, Any]],
+        metadata: dict[str, Any],
         escalate_for_review: bool,
     ) -> IncidentRecord:
         incident = self._require(incident_id)
@@ -333,9 +333,9 @@ class IncidentService:
         }
         return mapping.get(severity, ReviewPriority.MEDIUM.value)
 
-    def _dedupe_strings(self, values: List[str]) -> List[str]:
+    def _dedupe_strings(self, values: list[str]) -> list[str]:
         seen = set()
-        result: List[str] = []
+        result: list[str] = []
         for value in values:
             if not value or value in seen:
                 continue
@@ -343,9 +343,9 @@ class IncidentService:
             result.append(value)
         return result
 
-    def _dedupe_evidence(self, values: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _dedupe_evidence(self, values: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen = set()
-        result: List[Dict[str, Any]] = []
+        result: list[dict[str, Any]] = []
         for value in values:
             frozen = self._freeze(value)
             if frozen in seen:
@@ -383,4 +383,4 @@ class IncidentService:
         )
 
     def _utcnow(self) -> str:
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(UTC).isoformat()

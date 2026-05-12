@@ -5,7 +5,6 @@ from typing import Any
 
 import pytest
 
-
 MODULE_CANDIDATES = (
     "app.cli.verify",
     "app.cli.main",

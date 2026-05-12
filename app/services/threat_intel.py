@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
-
 
 ThreatSeverity = Literal["low", "medium", "high", "critical"]
 ThreatType = Literal[
@@ -18,7 +17,7 @@ ThreatSourceKind = Literal["manual", "feed", "import"]
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _normalize_text(value: str | None) -> str:

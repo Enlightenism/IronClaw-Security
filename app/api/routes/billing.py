@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 from app.core.auth import require_api_key
 from app.core.unit_wallet import get_unit_wallet_registry
 
-
 router = APIRouter(
     prefix="/billing",
     tags=["billing"],

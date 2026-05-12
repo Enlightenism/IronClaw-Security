@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
 import hashlib
 import ipaddress
 import json
-from pathlib import Path
 import re
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
-
 
 IOC_PATTERN = re.compile(
     r"(?P<ipv4>\b(?:\d{1,3}\.){3}\d{1,3}\b)|"
@@ -74,7 +73,7 @@ class ThreatAssessment:
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _normalize_text(value: str) -> str:
@@ -92,7 +91,7 @@ def _normalize_indicator(value: str, indicator_type: str) -> str:
 
 def _indicator_fingerprint(value: str, indicator_type: str) -> str:
     normalized = _normalize_indicator(value, indicator_type)
-    return hashlib.sha256(f"{indicator_type}:{normalized}".encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{indicator_type}:{normalized}".encode()).hexdigest()
 
 
 def _infer_indicator_type(value: str) -> str:

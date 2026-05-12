@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, is_dataclass, replace
-from typing import Any, Awaitable, Callable, Mapping
+from typing import Any
 from uuid import uuid4
 
 from .config import IronClawSkillConfig
@@ -143,11 +144,11 @@ def _bool_value(value: Any, default: bool = False) -> bool:
 
 
 def _result_asdict(result: SkillExecutionResult) -> dict[str, Any]:
-    if hasattr(result, "asdict") and callable(getattr(result, "asdict")):
+    if hasattr(result, "asdict") and callable(result.asdict):
         payload = result.asdict()
         if isinstance(payload, dict):
             return payload
-    if hasattr(result, "model_dump") and callable(getattr(result, "model_dump")):
+    if hasattr(result, "model_dump") and callable(result.model_dump):
         payload = result.model_dump(mode="json")
         if isinstance(payload, dict):
             return payload

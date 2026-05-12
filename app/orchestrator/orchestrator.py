@@ -4,7 +4,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from client import IronClawClient
 from app.orchestrator.agent_registry import (
     AgentDescriptor,
     AgentRegistry,
@@ -13,6 +12,7 @@ from app.orchestrator.agent_registry import (
     get_agent_by_id,
     get_agent_by_path,
 )
+from client import IronClawClient
 
 OrchestratorDecisionSource = Literal["registry_only", "guard_api", "guard_api_fallback"]
 

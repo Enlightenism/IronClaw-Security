@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from importlib import import_module
 from inspect import isawaitable
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 from fastapi import Depends, FastAPI
 from fastapi.openapi.utils import get_openapi
@@ -74,7 +75,7 @@ def _normalize_dependency_metadata(app: FastAPI) -> None:
             if getattr(dependant, "dependency", None) is None:
                 call = getattr(dependant, "call", None)
                 if call is not None:
-                    setattr(dependant, "dependency", call)
+                    dependant.dependency = call
 
 
 def _build_openapi(app: FastAPI) -> dict[str, Any]:

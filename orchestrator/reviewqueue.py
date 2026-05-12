@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any
 from uuid import uuid4
 
 
@@ -46,7 +47,7 @@ class ReviewComment:
     comment_id: str
     author_id: str
     message: str
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -64,7 +65,7 @@ class ReviewDecision:
     reviewer_id: str
     verdict: str
     reason: str
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -96,11 +97,11 @@ class ReviewItem:
     comments: list[ReviewComment] = field(default_factory=list)
     decisions: list[ReviewDecision] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def touch(self) -> None:
-        self.updated_at = datetime.now(timezone.utc).isoformat()
+        self.updated_at = datetime.now(UTC).isoformat()
 
     def add_comment(self, author_id: str, message: str, metadata: Mapping[str, Any] | None = None) -> ReviewComment:
         comment = ReviewComment(
@@ -156,7 +157,7 @@ class ReviewQueue:
         sink: Callable[[dict[str, Any]], Any] | None = None,
     ) -> None:
         self._items: dict[str, ReviewItem] = {}
-        self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self.clock = clock or (lambda: datetime.now(UTC))
         self.sink = sink
 
     def create(

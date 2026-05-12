@@ -5,7 +5,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 ReleaseChannel = Literal["dev", "staging", "production"]
 ReleasePolicyStatus = Literal["active", "draft", "deprecated"]
 ReleaseRolloutStrategy = Literal["manual", "canary", "blue-green", "in-place"]

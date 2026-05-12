@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from typing import Any, Mapping
-
+from typing import Any
 
 SECRET_PATTERNS: dict[str, str] = {
     "openai_api_key": r"\bsk-[A-Za-z0-9]{20,}\b",

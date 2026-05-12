@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Query
@@ -11,7 +11,6 @@ from app.services.groq_security_brain import GroqMode
 from app.ui.groq.control_panel import CONTROL_FLAGS
 from app.ui.groq.overview import build_groq_security_overview
 
-
 router = APIRouter(
     prefix="/ui/groq",
     tags=["groq-overview-history"],
@@ -19,7 +18,7 @@ router = APIRouter(
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _iso(dt: datetime) -> str:

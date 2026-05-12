@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from app.api.actionpolicy import evaluateactionpolicy
-
 
 router = APIRouter(prefix="/guard", tags=["action-guard"])
 
@@ -19,9 +18,9 @@ class ActionGuardRequest(BaseModel):
     target: str = Field(..., description="Execution target such as URL, shell, file path, or tool id.")
     content: str = Field(..., description="Prompt or action content to guard.")
     riskscore: int = Field(..., ge=0, le=100, description="Base risk score for guard evaluation.")
-    clientid: Optional[str] = Field(None, description="Client or actor identifier.")
-    sessionid: Optional[str] = Field(None, description="Session or workflow identifier.")
-    filepath: Optional[str] = Field(None, description="Optional source filepath for audit attribution.")
+    clientid: str | None = Field(None, description="Client or actor identifier.")
+    sessionid: str | None = Field(None, description="Session or workflow identifier.")
+    filepath: str | None = Field(None, description="Optional source filepath for audit attribution.")
     metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Optional metadata from retrieved docs, tools, or external sources.",

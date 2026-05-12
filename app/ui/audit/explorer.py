@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-
 
 router = APIRouter(
     prefix="/ui/audit",
@@ -17,7 +15,7 @@ router = APIRouter(
 class AuditKpiView(BaseModel):
     label: str
     value: int
-    trendlabel: Optional[str] = None
+    trendlabel: str | None = None
     status: str = "neutral"
 
 
@@ -43,16 +41,16 @@ class AuditEventView(BaseModel):
     timestamp: str
     category: str
     severity: str
-    actorid: Optional[str] = None
-    sessionid: Optional[str] = None
-    requestid: Optional[str] = None
-    traceid: Optional[str] = None
-    executionid: Optional[str] = None
-    reviewitemid: Optional[str] = None
-    incidentid: Optional[str] = None
-    verdict: Optional[str] = None
-    actiontype: Optional[str] = None
-    target: Optional[str] = None
+    actorid: str | None = None
+    sessionid: str | None = None
+    requestid: str | None = None
+    traceid: str | None = None
+    executionid: str | None = None
+    reviewitemid: str | None = None
+    incidentid: str | None = None
+    verdict: str | None = None
+    actiontype: str | None = None
+    target: str | None = None
     summary: str
     details: dict[str, str] = Field(default_factory=dict)
     tags: list[str] = Field(default_factory=list)
@@ -77,7 +75,7 @@ class AuditExplorerResponse(BaseModel):
 
 
 def _utc_iso(year: int, month: int, day: int, hour: int, minute: int = 0) -> str:
-    return datetime(year, month, day, hour, minute, 0, tzinfo=timezone.utc).isoformat()
+    return datetime(year, month, day, hour, minute, 0, tzinfo=UTC).isoformat()
 
 
 def _sample_audit_events() -> list[dict[str, object]]:
@@ -212,7 +210,7 @@ def _to_audit_event(record: dict[str, object]) -> AuditEventView:
 
     return AuditEventView(
         auditeventid=str(record.get("auditeventid") or "unknown-audit-event"),
-        timestamp=str(record.get("timestamp") or datetime.now(timezone.utc).isoformat()),
+        timestamp=str(record.get("timestamp") or datetime.now(UTC).isoformat()),
         category=str(record.get("category") or "unknown"),
         severity=str(record.get("severity") or "unknown"),
         actorid=record.get("actorid") if isinstance(record.get("actorid"), str) else None,
@@ -340,7 +338,7 @@ def get_audit_explorer() -> AuditExplorerResponse:
         overallstatus = "attention"
 
     return AuditExplorerResponse(
-        generatedat=datetime.now(timezone.utc).isoformat(),
+        generatedat=datetime.now(UTC).isoformat(),
         environment="local",
         overallstatus=overallstatus,
         kpis=kpis,

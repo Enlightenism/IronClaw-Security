@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from enum import Enum
 from functools import lru_cache
-from typing import Literal, Optional, get_args, get_origin
+from typing import Literal, get_args, get_origin
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -114,16 +114,16 @@ class Settings(BaseSettings):
     enable_guard_action_decision: bool = Field(default=True, alias="ENABLE_GUARD_ACTION_DECISION")
     enable_quarantine_review: bool = Field(default=True, alias="ENABLE_QUARANTINE_REVIEW")
 
-    groq_api_key: Optional[str] = Field(default=None, alias="GROQ_API_KEY")
+    groq_api_key: str | None = Field(default=None, alias="GROQ_API_KEY")
     groq_model: str = Field(default="llama-3.3-70b-versatile", alias="GROQ_MODEL")
     groq_timeout_seconds: float = Field(default=20.0, alias="GROQ_TIMEOUT_SECONDS")
     groq_enabled: bool = Field(default=False, alias="GROQ_ENABLED")
 
     auth_required: bool = Field(default=False, alias="AUTH_REQUIRED")
-    api_key: Optional[str] = Field(default=None, alias="API_KEY")
-    admin_api_key: Optional[str] = Field(default=None, alias="ADMIN_API_KEY")
-    platform_api_key: Optional[str] = Field(default=None, alias="PLATFORM_API_KEY")
-    internal_platform_api_key: Optional[str] = Field(
+    api_key: str | None = Field(default=None, alias="API_KEY")
+    admin_api_key: str | None = Field(default=None, alias="ADMIN_API_KEY")
+    platform_api_key: str | None = Field(default=None, alias="PLATFORM_API_KEY")
+    internal_platform_api_key: str | None = Field(
         default=None,
         alias="INTERNAL_PLATFORM_API_KEY",
     )
@@ -159,7 +159,7 @@ class Settings(BaseSettings):
         "internal_platform_api_key",
     )
     @classmethod
-    def empty_secret_to_none(cls, value: Optional[str]) -> Optional[str]:
+    def empty_secret_to_none(cls, value: str | None) -> str | None:
         if value is None:
             return None
         value = value.strip()
@@ -209,7 +209,7 @@ class Settings(BaseSettings):
         return tuple(supported)
 
     @property
-    def effective_platform_api_key(self) -> Optional[str]:
+    def effective_platform_api_key(self) -> str | None:
         return (
             self.internal_platform_api_key
             or self.platform_api_key

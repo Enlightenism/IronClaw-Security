@@ -8,7 +8,6 @@ from typing import Any, Final
 
 from dotenv import load_dotenv
 
-
 DEFAULT_BASE_URL: Final[str] = "http://127.0.0.1:8000"
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 10.0
 DEFAULT_POLICY_MODE: Final[str] = "review"

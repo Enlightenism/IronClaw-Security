@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Dict, Literal, Optional, Protocol, runtime_checkable
+from datetime import UTC, datetime
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from app.orchestrator.secure_runtime_pipeline import (
     ActionExecutionContext,
@@ -28,12 +28,12 @@ class SandboxRunner(Protocol):
         self,
         action_type: str,
         target: str,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         *,
         timeout_seconds: float,
         read_only_fs: bool = True,
         network_enabled: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         ...
 
 
@@ -62,12 +62,12 @@ class NoopSandboxRunner:
         self,
         action_type: str,
         target: str,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         *,
         timeout_seconds: float,
         read_only_fs: bool = True,
         network_enabled: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         # TODO: replace with a real sandbox driver.
         return {
             "status": "simulated",
@@ -95,8 +95,8 @@ class ClaudeSandboxExecutor:
 
     def __init__(
         self,
-        config: Optional[SandboxExecutorConfig] = None,
-        sandbox_runner: Optional[SandboxRunner] = None,
+        config: SandboxExecutorConfig | None = None,
+        sandbox_runner: SandboxRunner | None = None,
     ) -> None:
         self._config = config or SandboxExecutorConfig()
         self._runner: SandboxRunner = sandbox_runner or NoopSandboxRunner()
@@ -121,7 +121,7 @@ class ClaudeSandboxExecutor:
         return False
 
     def _now_iso(self) -> str:
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(UTC).isoformat()
 
     def execute(
         self,

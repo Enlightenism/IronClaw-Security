@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from app.api.actionguard import guardaction
-
 
 router = APIRouter(prefix="/decision", tags=["action-decision"])
 
@@ -20,9 +19,9 @@ class ActionDecisionRequest(BaseModel):
     target: str = Field(..., description="Target such as URL, shell, file path, or tool id.")
     content: str = Field(..., description="Prompt or action content to evaluate.")
     riskscore: int = Field(..., ge=0, le=100, description="Base risk score before decision logic.")
-    clientid: Optional[str] = Field(None, description="Client or actor id.")
-    sessionid: Optional[str] = Field(None, description="Session or workflow id.")
-    filepath: Optional[str] = Field(None, description="Optional source filepath for attribution.")
+    clientid: str | None = Field(None, description="Client or actor id.")
+    sessionid: str | None = Field(None, description="Session or workflow id.")
+    filepath: str | None = Field(None, description="Optional source filepath for attribution.")
     metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Optional metadata from retrieved docs, tools, files, or model outputs.",

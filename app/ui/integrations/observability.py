@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from app.dependencies import get_integration_registry
@@ -238,7 +238,7 @@ def build_integration_observability_view() -> IntegrationObservabilityView:
 
     return IntegrationObservabilityView(
         title="Integration Observability",
-        generated_at=datetime.now(timezone.utc).isoformat(),
+        generated_at=datetime.now(UTC).isoformat(),
         total=len(items),
         active_count=active_count,
         degraded_count=degraded_count,

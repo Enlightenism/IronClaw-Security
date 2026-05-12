@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Mapping, cast
+from collections.abc import Mapping
+from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, ConfigDict
@@ -38,7 +39,7 @@ class ReviewRequest(BaseModel):
     action: Literal["approve", "reject"]
 
 
-def _coerce_list(value: Any) -> List[Any]:
+def _coerce_list(value: Any) -> list[Any]:
     if isinstance(value, list):
         return list(value)
     if value is None:
@@ -46,13 +47,13 @@ def _coerce_list(value: Any) -> List[Any]:
     return []
 
 
-def _derive_summary(matched_patterns: List[Any]) -> str:
+def _derive_summary(matched_patterns: list[Any]) -> str:
     if matched_patterns:
         return f"Detected {len(matched_patterns)} risky pattern(s)."
     return _DEFAULT_SAFE_SUMMARY
 
 
-def _derive_risk_score(matched_patterns: List[Any]) -> int:
+def _derive_risk_score(matched_patterns: list[Any]) -> int:
     heuristic_bonus = 0
     for pattern in matched_patterns:
         identifier: Any = None
@@ -79,12 +80,12 @@ def _build_review_summary(summary: Any, action: Literal["approve", "reject"]) ->
     return f"{base_summary} {review_suffix}"
 
 
-def _normalize_history_item(item: Mapping[str, Any]) -> Dict[str, Any]:
+def _normalize_history_item(item: Mapping[str, Any]) -> dict[str, Any]:
     """
     Normalize a raw scan history item so downstream code and UI always see
     the expected keys and safe default values.
     """
-    normalized: Dict[str, Any] = dict(item)
+    normalized: dict[str, Any] = dict(item)
 
     matched_patterns = _coerce_list(normalized.get("matched_patterns"))
     normalized["matched_patterns"] = matched_patterns
@@ -118,11 +119,11 @@ def get_history_events(
         ge=1,
         le=_HISTORY_EVENTS_LIMIT_MAX,
     ),
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Return recent security history events, newest-first.
     """
-    return cast(List[Dict[str, Any]], list_audit_events(limit=limit))
+    return cast(list[dict[str, Any]], list_audit_events(limit=limit))
 
 
 @router.get("/events/by-session/{session_id}")
@@ -133,12 +134,12 @@ def get_history_events_by_session(
         ge=1,
         le=_HISTORY_EVENTS_LIMIT_MAX,
     ),
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Return recent security history events for a given session_id, newest-first.
     """
     return cast(
-        List[Dict[str, Any]],
+        list[dict[str, Any]],
         list_audit_events_for_session(session_id=session_id, limit=limit),
     )
 
@@ -151,12 +152,12 @@ def get_history_events_by_actor(
         ge=1,
         le=_HISTORY_EVENTS_LIMIT_MAX,
     ),
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Return recent security history events for a given actor_id, newest-first.
     """
     return cast(
-        List[Dict[str, Any]],
+        list[dict[str, Any]],
         list_audit_events_for_actor(actor_id=actor_id, limit=limit),
     )
 
@@ -225,7 +226,7 @@ def review_scan_record(scan_id: str, request: ReviewRequest) -> ScanHistoryItem:
         )
 
     approved = request.action == "approve"
-    updates: Dict[str, Any] = {
+    updates: dict[str, Any] = {
         "review_status": _REVIEW_STATUS_APPROVED if approved else _REVIEW_STATUS_REJECTED,
         "untrusted": not approved,
         "verdict": _VERDICT_ALLOW if approved else _VERDICT_BLOCK,

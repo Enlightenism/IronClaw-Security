@@ -18,7 +18,7 @@ class MetricsSummaryViewModel:
     telemetry_path: str
 
     @classmethod
-    def from_summary(cls, summary: dict[str, Any]) -> "MetricsSummaryViewModel":
+    def from_summary(cls, summary: dict[str, Any]) -> MetricsSummaryViewModel:
         return cls(
             total_events=int(summary.get("eventcount", 0)),
             allow_count=int(summary.get("allowcount", 0)),

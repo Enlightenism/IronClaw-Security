@@ -6,10 +6,10 @@ import re
 import shlex
 import subprocess
 import time
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Final, Sequence
-
+from typing import Any, Final
 
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 10.0
 DEFAULT_MAX_OUTPUT_CHARS: Final[int] = 12000

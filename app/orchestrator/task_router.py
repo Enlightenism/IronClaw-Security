@@ -13,7 +13,6 @@ from app.orchestrator.coordination_state import (
 from app.orchestrator.execution_plan import ExecutionPlan, build_execution_plan
 from app.orchestrator.orchestrator import IronClawOrchestrator, OrchestrationDecision
 
-
 RoutingMode = Literal[
     "direct_file",
     "agent_id",

@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-
 AuditEventType = Literal[
     "policy_decision",
     "execution_allowed",

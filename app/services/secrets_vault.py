@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
-from typing import Optional
 
 
 class _SecretsVault:
@@ -41,7 +40,7 @@ class _SecretsVault:
         return value
 
     @staticmethod
-    def supabase_service_role_key() -> Optional[str]:
+    def supabase_service_role_key() -> str | None:
         return os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
     # ------------------------------------------------------------------
@@ -82,26 +81,26 @@ class _SecretsVault:
         )
 
     @staticmethod
-    def reports_dir() -> Optional[str]:
+    def reports_dir() -> str | None:
         return os.getenv("REPORTS_DIR") or os.getenv("IRONCLAW_REPORTS_DIR")
 
     @staticmethod
-    def uploads_dir() -> Optional[str]:
+    def uploads_dir() -> str | None:
         return os.getenv("UPLOADS_DIR") or os.getenv("IRONCLAW_UPLOADS_DIR")
 
     @staticmethod
-    def quarantine_dir() -> Optional[str]:
+    def quarantine_dir() -> str | None:
         return os.getenv("QUARANTINE_DIR") or os.getenv("IRONCLAW_QUARANTINE_DIR")
 
     # ------------------------------------------------------------------
     # Optional integrations
     # ------------------------------------------------------------------
     @staticmethod
-    def redis_url() -> Optional[str]:
+    def redis_url() -> str | None:
         return os.getenv("REDIS_URL")
 
     @staticmethod
-    def sentry_dsn() -> Optional[str]:
+    def sentry_dsn() -> str | None:
         return os.getenv("SENTRY_DSN")
 
     @staticmethod
@@ -112,7 +111,7 @@ class _SecretsVault:
     # Generic escape hatch — use only when adding a new key not yet listed
     # ------------------------------------------------------------------
     @staticmethod
-    def get(key: str, default: Optional[str] = None) -> Optional[str]:
+    def get(key: str, default: str | None = None) -> str | None:
         return os.getenv(key, default)
 
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -17,9 +16,9 @@ class TestConsoleRequestTemplate(BaseModel):
     target: str
     content: str
     riskscore: int
-    clientid: Optional[str] = None
-    sessionid: Optional[str] = None
-    filepath: Optional[str] = None
+    clientid: str | None = None
+    sessionid: str | None = None
+    filepath: str | None = None
 
 
 class TestConsoleResponsePreview(BaseModel):
@@ -29,8 +28,8 @@ class TestConsoleResponsePreview(BaseModel):
     policyverdict: str
     shouldexecute: bool
     haltedbyboundary: bool
-    executorname: Optional[str] = None
-    reason: Optional[str] = None
+    executorname: str | None = None
+    reason: str | None = None
 
 
 class TestConsolePageResponse(BaseModel):
@@ -45,7 +44,7 @@ class TestConsolePageResponse(BaseModel):
 @router.get("/test-console", response_model=TestConsolePageResponse)
 def get_execution_test_console() -> TestConsolePageResponse:
     return TestConsolePageResponse(
-        generatedat=datetime.now(timezone.utc).isoformat(),
+        generatedat=datetime.now(UTC).isoformat(),
         availableactions=["httpfetch", "toolcall"],
         defaultrequest=TestConsoleRequestTemplate(
             actiontype="httpfetch",

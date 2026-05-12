@@ -4,7 +4,6 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-
 DEFAULT_INCIDENT_STATUS = "open"
 DEFAULT_INCIDENT_SEVERITY = "medium"
 ESCALATED_INCIDENT_SEVERITY = "high"

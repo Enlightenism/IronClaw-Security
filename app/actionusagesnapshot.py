@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass(slots=True)
@@ -18,21 +18,21 @@ class ActionUsageSnapshot:
     - JSON-friendly values via as_dict()
     """
 
-    snapshotid: Optional[str] = None
-    ownerid: Optional[str] = None
-    periodstart: Optional[str] = None
-    periodend: Optional[str] = None
-    totalunits: Optional[Decimal] = None
-    totalcost: Optional[Decimal] = None
-    remaining: Optional[Decimal] = None
-    quota: Optional[Decimal] = None
-    generatedat: Optional[str] = None
+    snapshotid: str | None = None
+    ownerid: str | None = None
+    periodstart: str | None = None
+    periodend: str | None = None
+    totalunits: Decimal | None = None
+    totalcost: Decimal | None = None
+    remaining: Decimal | None = None
+    quota: Decimal | None = None
+    generatedat: str | None = None
 
     # Collections / nested structures
-    events: Optional[List[Dict[str, Any]]] = field(default=None)
-    summary: Optional[Dict[str, Any]] = field(default=None)
+    events: list[dict[str, Any]] | None = field(default=None)
+    summary: dict[str, Any] | None = field(default=None)
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         """
         Return a plain dict representation suitable for JSON or further
         transformation. Keys are stable across builds.
@@ -52,7 +52,7 @@ class ActionUsageSnapshot:
         }
 
 
-def _coerce_decimal(value: Any) -> Optional[Decimal]:
+def _coerce_decimal(value: Any) -> Decimal | None:
     if value is None:
         return None
     if isinstance(value, Decimal):
@@ -63,7 +63,7 @@ def _coerce_decimal(value: Any) -> Optional[Decimal]:
         return None
 
 
-def _ensure_non_negative(name: str, value: Optional[Decimal]) -> Optional[Decimal]:
+def _ensure_non_negative(name: str, value: Decimal | None) -> Decimal | None:
     if value is None:
         return None
     if value < Decimal("0"):
@@ -71,21 +71,21 @@ def _ensure_non_negative(name: str, value: Optional[Decimal]) -> Optional[Decima
     return value
 
 
-def _generate_snapshot_id(owner_id: Optional[str]) -> str:
+def _generate_snapshot_id(owner_id: str | None) -> str:
     prefix = "snapshot"
     owner_part = (owner_id or "").strip() or "anon"
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     return f"{prefix}-{owner_part}-{timestamp}"
 
 
 def build_action_usage_snapshot(
     *,
-    owner_id: Optional[str] = None,
-    period_start: Optional[str] = None,
-    period_end: Optional[str] = None,
-    total_units: Optional[Any] = None,
-    total_cost: Optional[Any] = None,
-    quota: Optional[Any] = None,
+    owner_id: str | None = None,
+    period_start: str | None = None,
+    period_end: str | None = None,
+    total_units: Any | None = None,
+    total_cost: Any | None = None,
+    quota: Any | None = None,
 ) -> ActionUsageSnapshot:
     """
     Build a snapshot object that satisfies tests/testactionusagesnapshot.py.
@@ -100,7 +100,7 @@ def build_action_usage_snapshot(
     """
 
     # Normalize owner id
-    owner_normalized: Optional[str] = None
+    owner_normalized: str | None = None
     if owner_id is not None:
         if not isinstance(owner_id, str):
             raise TypeError("owner_id must be a string when provided")
@@ -111,8 +111,8 @@ def build_action_usage_snapshot(
         owner_normalized = stripped
 
     # Normalize period fields to non-empty ISO-like strings when provided
-    period_start_normalized: Optional[str] = period_start
-    period_end_normalized: Optional[str] = period_end
+    period_start_normalized: str | None = period_start
+    period_end_normalized: str | None = period_end
 
     # Coerce numeric fields
     total_units_dec = _coerce_decimal(total_units)
@@ -133,7 +133,7 @@ def build_action_usage_snapshot(
             raise ValueError("total_cost must be zero when total_units is zero")
 
     # Derive remaining from quota when possible, otherwise leave None
-    remaining_dec: Optional[Decimal] = None
+    remaining_dec: Decimal | None = None
     if quota_dec is not None and total_units_dec is not None:
         # remaining = quota - total_units, ensuring non-negative
         remaining_dec = quota_dec - total_units_dec
@@ -148,11 +148,11 @@ def build_action_usage_snapshot(
 
     # Generate identifiers and timestamps
     snapshot_id = _generate_snapshot_id(owner_normalized)
-    generated_at = datetime.now(timezone.utc).isoformat()
+    generated_at = datetime.now(UTC).isoformat()
 
     # Basic summary/events; may remain None, which tests accept
-    events: Optional[List[Dict[str, Any]]] = None
-    summary: Optional[Dict[str, Any]] = None
+    events: list[dict[str, Any]] | None = None
+    summary: dict[str, Any] | None = None
 
     return ActionUsageSnapshot(
         snapshotid=snapshot_id,

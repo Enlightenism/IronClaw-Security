@@ -10,7 +10,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
-
 RestoreMode = Literal["validate", "dry-run", "apply", "rollback"]
 RestoreStatus = Literal["pending", "validated", "dry-run", "applied", "rolled-back", "failed"]
 
@@ -51,7 +50,7 @@ class RestoreManifest:
     meta: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "RestoreManifest":
+    def from_dict(cls, payload: dict[str, Any]) -> RestoreManifest:
         return cls(
             target_name=str(payload["target_name"]),
             target_kind=str(payload["target_kind"]),

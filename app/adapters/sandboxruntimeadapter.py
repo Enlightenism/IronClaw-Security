@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any
 
 from app.runtime.sandboxrouter import (
     SandboxExecutionRequest,
     SandboxExecutionResult,
     build_sandbox_router,
 )
-
 
 ExecutorCallable = Callable[..., Any]
 

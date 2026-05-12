@@ -7,7 +7,6 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-
 UI_SYSTEM_DIAGNOSTICS_PATH: Final[str] = "/ui/system-diagnostics"
 
 

@@ -13,7 +13,6 @@ from app.orchestrator.remediation_gate import GateReviewOutcome, RemediationGate
 from app.orchestrator.replay_controller import ReplayReport
 from app.orchestrator.supervisor import SupervisorEscalation
 
-
 LedgerEventType = str
 
 

@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 
 from app.services.integrationverifier import IntegrationVerifier
 
-
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 
 _service = IntegrationVerifier()

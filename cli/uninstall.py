@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass, asdict
-from pathlib import Path
-from typing import Any
 import json
 import shutil
 import sys
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any
 
 
 @dataclass(slots=True)

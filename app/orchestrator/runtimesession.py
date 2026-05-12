@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Iterable, Mapping
+from typing import Any
 from uuid import uuid4
 
 from app.orchestrator.checkpointstore import build_checkpoint_store
@@ -14,7 +15,6 @@ from app.orchestrator.executorboundary import (
 )
 from app.orchestrator.reviewstatestore import build_review_state_store
 from app.persistencebootstrap import build_store
-
 
 DEFAULT_SESSION_TABLE = "runtime_sessions"
 

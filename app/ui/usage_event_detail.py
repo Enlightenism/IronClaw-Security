@@ -6,7 +6,6 @@ from typing import Any
 from fastapi import APIRouter, Path
 from pydantic import BaseModel, Field
 
-
 router = APIRouter(prefix="/usage-events/detail", tags=["usage-event-detail"])
 
 

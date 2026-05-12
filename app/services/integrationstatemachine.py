@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 
 from app.services.integrationregistry import IntegrationStatus, get_integration_registry
 
-
 _ALLOWED_TRANSITIONS: dict[IntegrationStatus, set[IntegrationStatus]] = {
     "planned": {"available", "disabled"},
     "available": {"configured", "disabled", "degraded"},

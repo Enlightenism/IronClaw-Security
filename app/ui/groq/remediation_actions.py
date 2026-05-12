@@ -1,18 +1,18 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Literal, Sequence
+from datetime import UTC, datetime
+from typing import Any, Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from app.services.groq_client import GroqChatClient  # you implement this
 from app.services.groq_security_brain import GroqMode
-from app.ui.groq.incidents import _INCIDENTS, IncidentSeverity
 from app.ui.groq.brain_status import build_groq_brain_status_view
 from app.ui.groq.control_panel import CONTROL_FLAGS
-
+from app.ui.groq.incidents import _INCIDENTS, IncidentSeverity
 
 router = APIRouter(
     prefix="/ui/groq",
@@ -21,7 +21,7 @@ router = APIRouter(
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 RemediationKind = Literal[

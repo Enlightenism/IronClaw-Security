@@ -6,7 +6,6 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-
 router = APIRouter(prefix="/request-context", tags=["request-context"])
 
 

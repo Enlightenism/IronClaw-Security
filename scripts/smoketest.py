@@ -10,7 +10,6 @@ from typing import Any, Final
 
 import httpx
 
-
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 RESULT_FILE: Final[Path] = REPO_ROOT / ".smoketest-results.json"
 

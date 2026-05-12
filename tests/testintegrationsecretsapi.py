@@ -5,7 +5,6 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.services.secret_service import create_secret_service
 
-
 client = TestClient(app)
 
 

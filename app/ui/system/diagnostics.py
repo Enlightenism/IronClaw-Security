@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -16,7 +15,7 @@ class ServiceDiagnosticItem(BaseModel):
     service: str
     status: str
     detail: str
-    latencyms: Optional[int] = None
+    latencyms: int | None = None
 
 
 class SystemDiagnosticsResponse(BaseModel):
@@ -61,7 +60,7 @@ def get_system_diagnostics() -> SystemDiagnosticsResponse:
     unhealthy = [service for service in services if service.status != "healthy"]
 
     return SystemDiagnosticsResponse(
-        generatedat=datetime.now(timezone.utc).isoformat(),
+        generatedat=datetime.now(UTC).isoformat(),
         overallstatus="healthy" if not unhealthy else "degraded",
         services=services,
         warnings=[] if not unhealthy else ["One or more services require attention."],

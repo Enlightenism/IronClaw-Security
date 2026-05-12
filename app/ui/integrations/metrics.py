@@ -1,27 +1,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from app.dependencies import get_integration_registry
-from app.services.integration_registry import (
-    IntegrationRegistry,
-    list_integrations,
-)
 from app.services.incident_store import (
     IncidentStore,
     list_incidents,
+)
+from app.services.integration_registry import (
+    IntegrationRegistry,
+    list_integrations,
 )
 from app.services.metrics_store import (
     MetricsStore,
     get_integration_latency_summary,
     get_integration_throughput_summary,
 )
-
 
 router = APIRouter(
     prefix="/ui/integrations",
@@ -222,7 +221,7 @@ def get_integration_metrics() -> IntegrationMetricsResponse:
     items = [_snapshot_to_view(s) for s in snapshots]
 
     return IntegrationMetricsResponse(
-        generated_at=datetime.now(timezone.utc).isoformat(),
+        generated_at=datetime.now(UTC).isoformat(),
         total=len(items),
         active_count=active_count,
         degraded_count=degraded_count,

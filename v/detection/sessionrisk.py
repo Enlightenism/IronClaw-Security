@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Set
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -54,11 +55,11 @@ class SessionRiskSignal(BaseModel):
         ...,
         description="Source subsystem (promptguard, malware, secrets, runtime, etc.)",
     )
-    tags: Set[str] = Field(
+    tags: set[str] = Field(
         default_factory=set,
         description="Additional context tags (integration, environment, model id, etc.)",
     )
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Detector-specific metadata kept for enrichment and UX",
     )
@@ -75,11 +76,11 @@ class SessionRiskSnapshot(BaseModel):
     session_id: str
     risk_score: float = Field(..., ge=0.0, le=10.0)
     level: SessionRiskLevel
-    dominant_kinds: List[SessionRiskSignalKind] = Field(
+    dominant_kinds: list[SessionRiskSignalKind] = Field(
         default_factory=list,
         description="Most influential signal kinds contributing to the score",
     )
-    contributing_signal_ids: List[str] = Field(
+    contributing_signal_ids: list[str] = Field(
         default_factory=list,
         description="Signals that materially impacted the score",
     )
@@ -87,7 +88,7 @@ class SessionRiskSnapshot(BaseModel):
         ...,
         description="High-level recommendation (allow, warn, step_up, quarantine, block)",
     )
-    reasons: List[str] = Field(
+    reasons: list[str] = Field(
         default_factory=list,
         description="Human-readable explanations suitable for UI and audit logs",
     )
@@ -133,7 +134,7 @@ class SessionRiskScoringService:
     - Emitting security events and wiring into review queue / incident linkage.
     """
 
-    def __init__(self, config: Optional[_SessionRiskConfig] = None) -> None:
+    def __init__(self, config: _SessionRiskConfig | None = None) -> None:
         self._config = config or _SessionRiskConfig()
 
     def score_session(
@@ -154,10 +155,10 @@ class SessionRiskScoringService:
                 reasons=["No risk signals observed for this session."],
             )
 
-        weighted_scores: List[float] = []
-        contributing_ids: List[str] = []
-        kind_contributions: Dict[SessionRiskSignalKind, float] = {}
-        reasons: List[str] = []
+        weighted_scores: list[float] = []
+        contributing_ids: list[str] = []
+        kind_contributions: dict[SessionRiskSignalKind, float] = {}
+        reasons: list[str] = []
 
         for signal in relevant_signals:
             weight = self._weight_for_kind(signal.kind)
@@ -211,11 +212,11 @@ class SessionRiskScoringService:
     def score_all(
         self,
         signals_by_session: Mapping[str, Sequence[SessionRiskSignal]],
-    ) -> List[SessionRiskSnapshot]:
+    ) -> list[SessionRiskSnapshot]:
         """
         Convenience method used by batch pipelines to score multiple sessions at once.
         """
-        snapshots: List[SessionRiskSnapshot] = []
+        snapshots: list[SessionRiskSnapshot] = []
         for session_id, signals in signals_by_session.items():
             snapshots.append(self.score_session(session_id, signals))
         return snapshots

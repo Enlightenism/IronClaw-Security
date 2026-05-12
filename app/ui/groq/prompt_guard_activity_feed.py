@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter
@@ -13,7 +13,6 @@ from app.ui.groq.prompt_guard_policy import build_prompt_guard_policy_view
 from app.ui.groq.prompt_guard_recommendations import build_prompt_guard_recommendations_view
 from app.ui.groq.prompt_guard_trends import build_prompt_guard_trend_series
 
-
 router = APIRouter(
     prefix="/ui/groq",
     tags=["groq-prompt-guard-activity-feed"],
@@ -21,7 +20,7 @@ router = APIRouter(
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 ActivityType = Literal[

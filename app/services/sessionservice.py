@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.core.principals import Principal
 from app.core.session_security import SessionPolicy, SessionRecord, SessionValidationResult

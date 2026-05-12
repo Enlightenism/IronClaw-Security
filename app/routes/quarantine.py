@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.auth import require_api_key
@@ -16,16 +14,16 @@ router = APIRouter(
 
 @router.get("")
 def list_quarantine_items(
-    status_filter: Optional[str] = Query(
+    status_filter: str | None = Query(
         default=None,
         alias="status",
         pattern="^(isolated|underreview|released|destroyed)$",
     ),
-    source: Optional[str] = Query(
+    source: str | None = Query(
         default=None,
         pattern="^(scan|guard|sandbox|review|system)$",
     ),
-    risk_level: Optional[str] = Query(
+    risk_level: str | None = Query(
         default=None,
         alias="riskLevel",
         pattern="^(low|medium|high|critical)$",

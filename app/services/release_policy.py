@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Dict, Mapping, Optional
+from typing import Any
 
 from app.services.deployment_readiness import (
     DeploymentReadinessInput,
@@ -42,7 +43,7 @@ class ReleasePolicyResult:
     readiness_result: DeploymentReadinessResult
     release_summary: ReleaseSummary
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "integration_id": self.integration_id,
             "rollout_decision": self.rollout_decision.to_dict(),
@@ -76,7 +77,7 @@ def evaluate_release_policy(
 
 def summarize_release_policy(
     result: ReleasePolicyResult,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     return result.to_dict()
 
 

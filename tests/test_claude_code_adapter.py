@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.adapters.base import AdapterExecutionRequest
-from app.adapters.claude_code_adapter import ClaudeCodeAdapter, build_claude_code_adapter
+from app.adapters.claude_code_adapter import build_claude_code_adapter
 from app.services.integration_registry import initialize_integration_registry
 
 

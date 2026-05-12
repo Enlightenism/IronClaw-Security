@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import Depends, Header, Request
+from fastapi import Depends, Header
 
 from app.core.access_control import require_access
 from app.core.auth import AuthContext, get_auth_context

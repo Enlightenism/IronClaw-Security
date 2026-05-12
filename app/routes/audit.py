@@ -3,16 +3,18 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, Query, status
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.auth import get_api_key
 from app.services.auditstore import (
     create_audit_event as create_audit_event_record,
+)
+from app.services.auditstore import (
     list_audit_events,
     list_audit_events_by_actor,
     list_audit_events_by_request,
     list_audit_events_by_trace,
 )
-from pydantic import BaseModel, ConfigDict, Field
 
 router = APIRouter(
     prefix="/audit",

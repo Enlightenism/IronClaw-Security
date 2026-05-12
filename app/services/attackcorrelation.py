@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-
 from collections import Counter, defaultdict
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha1
 from statistics import mean
-from typing import Any, Iterable, Mapping, Sequence
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Utilities
@@ -990,7 +989,7 @@ class AttackCorrelationService:
 
         extra_tags = self._tags_from_patterns(matched_patterns)
         tags = _nonempty(
-            sorted({"scan"} | (({primary_category} if primary_category else set())) | extra_tags)
+            sorted({"scan"} | ({primary_category} if primary_category else set()) | extra_tags)
         )
         indicators = _nonempty([*matched_patterns, *risky_files])
 

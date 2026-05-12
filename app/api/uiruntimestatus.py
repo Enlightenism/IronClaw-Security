@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
@@ -53,7 +53,7 @@ class RuntimeStatusPageResponse(BaseModel):
     metrics: RuntimeMetricsStatus
     policy: RuntimePolicyStatus
     defaultfilepath: str
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 @router.get(
@@ -63,9 +63,9 @@ class RuntimeStatusPageResponse(BaseModel):
     dependencies=[Depends(require_api_key)],
 )
 def runtime_status_page() -> RuntimeStatusPageResponse:
-    payload: Dict[str, Any] = get_runtime_status_page()
+    payload: dict[str, Any] = get_runtime_status_page()
 
-    metrics: Dict[str, Any] = dict(payload.get("metrics", {}))
+    metrics: dict[str, Any] = dict(payload.get("metrics", {}))
     if "totalrequests" not in metrics:
         metrics["totalrequests"] = int(metrics.get("totalevents", 0) or 0)
     metrics.pop("totalevents", None)

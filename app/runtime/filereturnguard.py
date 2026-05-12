@@ -5,15 +5,15 @@ import mimetypes
 import os
 import re
 import zipfile
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from app.detection.artifactanalyzer import analyze_artifact_dict
 from app.detection.downloadanalyzer import analyze_download_dict
 from app.detection.outputsanitizer import build_output_sanitizer
 from app.services.fileinspectionservice import build_file_inspection_service
-
 
 DEFAULT_ALLOWED_EXTENSIONS = {
     ".txt",

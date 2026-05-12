@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 
-
 QUARANTINE_TARGET_TYPES = {"skill", "archive", "local_path"}
 HIGH_RISK_SANDBOX_TARGET_TYPES = {"github_repo"}
 

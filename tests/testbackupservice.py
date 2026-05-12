@@ -199,7 +199,7 @@ def test_rotate_removes_backups_beyond_policy_limit(tmp_path: Path) -> None:
 
     for index in range(4):
         file_path = target_root / f"runtime-metadata-hourly-20260427T130{index}00Z.jsonl.gz"
-        file_path.write_bytes(f"artifact-{index}".encode("utf-8"))
+        file_path.write_bytes(f"artifact-{index}".encode())
 
     source_dir = tmp_path / "runtime"
     source_dir.mkdir()

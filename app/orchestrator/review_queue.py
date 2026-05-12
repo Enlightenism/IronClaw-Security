@@ -4,7 +4,6 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-
 ReviewStatus = Literal["pending", "approved", "rejected"]
 ReviewPriority = Literal["low", "medium", "high", "critical"]
 

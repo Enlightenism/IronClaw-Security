@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from app.services.integration_registry import (
@@ -95,7 +95,7 @@ def build_integration_snapshots_view(
     warning_snapshot_count = 0
     failing_snapshot_count = 0
 
-    generated_at = datetime.now(timezone.utc)
+    generated_at = datetime.now(UTC)
 
     for record in records:
         verification = verify_integration(

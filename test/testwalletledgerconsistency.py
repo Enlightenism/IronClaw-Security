@@ -12,7 +12,7 @@ from app.unitwallet import build_unit_wallet
 def _payload_of(result: Any) -> dict[str, Any]:
     if isinstance(result, dict):
         return result
-    if hasattr(result, "as_dict") and callable(getattr(result, "as_dict")):
+    if hasattr(result, "as_dict") and callable(result.as_dict):
         payload = result.as_dict()
         assert isinstance(payload, dict)
         return payload

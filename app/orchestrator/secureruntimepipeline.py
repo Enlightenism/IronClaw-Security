@@ -1,16 +1,10 @@
 from __future__ import annotations
 
-
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
-
+from typing import Any
 
 from app.detection.downloadanalyzer import build_download_analyzer
-from app.detection.outputsanitizer import build_output_sanitizer
-from app.detection.sessionrisk import SessionEvent, build_session_risk_analyzer
-from app.security.hostilecontext import scanhostilecontextdict
-from app.security.promptinjection import scanpromptinjectiondict
-
 
 ExecutorCallable = Callable[..., Any]
 
@@ -190,7 +184,7 @@ class SecureRuntimePipeline:
     shellreviewthreshold: int = 10
     shellblockthreshold: int = 45
     defaultfilepath: str = "app/api/actionexecute.py"
-    executor: Optional[ExecutorCallable] = None
+    executor: ExecutorCallable | None = None
     name: str = "secureruntimepipeline"
     _sandbox_router: Any = field(default=None, repr=False, compare=False)
     _tool_call_guard: Any = field(default=None, repr=False, compare=False)
@@ -255,7 +249,7 @@ class SecureRuntimePipeline:
         matched_rules: list[str],
         sandbox_decision: Any,
         tool_decision: Any,
-    ) -> "_GuardedRuntimeResult":
+    ) -> _GuardedRuntimeResult:
         reasons = _merge_reasons(sandbox_decision, tool_decision)
         return _GuardedRuntimeResult(
             session_id=session_id,
@@ -272,7 +266,7 @@ class SecureRuntimePipeline:
             tool_decision=_as_dict(tool_decision) if tool_decision is not None else {},
         )
 
-    def evaluate(self, *, session_id: str = "", tool_name: str = "", **kwargs: Any) -> "_GuardedRuntimeResult":  # type: ignore[override]
+    def evaluate(self, *, session_id: str = "", tool_name: str = "", **kwargs: Any) -> _GuardedRuntimeResult:  # type: ignore[override]
         session_id = (session_id or "").strip()
         tool_name = (tool_name or "").strip().lower()
 
@@ -523,7 +517,7 @@ def build_secure_runtime_pipeline(
     shellreviewthreshold: int = 10,
     shellblockthreshold: int = 45,
     defaultfilepath: str = "app/api/actionexecute.py",
-    executor: Optional[ExecutorCallable] = None,
+    executor: ExecutorCallable | None = None,
 ) -> SecureRuntimePipeline:
     return SecureRuntimePipeline(
         reviewthreshold=reviewthreshold,
@@ -552,7 +546,7 @@ def initialize_secureruntimepipeline(
     shellreviewthreshold: int = 10,
     shellblockthreshold: int = 45,
     defaultfilepath: str = "app/api/actionexecute.py",
-    executor: Optional[ExecutorCallable] = None,
+    executor: ExecutorCallable | None = None,
 ) -> SecureRuntimePipeline:
     return SecureRuntimePipeline(
         reviewthreshold=reviewthreshold,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -13,32 +13,32 @@ class RequestContextResponse(BaseModel):
     specification and must remain stable for tests and downstream clients.
     """
 
-    request_id: Optional[str] = Field(
+    request_id: str | None = Field(
         default=None,
         title="Request Id",
         description="Stable identifier for the current request, if available.",
     )
-    trace_id: Optional[str] = Field(
+    trace_id: str | None = Field(
         default=None,
         title="Trace Id",
         description="Trace identifier for correlating logs, spans, and security events.",
     )
-    client_id: Optional[str] = Field(
+    client_id: str | None = Field(
         default=None,
         title="Client Id",
         description="Caller-supplied client identifier from X-Client-Id header.",
     )
-    session_id: Optional[str] = Field(
+    session_id: str | None = Field(
         default=None,
         title="Session Id",
         description="Caller-supplied session identifier from X-Session-Id header.",
     )
-    integration_id: Optional[str] = Field(
+    integration_id: str | None = Field(
         default=None,
         title="Integration Id",
         description="Caller-supplied integration identifier from X-Integration-Id header.",
     )
-    request_started_at: Optional[float] = Field(
+    request_started_at: float | None = Field(
         default=None,
         title="Request Started At",
         description=(
@@ -46,12 +46,12 @@ class RequestContextResponse(BaseModel):
             "was first received by IronClaw-Security."
         ),
     )
-    client_host: Optional[str] = Field(
+    client_host: str | None = Field(
         default=None,
         title="Client Host",
         description="Best-effort resolved client host or IP address.",
     )
-    client_ip: Optional[str] = Field(
+    client_ip: str | None = Field(
         default=None,
         title="Client Ip",
         description="Resolved client IP, preferring X-Forwarded-For then X-Real-IP then direct.",
@@ -66,17 +66,17 @@ class RequestContextResponse(BaseModel):
         title="Method",
         description="HTTP method for the request (GET, POST, etc.).",
     )
-    user_agent: Optional[str] = Field(
+    user_agent: str | None = Field(
         default=None,
         title="User Agent",
         description="Sanitized User-Agent header value.",
     )
-    timestamp: Optional[str] = Field(
+    timestamp: str | None = Field(
         default=None,
         title="Timestamp",
         description="ISO 8601 UTC timestamp when the context snapshot was built.",
     )
-    headers: Dict[str, Any] = Field(
+    headers: dict[str, Any] = Field(
         default_factory=dict,
         title="Headers",
         description=(

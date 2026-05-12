@@ -6,7 +6,6 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Final
 
-
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 ROOT_API_DIR: Final[Path] = REPO_ROOT / "api"
 APP_API_DIR: Final[Path] = REPO_ROOT / "app" / "api"

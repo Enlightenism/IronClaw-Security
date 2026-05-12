@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import re
 import shlex
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Mapping, Sequence
-
+from typing import Any
 
 SHELL_LIKE_TARGETS = {
     "shell",

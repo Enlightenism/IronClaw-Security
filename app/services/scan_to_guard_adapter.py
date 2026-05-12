@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from app.models.guard_facade import GuardActionRequest
 
 
 def build_guard_request_from_scan(
     *,
-    scan_result: Dict[str, Any],
+    scan_result: dict[str, Any],
     action_type: str,
     target: str,
     content: str,

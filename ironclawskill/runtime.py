@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any, Protocol
 from uuid import uuid4
@@ -14,10 +14,8 @@ from .contracts import (
     SkillDecision,
     SkillExecutionRequest,
     SkillExecutionResult,
-    SkillExecutionTarget,
     SkillProvider,
     SkillProviderDecision,
-    SkillReason,
     SkillUsage,
 )
 from .errors import IronClawConfigurationError, IronClawRuntimeError
@@ -26,7 +24,7 @@ JsonDict = dict[str, Any]
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _clean_mapping(value: dict[str, Any] | None) -> dict[str, Any]:
@@ -115,8 +113,8 @@ class RuntimeExecutionTrace:
             "request_id": self.request_id,
             "trace_id": self.trace_id,
             "provider": self.provider,
-            "started_at": self.started_at.astimezone(timezone.utc).isoformat(),
-            "finished_at": self.finished_at.astimezone(timezone.utc).isoformat(),
+            "started_at": self.started_at.astimezone(UTC).isoformat(),
+            "finished_at": self.finished_at.astimezone(UTC).isoformat(),
             "duration_ms": self.duration_ms,
             "allowed": self.allowed,
             "blocked": self.blocked,
@@ -143,7 +141,7 @@ class IronClawRuntime:
         *,
         config: IronClawSkillConfig | None = None,
         config_path: str | None = None,
-    ) -> "IronClawRuntime":
+    ) -> IronClawRuntime:
         resolved = config or load_config(config_path=config_path)
         return cls(config=resolved)
 

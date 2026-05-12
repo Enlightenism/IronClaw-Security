@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from heapq import heappop, heappush
 from itertools import count
-from typing import Any, Iterable, Mapping
+from typing import Any
 from uuid import uuid4
 
 from app.orchestrator.reviewstatestore import ReviewStateStore, build_review_state_store
-
 
 DEFAULT_QUEUE_ID = "default"
 DEFAULT_PRIORITY = 100

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from threading import Lock
 from typing import Any, Literal
 from uuid import uuid4
-
 
 PlanName = Literal["free", "pro", "enterprise"]
 SubscriptionStatus = Literal["trialing", "active", "past_due", "canceled"]
@@ -13,7 +12,7 @@ MeterEventType = Literal["scan", "guard_request", "execution", "incident", "quar
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # ---------------------------------------------------------------------------

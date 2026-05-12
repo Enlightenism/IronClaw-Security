@@ -7,7 +7,6 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-
 UI_AUDIT_EXPLORER_PATH: Final[str] = "/ui/audit-explorer"
 
 

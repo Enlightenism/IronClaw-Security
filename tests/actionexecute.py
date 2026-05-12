@@ -10,7 +10,6 @@ from app.orchestrator.secureruntimepipeline import (
     initialize_secureruntimepipeline,
 )
 
-
 app = FastAPI()
 app.include_router(router)
 client = TestClient(app)

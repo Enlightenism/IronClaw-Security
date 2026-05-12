@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-
 from fastapi import APIRouter, Depends, Request
-
 
 from app.dependencies.rate_limit import limit_guard_routes
 from app.models.action_guard import (
@@ -24,7 +22,6 @@ from app.services.action_policy import (
     evaluate_action_policy,
 )
 from app.services.telemetry import append_telemetry_event
-
 
 router = APIRouter(dependencies=[Depends(limit_guard_routes)])
 

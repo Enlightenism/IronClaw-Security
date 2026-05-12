@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any
 
 
 @dataclass(slots=True)
@@ -13,7 +13,7 @@ class PageSection:
     title: str
     kind: str
     description: str
-    items: List[Dict[str, Any]] = field(default_factory=list)
+    items: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -29,5 +29,5 @@ class UIPageDefinition:
     title: str
     path: str
     summary: str
-    sections: List[PageSection] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    sections: list[PageSection] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.orchestrator.secureruntimepipeline import SecureRuntimePipeline, getactionexecutepipeline
 from app.service import ActionExecuteResult, ExecutionReason, executeguardedaction
-
 
 router = APIRouter()
 
@@ -22,9 +21,9 @@ class ExecuteRequest(BaseModel):
     target: str = Field(..., description="Execution target such as URL, shell, or tool name.")
     content: str = Field(..., description="Prompt, content, or execution description.")
     riskscore: int = Field(..., ge=0, le=100, description="Base risk score for the action.")
-    clientid: Optional[str] = Field(None, description="Client or actor identifier.")
-    sessionid: Optional[str] = Field(None, description="Session or conversation identifier.")
-    filepath: Optional[str] = Field(
+    clientid: str | None = Field(None, description="Client or actor identifier.")
+    sessionid: str | None = Field(None, description="Session or conversation identifier.")
+    filepath: str | None = Field(
         None,
         description="Optional source filepath for attribution and audit visibility.",
     )
@@ -38,23 +37,23 @@ class ExecuteReasonView(BaseModel):
 
 
 class ExecuteResponse(BaseModel):
-    executionid: Optional[str] = None
+    executionid: str | None = None
     executionstate: ExecutionState
     responseaction: str
     responsestatus: ResponseStatus
-    traceid: Optional[str] = None
-    requestid: Optional[str] = None
-    decisionid: Optional[str] = None
+    traceid: str | None = None
+    requestid: str | None = None
+    decisionid: str | None = None
     policyverdict: PolicyVerdict
     riskscore: int
     shouldexecute: bool
     haltedbyboundary: bool
-    reviewitemid: Optional[str] = None
-    executorname: Optional[str] = None
-    executorresult: Optional[dict] = None
-    reason: Optional[str] = None
+    reviewitemid: str | None = None
+    executorname: str | None = None
+    executorresult: dict | None = None
+    reason: str | None = None
     reasons: list[ExecuteReasonView] = Field(default_factory=list)
-    filepath: Optional[str] = None
+    filepath: str | None = None
     promptinjection: dict = Field(default_factory=dict)
 
 
