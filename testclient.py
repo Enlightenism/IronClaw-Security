@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -113,7 +114,7 @@ def run_testclient_checks() -> dict[str, Any]:
     return report
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:  # noqa: ARG001
     report = run_testclient_checks()
     print(f"TestClient report written to {RESULT_FILE}")
     print(f"TESTCLIENT: {report['overall_status'].upper()}")
@@ -121,4 +122,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))
