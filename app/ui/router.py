@@ -109,14 +109,10 @@ def validate_ui_routers() -> None:
 def include_ui_routers(app: FastAPI) -> None:
     validate_ui_routers()
 
-    existing_route_signatures = {
-        _route_signature(route) for route in app.routes if getattr(route, "path", "")
-    }
+    existing_route_signatures = {_route_signature(route) for route in app.routes if getattr(route, "path", "")}
 
     for ui_router in get_ui_routers():
-        router_signatures = {
-            _route_signature(route) for route in ui_router.routes if getattr(route, "path", "")
-        }
+        router_signatures = {_route_signature(route) for route in ui_router.routes if getattr(route, "path", "")}
 
         if router_signatures and router_signatures.issubset(existing_route_signatures):
             continue
