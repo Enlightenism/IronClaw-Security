@@ -18,11 +18,10 @@ def _optional_router(module_path: str) -> APIRouter | None:
     router = getattr(module, "router", None)
     if router is None:
         return None
-    return cast("APIRouter", router)
+    return cast(APIRouter, router)
 
 
 router = APIRouter(tags=["ui"])
-
 
 UI_ROUTERS: Final[tuple[APIRouter | None, ...]] = (
     _optional_router("app.ui.executions.dashboard"),
@@ -41,7 +40,6 @@ UI_ROUTERS: Final[tuple[APIRouter | None, ...]] = (
     _optional_router("app.ui.alerts.notifications"),
     _optional_router("app.ui.system.diagnostics"),
     _optional_router("app.ui.integrations.settings"),
-    _optional_router("app.ui.data.retention"),
     _optional_router("app.ui.incidents.triage"),
     # app.ui.admin.operators removed — superseded by app.api.ui_admin_operators
     # which has auth, correct schema, and permissions model
@@ -111,10 +109,14 @@ def validate_ui_routers() -> None:
 def include_ui_routers(app: FastAPI) -> None:
     validate_ui_routers()
 
-    existing_route_signatures = {_route_signature(route) for route in app.routes if getattr(route, "path", "")}
+    existing_route_signatures = {
+        _route_signature(route) for route in app.routes if getattr(route, "path", "")
+    }
 
     for ui_router in get_ui_routers():
-        router_signatures = {_route_signature(route) for route in ui_router.routes if getattr(route, "path", "")}
+        router_signatures = {
+            _route_signature(route) for route in ui_router.routes if getattr(route, "path", "")
+        }
 
         if router_signatures and router_signatures.issubset(existing_route_signatures):
             continue
