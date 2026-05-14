@@ -80,11 +80,7 @@ def _as_dict(value: Any) -> dict[str, Any]:
         if isinstance(dumped, Mapping):
             return dict(dumped)
     if hasattr(value, "__dict__"):
-        return {
-            key: item
-            for key, item in vars(value).items()
-            if not key.startswith("_") and not callable(item)
-        }
+        return {key: item for key, item in vars(value).items() if not key.startswith("_") and not callable(item)}
     raise TypeError("queue item payload must be mapping-like")
 
 
@@ -146,38 +142,15 @@ def _normalize_queue_item_payload(
 
     now_iso = _utc_now_iso()
 
-    resolved_review_id = (
-        _text(review_id)
-        or _text(source_payload.get("review_id"))
-        or _text(source_payload.get("id"))
-        or str(uuid4())
-    )
+    resolved_review_id = _text(review_id) or _text(source_payload.get("review_id")) or _text(source_payload.get("id")) or str(uuid4())
 
-    resolved_request_id = (
-        _text(request_id)
-        or _text(source_payload.get("request_id"))
-        or _text(source_payload.get("scan_id"))
-        or _text(source_payload.get("execution_id"))
-    )
+    resolved_request_id = _text(request_id) or _text(source_payload.get("request_id")) or _text(source_payload.get("scan_id")) or _text(source_payload.get("execution_id"))
 
-    resolved_org_id = (
-        _text(organization_id)
-        or _text(org_id)
-        or _text(source_payload.get("organization_id"))
-        or _text(source_payload.get("org_id"))
-    )
+    resolved_org_id = _text(organization_id) or _text(org_id) or _text(source_payload.get("organization_id")) or _text(source_payload.get("org_id"))
 
-    resolved_status = (
-        _text(status)
-        or _text(source_payload.get("status"))
-        or _STATUS_QUEUED
-    )
+    resolved_status = _text(status) or _text(source_payload.get("status")) or _STATUS_QUEUED
 
-    resolved_queue_id = (
-        _text(queue_id)
-        or _text(source_payload.get("queue_id"))
-        or DEFAULT_QUEUE_ID
-    )
+    resolved_queue_id = _text(queue_id) or _text(source_payload.get("queue_id")) or DEFAULT_QUEUE_ID
 
     resolved_priority = _int(
         priority if priority is not None else source_payload.get("priority"),
@@ -190,7 +163,10 @@ def _normalize_queue_item_payload(
     )
     resolved_max_attempts = max(
         1,
-        _int(max_attempts if max_attempts is not None else source_payload.get("max_attempts"), default=3),
+        _int(
+            max_attempts if max_attempts is not None else source_payload.get("max_attempts"),
+            default=3,
+        ),
     )
 
     resolved_created_at = _text(created_at) or _text(source_payload.get("created_at")) or now_iso

@@ -34,21 +34,18 @@ from ironclaw_skill.contracts import (  # re-exported for local type signatures
     SkillResponseEnvelope,
 )
 
-OPENCLAW_PLATFORM: Final[Literal["openclaw"]] = "openclaw"
+OPENCLAW_PLATFORM: Final = "openclaw"
 
 
 def adapt_openclaw_request(raw: dict[str, Any]) -> SkillRequest:
-    """
-    Delegate OpenClaw → IronClaw skill request adaptation to the canonical
+    """Delegate OpenClaw → IronClaw skill request adaptation to the canonical
     implementation while keeping a stable symbol under ironclawskill.*.
     """
     return adaptopenclawrequest(raw)
 
 
 def adapt_openclaw_response(response: SkillResponseEnvelope) -> dict[str, Any]:
-    """
-    Delegate IronClaw skill response → OpenClaw-shaped payload adaptation.
-    """
+    """Delegate IronClaw skill response → OpenClaw-shaped payload adaptation."""
     return adaptopenclawresponse(response)
 
 
@@ -59,9 +56,7 @@ def build_openclaw_error_response(
     error_code: str,
     request_id: str | None = None,
 ) -> dict[str, Any]:
-    """
-    Build an OpenClaw-shaped error response using the canonical implementation.
-    """
+    """Build an OpenClaw-shaped error response using the canonical implementation."""
     return buildopenclawerrorresponse(
         operation=operation,
         summary=summary,
@@ -80,16 +75,19 @@ def build_openclaw_success_response(
     request_id: str | None = None,
     scan_id: str | None = None,
     decision_source: Literal[
-        "policy", "scan", "ai", "runtime", "combined", "unknown"
+        "policy",
+        "scan",
+        "ai",
+        "runtime",
+        "combined",
+        "unknown",
     ] = "unknown",
     matched_patterns: list[str] | None = None,
     risk_score: int | None = None,
     reasons: list[SkillReason] | None = None,
     raw_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """
-    Build an OpenClaw-shaped success response using the canonical implementation.
-    """
+    """Build an OpenClaw-shaped success response using the canonical implementation."""
     return buildopenclawsuccessresponse(
         operation=operation,
         verdict=verdict,
@@ -107,15 +105,12 @@ def build_openclaw_success_response(
 
 
 def openclaw_tool_input_schema() -> dict[str, Any]:
-    """
-    Expose the JSON-schema input contract for OpenClaw tools.
-    """
+    """Expose the JSON-schema input contract for OpenClaw tools."""
     return openclawtoolinputschema()
 
 
 class OpenClawSkillAdapter:
-    """
-    High-level runtime adapter facade for OpenClaw.
+    """High-level runtime adapter facade for OpenClaw.
 
     Wraps the request/response adaptation helpers so the runtime can treat
     OpenClaw as a provider, while all normalization remains in the

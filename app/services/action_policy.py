@@ -53,7 +53,7 @@ BLOCKED_TARGETS = frozenset(
         ".azure",
         ".config/gcloud",
         "kubeconfig",
-    }
+    },
 )
 
 HIGH_REVIEW_TARGETS = frozenset(
@@ -89,7 +89,7 @@ HIGH_REVIEW_TARGETS = frozenset(
         "regsvr32",
         "mshta",
         "rundll32",
-    }
+    },
 )
 
 ELEVATED_REVIEW_ACTIONS = frozenset(
@@ -99,7 +99,7 @@ ELEVATED_REVIEW_ACTIONS = frozenset(
         "git_operation",
         "file_write",
         "tool_call",
-    }
+    },
 )
 
 
@@ -175,7 +175,7 @@ def _build_block_decision(
                 label="Blocked target",
                 details=summary,
                 score=1.0,
-            )
+            ),
         ],
     )
 
@@ -204,7 +204,7 @@ def _build_review_decision(
                 label=label,
                 details=summary,
                 score=0.7,
-            )
+            ),
         ],
     )
 
@@ -232,7 +232,7 @@ def _build_allow_decision(
                 label="Allowed by policy",
                 details=summary,
                 score=0.0,
-            )
+            ),
         ],
     )
 

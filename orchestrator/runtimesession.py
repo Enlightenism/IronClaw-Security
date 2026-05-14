@@ -105,7 +105,11 @@ class RuntimeSession:
 
     def attach_checkpoint(self, checkpoint_id: str) -> None:
         self.checkpoint_id = checkpoint_id
-        self.add_event("checkpoint_attached", "Checkpoint attached to runtime session.", {"checkpoint_id": checkpoint_id})
+        self.add_event(
+            "checkpoint_attached",
+            "Checkpoint attached to runtime session.",
+            {"checkpoint_id": checkpoint_id},
+        )
 
     def apply_supervisor_decision(self, decision: Mapping[str, Any]) -> None:
         status = str(decision.get("status", "")).lower()
@@ -325,7 +329,7 @@ class RuntimeSessionManager:
                     "event": event_name,
                     "session": session.to_dict(),
                     "timestamp": datetime.now(UTC).isoformat(),
-                }
+                },
             )
 
 

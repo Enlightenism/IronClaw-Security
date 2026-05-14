@@ -245,7 +245,7 @@ def scanpromptinjection(
             metadata.get("emailbody"),
             metadata.get("prompt"),
             metadata.get("assistantreply"),
-        ]
+        ],
     )
 
     matchedpatterns: list[str] = []
@@ -272,7 +272,7 @@ def scanpromptinjection(
                 label=rule.label,
                 details=detailtext,
                 score=rule.score,
-            )
+            ),
         )
         totalscore += rule.score
 
@@ -290,18 +290,12 @@ def scanpromptinjection(
         severity = "none"
 
     shouldreview = totalscore >= 20
-    shouldquarantine = totalscore >= 70 or (
-        "prompt_exfiltration" in categories and "unsafe_tool_escalation" in categories
-    )
+    shouldquarantine = totalscore >= 70 or ("prompt_exfiltration" in categories and "unsafe_tool_escalation" in categories)
 
     if not flagged:
         summary = "No prompt injection or indirect prompt injection indicators were detected."
     else:
-        summary = (
-            "Detected prompt injection indicators in runtime-bound content."
-            if "indirect_prompt_injection" not in categories
-            else "Detected prompt injection and untrusted-content instruction indicators."
-        )
+        summary = "Detected prompt injection indicators in runtime-bound content." if "indirect_prompt_injection" not in categories else "Detected prompt injection and untrusted-content instruction indicators."
 
     return PromptInjectionScanResult(
         flagged=flagged,

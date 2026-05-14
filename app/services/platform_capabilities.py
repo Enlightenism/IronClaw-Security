@@ -54,7 +54,11 @@ def default_platform_profiles() -> list[PlatformProfile]:
             capabilities=[
                 PlatformCapability("prompt_interception", "native", "Supports local interception workflows."),
                 PlatformCapability("tool_interception", "native", "Supports guarded tool execution flows."),
-                PlatformCapability("execution_interception", "partial", "Execution plan interception depends on runtime hook depth."),
+                PlatformCapability(
+                    "execution_interception",
+                    "partial",
+                    "Execution plan interception depends on runtime hook depth.",
+                ),
                 PlatformCapability("review_queue", "partial", "Review queue can be layered through IronClaw."),
                 PlatformCapability("telemetry", "native", "Telemetry can be forwarded to IronClaw."),
             ],

@@ -84,7 +84,7 @@ def _build_packages() -> list[BillingManifestPackageView]:
                     "units_display": f"{included_units:,} units",
                     "effective_price_per_1k_units": unit_price_per_1k,
                 },
-            )
+            ),
         )
 
     return packages

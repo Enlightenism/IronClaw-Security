@@ -86,7 +86,7 @@ def _build_mock_summaries(period: str, limit: int) -> UsageSummaryListView:
                 "sampled": True,
                 "limit": limit,
             },
-        )
+        ),
     ]
 
     return UsageSummaryListView(

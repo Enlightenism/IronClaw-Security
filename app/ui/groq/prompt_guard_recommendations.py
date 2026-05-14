@@ -113,7 +113,7 @@ def build_prompt_guard_recommendations_view() -> PromptGuardRecommendationsView:
                 rationale=f"Policy mode is {policy.mode}, which lowers active protection for live prompts.",
                 suggested_action="Move the prompt guard into assist or enforce mode after validation testing.",
                 metadata={"policy_mode": policy.mode},
-            )
+            ),
         )
 
     if pending_reviews > 0:
@@ -127,7 +127,7 @@ def build_prompt_guard_recommendations_view() -> PromptGuardRecommendationsView:
                 rationale=f"{pending_reviews} review item(s) are still pending, which can delay tuning decisions.",
                 suggested_action="Triage pending review items and convert validated cases into policy updates or exceptions.",
                 metadata={"pending_reviews": pending_reviews},
-            )
+            ),
         )
 
     if active_allowlists > 0:
@@ -141,7 +141,7 @@ def build_prompt_guard_recommendations_view() -> PromptGuardRecommendationsView:
                 rationale=f"{active_allowlists} active allowlist entrie(s) are currently in effect.",
                 suggested_action="Review each active allowlist entry for expiry, scope, and business justification.",
                 metadata={"active_allowlists": active_allowlists},
-            )
+            ),
         )
 
     if simulation_events == 0:
@@ -155,7 +155,7 @@ def build_prompt_guard_recommendations_view() -> PromptGuardRecommendationsView:
                 rationale="Without simulation evidence, policy quality and operator confidence are harder to validate.",
                 suggested_action="Run prompt guard simulation tests against expected safe and unsafe prompt patterns.",
                 metadata={"simulation_events": simulation_events},
-            )
+            ),
         )
 
     if not items:
@@ -169,7 +169,7 @@ def build_prompt_guard_recommendations_view() -> PromptGuardRecommendationsView:
                 rationale="No immediate gaps were detected in policy mode, review queue, allowlist activity, or audit visibility.",
                 suggested_action="Continue monitoring trends and keep policy reviews in the normal operating cadence.",
                 metadata={},
-            )
+            ),
         )
 
     return PromptGuardRecommendationsView(

@@ -90,8 +90,7 @@ def _coerce_skill_decision(
 
 
 class RuntimeAdapter(Protocol):
-    def execute(self, request: SkillExecutionRequest) -> SkillProviderDecision:
-        ...
+    def execute(self, request: SkillExecutionRequest) -> SkillProviderDecision: ...
 
 
 @dataclass(slots=True, frozen=True)
@@ -293,7 +292,7 @@ class IronClawRuntime:
                 "policy_hits": self._coerce_str_list(self._decision_field(decision, "policy_hits")),
                 "warnings": self._coerce_str_list(self._decision_field(decision, "warnings")),
                 "raw_response": self._decision_field(decision, "raw_response"),
-            }
+            },
         )
         status = "completed"
         if resolved_decision is SkillDecision.BLOCK:
@@ -360,7 +359,7 @@ class IronClawRuntime:
                 computeunits=int(value.get("computeunits", value.get("compute_units", 0)) or 0),
                 billableunits=int(value.get("billableunits", value.get("billable_units", 0)) or 0),
                 estimatedcostusd=float(
-                    value.get("estimatedcostusd", value.get("estimated_cost_usd", 0.0)) or 0.0
+                    value.get("estimatedcostusd", value.get("estimated_cost_usd", 0.0)) or 0.0,
                 ),
                 latencyms=int(value.get("latencyms", duration_ms) or duration_ms),
             )
@@ -387,8 +386,7 @@ def runtimesnapshot(
     config: IronClawSkillConfig | None = None,
     config_path: str | None = None,
 ) -> JsonDict:
-    """
-    Backwards-compatible helper for CLI: return a lightweight runtime
+    """Backwards-compatible helper for CLI: return a lightweight runtime
     health snapshot without forcing callers to construct a runtime directly.
     """
     runtime = IronClawRuntime.create(config=config, config_path=config_path)
@@ -398,8 +396,8 @@ def runtimesnapshot(
 __all__ = [
     "IronClawRuntime",
     "IronClawSkillRuntime",
-    "RuntimeExecutionTrace",
     "RuntimeAdapter",
+    "RuntimeExecutionTrace",
     "create_runtime",
     "createruntime",
     "runtimesnapshot",

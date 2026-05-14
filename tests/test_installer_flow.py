@@ -24,12 +24,11 @@ def _import_installer_module() -> Any:
         except ModuleNotFoundError as exc:
             last_error = exc
     raise AssertionError(
-        "Unable to import installer module. Expected one of: "
-        + ", ".join(MODULE_CANDIDATES)
+        "Unable to import installer module. Expected one of: " + ", ".join(MODULE_CANDIDATES),
     ) from last_error
 
 
-@pytest.fixture()
+@pytest.fixture
 def installer_module() -> Any:
     return _import_installer_module()
 
@@ -101,7 +100,7 @@ def test_installer_parser_accepts_common_flags(installer_module: Any) -> None:
             "claude",
             "--target-dir",
             "C:/tmp/ironclaw-target",
-        ]
+        ],
     )
 
     integration = getattr(args, "integration", None) or getattr(args, "name", None)

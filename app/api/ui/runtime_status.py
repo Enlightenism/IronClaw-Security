@@ -26,23 +26,14 @@ def read_runtime_status() -> dict[str, object]:
     return {
         "environment": "local",
         "service": "ironclaw-security",
-        "status": (
-            "healthy"
-            if all(item.status in healthy_statuses for item in integrations)
-            else "degraded"
-        ),
+        "status": ("healthy" if all(item.status in healthy_statuses for item in integrations) else "degraded"),
         "generated_at": datetime.now(UTC).isoformat(),
         "latest_event_at": latest_event_at,
         "integration_summary": {
             "total": len(integrations),
             "healthy": sum(1 for item in integrations if item.status in healthy_statuses),
             "degraded": sum(1 for item in integrations if item.status in degraded_statuses),
-            "other": sum(
-                1
-                for item in integrations
-                if item.status not in healthy_statuses
-                and item.status not in degraded_statuses
-            ),
+            "other": sum(1 for item in integrations if item.status not in healthy_statuses and item.status not in degraded_statuses),
         },
         "telemetry_summary": {
             "total_events": len(events),
@@ -55,9 +46,7 @@ def read_runtime_status() -> dict[str, object]:
                 "platform": item.platform,
                 "display_name": item.displayname,
                 "status": item.status,
-                "status_tone": (
-                    "healthy" if item.status in healthy_statuses else "warning"
-                ),
+                "status_tone": ("healthy" if item.status in healthy_statuses else "warning"),
                 "settings_route": item.settingsroute,
                 "verification_route": item.verificationroute,
             }

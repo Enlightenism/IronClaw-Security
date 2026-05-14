@@ -17,6 +17,7 @@ def _run_command(command: str) -> int:
     try:
         completed = subprocess.run(
             command,
+            check=False,
             shell=True,
         )
         return completed.returncode
@@ -117,7 +118,10 @@ def main(argv: list[str] | None = None) -> int:
             session_id=args.session_id,
         )
     except IronClawClientError as exc:
-        print("[ironclaw-shell-guard] Guard service unreachable. Blocking by default.", file=sys.stderr)
+        print(
+            "[ironclaw-shell-guard] Guard service unreachable. Blocking by default.",
+            file=sys.stderr,
+        )
         print(f"[ironclaw-shell-guard] ERROR: {exc}", file=sys.stderr)
         return 1
 
@@ -134,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
         f"  risk_score       = {decision.risk_score}\n"
         f"  should_halt      = {decision.should_halt}\n"
         f"  should_warn      = {decision.should_warn}\n"
-        f"  matched_patterns = {decision.matched_patterns}\n"
+        f"  matched_patterns = {decision.matched_patterns}\n",
     )
 
     if decision.should_halt:

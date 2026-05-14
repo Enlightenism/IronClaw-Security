@@ -12,9 +12,21 @@ _RUNTIME_OVERVIEW_ITEMS: list[dict[str, Any]] = [
 ]
 
 _RISK_THRESHOLD_ITEMS: list[dict[str, Any]] = [
-    {"range": "0-49", "decision": "Allow", "detail": "Requests may continue through guarded dry-run execution."},
-    {"range": "50-89", "decision": "Review", "detail": "Requests are diverted into review workflow before execution."},
-    {"range": "90+", "decision": "Block", "detail": "Requests are halted before executor invocation."},
+    {
+        "range": "0-49",
+        "decision": "Allow",
+        "detail": "Requests may continue through guarded dry-run execution.",
+    },
+    {
+        "range": "50-89",
+        "decision": "Review",
+        "detail": "Requests are diverted into review workflow before execution.",
+    },
+    {
+        "range": "90+",
+        "decision": "Block",
+        "detail": "Requests are halted before executor invocation.",
+    },
 ]
 
 _ACTIVE_EXECUTOR_ITEMS: list[dict[str, Any]] = [

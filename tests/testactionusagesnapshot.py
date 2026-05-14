@@ -114,7 +114,7 @@ def test_action_usage_snapshot_numeric_fields_are_non_negative_when_present() ->
     ):
         value = _number(payload, *keys)
         if value is not None:
-            assert value >= Decimal("0")
+            assert value >= Decimal(0)
 
 
 def test_action_usage_snapshot_remaining_does_not_exceed_quota_when_both_present() -> None:
@@ -172,8 +172,8 @@ def test_action_usage_snapshot_total_cost_is_zero_when_total_units_zero_and_unit
     total_units = _number(payload, "totalunits", "total_units", "units")
     total_cost = _number(payload, "totalcost", "total_cost")
 
-    if total_units is not None and total_cost is not None and total_units == Decimal("0"):
-        assert total_cost == Decimal("0")
+    if total_units is not None and total_cost is not None and total_units == Decimal(0):
+        assert total_cost == Decimal(0)
 
 
 def test_action_usage_snapshot_multiple_builds_have_stable_key_sets() -> None:

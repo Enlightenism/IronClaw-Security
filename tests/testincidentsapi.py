@@ -31,7 +31,7 @@ class StubAttackCorrelationService:
                 "organization_id": organization_id,
                 "request_id": request_id,
                 "metadata": metadata,
-            }
+            },
         )
         return {
             "risk_score": 72,
@@ -60,7 +60,7 @@ class StubAttackCorrelationService:
                         "action_id": "act-001",
                         "action": "disable-session",
                         "status": "open",
-                    }
+                    },
                 ],
                 "malware_summary": None,
                 "detonation_summary": None,
@@ -75,7 +75,7 @@ class StubAttackCorrelationService:
                     "action_id": "act-001",
                     "action": "disable-session",
                     "status": "open",
-                }
+                },
             ],
         }
 
@@ -107,7 +107,7 @@ def test_correlate_incidents_returns_correlation_response():
                         "tools": ["shell"],
                     },
                     "metadata": {"origin": "unit-test"},
-                }
+                },
             ],
             "session_id": "sess-001",
             "actor_id": "actor-001",
@@ -149,8 +149,8 @@ def test_correlate_incidents_uses_query_fallbacks_for_session_and_actor():
                         "files": ["payload.py"],
                         "hashes": ["sha256:deadbeef"],
                     },
-                }
-            ]
+                },
+            ],
         },
     )
 
@@ -170,5 +170,5 @@ def test_correlate_incidents_rejects_empty_signal_list():
 
     assert response.status_code == 400
     assert response.json() == {
-        "detail": "At least one signal is required for correlation"
+        "detail": "At least one signal is required for correlation",
     }

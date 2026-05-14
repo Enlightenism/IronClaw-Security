@@ -48,7 +48,7 @@ def _build_recent_events_items() -> list[dict[str, Any]]:
             "action": "telemetry-access-summary",
             "result": "No events yet",
             "detail": "Recent access events will appear here after telemetry access reads are recorded.",
-        }
+        },
     ]
 
 
@@ -124,7 +124,16 @@ def _to_bool(value: Any, *, true_values: set[str] | None = None) -> bool:
         return value
     if isinstance(value, str):
         normalized = value.strip().lower()
-        allowed = true_values or {"true", "active", "available", "enabled", "ready", "required", "yes", "tracked"}
+        allowed = true_values or {
+            "true",
+            "active",
+            "available",
+            "enabled",
+            "ready",
+            "required",
+            "yes",
+            "tracked",
+        }
         return normalized in allowed
     return bool(value)
 

@@ -68,11 +68,7 @@ def get_marketing_architecture() -> ArchitecturePageResponse:
     hero = ArchitectureHeroView(
         eyebrow="Security architecture",
         title="An AI security architecture built to interrupt dangerous actions before they execute.",
-        subtitle=(
-            "IronClaw-Security is designed as a runtime decision layer between AI intent and system action, using "
-            "policy enforcement, least-privilege boundaries, review controls, quarantine paths, and audit evidence "
-            "to protect people, machines, and organizations from unsafe AI behavior."
-        ),
+        subtitle=("IronClaw-Security is designed as a runtime decision layer between AI intent and system action, using policy enforcement, least-privilege boundaries, review controls, quarantine paths, and audit evidence to protect people, machines, and organizations from unsafe AI behavior."),
         primaryctalabel="Request architecture walkthrough",
         primaryctahref="/contact-sales",
         secondaryctalabel="Explore trust page",
@@ -84,36 +80,28 @@ def get_marketing_architecture() -> ArchitecturePageResponse:
             statid="zero-trust",
             value="Per-request",
             label="NIST says zero trust is built on accurate least-privilege per-request decisions",
-            context=(
-                "NIST defines zero trust as minimizing uncertainty by enforcing accurate, least-privilege, per-request access decisions."
-            ),
+            context=("NIST defines zero trust as minimizing uncertainty by enforcing accurate, least-privilege, per-request access decisions."),
             source="NIST SP 800-207",
         ),
         ArchitectureProofStatView(
             statid="least-privilege",
             value="Minimum",
             label="Least privilege means giving only the resources and authorizations needed",
-            context=(
-                "NIST defines least privilege as granting the minimum system resources and authorizations necessary to perform a function."
-            ),
+            context=("NIST defines least privilege as granting the minimum system resources and authorizations necessary to perform a function."),
             source="NIST glossary",
         ),
         ArchitectureProofStatView(
             statid="prompt-mitigation",
             value="Scoped",
             label="OWASP recommends separating prompts and limiting external access",
-            context=(
-                "OWASP recommends keeping system prompts separate, limiting response scope, and reducing external access as prompt injection mitigations."
-            ),
+            context=("OWASP recommends keeping system prompts separate, limiting response scope, and reducing external access as prompt injection mitigations."),
             source="OWASP prompt injection guidance",
         ),
         ArchitectureProofStatView(
             statid="runtime-position",
             value="Inline",
             label="Runtime interception is becoming a core governance pattern for AI agents",
-            context=(
-                "Policy-based AI agent governance patterns increasingly place a security service between agents and target resources to intercept requests in real time."
-            ),
+            context=("Policy-based AI agent governance patterns increasingly place a security service between agents and target resources to intercept requests in real time."),
             source="AI agent governance technical analysis",
         ),
     ]
@@ -122,9 +110,7 @@ def get_marketing_architecture() -> ArchitecturePageResponse:
         ArchitectureLayerView(
             layerid="layer-1",
             title="Context intake layer",
-            summary=(
-                "Every prompt, document, retrieved artifact, tool output, and external source is treated as potential attack-bearing context."
-            ),
+            summary=("Every prompt, document, retrieved artifact, tool output, and external source is treated as potential attack-bearing context."),
             functions=[
                 "Separates trusted and untrusted inputs",
                 "Preserves visibility into external content influence",
@@ -134,9 +120,7 @@ def get_marketing_architecture() -> ArchitecturePageResponse:
         ArchitectureLayerView(
             layerid="layer-2",
             title="Policy decision layer",
-            summary=(
-                "This is the core of IronClaw. It decides whether an AI-linked action should be allowed, reviewed, quarantined, or denied."
-            ),
+            summary=("This is the core of IronClaw. It decides whether an AI-linked action should be allowed, reviewed, quarantined, or denied."),
             functions=[
                 "Applies runtime policy to each sensitive request",
                 "Supports deterministic enforcement before execution",
@@ -146,9 +130,7 @@ def get_marketing_architecture() -> ArchitecturePageResponse:
         ArchitectureLayerView(
             layerid="layer-3",
             title="Execution boundary layer",
-            summary=(
-                "Tool calls, file operations, network actions, and downstream effects are treated as security boundaries, not normal app flow."
-            ),
+            summary=("Tool calls, file operations, network actions, and downstream effects are treated as security boundaries, not normal app flow."),
             functions=[
                 "Creates a hard decision point before powerful actions",
                 "Supports least-privilege execution paths",
@@ -158,9 +140,7 @@ def get_marketing_architecture() -> ArchitecturePageResponse:
         ArchitectureLayerView(
             layerid="layer-4",
             title="Review and quarantine layer",
-            summary=(
-                "High-risk actions should not disappear into logs. They need containment and human judgment."
-            ),
+            summary=("High-risk actions should not disappear into logs. They need containment and human judgment."),
             functions=[
                 "Routes suspicious items into manual review queues",
                 "Quarantines risky artifacts or requests for analysis",
@@ -170,9 +150,7 @@ def get_marketing_architecture() -> ArchitecturePageResponse:
         ArchitectureLayerView(
             layerid="layer-5",
             title="Audit and operations layer",
-            summary=(
-                "Serious buyers and defenders need evidence. The architecture captures why a decision happened and what the system did next."
-            ),
+            summary=("Serious buyers and defenders need evidence. The architecture captures why a decision happened and what the system did next."),
             functions=[
                 "Records policy and execution outcomes",
                 "Supports forensic review and governance workflows",
@@ -185,37 +163,27 @@ def get_marketing_architecture() -> ArchitecturePageResponse:
         ArchitectureFlowStepView(
             stepid="flow-1",
             title="AI intent enters the system",
-            description=(
-                "A model generates an intended action after processing prompts, files, web content, or other context."
-            ),
+            description=("A model generates an intended action after processing prompts, files, web content, or other context."),
         ),
         ArchitectureFlowStepView(
             stepid="flow-2",
             title="Context and action are evaluated",
-            description=(
-                "IronClaw inspects the requested behavior in light of risk, policy, tool class, environment sensitivity, and trust boundaries."
-            ),
+            description=("IronClaw inspects the requested behavior in light of risk, policy, tool class, environment sensitivity, and trust boundaries."),
         ),
         ArchitectureFlowStepView(
             stepid="flow-3",
             title="A policy decision is made",
-            description=(
-                "The action is explicitly allowed, routed to review, quarantined, or denied before execution reaches sensitive resources."
-            ),
+            description=("The action is explicitly allowed, routed to review, quarantined, or denied before execution reaches sensitive resources."),
         ),
         ArchitectureFlowStepView(
             stepid="flow-4",
             title="Execution is controlled at the boundary",
-            description=(
-                "Only approved actions proceed, and those actions remain constrained by least-privilege and operational safeguards."
-            ),
+            description=("Only approved actions proceed, and those actions remain constrained by least-privilege and operational safeguards."),
         ),
         ArchitectureFlowStepView(
             stepid="flow-5",
             title="Evidence is captured for operators",
-            description=(
-                "The system stores reviewable traces so teams can understand what happened, why it happened, and how to improve controls."
-            ),
+            description=("The system stores reviewable traces so teams can understand what happened, why it happened, and how to improve controls."),
         ),
     ]
 
@@ -223,37 +191,27 @@ def get_marketing_architecture() -> ArchitecturePageResponse:
         ArchitecturePrincipleView(
             principleid="principle-1",
             title="No implicit trust",
-            description=(
-                "The architecture assumes prompts, retrieved context, files, and model outputs can all be manipulated."
-            ),
+            description=("The architecture assumes prompts, retrieved context, files, and model outputs can all be manipulated."),
         ),
         ArchitecturePrincipleView(
             principleid="principle-2",
             title="Least privilege by default",
-            description=(
-                "AI systems should get the minimum practical authority needed for the current task, not broad standing power."
-            ),
+            description=("AI systems should get the minimum practical authority needed for the current task, not broad standing power."),
         ),
         ArchitecturePrincipleView(
             principleid="principle-3",
             title="Enforcement before execution",
-            description=(
-                "Security value comes from intercepting dangerous actions before they happen, not only documenting them afterwards."
-            ),
+            description=("Security value comes from intercepting dangerous actions before they happen, not only documenting them afterwards."),
         ),
         ArchitecturePrincipleView(
             principleid="principle-4",
             title="Containment for ambiguous risk",
-            description=(
-                "If a request is suspicious or unclear, the architecture should slow it down, isolate it, and make it reviewable."
-            ),
+            description=("If a request is suspicious or unclear, the architecture should slow it down, isolate it, and make it reviewable."),
         ),
         ArchitecturePrincipleView(
             principleid="principle-5",
             title="Architecture that evolves with AI",
-            description=(
-                "As agent capabilities, tools, and attacks evolve, the decision model and protection surfaces must evolve with them."
-            ),
+            description=("As agent capabilities, tools, and attacks evolve, the decision model and protection surfaces must evolve with them."),
         ),
     ]
 

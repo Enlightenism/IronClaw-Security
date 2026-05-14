@@ -18,7 +18,7 @@ def _optional_router(module_path: str) -> APIRouter | None:
     router = getattr(module, "router", None)
     if router is None:
         return None
-    return cast(APIRouter, router)
+    return cast("APIRouter", router)
 
 
 router = APIRouter(tags=["ui"])
@@ -73,7 +73,7 @@ def _router_label(ui_router: APIRouter) -> str:
 
 def _route_signature(route: object) -> tuple[str, tuple[str, ...], str]:
     path = str(getattr(route, "path", ""))
-    methods = tuple(sorted(cast(set[str], getattr(route, "methods", set()) or set())))
+    methods = tuple(sorted(cast("set[str]", getattr(route, "methods", set()) or set())))
     name = str(getattr(route, "name", ""))
     return (path, methods, name)
 
@@ -102,8 +102,7 @@ def validate_ui_routers() -> None:
 
             if signature in seen_route_signatures:
                 raise ValueError(
-                    f"duplicate UI route registration detected: {path} {methods} "
-                    f"already registered under {seen_route_signatures[signature]}"
+                    f"duplicate UI route registration detected: {path} {methods} already registered under {seen_route_signatures[signature]}",
                 )
 
             seen_route_signatures[signature] = label
@@ -112,18 +111,10 @@ def validate_ui_routers() -> None:
 def include_ui_routers(app: FastAPI) -> None:
     validate_ui_routers()
 
-    existing_route_signatures = {
-        _route_signature(route)
-        for route in app.routes
-        if getattr(route, "path", "")
-    }
+    existing_route_signatures = {_route_signature(route) for route in app.routes if getattr(route, "path", "")}
 
     for ui_router in get_ui_routers():
-        router_signatures = {
-            _route_signature(route)
-            for route in ui_router.routes
-            if getattr(route, "path", "")
-        }
+        router_signatures = {_route_signature(route) for route in ui_router.routes if getattr(route, "path", "")}
 
         if router_signatures and router_signatures.issubset(existing_route_signatures):
             continue

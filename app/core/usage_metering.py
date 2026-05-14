@@ -27,8 +27,7 @@ class UsageSummary:
 
 
 class UsageMeteringRegistry:
-    """
-    In-memory metering registry for local-first revenue experiments.
+    """In-memory metering registry for local-first revenue experiments.
 
     Tracks:
     - total requests per API key

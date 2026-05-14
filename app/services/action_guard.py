@@ -164,7 +164,7 @@ def _build_reasons(
                 "label": "High risk score",
                 "details": f"Risk score {risk_score} exceeds the high-risk threshold.",
                 "score": min(risk_score / 100, 1.0),
-            }
+            },
         )
     elif risk_score >= 40:
         reasons.append(
@@ -173,7 +173,7 @@ def _build_reasons(
                 "label": "Medium risk score",
                 "details": f"Risk score {risk_score} exceeds the medium-risk threshold.",
                 "score": min(risk_score / 100, 1.0),
-            }
+            },
         )
     elif risk_score >= 20:
         reasons.append(
@@ -182,7 +182,7 @@ def _build_reasons(
                 "label": "Elevated risk score",
                 "details": f"Risk score {risk_score} exceeds the elevated-risk threshold.",
                 "score": min(risk_score / 100, 1.0),
-            }
+            },
         )
 
     if matched_patterns:
@@ -192,7 +192,7 @@ def _build_reasons(
                 "label": "Matched detection patterns",
                 "details": f"Matched patterns: {', '.join(matched_patterns)}.",
                 "score": min(risk_score / 100, 1.0),
-            }
+            },
         )
 
     if promptinjection and promptinjection.get("flagged") is True:
@@ -213,7 +213,7 @@ def _build_reasons(
                     "label": str(item.get("label") or "Prompt injection signal"),
                     "details": str(item.get("details") or ""),
                     "score": score,
-                }
+                },
             )
 
     if not reasons:
@@ -223,7 +223,7 @@ def _build_reasons(
                 "label": "No elevated scan conditions",
                 "details": "No elevated scan conditions were detected.",
                 "score": 0.0,
-            }
+            },
         )
 
     return reasons

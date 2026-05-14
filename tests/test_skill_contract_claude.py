@@ -31,7 +31,7 @@ def test_adapt_claude_scan_text_request() -> None:
                 "session_id": "sess-001",
                 "tags": ["Prompt-Injection", " Prompt-Injection ", "security"],
             },
-        }
+        },
     )
 
     assert isinstance(request, SkillScanRequest)
@@ -57,7 +57,7 @@ def test_adapt_claude_scan_prompt_bundle_request() -> None:
             "context": {
                 "request_id": "req-bundle",
             },
-        }
+        },
     )
 
     assert isinstance(request, SkillScanRequest)
@@ -82,7 +82,7 @@ def test_adapt_claude_action_policy_request() -> None:
                 "request_id": "req-policy",
                 "client_id": "claude-desktop",
             },
-        }
+        },
     )
 
     assert isinstance(request, SkillActionPolicyRequest)
@@ -102,7 +102,7 @@ def test_adapt_claude_action_decision_request() -> None:
             "target": "app/main.py",
             "content": "patched code",
             "policy_mode": "review",
-        }
+        },
     )
 
     assert isinstance(request, SkillActionDecisionRequest)
@@ -121,7 +121,7 @@ def test_adapt_claude_execute_request() -> None:
             "require_confirmation": True,
             "allow_side_effects": False,
             "context": {"request_id": "req-exec"},
-        }
+        },
     )
 
     assert isinstance(request, SkillExecuteRequest)
@@ -139,7 +139,7 @@ def test_adapt_claude_request_rejects_unknown_operation() -> None:
                 "operation": "destroy_everything",
                 "target_type": "text",
                 "target_value": "bad payload",
-            }
+            },
         )
 
 
@@ -149,7 +149,7 @@ def test_adapt_claude_request_rejects_missing_bundle_for_prompt_bundle() -> None
             {
                 "operation": "scan",
                 "target_type": "prompt_bundle",
-            }
+            },
         )
 
 

@@ -182,9 +182,7 @@ class DeploymentReadinessEvaluator:
         return ReadinessCheck(
             name="backup_targets",
             status="pass" if configured else "warn",
-            summary="Backup target structure is present."
-            if configured
-            else "Backup target structure is not fully defined.",
+            summary="Backup target structure is present." if configured else "Backup target structure is not fully defined.",
             details=tuple(details),
             remediation=() if configured else remediation,
         )
@@ -211,9 +209,7 @@ class DeploymentReadinessEvaluator:
         return ReadinessCheck(
             name="restore_targets",
             status="pass" if ready else "warn",
-            summary="Restore target path is available."
-            if ready
-            else "Restore targets need explicit automation.",
+            summary="Restore target path is available." if ready else "Restore targets need explicit automation.",
             details=tuple(details),
             remediation=() if ready else remediation,
         )
@@ -234,9 +230,7 @@ class DeploymentReadinessEvaluator:
         return ReadinessCheck(
             name="supabase_migrations",
             status="pass" if has_schema else "fail",
-            summary="Migration baseline is present."
-            if has_schema
-            else "Migration baseline is insufficient for recovery readiness.",
+            summary="Migration baseline is present." if has_schema else "Migration baseline is insufficient for recovery readiness.",
             details=tuple(details),
             remediation=() if has_schema else remediation,
         )
@@ -257,9 +251,7 @@ class DeploymentReadinessEvaluator:
         return ReadinessCheck(
             name="runtime_outputs",
             status="pass" if has_artifacts else "warn",
-            summary="Runtime output artifacts are available."
-            if has_artifacts
-            else "No runtime artifacts found for backup verification.",
+            summary="Runtime output artifacts are available." if has_artifacts else "No runtime artifacts found for backup verification.",
             details=tuple(details),
             remediation=() if has_artifacts else remediation,
         )
@@ -291,9 +283,7 @@ class DeploymentReadinessEvaluator:
         return ReadinessCheck(
             name="runbook_markers",
             status="pass" if found_keywords else "warn",
-            summary="Recovery runbook markers detected."
-            if found_keywords
-            else "Recovery runbook content is not explicit yet.",
+            summary="Recovery runbook markers detected." if found_keywords else "Recovery runbook content is not explicit yet.",
             details=tuple(details),
             remediation=() if found_keywords else remediation,
         )
@@ -331,9 +321,7 @@ class DeploymentReadinessEvaluator:
         return ReadinessCheck(
             name="environment_configuration",
             status=status,
-            summary="Environment baseline is fully configured."
-            if status == "pass"
-            else "Environment baseline is incomplete.",
+            summary="Environment baseline is fully configured." if status == "pass" else "Environment baseline is incomplete.",
             details=tuple(details),
             remediation=() if status == "pass" else remediation,
         )
@@ -366,7 +354,7 @@ class DeploymentReadinessEvaluator:
 def _print_human_report(report: DeploymentReadinessReport) -> None:
     print(f"IronClaw deployment readiness: {report.overall_status.upper()} ({report.score})")
     print(f"Generated at: {report.generated_at}")
-    print("")
+    print()
     for check in report.checks:
         print(f"[{check.status.upper()}] {check.name}: {check.summary}")
         for detail in check.details:
@@ -374,12 +362,12 @@ def _print_human_report(report: DeploymentReadinessReport) -> None:
         if check.remediation:
             for item in check.remediation:
                 print(f"  * {item}")
-        print("")
+        print()
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Evaluate IronClaw deployment readiness targets for backup and restore implementation."
+        description="Evaluate IronClaw deployment readiness targets for backup and restore implementation.",
     )
     parser.add_argument(
         "--json",

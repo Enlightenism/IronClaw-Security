@@ -40,7 +40,7 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
     (
         "private_key_block",
         re.compile(
-            r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----"
+            r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----",
         ),
         0.60,
     ),
@@ -125,14 +125,14 @@ PATH_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
     (
         "unix_sensitive_path",
         re.compile(
-            r"\b/(?:etc/passwd|etc/shadow|root/\.ssh|home/[^/\s]+/\.ssh/[^\s]+)\b"
+            r"\b/(?:etc/passwd|etc/shadow|root/\.ssh|home/[^/\s]+/\.ssh/[^\s]+)\b",
         ),
         0.26,
     ),
     (
         "windows_sensitive_path",
         re.compile(
-            r"\b[A-Za-z]:\\(?:Users\\[^\\]+\\\.ssh\\|Windows\\System32\\config\\SAM)\b"
+            r"\b[A-Za-z]:\\(?:Users\\[^\\]+\\\.ssh\\|Windows\\System32\\config\\SAM)\b",
         ),
         0.26,
     ),
@@ -170,7 +170,7 @@ class OutputSanitizationResult:
     blocked: bool
     sanitized: bool
     analyzed_at: str = field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat(),
     )
 
     def as_dict(self) -> dict[str, Any]:
@@ -272,7 +272,7 @@ class OutputSanitizer:
                     end=len(blocked_message),
                     replacement=blocked_message,
                     detail="Replaced entire output because blocking indicators were present.",
-                )
+                ),
             )
 
         sanitized = working != text
@@ -335,7 +335,7 @@ class OutputSanitizer:
                         weight=float(weight),
                         evidence=self._clip_evidence(matched_value),
                         category=category,
-                    )
+                    ),
                 )
                 actions.append(
                     SanitizationAction(
@@ -344,7 +344,7 @@ class OutputSanitizer:
                         end=start + len(replacement_label),
                         replacement=replacement_label,
                         detail=f"Redacted {name}.",
-                    )
+                    ),
                 )
 
         return updated, signals, actions
@@ -364,8 +364,12 @@ class OutputSanitizer:
         for name, pattern, disposition, weight in COMMAND_PATTERNS:
             for match in pattern.finditer(text):
                 evidence = self._clip_evidence(match.group(0))
-                adjusted_weight = float(weight) if block_unsafe_commands else float(
-                    min(weight, 0.22)
+                adjusted_weight = (
+                    float(weight)
+                    if block_unsafe_commands
+                    else float(
+                        min(weight, 0.22),
+                    )
                 )
                 signals.append(
                     SanitizerSignal(
@@ -373,7 +377,7 @@ class OutputSanitizer:
                         weight=adjusted_weight,
                         evidence=evidence,
                         category="command",
-                    )
+                    ),
                 )
                 actions.append(
                     SanitizationAction(
@@ -381,7 +385,7 @@ class OutputSanitizer:
                         start=match.start(),
                         end=match.end(),
                         detail=f"Detected command pattern {name} with disposition {disposition}.",
-                    )
+                    ),
                 )
 
         return signals, actions
@@ -410,7 +414,7 @@ class OutputSanitizer:
                         weight=adjusted,
                         evidence=self._clip_evidence(match.group(0)),
                         category="policy",
-                    )
+                    ),
                 )
         return signals
 
@@ -482,7 +486,7 @@ class OutputSanitizer:
         blocked: bool,
     ) -> list[str]:
         reasons: list[str] = [
-            f"Output sanitation verdict is {verdict} with {severity} severity."
+            f"Output sanitation verdict is {verdict} with {severity} severity.",
         ]
 
         if context:
@@ -490,7 +494,7 @@ class OutputSanitizer:
 
         if sanitized:
             reasons.append(
-                "Sensitive content was redacted or transformed before release."
+                "Sensitive content was redacted or transformed before release.",
             )
 
         if blocked:
@@ -546,9 +550,9 @@ def build_output_sanitizer() -> OutputSanitizer:
 
 
 __all__ = [
-    "SanitizerSignal",
-    "SanitizationAction",
     "OutputSanitizationResult",
     "OutputSanitizer",
+    "SanitizationAction",
+    "SanitizerSignal",
     "build_output_sanitizer",
 ]

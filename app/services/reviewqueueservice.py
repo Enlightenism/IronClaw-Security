@@ -72,11 +72,7 @@ def _coerce_record(value: Any) -> dict[str, Any]:
             return dict(dumped)
 
     if hasattr(value, "__dict__"):
-        return {
-            str(key): item
-            for key, item in vars(value).items()
-            if not str(key).startswith("_") and not callable(item)
-        }
+        return {str(key): item for key, item in vars(value).items() if not str(key).startswith("_") and not callable(item)}
 
     return dict(value)
 
@@ -429,10 +425,7 @@ def remove_review_item(review_id: str) -> bool:
 
     with _REVIEW_QUEUE_LOCK:
         items = _load_queue()
-        remaining = [
-            item for item in items
-            if str(item.get("review_id") or "").strip() != wanted
-        ]
+        remaining = [item for item in items if str(item.get("review_id") or "").strip() != wanted]
 
         if len(remaining) == len(items):
             return False

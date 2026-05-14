@@ -37,8 +37,7 @@ class PlaybookDefinition(BaseModel):
 
 
 class PlaybookRegistry:
-    """
-    In-memory registry of default threat-response playbooks.
+    """In-memory registry of default threat-response playbooks.
 
     Design goals:
     - Stable local-first defaults with no external dependency.
@@ -99,7 +98,7 @@ class PlaybookRegistry:
                         owner="runtime",
                     ),
                 ],
-            )
+            ),
         )
 
         self.register(
@@ -137,7 +136,7 @@ class PlaybookRegistry:
                         owner="analyst",
                     ),
                 ],
-            )
+            ),
         )
 
         self.register(
@@ -175,7 +174,7 @@ class PlaybookRegistry:
                         owner="soc",
                     ),
                 ],
-            )
+            ),
         )
 
         self.register(
@@ -212,7 +211,7 @@ class PlaybookRegistry:
                         owner="analyst",
                     ),
                 ],
-            )
+            ),
         )
 
         self.register(
@@ -257,7 +256,7 @@ class PlaybookRegistry:
                         owner="security-engineering",
                     ),
                 ],
-            )
+            ),
         )
 
         self.register(
@@ -294,7 +293,7 @@ class PlaybookRegistry:
                         owner="analyst",
                     ),
                 ],
-            )
+            ),
         )
 
         self.register(
@@ -331,5 +330,5 @@ class PlaybookRegistry:
                         owner="analyst",
                     ),
                 ],
-            )
+            ),
         )

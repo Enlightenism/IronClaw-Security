@@ -105,8 +105,7 @@ def get_usage_registry() -> UsageRegistry:
     response_model=UsageSummaryResponse,
 )
 def get_owner_usage(owner_key: str) -> UsageSummaryResponse:
-    """
-    Return a metered view of IronClaw-Security protection usage for this owner key.
+    """Return a metered view of IronClaw-Security protection usage for this owner key.
 
     In Gen1 this is backed by an in-memory registry. In a production deployment
     the same shape can be hydrated from logs or a billing database.

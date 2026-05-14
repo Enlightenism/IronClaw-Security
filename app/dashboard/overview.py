@@ -247,8 +247,14 @@ def build_dashboard_overview(
         quarantined_actions=quarantined_actions,
         active_incidents=active_incidents,
         pending_reviews=pending_reviews,
-        policy_coverage_percent=max(0.0, _coerce_float(source.get("policy_coverage_percent"), current.policy_coverage_percent)),
-        tool_execution_allow_rate=max(0.0, _coerce_float(source.get("tool_execution_allow_rate"), current.tool_execution_allow_rate)),
+        policy_coverage_percent=max(
+            0.0,
+            _coerce_float(source.get("policy_coverage_percent"), current.policy_coverage_percent),
+        ),
+        tool_execution_allow_rate=max(
+            0.0,
+            _coerce_float(source.get("tool_execution_allow_rate"), current.tool_execution_allow_rate),
+        ),
         telemetry_online=_coerce_bool(source.get("telemetry_online"), current.telemetry_online),
         review_backlog_present=review_backlog_present,
         quarantine_pressure=quarantine_pressure,

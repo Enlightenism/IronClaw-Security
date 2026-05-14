@@ -87,7 +87,7 @@ def _build_links(event_id: str, session_id: str | None, client_id: str | None) -
                 label="Session timeline",
                 path=f"/ui/activity/sessiontimeline/{session_id}",
                 description="Timeline view for all activity in this session.",
-            )
+            ),
         )
 
     if client_id:
@@ -96,7 +96,7 @@ def _build_links(event_id: str, session_id: str | None, client_id: str | None) -
                 label="Client profile",
                 path=f"/ui/activity/clientprofile/{client_id}",
                 description="Profile view for the client associated with this usage.",
-            )
+            ),
         )
 
     return links

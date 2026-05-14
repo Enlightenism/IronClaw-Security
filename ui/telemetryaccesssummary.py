@@ -62,15 +62,13 @@ def telemetry_access_summary_page(
     principal_type: str | None = Query(default=None),
     period: str = Query(default="24h"),
 ) -> dict[str, Any]:
-    """
-    UI metadata endpoint for telemetry access posture.
+    """UI metadata endpoint for telemetry access posture.
 
     This page is intentionally presentation-oriented so the UI can render:
     - summary KPIs
     - policy/access posture sections
     - quick navigation actions into related pages
     """
-
     effective_principal_id = principal_id or "cust_demo_001"
     effective_principal_type = principal_type or "customer"
 

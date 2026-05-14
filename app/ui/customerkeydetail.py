@@ -44,45 +44,27 @@ def _extract_key(record: Mapping[str, Any] | None) -> dict[str, Any]:
     metadata = _safe_dict(payload.get("metadata"))
 
     key_id = _safe_str(
-        payload.get("key_id")
-        or payload.get("keyid")
-        or payload.get("id")
-        or metadata.get("key_id")
+        payload.get("key_id") or payload.get("keyid") or payload.get("id") or metadata.get("key_id"),
     )
     display_name = _safe_str(
-        payload.get("display_name")
-        or payload.get("displayname")
-        or payload.get("name")
-        or metadata.get("display_name")
-        or metadata.get("name")
-        or "Unnamed key"
+        payload.get("display_name") or payload.get("displayname") or payload.get("name") or metadata.get("display_name") or metadata.get("name") or "Unnamed key",
     )
     masked_key = _safe_str(
-        payload.get("masked_key")
-        or payload.get("maskedkey")
-        or payload.get("key_preview")
-        or payload.get("preview")
-        or payload.get("last4")
+        payload.get("masked_key") or payload.get("maskedkey") or payload.get("key_preview") or payload.get("preview") or payload.get("last4"),
     )
     created_at = _safe_str(
-        payload.get("created_at")
-        or payload.get("createdat")
-        or payload.get("created")
-        or payload.get("timestamp")
+        payload.get("created_at") or payload.get("createdat") or payload.get("created") or payload.get("timestamp"),
     )
     last_used_at = _safe_str(
-        payload.get("last_used_at")
-        or payload.get("lastusedat")
-        or payload.get("last_used")
-        or payload.get("last_seen_at")
+        payload.get("last_used_at") or payload.get("lastusedat") or payload.get("last_used") or payload.get("last_seen_at"),
     )
     active = bool(payload.get("active", True))
 
     scopes = _normalize_string_list(
-        payload.get("scopes") or metadata.get("scopes") or metadata.get("permissions")
+        payload.get("scopes") or metadata.get("scopes") or metadata.get("permissions"),
     )
     environments = _normalize_string_list(
-        payload.get("environments") or metadata.get("environments")
+        payload.get("environments") or metadata.get("environments"),
     )
     tags = _normalize_string_list(payload.get("tags") or metadata.get("tags"))
 
@@ -102,12 +84,7 @@ def _extract_key(record: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 def _build_audit_items(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
-    raw_items = (
-        payload.get("audit")
-        or payload.get("audit_events")
-        or payload.get("events")
-        or payload.get("activity")
-    )
+    raw_items = payload.get("audit") or payload.get("audit_events") or payload.get("events") or payload.get("activity")
     items: list[dict[str, Any]] = []
     for raw_item in _safe_list(raw_items):
         if not isinstance(raw_item, Mapping):
@@ -116,20 +93,18 @@ def _build_audit_items(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
         items.append(
             {
                 "timestamp": _safe_str(
-                    item.get("timestamp")
-                    or item.get("created_at")
-                    or item.get("occurred_at")
+                    item.get("timestamp") or item.get("created_at") or item.get("occurred_at"),
                 ),
                 "event_type": _safe_str(
-                    item.get("event_type") or item.get("type") or "event"
+                    item.get("event_type") or item.get("type") or "event",
                 ),
                 "actor": _safe_str(item.get("actor") or item.get("requested_by")),
                 "result": _safe_str(item.get("result") or item.get("status")),
                 "detail": _safe_str(
-                    item.get("detail") or item.get("reason") or item.get("message")
+                    item.get("detail") or item.get("reason") or item.get("message"),
                 ),
                 "metadata": _safe_dict(item.get("metadata")),
-            }
+            },
         )
     return items
 
@@ -147,15 +122,10 @@ def build_customer_key_detail_view(
 
     metadata = key["metadata"]
     owner = _safe_str(
-        source.get("owner")
-        or metadata.get("owner")
-        or metadata.get("owner_key")
-        or metadata.get("customer_id")
+        source.get("owner") or metadata.get("owner") or metadata.get("owner_key") or metadata.get("customer_id"),
     )
     organization_id = _safe_str(
-        source.get("organization_id")
-        or metadata.get("organization_id")
-        or metadata.get("org_id")
+        source.get("organization_id") or metadata.get("organization_id") or metadata.get("org_id"),
     )
     last_used_label = key["last_used_at"] or "Never used"
 

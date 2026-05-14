@@ -137,7 +137,7 @@ def build_prompt_guard_timeline_summary() -> PromptGuardTimelineSummary:
                 source_module="prompt_guard_trends",
                 details=point_data,
                 tags=["trend", "bucket"],
-            )
+            ),
         )
 
     for item in activity_feed.items:
@@ -151,7 +151,7 @@ def build_prompt_guard_timeline_summary() -> PromptGuardTimelineSummary:
                 source_module=item.source_module,
                 details=item.details,
                 tags=list(item.tags),
-            )
+            ),
         )
 
     for alert in alerts.latest_alerts:
@@ -165,7 +165,7 @@ def build_prompt_guard_timeline_summary() -> PromptGuardTimelineSummary:
                 source_module=alert.source_module,
                 details=alert.details,
                 tags=list(alert.tags),
-            )
+            ),
         )
 
     entries.sort(key=lambda entry: entry.timestamp, reverse=True)
@@ -204,9 +204,6 @@ def get_prompt_guard_timeline_summary() -> PromptGuardTimelineSummaryResponse:
         total_entries=data["total_entries"],
         interval_minutes=data["interval_minutes"],
         lookback_hours=data["lookback_hours"],
-        entries=[
-            PromptGuardTimelineEntryResponse(**entry)
-            for entry in data["entries"]
-        ],
+        entries=[PromptGuardTimelineEntryResponse(**entry) for entry in data["entries"]],
         metadata=data["metadata"],
     )

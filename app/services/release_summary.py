@@ -101,7 +101,7 @@ def build_release_summary_from_parts(
             readiness_result,
             "score",
             default=_read_attr(rollout_decision, "score", default=0.0),
-        )
+        ),
     )
     ready = bool(_read_attr(readiness_result, "ready", default=False))
 
@@ -110,10 +110,10 @@ def build_release_summary_from_parts(
     reasons.extend(_extract_finding_messages(readiness_findings))
 
     next_actions = _coerce_string_list(
-        _read_attr(readiness_result, "next_actions", default=[])
+        _read_attr(readiness_result, "next_actions", default=[]),
     )
     next_actions.extend(
-        _coerce_string_list(_read_attr(rollout_decision, "required_actions", default=[]))
+        _coerce_string_list(_read_attr(rollout_decision, "required_actions", default=[])),
     )
 
     return build_release_summary(
@@ -129,7 +129,7 @@ def build_release_summary_from_parts(
             reasons=reasons,
             next_actions=next_actions,
             metadata=metadata or {},
-        )
+        ),
     )
 
 

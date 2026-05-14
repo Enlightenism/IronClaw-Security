@@ -57,11 +57,7 @@ def _as_dict(value: Any) -> dict[str, Any]:
         if isinstance(dumped, Mapping):
             return dict(dumped)
     if hasattr(value, "__dict__"):
-        return {
-            key: item
-            for key, item in vars(value).items()
-            if not key.startswith("_") and not callable(item)
-        }
+        return {key: item for key, item in vars(value).items() if not key.startswith("_") and not callable(item)}
     raise TypeError("review state payload must be a mapping-like object")
 
 
@@ -107,84 +103,33 @@ def _normalize_review_state_payload(
     source_payload = _as_dict(payload)
     source_payload.update({key: value for key, value in extra.items() if value is not None})
 
-    resolved_review_id = (
-        _text(review_id)
-        or _text(source_payload.get("review_id"))
-        or _text(source_payload.get("id"))
-        or str(uuid4())
-    )
+    resolved_review_id = _text(review_id) or _text(source_payload.get("review_id")) or _text(source_payload.get("id")) or str(uuid4())
 
-    resolved_request_id = (
-        _text(request_id)
-        or _text(source_payload.get("request_id"))
-        or _text(source_payload.get("scan_id"))
-        or _text(source_payload.get("execution_id"))
-    )
+    resolved_request_id = _text(request_id) or _text(source_payload.get("request_id")) or _text(source_payload.get("scan_id")) or _text(source_payload.get("execution_id"))
 
-    resolved_incident_id = (
-        _text(incident_id)
-        or _text(source_payload.get("incident_id"))
-    )
+    resolved_incident_id = _text(incident_id) or _text(source_payload.get("incident_id"))
 
-    resolved_org_id = (
-        _text(organization_id)
-        or _text(org_id)
-        or _text(source_payload.get("organization_id"))
-        or _text(source_payload.get("org_id"))
-    )
+    resolved_org_id = _text(organization_id) or _text(org_id) or _text(source_payload.get("organization_id")) or _text(source_payload.get("org_id"))
 
-    resolved_owner_id = (
-        _text(owner_id)
-        or _text(source_payload.get("owner_id"))
-    )
+    resolved_owner_id = _text(owner_id) or _text(source_payload.get("owner_id"))
 
-    resolved_reviewer_id = (
-        _text(reviewer_id)
-        or _text(source_payload.get("reviewer_id"))
-        or _text(source_payload.get("assigned_to"))
-    )
+    resolved_reviewer_id = _text(reviewer_id) or _text(source_payload.get("reviewer_id")) or _text(source_payload.get("assigned_to"))
 
-    resolved_queue_id = (
-        _text(queue_id)
-        or _text(source_payload.get("queue_id"))
-        or "default"
-    )
+    resolved_queue_id = _text(queue_id) or _text(source_payload.get("queue_id")) or "default"
 
-    resolved_source = (
-        _text(source)
-        or _text(source_payload.get("source"))
-        or "orchestrator"
-    )
+    resolved_source = _text(source) or _text(source_payload.get("source")) or "orchestrator"
 
-    resolved_status = (
-        _text(status)
-        or _text(source_payload.get("status"))
-        or "pending"
-    )
+    resolved_status = _text(status) or _text(source_payload.get("status")) or "pending"
 
-    resolved_decision = (
-        _text(decision)
-        or _text(source_payload.get("decision"))
-    )
+    resolved_decision = _text(decision) or _text(source_payload.get("decision"))
 
-    resolved_resolution = (
-        _text(resolution)
-        or _text(source_payload.get("resolution"))
-    )
+    resolved_resolution = _text(resolution) or _text(source_payload.get("resolution"))
 
-    resolved_severity = (
-        _text(severity)
-        or _text(source_payload.get("severity"))
-        or "medium"
-    )
+    resolved_severity = _text(severity) or _text(source_payload.get("severity")) or "medium"
 
     now_iso = _utc_now_iso()
-    created_iso = (
-        created_at if isinstance(created_at, str) else None
-    ) or _text(source_payload.get("created_at")) or now_iso
-    updated_iso = (
-        updated_at if isinstance(updated_at, str) else None
-    ) or _text(source_payload.get("updated_at")) or created_iso
+    created_iso = (created_at if isinstance(created_at, str) else None) or _text(source_payload.get("created_at")) or now_iso
+    updated_iso = (updated_at if isinstance(updated_at, str) else None) or _text(source_payload.get("updated_at")) or created_iso
 
     return {
         "review_id": resolved_review_id,
@@ -206,18 +151,16 @@ def _normalize_review_state_payload(
         "metadata": _as_dict(metadata if metadata is not None else source_payload.get("metadata")),
         "created_at": created_iso,
         "updated_at": updated_iso,
-        "first_seen_at": (
-            _text(first_seen_at) or _text(source_payload.get("first_seen_at")) or created_iso
-        ),
-        "last_seen_at": (
-            _text(last_seen_at) or _text(source_payload.get("last_seen_at")) or updated_iso
-        ),
+        "first_seen_at": (_text(first_seen_at) or _text(source_payload.get("first_seen_at")) or created_iso),
+        "last_seen_at": (_text(last_seen_at) or _text(source_payload.get("last_seen_at")) or updated_iso),
         "acknowledged_at": _text(
-            acknowledged_at if isinstance(acknowledged_at, str) else source_payload.get("acknowledged_at")
-        ) or None,
+            acknowledged_at if isinstance(acknowledged_at, str) else source_payload.get("acknowledged_at"),
+        )
+        or None,
         "resolved_at": _text(
-            resolved_at if isinstance(resolved_at, str) else source_payload.get("resolved_at")
-        ) or None,
+            resolved_at if isinstance(resolved_at, str) else source_payload.get("resolved_at"),
+        )
+        or None,
         "open": _bool(
             source_payload.get("open"),
             default=resolved_status.lower() not in {"resolved", "dismissed", "closed"},

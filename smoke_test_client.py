@@ -125,7 +125,7 @@ def main() -> int:
     expected_block_patterns = {"download and execute", "ps_encoded_command"}
     if not expected_block_patterns.issubset(patterns):
         failures.append(
-            f"Blocked scan patterns missing; expected at least {expected_block_patterns}, got {patterns}"
+            f"Blocked scan patterns missing; expected at least {expected_block_patterns}, got {patterns}",
         )
 
     # URL must allow
@@ -138,13 +138,13 @@ def main() -> int:
     summary = (github_scan.get("summary") or "").lower()
     if "sandbox" not in summary:
         failures.append(
-            f"GitHub scan summary should mention sandbox handling, got: {github_scan.get('summary')!r}"
+            f"GitHub scan summary should mention sandbox handling, got: {github_scan.get('summary')!r}",
         )
 
     # Safe bundle must be allow and not halt/warn
     if safe_bundle.get("highest_verdict") != "allow":
         failures.append(
-            f"Safe bundle highest_verdict expected allow, got {safe_bundle.get('highest_verdict')}"
+            f"Safe bundle highest_verdict expected allow, got {safe_bundle.get('highest_verdict')}",
         )
     if safe_bundle.get("should_halt") or safe_bundle.get("should_warn"):
         failures.append("Safe bundle should_halt/should_warn should both be False")
@@ -154,7 +154,7 @@ def main() -> int:
     ub = blocked_bundle
     if ub.get("highest_verdict") != "block":
         failures.append(
-            f"Blocked bundle highest_verdict expected block, got {ub.get('highest_verdict')}"
+            f"Blocked bundle highest_verdict expected block, got {ub.get('highest_verdict')}",
         )
     if not ub.get("should_halt"):
         failures.append("Blocked bundle should_halt expected True")
@@ -167,21 +167,21 @@ def main() -> int:
     }
     if not expected_up.issubset(up_patterns):
         failures.append(
-            f"Blocked bundle user_prompt patterns missing; expected at least {expected_up}, got {up_patterns}"
+            f"Blocked bundle user_prompt patterns missing; expected at least {expected_up}, got {up_patterns}",
         )
 
     # Mixed bundle: escalation from tool_output
     mb = mixed_bundle
     if mb.get("highest_verdict") != "block":
         failures.append(
-            f"Mixed bundle highest_verdict expected block, got {mb.get('highest_verdict')}"
+            f"Mixed bundle highest_verdict expected block, got {mb.get('highest_verdict')}",
         )
     if not mb.get("should_halt"):
         failures.append("Mixed bundle should_halt expected True")
     tool = mb.get("tool_output") or {}
     if tool.get("verdict") != "block":
         failures.append(
-            f"Mixed bundle tool_output verdict expected block, got {tool.get('verdict')}"
+            f"Mixed bundle tool_output verdict expected block, got {tool.get('verdict')}",
         )
 
     if failures:

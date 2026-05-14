@@ -121,8 +121,7 @@ def _next_incident_link_id() -> str:
 
 
 def _seed_incident_links() -> None:
-    """
-    Seed a few synthetic links so the UI has something to render
+    """Seed a few synthetic links so the UI has something to render
     before the real pipeline wires in.[web:1466][web:1469]
     """
     global _INCIDENT_LINKS, _INCIDENT_LINK_COUNTER
@@ -139,22 +138,13 @@ def _seed_incident_links() -> None:
     seeded: list[PromptGuardIncidentLink] = []
     for idx, incident in enumerate(_INCIDENTS[:2], start=1):
         matching_audit = next(
-            (
-                a
-                for a in _AUDIT_TRAIL
-                if a.prompt_excerpt
-                and incident.title.lower().split()[0] in a.prompt_excerpt.lower()
-            ),
+            (a for a in _AUDIT_TRAIL if a.prompt_excerpt and incident.title.lower().split()[0] in a.prompt_excerpt.lower()),
             None,
         )
         link = PromptGuardIncidentLink(
             id=f"plink-{idx}",
             incident_id=incident.id,
-            prompt_excerpt=(
-                matching_audit.prompt_excerpt
-                if matching_audit and matching_audit.prompt_excerpt
-                else incident.summary[:160]
-            ),
+            prompt_excerpt=(matching_audit.prompt_excerpt if matching_audit and matching_audit.prompt_excerpt else incident.summary[:160]),
             verdict=matching_audit.verdict if matching_audit and matching_audit.verdict else "warn",
             risk_score=matching_audit.risk_score if matching_audit and matching_audit.risk_score is not None else 60,
             audit_event_id=matching_audit.id if matching_audit else None,
@@ -170,9 +160,7 @@ def _seed_incident_links() -> None:
 def _append_incident_link(
     payload: PromptGuardIncidentLinkCreateRequest,
 ) -> PromptGuardIncidentLink:
-    """
-    Append a new link entry, enforcing a rolling window.[web:1189][web:1188]
-    """
+    """Append a new link entry, enforcing a rolling window.[web:1189][web:1188]"""
     global _INCIDENT_LINKS
 
     # Basic validation that incident exists; keep cheap and in-memory
@@ -249,8 +237,7 @@ def get_prompt_guard_incident_links(
         description="Optional filter by incident id.",
     ),
 ) -> PromptGuardIncidentLinksResponse:
-    """
-    List links between prompt guard decisions and incidents so operators
+    """List links between prompt guard decisions and incidents so operators
     can see which guarded prompts escalated into incidents.[web:1464][web:1466]
     """
     _seed_incident_links()
@@ -283,8 +270,7 @@ def get_prompt_guard_incident_links(
 def create_prompt_guard_incident_link(
     payload: PromptGuardIncidentLinkCreateRequest,
 ) -> PromptGuardIncidentLinkView:
-    """
-    Manually or programmatically link a guarded prompt decision to an
+    """Manually or programmatically link a guarded prompt decision to an
     existing incident, creating a correlation record for audit and UI.[web:1463][web:1468]
     """
     _seed_incident_links()

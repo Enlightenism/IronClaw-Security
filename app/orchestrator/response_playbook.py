@@ -191,7 +191,7 @@ def _review_decision_actions(case_file: CaseFile, decision: ReviewDecisionRecord
             summary="Decision deferred and case kept open for additional context.",
             automated=False,
             metadata={"reviewer": decision.reviewer},
-        )
+        ),
     ]
 
 
@@ -290,7 +290,7 @@ def _gate_outcome_actions(case_file: CaseFile, outcome: GateReviewOutcome) -> li
             status="completed",
             summary="Outcome requires further analyst validation before action.",
             automated=False,
-        )
+        ),
     ]
 
 
@@ -349,7 +349,7 @@ def run_supervisor_escalation_playbook(
                 summary="Security lead notified due to elevated escalation severity.",
                 automated=False,
                 metadata={"risk_score": escalation.risk_score},
-            )
+            ),
         )
 
     return _finalize_execution(execution, actions=actions, status="awaiting_manual_action")

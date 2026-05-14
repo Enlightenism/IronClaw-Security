@@ -36,6 +36,7 @@ _ALLOWED_INCIDENT_SOURCES = {
 # Private helpers
 # ---------------------------------------------------------------------------
 
+
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
@@ -85,11 +86,7 @@ def _mapping(value: Any) -> dict[str, Any]:
         if isinstance(dumped, Mapping):
             return dict(dumped)
     if hasattr(value, "__dict__"):
-        return {
-            key: val
-            for key, val in vars(value).items()
-            if not key.startswith("_") and not callable(val)
-        }
+        return {key: val for key, val in vars(value).items() if not key.startswith("_") and not callable(val)}
     raise TypeError("value is not serializable to dict")
 
 
@@ -183,42 +180,16 @@ def _normalize_incident_payload(
     source_payload = _mapping(payload)
     source_payload.update({key: value for key, value in extra.items() if value is not None})
 
-    resolved_incident_id = (
-        _string(incidentid)
-        or _string(incident_id)
-        or _string(id)
-        or _string(source_payload.get("incidentid"))
-        or _string(source_payload.get("incident_id"))
-        or _string(source_payload.get("id"))
-        or str(uuid4())
-    )
+    resolved_incident_id = _string(incidentid) or _string(incident_id) or _string(id) or _string(source_payload.get("incidentid")) or _string(source_payload.get("incident_id")) or _string(source_payload.get("id")) or str(uuid4())
 
-    resolved_title = (
-        _string(title)
-        or _string(source_payload.get("title"))
-        or _string(summary)
-        or _string(source_payload.get("summary"))
-        or _string(description)
-        or _string(source_payload.get("description"))
-        or "Security incident"
-    )
+    resolved_title = _string(title) or _string(source_payload.get("title")) or _string(summary) or _string(source_payload.get("summary")) or _string(description) or _string(source_payload.get("description")) or "Security incident"
 
     if not resolved_title:
         raise ValueError("title is required")
 
-    resolved_summary = (
-        _string(summary)
-        or _string(source_payload.get("summary"))
-        or _string(description)
-        or _string(source_payload.get("description"))
-        or resolved_title
-    )
+    resolved_summary = _string(summary) or _string(source_payload.get("summary")) or _string(description) or _string(source_payload.get("description")) or resolved_title
 
-    resolved_description = (
-        _string(description)
-        or _string(source_payload.get("description"))
-        or resolved_summary
-    )
+    resolved_description = _string(description) or _string(source_payload.get("description")) or resolved_summary
 
     resolved_severity = _string(severity or source_payload.get("severity"))
     if not resolved_severity:
@@ -227,75 +198,29 @@ def _normalize_incident_payload(
 
     resolved_status = _normalize_status(status or source_payload.get("status"))
 
-    resolved_priority = (
-        _string(priority)
-        or _string(source_payload.get("priority"))
-        or resolved_severity
-    )
+    resolved_priority = _string(priority) or _string(source_payload.get("priority")) or resolved_severity
 
-    resolved_category = (
-        _string(category)
-        or _string(incident_type)
-        or _string(source_payload.get("category"))
-        or _string(source_payload.get("incident_type"))
-        or "security"
-    )
+    resolved_category = _string(category) or _string(incident_type) or _string(source_payload.get("category")) or _string(source_payload.get("incident_type")) or "security"
 
     resolved_source = _normalize_source(source or source_payload.get("source"))
     resolved_verdict = _string(verdict) or _string(source_payload.get("verdict")) or "pending"
 
-    resolved_org = (
-        _string(organization_id)
-        or _string(org_id)
-        or _string(tenant_id)
-        or _string(customer_id)
-        or _string(source_payload.get("organization_id"))
-        or _string(source_payload.get("org_id"))
-        or _string(source_payload.get("tenant_id"))
-        or _string(source_payload.get("customer_id"))
-    )
+    resolved_org = _string(organization_id) or _string(org_id) or _string(tenant_id) or _string(customer_id) or _string(source_payload.get("organization_id")) or _string(source_payload.get("org_id")) or _string(source_payload.get("tenant_id")) or _string(source_payload.get("customer_id"))
 
     resolved_created_at = _normalize_timestamp(
-        created_at
-        or createdat
-        or source_payload.get("created_at")
-        or source_payload.get("createdat")
-        or detected_at
-        or detectedat
-        or timestamp
-        or source_payload.get("detected_at")
-        or source_payload.get("detectedat")
-        or source_payload.get("timestamp")
+        created_at or createdat or source_payload.get("created_at") or source_payload.get("createdat") or detected_at or detectedat or timestamp or source_payload.get("detected_at") or source_payload.get("detectedat") or source_payload.get("timestamp"),
     )
     resolved_updated_at = _normalize_timestamp(
-        updated_at
-        or updatedat
-        or source_payload.get("updated_at")
-        or source_payload.get("updatedat")
-        or resolved_created_at
+        updated_at or updatedat or source_payload.get("updated_at") or source_payload.get("updatedat") or resolved_created_at,
     )
     resolved_detected_at = _normalize_timestamp(
-        detected_at
-        or detectedat
-        or source_payload.get("detected_at")
-        or source_payload.get("detectedat")
-        or timestamp
-        or source_payload.get("timestamp")
-        or resolved_created_at
+        detected_at or detectedat or source_payload.get("detected_at") or source_payload.get("detectedat") or timestamp or source_payload.get("timestamp") or resolved_created_at,
     )
     resolved_resolved_at = (
         _normalize_timestamp(
-            resolved_at
-            or resolvedat
-            or source_payload.get("resolved_at")
-            or source_payload.get("resolvedat")
+            resolved_at or resolvedat or source_payload.get("resolved_at") or source_payload.get("resolvedat"),
         )
-        if (
-            resolved_at is not None
-            or resolvedat is not None
-            or source_payload.get("resolved_at") is not None
-            or source_payload.get("resolvedat") is not None
-        )
+        if (resolved_at is not None or resolvedat is not None or source_payload.get("resolved_at") is not None or source_payload.get("resolvedat") is not None)
         else None
     )
 
@@ -303,37 +228,10 @@ def _normalize_incident_payload(
     resolved_target = target if isinstance(target, dict) else _mapping(source_payload.get("target"))
     resolved_metadata = metadata if isinstance(metadata, dict) else _mapping(source_payload.get("metadata"))
 
-    resolved_request_id = (
-        _string(request_id)
-        or _string(requestid)
-        or _string(source_payload.get("request_id"))
-        or _string(source_payload.get("requestid"))
-        or None
-    )
-    resolved_trace_id = (
-        _string(trace_id)
-        or _string(traceid)
-        or _string(source_payload.get("trace_id"))
-        or _string(source_payload.get("traceid"))
-        or None
-    )
-    resolved_owner = (
-        _string(owner)
-        or _string(owner_id)
-        or _string(assigned_to)
-        or _string(assignedto)
-        or _string(source_payload.get("owner"))
-        or _string(source_payload.get("owner_id"))
-        or _string(source_payload.get("assigned_to"))
-        or _string(source_payload.get("assignedto"))
-        or None
-    )
-    resolved_assetref = (
-        _string(assetref)
-        or _string(source_payload.get("assetref"))
-        or _string(source_payload.get("asset_ref"))
-        or None
-    )
+    resolved_request_id = _string(request_id) or _string(requestid) or _string(source_payload.get("request_id")) or _string(source_payload.get("requestid")) or None
+    resolved_trace_id = _string(trace_id) or _string(traceid) or _string(source_payload.get("trace_id")) or _string(source_payload.get("traceid")) or None
+    resolved_owner = _string(owner) or _string(owner_id) or _string(assigned_to) or _string(assignedto) or _string(source_payload.get("owner")) or _string(source_payload.get("owner_id")) or _string(source_payload.get("assigned_to")) or _string(source_payload.get("assignedto")) or None
+    resolved_assetref = _string(assetref) or _string(source_payload.get("assetref")) or _string(source_payload.get("asset_ref")) or None
 
     normalized = {
         "incidentid": resolved_incident_id,
@@ -387,6 +285,7 @@ def _normalize_incident_payload(
 # IncidentRecord — persistence-backed, str timestamps
 # Distinct from incident_store.IncidentRecordInMemory (datetime timestamps).
 # ---------------------------------------------------------------------------
+
 
 @dataclass(slots=True)
 class IncidentRecord:
@@ -499,6 +398,7 @@ class IncidentRecord:
 # Seed helper
 # ---------------------------------------------------------------------------
 
+
 def _seed_demo_incident() -> IncidentRecord:
     now = _utc_now()
     return IncidentRecord(
@@ -529,6 +429,7 @@ def _seed_demo_incident() -> IncidentRecord:
 # IncidentStore — persistence-backed
 # Distinct from incident_store.IncidentStoreInMemory (thread-locked list).
 # ---------------------------------------------------------------------------
+
 
 @dataclass(slots=True)
 class IncidentStore:
@@ -629,7 +530,10 @@ class IncidentStore:
         return dict(payload)
 
     def _safe_update(
-        self, payload: dict[str, Any], *, filters: dict[str, Any]
+        self,
+        payload: dict[str, Any],
+        *,
+        filters: dict[str, Any],
     ) -> dict[str, Any] | None:
         try:
             updated = self.backend.update(
@@ -868,7 +772,10 @@ class IncidentStore:
 
         normalized = _normalize_incident_payload(merged)
 
-        if _normalize_status(normalized.get("status")) in {"resolved", "closed"} and not normalized.get("resolved_at"):
+        if _normalize_status(normalized.get("status")) in {
+            "resolved",
+            "closed",
+        } and not normalized.get("resolved_at"):
             normalized["resolved_at"] = normalized["updated_at"]
             normalized["resolvedat"] = normalized["updatedat"]
 
@@ -1075,6 +982,7 @@ class IncidentStore:
 # ---------------------------------------------------------------------------
 # Subclass aliases (kept for any router that imports them by name)
 # ---------------------------------------------------------------------------
+
 
 class InMemoryIncidentStore(IncidentStore):
     pass

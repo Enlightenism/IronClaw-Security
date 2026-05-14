@@ -29,7 +29,7 @@ def test_build_action_history_detail_view_falls_back_to_executionid() -> None:
             "executionid": "exec-702",
             "status": "review",
             "riskscore": 5,
-        }
+        },
     )
 
     assert view.actionid == "exec-702"
@@ -44,21 +44,12 @@ def test_build_action_history_detail_view_formats_special_values() -> None:
             "tags": ["security", "runtime"],
             "metadata": {"region": "mx", "tier": "prod"},
             "notes": None,
-        }
+        },
     )
 
-    assert any(
-        row.key == "promptinjectiondetected" and row.tone == "critical"
-        for row in view.rows
-    )
-    assert any(
-        row.key == "tags" and row.value == "security, runtime"
-        for row in view.rows
-    )
-    assert any(
-        row.key == "metadata" and row.value == "region=mx, tier=prod"
-        for row in view.rows
-    )
+    assert any(row.key == "promptinjectiondetected" and row.tone == "critical" for row in view.rows)
+    assert any(row.key == "tags" and row.value == "security, runtime" for row in view.rows)
+    assert any(row.key == "metadata" and row.value == "region=mx, tier=prod" for row in view.rows)
     assert any(row.key == "notes" and row.value == "—" for row in view.rows)
 
 

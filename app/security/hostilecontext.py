@@ -147,7 +147,7 @@ def scanhostilecontext(
             metadata.get("filename"),
             metadata.get("attachmenttext"),
             metadata.get("retrievedcontent"),
-        ]
+        ],
     )
 
     matchedpatterns: list[str] = []
@@ -173,7 +173,7 @@ def scanhostilecontext(
                 label=rule.label,
                 details=f"{rule.details} Matched content: {excerpt[:220]}",
                 score=rule.score,
-            )
+            ),
         )
         totalscore += rule.score
 
@@ -191,9 +191,7 @@ def scanhostilecontext(
         severity = "none"
 
     shouldreview = totalscore >= 20
-    shouldquarantine = totalscore >= 70 or (
-        "remote_exfiltration" in categories and "tool_output_override" in categories
-    )
+    shouldquarantine = totalscore >= 70 or ("remote_exfiltration" in categories and "tool_output_override" in categories)
 
     if not flagged:
         summary = "No hostile external context indicators were detected."

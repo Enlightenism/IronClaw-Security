@@ -255,7 +255,7 @@ if __name__ == "__main__":
             target="https://github.com/example/approved-repo",
             requested_by="runtime-executor-01",
             metadata={"trigger": "manual_test"},
-        )
+        ),
     )
 
     print(json.dumps(summarize_execution_result(result), ensure_ascii=False, indent=2))

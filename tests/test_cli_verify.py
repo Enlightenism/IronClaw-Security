@@ -7,7 +7,7 @@ from app.cli.main import run_cli
 
 def test_cli_verify_non_strict_returns_zero(capsys):
     exit_code = run_cli(
-        ["verify", "integration-claude-code", "--requested-by", "pytest"]
+        ["verify", "integration-claude-code", "--requested-by", "pytest"],
     )
 
     assert exit_code == 0
@@ -21,7 +21,7 @@ def test_cli_verify_non_strict_returns_zero(capsys):
 
 def test_cli_verify_strict_returns_zero_with_failed_verification_summary(capsys):
     exit_code = run_cli(
-        ["verify", "integration-openclaw", "--strict", "--requested-by", "pytest"]
+        ["verify", "integration-openclaw", "--strict", "--requested-by", "pytest"],
     )
 
     assert exit_code == 0

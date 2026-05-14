@@ -115,16 +115,13 @@ class RestoreResult:
 
 @runtime_checkable
 class RestoreExecutor(Protocol):
-    def restore(self, manifest: RestoreManifest, restore_root: Path, dry_run: bool) -> list[dict[str, Any]]:
-        ...
+    def restore(self, manifest: RestoreManifest, restore_root: Path, dry_run: bool) -> list[dict[str, Any]]: ...
 
-    def rollback(self, rollback_checkpoint: Path, restore_root: Path) -> list[dict[str, Any]]:
-        ...
+    def rollback(self, rollback_checkpoint: Path, restore_root: Path) -> list[dict[str, Any]]: ...
 
 
 class FilesystemRestoreExecutor:
-    """
-    Filesystem-oriented restore executor.
+    """Filesystem-oriented restore executor.
 
     - tar.gz: extracts archive to restore root
     - jsonl.gz: replays lines into a materialized jsonl file for inspection
@@ -191,7 +188,7 @@ class FilesystemRestoreExecutor:
                         "action": "restore-checkpoint-path",
                         "source": str(child),
                         "destination": str(destination),
-                    }
+                    },
                 )
                 if child.is_dir():
                     shutil.copytree(child, destination, dirs_exist_ok=True)
@@ -203,8 +200,7 @@ class FilesystemRestoreExecutor:
 
 
 class RestoreService:
-    """
-    Owns validated restore, dry-run restore, and rollback-safe replay for IronClaw.
+    """Owns validated restore, dry-run restore, and rollback-safe replay for IronClaw.
 
     Expected artifact layout:
     - backup artifact: /path/to/backup.tar.gz or /path/to/export.jsonl.gz
@@ -265,7 +261,7 @@ class RestoreService:
                     "name": "checksum-match",
                     "ok": checksum_ok,
                     "detail": {"expected": manifest.sha256, "actual": actual},
-                }
+                },
             )
         else:
             checks.append(
@@ -273,7 +269,7 @@ class RestoreService:
                     "name": "checksum-match",
                     "ok": manifest.sha256 is None,
                     "detail": "skipped-no-checksum" if manifest.sha256 is None else "missing-backup-file",
-                }
+                },
             )
 
         ok = all(bool(check["ok"]) for check in checks)
@@ -416,8 +412,7 @@ class RestoreService:
             )
 
     def replay_with_rollback_safety(self, manifest_path: Path, restore_root: Path) -> RestoreResult:
-        """
-        Higher-level helper for explicit rollback-safe replay.
+        """Higher-level helper for explicit rollback-safe replay.
         Equivalent to restore(), but named for orchestration clarity.
         """
         return self.restore(manifest_path, restore_root)
@@ -444,7 +439,7 @@ class RestoreService:
                     "name": "rollback-checkpoint-exists",
                     "ok": rollback_checkpoint.exists(),
                     "detail": str(rollback_checkpoint),
-                }
+                },
             ],
             failure_reason=None,
         )

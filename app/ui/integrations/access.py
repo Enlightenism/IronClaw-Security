@@ -159,12 +159,10 @@ def build_integration_access_view(
         command_ready = bool(getattr(record, "command_name", None))
         install_ready = bool(getattr(record, "install_target", None))
         endpoint_ready = bool(
-            getattr(record, "endpoint", None) or getattr(record, "base_url", None)
+            getattr(record, "endpoint", None) or getattr(record, "base_url", None),
         )
         secret_ready = bool(
-            record_metadata.get("secret_ref")
-            or record_metadata.get("credential_ref")
-            or record_metadata.get("api_key_ref")
+            record_metadata.get("secret_ref") or record_metadata.get("credential_ref") or record_metadata.get("api_key_ref"),
         )
 
         control_count = _control_count(
@@ -205,7 +203,7 @@ def build_integration_access_view(
                 metadata={
                     "requested_by": requested_by,
                 },
-            )
+            ),
         )
 
     items.sort(
@@ -214,7 +212,7 @@ def build_integration_access_view(
             item.platform,
             item.slug,
             item.integration_id,
-        )
+        ),
     )
 
     return IntegrationAccessView(

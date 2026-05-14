@@ -26,14 +26,12 @@ from ironclaw_skill.billing import (
 # ---------------------------------------------------------------------------
 
 
-
-@pytest.fixture()
+@pytest.fixture
 def stub_policy() -> BillingPolicy:
     return BillingPolicy(provider="stub")
 
 
-
-@pytest.fixture()
+@pytest.fixture
 def memory_policy(tmp_path: Path) -> BillingPolicy:
     return BillingPolicy(
         provider="memory",
@@ -43,23 +41,19 @@ def memory_policy(tmp_path: Path) -> BillingPolicy:
     )
 
 
-
-@pytest.fixture()
+@pytest.fixture
 def memory_hook(memory_policy: BillingPolicy) -> MemoryBillingHook:
     return MemoryBillingHook(memory_policy)
 
 
-
-@pytest.fixture()
+@pytest.fixture
 def stub_hook(stub_policy: BillingPolicy) -> StubBillingHook:
     return StubBillingHook(stub_policy)
-
 
 
 # ---------------------------------------------------------------------------
 # BillingPolicy.cost_for
 # ---------------------------------------------------------------------------
-
 
 
 class TestBillingPolicyCostForUnit:
@@ -96,11 +90,9 @@ class TestBillingPolicyCostForUnit:
         assert policy.cost_for("  execute  ") == 3
 
 
-
 # ---------------------------------------------------------------------------
 # load_billing_policy — env resolution
 # ---------------------------------------------------------------------------
-
 
 
 class TestLoadBillingPolicy:
@@ -187,11 +179,9 @@ class TestLoadBillingPolicy:
         assert policy.ledger_path == ledger.resolve()
 
 
-
 # ---------------------------------------------------------------------------
 # StubBillingHook
 # ---------------------------------------------------------------------------
-
 
 
 class TestStubBillingHook:
@@ -271,11 +261,9 @@ class TestStubBillingHook:
         assert result.reason == "stub_billing_provider"
 
 
-
 # ---------------------------------------------------------------------------
 # MemoryBillingHook — accepted path
 # ---------------------------------------------------------------------------
-
 
 
 class TestMemoryBillingHookAccepted:
@@ -354,11 +342,9 @@ class TestMemoryBillingHookAccepted:
         assert json.dumps(result.to_dict())
 
 
-
 # ---------------------------------------------------------------------------
 # MemoryBillingHook — rejected / exhausted path
 # ---------------------------------------------------------------------------
-
 
 
 class TestMemoryBillingHookRejected:
@@ -432,11 +418,9 @@ class TestMemoryBillingHookRejected:
         assert hook.balance == 1
 
 
-
 # ---------------------------------------------------------------------------
 # MemoryBillingHook — reset_balance
 # ---------------------------------------------------------------------------
-
 
 
 class TestMemoryBillingHookResetBalance:
@@ -458,11 +442,9 @@ class TestMemoryBillingHookResetBalance:
         assert memory_hook.balance == 9
 
 
-
 # ---------------------------------------------------------------------------
 # MemoryBillingHook — ledger persistence
 # ---------------------------------------------------------------------------
-
 
 
 class TestMemoryBillingHookLedger:
@@ -515,11 +497,9 @@ class TestMemoryBillingHookLedger:
         assert deep_path.exists()
 
 
-
 # ---------------------------------------------------------------------------
 # MemoryBillingHook — thread safety
 # ---------------------------------------------------------------------------
-
 
 
 class TestMemoryBillingHookThreadSafety:
@@ -550,11 +530,9 @@ class TestMemoryBillingHookThreadSafety:
         assert hook.balance == 1000 - 100
 
 
-
 # ---------------------------------------------------------------------------
 # create_billing_hook
 # ---------------------------------------------------------------------------
-
 
 
 class TestCreateBillingHook:
@@ -580,11 +558,9 @@ class TestCreateBillingHook:
         assert isinstance(hook, StubBillingHook)
 
 
-
 # ---------------------------------------------------------------------------
 # charge_units — top-level convenience
 # ---------------------------------------------------------------------------
-
 
 
 class TestChargeUnits:
@@ -628,11 +604,9 @@ class TestChargeUnits:
             assert r.ok is True
 
 
-
 # ---------------------------------------------------------------------------
 # build_billing_context_from_request_context
 # ---------------------------------------------------------------------------
-
 
 
 class TestBuildBillingContextFromRequestContext:
@@ -712,11 +686,9 @@ class TestBuildBillingContextFromRequestContext:
         assert json.dumps(bc.to_dict())
 
 
-
 # ---------------------------------------------------------------------------
 # BillingContext.to_dict
 # ---------------------------------------------------------------------------
-
 
 
 class TestBillingContextToDict:
@@ -743,11 +715,9 @@ class TestBillingContextToDict:
         assert d["request_id"] is None
 
 
-
 # ---------------------------------------------------------------------------
 # BillingEvent.to_dict
 # ---------------------------------------------------------------------------
-
 
 
 class TestBillingEventToDict:
@@ -764,11 +734,9 @@ class TestBillingEventToDict:
         assert result.event.to_dict()["operation"] == "execute"
 
 
-
 # ---------------------------------------------------------------------------
 # BillingResult.to_dict
 # ---------------------------------------------------------------------------
-
 
 
 class TestBillingResultToDict:

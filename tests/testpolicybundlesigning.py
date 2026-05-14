@@ -21,14 +21,16 @@ def _canonical_bundle(
     return {
         "bundle_id": bundle_id,
         "version": version,
-        "policy": policy or {
+        "policy": policy
+        or {
             "default_verdict": "allow",
             "rules": [
                 {"id": "rule-safe-shell", "action": "allow", "match": {"tool": "bash"}},
                 {"id": "rule-high-risk", "action": "review", "match": {"risk": "high"}},
             ],
         },
-        "metadata": metadata or {
+        "metadata": metadata
+        or {
             "issuer": "ironclaw",
             "environment": "test",
             "targets": ["openclaw", "claude", "groq"],
@@ -51,7 +53,7 @@ def _hmac_b64(secret: str, message: str) -> str:
     return base64.b64encode(digest).decode("utf-8")
 
 
-@pytest.fixture()
+@pytest.fixture
 def service():
     return build_policy_bundle_signing_service()
 
@@ -98,7 +100,7 @@ def test_verify_bundle_rejects_tampered_policy(service):
 
     tampered = _canonical_bundle()
     tampered["policy"]["rules"].append(
-        {"id": "rule-evil", "action": "allow", "match": {"tool": "python", "path": "/etc/shadow"}}
+        {"id": "rule-evil", "action": "allow", "match": {"tool": "python", "path": "/etc/shadow"}},
     )
 
     verdict = service.verify_bundle(
@@ -364,7 +366,6 @@ def test_missing_version_is_rejected(service):
 
 
 def test_verify_latest_bundle_accepts_forward_progress(service):
-    current = _canonical_bundle(version="2026.04.25")
     next_bundle = _canonical_bundle(version="2026.04.26")
     signed = service.sign_bundle(bundle=next_bundle, secret="ironclaw-test-secret")
 

@@ -83,10 +83,7 @@ class IntegrationRegistry:
                 platform="claude",
                 displayname="Claude Code",
                 status="available",
-                description=(
-                    "IronClaw control-plane adapter for Claude and Claude Code "
-                    "security enforcement."
-                ),
+                description=("IronClaw control-plane adapter for Claude and Claude Code security enforcement."),
                 version="gen1",
                 adaptermodule="app.claudeguardrouter",
                 verificationroute="/integrations/integration-claude-code/verify",
@@ -108,10 +105,7 @@ class IntegrationRegistry:
                 platform="openclaw",
                 displayname="OpenClaw",
                 status="ready",
-                description=(
-                    "Native IronClaw enforcement integration for OpenClaw-style "
-                    "agent toolchains."
-                ),
+                description=("Native IronClaw enforcement integration for OpenClaw-style agent toolchains."),
                 version="gen1",
                 adaptermodule="app.adapters.openclaw",
                 verificationroute="/integrations/integration-openclaw/verify",
@@ -133,10 +127,7 @@ class IntegrationRegistry:
                 platform="generic",
                 displayname="Generic Agent Runtime",
                 status="planned",
-                description=(
-                    "Generic IronClaw adapter template for custom agent runtimes "
-                    "and toolchains."
-                ),
+                description=("Generic IronClaw adapter template for custom agent runtimes and toolchains."),
                 version="gen1",
                 adaptermodule="app.adapters.genericagent",
                 verificationroute="/integrations/integration-generic-agent/verify",
@@ -174,7 +165,7 @@ class IntegrationRegistry:
                         enabled=True,
                         maturity="gen1",
                         notes="Groq Assist-specific capabilities.",
-                    )
+                    ),
                 ],
                 metadata={
                     "provider": "groq",
@@ -219,11 +210,7 @@ class IntegrationRegistry:
                 )
                 for capability in record.capabilities
             ],
-            metadata={
-                str(key).strip(): str(value).strip()
-                for key, value in record.metadata.items()
-                if str(key).strip()
-            },
+            metadata={str(key).strip(): str(value).strip() for key, value in record.metadata.items() if str(key).strip()},
         )
         self._records[normalized_id] = stored
         return stored

@@ -353,10 +353,10 @@ async def stream_request_log() -> StreamingResponse:
 
 
 __all__ = [
+    "_REQUEST_EVENTS",
     "RequestLogEvent",
     "RequestLogEventView",
     "RequestLogPageResponse",
-    "_REQUEST_EVENTS",
     "router",
     "seed_demo_requests",
 ]

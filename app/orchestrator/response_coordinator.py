@@ -196,11 +196,7 @@ def _build_response_reason(decision: PolicyDecision) -> str:
 
 
 def _build_review_reason(decision: PolicyDecision) -> str:
-    return (
-        f"Decision {decision.decision_id} requires review. "
-        f"Verdict={decision.verdict}, risk_score={decision.risk_score}, "
-        f"risk_level={decision.risk_level}, matched_rules={len(decision.matched_rules)}."
-    )
+    return f"Decision {decision.decision_id} requires review. Verdict={decision.verdict}, risk_score={decision.risk_score}, risk_level={decision.risk_level}, matched_rules={len(decision.matched_rules)}."
 
 
 def _should_queue_for_review(

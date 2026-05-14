@@ -70,10 +70,7 @@ def get_marketing_why_ironclaw() -> WhyIronclawPageResponse:
     hero = WhyIronclawHeroView(
         eyebrow="Why IronClaw",
         title="Because AI needs a real line of defense between intelligence and action.",
-        subtitle=(
-            "IronClaw-Security is for teams that understand a modern AI system is not just a model. It is a live trust chain "
-            "connected to files, browsers, tools, APIs, memory, workflows, and the user's own machine."
-        ),
+        subtitle=("IronClaw-Security is for teams that understand a modern AI system is not just a model. It is a live trust chain connected to files, browsers, tools, APIs, memory, workflows, and the user's own machine."),
         primaryctalabel="Book live demo",
         primaryctahref="/contact-sales",
         secondaryctalabel="Read security features",
@@ -85,37 +82,28 @@ def get_marketing_why_ironclaw() -> WhyIronclawPageResponse:
             statid="security-concern",
             value="92%",
             label="Security professionals are concerned about AI agents in the workforce",
-            context=(
-                "Darktrace reports that 92% of security professionals are concerned about the impact of AI agents on security."
-            ),
+            context=("Darktrace reports that 92% of security professionals are concerned about the impact of AI agents on security."),
             source="Darktrace State of AI Cybersecurity 2026",
         ),
         WhyIronclawProofStatView(
             statid="governance-gap",
             value="14.4%",
             label="Only a small share of organizations have full security approval for agents in production",
-            context=(
-                "Gravitee reports that 81% of teams are past planning, yet only 14.4% have full security approval."
-            ),
+            context=("Gravitee reports that 81% of teams are past planning, yet only 14.4% have full security approval."),
             source="Gravitee State of AI Agent Security 2026",
         ),
         WhyIronclawProofStatView(
             statid="incident-rate",
             value="88%",
             label="Organizations report confirmed or suspected AI agent security incidents",
-            context=(
-                "Gravitee says 88% of organizations confirmed or suspected agent-related security incidents in the past year."
-            ),
+            context=("Gravitee says 88% of organizations confirmed or suspected agent-related security incidents in the past year."),
             source="Gravitee State of AI Agent Security 2026",
         ),
         WhyIronclawProofStatView(
             statid="top-risk",
             value="LLM01",
             label="Prompt injection remains the top-ranked LLM application risk",
-            context=(
-                "OWASP identifies prompt injection as LLM01 and warns that it can lead to unauthorized functions, arbitrary commands, "
-                "sensitive disclosure, and manipulated decision-making."
-            ),
+            context=("OWASP identifies prompt injection as LLM01 and warns that it can lead to unauthorized functions, arbitrary commands, sensitive disclosure, and manipulated decision-making."),
             source="OWASP GenAI Security Project",
         ),
     ]
@@ -124,10 +112,7 @@ def get_marketing_why_ironclaw() -> WhyIronclawPageResponse:
         WhyIronclawReasonView(
             reasonid="reason-1",
             title="Because legacy security was not built for AI agency",
-            summary=(
-                "Traditional controls were designed for apps, users, and endpoints. They were not designed for models that can be manipulated "
-                "through language and then act through tools."
-            ),
+            summary=("Traditional controls were designed for apps, users, and endpoints. They were not designed for models that can be manipulated through language and then act through tools."),
             bullets=[
                 "Prompt injection is not a normal input-validation issue",
                 "Autonomous systems can chain mistakes into privileged actions",
@@ -137,9 +122,7 @@ def get_marketing_why_ironclaw() -> WhyIronclawPageResponse:
         WhyIronclawReasonView(
             reasonid="reason-2",
             title="Because the operator carries the real risk",
-            summary=(
-                "In many AI workflows, it is the user's browser, files, secrets, device, or business systems that absorb the damage when trust fails."
-            ),
+            summary=("In many AI workflows, it is the user's browser, files, secrets, device, or business systems that absorb the damage when trust fails."),
             bullets=[
                 "The model may be remote, but the blast radius often lands locally",
                 "Vendors are not the only trust boundary that matters",
@@ -149,9 +132,7 @@ def get_marketing_why_ironclaw() -> WhyIronclawPageResponse:
         WhyIronclawReasonView(
             reasonid="reason-3",
             title="Because adoption is outrunning governance",
-            summary=(
-                "Organizations are shipping AI agents and tool-connected systems faster than they can properly approve, monitor, and govern them."
-            ),
+            summary=("Organizations are shipping AI agents and tool-connected systems faster than they can properly approve, monitor, and govern them."),
             bullets=[
                 "Production deployment is rising faster than security approval",
                 "Many teams still lack complete visibility into agent behavior",
@@ -161,9 +142,7 @@ def get_marketing_why_ironclaw() -> WhyIronclawPageResponse:
         WhyIronclawReasonView(
             reasonid="reason-4",
             title="Because trust has to be enforced, not implied",
-            summary=(
-                "The future of AI adoption belongs to products that can visibly allow, review, quarantine, and block risky behavior before damage occurs."
-            ),
+            summary=("The future of AI adoption belongs to products that can visibly allow, review, quarantine, and block risky behavior before damage occurs."),
             bullets=[
                 "Human approval for high-risk actions matters",
                 "Decision trails build buyer and operator confidence",
@@ -203,32 +182,20 @@ def get_marketing_why_ironclaw() -> WhyIronclawPageResponse:
         WhyIronclawScenarioView(
             scenarioid="scenario-1",
             title="A browsing agent reads attacker-controlled content",
-            failuremode=(
-                "Hidden instructions inside a webpage alter the model's next step and push it toward unsafe actions."
-            ),
-            ironclawresponse=(
-                "IronClaw treats external content as untrusted and places policy and review checks between model output and execution."
-            ),
+            failuremode=("Hidden instructions inside a webpage alter the model's next step and push it toward unsafe actions."),
+            ironclawresponse=("IronClaw treats external content as untrusted and places policy and review checks between model output and execution."),
         ),
         WhyIronclawScenarioView(
             scenarioid="scenario-2",
             title="A tool-using copilot is granted too much autonomy",
-            failuremode=(
-                "The system turns ambiguous or manipulated output into privileged tool use across files, APIs, or enterprise systems."
-            ),
-            ironclawresponse=(
-                "IronClaw supports least-privilege action control, review for high-risk requests, and safer containment paths."
-            ),
+            failuremode=("The system turns ambiguous or manipulated output into privileged tool use across files, APIs, or enterprise systems."),
+            ironclawresponse=("IronClaw supports least-privilege action control, review for high-risk requests, and safer containment paths."),
         ),
         WhyIronclawScenarioView(
             scenarioid="scenario-3",
             title="An enterprise scales agents faster than security review",
-            failuremode=(
-                "Teams deploy AI broadly while governance, approvals, and monitoring remain incomplete or inconsistent."
-            ),
-            ironclawresponse=(
-                "IronClaw creates a buyer-ready control layer centered on runtime enforcement, audit evidence, and operational visibility."
-            ),
+            failuremode=("Teams deploy AI broadly while governance, approvals, and monitoring remain incomplete or inconsistent."),
+            ironclawresponse=("IronClaw creates a buyer-ready control layer centered on runtime enforcement, audit evidence, and operational visibility."),
         ),
     ]
 

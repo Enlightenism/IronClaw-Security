@@ -141,7 +141,7 @@ def build_integration_dependencies_view(
                     "requested_by": requested_by,
                     "status": record.status,
                 },
-            )
+            ),
         )
 
     items.sort(
@@ -150,7 +150,7 @@ def build_integration_dependencies_view(
             item.platform,
             item.slug,
             item.integration_id,
-        )
+        ),
     )
 
     return IntegrationDependenciesView(

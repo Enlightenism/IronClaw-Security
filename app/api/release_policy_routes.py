@@ -16,12 +16,15 @@ router = APIRouter(
 # that a missing env var or Supabase config never crashes pytest collection.
 # ---------------------------------------------------------------------------
 
+
 def _get_release_policy_client():
     try:
         from app.dependencies import get_release_policy_client
+
         return get_release_policy_client()
     except Exception:
         from app.clients.release_policy_client import ReleasePolicyClient
+
         return ReleasePolicyClient()
 
 
@@ -29,34 +32,46 @@ def _get_release_policy_client():
 # Request / Response models
 # ---------------------------------------------------------------------------
 
+
 class ReleasePolicyRequest(BaseModel):
     integration_id: str = Field(..., description="Stable integration identifier.")
     compatibility_state: str = Field(
-        ..., description="Compatibility state (supported, warning, unsupported)."
+        ...,
+        description="Compatibility state (supported, warning, unsupported).",
     )
     telemetry_state: str = Field(
-        ..., description="Telemetry state (supported, warning, unsupported)."
+        ...,
+        description="Telemetry state (supported, warning, unsupported).",
     )
     lifecycle_state: str = Field(
-        ..., description="Lifecycle state (draft, active, degraded, blocked, retired)."
+        ...,
+        description="Lifecycle state (draft, active, degraded, blocked, retired).",
     )
     risk_score: float = Field(
-        ..., ge=0.0, le=100.0, description="Overall risk score, 0–100."
+        ...,
+        ge=0.0,
+        le=100.0,
+        description="Overall risk score, 0–100.",
     )
     has_open_blockers: bool = Field(
-        False, description="Whether any hard rollout blockers are open."
+        False,
+        description="Whether any hard rollout blockers are open.",
     )
     has_audit_gaps: bool = Field(
-        False, description="Whether audit coverage has known gaps."
+        False,
+        description="Whether audit coverage has known gaps.",
     )
     has_rollback_plan: bool = Field(
-        True, description="Whether a rollback plan exists and is current."
+        True,
+        description="Whether a rollback plan exists and is current.",
     )
     has_test_evidence: bool = Field(
-        True, description="Whether test evidence is available for this release."
+        True,
+        description="Whether test evidence is available for this release.",
     )
     requires_manual_review: bool = Field(
-        False, description="Whether manual review is required before release."
+        False,
+        description="Whether manual review is required before release.",
     )
     manual_review_completed: bool = Field(
         False,
@@ -79,14 +94,12 @@ class ReleasePolicyResponse(BaseModel):
 # Route
 # ---------------------------------------------------------------------------
 
+
 @router.post(
     "/evaluate",
     response_model=ReleasePolicyResponse,
     summary="Evaluate release policy for an integration",
-    description=(
-        "Evaluate rollout decision, readiness, and release summary "
-        "for a given integration snapshot."
-    ),
+    description=("Evaluate rollout decision, readiness, and release summary for a given integration snapshot."),
 )
 def evaluate_release_policy_route(
     payload: ReleasePolicyRequest,

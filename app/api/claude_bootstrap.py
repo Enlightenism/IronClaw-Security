@@ -75,10 +75,7 @@ class ClaudeBootstrapRequest(BaseModel):
     )
     base_guard_url: str | None = Field(
         None,
-        description=(
-            "Optional override for IronClaw's externally reachable base URL. "
-            "If omitted, this is derived from the current request."
-        ),
+        description=("Optional override for IronClaw's externally reachable base URL. If omitted, this is derived from the current request."),
     )
     guard_mode: Literal["enforce", "assist", "dryrun"] = Field(
         "enforce",

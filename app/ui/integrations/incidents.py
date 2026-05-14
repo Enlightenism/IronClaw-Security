@@ -207,7 +207,7 @@ def build_integration_incidents_view(
                 metadata={
                     "requested_by": requested_by,
                 },
-            )
+            ),
         )
 
     items.sort(
@@ -216,7 +216,7 @@ def build_integration_incidents_view(
             -item.open_incident_count,
             -item.critical_incident_count,
             item.slug,
-        )
+        ),
     )
 
     return IntegrationIncidentsView(

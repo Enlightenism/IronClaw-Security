@@ -302,7 +302,7 @@ def build_review_detail(
             **{
                 **detail.__dict__,
                 "review_id": _coerce_str(review_id),
-            }
+            },
         )
 
     return detail

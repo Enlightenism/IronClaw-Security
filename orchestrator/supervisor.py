@@ -66,7 +66,7 @@ class SupervisorDecision:
                 kind=kind,
                 message=message,
                 metadata=dict(metadata or {}),
-            )
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -247,7 +247,7 @@ class Supervisor:
                     "event": "supervisor.decision",
                     "decision": decision.to_dict(),
                     "timestamp": datetime.now(UTC).isoformat(),
-                }
+                },
             )
 
 

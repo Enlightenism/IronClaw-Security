@@ -208,7 +208,7 @@ def _build_placeholder_items() -> list[ReviewQueueItem]:
                 traceid=raw.get("traceid"),
                 requestid=raw.get("requestid"),
                 decisionid=raw.get("decisionid"),
-            )
+            ),
         )
     return items
 

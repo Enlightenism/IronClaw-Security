@@ -114,7 +114,7 @@ def _build_placeholder_items() -> list[IncidentTriageItem]:
                     riskscore=44,
                     executionstate="executed",
                     policyverdict="allow",
-                )
+                ),
             ],
         ),
     ]

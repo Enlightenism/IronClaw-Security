@@ -57,8 +57,7 @@ class ReviewQueueItem(BaseModel):
 
 
 class ReviewQueueService:
-    """
-    In-memory analyst review queue with deterministic escalation behavior.
+    """In-memory analyst review queue with deterministic escalation behavior.
 
     Goals:
     - Fast drop-in service for orchestration/testing.
@@ -188,7 +187,7 @@ class ReviewQueueService:
                         "status": ReviewStatus.IN_PROGRESS,
                         "assigned_to": reviewer_id,
                         "updated_at": self._utcnow(),
-                    }
+                    },
                 )
                 self._items[review_id] = claimed
                 return claimed
@@ -203,7 +202,7 @@ class ReviewQueueService:
                     "assigned_to": reviewer_id,
                     "status": ReviewStatus.IN_PROGRESS,
                     "updated_at": self._utcnow(),
-                }
+                },
             )
             self._items[review_id] = updated
             self._remove_from_pending(review_id)
@@ -217,7 +216,7 @@ class ReviewQueueService:
                     "status": ReviewStatus.COMPLETED,
                     "updated_at": self._utcnow(),
                     "completed_at": self._utcnow(),
-                }
+                },
             )
             self._items[review_id] = updated
             self._remove_from_pending(review_id)
@@ -236,7 +235,7 @@ class ReviewQueueService:
                     "reasons": reasons,
                     "updated_at": self._utcnow(),
                     "completed_at": self._utcnow(),
-                }
+                },
             )
             self._items[review_id] = updated
             self._remove_from_pending(review_id)
@@ -251,7 +250,7 @@ class ReviewQueueService:
                     "assigned_to": None,
                     "updated_at": self._utcnow(),
                     "completed_at": None,
-                }
+                },
             )
             self._items[review_id] = updated
             self._push_pending(review_id)
@@ -282,16 +281,10 @@ class ReviewQueueService:
                 "reasons": self._dedupe_strings([*item.reasons, *reasons]),
                 "evidence": self._dedupe_evidence([*item.evidence, *evidence]),
                 "updated_at": self._utcnow(),
-                "status": item.status
-                if item.status != ReviewStatus.DISMISSED
-                else ReviewStatus.PENDING,
-                "assigned_to": item.assigned_to
-                if item.status == ReviewStatus.IN_PROGRESS
-                else None,
-                "completed_at": None
-                if item.status == ReviewStatus.DISMISSED
-                else item.completed_at,
-            }
+                "status": item.status if item.status != ReviewStatus.DISMISSED else ReviewStatus.PENDING,
+                "assigned_to": item.assigned_to if item.status == ReviewStatus.IN_PROGRESS else None,
+                "completed_at": None if item.status == ReviewStatus.DISMISSED else item.completed_at,
+            },
         )
         self._items[review_id] = updated
         if updated.status == ReviewStatus.PENDING:
@@ -299,11 +292,7 @@ class ReviewQueueService:
         return updated
 
     def _rebuild_pending_order(self) -> None:
-        pending = [
-            item.review_id
-            for item in sorted(self._items.values(), key=self._sort_key)
-            if item.status == ReviewStatus.PENDING
-        ]
+        pending = [item.review_id for item in sorted(self._items.values(), key=self._sort_key) if item.status == ReviewStatus.PENDING]
         self._pending_order = deque(pending)
 
     def _push_pending(self, review_id: str) -> None:
@@ -312,9 +301,7 @@ class ReviewQueueService:
         self._rebuild_pending_order()
 
     def _remove_from_pending(self, review_id: str) -> None:
-        self._pending_order = deque(
-            existing_id for existing_id in self._pending_order if existing_id != review_id
-        )
+        self._pending_order = deque(existing_id for existing_id in self._pending_order if existing_id != review_id)
 
     def _sort_key(self, item: ReviewQueueItem) -> tuple[int, str, str]:
         priority_rank = {

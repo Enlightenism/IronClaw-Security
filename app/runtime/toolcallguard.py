@@ -184,10 +184,7 @@ class ToolCallGuard:
             {
                 "source": "toolcallguard",
                 "label": "Tool call review",
-                "details": (
-                    f"Tool '{normalized.tool_name}' was evaluated for action '{normalized.actiontype}' "
-                    f"against target '{normalized.target}' with cumulative risk {normalized_risk}."
-                ),
+                "details": (f"Tool '{normalized.tool_name}' was evaluated for action '{normalized.actiontype}' against target '{normalized.target}' with cumulative risk {normalized_risk}."),
                 "score": normalized_risk,
             },
         )
@@ -242,7 +239,7 @@ class ToolCallGuard:
                     "label": "Missing tool name",
                     "details": "Tool call was denied because no tool name was provided.",
                     "score": 75,
-                }
+                },
             )
             matched_rules.append("toolcallguard:missing_tool_name")
             return 75, reasons, matched_rules
@@ -254,7 +251,7 @@ class ToolCallGuard:
                     "label": "High-risk tool",
                     "details": f"Tool '{request.tool_name}' is classified as high risk.",
                     "score": 25,
-                }
+                },
             )
             matched_rules.append(f"toolcallguard:high_risk:{request.tool_name}")
             risk_delta += 25
@@ -264,12 +261,9 @@ class ToolCallGuard:
                 {
                     "source": "toolcallguard",
                     "label": "Non-sandbox scope",
-                    "details": (
-                        f"Tool '{request.tool_name}' requested environment scope "
-                        f"'{request.environment_scope}' outside the sandbox boundary."
-                    ),
+                    "details": (f"Tool '{request.tool_name}' requested environment scope '{request.environment_scope}' outside the sandbox boundary."),
                     "score": 45,
-                }
+                },
             )
             matched_rules.append("toolcallguard:non_sandbox_scope")
             risk_delta += 45
@@ -281,7 +275,7 @@ class ToolCallGuard:
                     "label": "Missing command payload",
                     "details": f"Command-like tool '{request.tool_name}' did not provide a command payload.",
                     "score": 40,
-                }
+                },
             )
             matched_rules.append("toolcallguard:missing_command")
             risk_delta += 40
@@ -293,7 +287,7 @@ class ToolCallGuard:
                     "label": "Missing network URL",
                     "details": f"Network-like tool '{request.tool_name}' did not provide a network URL.",
                     "score": 40,
-                }
+                },
             )
             matched_rules.append("toolcallguard:missing_network_url")
             risk_delta += 40
@@ -305,7 +299,7 @@ class ToolCallGuard:
                     "label": "Missing artifact paths",
                     "details": f"File-like tool '{request.tool_name}' did not provide any artifact paths.",
                     "score": 30,
-                }
+                },
             )
             matched_rules.append("toolcallguard:missing_artifact_paths")
             risk_delta += 30
@@ -357,7 +351,7 @@ class ToolCallGuard:
                         **dict(request.metadata),
                         "tool_name": request.tool_name,
                     },
-                )
+                ),
             )
         return policies
 
@@ -379,7 +373,7 @@ class ToolCallGuard:
                     "label": label,
                     "details": details,
                     "score": score,
-                }
+                },
             )
         return deduped[:20]
 

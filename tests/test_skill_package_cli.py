@@ -306,7 +306,10 @@ class TestCmdStatus:
         assert code == 0
 
     def test_human_output_contains_installed_field(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         _cmd_status(_args(json=False))
@@ -314,7 +317,10 @@ class TestCmdStatus:
         assert "installed:" in captured.out
 
     def test_human_output_contains_version_field(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         _cmd_status(_args(json=False))
@@ -322,7 +328,10 @@ class TestCmdStatus:
         assert "version:" in captured.out
 
     def test_human_output_contains_config_dir_field(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         _cmd_status(_args(json=False))
@@ -330,7 +339,10 @@ class TestCmdStatus:
         assert "config_dir:" in captured.out
 
     def test_human_output_contains_base_url_field(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         _cmd_status(_args(json=False))
@@ -338,7 +350,10 @@ class TestCmdStatus:
         assert "base_url:" in captured.out
 
     def test_json_output_is_valid_json(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         code = _cmd_status(_args(json=True))
@@ -348,7 +363,10 @@ class TestCmdStatus:
         assert isinstance(payload, dict)
 
     def test_json_output_installed_field_is_bool(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         _cmd_status(_args(json=True))
@@ -357,7 +375,10 @@ class TestCmdStatus:
         assert isinstance(payload["installed"], bool)
 
     def test_json_output_version_matches_package(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         _cmd_status(_args(json=True))
@@ -366,7 +387,10 @@ class TestCmdStatus:
         assert payload["version"] == __version__
 
     def test_installed_false_when_config_dir_missing(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         missing = tmp_path / "missing_dir"
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(missing))
@@ -376,7 +400,10 @@ class TestCmdStatus:
         assert payload["installed"] is False
 
     def test_installed_false_when_only_config_file_exists(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         (tmp_path / "config.json").write_text("{}", encoding="utf-8")
@@ -386,7 +413,10 @@ class TestCmdStatus:
         assert payload["installed"] is False
 
     def test_installed_true_when_both_config_and_skill_exist(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         (tmp_path / "config.json").write_text("{}", encoding="utf-8")
@@ -397,7 +427,10 @@ class TestCmdStatus:
         assert payload["installed"] is True
 
     def test_base_url_read_from_config_file(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         monkeypatch.delenv("IRONCLAW_BASE_URL", raising=False)
@@ -409,7 +442,10 @@ class TestCmdStatus:
         assert payload["base_url"] == "http://10.0.0.1:7777"
 
     def test_base_url_env_overrides_config_file(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         monkeypatch.setenv("IRONCLAW_BASE_URL", "http://env-override:5000")
@@ -421,7 +457,10 @@ class TestCmdStatus:
         assert payload["base_url"] == "http://env-override:5000"
 
     def test_base_url_none_when_not_configured(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         monkeypatch.delenv("IRONCLAW_BASE_URL", raising=False)
@@ -431,7 +470,10 @@ class TestCmdStatus:
         assert payload["base_url"] is None
 
     def test_human_unset_base_url_prints_unset(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         monkeypatch.delenv("IRONCLAW_BASE_URL", raising=False)
@@ -459,8 +501,10 @@ class TestCmdDoctor:
         (tmp_path / "config.json").write_text("{}", encoding="utf-8")
         (tmp_path / "skill.json").write_text("{}", encoding="utf-8")
 
-        with patch("ironclaw_skill.cli._project_root") as mock_root, \
-             patch("ironclaw_skill.cli._env_file") as mock_env:
+        with (
+            patch("ironclaw_skill.cli._project_root") as mock_root,
+            patch("ironclaw_skill.cli._env_file") as mock_env,
+        ):
             mock_root.return_value = tmp_path
             mock_env.return_value = tmp_path / ".env"
             (tmp_path / ".env").write_text("# env\n", encoding="utf-8")
@@ -468,15 +512,20 @@ class TestCmdDoctor:
         assert code == 0
 
     def test_human_output_ok_label_present(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         monkeypatch.setenv("IRONCLAW_BASE_URL", "http://127.0.0.1:8000")
         (tmp_path / "config.json").write_text("{}", encoding="utf-8")
         (tmp_path / "skill.json").write_text("{}", encoding="utf-8")
 
-        with patch("ironclaw_skill.cli._project_root", return_value=tmp_path), \
-             patch("ironclaw_skill.cli._env_file", return_value=tmp_path / ".env"):
+        with (
+            patch("ironclaw_skill.cli._project_root", return_value=tmp_path),
+            patch("ironclaw_skill.cli._env_file", return_value=tmp_path / ".env"),
+        ):
             (tmp_path / ".env").write_text("# env\n", encoding="utf-8")
             _cmd_doctor(_args(json=False))
 
@@ -484,7 +533,10 @@ class TestCmdDoctor:
         assert "[OK]" in captured.out or "[FAIL]" in captured.out
 
     def test_human_output_fail_label_present_when_missing(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         missing = tmp_path / "absent"
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(missing))
@@ -493,7 +545,10 @@ class TestCmdDoctor:
         assert "[FAIL]" in captured.out
 
     def test_json_output_is_valid_json(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         _cmd_doctor(_args(json=True))
@@ -502,7 +557,10 @@ class TestCmdDoctor:
         assert isinstance(payload, dict)
 
     def test_json_output_has_ok_field(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         _cmd_doctor(_args(json=True))
@@ -512,7 +570,10 @@ class TestCmdDoctor:
         assert isinstance(payload["ok"], bool)
 
     def test_json_output_has_checks_list(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         _cmd_doctor(_args(json=True))
@@ -523,7 +584,10 @@ class TestCmdDoctor:
         assert len(payload["checks"]) > 0
 
     def test_checks_each_have_name_ok_detail(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         _cmd_doctor(_args(json=True))
@@ -535,7 +599,10 @@ class TestCmdDoctor:
             assert "detail" in check
 
     def test_doctor_check_names_include_expected(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         _cmd_doctor(_args(json=True))
@@ -547,7 +614,10 @@ class TestCmdDoctor:
         assert "base-url" in names
 
     def test_ok_false_when_config_file_absent(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         missing = tmp_path / "no_dir"
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(missing))
@@ -557,15 +627,20 @@ class TestCmdDoctor:
         assert payload["ok"] is False
 
     def test_ok_true_when_all_checks_pass(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         monkeypatch.setenv("IRONCLAW_BASE_URL", "http://127.0.0.1:8000")
         (tmp_path / "config.json").write_text("{}", encoding="utf-8")
         (tmp_path / "skill.json").write_text("{}", encoding="utf-8")
 
-        with patch("ironclaw_skill.cli._project_root", return_value=tmp_path), \
-             patch("ironclaw_skill.cli._env_file", return_value=tmp_path / ".env"):
+        with (
+            patch("ironclaw_skill.cli._project_root", return_value=tmp_path),
+            patch("ironclaw_skill.cli._env_file", return_value=tmp_path / ".env"),
+        ):
             (tmp_path / ".env").write_text("# env\n", encoding="utf-8")
             _cmd_doctor(_args(json=True))
 
@@ -574,7 +649,10 @@ class TestCmdDoctor:
         assert payload["ok"] is True
 
     def test_base_url_check_fails_when_env_missing_and_config_empty(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         monkeypatch.delenv("IRONCLAW_BASE_URL", raising=False)
@@ -586,7 +664,10 @@ class TestCmdDoctor:
         assert base_url_check["ok"] is False
 
     def test_base_url_check_passes_when_env_set(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         monkeypatch.setenv("IRONCLAW_BASE_URL", "http://127.0.0.1:8000")
@@ -607,8 +688,10 @@ class TestCmdInstall:
         return MagicMock(return_value=_make_fake_install_result(tmp_path))
 
     def test_returns_0_on_success(self, tmp_path: Path):
-        with patch("ironclaw_skill.cli.build_install_config") as mock_config, \
-             patch("ironclaw_skill.cli.run_install", self._make_mock_run_install(tmp_path)):
+        with (
+            patch("ironclaw_skill.cli.build_install_config") as mock_config,
+            patch("ironclaw_skill.cli.run_install", self._make_mock_run_install(tmp_path)),
+        ):
             mock_config.return_value = MagicMock()
             args = _args(
                 command="install",
@@ -620,8 +703,10 @@ class TestCmdInstall:
         assert code == 0
 
     def test_human_output_contains_install_completed(self, tmp_path: Path, capsys):
-        with patch("ironclaw_skill.cli.build_install_config") as mock_config, \
-             patch("ironclaw_skill.cli.run_install", self._make_mock_run_install(tmp_path)):
+        with (
+            patch("ironclaw_skill.cli.build_install_config") as mock_config,
+            patch("ironclaw_skill.cli.run_install", self._make_mock_run_install(tmp_path)),
+        ):
             mock_config.return_value = MagicMock()
             args = _args(command="install", project_root=tmp_path, config_dir=tmp_path, json=False)
             _cmd_install(args)
@@ -629,8 +714,10 @@ class TestCmdInstall:
         assert "install completed" in captured.out
 
     def test_human_output_contains_config_file_path(self, tmp_path: Path, capsys):
-        with patch("ironclaw_skill.cli.build_install_config") as mock_config, \
-             patch("ironclaw_skill.cli.run_install", self._make_mock_run_install(tmp_path)):
+        with (
+            patch("ironclaw_skill.cli.build_install_config") as mock_config,
+            patch("ironclaw_skill.cli.run_install", self._make_mock_run_install(tmp_path)),
+        ):
             mock_config.return_value = MagicMock()
             args = _args(command="install", project_root=tmp_path, config_dir=tmp_path, json=False)
             _cmd_install(args)
@@ -640,8 +727,10 @@ class TestCmdInstall:
     def test_human_output_contains_env_file_when_written(self, tmp_path: Path, capsys):
         env_path = tmp_path / ".env"
         mock_result = _make_fake_install_result(tmp_path, env_file=env_path)
-        with patch("ironclaw_skill.cli.build_install_config") as mock_config, \
-             patch("ironclaw_skill.cli.run_install", return_value=mock_result):
+        with (
+            patch("ironclaw_skill.cli.build_install_config") as mock_config,
+            patch("ironclaw_skill.cli.run_install", return_value=mock_result),
+        ):
             mock_config.return_value = MagicMock()
             args = _args(command="install", project_root=tmp_path, config_dir=tmp_path, json=False)
             _cmd_install(args)
@@ -650,8 +739,10 @@ class TestCmdInstall:
 
     def test_human_output_omits_env_file_when_not_written(self, tmp_path: Path, capsys):
         mock_result = _make_fake_install_result(tmp_path, env_file=None)
-        with patch("ironclaw_skill.cli.build_install_config") as mock_config, \
-             patch("ironclaw_skill.cli.run_install", return_value=mock_result):
+        with (
+            patch("ironclaw_skill.cli.build_install_config") as mock_config,
+            patch("ironclaw_skill.cli.run_install", return_value=mock_result),
+        ):
             mock_config.return_value = MagicMock()
             args = _args(command="install", project_root=tmp_path, config_dir=tmp_path, json=False)
             _cmd_install(args)
@@ -661,8 +752,10 @@ class TestCmdInstall:
     def test_human_output_contains_vscode_settings_when_written(self, tmp_path: Path, capsys):
         vscode_path = tmp_path / ".vscode" / "settings.json"
         mock_result = _make_fake_install_result(tmp_path, vscode_settings_file=vscode_path)
-        with patch("ironclaw_skill.cli.build_install_config") as mock_config, \
-             patch("ironclaw_skill.cli.run_install", return_value=mock_result):
+        with (
+            patch("ironclaw_skill.cli.build_install_config") as mock_config,
+            patch("ironclaw_skill.cli.run_install", return_value=mock_result),
+        ):
             mock_config.return_value = MagicMock()
             args = _args(command="install", project_root=tmp_path, config_dir=tmp_path, json=False)
             _cmd_install(args)
@@ -671,8 +764,10 @@ class TestCmdInstall:
 
     def test_human_output_omits_vscode_when_not_written(self, tmp_path: Path, capsys):
         mock_result = _make_fake_install_result(tmp_path, vscode_settings_file=None)
-        with patch("ironclaw_skill.cli.build_install_config") as mock_config, \
-             patch("ironclaw_skill.cli.run_install", return_value=mock_result):
+        with (
+            patch("ironclaw_skill.cli.build_install_config") as mock_config,
+            patch("ironclaw_skill.cli.run_install", return_value=mock_result),
+        ):
             mock_config.return_value = MagicMock()
             args = _args(command="install", project_root=tmp_path, config_dir=tmp_path, json=False)
             _cmd_install(args)
@@ -680,8 +775,10 @@ class TestCmdInstall:
         assert "vscode settings:" not in captured.out
 
     def test_json_output_is_valid_json(self, tmp_path: Path, capsys):
-        with patch("ironclaw_skill.cli.build_install_config") as mock_config, \
-             patch("ironclaw_skill.cli.run_install", self._make_mock_run_install(tmp_path)):
+        with (
+            patch("ironclaw_skill.cli.build_install_config") as mock_config,
+            patch("ironclaw_skill.cli.run_install", self._make_mock_run_install(tmp_path)),
+        ):
             mock_config.return_value = MagicMock()
             args = _args(command="install", project_root=tmp_path, config_dir=tmp_path, json=True)
             code = _cmd_install(args)
@@ -691,8 +788,10 @@ class TestCmdInstall:
         assert isinstance(payload, dict)
 
     def test_json_output_has_ok_field(self, tmp_path: Path, capsys):
-        with patch("ironclaw_skill.cli.build_install_config") as mock_config, \
-             patch("ironclaw_skill.cli.run_install", self._make_mock_run_install(tmp_path)):
+        with (
+            patch("ironclaw_skill.cli.build_install_config") as mock_config,
+            patch("ironclaw_skill.cli.run_install", self._make_mock_run_install(tmp_path)),
+        ):
             mock_config.return_value = MagicMock()
             args = _args(command="install", project_root=tmp_path, config_dir=tmp_path, json=True)
             _cmd_install(args)
@@ -707,8 +806,10 @@ class TestCmdInstall:
             captured_args.append(ns)
             return MagicMock()
 
-        with patch("ironclaw_skill.cli.build_install_config", side_effect=capture_config), \
-             patch("ironclaw_skill.cli.run_install", self._make_mock_run_install(tmp_path)):
+        with (
+            patch("ironclaw_skill.cli.build_install_config", side_effect=capture_config),
+            patch("ironclaw_skill.cli.run_install", self._make_mock_run_install(tmp_path)),
+        ):
             args = _args(command="install", project_root=tmp_path, config_dir=tmp_path)
             _cmd_install(args)
 
@@ -728,8 +829,10 @@ class TestCmdInstall:
             captured_args.append(ns)
             return MagicMock()
 
-        with patch("ironclaw_skill.cli.build_install_config", side_effect=capture_config), \
-             patch("ironclaw_skill.cli.run_install", self._make_mock_run_install(tmp_path)):
+        with (
+            patch("ironclaw_skill.cli.build_install_config", side_effect=capture_config),
+            patch("ironclaw_skill.cli.run_install", self._make_mock_run_install(tmp_path)),
+        ):
             args = _args(command="install", project_root=tmp_path, config_dir=tmp_path, no_vscode=True)
             _cmd_install(args)
 
@@ -742,8 +845,10 @@ class TestCmdInstall:
             captured_args.append(ns)
             return MagicMock()
 
-        with patch("ironclaw_skill.cli.build_install_config", side_effect=capture_config), \
-             patch("ironclaw_skill.cli.run_install", self._make_mock_run_install(tmp_path)):
+        with (
+            patch("ironclaw_skill.cli.build_install_config", side_effect=capture_config),
+            patch("ironclaw_skill.cli.run_install", self._make_mock_run_install(tmp_path)),
+        ):
             args = _args(command="install", project_root=tmp_path, config_dir=tmp_path, overwrite=True)
             _cmd_install(args)
 
@@ -751,8 +856,10 @@ class TestCmdInstall:
 
     def test_run_install_called_once(self, tmp_path: Path):
         mock_run = MagicMock(return_value=_make_fake_install_result(tmp_path))
-        with patch("ironclaw_skill.cli.build_install_config", return_value=MagicMock()), \
-             patch("ironclaw_skill.cli.run_install", mock_run):
+        with (
+            patch("ironclaw_skill.cli.build_install_config", return_value=MagicMock()),
+            patch("ironclaw_skill.cli.run_install", mock_run),
+        ):
             args = _args(command="install", project_root=tmp_path, config_dir=tmp_path)
             _cmd_install(args)
         assert mock_run.call_count == 1
@@ -870,7 +977,15 @@ class TestDeriveStatus:
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         result = _derive_status()
         d = result.to_dict()
-        for key in ("installed", "version", "config_dir", "config_file", "skill_file", "env_file", "base_url"):
+        for key in (
+            "installed",
+            "version",
+            "config_dir",
+            "config_file",
+            "skill_file",
+            "env_file",
+            "base_url",
+        ):
             assert key in d
 
 
@@ -1081,7 +1196,10 @@ class TestPrintJson:
 
 class TestEnvironmentVariableIntegration:
     def test_ironclaw_config_dir_env_controls_status_config_dir(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         custom_dir = tmp_path / "custom_config"
         custom_dir.mkdir()
@@ -1092,7 +1210,10 @@ class TestEnvironmentVariableIntegration:
         assert str(custom_dir) in payload["config_dir"]
 
     def test_ironclaw_base_url_env_reflected_in_status(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         monkeypatch.setenv("IRONCLAW_BASE_URL", "http://custom-host:1234")
@@ -1102,7 +1223,10 @@ class TestEnvironmentVariableIntegration:
         assert payload["base_url"] == "http://custom-host:1234"
 
     def test_ironclaw_base_url_env_reflected_in_doctor(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         monkeypatch.setenv("IRONCLAW_BASE_URL", "http://127.0.0.1:8000")
@@ -1114,7 +1238,10 @@ class TestEnvironmentVariableIntegration:
         assert "http://127.0.0.1:8000" in base_url_check["detail"]
 
     def test_missing_ironclaw_base_url_env_reflects_in_doctor_detail(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
     ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         monkeypatch.delenv("IRONCLAW_BASE_URL", raising=False)
@@ -1168,16 +1295,29 @@ class TestMainEndToEnd:
 
     def test_main_install_routes_to_cmd_install(self, tmp_path: Path):
         mock_result = _make_fake_install_result(tmp_path)
-        with patch("ironclaw_skill.cli.build_install_config", return_value=MagicMock()), \
-             patch("ironclaw_skill.cli.run_install", return_value=mock_result):
+        with (
+            patch("ironclaw_skill.cli.build_install_config", return_value=MagicMock()),
+            patch("ironclaw_skill.cli.run_install", return_value=mock_result),
+        ):
             code = main(["install", "--project-root", str(tmp_path), "--config-dir", str(tmp_path)])
         assert code == 0
 
     def test_main_install_json_routes_to_cmd_install_json(self, tmp_path: Path, capsys):
         mock_result = _make_fake_install_result(tmp_path)
-        with patch("ironclaw_skill.cli.build_install_config", return_value=MagicMock()), \
-             patch("ironclaw_skill.cli.run_install", return_value=mock_result):
-            code = main(["--json", "install", "--project-root", str(tmp_path), "--config-dir", str(tmp_path)])
+        with (
+            patch("ironclaw_skill.cli.build_install_config", return_value=MagicMock()),
+            patch("ironclaw_skill.cli.run_install", return_value=mock_result),
+        ):
+            code = main(
+                [
+                    "--json",
+                    "install",
+                    "--project-root",
+                    str(tmp_path),
+                    "--config-dir",
+                    str(tmp_path),
+                ]
+            )
         captured = capsys.readouterr()
         assert code == 0
         payload = json.loads(captured.out)

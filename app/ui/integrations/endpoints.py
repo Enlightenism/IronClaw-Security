@@ -117,19 +117,16 @@ def build_integration_endpoints_view(
                 metadata={
                     "requested_by": requested_by,
                 },
-            )
+            ),
         )
 
     items.sort(
         key=lambda item: (
-            0 if item.endpoint_kind == "remote"
-            else 1 if item.endpoint_kind == "local"
-            else 2 if item.endpoint_kind == "custom"
-            else 3,
+            0 if item.endpoint_kind == "remote" else 1 if item.endpoint_kind == "local" else 2 if item.endpoint_kind == "custom" else 3,
             item.platform,
             item.slug,
             item.integration_id,
-        )
+        ),
     )
 
     return IntegrationEndpointsView(

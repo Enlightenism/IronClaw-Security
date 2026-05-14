@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from app.api.integrations import router as integrations_router
 
 
-@pytest.fixture()
+@pytest.fixture
 def client() -> Iterator[TestClient]:
     app = FastAPI()
     app.include_router(integrations_router)
@@ -35,11 +35,7 @@ def test_integrations_router_exposes_expected_http_methods(client: TestClient) -
         (
             route.path,
             tuple(
-                sorted(
-                    method
-                    for method in route.methods
-                    if method not in {"HEAD", "OPTIONS"}
-                )
+                sorted(method for method in route.methods if method not in {"HEAD", "OPTIONS"}),
             ),
         )
         for route in client.app.routes
@@ -54,9 +50,7 @@ def test_integrations_router_exposes_expected_http_methods(client: TestClient) -
     }
 
     missing_methods = expected_methods - route_methods
-    assert not missing_methods, (
-        f"missing integration route methods: {sorted(missing_methods)}"
-    )
+    assert not missing_methods, f"missing integration route methods: {sorted(missing_methods)}"
 
 
 @pytest.mark.parametrize(

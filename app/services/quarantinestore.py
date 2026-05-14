@@ -48,11 +48,7 @@ def _mapping(value: Any) -> dict[str, Any]:
         if isinstance(dumped, Mapping):
             return dict(dumped)
     if hasattr(value, "__dict__"):
-        return {
-            key: val
-            for key, val in vars(value).items()
-            if not key.startswith("_") and not callable(val)
-        }
+        return {key: val for key, val in vars(value).items() if not key.startswith("_") and not callable(val)}
     raise TypeError("value is not serializable to dict")
 
 
@@ -103,80 +99,27 @@ def _normalize_quarantine_payload(
     source_payload = _mapping(payload)
     source_payload.update({key: value for key, value in extra.items() if value is not None})
 
-    resolved_quarantine_id = (
-        _string(quarantine_id)
-        or _string(source_payload.get("quarantine_id"))
-        or _string(source_payload.get("id"))
-        or str(uuid4())
-    )
+    resolved_quarantine_id = _string(quarantine_id) or _string(source_payload.get("quarantine_id")) or _string(source_payload.get("id")) or str(uuid4())
 
-    resolved_item_id = (
-        _string(item_id)
-        or _string(artifact_id)
-        or _string(source_payload.get("item_id"))
-        or _string(source_payload.get("artifact_id"))
-        or resolved_quarantine_id
-    )
+    resolved_item_id = _string(item_id) or _string(artifact_id) or _string(source_payload.get("item_id")) or _string(source_payload.get("artifact_id")) or resolved_quarantine_id
 
-    resolved_org = (
-        _string(organization_id)
-        or _string(org_id)
-        or _string(tenant_id)
-        or _string(source_payload.get("organization_id"))
-        or _string(source_payload.get("org_id"))
-        or _string(source_payload.get("tenant_id"))
-    )
+    resolved_org = _string(organization_id) or _string(org_id) or _string(tenant_id) or _string(source_payload.get("organization_id")) or _string(source_payload.get("org_id")) or _string(source_payload.get("tenant_id"))
 
-    resolved_category = (
-        _string(category)
-        or _string(item_type)
-        or _string(source_payload.get("category"))
-        or _string(source_payload.get("item_type"))
-        or "artifact"
-    )
+    resolved_category = _string(category) or _string(item_type) or _string(source_payload.get("category")) or _string(source_payload.get("item_type")) or "artifact"
 
-    resolved_source = (
-        _string(source)
-        or _string(source_payload.get("source"))
-        or "ironclaw"
-    )
+    resolved_source = _string(source) or _string(source_payload.get("source")) or "ironclaw"
 
-    resolved_reason = (
-        _string(reason)
-        or _string(source_payload.get("reason"))
-        or "policy_violation"
-    )
+    resolved_reason = _string(reason) or _string(source_payload.get("reason")) or "policy_violation"
 
-    resolved_verdict = (
-        _string(verdict)
-        or _string(source_payload.get("verdict"))
-        or "pending"
-    )
+    resolved_verdict = _string(verdict) or _string(source_payload.get("verdict")) or "pending"
 
-    resolved_severity = (
-        _string(severity)
-        or _string(source_payload.get("severity"))
-        or "medium"
-    )
+    resolved_severity = _string(severity) or _string(source_payload.get("severity")) or "medium"
 
-    resolved_status = (
-        _string(status)
-        or _string(source_payload.get("status"))
-        or "quarantined"
-    )
+    resolved_status = _string(status) or _string(source_payload.get("status")) or "quarantined"
 
-    resolved_filename = (
-        _string(filename)
-        or _string(source_payload.get("filename"))
-        or _string(source_payload.get("name"))
-    )
+    resolved_filename = _string(filename) or _string(source_payload.get("filename")) or _string(source_payload.get("name"))
 
-    resolved_location = (
-        _string(location)
-        or _string(storage_key)
-        or _string(source_payload.get("location"))
-        or _string(source_payload.get("storage_key"))
-    )
+    resolved_location = _string(location) or _string(storage_key) or _string(source_payload.get("location")) or _string(source_payload.get("storage_key"))
 
     resolved_created_at = _normalize_timestamp(
         created_at or source_payload.get("created_at") or quarantined_at or source_payload.get("quarantined_at"),
@@ -187,16 +130,8 @@ def _normalize_quarantine_payload(
     resolved_quarantined_at = _normalize_timestamp(
         quarantined_at or source_payload.get("quarantined_at") or resolved_created_at,
     )
-    resolved_released_at = (
-        _normalize_timestamp(released_at or source_payload.get("released_at"))
-        if (released_at is not None or source_payload.get("released_at") is not None)
-        else None
-    )
-    resolved_expires_at = (
-        _normalize_timestamp(expires_at or source_payload.get("expires_at"))
-        if (expires_at is not None or source_payload.get("expires_at") is not None)
-        else None
-    )
+    resolved_released_at = _normalize_timestamp(released_at or source_payload.get("released_at")) if (released_at is not None or source_payload.get("released_at") is not None) else None
+    resolved_expires_at = _normalize_timestamp(expires_at or source_payload.get("expires_at")) if (expires_at is not None or source_payload.get("expires_at") is not None) else None
 
     normalized = {
         "quarantine_id": resolved_quarantine_id,

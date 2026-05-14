@@ -92,11 +92,7 @@ def build_integration_installer_card(
     if record is None:
         raise KeyError(f"unknown integration_id: {integration_id}")
 
-    enabled_capabilities = [
-        capability.name
-        for capability in record.capabilities
-        if capability.enabled
-    ]
+    enabled_capabilities = [capability.name for capability in record.capabilities if capability.enabled]
 
     return IntegrationInstallerCard(
         integration_id=record.integration_id,

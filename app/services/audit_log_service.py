@@ -15,8 +15,7 @@ _DEFAULT_AUDIT_LOG_PATH = Path("output/security-events.jsonl")
 
 
 def get_audit_log() -> SecurityAuditLog:
-    """
-    Return the active SecurityAuditLog instance.
+    """Return the active SecurityAuditLog instance.
 
     Falls back to initialize_security_audit_log with the default path if one is
     not already configured by the orchestrator.
@@ -29,8 +28,7 @@ def get_audit_log() -> SecurityAuditLog:
 
 
 def set_audit_log(log: SecurityAuditLog) -> SecurityAuditLog:
-    """
-    Install a SecurityAuditLog instance as the active singleton.
+    """Install a SecurityAuditLog instance as the active singleton.
 
     This is primarily used by the orchestrator and tests.
     """
@@ -40,8 +38,7 @@ def set_audit_log(log: SecurityAuditLog) -> SecurityAuditLog:
 
 
 def reset_audit_log() -> SecurityAuditLog:
-    """
-    Reset the active audit log to a fresh instance with the default path.
+    """Reset the active audit log to a fresh instance with the default path.
 
     This also clears the persisted default audit log file so tests start from a
     clean state.
@@ -59,8 +56,7 @@ def _load_events() -> list[SecurityAuditEvent]:
 
 
 def list_audit_events(limit: int | None = 100) -> list[dict[str, Any]]:
-    """
-    Return recent audit events as plain dicts, newest-first.
+    """Return recent audit events as plain dicts, newest-first.
 
     If limit is None, all available events are returned.
     """
@@ -78,9 +74,7 @@ def list_audit_events_for_session(
     session_id: str,
     limit: int | None = 100,
 ) -> list[dict[str, Any]]:
-    """
-    Return recent events filtered by session_id, newest-first.
-    """
+    """Return recent events filtered by session_id, newest-first."""
     normalized_session_id = session_id.strip()
     events = list_audit_events(limit=None)
     filtered = [e for e in events if e.get("session_id") == normalized_session_id]
@@ -96,16 +90,10 @@ def list_audit_events_for_actor(
     actor_id: str,
     limit: int | None = 100,
 ) -> list[dict[str, Any]]:
-    """
-    Return recent events filtered by actor_id, newest-first.
-    """
+    """Return recent events filtered by actor_id, newest-first."""
     normalized_actor_id = actor_id.strip()
     events = list_audit_events(limit=None)
-    filtered = [
-        e
-        for e in events
-        if e.get("actor_id") == normalized_actor_id or e.get("client_id") == normalized_actor_id
-    ]
+    filtered = [e for e in events if e.get("actor_id") == normalized_actor_id or e.get("client_id") == normalized_actor_id]
 
     if limit is None:
         return filtered
@@ -117,9 +105,7 @@ def list_audit_events_for_actor(
 def list_audit_events_for_request(
     request_id: str,
 ) -> list[dict[str, Any]]:
-    """
-    Return all events associated with a specific request_id.
-    """
+    """Return all events associated with a specific request_id."""
     normalized_request_id = request_id.strip()
     events = list_audit_events(limit=None)
     return [e for e in events if e.get("request_id") == normalized_request_id]
@@ -128,9 +114,7 @@ def list_audit_events_for_request(
 def list_audit_events_for_trace(
     trace_id: str,
 ) -> list[dict[str, Any]]:
-    """
-    Return all events associated with a specific trace_id.
-    """
+    """Return all events associated with a specific trace_id."""
     normalized_trace_id = trace_id.strip()
     events = list_audit_events(limit=None)
     return [e for e in events if e.get("trace_id") == normalized_trace_id]

@@ -120,12 +120,9 @@ def evaluateactionpolicy(
         _build_policy_reason(
             source="policy",
             label="Risk policy evaluation",
-            details=(
-                f"Policy evaluated action '{actiontype}' on target '{target}' with base risk {int(riskscore)} "
-                f"and adjusted risk {adjustedriskscore}."
-            ),
+            details=(f"Policy evaluated action '{actiontype}' on target '{target}' with base risk {int(riskscore)} and adjusted risk {adjustedriskscore}."),
             score=adjustedriskscore,
-        )
+        ),
     ]
 
     for item in promptscan.get("reasons", []):
@@ -136,7 +133,7 @@ def evaluateactionpolicy(
                     "label": str(item.get("label", "Prompt injection indicator")),
                     "details": str(item.get("details", "")),
                     "score": int(item.get("score", 0)),
-                }
+                },
             )
         else:
             reasons.append(
@@ -145,7 +142,7 @@ def evaluateactionpolicy(
                     label="Prompt injection indicator",
                     details=str(item),
                     score=0,
-                )
+                ),
             )
 
     return {

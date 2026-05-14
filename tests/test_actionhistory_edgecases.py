@@ -37,8 +37,8 @@ def test_action_history_view_uses_fallback_usage_field_names() -> None:
                     "remaining_units": 14,
                     "wallet_balance": 9,
                 },
-            }
-        ]
+            },
+        ],
     )
 
     item = view.items[0]
@@ -56,8 +56,8 @@ def test_action_history_view_marks_zero_remaining_units_as_warning() -> None:
                     "remainingunits": 0,
                     "walletbalance": 3,
                 },
-            }
-        ]
+            },
+        ],
     )
 
     item = view.items[0]
@@ -73,8 +73,8 @@ def test_action_history_view_marks_negative_wallet_balance_as_critical() -> None
                     "remainingunits": 5,
                     "walletbalance": -2,
                 },
-            }
-        ]
+            },
+        ],
     )
 
     item = view.items[0]

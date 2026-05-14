@@ -186,7 +186,7 @@ if __name__ == "__main__":
         run_supervised_request,
     )
 
-    root = Path(".").resolve()
+    root = Path().resolve()
     orchestrator = IronClawOrchestrator(project_root=root)
     graph = build_dependency_graph(root)
     coordination_snapshot = initialize_coordination_state(orchestrator.registry, graph)

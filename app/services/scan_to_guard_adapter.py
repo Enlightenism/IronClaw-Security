@@ -15,8 +15,7 @@ def build_guard_request_from_scan(
     session_id: str | None = None,
     file_path: str | None = None,
 ) -> GuardActionRequest:
-    """
-    Translate a scan result + proposed action into a GuardActionRequest.
+    """Translate a scan result + proposed action into a GuardActionRequest.
 
     This keeps scanner-side verdicts and the execution guard loosely coupled:
     the scanner decides risk and sandbox_lane, the orchestrator decides whether

@@ -8,10 +8,7 @@ client = TestClient(app)
 
 
 def _assert_client_error(response, expected_statuses: set[int]) -> None:
-    assert response.status_code in expected_statuses, (
-        f"Expected one of {sorted(expected_statuses)}, "
-        f"got {response.status_code}: {response.text}"
-    )
+    assert response.status_code in expected_statuses, f"Expected one of {sorted(expected_statuses)}, got {response.status_code}: {response.text}"
 
 
 def test_history_detail_unknown_id_returns_client_error():

@@ -130,7 +130,12 @@ def _check_health_route_declared(results: list[dict[str, Any]]) -> None:
     if found:
         _record(results, "health-route-declared", True, "health-style route declaration found")
         return
-    _record(results, "health-route-declared", False, "no health-style route declaration found in app/main.py")
+    _record(
+        results,
+        "health-route-declared",
+        False,
+        "no health-style route declaration found in app/main.py",
+    )
 
 
 def _check_key_tests_present(results: list[dict[str, Any]]) -> None:

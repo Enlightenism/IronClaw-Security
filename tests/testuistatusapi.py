@@ -74,7 +74,7 @@ def _build_ui_status_payload() -> UIStatusResponse:
 
     try:
         telemetry_summary: dict[str, Any] = copy.deepcopy(
-            summarize_telemetry_events(limit=250)
+            summarize_telemetry_events(limit=250),
         )
     except Exception as exc:
         telemetry_error = True

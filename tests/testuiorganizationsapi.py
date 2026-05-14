@@ -30,11 +30,5 @@ def test_ui_organizations_contains_core_fields() -> None:
     assert data
 
     assert any(k in data for k in ("title", "headline", "summary", "page_title"))
-    assert any(
-        k in data
-        for k in ("organizations", "items", "rows", "records", "tenants", "accounts")
-    )
-    assert any(
-        k in data
-        for k in ("filters", "sections", "actions", "columns", "table", "pagination")
-    )
+    assert any(k in data for k in ("organizations", "items", "rows", "records", "tenants", "accounts"))
+    assert any(k in data for k in ("filters", "sections", "actions", "columns", "table", "pagination"))

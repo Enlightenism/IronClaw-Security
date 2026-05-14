@@ -181,7 +181,7 @@ def _write_report(report: VerificationReport) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Verify IronClaw deployment artifacts (security gate, route inventory, smoketest)."
+        description="Verify IronClaw deployment artifacts (security gate, route inventory, smoketest).",
     )
     parser.add_argument(
         "--json",

@@ -111,10 +111,7 @@ def _score_runtime_actions(mode: GroqMode) -> DomainPostureScore:
 
     score = _clamp_score(base)
 
-    rationale = (
-        f"Based on {total} recent decisions: {blocked} blocked, "
-        f"{quarantined} quarantined, {warned} warned, {allowed} allowed."
-    )
+    rationale = f"Based on {total} recent decisions: {blocked} blocked, {quarantined} quarantined, {warned} warned, {allowed} allowed."
 
     return DomainPostureScore(
         name="runtime_actions",
@@ -164,10 +161,7 @@ def _score_control_hygiene(mode: GroqMode) -> DomainPostureScore:
 
     score = _clamp_score(base)
 
-    rationale = (
-        f"Current mode is '{flags.mode}' with runtime toggles affecting "
-        "enforcement strength and attack surface."
-    )
+    rationale = f"Current mode is '{flags.mode}' with runtime toggles affecting enforcement strength and attack surface."
 
     return DomainPostureScore(
         name="control_hygiene",
@@ -214,18 +208,11 @@ def _score_incident_pressure(mode: GroqMode) -> DomainPostureScore:
     base -= high_count * 10.0
     base -= critical_count * 18.0
 
-    newest_open_incident_at = (
-        max((incident.created_at for incident in open_incidents), default=None)
-        if open_incidents
-        else None
-    )
+    newest_open_incident_at = max((incident.created_at for incident in open_incidents), default=None) if open_incidents else None
 
     score = _clamp_score(base)
 
-    rationale = (
-        f"{total_open} open incidents with {high_count} high and "
-        f"{critical_count} critical requiring attention."
-    )
+    rationale = f"{total_open} open incidents with {high_count} high and {critical_count} critical requiring attention."
 
     return DomainPostureScore(
         name="incident_pressure",
@@ -250,24 +237,10 @@ def _score_request_stream_exposure(mode: GroqMode) -> DomainPostureScore:
     total = len(recent_events)
 
     high_risk = sum(1 for event in recent_events if event.risk_score >= 70)
-    blocked_or_quarantined = sum(
-        1 for event in recent_events if event.verdict in ("block", "quarantine")
-    )
-    prompt_injection_signals = sum(
-        1
-        for event in recent_events
-        if any(signal == "prompt_injection" for signal in event.signals)
-    )
-    credential_leak_signals = sum(
-        1
-        for event in recent_events
-        if any(signal == "credential_leak" for signal in event.signals)
-    )
-    data_exfiltration_signals = sum(
-        1
-        for event in recent_events
-        if any(signal == "data_exfiltration" for signal in event.signals)
-    )
+    blocked_or_quarantined = sum(1 for event in recent_events if event.verdict in ("block", "quarantine"))
+    prompt_injection_signals = sum(1 for event in recent_events if any(signal == "prompt_injection" for signal in event.signals))
+    credential_leak_signals = sum(1 for event in recent_events if any(signal == "credential_leak" for signal in event.signals))
+    data_exfiltration_signals = sum(1 for event in recent_events if any(signal == "data_exfiltration" for signal in event.signals))
 
     if total == 0:
         base = 100.0
@@ -286,10 +259,7 @@ def _score_request_stream_exposure(mode: GroqMode) -> DomainPostureScore:
     score = _clamp_score(base)
     last_event_at = recent_events[-1].occurred_at if recent_events else None
 
-    rationale = (
-        f"Recent stream has {total} requests, {high_risk} high-risk evaluations, "
-        f"and {blocked_or_quarantined} blocked or quarantined outcomes."
-    )
+    rationale = f"Recent stream has {total} requests, {high_risk} high-risk evaluations, and {blocked_or_quarantined} blocked or quarantined outcomes."
 
     return DomainPostureScore(
         name="request_stream_exposure",
@@ -322,9 +292,7 @@ def build_global_posture_summary(mode: GroqMode | None = None) -> GlobalPostureS
     ]
 
     total_weight = sum(domain.weight for domain in domains) or 1.0
-    weighted_score = (
-        sum(domain.score * domain.weight for domain in domains) / total_weight
-    )
+    weighted_score = sum(domain.score * domain.weight for domain in domains) / total_weight
     overall_score = _clamp_score(weighted_score)
 
     metadata = {

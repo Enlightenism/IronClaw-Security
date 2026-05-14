@@ -123,7 +123,7 @@ def test_unit_ledger_balance_is_non_negative_when_present() -> None:
 
     balance = _number(payload, "balance", "units", "available", "credits", "available_units")
     if balance is not None:
-        assert balance >= Decimal("0")
+        assert balance >= Decimal(0)
 
 
 def test_unit_ledger_entry_count_matches_entries_length_when_both_present() -> None:
@@ -168,7 +168,7 @@ def test_unit_ledger_entry_amounts_are_non_negative_when_present() -> None:
 
     for entry in entries:
         if "amount" in entry and entry["amount"] is not None:
-            assert Decimal(str(entry["amount"])) >= Decimal("0")
+            assert Decimal(str(entry["amount"])) >= Decimal(0)
 
 
 def test_unit_ledger_post_credit_increases_balance_when_supported() -> None:
@@ -179,19 +179,19 @@ def test_unit_ledger_post_credit_increases_balance_when_supported() -> None:
         pytest.skip("ledger credit posting method not implemented")
 
     before_payload = _payload_of(ledger)
-    before = _number(before_payload, "balance", "units", "available") or Decimal("0")
+    before = _number(before_payload, "balance", "units", "available") or Decimal(0)
 
     _call_method_if_present(
         ledger,
         post_methods,
-        amount=Decimal("10"),
+        amount=Decimal(10),
         reference_id="credit-001",
     )
 
     after_payload = _payload_of(ledger)
-    after = _number(after_payload, "balance", "units", "available") or Decimal("0")
+    after = _number(after_payload, "balance", "units", "available") or Decimal(0)
 
-    assert after - before == Decimal("10")
+    assert after - before == Decimal(10)
 
 
 def test_unit_ledger_post_debit_decreases_balance_when_supported() -> None:
@@ -207,24 +207,24 @@ def test_unit_ledger_post_debit_decreases_balance_when_supported() -> None:
         _call_method_if_present(
             ledger,
             credit_methods,
-            amount=Decimal("25"),
+            amount=Decimal(25),
             reference_id="fund-001",
         )
 
     before_payload = _payload_of(ledger)
-    before = _number(before_payload, "balance", "units", "available") or Decimal("0")
+    before = _number(before_payload, "balance", "units", "available") or Decimal(0)
 
     _call_method_if_present(
         ledger,
         debit_methods,
-        amount=Decimal("5"),
+        amount=Decimal(5),
         reference_id="debit-001",
     )
 
     after_payload = _payload_of(ledger)
-    after = _number(after_payload, "balance", "units", "available") or Decimal("0")
+    after = _number(after_payload, "balance", "units", "available") or Decimal(0)
 
-    assert before - after == Decimal("5")
+    assert before - after == Decimal(5)
 
 
 def test_unit_ledger_rejects_negative_credit_when_supported() -> None:
@@ -238,7 +238,7 @@ def test_unit_ledger_rejects_negative_credit_when_supported() -> None:
         _call_method_if_present(
             ledger,
             post_methods,
-            amount=Decimal("-1"),
+            amount=Decimal(-1),
             reference_id="credit-negative",
         )
 
@@ -254,7 +254,7 @@ def test_unit_ledger_rejects_negative_debit_when_supported() -> None:
         _call_method_if_present(
             ledger,
             debit_methods,
-            amount=Decimal("-1"),
+            amount=Decimal(-1),
             reference_id="debit-negative",
         )
 
@@ -267,13 +267,13 @@ def test_unit_ledger_prevents_overdraft_when_supported() -> None:
         pytest.skip("ledger debit posting method not implemented")
 
     payload = _payload_of(ledger)
-    balance = _number(payload, "balance", "units", "available") or Decimal("0")
+    balance = _number(payload, "balance", "units", "available") or Decimal(0)
 
     with pytest.raises((TypeError, ValueError, AssertionError)):
         _call_method_if_present(
             ledger,
             debit_methods,
-            amount=balance + Decimal("1"),
+            amount=balance + Decimal(1),
             reference_id="overdraft-001",
         )
 
@@ -289,7 +289,7 @@ def test_unit_ledger_entries_are_append_only_when_supported() -> None:
     _call_method_if_present(
         ledger,
         credit_methods,
-        amount=Decimal("3"),
+        amount=Decimal(3),
         reference_id="append-001",
     )
     after_entries = list(_entries_of(ledger) or [])
@@ -308,14 +308,14 @@ def test_unit_ledger_idempotent_reference_does_not_duplicate_when_supported() ->
         _call_method_if_present(
             ledger,
             credit_methods,
-            amount=Decimal("4"),
+            amount=Decimal(4),
             reference_id="idempotent-001",
         )
         first_entries = list(_entries_of(ledger) or [])
         _call_method_if_present(
             ledger,
             credit_methods,
-            amount=Decimal("4"),
+            amount=Decimal(4),
             reference_id="idempotent-001",
         )
         second_entries = list(_entries_of(ledger) or [])

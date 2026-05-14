@@ -136,7 +136,7 @@ class _PolicyStoreStub:
         return [dict(item) for item in self.history]
 
 
-@pytest.fixture()
+@pytest.fixture
 def api(monkeypatch):
     signing = _BundleSigningServiceStub()
     store = _PolicyStoreStub()

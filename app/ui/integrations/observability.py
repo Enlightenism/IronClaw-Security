@@ -130,7 +130,7 @@ def _index_incidents_by_integration(
     for integration_id, incidents in incidents_by_integration.items():
         incidents.sort(
             key=lambda inc: str(
-                getattr(inc, "updated_at", getattr(inc, "created_at", ""))
+                getattr(inc, "updated_at", getattr(inc, "created_at", "")),
             ),
             reverse=True,
         )
@@ -178,12 +178,7 @@ def build_integration_observability_view() -> IntegrationObservabilityView:
         p95_latency_ms = float(getattr(latency, "p95_ms", 0.0))
 
         integration_incidents = incidents_by_integration.get(record.integration_id, [])
-        open_incident_count = sum(
-            1
-            for inc in integration_incidents
-            if str(getattr(inc, "status", "")).lower()
-            in {"open", "acknowledged", "investigating"}
-        )
+        open_incident_count = sum(1 for inc in integration_incidents if str(getattr(inc, "status", "")).lower() in {"open", "acknowledged", "investigating"})
 
         if open_incident_count > 0 or error_rate_1m > 0 or p95_latency_ms > 1000:
             degraded_count += 1
@@ -195,7 +190,7 @@ def build_integration_observability_view() -> IntegrationObservabilityView:
                 record,
                 "updated_at",
                 getattr(record, "created_at", ""),
-            )
+            ),
         )
 
         observability_score = _observability_score(
@@ -223,7 +218,7 @@ def build_integration_observability_view() -> IntegrationObservabilityView:
                     "requested_by": "ui-observability",
                     "rate_window_seconds": getattr(throughput, "window_seconds", None),
                 },
-            )
+            ),
         )
 
     items.sort(

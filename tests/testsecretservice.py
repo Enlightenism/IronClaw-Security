@@ -48,12 +48,7 @@ def test_secret_service_reviews_secret_text_and_redacts() -> None:
 def test_secret_service_blocks_private_key_material() -> None:
     service = build_secret_service()
 
-    private_key = (
-        "-----BEGIN PRIVATE KEY-----\n"
-        "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n"
-        "FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE\n"
-        "-----END PRIVATE KEY-----"
-    )
+    private_key = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\nFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE\n-----END PRIVATE KEY-----"
     result = service.inspect_text(
         private_key,
         context="sensitive_export",
@@ -267,7 +262,7 @@ def test_secret_service_payload_uses_tool_name_as_fallback_context() -> None:
     )
 
     assert isinstance(result.reasons, list)
-    assert any("Context: bash." == item for item in result.reasons)
+    assert any(item == "Context: bash." for item in result.reasons)
 
 
 def test_secret_service_reason_list_is_bounded() -> None:
@@ -282,12 +277,7 @@ def test_secret_service_reason_list_is_bounded() -> None:
             "direction": "egress",
             "authorization": "Bearer abcdefghijklmnopqrstuvwxyz123456",
         },
-        content=(
-            "-----BEGIN PRIVATE KEY-----\n"
-            "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n"
-            "FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE\n"
-            "-----END PRIVATE KEY-----"
-        ),
+        content=("-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\nFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE\n-----END PRIVATE KEY-----"),
         context="tool_execution",
     )
 

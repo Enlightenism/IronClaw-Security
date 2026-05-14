@@ -147,7 +147,7 @@ class ReviewStateStore:
                 **item.to_dict(),
                 "status": decision,
                 "updated_at": decision_record.decided_at,
-            }
+            },
         )
         self._items[review_item_id] = updated_item
 

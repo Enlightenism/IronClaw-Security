@@ -39,16 +39,10 @@ def build_ui_integration_settings_page() -> dict[str, object]:
                 "manifestroute": record.manifestroute,
                 "adaptermodule": record.adaptermodule,
                 "configurable": configurable,
-                "configurationstate": (
-                    "configured"
-                    if verified
-                    else "pending"
-                    if configurable
-                    else "unavailable"
-                ),
+                "configurationstate": ("configured" if verified else "pending" if configurable else "unavailable"),
                 "tags": list(record.tags),
                 "metadata": dict(record.metadata),
-            }
+            },
         )
 
     return {

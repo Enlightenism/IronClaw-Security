@@ -229,15 +229,7 @@ def analyze_download(payload: Mapping[str, Any]) -> DownloadAnalysis:
     if any(pattern in {"credential", "token", "password"} for pattern in matched_patterns):
         failed_checks.append("download shows secret-risk indicators")
 
-    reason = (
-        extension_reasons[0]
-        if extension_reasons
-        else host_reasons[0]
-        if host_reasons
-        else matched_patterns[0]
-        if matched_patterns
-        else "no download threats detected"
-    )
+    reason = extension_reasons[0] if extension_reasons else host_reasons[0] if host_reasons else matched_patterns[0] if matched_patterns else "no download threats detected"
 
     return DownloadAnalysis(
         detected=total_risk >= 35,
@@ -261,10 +253,10 @@ def summarize_download_analysis(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "HIGH_RISK_EXTENSIONS",
-    "MEDIUM_RISK_EXTENSIONS",
-    "HIGH_RISK_KEYWORDS",
-    "MEDIUM_RISK_KEYWORDS",
     "HIGH_RISK_HOST_PATTERNS",
+    "HIGH_RISK_KEYWORDS",
+    "MEDIUM_RISK_EXTENSIONS",
+    "MEDIUM_RISK_KEYWORDS",
     "DownloadAnalysis",
     "analyze_download",
     "summarize_download_analysis",

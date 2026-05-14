@@ -233,7 +233,7 @@ def _build_sections(items: list[UIPageItem]) -> list[UIPageSection]:
                 label=category_labels.get(category, category.title()),
                 total=len(section_items),
                 items=section_items,
-            )
+            ),
         )
     return sections
 

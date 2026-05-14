@@ -72,7 +72,7 @@ def build_action_usage_view(
                     label=key,
                     value=_format_value(normalized_snapshot.get(key)),
                     tone=_infer_tone(key, normalized_snapshot.get(key)),
-                )
+                ),
             )
             seen_keys.add(key)
 
@@ -84,7 +84,7 @@ def build_action_usage_view(
                 label=key,
                 value=_format_value(value),
                 tone=_infer_tone(key, value),
-            )
+            ),
         )
 
     return ActionUsageView(

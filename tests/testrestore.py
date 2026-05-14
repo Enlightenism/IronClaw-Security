@@ -52,7 +52,7 @@ def _base_env() -> dict[str, str]:
             "IRONCLAW_RESTORE_TARGET_NAME": "primary",
             "IRONCLAW_RESTORE_DRY_RUN": "true",
             "IRONCLAW_BACKUP_DIR": str(ROOT / "output" / "test-backups"),
-        }
+        },
     )
     return env
 
@@ -203,10 +203,7 @@ def test_restore_fails_or_warns_with_missing_restore_target() -> None:
 
     checks = _payload_checks(payload)
     if any(_check_name(check) in {"restore-target", "restore-config", "target-selection"} for check in checks):
-        assert any(
-            _check_name(check) in {"restore-target", "restore-config", "target-selection"} and _check_ok(check) is False
-            for check in checks
-        )
+        assert any(_check_name(check) in {"restore-target", "restore-config", "target-selection"} and _check_ok(check) is False for check in checks)
     else:
         pytest.skip("restore target validation check is not implemented by this script")
 

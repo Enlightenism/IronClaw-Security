@@ -71,7 +71,7 @@ def test_evaluate_request_allows_authorized_usage() -> None:
             remaining_before=12,
             remaining_after=11,
             wallet_balance=7,
-        )
+        ),
     )
 
     decision = service.evaluate_request(
@@ -79,7 +79,7 @@ def test_evaluate_request_allows_authorized_usage() -> None:
             owner_key="owner-301",
             action_name="httpfetch:https://example.com",
             requested_units=1,
-        )
+        ),
     )
 
     assert decision.execution_allowed is True
@@ -95,7 +95,7 @@ def test_execute_returns_receipt_when_usage_is_consumed() -> None:
             remaining_before=5,
             remaining_after=4,
             wallet_balance=2,
-        )
+        ),
     )
 
     receipt = service.execute(
@@ -104,7 +104,7 @@ def test_execute_returns_receipt_when_usage_is_consumed() -> None:
             action_name="browseropen:https://example.com",
             requested_units=1,
             metadata={"source": "test"},
-        )
+        ),
     )
 
     assert receipt.executed is True
@@ -122,7 +122,7 @@ def test_execute_blocks_when_usage_is_not_authorized() -> None:
             remaining_after=0,
             wallet_balance=0,
             reason="insufficient_units",
-        )
+        ),
     )
 
     receipt = service.execute(
@@ -130,7 +130,7 @@ def test_execute_blocks_when_usage_is_not_authorized() -> None:
             owner_key="owner-303",
             action_name="toolcall:shell",
             requested_units=2,
-        )
+        ),
     )
 
     assert receipt.executed is False
@@ -147,7 +147,7 @@ def test_get_usage_snapshot_returns_underlying_snapshot() -> None:
             remaining_before=9,
             remaining_after=8,
             wallet_balance=3,
-        )
+        ),
     )
 
     snapshot = service.get_usage_snapshot(owner_key="owner-304")

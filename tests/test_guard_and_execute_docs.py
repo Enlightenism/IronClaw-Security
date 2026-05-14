@@ -47,35 +47,47 @@ def test_guard_endpoints_require_auth_or_respond_successfully() -> None:
     client = TestClient(app)
 
     endpoints = [
-        ("/guard/action", {
-            "action_type": "network_request",
-            "target": "https://example.com",
-            "content": "Fetch a public page.",
-            "client_id": "docs-test-client",
-            "session_id": "docs-test-session",
-        }),
-        ("/guard/action-policy", {
-            "action_type": "network_request",
-            "target": "https://example.com",
-            "content": "Fetch a public page.",
-            "client_id": "docs-test-client",
-            "session_id": "docs-test-session",
-        }),
-        ("/guard/action-decision", {
-            "action_type": "network_request",
-            "target": "https://example.com",
-            "content": "Fetch a public page.",
-            "client_id": "docs-test-client",
-            "session_id": "docs-test-session",
-        }),
-        ("/guard/execute", {
-            "action_type": "network_request",
-            "target": "https://example.com",
-            "content": "Fetch a public page.",
-            "risk_score": 0,
-            "client_id": "docs-test-client",
-            "session_id": "docs-test-session",
-        }),
+        (
+            "/guard/action",
+            {
+                "action_type": "network_request",
+                "target": "https://example.com",
+                "content": "Fetch a public page.",
+                "client_id": "docs-test-client",
+                "session_id": "docs-test-session",
+            },
+        ),
+        (
+            "/guard/action-policy",
+            {
+                "action_type": "network_request",
+                "target": "https://example.com",
+                "content": "Fetch a public page.",
+                "client_id": "docs-test-client",
+                "session_id": "docs-test-session",
+            },
+        ),
+        (
+            "/guard/action-decision",
+            {
+                "action_type": "network_request",
+                "target": "https://example.com",
+                "content": "Fetch a public page.",
+                "client_id": "docs-test-client",
+                "session_id": "docs-test-session",
+            },
+        ),
+        (
+            "/guard/execute",
+            {
+                "action_type": "network_request",
+                "target": "https://example.com",
+                "content": "Fetch a public page.",
+                "risk_score": 0,
+                "client_id": "docs-test-client",
+                "session_id": "docs-test-session",
+            },
+        ),
     ]
 
     for path, payload in endpoints:

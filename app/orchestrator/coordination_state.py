@@ -99,10 +99,7 @@ def _build_agent_links(
     registry: AgentRegistry,
     graph: DependencyGraph,
 ) -> dict[str, dict[str, list[str]]]:
-    path_to_agent_id = {
-        item.relative_path: item.agent_id
-        for item in registry.items
-    }
+    path_to_agent_id = {item.relative_path: item.agent_id for item in registry.items}
 
     links: dict[str, dict[str, list[str]]] = {}
 
@@ -112,16 +109,8 @@ def _build_agent_links(
             continue
 
         links[agent_id] = {
-            "upstream_agents": sorted(
-                path_to_agent_id[path]
-                for path in node.incoming
-                if path in path_to_agent_id
-            ),
-            "downstream_agents": sorted(
-                path_to_agent_id[path]
-                for path in node.outgoing
-                if path in path_to_agent_id
-            ),
+            "upstream_agents": sorted(path_to_agent_id[path] for path in node.incoming if path in path_to_agent_id),
+            "downstream_agents": sorted(path_to_agent_id[path] for path in node.outgoing if path in path_to_agent_id),
         }
 
     return links
@@ -136,15 +125,18 @@ def initialize_coordination_state(
     states: list[AgentState] = []
     for item in registry.items:
         agent_links = links.get(item.agent_id, {})
-        status: CoordinationStatus = "observing" if item.threat_profile in {
-            "execution_capable",
-            "security_critical",
-            "sensitive",
-        } else "idle"
-
-        priority: CoordinationPriority = "high" if item.threat_profile == "security_critical" else (
-            "normal" if item.threat_profile in {"sensitive", "execution_capable"} else "low"
+        status: CoordinationStatus = (
+            "observing"
+            if item.threat_profile
+            in {
+                "execution_capable",
+                "security_critical",
+                "sensitive",
+            }
+            else "idle"
         )
+
+        priority: CoordinationPriority = "high" if item.threat_profile == "security_critical" else ("normal" if item.threat_profile in {"sensitive", "execution_capable"} else "low")
 
         states.append(
             AgentState(
@@ -161,7 +153,7 @@ def initialize_coordination_state(
                 upstream_agents=agent_links.get("upstream_agents", []),
                 downstream_agents=agent_links.get("downstream_agents", []),
                 tags=item.tags,
-            )
+            ),
         )
 
     states.sort(key=lambda state: state.file_path)
@@ -203,7 +195,7 @@ def apply_execution_plan(
                 upstream_agents=state.upstream_agents,
                 downstream_agents=state.downstream_agents,
                 tags=state.tags,
-            )
+            ),
         )
 
     if not matched:
@@ -257,7 +249,7 @@ if __name__ == "__main__":
     from app.orchestrator.agent_registry import discover_agents
     from app.orchestrator.dependency_graph import build_dependency_graph
 
-    root = Path(".").resolve()
+    root = Path().resolve()
     registry = discover_agents(root)
     graph = build_dependency_graph(root)
     snapshot = initialize_coordination_state(registry, graph)

@@ -35,6 +35,7 @@ from ironclaw_skill.router import (
 # Helpers / fixtures
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 def _ctx(request_id: str | None = None) -> SkillRequestContext:
     return SkillRequestContext(
         client_id="test-client",
@@ -131,6 +132,7 @@ def _assert_envelope_invariants(
 # 1. Package-level metadata — accessible without internal imports
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class TestPackageMetadata:
     def test_version_is_accessible(self):
         assert hasattr(ironclaw_skill, "__version__")
@@ -159,6 +161,7 @@ class TestPackageMetadata:
 # ══════════════════════════════════════════════════════════════════════════════
 # 2. Public contract construction — validate all request types build cleanly
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 class TestPublicContractConstruction:
     def test_scan_request_text(self):
@@ -224,7 +227,7 @@ class TestPublicContractConstruction:
                     label="Test label",
                     details="Test details",
                     score=0.1,
-                )
+                ),
             ],
         )
         _assert_envelope_invariants(envelope, expected_operation="scan", expect_ok=True)
@@ -250,6 +253,7 @@ class TestPublicContractConstruction:
 # ══════════════════════════════════════════════════════════════════════════════
 # 3. Default router — all four operations, no custom handlers
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 class TestDefaultRouterAllOperations:
     def test_default_scan(self):
@@ -312,6 +316,7 @@ class TestDefaultRouterAllOperations:
 # 4. Custom handler registration via .register() — all four slots
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class TestCustomHandlerRegistration:
     def _make_allow_handler(self, operation: str):
         def handler(request):
@@ -323,6 +328,7 @@ class TestCustomHandlerRegistration:
                 risk_score=0,
                 request_id=request.context.request_id,
             )
+
         return handler
 
     def test_register_scan_handler(self):
@@ -429,10 +435,12 @@ class TestCustomHandlerRegistration:
 # 5. Error-wrapping — handler raises, router catches and returns error envelope
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class TestHandlerExceptionWrapping:
     def _raising_handler(self, operation: str):
         def handler(request):
             raise RuntimeError(f"Simulated failure in {operation} handler")
+
         return handler
 
     def test_scan_handler_exception_is_wrapped(self):
@@ -490,6 +498,7 @@ class TestHandlerExceptionWrapping:
 # 6. Operation mismatch — handler returns wrong operation, router wraps as error
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class TestOperationMismatch:
     def test_scan_handler_returning_execute_operation_is_caught(self):
         def bad_handler(request):
@@ -526,6 +535,7 @@ class TestOperationMismatch:
 # 7. Unsupported request type — must raise IronClawSkillRouterError
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class TestUnsupportedRequestType:
     def test_arbitrary_object_raises(self):
         router = IronClawSkillRouter()
@@ -547,6 +557,7 @@ class TestUnsupportedRequestType:
 # 8. request_id propagation through the public boundary
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class TestRequestIdPropagation:
     def test_request_id_propagates_from_context_default_scan(self):
         ctx = _ctx("propagation-test-001")
@@ -564,7 +575,7 @@ class TestRequestIdPropagation:
                 action=SkillActionInput(
                     action_type="file_write",
                     target="/tmp/test.txt",
-                )
+                ),
             ),
             context=ctx,
         )
@@ -590,6 +601,7 @@ class TestRequestIdPropagation:
 # ══════════════════════════════════════════════════════════════════════════════
 # 9. Envelope shape invariants — exhaustive field-level assertions
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 class TestEnvelopeShapeInvariants:
     @pytest.mark.parametrize(
@@ -663,6 +675,7 @@ class TestEnvelopeShapeInvariants:
 # 10. Dataclass slot structure — router fields are directly assignable
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class TestRouterDataclassSlots:
     def test_all_handler_slots_default_to_none(self):
         router = IronClawSkillRouter()
@@ -685,15 +698,19 @@ class TestRouterDataclassSlots:
         def handler_v1(r):
             calls.append("v1")
             return build_skill_success_response(
-                operation="scan", verdict="allow",
-                summary="v1", request_id=r.context.request_id,
+                operation="scan",
+                verdict="allow",
+                summary="v1",
+                request_id=r.context.request_id,
             )
 
         def handler_v2(r):
             calls.append("v2")
             return build_skill_success_response(
-                operation="scan", verdict="block",
-                summary="v2", request_id=r.context.request_id,
+                operation="scan",
+                verdict="block",
+                summary="v2",
+                request_id=r.context.request_id,
             )
 
         router = IronClawSkillRouter()

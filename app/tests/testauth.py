@@ -262,7 +262,7 @@ def test_get_api_key_uses_first_non_empty_supported_setting_field() -> None:
             platform_api_key="",
             admin_api_key="admin-secret",
             api_key="fallback-secret",
-        )
+        ),
     )
     client = TestClient(app)
 
@@ -323,7 +323,7 @@ def test_direct_dependency_raises_auth_not_configured_when_enabled_without_keys(
             "scheme": "http",
             "root_path": "",
             "http_version": "1.1",
-        }
+        },
     )
 
     with pytest.raises(AppError) as exc_info:

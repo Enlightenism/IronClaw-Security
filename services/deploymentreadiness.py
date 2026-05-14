@@ -49,12 +49,7 @@ def _default_release_id() -> str:
 
 
 def _detect_environment() -> str:
-    value = (
-        os.getenv("IRONCLAW_ENV")
-        or os.getenv("ENVIRONMENT")
-        or os.getenv("APP_ENV")
-        or "local"
-    )
+    value = os.getenv("IRONCLAW_ENV") or os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or "local"
     return str(value).strip().lower()
 
 
@@ -202,19 +197,13 @@ def _env_file_check(root: Path) -> DeploymentReadinessCheck:
             metadata={"path": str(env_path)},
         )
 
-    non_comment_lines = [
-        line.strip()
-        for line in content.splitlines()
-        if line.strip() and not line.strip().startswith("#")
-    ]
+    non_comment_lines = [line.strip() for line in content.splitlines() if line.strip() and not line.strip().startswith("#")]
     has_pairs = any("=" in line for line in non_comment_lines)
     return _make_check(
         "environment-file",
         "Environment file",
         has_pairs,
-        "Environment file is readable and contains key/value settings."
-        if has_pairs
-        else "Environment file exists but does not contain usable key/value entries.",
+        "Environment file is readable and contains key/value settings." if has_pairs else "Environment file exists but does not contain usable key/value entries.",
         metadata={"path": str(env_path), "entry_count": len(non_comment_lines)},
     )
 
@@ -249,7 +238,11 @@ def _channel_check(root: Path) -> DeploymentReadinessCheck:
         "Release channel",
         ok,
         f"Configured channel: {channel}",
-        metadata={"path": str(config_json), "detected_channel": channel, "allowed": sorted(_ALLOWED_CHANNELS)},
+        metadata={
+            "path": str(config_json),
+            "detected_channel": channel,
+            "allowed": sorted(_ALLOWED_CHANNELS),
+        },
     )
 
 

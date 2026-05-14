@@ -108,12 +108,8 @@ def _usage_to_dict(receipt: Any) -> dict[str, Any]:
         "reason": getattr(receipt, "reason", ""),
         "applied": bool(getattr(consumption, "applied", False)) if consumption else False,
         "plan": getattr(consumption, "plan", None) if consumption else None,
-        "subscriptionid": getattr(consumption, "subscription_id", None)
-        if consumption
-        else None,
-        "walletbalance": getattr(consumption, "wallet_balance", None)
-        if consumption
-        else None,
+        "subscriptionid": getattr(consumption, "subscription_id", None) if consumption else None,
+        "walletbalance": getattr(consumption, "wallet_balance", None) if consumption else None,
     }
 
 
@@ -190,7 +186,7 @@ def executeaction(request: ActionExecuteRequestModel) -> ActionExecuteResponse:
                     "filepath": request.filepath,
                 },
                 metadata=mergedmetadata,
-            )
+            ),
         )
         usage = _usage_to_dict(receipt)
     except Exception:

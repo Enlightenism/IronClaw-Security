@@ -193,7 +193,7 @@ def build_integration_search_view(
                 metadata={
                     "requested_by": requested_by,
                 },
-            )
+            ),
         )
 
     # Sort by score (desc), then name.
@@ -203,7 +203,7 @@ def build_integration_search_view(
             item.name.lower(),
             item.slug,
             item.integration_id,
-        )
+        ),
     )
 
     return IntegrationSearchView(

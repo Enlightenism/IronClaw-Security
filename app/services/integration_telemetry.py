@@ -15,8 +15,7 @@ class TelemetryState(str, Enum):
 
 @dataclass(frozen=True)
 class AdapterTelemetry:
-    """
-    Telemetry for a single adapter/runtime within an integration.
+    """Telemetry for a single adapter/runtime within an integration.
 
     This is intentionally minimal and deterministic so platforms can
     store and query it easily (JSON, event streams, etc.).
@@ -41,8 +40,7 @@ class AdapterTelemetry:
 
 @dataclass(frozen=True)
 class IntegrationTelemetrySummary:
-    """
-    Roll‑up telemetry for an entire integration across all adapters.
+    """Roll‑up telemetry for an entire integration across all adapters.
 
     This is what you send to the platform for dashboards, alerting, or risk views.
     """
@@ -62,9 +60,7 @@ class IntegrationTelemetrySummary:
         return {
             "integration_id": self.integration_id,
             "total_adapters": self.total_adapters,
-            "counts_by_state": {
-                state.value: count for state, count in self.counts_by_state.items()
-            },
+            "counts_by_state": {state.value: count for state, count in self.counts_by_state.items()},
             "overall_state": self.overall_state.value,
             "risk_score": self.risk_score,
             "sample_unsupported_adapters": list(self.sample_unsupported_adapters),
@@ -84,8 +80,7 @@ def summarize_integration_telemetry(
     # changing the function signature.
     weights: Mapping[TelemetryState, float] | None = None,
 ) -> IntegrationTelemetrySummary:
-    """
-    Aggregate adapter‑level telemetry into a single integration summary.
+    """Aggregate adapter‑level telemetry into a single integration summary.
 
     Rules (deliberately conservative):
 
@@ -101,7 +96,6 @@ def summarize_integration_telemetry(
     - If adapters provide their own `score`, we blend in the average of those
       to avoid discarding useful per‑adapter risk signals.
     """
-
     telemetry_list = list(adapter_telemetry)
     total = len(telemetry_list)
 
@@ -130,9 +124,7 @@ def summarize_integration_telemetry(
         overall_state = TelemetryState.WARNING
     else:
         # If there are zero adapters, treat as unsupported to be safe.
-        overall_state = (
-            TelemetryState.SUPPORTED if total > 0 else TelemetryState.UNSUPPORTED
-        )
+        overall_state = TelemetryState.SUPPORTED if total > 0 else TelemetryState.UNSUPPORTED
 
     # Default penalty weights – can be overridden via `weights`.
     penalties = {

@@ -242,16 +242,8 @@ def build_system_diagnostics(
     review_queue_ready = _coerce_bool(source.get("review_queue_ready"), current.review_queue_ready)
     database_ready = _coerce_bool(source.get("database_ready"), current.database_ready)
 
-    warnings = tuple(
-        _coerce_str(item)
-        for item in (source.get("warnings") if isinstance(source.get("warnings"), list) else list(current.warnings))
-        if _coerce_str(item)
-    )
-    failures = tuple(
-        _coerce_str(item)
-        for item in (source.get("failures") if isinstance(source.get("failures"), list) else list(current.failures))
-        if _coerce_str(item)
-    )
+    warnings = tuple(_coerce_str(item) for item in (source.get("warnings") if isinstance(source.get("warnings"), list) else list(current.warnings)) if _coerce_str(item))
+    failures = tuple(_coerce_str(item) for item in (source.get("failures") if isinstance(source.get("failures"), list) else list(current.failures)) if _coerce_str(item))
 
     derived_healthy = all(
         (
@@ -262,7 +254,7 @@ def build_system_diagnostics(
             database_ready,
             not failures,
             all(check.healthy for check in checks),
-        )
+        ),
     )
     derived_status = "healthy" if derived_healthy and not warnings else "degraded" if derived_healthy else "unhealthy"
 

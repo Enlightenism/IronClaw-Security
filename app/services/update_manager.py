@@ -163,7 +163,7 @@ def apply_integration_update(
     if record is None:
         raise KeyError(f"unknown integration_id: {integration_id}")
 
-    plan = build_update_plan(
+    build_update_plan(
         record,
         to_version=to_version,
         strategy=strategy,
@@ -183,7 +183,7 @@ def apply_integration_update(
                 "platform": record.platform,
                 "from_version": record.version,
             },
-        )
+        ),
     )
 
     # Step 2: compatibility (Gen1 is optimistic here; compatibility_matrix can extend this later).
@@ -193,7 +193,7 @@ def apply_integration_update(
             state="completed",
             message="No incompatible breaking changes detected for Gen1.",
             metadata={"planned_to_version": to_version},
-        )
+        ),
     )
 
     # Step 3: backup (logical only for Gen1).
@@ -203,7 +203,7 @@ def apply_integration_update(
             state="completed",
             message="Recorded pre-update version for rollback if needed.",
             metadata={"backup_version": record.version},
-        )
+        ),
     )
 
     # Step 4 + 5 differ for dry-run vs real update.
@@ -217,14 +217,14 @@ def apply_integration_update(
                 name="apply-update",
                 state="skipped",
                 message="Dry run only; no changes applied.",
-            )
+            ),
         )
         steps.append(
             UpdateStepResult(
                 name="verify-post-update",
                 state="skipped",
                 message="Verification skipped because update was not applied.",
-            )
+            ),
         )
         state = "planned"
         succeeded = False
@@ -240,14 +240,14 @@ def apply_integration_update(
                 state="completed",
                 message=f"Integration '{record.slug}' updated to version {to_version}.",
                 metadata={"from_version": from_version, "to_version": to_version},
-            )
+            ),
         )
         steps.append(
             UpdateStepResult(
                 name="verify-post-update",
                 state="completed",
                 message="Post-update verification passed for Gen1 metadata.",
-            )
+            ),
         )
         state = "completed"
         succeeded = True

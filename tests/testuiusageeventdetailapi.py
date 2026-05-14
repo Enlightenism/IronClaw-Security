@@ -30,11 +30,5 @@ def test_ui_usage_event_detail_contains_core_fields() -> None:
     assert data
 
     assert any(k in data for k in ("title", "headline", "summary", "page_title"))
-    assert any(
-        k in data
-        for k in ("event", "detail", "item", "record", "metadata", "payload")
-    )
-    assert any(
-        k in data
-        for k in ("fields", "timeline", "actions", "sections", "status", "details")
-    )
+    assert any(k in data for k in ("event", "detail", "item", "record", "metadata", "payload"))
+    assert any(k in data for k in ("fields", "timeline", "actions", "sections", "status", "details"))

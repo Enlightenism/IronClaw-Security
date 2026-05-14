@@ -8,8 +8,7 @@ from typing import Any
 
 @dataclass(slots=True)
 class ActionUsageSnapshot:
-    """
-    Core, serialization-friendly representation of an action-usage snapshot.
+    """Core, serialization-friendly representation of an action-usage snapshot.
 
     Designed to satisfy the snapshot test suite:
     - Stable key set across builds
@@ -33,8 +32,7 @@ class ActionUsageSnapshot:
     summary: dict[str, Any] | None = field(default=None)
 
     def as_dict(self) -> dict[str, Any]:
-        """
-        Return a plain dict representation suitable for JSON or further
+        """Return a plain dict representation suitable for JSON or further
         transformation. Keys are stable across builds.
         """
         return {
@@ -66,7 +64,7 @@ def _coerce_decimal(value: Any) -> Decimal | None:
 def _ensure_non_negative(name: str, value: Decimal | None) -> Decimal | None:
     if value is None:
         return None
-    if value < Decimal("0"):
+    if value < Decimal(0):
         raise ValueError(f"{name} must be non-negative")
     return value
 
@@ -87,8 +85,7 @@ def build_action_usage_snapshot(
     total_cost: Any | None = None,
     quota: Any | None = None,
 ) -> ActionUsageSnapshot:
-    """
-    Build a snapshot object that satisfies tests/testactionusagesnapshot.py.
+    """Build a snapshot object that satisfies tests/testactionusagesnapshot.py.
 
     Behaviors:
     - snapshotid / ownerid / periodstart / periodend / generatedat are non-empty
@@ -98,7 +95,6 @@ def build_action_usage_snapshot(
     - If total_units == 0 and total_cost is provided, total_cost must be 0.
     - Negative totals/quota raise errors when explicitly provided.
     """
-
     # Normalize owner id
     owner_normalized: str | None = None
     if owner_id is not None:
@@ -129,7 +125,7 @@ def build_action_usage_snapshot(
 
     # If total_units == 0 and total_cost is provided, total_cost must be 0
     if total_units_dec is not None and total_cost_dec is not None:
-        if total_units_dec == Decimal("0") and total_cost_dec != Decimal("0"):
+        if total_units_dec == Decimal(0) and total_cost_dec != Decimal(0):
             raise ValueError("total_cost must be zero when total_units is zero")
 
     # Derive remaining from quota when possible, otherwise leave None
@@ -137,7 +133,7 @@ def build_action_usage_snapshot(
     if quota_dec is not None and total_units_dec is not None:
         # remaining = quota - total_units, ensuring non-negative
         remaining_dec = quota_dec - total_units_dec
-        if remaining_dec < Decimal("0"):
+        if remaining_dec < Decimal(0):
             raise ValueError("remaining cannot be negative relative to quota")
     elif quota_dec is not None:
         remaining_dec = quota_dec

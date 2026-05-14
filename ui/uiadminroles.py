@@ -323,7 +323,7 @@ def ui_admin_roles_page(
                     "title": "No roles found",
                     "description": "Adjust your filters or search criteria to inspect different role definitions.",
                 },
-            }
+            },
         ],
         "actions": [
             {

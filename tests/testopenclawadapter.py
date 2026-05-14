@@ -174,8 +174,7 @@ def test_adapt_allow_sets_should_allow_true() -> None:
 
 
 def test_adapt_block_sets_should_block_and_hold() -> None:
-    decision = _make_decision("block", risk_score=90, risk_level="high",
-                              matched_rules=["signature_mismatch"])
+    decision = _make_decision("block", risk_score=90, risk_level="high", matched_rules=["signature_mismatch"])
     resp = adapt_policy_decision_to_openclaw(decision, request=_ocrequest())
     assert resp.should_block is True
     assert resp.should_allow is False
@@ -208,8 +207,7 @@ def test_adapt_carries_decision_id() -> None:
 
 def test_adapt_carries_trace_id() -> None:
     decision = _make_decision("allow")
-    resp = adapt_policy_decision_to_openclaw(decision, request=_ocrequest(),
-                                              trace_id="trace-xyz")
+    resp = adapt_policy_decision_to_openclaw(decision, request=_ocrequest(), trace_id="trace-xyz")
     assert resp.trace_id == "trace-xyz"
 
 

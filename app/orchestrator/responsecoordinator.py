@@ -66,11 +66,7 @@ def _as_dict(value: Any) -> dict[str, Any]:
         if isinstance(dumped, Mapping):
             return dict(dumped)
     if hasattr(value, "__dict__"):
-        return {
-            key: item
-            for key, item in vars(value).items()
-            if not key.startswith("_") and not callable(item)
-        }
+        return {key: item for key, item in vars(value).items() if not key.startswith("_") and not callable(item)}
     return {}
 
 
@@ -173,11 +169,7 @@ class ResponseCoordinator:
                 "decision": None,
                 "resolution": None,
                 "source": "responsecoordinator",
-                "notes": (
-                    f"Executionstate={decision.executionstate}, "
-                    f"policyverdict={decision.policyverdict}, "
-                    f"responseaction={decision.responseaction}."
-                ),
+                "notes": (f"Executionstate={decision.executionstate}, policyverdict={decision.policyverdict}, responseaction={decision.responseaction}."),
                 "tags": ["runtime_decision"],
                 "metadata": {
                     "session_id": session_id,
@@ -204,7 +196,7 @@ class ResponseCoordinator:
                     "label": "Review enqueue",
                     "details": f"Queued review '{queue_item.get('review_id')}' for session '{session_id}'.",
                     "score": decision.adjustedriskscore,
-                }
+                },
             )
 
         if queued_for_review and not decision.degradedmode:
@@ -218,7 +210,7 @@ class ResponseCoordinator:
                         "label": "Review lease",
                         "details": f"Leased review '{leased.get('review_id')}' for active handling.",
                         "score": decision.adjustedriskscore,
-                    }
+                    },
                 )
 
         session_updates: dict[str, Any] = {
@@ -232,10 +224,7 @@ class ResponseCoordinator:
         summary_reason = {
             "source": "responsecoordinator",
             "label": "Decision coordination",
-            "details": (
-                f"Coordinated decision '{decision.policyverdict}' "
-                f"for session '{session_id}' with executionstate '{decision.executionstate}'."
-            ),
+            "details": (f"Coordinated decision '{decision.policyverdict}' for session '{session_id}' with executionstate '{decision.executionstate}'."),
             "score": decision.adjustedriskscore,
         }
         reasons.append(summary_reason)

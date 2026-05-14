@@ -153,8 +153,7 @@ class BrainDecisionResponse(BaseModel):
 
 
 def _get_supabase_client() -> SupabaseClient | None:
-    """
-    Build a SupabaseClient for history operations.
+    """Build a SupabaseClient for history operations.
 
     History is best-effort; if configuration is missing or Supabase is down,
     we return None and treat history as disabled rather than failing scans.
@@ -356,9 +355,7 @@ def _fetch_related_history(
 
     related_rows: list[dict[str, Any]] = []
     for row in rows:
-        if session_id and row.get("session_id") == session_id:
-            related_rows.append(row)
-        elif user_id and row.get("user_id") == user_id:
+        if (session_id and row.get("session_id") == session_id) or (user_id and row.get("user_id") == user_id):
             related_rows.append(row)
 
     items = [
@@ -433,32 +430,20 @@ def _compute_brain_decision(
     if not related_history:
         return base
 
-    prior_high_risk = [
-        h
-        for h in related_history
-        if h.verdict in ("quarantine", "block")
-        or h.sandbox_lane in ("prompt_injection", "code_execution", "exfiltration")
-    ]
+    prior_high_risk = [h for h in related_history if h.verdict in ("quarantine", "block") or h.sandbox_lane in ("prompt_injection", "code_execution", "exfiltration")]
 
     if not prior_high_risk:
         return base
 
     count = len(prior_high_risk)
     boosted_confidence = min(1.0, base.confidence + 0.05)
-    extra_reason = (
-        f" There are {count} prior high-risk events for this session or user, "
-        "indicating potential ongoing prompt abuse or malicious behavior."
-    )
+    extra_reason = f" There are {count} prior high-risk events for this session or user, indicating potential ongoing prompt abuse or malicious behavior."
 
     if base.final_action == "warn" and count >= 2:
         return BrainDecision(
             final_action="quarantine",
             confidence=min(1.0, boosted_confidence + 0.05),
-            reason=(
-                "Repeated suspicious activity was observed across related history. "
-                "The current event should be quarantined pending further review."
-                + extra_reason
-            ),
+            reason=("Repeated suspicious activity was observed across related history. The current event should be quarantined pending further review." + extra_reason),
             recommended_mode="enforce",
         )
 
@@ -466,11 +451,7 @@ def _compute_brain_decision(
         return BrainDecision(
             final_action="warn",
             confidence=0.85,
-            reason=(
-                "The current content appears safe on its own, but related history shows repeated "
-                "high-risk activity. Proceed with caution."
-                + extra_reason
-            ),
+            reason=("The current content appears safe on its own, but related history shows repeated high-risk activity. Proceed with caution." + extra_reason),
             recommended_mode="enforce",
         )
 
@@ -672,7 +653,7 @@ async def scan_batch_endpoint(request: ScanBatchRequest) -> ScanBatchResponse:
             ScanBatchItemResponse(
                 client_id=item.client_id,
                 **scan_response.model_dump(),
-            )
+            ),
         )
 
     return ScanBatchResponse(items=responses)

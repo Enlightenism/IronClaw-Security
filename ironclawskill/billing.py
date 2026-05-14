@@ -148,7 +148,7 @@ def _coerce_int(value: Any, *, default: int, field_name: str) -> int:
         result = int(value)
     except (TypeError, ValueError) as exc:
         raise ProviderConfigurationError(
-            f"Invalid integer for {field_name}: {value!r}"
+            f"Invalid integer for {field_name}: {value!r}",
         ) from exc
     if result < 0:
         raise ProviderConfigurationError(f"{field_name} must be >= 0")
@@ -163,9 +163,7 @@ def default_ledger_path() -> Path:
 
 
 def load_billing_policy() -> BillingPolicy:
-    provider_raw = (
-        _normalize_optional_text(os.getenv("IRONCLAW_BILLING_PROVIDER")) or DEFAULT_PROVIDER
-    )
+    provider_raw = _normalize_optional_text(os.getenv("IRONCLAW_BILLING_PROVIDER")) or DEFAULT_PROVIDER
     provider = provider_raw.lower()
     if provider not in {"stub", "memory"}:
         raise ProviderConfigurationError(f"Unsupported billing provider: {provider_raw}")
@@ -178,14 +176,12 @@ def load_billing_policy() -> BillingPolicy:
             field_name="IRONCLAW_UNITS_PER_SCAN",
         ),
         units_per_action_policy=_coerce_int(
-            os.getenv("IRONCLAW_UNITS_PER_ACTION_POLICY")
-            or os.getenv("IRONCLAWUNITSPERACTIONPOLICY"),
+            os.getenv("IRONCLAW_UNITS_PER_ACTION_POLICY") or os.getenv("IRONCLAWUNITSPERACTIONPOLICY"),
             default=DEFAULT_UNITS_PER_ACTION_POLICY,
             field_name="IRONCLAW_UNITS_PER_ACTION_POLICY",
         ),
         units_per_action_decision=_coerce_int(
-            os.getenv("IRONCLAW_UNITS_PER_ACTION_DECISION")
-            or os.getenv("IRONCLAWUNITSPERACTIONDECISION"),
+            os.getenv("IRONCLAW_UNITS_PER_ACTION_DECISION") or os.getenv("IRONCLAWUNITSPERACTIONDECISION"),
             default=DEFAULT_UNITS_PER_ACTION_DECISION,
             field_name="IRONCLAW_UNITS_PER_ACTION_DECISION",
         ),
@@ -423,20 +419,13 @@ def charge_units(
         units=units,
     )
 
+
 # Backwards-compatible aliases for CLI and external callers
 chargeunits = charge_units
 createbillinghook = create_billing_hook
 
 
 __all__ = [
-    "BillingContext",
-    "BillingEvent",
-    "BillingHook",
-    "BillingOperation",
-    "BillingPolicy",
-    "BillingProvider",
-    "BillingResult",
-    "BillingStatus",
     "DEFAULT_BALANCE",
     "DEFAULT_BLOCK_ON_EXHAUSTED",
     "DEFAULT_LEDGER_DIRNAME",
@@ -446,6 +435,14 @@ __all__ = [
     "DEFAULT_UNITS_PER_ACTION_POLICY",
     "DEFAULT_UNITS_PER_EXECUTE",
     "DEFAULT_UNITS_PER_SCAN",
+    "BillingContext",
+    "BillingEvent",
+    "BillingHook",
+    "BillingOperation",
+    "BillingPolicy",
+    "BillingProvider",
+    "BillingResult",
+    "BillingStatus",
     "MemoryBillingHook",
     "StubBillingHook",
     "build_billing_context_from_request_context",

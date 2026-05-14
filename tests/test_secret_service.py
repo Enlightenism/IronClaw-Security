@@ -9,6 +9,7 @@ from app.services.secrets_vault import _SecretsVault
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def fresh_vault() -> _SecretsVault:
     """Return a new unseeded vault instance (bypasses lru_cache)."""
     return _SecretsVault()
@@ -17,6 +18,7 @@ def fresh_vault() -> _SecretsVault:
 # ---------------------------------------------------------------------------
 # Core identity
 # ---------------------------------------------------------------------------
+
 
 def test_app_name_default():
     with patch.dict(os.environ, {}, clear=False):
@@ -53,6 +55,7 @@ def test_app_port_is_int():
 # Supabase
 # ---------------------------------------------------------------------------
 
+
 def test_supabase_url_empty_default():
     os.environ.pop("SUPABASE_URL", None)
     assert fresh_vault().supabase_url() == ""
@@ -82,6 +85,7 @@ def test_supabase_service_role_key_returns_value():
 # Groq / AI
 # ---------------------------------------------------------------------------
 
+
 def test_groq_api_key_empty_default():
     os.environ.pop("GROQ_API_KEY", None)
     assert fresh_vault().groq_api_key() == ""
@@ -100,6 +104,7 @@ def test_groq_model_override():
 # ---------------------------------------------------------------------------
 # Auth / JWT
 # ---------------------------------------------------------------------------
+
 
 def test_secret_key_empty_default():
     os.environ.pop("SECRET_KEY", None)
@@ -124,6 +129,7 @@ def test_access_token_expire_minutes_is_int():
 # ---------------------------------------------------------------------------
 # Filesystem paths
 # ---------------------------------------------------------------------------
+
 
 def test_data_dir_falls_back_to_samples():
     for key in ("IRONCLAW_DATA_DIR", "IRONCLAW_BASE_DIR", "DATA_DIR"):
@@ -166,6 +172,7 @@ def test_quarantine_dir_none_when_absent():
 # Optional integrations
 # ---------------------------------------------------------------------------
 
+
 def test_redis_url_none_when_absent():
     os.environ.pop("REDIS_URL", None)
     assert fresh_vault().redis_url() is None
@@ -190,6 +197,7 @@ def test_environment_override():
 # Generic escape hatch
 # ---------------------------------------------------------------------------
 
+
 def test_get_returns_default_when_absent():
     os.environ.pop("IRONCLAW_NONEXISTENT_KEY", None)
     assert fresh_vault().get("IRONCLAW_NONEXISTENT_KEY", "fallback") == "fallback"
@@ -204,8 +212,10 @@ def test_get_returns_value_when_present():
 # Singleton
 # ---------------------------------------------------------------------------
 
+
 def test_vault_singleton_is_same_object():
     from app.services.secrets_vault import _vault_singleton
     from app.services.secrets_vault import vault as v1
+
     v2 = _vault_singleton()
     assert v1 is v2

@@ -89,7 +89,7 @@ def test_action_usage_numeric_fields_are_non_negative_when_present() -> None:
     for key in ("units", "unitcost", "totalcost", "quota", "remaining"):
         value = _read_numeric(payload, key)
         if value is not None:
-            assert value >= Decimal("0")
+            assert value >= Decimal(0)
 
 
 def test_action_usage_owner_identifier_is_non_empty_when_present() -> None:

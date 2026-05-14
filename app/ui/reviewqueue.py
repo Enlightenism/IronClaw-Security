@@ -93,7 +93,7 @@ def _build_row(item: ReviewQueueItem) -> ReviewQueueRow:
             method="GET",
             href=detail_href,
             style="primary",
-        )
+        ),
     ]
 
     if item.status == ReviewStatus.PENDING:
@@ -105,7 +105,7 @@ def _build_row(item: ReviewQueueItem) -> ReviewQueueRow:
                 api_path="/api/review-queue/claim-next",
                 body={"reviewer_id": "analyst-1"},
                 style="default",
-            )
+            ),
         )
 
     if item.status == ReviewStatus.IN_PROGRESS:
@@ -117,7 +117,7 @@ def _build_row(item: ReviewQueueItem) -> ReviewQueueRow:
                 api_path=f"/api/review-queue/{item.review_id}/complete",
                 body={},
                 style="success",
-            )
+            ),
         )
         actions.append(
             ReviewQueueRowAction(
@@ -127,7 +127,7 @@ def _build_row(item: ReviewQueueItem) -> ReviewQueueRow:
                 api_path=f"/api/review-queue/{item.review_id}/dismiss",
                 body={"reason": "dismissed-by-analyst"},
                 style="danger",
-            )
+            ),
         )
 
     return ReviewQueueRow(
@@ -166,14 +166,8 @@ def get_review_queue_page(
         title="Review Queue",
         description="Analyst queue for escalated review items that require human triage.",
         filters=ReviewQueueFilters(
-            statuses=[
-                ReviewQueueFilterOption(value=status_member.value, label=_labelize(status_member.value))
-                for status_member in ReviewStatus
-            ],
-            priorities=[
-                ReviewQueueFilterOption(value=priority.value, label=_labelize(priority.value))
-                for priority in ReviewPriority
-            ],
+            statuses=[ReviewQueueFilterOption(value=status_member.value, label=_labelize(status_member.value)) for status_member in ReviewStatus],
+            priorities=[ReviewQueueFilterOption(value=priority.value, label=_labelize(priority.value)) for priority in ReviewPriority],
         ),
         summary_cards=[
             ReviewQueueSummaryCard(key="pending", label="Pending", count=counts.get("pending", 0)),

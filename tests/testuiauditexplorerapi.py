@@ -10,7 +10,7 @@ from app.main import app
 UI_AUDIT_EXPLORER_PATH: Final[str] = "/ui/audit-explorer"
 
 
-@pytest.fixture()
+@pytest.fixture
 def client() -> TestClient:
     with TestClient(app) as test_client:
         yield test_client
@@ -42,14 +42,8 @@ def test_ui_audit_explorer_contains_core_fields(client: TestClient) -> None:
 
     assert data
     assert any(k in data for k in ("title", "headline", "summary", "dashboard_title"))
-    assert any(
-        k in data
-        for k in ("items", "events", "records", "logs", "entries")
-    )
-    assert any(
-        k in data
-        for k in ("filters", "timeline", "facets", "sections", "actions")
-    )
+    assert any(k in data for k in ("items", "events", "records", "logs", "entries"))
+    assert any(k in data for k in ("filters", "timeline", "facets", "sections", "actions"))
 
 
 def test_ui_audit_explorer_surface_does_not_return_array_root(

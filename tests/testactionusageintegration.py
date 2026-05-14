@@ -161,7 +161,7 @@ def test_wallet_debit_can_track_usage_total_cost_when_supported() -> None:
     if not any(hasattr(wallet, name) and callable(getattr(wallet, name)) for name in debit_methods):
         pytest.skip("wallet debit method not implemented")
 
-    _call_method_if_present(wallet, credit_methods, total_cost + Decimal("5"))
+    _call_method_if_present(wallet, credit_methods, total_cost + Decimal(5))
     before = _wallet_balance(wallet)
     _call_method_if_present(wallet, debit_methods, total_cost)
     after = _wallet_balance(wallet)
@@ -197,12 +197,12 @@ def test_usage_and_wallet_values_remain_non_negative_across_integration() -> Non
     wallet_balance = _wallet_balance(wallet)
     usage_payload = _payload_of(usage)
 
-    assert wallet_balance >= Decimal("0")
+    assert wallet_balance >= Decimal(0)
 
     for key in ("units", "unitcost", "totalcost", "quota", "remaining"):
         value = _number(usage_payload, key, key.replace("cost", "_cost"))
         if value is not None:
-            assert value >= Decimal("0")
+            assert value >= Decimal(0)
 
 
 def test_multiple_usage_records_for_same_owner_have_stable_owner_identity_when_supported() -> None:

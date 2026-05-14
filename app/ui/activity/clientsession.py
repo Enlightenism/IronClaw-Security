@@ -216,7 +216,7 @@ def _build_client_summaries(records: list[dict[str, Any]]) -> list[ClientActivit
                 pendingreviews=_pending_reviews(group),
                 verdictcounts=_verdict_counts(group),
                 recentexecutions=_recent_items(group),
-            )
+            ),
         )
     return summaries
 
@@ -241,7 +241,7 @@ def _build_session_summaries(records: list[dict[str, Any]]) -> list[SessionActiv
                 pendingreviews=_pending_reviews(group),
                 verdictcounts=_verdict_counts(group),
                 recentexecutions=_recent_items(group),
-            )
+            ),
         )
     return summaries
 

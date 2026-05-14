@@ -268,7 +268,7 @@ class DownloadAnalyzer:
                     name="non_http_scheme",
                     weight=0.30,
                     evidence=f"Download URL uses {parsed.scheme} scheme.",
-                )
+                ),
             )
 
         if host in URL_SHORTENER_HOSTS:
@@ -277,7 +277,7 @@ class DownloadAnalyzer:
                     name="url_shortener",
                     weight=0.28,
                     evidence=f"Host {host} is a known shortening service.",
-                )
+                ),
             )
 
         tld = host.rsplit(".", 1)[-1] if "." in host else ""
@@ -287,7 +287,7 @@ class DownloadAnalyzer:
                     name="suspicious_tld",
                     weight=0.26,
                     evidence=f"Host uses high-risk top-level domain .{tld}.",
-                )
+                ),
             )
 
         if IP_LITERAL_PATTERN.match(host):
@@ -299,7 +299,7 @@ class DownloadAnalyzer:
                             name="ip_literal_host",
                             weight=0.24,
                             evidence=f"URL uses literal IP host {host}.",
-                        )
+                        ),
                     )
             except ValueError:
                 pass
@@ -310,7 +310,7 @@ class DownloadAnalyzer:
                     name="deep_subdomain_chain",
                     weight=0.14,
                     evidence=f"Host {host} contains many chained subdomains.",
-                )
+                ),
             )
 
         if "@" in parsed.netloc and CREDENTIAL_STYLE_PATTERN.match(parsed.netloc):
@@ -319,7 +319,7 @@ class DownloadAnalyzer:
                     name="credential_style_url",
                     weight=0.32,
                     evidence="URL contains credential-style userinfo before host.",
-                )
+                ),
             )
 
         lowered_target = f"{path}?{query}".lower()
@@ -329,7 +329,7 @@ class DownloadAnalyzer:
                     name="double_extension_url",
                     weight=0.42,
                     evidence=f"URL path suggests disguised executable: {path}",
-                )
+                ),
             )
 
         for ext in HIGH_RISK_EXTENSIONS:
@@ -339,7 +339,7 @@ class DownloadAnalyzer:
                         name="executable_download_url",
                         weight=0.38,
                         evidence=f"URL path ends with executable extension {ext}.",
-                    )
+                    ),
                 )
                 break
 
@@ -349,7 +349,7 @@ class DownloadAnalyzer:
                     name="obfuscated_download_query",
                     weight=0.18,
                     evidence="Download query uses encoded characters alongside forced attachment semantics.",
-                )
+                ),
             )
 
         return signals
@@ -364,7 +364,7 @@ class DownloadAnalyzer:
                     name="double_extension_name",
                     weight=0.46,
                     evidence=f"Filename appears disguised with double extension: {file_name}",
-                )
+                ),
             )
 
         for ext in HIGH_RISK_EXTENSIONS:
@@ -374,7 +374,7 @@ class DownloadAnalyzer:
                         name="high_risk_extension",
                         weight=0.34,
                         evidence=f"Filename uses high-risk extension {ext}.",
-                    )
+                    ),
                 )
                 break
 
@@ -385,7 +385,7 @@ class DownloadAnalyzer:
                     name="archive_container",
                     weight=0.12,
                     evidence=f"Filename is an archive container {archive_match}.",
-                )
+                ),
             )
 
         if any(char in file_name for char in ("\u202e", "\u202d", "\u2066", "\u2067", "\u2068", "\u2069")):
@@ -394,7 +394,7 @@ class DownloadAnalyzer:
                     name="unicode_direction_override",
                     weight=0.54,
                     evidence="Filename contains Unicode direction override characters.",
-                )
+                ),
             )
 
         return signals
@@ -415,7 +415,7 @@ class DownloadAnalyzer:
                     name="portable_executable_header",
                     weight=0.48,
                     evidence="Payload starts with MZ executable header.",
-                )
+                ),
             )
         elif prefix.startswith(b"PK\x03\x04"):
             signals.append(
@@ -423,7 +423,7 @@ class DownloadAnalyzer:
                     name="zip_container_header",
                     weight=0.12,
                     evidence="Payload starts with ZIP archive header.",
-                )
+                ),
             )
         elif prefix.startswith(b"%PDF"):
             if any(ext in lowered_name for ext in (".exe", ".scr", ".js", ".bat")):
@@ -432,7 +432,7 @@ class DownloadAnalyzer:
                         name="extension_mime_mismatch",
                         weight=0.40,
                         evidence="Payload header appears to be PDF but filename extension is executable-like.",
-                    )
+                    ),
                 )
 
         if content_type:
@@ -443,7 +443,7 @@ class DownloadAnalyzer:
                         name="generic_binary_content_type",
                         weight=0.10,
                         evidence=f"Content-Type is generic binary: {content_type}",
-                    )
+                    ),
                 )
             if "text/html" in lowered_type and any(lowered_name.endswith(ext) for ext in HIGH_RISK_EXTENSIONS):
                 signals.append(
@@ -451,7 +451,7 @@ class DownloadAnalyzer:
                         name="content_type_filename_mismatch",
                         weight=0.35,
                         evidence=f"Executable-like filename conflicts with content type {content_type}.",
-                    )
+                    ),
                 )
 
         if len(payload) < 180 and any(lowered_name.endswith(ext) for ext in HIGH_RISK_EXTENSIONS):
@@ -460,7 +460,7 @@ class DownloadAnalyzer:
                     name="tiny_executable_payload",
                     weight=0.14,
                     evidence="Executable-like payload is unusually small and may be a staged dropper or broken lure.",
-                )
+                ),
             )
 
         return signals
@@ -475,7 +475,7 @@ class DownloadAnalyzer:
                     weight=min(0.50, 0.16 + len(matches) * 0.08),
                     evidence=f"Threat intel matched {len(matches)} indicator(s).",
                     category="threatintel",
-                )
+                ),
             )
 
         for family in list(getattr(assessment, "risk_families", []))[:3]:
@@ -485,7 +485,7 @@ class DownloadAnalyzer:
                     weight=0.12,
                     evidence=f"Threat intel associated the target with {family}.",
                     category="threatintel",
-                )
+                ),
             )
 
         return signals
@@ -503,7 +503,7 @@ class DownloadAnalyzer:
                     weight=min(0.55, score * 0.50),
                     evidence=f"Artifact analysis returned score {score:.4f}, verdict {verdict}, severity {severity}.",
                     category="artifact",
-                )
+                ),
             )
 
         components = list(getattr(result, "components", []))
@@ -518,7 +518,7 @@ class DownloadAnalyzer:
                     weight=min(0.22, component_score * 0.18),
                     evidence=f"{component_name} component contributed score {component_score:.4f}.",
                     category="artifact",
-                )
+                ),
             )
 
         return signals
@@ -539,7 +539,7 @@ class DownloadAnalyzer:
     def _resolve_verdict(self, score: float, signals: list[DownloadSignal]) -> str:
         names = {signal.name for signal in signals}
 
-        if score >= 0.82 or "unicode_direction_override" in names or "portable_executable_header" in names and "double_extension_name" in names:
+        if score >= 0.82 or "unicode_direction_override" in names or ("portable_executable_header" in names and "double_extension_name" in names):
             return "block"
         if score >= 0.52 or "threatintel_match" in names:
             return "review"
@@ -572,7 +572,7 @@ class DownloadAnalyzer:
         artifact_analysis: dict[str, Any] | None,
     ) -> list[str]:
         reasons: list[str] = [
-            f"Download risk classified as {verdict} with {severity} severity."
+            f"Download risk classified as {verdict} with {severity} severity.",
         ]
 
         if url:
@@ -585,7 +585,7 @@ class DownloadAnalyzer:
 
         if artifact_analysis:
             reasons.append(
-                f"Artifact analysis also returned verdict {artifact_analysis.get('verdict')} with score {artifact_analysis.get('score')}."
+                f"Artifact analysis also returned verdict {artifact_analysis.get('verdict')} with score {artifact_analysis.get('score')}.",
             )
 
         if len(reasons) == 1:
@@ -623,8 +623,8 @@ def build_download_analyzer(
 
 
 __all__ = [
-    "DownloadSignal",
     "DownloadAnalysisResult",
     "DownloadAnalyzer",
+    "DownloadSignal",
     "build_download_analyzer",
 ]

@@ -206,23 +206,11 @@ def build_incidents_overview(
     if not source.get("total_open") and incidents:
         total_open = sum(1 for item in incidents if item.status.lower() in {"open", "investigating", "triage", "contained", "under_review"})
     if not source.get("critical_open") and incidents:
-        critical_open = sum(
-            1
-            for item in incidents
-            if item.severity.lower() == "critical" and item.status.lower() not in {"resolved", "closed"}
-        )
+        critical_open = sum(1 for item in incidents if item.severity.lower() == "critical" and item.status.lower() not in {"resolved", "closed"})
     if not source.get("high_open") and incidents:
-        high_open = sum(
-            1
-            for item in incidents
-            if item.severity.lower() == "high" and item.status.lower() not in {"resolved", "closed"}
-        )
+        high_open = sum(1 for item in incidents if item.severity.lower() == "high" and item.status.lower() not in {"resolved", "closed"})
     if not source.get("under_review") and incidents:
-        under_review = sum(
-            1
-            for item in incidents
-            if item.requires_human_review or item.status.lower() in {"under_review", "triage", "investigating"}
-        )
+        under_review = sum(1 for item in incidents if item.requires_human_review or item.status.lower() in {"under_review", "triage", "investigating"})
     if not source.get("contained") and incidents:
         contained = sum(1 for item in incidents if item.status.lower() == "contained")
 

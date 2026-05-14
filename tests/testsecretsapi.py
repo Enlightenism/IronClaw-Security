@@ -52,7 +52,7 @@ class _SecretServiceStub:
                 "metadata": metadata if metadata is not None else {},
                 "redact_secrets": redact_secrets,
                 "block_unsafe_commands": block_unsafe_commands,
-            }
+            },
         )
         return _Result(
             verdict="allow",
@@ -78,7 +78,7 @@ class _SecretServiceStub:
                 "metadata": metadata if metadata is not None else {},
                 "redact_secrets": redact_secrets,
                 "block_unsafe_commands": block_unsafe_commands,
-            }
+            },
         )
         return _Result(
             verdict="review",
@@ -102,7 +102,7 @@ class _SecretServiceStub:
                 "context": context,
                 "redact_secrets": redact_secrets,
                 "block_unsafe_commands": block_unsafe_commands,
-            }
+            },
         )
         return _Result(
             verdict="allow",
@@ -132,7 +132,7 @@ class _SecretServiceStub:
                 "context": context,
                 "redact_secrets": redact_secrets,
                 "block_unsafe_commands": block_unsafe_commands,
-            }
+            },
         )
         return _Result(
             verdict="block",
@@ -342,7 +342,9 @@ def test_secrets_api_inspect_metadata_endpoint(monkeypatch) -> None:
     assert service.calls[0]["context"] == "headers"
 
 
-def test_secrets_api_inspect_text_endpoint_defaults_missing_text_to_empty_string(monkeypatch) -> None:
+def test_secrets_api_inspect_text_endpoint_defaults_missing_text_to_empty_string(
+    monkeypatch,
+) -> None:
     client, service = _build_client(monkeypatch)
 
     response = client.post(

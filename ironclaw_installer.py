@@ -131,7 +131,14 @@ def _normalize_provider_targets(values: tuple[str, ...] | list[str] | None) -> t
     return tuple(normalized)
 
 
-def _classify_write(path: Path, wrote: bool, existed_before: bool, created: list[str], updated: list[str], skipped: list[str]) -> None:
+def _classify_write(
+    path: Path,
+    wrote: bool,
+    existed_before: bool,
+    created: list[str],
+    updated: list[str],
+    skipped: list[str],
+) -> None:
     path_text = str(path)
     if not wrote:
         skipped.append(path_text)
@@ -399,7 +406,7 @@ def run_install(config: InstallConfig) -> InstallResult:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Install and bootstrap IronClaw-Security for local skill-style use."
+        description="Install and bootstrap IronClaw-Security for local skill-style use.",
     )
     parser.add_argument(
         "--project-root",

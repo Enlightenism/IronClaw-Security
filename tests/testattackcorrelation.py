@@ -10,7 +10,6 @@ class FakeIncidentStore:
 
     def find_by_attack_fingerprint(self, **payload):
         self.lookup_payloads.append(payload)
-        return None
 
     def upsert_incident(self, **payload):
         self.saved_incidents.append(payload)
@@ -56,8 +55,8 @@ class FakeRemediationGate:
                     "action_id": "act-001",
                     "action": "disable-session",
                     "status": "open",
-                }
-            ]
+                },
+            ],
         }
 
 
@@ -108,7 +107,7 @@ def test_correlate_returns_observed_incident_for_single_medium_signal():
                     "prompt_fingerprints": ["pf-001"],
                     "tools": ["shell"],
                 },
-            }
+            },
         ],
         session_id="sess-001",
         actor_id="actor-001",
@@ -144,7 +143,7 @@ def test_correlate_enriches_with_services_and_creates_response_artifacts():
             "families": ["redclaw"],
             "hashes": ["sha256:deadbeef"],
             "files": ["payload.py"],
-        }
+        },
     )
     detonation_service = FakeDetonationService(
         {
@@ -155,7 +154,7 @@ def test_correlate_enriches_with_services_and_creates_response_artifacts():
             "domains": ["evil.example"],
             "ips": ["10.0.0.9"],
             "hashes": ["sha256:deadbeef"],
-        }
+        },
     )
     hostile_context_service = FakeHostileContextService(
         {
@@ -165,7 +164,7 @@ def test_correlate_enriches_with_services_and_creates_response_artifacts():
             "campaign": "night-harvest",
             "cluster": "cluster-7",
             "ttp_ids": ["T1059", "T1105"],
-        }
+        },
     )
 
     service = AttackCorrelationService(
@@ -193,7 +192,7 @@ def test_correlate_enriches_with_services_and_creates_response_artifacts():
                     "hashes": ["sha256:deadbeef"],
                     "tools": ["python"],
                 },
-            }
+            },
         ],
         session_id="sess-222",
         actor_id="actor-222",
@@ -247,7 +246,7 @@ def test_correlate_uses_existing_incident_id_when_lookup_matches():
                 "severity": "high",
                 "summary": "Existing attack fingerprint should reuse incident",
                 "score": 70,
-            }
+            },
         ],
         session_id="sess-existing",
         organization_id="org-existing",
@@ -291,7 +290,7 @@ def test_correlate_deduplicates_indicators_and_handles_missing_services():
                     "tools": ["curl"],
                 },
             },
-        ]
+        ],
     )
 
     assert result["incident"]["indicators"]["domains"] == ["dup.example"]
@@ -323,7 +322,7 @@ def test_correlate_opens_review_and_actions_for_high_risk_without_quarantine():
                 "summary": "High-confidence tool hijack attempt",
                 "score": 72,
                 "evidence": {"tools": ["shell"]},
-            }
+            },
         ],
         session_id="sess-high",
         actor_id="actor-high",
@@ -338,7 +337,7 @@ def test_correlate_opens_review_and_actions_for_high_risk_without_quarantine():
             "action_id": "act-001",
             "action": "disable-session",
             "status": "open",
-        }
+        },
     ]
     assert result["incident"]["status"] == "action_required"
 
@@ -363,8 +362,8 @@ def test_default_score_mapping_is_applied_when_signal_score_missing(severity, ex
                 "source": "test",
                 "severity": severity,
                 "summary": "Severity mapping validation",
-            }
-        ]
+            },
+        ],
     )
 
     assert result["signals"][0]["score"] == expected_score

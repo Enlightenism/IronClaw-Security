@@ -292,7 +292,7 @@ def test_billing_store_financial_fields_are_non_negative_when_present() -> None:
     ):
         value = _number(payload, *keys)
         if value is not None:
-            assert value >= Decimal("0")
+            assert value >= Decimal(0)
 
 
 def test_billing_store_multiple_builds_have_stable_key_sets() -> None:

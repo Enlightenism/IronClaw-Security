@@ -10,7 +10,7 @@ from app.main import app
 ADMIN_SYSTEM_DIAGNOSTICS_PATH: Final[str] = "/admin/system-diagnostics"
 
 
-@pytest.fixture()
+@pytest.fixture
 def client() -> TestClient:
     with TestClient(app) as test_client:
         yield test_client

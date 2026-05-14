@@ -73,10 +73,7 @@ def get_marketing_pricing() -> PricingPageResponse:
     hero = PricingHeroView(
         badge="IronClaw-Security pricing",
         title="Guard AI actions before they become incidents.",
-        subtitle=(
-            "Choose a plan that matches your runtime volume, review workload, and alerting needs "
-            "while keeping high-risk tool calls under strict policy control."
-        ),
+        subtitle=("Choose a plan that matches your runtime volume, review workload, and alerting needs while keeping high-risk tool calls under strict policy control."),
         cta_primary_label="Start protected trial",
         cta_primary_href="/signup",
         cta_secondary_label="Book live demo",

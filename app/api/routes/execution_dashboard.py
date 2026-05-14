@@ -109,7 +109,7 @@ _SAMPLE_EXECUTIONS: list[dict[str, Any]] = [
                 "label": "Allowed target",
                 "details": "The request targets a public HTTPS endpoint.",
                 "score": 12,
-            }
+            },
         ],
     },
     {
@@ -141,7 +141,7 @@ _SAMPLE_EXECUTIONS: list[dict[str, Any]] = [
                 "label": "Destructive command",
                 "details": "The command attempts to remove local files.",
                 "score": 91,
-            }
+            },
         ],
     },
 ]
@@ -250,7 +250,7 @@ def get_execution_detail(execution_id: str) -> ExecutionDetailResponse:
                 "label": "Missing record",
                 "details": "No execution record matched the provided execution ID.",
                 "score": 0,
-            }
+            },
         ],
     }
     return _to_detail_response(fallback)

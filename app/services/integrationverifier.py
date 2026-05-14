@@ -62,9 +62,7 @@ class IntegrationVerifier:
 
         checks = self._build_checks(record)
         missingcapabilities = self._collect_missing_capabilities(record)
-        verified = all(check.passed for check in checks) and (
-            not strict or not missingcapabilities
-        )
+        verified = all(check.passed for check in checks) and (not strict or not missingcapabilities)
 
         status = "ready" if verified else "degraded"
         registry.update_status(record.integrationid, status, verified=verified)
@@ -137,16 +135,8 @@ class IntegrationVerifier:
             "execution_control",
             "telemetry",
         )
-        available = {
-            capability.name
-            for capability in record.capabilities
-            if capability.enabled
-        }
-        return [
-            capability_name
-            for capability_name in required_capabilities
-            if capability_name not in available
-        ]
+        available = {capability.name for capability in record.capabilities if capability.enabled}
+        return [capability_name for capability_name in required_capabilities if capability_name not in available]
 
     def _build_summary(
         self,
@@ -157,19 +147,10 @@ class IntegrationVerifier:
         missingcapabilities: list[CapabilityName],
     ) -> str:
         if verified:
-            return (
-                f"Integration {record.integrationid} passed verification "
-                f"with strict={'on' if strict else 'off'}."
-            )
+            return f"Integration {record.integrationid} passed verification with strict={'on' if strict else 'off'}."
         if missingcapabilities:
-            return (
-                f"Integration {record.integrationid} is missing required capabilities: "
-                + ", ".join(missingcapabilities)
-                + "."
-            )
-        return (
-            f"Integration {record.integrationid} failed one or more verification checks."
-        )
+            return f"Integration {record.integrationid} is missing required capabilities: " + ", ".join(missingcapabilities) + "."
+        return f"Integration {record.integrationid} failed one or more verification checks."
 
 
 _verifier = IntegrationVerifier()

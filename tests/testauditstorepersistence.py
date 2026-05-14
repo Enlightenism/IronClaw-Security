@@ -23,11 +23,7 @@ def _load_module() -> Any:
 
 
 def _callable_names(module: Any) -> set[str]:
-    return {
-        name
-        for name in dir(module)
-        if not name.startswith("_") and callable(getattr(module, name))
-    }
+    return {name for name in dir(module) if not name.startswith("_") and callable(getattr(module, name))}
 
 
 def _first_callable(module: Any, *names: str) -> Any | None:
@@ -107,9 +103,7 @@ def test_audit_store_module_imports() -> None:
 
 def test_audit_store_exposes_public_surface() -> None:
     module = _load_module()
-    assert _callable_names(module) or any(
-        hasattr(module, name) for name in ("AuditStore", "InMemoryAuditStore", "SupabaseAuditStore")
-    )
+    assert _callable_names(module) or any(hasattr(module, name) for name in ("AuditStore", "InMemoryAuditStore", "SupabaseAuditStore"))
 
 
 def test_audit_store_can_be_built() -> None:

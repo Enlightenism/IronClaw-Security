@@ -75,7 +75,7 @@ class PromptGuardKpiSummaryResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-def _find_kpi_value(metrics: Any, *names: str, default: float | int = 0) -> float | int:
+def _find_kpi_value(metrics: Any, *names: str, default: float = 0) -> float | int:
     for name in names:
         match = next((kpi for kpi in metrics.kpis if kpi.name == name), None)
         if match is not None:
@@ -213,9 +213,6 @@ def get_prompt_guard_kpi_summary() -> PromptGuardKpiSummaryResponse:
 
     return PromptGuardKpiSummaryResponse(
         generated_at=data["generated_at"],
-        cards=[
-            PromptGuardKpiCardResponse(**card)
-            for card in data["cards"]
-        ],
+        cards=[PromptGuardKpiCardResponse(**card) for card in data["cards"]],
         metadata=data["metadata"],
     )

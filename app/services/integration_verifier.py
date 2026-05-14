@@ -70,9 +70,7 @@ def verify_integration(
         raise KeyError(f"unknown integration_id: {integration_id}")
 
     checks = _build_verification_checks(record, strict=strict)
-    verified = all(check.state != "fail" for check in checks) and any(
-        check.state == "pass" for check in checks
-    )
+    verified = all(check.state != "fail" for check in checks) and any(check.state == "pass" for check in checks)
 
     metadata = dict(extra_metadata or {})
     if requested_by:
@@ -104,40 +102,34 @@ def _build_verification_checks(
             name="integration-registered",
             state="pass",
             message=f"Integration '{record.slug}' is registered.",
-        )
+        ),
     )
 
     checks.append(
         VerificationCheckResult(
             name="command-available",
             state="pass" if bool(record.command_name) else "warn",
-            message="Install command is available."
-            if record.command_name
-            else "Install command is not registered yet.",
+            message="Install command is available." if record.command_name else "Install command is not registered yet.",
             metadata={"command_name": record.command_name},
-        )
+        ),
     )
 
     checks.append(
         VerificationCheckResult(
             name="entrypoint-declared",
             state="pass" if bool(record.entrypoint) else "warn",
-            message="Adapter entrypoint is declared."
-            if record.entrypoint
-            else "Adapter entrypoint is missing.",
+            message="Adapter entrypoint is declared." if record.entrypoint else "Adapter entrypoint is missing.",
             metadata={"entrypoint": record.entrypoint},
-        )
+        ),
     )
 
     checks.append(
         VerificationCheckResult(
             name="install-target-declared",
             state="pass" if bool(record.install_target) else "warn",
-            message="Install target is declared."
-            if record.install_target
-            else "Install target is missing.",
+            message="Install target is declared." if record.install_target else "Install target is missing.",
             metadata={"install_target": record.install_target},
-        )
+        ),
     )
 
     enabled_capabilities = [item.name for item in record.capabilities if item.enabled]
@@ -145,22 +137,18 @@ def _build_verification_checks(
         VerificationCheckResult(
             name="capabilities-present",
             state="pass" if enabled_capabilities else "fail",
-            message="Integration capabilities are present."
-            if enabled_capabilities
-            else "No enabled capabilities are registered.",
+            message="Integration capabilities are present." if enabled_capabilities else "No enabled capabilities are registered.",
             metadata={"capabilities": enabled_capabilities},
-        )
+        ),
     )
 
     checks.append(
         VerificationCheckResult(
             name="status-active",
             state="pass" if record.status == "active" else ("fail" if strict else "warn"),
-            message="Integration is active."
-            if record.status == "active"
-            else f"Integration status is '{record.status}'.",
+            message="Integration is active." if record.status == "active" else f"Integration status is '{record.status}'.",
             metadata={"status": record.status},
-        )
+        ),
     )
 
     return checks

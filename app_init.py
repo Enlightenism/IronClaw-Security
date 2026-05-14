@@ -57,7 +57,7 @@ def _build_readiness_checks(settings: Settings, app: FastAPI) -> list[ReadinessC
                 "guard_decision_enabled": settings.enable_guard_action_decision,
                 "structured_logging_enabled": settings.structured_logging_enabled,
             },
-        )
+        ),
     )
 
     scanner_service: Any | None = getattr(app.state, "scanner_service", None)
@@ -68,7 +68,7 @@ def _build_readiness_checks(settings: Settings, app: FastAPI) -> list[ReadinessC
             details={
                 "present": scanner_service is not None,
             },
-        )
+        ),
     )
 
     history_service: Any | None = getattr(app.state, "history_service", None)
@@ -79,7 +79,7 @@ def _build_readiness_checks(settings: Settings, app: FastAPI) -> list[ReadinessC
             details={
                 "present": history_service is not None,
             },
-        )
+        ),
     )
 
     groq_ready = (not settings.groq_enabled) or bool(settings.groq_api_key)
@@ -93,7 +93,7 @@ def _build_readiness_checks(settings: Settings, app: FastAPI) -> list[ReadinessC
                 "api_key_present": bool(settings.groq_api_key),
                 "timeout_seconds": settings.groq_timeout_seconds,
             },
-        )
+        ),
     )
 
     return checks

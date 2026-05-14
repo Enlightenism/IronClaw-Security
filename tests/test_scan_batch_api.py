@@ -31,7 +31,7 @@ def test_scan_batch_accepts_valid_items():
                 "target_value": "safe text content",
                 "client_id": "batch-client-002",
             },
-        ]
+        ],
     }
 
     response = client.post(
@@ -69,8 +69,8 @@ def test_scan_batch_rejects_invalid_item_shape():
                 "target_type": "http_url",
                 "target_value": "https://example.com/not-valid-for-schema",
                 "client_id": "batch-client-003",
-            }
-        ]
+            },
+        ],
     }
 
     response = client.post(
@@ -89,8 +89,8 @@ def test_scan_batch_route_allows_access_with_api_key():
                 "target_type": "url",
                 "target_value": "https://example.com/ok",
                 "client_id": "batch-client-004",
-            }
-        ]
+            },
+        ],
     }
 
     response = client.post(

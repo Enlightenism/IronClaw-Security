@@ -223,13 +223,7 @@ def _filter_events(
         filtered = [event for event in filtered if event.resource_id == resource_id]
     if search:
         needle = search.strip().lower()
-        filtered = [
-            event
-            for event in filtered
-            if needle in event.summary.lower()
-            or needle in event.action.lower()
-            or any(needle in tag.lower() for tag in event.tags)
-        ]
+        filtered = [event for event in filtered if needle in event.summary.lower() or needle in event.action.lower() or any(needle in tag.lower() for tag in event.tags)]
 
     return filtered
 
@@ -237,9 +231,21 @@ def _filter_events(
 def _build_kpis(events: list[AuditEventView]) -> list[AuditKpiView]:
     return [
         AuditKpiView(label="total_events", value=len(events)),
-        AuditKpiView(label="blocked_events", value=sum(1 for item in events if item.outcome == "blocked"), status="alert"),
-        AuditKpiView(label="warning_events", value=sum(1 for item in events if item.outcome == "warning"), status="warning"),
-        AuditKpiView(label="failure_events", value=sum(1 for item in events if item.outcome == "failure"), status="critical"),
+        AuditKpiView(
+            label="blocked_events",
+            value=sum(1 for item in events if item.outcome == "blocked"),
+            status="alert",
+        ),
+        AuditKpiView(
+            label="warning_events",
+            value=sum(1 for item in events if item.outcome == "warning"),
+            status="warning",
+        ),
+        AuditKpiView(
+            label="failure_events",
+            value=sum(1 for item in events if item.outcome == "failure"),
+            status="critical",
+        ),
     ]
 
 
@@ -253,7 +259,7 @@ def _build_timeline(events: list[AuditEventView]) -> list[AuditTimelinePoint]:
                 blocked_events=1 if event.outcome == "blocked" else 0,
                 warning_events=1 if event.outcome == "warning" else 0,
                 failure_events=1 if event.outcome == "failure" else 0,
-            )
+            ),
         )
     return points
 

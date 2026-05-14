@@ -99,7 +99,7 @@ def test_shell_metacharacters_raise_risk():
 
 def test_long_command_raises_risk():
     supervisor = build_command_supervisor()
-    command = "python -c \"" + ("a" * 5000) + "\""
+    command = 'python -c "' + ("a" * 5000) + '"'
 
     decision = supervisor.evaluate(command=command)
     matched_rules = list(_decision_attr(decision, "matched_rules", []) or [])
@@ -257,11 +257,7 @@ def test_reasons_and_rules_are_deduplicated():
     assert matched_rules.count("dangerous_token:sudo") <= 1
 
     reasons = list(_decision_attr(decision, "reasons", []) or [])
-    sudo_reasons = [
-        item
-        for item in reasons
-        if item.get("label") == "Dangerous token" and "sudo" in str(item.get("details", "")).lower()
-    ]
+    sudo_reasons = [item for item in reasons if item.get("label") == "Dangerous token" and "sudo" in str(item.get("details", "")).lower()]
     assert len(sudo_reasons) <= 1
 
 

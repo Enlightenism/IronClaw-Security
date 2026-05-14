@@ -115,7 +115,7 @@ def test_monetization_reporting_numeric_fields_are_non_negative_when_present() -
     ):
         value = _number(payload, *keys)
         if value is not None:
-            assert value >= Decimal("0")
+            assert value >= Decimal(0)
 
 
 def test_monetization_reporting_remaining_does_not_exceed_quota_when_both_present() -> None:

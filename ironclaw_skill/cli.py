@@ -115,35 +115,35 @@ def _doctor() -> SkillDoctorResult:
             "name": "project-root",
             "ok": _project_root().exists(),
             "detail": str(_project_root()),
-        }
+        },
     )
     checks.append(
         {
             "name": "config-file",
             "ok": status.config_file.exists(),
             "detail": str(status.config_file),
-        }
+        },
     )
     checks.append(
         {
             "name": "skill-file",
             "ok": status.skill_file.exists(),
             "detail": str(status.skill_file),
-        }
+        },
     )
     checks.append(
         {
             "name": "env-file",
             "ok": status.env_file.exists(),
             "detail": str(status.env_file),
-        }
+        },
     )
     checks.append(
         {
             "name": "base-url",
             "ok": bool(status.base_url),
             "detail": status.base_url or "missing",
-        }
+        },
     )
 
     ok = all(bool(item["ok"]) for item in checks)

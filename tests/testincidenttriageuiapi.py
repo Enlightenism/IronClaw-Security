@@ -30,11 +30,5 @@ def test_ui_incident_triage_contains_core_fields() -> None:
     assert data
 
     assert any(k in data for k in ("title", "headline", "dashboard_title"))
-    assert any(
-        k in data
-        for k in ("incidents", "items", "rows", "queue", "cards")
-    )
-    assert any(
-        k in data
-        for k in ("filters", "segments", "tabs", "sections")
-    )
+    assert any(k in data for k in ("incidents", "items", "rows", "queue", "cards"))
+    assert any(k in data for k in ("filters", "segments", "tabs", "sections"))

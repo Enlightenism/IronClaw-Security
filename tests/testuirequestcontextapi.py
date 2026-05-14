@@ -30,11 +30,5 @@ def test_ui_request_context_contains_core_fields() -> None:
     assert data
 
     assert any(k in data for k in ("title", "headline", "summary", "page_title"))
-    assert any(
-        k in data
-        for k in ("request", "context", "session", "metadata", "inputs")
-    )
-    assert any(
-        k in data
-        for k in ("risk", "signals", "policy", "actions", "decision", "trace")
-    )
+    assert any(k in data for k in ("request", "context", "session", "metadata", "inputs"))
+    assert any(k in data for k in ("risk", "signals", "policy", "actions", "decision", "trace"))

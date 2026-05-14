@@ -96,7 +96,7 @@ def build_action_usage_detail_view(
                     key=key,
                     value=_format_detail_value(value),
                     tone=_infer_detail_tone(key, value),
-                )
+                ),
             )
             seen_keys.add(key)
 
@@ -109,7 +109,7 @@ def build_action_usage_detail_view(
                 key=key,
                 value=_format_detail_value(value),
                 tone=_infer_detail_tone(key, value),
-            )
+            ),
         )
 
     return ActionUsageDetailView(

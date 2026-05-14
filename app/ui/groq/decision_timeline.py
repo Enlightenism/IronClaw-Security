@@ -174,7 +174,7 @@ def _seed_demo_actions() -> list[dict[str, Any]]:
                 "content": f"[#{i}] {base['content']}",
                 "client_id": f"demo-client-{(i % 3) + 1}",
                 "session_id": f"session-{(i % 5) + 1}",
-            }
+            },
         )
     return actions
 
@@ -286,8 +286,7 @@ def get_decision_timeline(
         description="Mode in which to evaluate the synthetic decision history.",
     ),
 ) -> DecisionTimelineResponse:
-    """
-    Returns a paginated, time-ordered view of recent Groq security brain decisions.
+    """Returns a paginated, time-ordered view of recent Groq security brain decisions.
 
     This is currently backed by synthetic/demo data so the UI can be built
     without depending on a real database. Later you can swap the generator

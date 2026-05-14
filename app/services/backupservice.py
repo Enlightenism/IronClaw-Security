@@ -109,8 +109,7 @@ class SnapshotProvider(Protocol):
 
 
 class FilesystemSnapshotProvider:
-    """
-    Default provider that copies or compresses directories/files.
+    """Default provider that copies or compresses directories/files.
 
     This is primarily for local development and CI artifacts; production
     integrations should provide a more robust implementation.
@@ -132,7 +131,7 @@ class FilesystemSnapshotProvider:
                     "gztar",
                     root_dir=str(root_dir),
                     base_dir=base_name,
-                )
+                ),
             )
             if produced != destination:
                 destination.unlink(missing_ok=True)
@@ -147,7 +146,7 @@ class FilesystemSnapshotProvider:
                         "path": str(path.relative_to(source)),
                         "is_dir": path.is_dir(),
                         "size": path.stat().st_size if path.is_file() else 0,
-                    }
+                    },
                 )
             with gzip.open(destination, "wt", encoding="utf-8") as fh:
                 for entry in entries:
@@ -161,8 +160,7 @@ class FilesystemSnapshotProvider:
 
 
 class BackupService:
-    """
-    Orchestrates IronClaw backup creation, rotation, and verification.
+    """Orchestrates IronClaw backup creation, rotation, and verification.
 
     This service is intentionally filesystem-focused; callers are expected
     to provide the concrete SnapshotProvider that knows how to talk to
@@ -213,11 +211,7 @@ class BackupService:
             if not tier_dir.exists():
                 continue
             backups = sorted(
-                (
-                    p
-                    for p in tier_dir.glob("*")
-                    if p.is_file() and not p.name.endswith(".manifest.json")
-                ),
+                (p for p in tier_dir.glob("*") if p.is_file() and not p.name.endswith(".manifest.json")),
                 key=lambda p: p.stat().st_mtime,
                 reverse=True,
             )
@@ -307,8 +301,7 @@ class BackupService:
 
 
 def default_backup_targets_from_env() -> list[BackupTarget]:
-    """
-    Construct a default set of backup targets from environment variables.
+    """Construct a default set of backup targets from environment variables.
 
     This keeps orchestration logic centralized while allowing deployment
     configuration to drive which stores are actually backed up.
@@ -336,7 +329,7 @@ def default_backup_targets_from_env() -> list[BackupTarget]:
                 rotation_policy=db_policy,
                 encrypt_at_rest=True,
                 checksum_required=True,
-            )
+            ),
         )
 
     runtime_policy = BackupRotationPolicy(
@@ -354,7 +347,7 @@ def default_backup_targets_from_env() -> list[BackupTarget]:
             rotation_policy=runtime_policy,
             encrypt_at_rest=False,
             checksum_required=True,
-        )
+        ),
     )
 
     return targets
@@ -367,15 +360,15 @@ def build_default_backup_service() -> BackupService:
 
 
 __all__ = [
-    "BackupKind",
     "BackupFormat",
-    "RotationTier",
-    "BackupRotationPolicy",
-    "BackupTarget",
+    "BackupKind",
     "BackupManifest",
-    "SnapshotProvider",
-    "FilesystemSnapshotProvider",
+    "BackupRotationPolicy",
     "BackupService",
-    "default_backup_targets_from_env",
+    "BackupTarget",
+    "FilesystemSnapshotProvider",
+    "RotationTier",
+    "SnapshotProvider",
     "build_default_backup_service",
+    "default_backup_targets_from_env",
 ]

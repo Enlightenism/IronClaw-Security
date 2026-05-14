@@ -49,10 +49,7 @@ async def _scan_with_policy_guard(
 
 
 def _build_guard_warning(reason: str, verdict: str) -> bytes:
-    return (
-        "\n\n[IRONCLAW-GUARD] Stream truncated due to high-risk content. "
-        f"Reason: {reason or 'policy guard verdict: ' + verdict}.\n"
-    ).encode()
+    return (f"\n\n[IRONCLAW-GUARD] Stream truncated due to high-risk content. Reason: {reason or 'policy guard verdict: ' + verdict}.\n").encode()
 
 
 async def _guarded_upstream_stream(
@@ -217,9 +214,5 @@ async def _close_client_and_upstream(
 
 def _infer_guard_base_url(request: Request) -> str:
     scheme = request.headers.get("X-Forwarded-Proto") or request.url.scheme
-    host = (
-        request.headers.get("X-Forwarded-Host")
-        or request.headers.get("Host")
-        or request.url.netloc
-    )
+    host = request.headers.get("X-Forwarded-Host") or request.headers.get("Host") or request.url.netloc
     return f"{scheme}://{host}".rstrip("/")

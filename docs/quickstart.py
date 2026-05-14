@@ -81,7 +81,7 @@ def _run_restore_demo(client: IronClawClient, target_name: str, *, dry_run: bool
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="IronClaw quickstart runner for health, UI, backup, and restore examples."
+        description="IronClaw quickstart runner for health, UI, backup, and restore examples.",
     )
     parser.add_argument(
         "--base-url",

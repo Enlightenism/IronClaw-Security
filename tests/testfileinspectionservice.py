@@ -64,12 +64,7 @@ def test_upload_reviews_secret_text_and_redacts() -> None:
 def test_upload_blocks_private_key_material() -> None:
     service = build_file_inspection_service()
 
-    private_key = (
-        b"-----BEGIN PRIVATE KEY-----\n"
-        b"MIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n"
-        b"FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE\n"
-        b"-----END PRIVATE KEY-----"
-    )
+    private_key = b"-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\nFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE\n-----END PRIVATE KEY-----"
     result = service.inspect_upload(
         file_name="id_rsa.pem",
         content=private_key,
@@ -215,7 +210,7 @@ def test_upload_inspects_archive_and_flags_suspicious_entries() -> None:
             "../escape.txt": b"oops",
             "bin/run.sh": b"echo hi",
             ".env": b"TOKEN=secret",
-        }
+        },
     )
     result = service.inspect_upload(
         file_name="bundle.zip",
@@ -239,7 +234,7 @@ def test_upload_blocks_archive_with_too_many_entries() -> None:
             "a.txt": b"a",
             "b.txt": b"b",
             "c.txt": b"c",
-        }
+        },
     )
     result = service.inspect_upload(
         file_name="many.zip",
@@ -316,11 +311,7 @@ def test_batch_returns_aggregate_decision() -> None:
             },
             {
                 "file_name": "id_rsa.pem",
-                "content": (
-                    b"-----BEGIN PRIVATE KEY-----\n"
-                    b"FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE\n"
-                    b"-----END PRIVATE KEY-----"
-                ),
+                "content": (b"-----BEGIN PRIVATE KEY-----\nFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE\n-----END PRIVATE KEY-----"),
                 "mime_type": "application/x-pem-file",
             },
         ],

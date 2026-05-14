@@ -66,8 +66,7 @@ class IncidentRecord(BaseModel):
 
 
 class IncidentService:
-    """
-    Minimal in-memory incident linker for correlated threat clusters.
+    """Minimal in-memory incident linker for correlated threat clusters.
 
     Design goals:
     - Deterministic, test-friendly, no external persistence required.
@@ -172,8 +171,7 @@ class IncidentService:
         clusters: Sequence[CorrelationCluster],
         coordinated_responses: Sequence[CoordinatedResponse],
     ) -> list[IncidentRecord]:
-        """
-        Convenience method for batch orchestration flows.
+        """Convenience method for batch orchestration flows.
 
         The caller is expected to pass aligned cluster/response sequences.
         """
@@ -188,7 +186,7 @@ class IncidentService:
                     cluster=cluster,
                     coordinated_response=response,
                     incident_id=incident_id,
-                )
+                ),
             )
         return incidents
 
@@ -208,7 +206,7 @@ class IncidentService:
                     "priority": cluster.priority,
                     "recommended_action": cluster.recommended_action,
                 },
-            )
+            ),
         )
 
         for signal in cluster.signals:
@@ -224,7 +222,7 @@ class IncidentService:
                         "session_id": signal.session_id,
                         "actor_id": signal.actor_id,
                     },
-                )
+                ),
             )
 
             if signal.session_id:
@@ -233,7 +231,7 @@ class IncidentService:
                         kind="session",
                         value=signal.session_id,
                         metadata={},
-                    )
+                    ),
                 )
 
             for artifact_id in sorted(signal.detonated_artifact_ids):
@@ -242,7 +240,7 @@ class IncidentService:
                         kind="artifact",
                         value=artifact_id,
                         metadata={"signal_id": signal.signal_id},
-                    )
+                    ),
                 )
 
             for hostile_context_id in sorted(signal.hostile_context_ids):
@@ -251,7 +249,7 @@ class IncidentService:
                         kind="hostile_context",
                         value=hostile_context_id,
                         metadata={"signal_id": signal.signal_id},
-                    )
+                    ),
                 )
 
         for edge in cluster.edges:
@@ -264,7 +262,7 @@ class IncidentService:
                         "weight": edge.weight,
                         "reason": edge.reason,
                     },
-                )
+                ),
             )
 
         for action in coordinated_response.actions:
@@ -277,7 +275,7 @@ class IncidentService:
                         "target_id": action.target_id,
                         "reason": action.reason,
                     },
-                )
+                ),
             )
 
         return self._dedupe_evidence(evidence)
@@ -287,11 +285,7 @@ class IncidentService:
         cluster: CorrelationCluster,
         coordinated_response: CoordinatedResponse,
     ) -> str:
-        session_part = (
-            f"session {coordinated_response.session_id}"
-            if coordinated_response.session_id
-            else cluster.cluster_id
-        )
+        session_part = f"session {coordinated_response.session_id}" if coordinated_response.session_id else cluster.cluster_id
         return f"{cluster.priority.title()} threat incident for {session_part}"
 
     def _status_from_disposition(self, disposition: ResponseDisposition) -> IncidentStatus:

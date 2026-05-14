@@ -100,7 +100,7 @@ class SkillPromptBundleInput(SkillBaseModel):
                 self.retrieved_doc,
                 self.tool_output,
                 self.model_output,
-            )
+            ),
         ):
             raise ValueError("at least one prompt bundle field must be provided")
         return self

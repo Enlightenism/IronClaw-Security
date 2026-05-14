@@ -162,7 +162,7 @@ class SecurityOrchestrator:
                     outputsanitization=dict(payload.get("outputsanitization", {})),
                     sessionrisk=dict(payload.get("sessionrisk", {})),
                     metadata=dict(payload.get("metadata", {})),
-                )
+                ),
             )
         return events
 

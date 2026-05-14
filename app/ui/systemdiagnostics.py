@@ -14,12 +14,7 @@ def _iso_now() -> str:
 
 
 def _iso_before(minutes: int) -> str:
-    return (
-        (datetime.now(UTC) - timedelta(minutes=minutes))
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
+    return (datetime.now(UTC) - timedelta(minutes=minutes)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 class DiagnosticsKpi(BaseModel):
@@ -213,9 +208,21 @@ def get_system_diagnostics() -> SystemDiagnosticsResponse:
         checks=checks,
         kpis=[
             DiagnosticsKpi(label="Healthy Checks", value=str(healthy_count), tone="success"),
-            DiagnosticsKpi(label="Degraded Checks", value=str(degraded_count), tone="warning" if degraded_count else "neutral"),
-            DiagnosticsKpi(label="Critical Checks", value=str(critical_count), tone="critical" if critical_count else "neutral"),
-            DiagnosticsKpi(label="Active Incidents", value=str(len(active_incidents)), tone="warning" if active_incidents else "neutral"),
+            DiagnosticsKpi(
+                label="Degraded Checks",
+                value=str(degraded_count),
+                tone="warning" if degraded_count else "neutral",
+            ),
+            DiagnosticsKpi(
+                label="Critical Checks",
+                value=str(critical_count),
+                tone="critical" if critical_count else "neutral",
+            ),
+            DiagnosticsKpi(
+                label="Active Incidents",
+                value=str(len(active_incidents)),
+                tone="warning" if active_incidents else "neutral",
+            ),
         ],
         active_incidents=active_incidents,
         timeline=timeline,

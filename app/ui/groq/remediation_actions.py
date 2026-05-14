@@ -192,18 +192,12 @@ def _posture_summary_for_prompt() -> str:
 
     open_incidents = [i for i in _INCIDENTS if i.status == "open"]
 
-    summary = (
-        f"Runtime mode: {CONTROL_FLAGS.mode}. "
-        f"Recent decisions: {total} total, {blocked} blocked, {quarantined} quarantined, {warns} warned. "
-        f"Open incidents: {len(open_incidents)}."
-    )
+    summary = f"Runtime mode: {CONTROL_FLAGS.mode}. Recent decisions: {total} total, {blocked} blocked, {quarantined} quarantined, {warns} warned. Open incidents: {len(open_incidents)}."
     return summary
 
 
 def _system_prompt_for_remediation(incident_text: str | None, free_text: str | None) -> str:
-    """
-    System prompt that asks Groq to output *structured* remediation actions.[web:1292][web:1296]
-    """
+    """System prompt that asks Groq to output *structured* remediation actions.[web:1292][web:1296]"""
     base = (
         "You are an AI security remediation planner. "
         "Given a security incident or situation description, propose a small set of "
@@ -218,17 +212,17 @@ def _system_prompt_for_remediation(incident_text: str | None, free_text: str | N
         "Output actions as JSON with this schema (array of objects):\n"
         "[\n"
         "  {\n"
-        '    \"kind\": \"configuration_change\" | \"access_control\" | '
-        '\"network_control\" | \"detection_rule\" | \"data_protection\" | '
-        '\"process_runbook\" | \"other\",\n'
-        '    \"title\": \"short human-readable title\",\n'
-        '    \"description\": \"clear step-by-step remediation description\",\n'
-        '    \"target\": \"what system/asset/app this applies to\",\n'
-        '    \"severity\": \"low\" | \"medium\" | \"high\" | \"critical\",\n'
-        '    \"estimated_impact\": \"short description of risk reduction\",\n'
-        '    \"estimated_effort\": \"low\" | \"medium\" | \"high\",\n'
-        '    \"depends_on\": [\"optional id-like or label of prerequisite step\"],\n'
-        '    \"tags\": [\"short tags for filtering, like incident type or system\"]\n'
+        '    "kind": "configuration_change" | "access_control" | '
+        '"network_control" | "detection_rule" | "data_protection" | '
+        '"process_runbook" | "other",\n'
+        '    "title": "short human-readable title",\n'
+        '    "description": "clear step-by-step remediation description",\n'
+        '    "target": "what system/asset/app this applies to",\n'
+        '    "severity": "low" | "medium" | "high" | "critical",\n'
+        '    "estimated_impact": "short description of risk reduction",\n'
+        '    "estimated_effort": "low" | "medium" | "high",\n'
+        '    "depends_on": ["optional id-like or label of prerequisite step"],\n'
+        '    "tags": ["short tags for filtering, like incident type or system"]\n'
         "  }\n"
         "]\n\n"
         "Return only valid JSON, no extra commentary.\n"
@@ -280,12 +274,7 @@ def _bundle_from_incident(
     if incident is None:
         raise ValueError(f"Incident {incident_id} not found")
 
-    incident_text = (
-        f"Incident title: {incident.title}. "
-        f"Severity: {incident.severity}. "
-        f"Description: {incident.description}. "
-        f"Signals: {', '.join(incident.signals) or 'none'}."
-    )
+    incident_text = f"Incident title: {incident.title}. Severity: {incident.severity}. Description: {incident.description}. Signals: {', '.join(incident.signals) or 'none'}."
 
     system_prompt = _system_prompt_for_remediation(incident_text=incident_text, free_text=None)
 
@@ -450,8 +439,7 @@ def _queue_actions(action_ids: Sequence[str], requested_by: str) -> list[Remedia
 def suggest_remediation_for_incident(
     payload: RemediationSuggestFromIncidentRequest,
 ) -> RemediationSuggestionResponse:
-    """
-    Ask the AI to propose structured remediation actions for a given incident.
+    """Ask the AI to propose structured remediation actions for a given incident.
 
     The response includes actions with stable IDs that can later be queued
     for execution by a separate worker layer.[web:1292][web:1293]
@@ -481,8 +469,7 @@ def suggest_remediation_for_incident(
 def suggest_remediation_freeform(
     payload: RemediationSuggestFreeformRequest,
 ) -> RemediationSuggestionResponse:
-    """
-    Ask the AI to propose structured remediation actions for a freeform
+    """Ask the AI to propose structured remediation actions for a freeform
     security situation or question.[web:1292][web:1277]
     """
     groq_client = GroqChatClient.default()
@@ -510,8 +497,7 @@ def suggest_remediation_freeform(
 def queue_remediation_actions(
     payload: RemediationQueueRequest,
 ) -> RemediationQueueResponse:
-    """
-    Mark one or more remediation actions as 'queued' for later execution
+    """Mark one or more remediation actions as 'queued' for later execution
     by a separate worker. This endpoint does NOT execute any actions itself,
     keeping a strong separation of duties.[web:1292][web:1294]
     """

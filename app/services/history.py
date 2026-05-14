@@ -130,11 +130,7 @@ def _coerce_record(result: Any) -> dict[str, Any]:
             return dict(dumped)
 
     if hasattr(result, "__dict__"):
-        return {
-            str(key): value
-            for key, value in vars(result).items()
-            if not str(key).startswith("_") and not callable(value)
-        }
+        return {str(key): value for key, value in vars(result).items() if not str(key).startswith("_") and not callable(value)}
 
     raise TypeError("result is not serializable to dict")
 
@@ -229,7 +225,7 @@ resetscanhistory = reset_scan_history
 
 
 def get_history_items(limit: int = 20) -> list[dict[str, Any]]:
-    return cast(list[dict[str, Any]], read_scan_history(limit=limit).get("items", []))
+    return cast("list[dict[str, Any]]", read_scan_history(limit=limit).get("items", []))
 
 
 def get_history_item(scan_id: str) -> dict[str, Any] | None:

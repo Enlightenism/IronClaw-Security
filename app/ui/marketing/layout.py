@@ -69,10 +69,7 @@ def get_marketing_layout() -> MarketingLayoutPageResponse:
     hero = MarketingLayoutHeroView(
         eyebrow="Marketing layout system",
         title="A design system for premium AI-security storytelling and buyer trust.",
-        subtitle=(
-            "This layout model defines the shared navigation, spacing, hierarchy, tokens, and content rhythm for the "
-            "IronClaw-Security marketing experience so every page feels consistent, modern, high-conviction, and enterprise ready."
-        ),
+        subtitle=("This layout model defines the shared navigation, spacing, hierarchy, tokens, and content rhythm for the IronClaw-Security marketing experience so every page feels consistent, modern, high-conviction, and enterprise ready."),
         primaryctalabel="See platform overview",
         primaryctahref="/ui/marketing/platform",
         secondaryctalabel="Contact sales",
@@ -193,10 +190,7 @@ def get_marketing_layout() -> MarketingLayoutPageResponse:
         MarketingSectionView(
             sectionid="section-1",
             title="Hero shell",
-            summary=(
-                "Every major page begins with a conviction-driven hero that explains the stakes, names the threat, "
-                "and gives the buyer a clear next step."
-            ),
+            summary=("Every major page begins with a conviction-driven hero that explains the stakes, names the threat, and gives the buyer a clear next step."),
             blocks=[
                 "Eyebrow label",
                 "Premium headline",
@@ -208,9 +202,7 @@ def get_marketing_layout() -> MarketingLayoutPageResponse:
         MarketingSectionView(
             sectionid="section-2",
             title="Proof layer",
-            summary=(
-                "Buyers need evidence quickly, so pages should surface trusted stats, standards, or operational proof early."
-            ),
+            summary=("Buyers need evidence quickly, so pages should surface trusted stats, standards, or operational proof early."),
             blocks=[
                 "Threat statistics",
                 "Standards-based trust references",
@@ -221,9 +213,7 @@ def get_marketing_layout() -> MarketingLayoutPageResponse:
         MarketingSectionView(
             sectionid="section-3",
             title="Narrative grid",
-            summary=(
-                "The middle of each page should explain what is dangerous, why it matters, and how IronClaw changes the outcome."
-            ),
+            summary=("The middle of each page should explain what is dangerous, why it matters, and how IronClaw changes the outcome."),
             blocks=[
                 "Threat explanation panels",
                 "Feature capability cards",
@@ -234,9 +224,7 @@ def get_marketing_layout() -> MarketingLayoutPageResponse:
         MarketingSectionView(
             sectionid="section-4",
             title="Decision support layer",
-            summary=(
-                "Each page should make it easier for a serious buyer to continue the evaluation without hunting for context."
-            ),
+            summary=("Each page should make it easier for a serious buyer to continue the evaluation without hunting for context."),
             blocks=[
                 "FAQs",
                 "Architecture steps",
@@ -247,9 +235,7 @@ def get_marketing_layout() -> MarketingLayoutPageResponse:
         MarketingSectionView(
             sectionid="section-5",
             title="Conversion footer",
-            summary=(
-                "The page should end with clarity, not drift, using one strong final CTA oriented around demo, trust review, or buyer action."
-            ),
+            summary=("The page should end with clarity, not drift, using one strong final CTA oriented around demo, trust review, or buyer action."),
             blocks=[
                 "Single conversion-focused CTA",
                 "Short trust reinforcement line",
@@ -262,38 +248,27 @@ def get_marketing_layout() -> MarketingLayoutPageResponse:
         MarketingPrincipleView(
             principleid="principle-1",
             title="Lead with risk and value immediately",
-            description=(
-                "Landing and marketing experiences work best when the visitor understands who the product is for, what problem it solves, "
-                "and why it matters within seconds."
-            ),
+            description=("Landing and marketing experiences work best when the visitor understands who the product is for, what problem it solves, and why it matters within seconds."),
         ),
         MarketingPrincipleView(
             principleid="principle-2",
             title="Use reusable systems, not page-by-page improvisation",
-            description=(
-                "Scalable SaaS experiences depend on repeatable layout patterns, consistent tokens, and modular content blocks."
-            ),
+            description=("Scalable SaaS experiences depend on repeatable layout patterns, consistent tokens, and modular content blocks."),
         ),
         MarketingPrincipleView(
             principleid="principle-3",
             title="Maintain clear hierarchy and uncluttered structure",
-            description=(
-                "Strong B2B pages reduce clutter, emphasize the most important message, and guide the eye with spacing and content order."
-            ),
+            description=("Strong B2B pages reduce clutter, emphasize the most important message, and guide the eye with spacing and content order."),
         ),
         MarketingPrincipleView(
             principleid="principle-4",
             title="Make accessibility part of the visual system",
-            description=(
-                "Readable contrast, operable controls, understandable structure, and robust layouts are core to trust, not optional polish."
-            ),
+            description=("Readable contrast, operable controls, understandable structure, and robust layouts are core to trust, not optional polish."),
         ),
         MarketingPrincipleView(
             principleid="principle-5",
             title="Feel futuristic without becoming generic AI design",
-            description=(
-                "The layout should feel advanced and premium while staying disciplined, readable, and enterprise credible."
-            ),
+            description=("The layout should feel advanced and premium while staying disciplined, readable, and enterprise credible."),
         ),
     ]
 

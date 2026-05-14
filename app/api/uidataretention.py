@@ -10,7 +10,6 @@ from app.dependencies.auth import require_api_key
 router = APIRouter(prefix="/ui", tags=["admin-data-retention"])
 
 
-
 class DataRetentionPolicyItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -18,7 +17,6 @@ class DataRetentionPolicyItem(BaseModel):
     retention_days: int = Field(ge=0)
     storage_class: Literal["standard", "hot", "protected", "archive"]
     status: Literal["active", "review_required"]
-
 
 
 class DataRetentionSummary(BaseModel):
@@ -29,7 +27,6 @@ class DataRetentionSummary(BaseModel):
     review_required: int = Field(ge=0)
 
 
-
 class AdminDataRetentionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -38,7 +35,6 @@ class AdminDataRetentionResponse(BaseModel):
     summary: DataRetentionSummary
     policies: list[DataRetentionPolicyItem]
     request_id: str | None = None
-
 
 
 _POLICIES: tuple[DataRetentionPolicyItem, ...] = (
@@ -69,7 +65,6 @@ _POLICIES: tuple[DataRetentionPolicyItem, ...] = (
 )
 
 
-
 @router.get(
     "/admin/data-retention",
     response_model=AdminDataRetentionResponse,
@@ -85,9 +80,7 @@ def get_data_retention_settings(
     summary = DataRetentionSummary(
         total_policies=len(policies),
         active=sum(1 for policy in policies if policy.status == "active"),
-        review_required=sum(
-            1 for policy in policies if policy.status == "review_required"
-        ),
+        review_required=sum(1 for policy in policies if policy.status == "review_required"),
     )
 
     return AdminDataRetentionResponse(

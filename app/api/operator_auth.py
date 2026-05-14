@@ -90,7 +90,7 @@ async def get_operator_any_permission_endpoint(
             "operator:read",
             "operator:write",
             "operator:manage",
-        )
+        ),
     ),
 ) -> dict[str, Any]:
     return {

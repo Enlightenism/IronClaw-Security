@@ -16,11 +16,9 @@ router = APIRouter(
 )
 
 
-
 class UsageRouteCount(BaseModel):
     route: str
     requests: int
-
 
 
 class UsageSummaryView(BaseModel):
@@ -29,7 +27,6 @@ class UsageSummaryView(BaseModel):
     total_units: int
     last_seen_at: str | None = None
     routes: list[UsageRouteCount] = Field(default_factory=list)
-
 
 
 class UsageEventView(BaseModel):
@@ -42,14 +39,12 @@ class UsageEventView(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-
 class UsageSummaryListResponse(BaseModel):
     status: str
     service: str
     timestamp: str
     total_keys: int
     summaries: list[UsageSummaryView] = Field(default_factory=list)
-
 
 
 class UsageEventListResponse(BaseModel):
@@ -60,17 +55,14 @@ class UsageEventListResponse(BaseModel):
     events: list[UsageEventView] = Field(default_factory=list)
 
 
-
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
 
 
 def _to_iso(value: datetime | None) -> str | None:
     if value is None:
         return None
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
-
 
 
 def _summary_to_view(summary: UsageSummary) -> UsageSummaryView:
@@ -90,7 +82,6 @@ def _summary_to_view(summary: UsageSummary) -> UsageSummaryView:
     )
 
 
-
 def _event_to_view(event: UsageEvent) -> UsageEventView:
     return UsageEventView(
         timestamp=_to_iso(event.timestamp) or _utc_now_iso(),
@@ -103,7 +94,6 @@ def _event_to_view(event: UsageEvent) -> UsageEventView:
     )
 
 
-
 @router.get("", response_model=UsageSummaryListResponse)
 def list_usage_summaries() -> UsageSummaryListResponse:
     registry = get_usage_metering_registry()
@@ -112,7 +102,6 @@ def list_usage_summaries() -> UsageSummaryListResponse:
         summaries,
         key=lambda summary: (-summary.total_units, -summary.total_requests, summary.api_key_id),
     )
-
 
     return UsageSummaryListResponse(
         status="ok",
@@ -123,14 +112,12 @@ def list_usage_summaries() -> UsageSummaryListResponse:
     )
 
 
-
 @router.get("/events", response_model=UsageEventListResponse)
 def list_usage_events(
     limit: int = Query(default=50, ge=1, le=200),
 ) -> UsageEventListResponse:
     registry = get_usage_metering_registry()
     events = registry.recent_events(limit=limit)
-
 
     return UsageEventListResponse(
         status="ok",

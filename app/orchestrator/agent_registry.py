@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Literal
 
+
 AgentLanguage = Literal[
     "python",
     "javascript",
@@ -155,7 +156,6 @@ def _stable_agent_id(relative_path: str) -> str:
 def _protected_actions_for(language: AgentLanguage, path: Path, content: str) -> list[ProtectedAction]:
     actions: set[ProtectedAction] = {"file_edit"}
 
-    suffix = path.suffix.lower()
     lowered_path = str(path).lower()
     lowered = content.lower()
 
@@ -194,21 +194,24 @@ def _threat_profile_for(path: Path, language: AgentLanguage, content: str) -> Th
     if any(part in lowered_path for part in ["security", "guard", "scanner", "policy", "telemetry", "orchestrator"]):
         return "security_critical"
 
-    if any(token in lowered for token in [
-        "subprocess",
-        "os.system",
-        "invoke-webrequest",
-        "start-process",
-        "curl",
-        "wget",
-        "requests.",
-        "httpx.",
-        "socket",
-        "ssh",
-        "token",
-        "secret",
-        "credential",
-    ]):
+    if any(
+        token in lowered
+        for token in [
+            "subprocess",
+            "os.system",
+            "invoke-webrequest",
+            "start-process",
+            "curl",
+            "wget",
+            "requests.",
+            "httpx.",
+            "socket",
+            "ssh",
+            "token",
+            "secret",
+            "credential",
+        ]
+    ):
         return "execution_capable"
 
     if any(part in lowered_path for part in ["auth", "history", "client", "api", "service"]):
@@ -358,6 +361,6 @@ def save_registry(
 
 
 if __name__ == "__main__":
-    root = Path(".").resolve()
+    root = Path().resolve()
     registry = discover_agents(root)
     print(json.dumps(registry.to_dict(), ensure_ascii=False, indent=2))

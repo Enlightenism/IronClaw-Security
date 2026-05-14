@@ -250,7 +250,14 @@ class ReviewQueue:
         self._emit("review.started", item)
         return item
 
-    def approve(self, review_id: str, reviewer_id: str, reason: str, *, metadata: Mapping[str, Any] | None = None) -> ReviewItem:
+    def approve(
+        self,
+        review_id: str,
+        reviewer_id: str,
+        reason: str,
+        *,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> ReviewItem:
         item = self._require(review_id)
         item.status = ReviewStatus.APPROVED
         item.assigned_to = reviewer_id
@@ -258,7 +265,14 @@ class ReviewQueue:
         self._emit("review.approved", item)
         return item
 
-    def reject(self, review_id: str, reviewer_id: str, reason: str, *, metadata: Mapping[str, Any] | None = None) -> ReviewItem:
+    def reject(
+        self,
+        review_id: str,
+        reviewer_id: str,
+        reason: str,
+        *,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> ReviewItem:
         item = self._require(review_id)
         item.status = ReviewStatus.REJECTED
         item.assigned_to = reviewer_id
@@ -437,7 +451,7 @@ class ReviewQueue:
                     "event": event,
                     "review": item.to_dict(),
                     "timestamp": self.clock().isoformat(),
-                }
+                },
             )
 
 

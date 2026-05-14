@@ -5,8 +5,7 @@ from functools import lru_cache
 
 
 class _SecretsVault:
-    """
-    Single source of truth for all env-sourced secrets and config values.
+    """Single source of truth for all env-sourced secrets and config values.
     Centralises os.getenv() access so callers never touch os directly.
     Thread-safe; values are read once per key and cached.
     """
@@ -74,11 +73,7 @@ class _SecretsVault:
     # ------------------------------------------------------------------
     @staticmethod
     def data_dir() -> str:
-        return (
-            os.getenv("IRONCLAW_DATA_DIR")
-            or os.getenv("IRONCLAW_BASE_DIR")
-            or os.getenv("DATA_DIR", "samples")
-        )
+        return os.getenv("IRONCLAW_DATA_DIR") or os.getenv("IRONCLAW_BASE_DIR") or os.getenv("DATA_DIR", "samples")
 
     @staticmethod
     def reports_dir() -> str | None:

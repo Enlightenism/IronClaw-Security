@@ -119,6 +119,7 @@ def _resolve_version() -> str:
 @lru_cache(maxsize=1)
 def _load_action_execute_pipeline_factory():
     from app.dependencies.action_execute import get_action_execute_pipeline
+
     return get_action_execute_pipeline
 
 
@@ -159,7 +160,7 @@ def _build_readiness_checks() -> list[ComponentStatus]:
                 "close_supported": pipeline_close_available,
                 **({"error": pipeline_error} if pipeline_error else {}),
             },
-        )
+        ),
     )
 
     telemetry_ok = True
@@ -180,7 +181,7 @@ def _build_readiness_checks() -> list[ComponentStatus]:
                 "recent_events_checked": telemetry_recent_count,
                 **({"error": telemetry_error} if telemetry_error else {}),
             },
-        )
+        ),
     )
 
     review_ok = True
@@ -202,7 +203,7 @@ def _build_readiness_checks() -> list[ComponentStatus]:
                 "total_items": review_summary.get("total_items"),
                 **({"error": review_error} if review_error else {}),
             },
-        )
+        ),
     )
 
     return checks
@@ -230,11 +231,7 @@ def _build_diagnostics_snapshot() -> DiagnosticsResponse:
     overall_status, _ = _overall_status_from_checks(checks)
 
     degraded_names = [c.name for c in checks if c.status == DEGRADED_STATUS]
-    summary = (
-        f"Degraded components: {', '.join(degraded_names)}."
-        if degraded_names
-        else "All components operational."
-    )
+    summary = f"Degraded components: {', '.join(degraded_names)}." if degraded_names else "All components operational."
 
     items: list[dict[str, Any]] = []
     try:
@@ -302,7 +299,12 @@ def get_health(response: Response) -> HealthResponse:
     )
     _safe_append_telemetry_event(
         "system_health_requested",
-        {"status": result.status, "live": result.live, "ready": result.ready, "check_count": len(checks)},
+        {
+            "status": result.status,
+            "live": result.live,
+            "ready": result.ready,
+            "check_count": len(checks),
+        },
     )
     return result
 

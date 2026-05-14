@@ -131,7 +131,7 @@ def _control_state(
             command_ready,
             install_ready,
             endpoint_ready,
-        )
+        ),
     )
     if enabled_count >= 4:
         return "enforced"
@@ -216,7 +216,7 @@ def build_integration_governance_view(
         command_ready = bool(getattr(record, "command_name", None))
         install_ready = bool(getattr(record, "install_target", None))
         endpoint_ready = bool(
-            getattr(record, "endpoint", None) or getattr(record, "base_url", None)
+            getattr(record, "endpoint", None) or getattr(record, "base_url", None),
         )
 
         control_state = _control_state(
@@ -270,21 +270,17 @@ def build_integration_governance_view(
                     "fail_count": fail_count,
                     "verification_summary": summary,
                 },
-            )
+            ),
         )
 
     items.sort(
         key=lambda item: (
-            0
-            if item.governance_state == "at-risk"
-            else 1
-            if item.governance_state == "partial"
-            else 2,
+            0 if item.governance_state == "at-risk" else 1 if item.governance_state == "partial" else 2,
             -item.governance_score,
             item.platform,
             item.slug,
             item.integration_id,
-        )
+        ),
     )
 
     return IntegrationGovernanceView(

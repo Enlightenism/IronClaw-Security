@@ -67,11 +67,23 @@ DEFAULT_BLOCKED_PATTERNS: tuple[tuple[str, str, int], ...] = (
     ("persistence_cron", r"(?i)\b(crontab|schtasks|at\.exe|systemctl\s+enable)\b", 35),
     ("privilege_escalation", r"(?i)\b(sudo|runas|chmod\s+\+s|setcap)\b", 35),
     ("reverse_shell", r"(?i)\b(nc\s+-e|bash\s+-i|powershell.+tcpclient|socat\s+.*exec:)\b", 60),
-    ("sensitive_file_access", r"(?i)(/etc/shadow|/etc/passwd|id_rsa|authorized_keys|\.aws/credentials)", 40),
+    (
+        "sensitive_file_access",
+        r"(?i)(/etc/shadow|/etc/passwd|id_rsa|authorized_keys|\.aws/credentials)",
+        40,
+    ),
     ("system_recon", r"(?i)\b(whoami|net\s+user|ipconfig|ifconfig|route\s+print|arp\s+-a)\b", 20),
-    ("download_and_execute", r"(?i)\b(curl|wget).*(\||&&|;).*\b(sh|bash|pwsh|powershell|python)\b", 60),
+    (
+        "download_and_execute",
+        r"(?i)\b(curl|wget).*(\||&&|;).*\b(sh|bash|pwsh|powershell|python)\b",
+        60,
+    ),
     ("encoded_powershell", r"(?i)\bpowershell(?:\.exe)?\b.*(?:-enc|-encodedcommand)\b", 55),
-    ("environment_secret_access", r"(?i)\b(printenv|env|set)\b.*\b(key|token|secret|password)\b", 35),
+    (
+        "environment_secret_access",
+        r"(?i)\b(printenv|env|set)\b.*\b(key|token|secret|password)\b",
+        35,
+    ),
 )
 
 DEFAULT_BLOCKED_BASENAMES = {
@@ -176,7 +188,7 @@ class CommandSupervisor:
                     label="Empty command",
                     details="Command execution was denied because no command content was provided.",
                     score=60,
-                )
+                ),
             )
             return self._finalize(
                 reasons=reasons,
@@ -194,12 +206,9 @@ class CommandSupervisor:
                 CommandReason(
                     source="commandsupervisor",
                     label="Command too large",
-                    details=(
-                        f"Command length {len(normalized_command)} exceeded the allowed maximum "
-                        f"of {self.max_command_length} characters."
-                    ),
+                    details=(f"Command length {len(normalized_command)} exceeded the allowed maximum of {self.max_command_length} characters."),
                     score=35,
-                )
+                ),
             )
             matched_rules.append("oversized_command")
             risk_delta += 35
@@ -209,12 +218,9 @@ class CommandSupervisor:
                 CommandReason(
                     source="commandsupervisor",
                     label="Execution boundary",
-                    details=(
-                        f"Command supervision applied hardened policy for action '{actiontype}' "
-                        f"targeting '{target}'."
-                    ),
+                    details=(f"Command supervision applied hardened policy for action '{actiontype}' targeting '{target}'."),
                     score=10,
-                )
+                ),
             )
             matched_rules.append("execution_boundary")
             risk_delta += 10
@@ -228,7 +234,7 @@ class CommandSupervisor:
                         label="Blocked executable",
                         details=f"Executable '{basename}' is explicitly blocked by command policy.",
                         score=70,
-                    )
+                    ),
                 )
                 matched_rules.append(f"blocked_basename:{basename}")
                 risk_delta += 70
@@ -237,12 +243,9 @@ class CommandSupervisor:
                     CommandReason(
                         source="commandsupervisor",
                         label="Unapproved executable",
-                        details=(
-                            f"Executable '{basename}' is outside the approved sandbox command set "
-                            "and requires review."
-                        ),
+                        details=(f"Executable '{basename}' is outside the approved sandbox command set and requires review."),
                         score=20,
-                    )
+                    ),
                 )
                 matched_rules.append(f"unapproved_basename:{basename}")
                 risk_delta += 20
@@ -253,7 +256,7 @@ class CommandSupervisor:
                     label="Unknown executable",
                     details="Unable to determine the executable from the provided command payload.",
                     score=15,
-                )
+                ),
             )
             matched_rules.append("unknown_executable")
             risk_delta += 15
@@ -266,7 +269,7 @@ class CommandSupervisor:
                         label="Command policy match",
                         details=f"Command matched supervised rule '{rule_name}'.",
                         score=score,
-                    )
+                    ),
                 )
                 matched_rules.append(rule_name)
                 risk_delta += int(score)
@@ -278,7 +281,7 @@ class CommandSupervisor:
                     label="Chained execution",
                     details="Command contains chained execution operators and needs stricter review.",
                     score=15,
-                )
+                ),
             )
             matched_rules.append("chained_execution")
             risk_delta += 15
@@ -290,7 +293,7 @@ class CommandSupervisor:
                     label="Path escape attempt",
                     details="Command appears to reference parent-directory traversal outside the sandbox.",
                     score=40,
-                )
+                ),
             )
             matched_rules.append("path_escape")
             risk_delta += 40
@@ -302,7 +305,7 @@ class CommandSupervisor:
                     label="Interactive session request",
                     details="Interactive or long-lived shell behavior was detected.",
                     score=25,
-                )
+                ),
             )
             matched_rules.append("interactive_session")
             risk_delta += 25
@@ -312,12 +315,9 @@ class CommandSupervisor:
                 CommandReason(
                     source="commandsupervisor",
                     label="Non-sandbox environment",
-                    details=(
-                        f"Environment scope '{environment_scope}' is outside the default sandbox "
-                        "boundary and requires escalation."
-                    ),
+                    details=(f"Environment scope '{environment_scope}' is outside the default sandbox boundary and requires escalation."),
                     score=45,
-                )
+                ),
             )
             matched_rules.append("non_sandbox_environment")
             risk_delta += 45

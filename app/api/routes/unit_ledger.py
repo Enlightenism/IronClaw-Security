@@ -146,11 +146,7 @@ def _filter_items(
 
     if reference_id:
         reference_value = reference_id.strip().lower()
-        filtered = [
-            item
-            for item in filtered
-            if item.reference_id and reference_value in item.reference_id.lower()
-        ]
+        filtered = [item for item in filtered if item.reference_id and reference_value in item.reference_id.lower()]
 
     return filtered
 
@@ -164,9 +160,7 @@ def _build_totals(items: list[UnitLedgerItem]) -> UnitLedgerTotalsView:
 
     total_purchased_units = sum(item.units for item in items if item.entry_type == "purchase")
     total_consumed_units = sum(abs(item.units) for item in items if item.entry_type == "debit")
-    total_credited_units = sum(
-        item.units for item in items if item.entry_type in {"credit", "adjustment"}
-    )
+    total_credited_units = sum(item.units for item in items if item.entry_type in {"credit", "adjustment"})
     total_refunded_units = sum(item.units for item in items if item.entry_type == "refund")
     total_purchase_amount_usd = round(
         sum(item.amount_usd or 0 for item in items if item.entry_type == "purchase"),

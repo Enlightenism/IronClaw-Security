@@ -75,7 +75,7 @@ def test_secure_runtime_pipeline_allows_safe_request() -> None:
             allowed=True,
             reasons=[{"label": "tool-safe"}],
             risk_delta=5,
-        )
+        ),
     )
     network_guard = _StageStub(
         _make_result(
@@ -83,7 +83,7 @@ def test_secure_runtime_pipeline_allows_safe_request() -> None:
             allowed=True,
             reasons=[{"label": "network-safe"}],
             risk_delta=2,
-        )
+        ),
     )
     file_return_guard = _StageStub(
         _make_result(
@@ -91,7 +91,7 @@ def test_secure_runtime_pipeline_allows_safe_request() -> None:
             allowed=True,
             reasons=[{"label": "file-safe"}],
             risk_delta=1,
-        )
+        ),
     )
 
     pipeline = build_secure_runtime_pipeline(
@@ -131,7 +131,7 @@ def test_secure_runtime_pipeline_reviews_when_any_stage_requires_review() -> Non
             should_review=True,
             reasons=[{"label": "shell-execution"}],
             risk_delta=35,
-        )
+        ),
     )
     network_guard = _StageStub(
         _make_result(
@@ -139,7 +139,7 @@ def test_secure_runtime_pipeline_reviews_when_any_stage_requires_review() -> Non
             allowed=True,
             reasons=[{"label": "network-safe"}],
             risk_delta=0,
-        )
+        ),
     )
     file_return_guard = _StageStub(
         _make_result(
@@ -147,7 +147,7 @@ def test_secure_runtime_pipeline_reviews_when_any_stage_requires_review() -> Non
             allowed=True,
             reasons=[{"label": "file-safe"}],
             risk_delta=0,
-        )
+        ),
     )
 
     pipeline = build_secure_runtime_pipeline(
@@ -181,7 +181,7 @@ def test_secure_runtime_pipeline_blocks_when_network_stage_blocks() -> None:
             allowed=True,
             reasons=[{"label": "tool-safe"}],
             risk_delta=5,
-        )
+        ),
     )
     network_guard = _StageStub(
         _make_result(
@@ -190,7 +190,7 @@ def test_secure_runtime_pipeline_blocks_when_network_stage_blocks() -> None:
             should_block=True,
             reasons=[{"label": "blocked-egress"}],
             risk_delta=90,
-        )
+        ),
     )
     file_return_guard = _StageStub(
         _make_result(
@@ -198,7 +198,7 @@ def test_secure_runtime_pipeline_blocks_when_network_stage_blocks() -> None:
             allowed=True,
             reasons=[{"label": "file-safe"}],
             risk_delta=0,
-        )
+        ),
     )
 
     pipeline = build_secure_runtime_pipeline(
@@ -231,7 +231,7 @@ def test_secure_runtime_pipeline_quarantines_when_file_stage_quarantines() -> No
             allowed=True,
             reasons=[{"label": "tool-safe"}],
             risk_delta=4,
-        )
+        ),
     )
     network_guard = _StageStub(
         _make_result(
@@ -239,7 +239,7 @@ def test_secure_runtime_pipeline_quarantines_when_file_stage_quarantines() -> No
             allowed=True,
             reasons=[{"label": "network-safe"}],
             risk_delta=3,
-        )
+        ),
     )
     file_return_guard = _StageStub(
         _make_result(
@@ -249,7 +249,7 @@ def test_secure_runtime_pipeline_quarantines_when_file_stage_quarantines() -> No
             should_quarantine=True,
             reasons=[{"label": "secret-material-detected"}],
             risk_delta=100,
-        )
+        ),
     )
 
     pipeline = build_secure_runtime_pipeline(
@@ -283,7 +283,7 @@ def test_secure_runtime_pipeline_aggregates_risk_delta_across_stages() -> None:
             allowed=True,
             reasons=[{"label": "tool-safe"}],
             risk_delta=7,
-        )
+        ),
     )
     network_guard = _StageStub(
         _make_result(
@@ -291,7 +291,7 @@ def test_secure_runtime_pipeline_aggregates_risk_delta_across_stages() -> None:
             allowed=True,
             reasons=[{"label": "network-safe"}],
             risk_delta=11,
-        )
+        ),
     )
     file_return_guard = _StageStub(
         _make_result(
@@ -299,7 +299,7 @@ def test_secure_runtime_pipeline_aggregates_risk_delta_across_stages() -> None:
             allowed=True,
             reasons=[{"label": "file-safe"}],
             risk_delta=13,
-        )
+        ),
     )
 
     pipeline = build_secure_runtime_pipeline(
@@ -330,7 +330,7 @@ def test_secure_runtime_pipeline_combines_reasons_from_multiple_stages() -> None
             should_review=True,
             reasons=[{"label": "shell-execution"}],
             risk_delta=20,
-        )
+        ),
     )
     network_guard = _StageStub(
         _make_result(
@@ -339,7 +339,7 @@ def test_secure_runtime_pipeline_combines_reasons_from_multiple_stages() -> None
             should_review=True,
             reasons=[{"label": "untrusted-destination"}],
             risk_delta=25,
-        )
+        ),
     )
     file_return_guard = _StageStub(
         _make_result(
@@ -347,7 +347,7 @@ def test_secure_runtime_pipeline_combines_reasons_from_multiple_stages() -> None
             allowed=True,
             reasons=[{"label": "file-safe"}],
             risk_delta=0,
-        )
+        ),
     )
 
     pipeline = build_secure_runtime_pipeline(
@@ -449,7 +449,7 @@ def test_secure_runtime_pipeline_short_circuits_after_quarantine() -> None:
             should_quarantine=True,
             reasons=[{"label": "known-exfiltration-pattern"}],
             risk_delta=100,
-        )
+        ),
     )
     network_guard = _StageStub(_make_result())
     file_return_guard = _StageStub(_make_result())

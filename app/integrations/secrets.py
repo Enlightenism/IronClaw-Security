@@ -214,7 +214,7 @@ def delete_integration_secret(
                 key=key,
                 deleted_by=request.deleted_by if request else None,
                 metadata=request.metadata if request else {},
-            )
+            ),
         )
     except TypeError:
         try:

@@ -94,7 +94,7 @@ def _build_policy(
             ",".join(preflight_checks),
             ",".join(upgrade_steps),
             ",".join(rollback_steps),
-        ]
+        ],
     )
 
     return ReleasePolicyDetail(
@@ -143,10 +143,7 @@ def list_release_policies(
     if channel is not None:
         items = [policy for policy in items if policy.channel == channel]
 
-    summaries = [
-        ReleasePolicySummary.model_validate(policy.model_dump())
-        for policy in items
-    ]
+    summaries = [ReleasePolicySummary.model_validate(policy.model_dump()) for policy in items]
     return ReleasePolicyListResponse(items=summaries, count=len(summaries))
 
 

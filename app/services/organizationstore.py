@@ -63,11 +63,7 @@ def _as_dict(value: Any) -> dict[str, Any]:
         if isinstance(dumped, Mapping):
             return dict(dumped)
     if hasattr(value, "__dict__"):
-        return {
-            key: item
-            for key, item in vars(value).items()
-            if not key.startswith("_") and not callable(item)
-        }
+        return {key: item for key, item in vars(value).items() if not key.startswith("_") and not callable(item)}
     raise TypeError("organization payload must be a mapping-like object")
 
 
@@ -133,54 +129,21 @@ def _normalize_organization_payload(
     source = _as_dict(payload)
     source.update({key: value for key, value in extra.items() if value is not None})
 
-    resolved_org_id = (
-        _text(organization_id)
-        or _text(org_id)
-        or _text(source.get("organization_id"))
-        or _text(source.get("org_id"))
-        or _text(source.get("id"))
-        or str(uuid4())
-    )
+    resolved_org_id = _text(organization_id) or _text(org_id) or _text(source.get("organization_id")) or _text(source.get("org_id")) or _text(source.get("id")) or str(uuid4())
 
-    resolved_name = (
-        _text(name)
-        or _text(display_name)
-        or _text(legal_name)
-        or _text(source.get("name"))
-        or _text(source.get("display_name"))
-        or _text(source.get("legal_name"))
-        or f"Organization {resolved_org_id[:8]}"
-    )
+    resolved_name = _text(name) or _text(display_name) or _text(legal_name) or _text(source.get("name")) or _text(source.get("display_name")) or _text(source.get("legal_name")) or f"Organization {resolved_org_id[:8]}"
 
-    resolved_slug = (
-        _text(slug)
-        or _text(source.get("slug"))
-        or _slugify(resolved_name)
-    )
+    resolved_slug = _text(slug) or _text(source.get("slug")) or _slugify(resolved_name)
 
-    resolved_owner_id = (
-        _text(owner_id)
-        or _text(source.get("owner_id"))
-        or None
-    )
+    resolved_owner_id = _text(owner_id) or _text(source.get("owner_id")) or None
 
-    resolved_status = (
-        _text(status)
-        or _text(source.get("status"))
-        or "active"
-    )
+    resolved_status = _text(status) or _text(source.get("status")) or "active"
 
-    resolved_tier = (
-        _text(tier)
-        or _text(plan)
-        or _text(source.get("tier"))
-        or _text(source.get("plan"))
-        or "standard"
-    )
+    resolved_tier = _text(tier) or _text(plan) or _text(source.get("tier")) or _text(source.get("plan")) or "standard"
 
     resolved_created_at = _normalize_timestamp(created_at or source.get("created_at"))
     resolved_updated_at = _normalize_timestamp(
-        updated_at or source.get("updated_at") or resolved_created_at
+        updated_at or source.get("updated_at") or resolved_created_at,
     )
 
     return {
@@ -189,12 +152,8 @@ def _normalize_organization_payload(
         "id": resolved_org_id,
         "owner_id": resolved_owner_id,
         "name": resolved_name,
-        "display_name": _text(display_name)
-        or _text(source.get("display_name"))
-        or resolved_name,
-        "legal_name": _text(legal_name)
-        or _text(source.get("legal_name"))
-        or resolved_name,
+        "display_name": _text(display_name) or _text(source.get("display_name")) or resolved_name,
+        "legal_name": _text(legal_name) or _text(source.get("legal_name")) or resolved_name,
         "slug": resolved_slug,
         "description": _text(description) or _text(source.get("description")),
         "industry": _text(industry) or _text(source.get("industry")),
@@ -209,17 +168,21 @@ def _normalize_organization_payload(
         "country": _text(country) or _text(source.get("country")),
         "timezone": _text(timezone) or _text(source.get("timezone")) or "UTC",
         "seat_limit": int(
-            seat_limit if seat_limit is not None else source.get("seat_limit", 0)
+            seat_limit if seat_limit is not None else source.get("seat_limit", 0),
         ),
         "member_count": int(
-            member_count if member_count is not None else source.get("member_count", 0)
+            member_count if member_count is not None else source.get("member_count", 0),
         ),
         "tags": _as_list(tags if tags is not None else source.get("tags")),
-        "metadata": metadata if isinstance(metadata, dict) else _as_dict(
-            source.get("metadata")
+        "metadata": metadata
+        if isinstance(metadata, dict)
+        else _as_dict(
+            source.get("metadata"),
         ),
-        "settings": settings if isinstance(settings, dict) else _as_dict(
-            source.get("settings")
+        "settings": settings
+        if isinstance(settings, dict)
+        else _as_dict(
+            source.get("settings"),
         ),
         "enabled": _bool(
             enabled if enabled is not None else source.get("enabled"),
@@ -250,20 +213,12 @@ class OrganizationRecord:
     @classmethod
     def from_row(cls, row: Mapping[str, Any]) -> OrganizationRecord:
         data = dict(row)
-        org_id = (
-            _text(data.get("organization_id"))
-            or _text(data.get("org_id"))
-            or _text(data.get("id"))
-        )
+        org_id = _text(data.get("organization_id")) or _text(data.get("org_id")) or _text(data.get("id"))
         created_at = _normalize_timestamp(data.get("created_at"))
         updated_at = _normalize_timestamp(data.get("updated_at") or created_at)
         tier = _text(data.get("tier"), "standard")
         plan = _text(data.get("plan"), tier)
-        owner_email = (
-            _text(data.get("owner_email"))
-            or _text(data.get("contact_email"))
-            or _text(data.get("billing_email"))
-        )
+        owner_email = _text(data.get("owner_email")) or _text(data.get("contact_email")) or _text(data.get("billing_email"))
         return cls(
             organizationid=org_id,
             name=_text(data.get("name")),

@@ -281,12 +281,14 @@ def _seed_items() -> list[RequestStreamItem]:
                     "operator_visible": True,
                     "requires_followup": entry["policy_verdict"] in {"warn", "quarantine", "block"},
                 },
-            )
+            ),
         )
     return items
 
 
-def _build_filter_options(items: list[RequestStreamItem]) -> dict[str, list[RequestStreamFilterOption]]:
+def _build_filter_options(
+    items: list[RequestStreamItem],
+) -> dict[str, list[RequestStreamFilterOption]]:
     def build(values: list[str], key: str, labels: dict[str, str] | None = None) -> list[RequestStreamFilterOption]:
         counts = Counter(values)
         options = []
@@ -297,7 +299,7 @@ def _build_filter_options(items: list[RequestStreamItem]) -> dict[str, list[Requ
                     label=(labels or {}).get(value, value.replace("-", " ").title()),
                     value=value,
                     count=counts[value],
-                )
+                ),
             )
         return options
 
@@ -359,8 +361,16 @@ def get_request_stream(
         },
         kpis=[
             RequestStreamKpi(label="Visible Requests", value=str(len(filtered)), tone="info"),
-            RequestStreamKpi(label="Blocked", value=str(blocked_count), tone="critical" if blocked_count else "neutral"),
-            RequestStreamKpi(label="Pending Review", value=str(review_count), tone="warning" if review_count else "neutral"),
+            RequestStreamKpi(
+                label="Blocked",
+                value=str(blocked_count),
+                tone="critical" if blocked_count else "neutral",
+            ),
+            RequestStreamKpi(
+                label="Pending Review",
+                value=str(review_count),
+                tone="warning" if review_count else "neutral",
+            ),
             RequestStreamKpi(label="Avg Latency", value=f"{avg_latency} ms", tone="info"),
             RequestStreamKpi(label="Units Consumed", value=str(total_units), tone="neutral"),
         ],

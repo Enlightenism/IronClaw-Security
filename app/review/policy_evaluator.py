@@ -98,7 +98,7 @@ def _build_reasons(summary: dict[str, Any], risk_score: int) -> list[ExecutionRe
                         label=str(item.get("label") or "decision"),
                         details=str(item.get("details") or summary.get("reason") or "Decision recorded"),
                         score=int(item["score"]) if item.get("score") is not None else None,
-                    )
+                    ),
                 )
             else:
                 reasons.append(
@@ -107,7 +107,7 @@ def _build_reasons(summary: dict[str, Any], risk_score: int) -> list[ExecutionRe
                         label="decision",
                         details=str(item),
                         score=risk_score,
-                    )
+                    ),
                 )
 
     if reasons:
@@ -119,7 +119,7 @@ def _build_reasons(summary: dict[str, Any], risk_score: int) -> list[ExecutionRe
             label="decision",
             details=str(summary.get("reason") or "Decision recorded"),
             score=risk_score,
-        )
+        ),
     ]
 
 
@@ -205,21 +205,21 @@ def summarize_policy_result(
 
 
 __all__ = [
-    "DEFAULT_FILE_PATH",
-    "ALLOW_VERDICT",
-    "WARN_VERDICT",
-    "BLOCK_VERDICT",
-    "REVIEW_VERDICT",
-    "EXECUTED_STATE",
-    "DENIED_STATE",
-    "STATUS_COMPLETED",
-    "STATUS_QUEUED",
-    "STATUS_DENIED",
     "ACTION_ALLOW",
-    "ACTION_REVIEW",
     "ACTION_BLOCK",
-    "ExecutionReason",
+    "ACTION_REVIEW",
+    "ALLOW_VERDICT",
+    "BLOCK_VERDICT",
+    "DEFAULT_FILE_PATH",
+    "DENIED_STATE",
+    "EXECUTED_STATE",
+    "REVIEW_VERDICT",
+    "STATUS_COMPLETED",
+    "STATUS_DENIED",
+    "STATUS_QUEUED",
+    "WARN_VERDICT",
     "ActionExecuteResult",
+    "ExecutionReason",
     "evaluate_policy_result",
     "summarize_policy_result",
 ]

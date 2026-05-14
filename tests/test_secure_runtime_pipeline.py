@@ -9,7 +9,7 @@ from app.orchestrator.secure_runtime_pipeline import (
 
 def test_run_secure_runtime_allows_safe_request() -> None:
     pipeline = initialize_secure_runtime_pipeline(
-        audit_log_path="output/test-security-events-runtime-allow.jsonl"
+        audit_log_path="output/test-security-events-runtime-allow.jsonl",
     )
 
     result = run_secure_runtime(
@@ -38,7 +38,7 @@ def test_run_secure_runtime_allows_safe_request() -> None:
 
 def test_run_secure_runtime_blocks_high_risk_request() -> None:
     pipeline = initialize_secure_runtime_pipeline(
-        audit_log_path="output/test-security-events-runtime-block.jsonl"
+        audit_log_path="output/test-security-events-runtime-block.jsonl",
     )
 
     result = run_secure_runtime(
@@ -66,7 +66,7 @@ def test_run_secure_runtime_blocks_high_risk_request() -> None:
 
 def test_summarize_secure_runtime_result_contains_expected_keys() -> None:
     pipeline = initialize_secure_runtime_pipeline(
-        audit_log_path="output/test-security-events-runtime-summary.jsonl"
+        audit_log_path="output/test-security-events-runtime-summary.jsonl",
     )
 
     result = run_secure_runtime(

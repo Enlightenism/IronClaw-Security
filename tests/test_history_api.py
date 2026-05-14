@@ -31,8 +31,7 @@ def _seed_history_event(
     verdict: str = "allow",
     risk_score: int = 0,
 ) -> None:
-    """
-    Seed a single audit event that will appear in the history API.
+    """Seed a single audit event that will appear in the history API.
     The history API is backed by the same audit log storage.
     """
     audit_log = initialize_security_audit_log("output/security-events.jsonl")

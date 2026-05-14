@@ -106,7 +106,7 @@ class SkillMiddleware(Generic[RequestT, ResponseT]):
                 if not billing_result.ok:
                     short_circuited = True
                     raise IronClawMiddlewareError(
-                        billing_result.reason or "Billing hook rejected the request."
+                        billing_result.reason or "Billing hook rejected the request.",
                     )
             except Exception as exc:
                 if not self.config.fail_open_on_billing_error:
@@ -218,7 +218,9 @@ def _extract_request_context(request: Any) -> SkillRequestContext | None:
     return None
 
 
-def _billing_context_from_request_context(request_context: SkillRequestContext | None) -> BillingContext | None:
+def _billing_context_from_request_context(
+    request_context: SkillRequestContext | None,
+) -> BillingContext | None:
     if request_context is None:
         return None
     return build_billing_context_from_request_context(request_context)
@@ -235,12 +237,12 @@ def run_middleware(
     request: RequestT,
 ) -> MiddlewareResult[ResponseT]:
     try:
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(middleware_instance(request))
 
     raise IronClawMiddlewareError(
-        "run_middleware cannot be used inside an active event loop; await the middleware directly."
+        "run_middleware cannot be used inside an active event loop; await the middleware directly.",
     ) from None
 
 

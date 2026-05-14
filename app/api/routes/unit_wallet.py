@@ -163,9 +163,7 @@ _SAMPLE_LEDGER: list[UnitLedgerItem] = [
 
 def _build_wallet_balance() -> UnitWalletBalanceView:
     purchased_units = sum(item.units for item in _SAMPLE_LEDGER if item.entry_type == "purchase")
-    credited_units = sum(
-        item.units for item in _SAMPLE_LEDGER if item.entry_type in {"credit", "adjustment", "refund"}
-    )
+    credited_units = sum(item.units for item in _SAMPLE_LEDGER if item.entry_type in {"credit", "adjustment", "refund"})
     consumed_units = sum(abs(item.units) for item in _SAMPLE_LEDGER if item.entry_type == "debit")
     balance_units = max(sum(item.units for item in _SAMPLE_LEDGER), 0)
 
@@ -180,11 +178,7 @@ def _build_wallet_balance() -> UnitWalletBalanceView:
 
 def _build_usage_summary() -> UnitUsageSummaryView:
     total_units = sum(abs(item.units) for item in _SAMPLE_LEDGER if item.entry_type == "debit")
-    total_requests = sum(
-        int(item.metadata.get("request_count", 0))
-        for item in _SAMPLE_LEDGER
-        if item.entry_type == "debit"
-    )
+    total_requests = sum(int(item.metadata.get("request_count", 0)) for item in _SAMPLE_LEDGER if item.entry_type == "debit")
     average_units_per_request = round(total_units / total_requests, 2) if total_requests else 0.0
     last_seen_at = _SAMPLE_LEDGER[0].timestamp if _SAMPLE_LEDGER else None
 

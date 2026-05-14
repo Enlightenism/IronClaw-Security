@@ -22,11 +22,11 @@ __all__ = [
     "AuthContext",
     "get_api_key",
     "get_auth_context",
-    "require_api_key",
     "get_authenticated_auth_context",
+    "require_access_dependency",
+    "require_api_key",
     "require_authenticated",
     "require_permission_dependency",
-    "require_access_dependency",
     "require_same_org_dependency",
 ]
 

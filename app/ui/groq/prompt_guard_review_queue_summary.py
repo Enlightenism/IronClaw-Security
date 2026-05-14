@@ -146,7 +146,7 @@ def build_prompt_guard_review_queue_summary() -> PromptGuardReviewQueueSummary:
                 timestamp=alert.timestamp,
                 source_module=alert.source_module,
                 details=alert.details,
-            )
+            ),
         )
 
     for rec in recommendations.items:
@@ -160,7 +160,7 @@ def build_prompt_guard_review_queue_summary() -> PromptGuardReviewQueueSummary:
                 timestamp=rec_data.get("generated_at", generated_at),
                 source_module="prompt_guard_recommendations",
                 details=rec_data,
-            )
+            ),
         )
 
     for item in activity_feed.items:
@@ -175,7 +175,7 @@ def build_prompt_guard_review_queue_summary() -> PromptGuardReviewQueueSummary:
                 timestamp=item.timestamp,
                 source_module=item.source_module,
                 details=item.details,
-            )
+            ),
         )
 
     queue_items.sort(key=lambda item: item.timestamp)
@@ -224,9 +224,6 @@ def get_prompt_guard_review_queue_summary() -> PromptGuardReviewQueueSummaryResp
         warning_alerts=data["warning_alerts"],
         recommendation_backlog=data["recommendation_backlog"],
         oldest_queue_signal=data["oldest_queue_signal"],
-        queue_items=[
-            PromptGuardReviewQueueItemResponse(**item)
-            for item in data["queue_items"]
-        ],
+        queue_items=[PromptGuardReviewQueueItemResponse(**item) for item in data["queue_items"]],
         metadata=data["metadata"],
     )

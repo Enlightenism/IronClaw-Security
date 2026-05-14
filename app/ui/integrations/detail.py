@@ -76,14 +76,18 @@ def build_integration_detail_view(
     verification_summary = summarize_verification_result(verification)
 
     platform_profile = get_platform_profile(record.platform)
-    platform_data = platform_profile.to_dict() if platform_profile is not None else {
-        "platform": record.platform,
-        "display_name": record.platform,
-        "install_mode": "unknown",
-        "capabilities": [],
-        "metadata": {},
-        "checked_at": None,
-    }
+    platform_data = (
+        platform_profile.to_dict()
+        if platform_profile is not None
+        else {
+            "platform": record.platform,
+            "display_name": record.platform,
+            "install_mode": "unknown",
+            "capabilities": [],
+            "metadata": {},
+            "checked_at": None,
+        }
+    )
 
     sections = [
         IntegrationDetailSection(
@@ -104,16 +108,8 @@ def build_integration_detail_view(
         IntegrationDetailSection(
             title="Capabilities",
             data={
-                "enabled": [
-                    capability.to_dict()
-                    for capability in record.capabilities
-                    if capability.enabled
-                ],
-                "disabled": [
-                    capability.to_dict()
-                    for capability in record.capabilities
-                    if not capability.enabled
-                ],
+                "enabled": [capability.to_dict() for capability in record.capabilities if capability.enabled],
+                "disabled": [capability.to_dict() for capability in record.capabilities if not capability.enabled],
             },
         ),
         IntegrationDetailSection(

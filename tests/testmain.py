@@ -7,11 +7,7 @@ from app.main import create_app
 
 def test_create_app_registers_core_health_routes() -> None:
     app = create_app()
-    route_map = {
-        route.path: route
-        for route in app.routes
-        if isinstance(route, APIRoute)
-    }
+    route_map = {route.path: route for route in app.routes if isinstance(route, APIRoute)}
 
     assert "/" in route_map
     assert "/health" in route_map
@@ -25,11 +21,7 @@ def test_create_app_registers_core_health_routes() -> None:
 
 def test_create_app_registers_integrations_routes() -> None:
     app = create_app()
-    route_paths = {
-        route.path
-        for route in app.routes
-        if isinstance(route, APIRoute)
-    }
+    route_paths = {route.path for route in app.routes if isinstance(route, APIRoute)}
 
     expected_paths = {
         "/integrations/installers",
@@ -53,20 +45,10 @@ def test_create_app_registers_integrations_routes() -> None:
 def test_create_app_integrations_routes_are_api_key_protected() -> None:
     app = create_app()
 
-    integration_routes = [
-        route
-        for route in app.routes
-        if isinstance(route, APIRoute) and route.path.startswith("/integrations")
-    ]
+    integration_routes = [route for route in app.routes if isinstance(route, APIRoute) and route.path.startswith("/integrations")]
 
     assert integration_routes, "expected integrations routes to be registered"
 
     for route in integration_routes:
-        dependency_calls = {
-            getattr(dependency.dependency, "__name__", repr(dependency.dependency))
-            for dependency in route.dependant.dependencies
-            if dependency.dependency is not None
-        }
-        assert "require_api_key" in dependency_calls, (
-            f"route {route.path} is missing require_api_key protection"
-        )
+        dependency_calls = {getattr(dependency.dependency, "__name__", repr(dependency.dependency)) for dependency in route.dependant.dependencies if dependency.dependency is not None}
+        assert "require_api_key" in dependency_calls, f"route {route.path} is missing require_api_key protection"

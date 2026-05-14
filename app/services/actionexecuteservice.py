@@ -52,8 +52,7 @@ class ActionExecutionReceipt:
 
 
 class ActionExecuteService:
-    """
-    Billing-aware execution guard.
+    """Billing-aware execution guard.
 
     This service does not perform the dangerous action itself. It decides
     whether the action is allowed to proceed and records prepaid unit usage.
@@ -64,9 +63,7 @@ class ActionExecuteService:
         *,
         usage_metering_service: UsageMeteringService | None = None,
     ) -> None:
-        self._usage_metering_service = (
-            usage_metering_service or get_usage_metering_service()
-        )
+        self._usage_metering_service = usage_metering_service or get_usage_metering_service()
 
     def evaluate_request(
         self,

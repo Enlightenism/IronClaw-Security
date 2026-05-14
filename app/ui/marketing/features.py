@@ -71,10 +71,7 @@ def get_marketing_features() -> FeaturesPageResponse:
     hero = FeaturesHeroView(
         eyebrow="Security features",
         title="AI-native protection for the threats legacy security never had to stop.",
-        subtitle=(
-            "IronClaw-Security is built for prompt injection, indirect context attacks, excessive agent autonomy, "
-            "unsafe tool execution, and the hidden trust failures that appear when AI systems are connected to real machines."
-        ),
+        subtitle=("IronClaw-Security is built for prompt injection, indirect context attacks, excessive agent autonomy, unsafe tool execution, and the hidden trust failures that appear when AI systems are connected to real machines."),
         primaryctalabel="See product tour",
         primaryctahref="/demo",
         secondaryctalabel="Read trust page",
@@ -86,38 +83,28 @@ def get_marketing_features() -> FeaturesPageResponse:
             statid="llm01",
             value="LLM01",
             label="Prompt injection is OWASP's top 2025 LLM risk",
-            context=(
-                "OWASP ranks prompt injection as the number one risk for LLM applications and highlights both direct "
-                "and indirect attack paths that can alter model behavior."
-            ),
+            context=("OWASP ranks prompt injection as the number one risk for LLM applications and highlights both direct and indirect attack paths that can alter model behavior."),
             source="OWASP GenAI Security Project",
         ),
         FeatureProofStatView(
             statid="llm06",
             value="LLM06",
             label="Excessive agency is a first-class AI security failure",
-            context=(
-                "OWASP defines excessive agency as damage caused when an LLM is allowed to take harmful actions in "
-                "response to manipulated, ambiguous, or malfunctioning outputs."
-            ),
+            context=("OWASP defines excessive agency as damage caused when an LLM is allowed to take harmful actions in response to manipulated, ambiguous, or malfunctioning outputs."),
             source="OWASP GenAI Security Project",
         ),
         FeatureProofStatView(
             statid="secure-resilient",
             value="Core",
             label="Secure and resilient behavior is part of trustworthy AI",
-            context=(
-                "NIST identifies security and resilience as core trustworthiness characteristics for AI systems."
-            ),
+            context=("NIST identifies security and resilience as core trustworthiness characteristics for AI systems."),
             source="NIST AI research on security and resilience",
         ),
         FeatureProofStatView(
             statid="indirect-vector",
             value="Hidden",
             label="Prompt injection can be embedded in websites, emails, and files",
-            context=(
-                "OWASP warns that indirect prompt injection can be concealed in external content that the model later processes."
-            ),
+            context=("OWASP warns that indirect prompt injection can be concealed in external content that the model later processes."),
             source="OWASP prompt injection guidance",
         ),
     ]
@@ -127,13 +114,8 @@ def get_marketing_features() -> FeaturesPageResponse:
             featureid="policy-enforcement",
             title="Runtime policy enforcement",
             category="Control plane",
-            summary=(
-                "IronClaw does not just observe AI behavior. It decides whether high-risk actions should be allowed, "
-                "reviewed, quarantined, or blocked before execution."
-            ),
-            whyitmatters=(
-                "If the model can act before security responds, detection arrives too late."
-            ),
+            summary=("IronClaw does not just observe AI behavior. It decides whether high-risk actions should be allowed, reviewed, quarantined, or blocked before execution."),
+            whyitmatters=("If the model can act before security responds, detection arrives too late."),
             bullets=[
                 "Applies enforceable action decisions before downstream execution",
                 "Creates consistent policy handling across tools, prompts, files, and runtime requests",
@@ -144,13 +126,8 @@ def get_marketing_features() -> FeaturesPageResponse:
             featureid="prompt-injection-defense",
             title="Prompt injection defense",
             category="AI attack prevention",
-            summary=(
-                "IronClaw is built around the reality that prompt injection is not edge-case behavior. It is a leading "
-                "attack class for AI systems with access to data, tools, or workflows."
-            ),
-            whyitmatters=(
-                "A compromised prompt can become a compromised action when no runtime boundary exists."
-            ),
+            summary=("IronClaw is built around the reality that prompt injection is not edge-case behavior. It is a leading attack class for AI systems with access to data, tools, or workflows."),
+            whyitmatters=("A compromised prompt can become a compromised action when no runtime boundary exists."),
             bullets=[
                 "Evaluates suspicious context before actions proceed",
                 "Supports review and containment for manipulated workflows",
@@ -161,13 +138,8 @@ def get_marketing_features() -> FeaturesPageResponse:
             featureid="indirect-content-boundary",
             title="External content boundary awareness",
             category="Input security",
-            summary=(
-                "Web pages, uploaded files, emails, and retrieved artifacts can all carry hidden instructions that shift "
-                "the model from serving the user to serving the attacker."
-            ),
-            whyitmatters=(
-                "The danger often enters through content the operator assumes is harmless."
-            ),
+            summary=("Web pages, uploaded files, emails, and retrieved artifacts can all carry hidden instructions that shift the model from serving the user to serving the attacker."),
+            whyitmatters=("The danger often enters through content the operator assumes is harmless."),
             bullets=[
                 "Treats external content as untrusted by default",
                 "Protects retrieval, browsing, and document-based workflows",
@@ -178,12 +150,8 @@ def get_marketing_features() -> FeaturesPageResponse:
             featureid="least-privilege-agents",
             title="Least-privilege agent operations",
             category="Autonomy control",
-            summary=(
-                "IronClaw is designed for a world where agent builders give models too much power too quickly."
-            ),
-            whyitmatters=(
-                "Excessive agency turns model mistakes and manipulations into real-world system actions."
-            ),
+            summary=("IronClaw is designed for a world where agent builders give models too much power too quickly."),
+            whyitmatters=("Excessive agency turns model mistakes and manipulations into real-world system actions."),
             bullets=[
                 "Supports scoped execution models for safer autonomy",
                 "Adds review gates for high-consequence actions",
@@ -194,13 +162,8 @@ def get_marketing_features() -> FeaturesPageResponse:
             featureid="review-quarantine",
             title="Review and quarantine workflow",
             category="Operational defense",
-            summary=(
-                "Suspicious AI actions need a place to go besides production. IronClaw gives teams review surfaces and "
-                "quarantine paths that slow dangerous automation down."
-            ),
-            whyitmatters=(
-                "Containment is what keeps one risky action from becoming an incident."
-            ),
+            summary=("Suspicious AI actions need a place to go besides production. IronClaw gives teams review surfaces and quarantine paths that slow dangerous automation down."),
+            whyitmatters=("Containment is what keeps one risky action from becoming an incident."),
             bullets=[
                 "Queues risky behavior for human review",
                 "Quarantines execution artifacts and suspicious outcomes",
@@ -211,13 +174,8 @@ def get_marketing_features() -> FeaturesPageResponse:
             featureid="audit-evidence",
             title="Traceable audit evidence",
             category="Visibility",
-            summary=(
-                "Every serious buyer wants evidence that decisions are real. IronClaw records the why behind allow, "
-                "review, quarantine, and block outcomes."
-            ),
-            whyitmatters=(
-                "You cannot prove control without a decision trail."
-            ),
+            summary=("Every serious buyer wants evidence that decisions are real. IronClaw records the why behind allow, review, quarantine, and block outcomes."),
+            whyitmatters=("You cannot prove control without a decision trail."),
             bullets=[
                 "Captures decision history for operational review",
                 "Supports forensic investigation after suspicious activity",

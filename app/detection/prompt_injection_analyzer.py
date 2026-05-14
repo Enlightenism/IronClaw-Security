@@ -150,11 +150,7 @@ def analyze_prompt_injection(payload: Any) -> PromptInjectionAnalysis:
     if any("token" in pattern or "credential" in pattern or "cookie" in pattern for pattern in matched_patterns):
         failed_checks.append("secret extraction language detected")
 
-    reason = (
-        matched_patterns[0]
-        if matched_patterns
-        else "no prompt injection indicators detected"
-    )
+    reason = matched_patterns[0] if matched_patterns else "no prompt injection indicators detected"
 
     return PromptInjectionAnalysis(
         detected=detected,

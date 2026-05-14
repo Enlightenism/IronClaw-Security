@@ -88,10 +88,7 @@ def get_marketing_customers() -> CustomersPageResponse:
     hero = CustomersHeroView(
         eyebrow="Customer stories",
         title="Teams adopt IronClaw when AI moves from experiment to exposure.",
-        subtitle=(
-            "Buyers do not come to IronClaw because AI is interesting. They come because once AI touches browsers, "
-            "files, tools, secrets, research flows, or autonomous actions, trust alone stops being a strategy."
-        ),
+        subtitle=("Buyers do not come to IronClaw because AI is interesting. They come because once AI touches browsers, files, tools, secrets, research flows, or autonomous actions, trust alone stops being a strategy."),
         primaryctalabel="Talk to security team",
         primaryctahref="/contact-sales",
         secondaryctalabel="See trust and security",
@@ -103,39 +100,28 @@ def get_marketing_customers() -> CustomersPageResponse:
             statid="trustworthy-ai",
             value="7",
             label="Core trustworthiness traits define credible AI adoption",
-            context=(
-                "NIST describes trustworthy AI through characteristics such as safety, security and resilience, "
-                "accountability, explainability, privacy enhancement, fairness, and reliability."
-            ),
+            context=("NIST describes trustworthy AI through characteristics such as safety, security and resilience, accountability, explainability, privacy enhancement, fairness, and reliability."),
             source="NIST AI Risk Management Framework 1.0",
         ),
         CustomerProofStatView(
             statid="runtime-priority",
             value="38%",
             label="Organizations identify runtime as their biggest AI risk area",
-            context=(
-                "Acuvity reports that runtime is the most vulnerable phase for many organizations, while a large share "
-                "also say it is where they lack the most capability."
-            ),
+            context=("Acuvity reports that runtime is the most vulnerable phase for many organizations, while a large share also say it is where they lack the most capability."),
             source="Acuvity 2025 State of AI Security research",
         ),
         CustomerProofStatView(
             statid="visibility-gap",
             value="27%",
             label="Organizations say runtime is also where they lack capability most",
-            context=(
-                "Security teams are more worried about what AI does in use than about pre-deployment concerns alone."
-            ),
+            context=("Security teams are more worried about what AI does in use than about pre-deployment concerns alone."),
             source="Acuvity 2025 State of AI Security research",
         ),
         CustomerProofStatView(
             statid="shadow-ai",
             value="45%",
             label="AI tool adoption often happens outside formal IT procurement",
-            context=(
-                "This creates visibility and governance gaps that make buyer trust depend on controls and monitoring, "
-                "not just vendor promises."
-            ),
+            context=("This creates visibility and governance gaps that make buyer trust depend on controls and monitoring, not just vendor promises."),
             source="State of Enterprise AI in 2025 analysis",
         ),
     ]
@@ -171,26 +157,17 @@ def get_marketing_customers() -> CustomersPageResponse:
         CustomerChallengeView(
             challengeid="buyer-fear",
             title="They know AI is moving faster than their control model.",
-            description=(
-                "Teams adopt AI quickly, but most security programs were not designed for prompt injection, "
-                "retrieval poisoning, chained tool calls, or agent autonomy."
-            ),
+            description=("Teams adopt AI quickly, but most security programs were not designed for prompt injection, retrieval poisoning, chained tool calls, or agent autonomy."),
         ),
         CustomerChallengeView(
             challengeid="trust-gap",
             title="They need proof that runtime decisions are enforced, not imagined.",
-            description=(
-                "A buyer loses confidence when a product can describe risk but cannot visibly block, review, quarantine, "
-                "and audit dangerous behavior."
-            ),
+            description=("A buyer loses confidence when a product can describe risk but cannot visibly block, review, quarantine, and audit dangerous behavior."),
         ),
         CustomerChallengeView(
             challengeid="machine-risk",
             title="They understand the real target is the user environment.",
-            description=(
-                "The machine, browser, file system, credentials, and connected tools usually belong to the operator, "
-                "which means the operator absorbs the consequences when platform trust fails."
-            ),
+            description=("The machine, browser, file system, credentials, and connected tools usually belong to the operator, which means the operator absorbs the consequences when platform trust fails."),
         ),
     ]
 
@@ -200,18 +177,9 @@ def get_marketing_customers() -> CustomersPageResponse:
             companyname="Northstar Agents",
             industry="Autonomous research platform",
             title="From fast demos to controlled deployment",
-            summary=(
-                "Northstar built a browsing and retrieval-heavy agent workflow. The team moved to IronClaw when it became "
-                "clear that untrusted web context could influence downstream actions."
-            ),
-            challenge=(
-                "Their platform could summarize, browse, extract, and chain actions across tools, but they lacked a real "
-                "runtime gate between model output and action execution."
-            ),
-            whyironclaw=(
-                "IronClaw gave them review queues, action policy enforcement, audit evidence, and a clear containment path "
-                "for suspicious executions."
-            ),
+            summary=("Northstar built a browsing and retrieval-heavy agent workflow. The team moved to IronClaw when it became clear that untrusted web context could influence downstream actions."),
+            challenge=("Their platform could summarize, browse, extract, and chain actions across tools, but they lacked a real runtime gate between model output and action execution."),
+            whyironclaw=("IronClaw gave them review queues, action policy enforcement, audit evidence, and a clear containment path for suspicious executions."),
             outcomes=[
                 CustomerOutcomeView(
                     outcomeid="northstar-1",
@@ -229,27 +197,16 @@ def get_marketing_customers() -> CustomersPageResponse:
                     detail="Security reviewers gained a place to inspect, approve, reject, and quarantine risky behavior.",
                 ),
             ],
-            operatorquote=(
-                "We did not need another dashboard. We needed a line of defense between the model and the machine."
-            ),
+            operatorquote=("We did not need another dashboard. We needed a line of defense between the model and the machine."),
         ),
         CustomerStoryView(
             storyid="internal-ai-platform",
             companyname="Granite Ops",
             industry="Internal enterprise AI platform",
             title="Replacing trust-based rollout with governed AI operations",
-            summary=(
-                "Granite Ops had multiple internal AI tools spreading across teams, with uneven review practices and "
-                "limited visibility into runtime actions."
-            ),
-            challenge=(
-                "Shadow AI growth meant teams were connecting models to files, browsers, and automation without a unified "
-                "control plane for high-risk behavior."
-            ),
-            whyironclaw=(
-                "IronClaw matched their need for least-privilege enforcement, auditability, and a path to scale AI use "
-                "without giving the model unchecked authority."
-            ),
+            summary=("Granite Ops had multiple internal AI tools spreading across teams, with uneven review practices and limited visibility into runtime actions."),
+            challenge=("Shadow AI growth meant teams were connecting models to files, browsers, and automation without a unified control plane for high-risk behavior."),
+            whyironclaw=("IronClaw matched their need for least-privilege enforcement, auditability, and a path to scale AI use without giving the model unchecked authority."),
             outcomes=[
                 CustomerOutcomeView(
                     outcomeid="granite-1",
@@ -267,24 +224,16 @@ def get_marketing_customers() -> CustomersPageResponse:
                     detail="Policy outcomes and suspicious actions became inspectable instead of invisible.",
                 ),
             ],
-            operatorquote=(
-                "IronClaw helped us move from AI enthusiasm to AI accountability."
-            ),
+            operatorquote=("IronClaw helped us move from AI enthusiasm to AI accountability."),
         ),
         CustomerStoryView(
             storyid="regulated-services-team",
             companyname="Aegis Advisory",
             industry="Regulated professional services",
             title="Making AI usable in a high-consequence environment",
-            summary=(
-                "Aegis wanted AI productivity, but only if risky actions could be slowed, reviewed, and justified."
-            ),
-            challenge=(
-                "Their teams could not accept a model making hidden decisions over client-sensitive workflows or external content."
-            ),
-            whyironclaw=(
-                "IronClaw gave them a runtime story centered on review, quarantine, traceability, and operator protection."
-            ),
+            summary=("Aegis wanted AI productivity, but only if risky actions could be slowed, reviewed, and justified."),
+            challenge=("Their teams could not accept a model making hidden decisions over client-sensitive workflows or external content."),
+            whyironclaw=("IronClaw gave them a runtime story centered on review, quarantine, traceability, and operator protection."),
             outcomes=[
                 CustomerOutcomeView(
                     outcomeid="aegis-1",
@@ -302,9 +251,7 @@ def get_marketing_customers() -> CustomersPageResponse:
                     detail="Their clients saw a clear commitment to safeguarding data, systems, and operator workflows.",
                 ),
             ],
-            operatorquote=(
-                "The question stopped being whether AI was useful and became whether it was governable. IronClaw gave us that answer."
-            ),
+            operatorquote=("The question stopped being whether AI was useful and became whether it was governable. IronClaw gave us that answer."),
         ),
     ]
 
@@ -312,9 +259,7 @@ def get_marketing_customers() -> CustomersPageResponse:
         CustomerSegmentView(
             segmentid="builders",
             title="For AI product builders",
-            description=(
-                "Use IronClaw when your product connects models to tools, files, browsing, memory, or automated execution."
-            ),
+            description=("Use IronClaw when your product connects models to tools, files, browsing, memory, or automated execution."),
             bestfor=[
                 "Agentic applications",
                 "Research assistants",
@@ -325,9 +270,7 @@ def get_marketing_customers() -> CustomersPageResponse:
         CustomerSegmentView(
             segmentid="buyers",
             title="For enterprise buyers",
-            description=(
-                "Use IronClaw when adoption depends on showing that your AI system can be controlled under pressure."
-            ),
+            description=("Use IronClaw when adoption depends on showing that your AI system can be controlled under pressure."),
             bestfor=[
                 "Security-conscious evaluations",
                 "Regulated environments",
@@ -338,9 +281,7 @@ def get_marketing_customers() -> CustomersPageResponse:
         CustomerSegmentView(
             segmentid="operators",
             title="For operators and defenders",
-            description=(
-                "Use IronClaw when your team needs visibility into suspicious AI actions before they become incidents."
-            ),
+            description=("Use IronClaw when your team needs visibility into suspicious AI actions before they become incidents."),
             bestfor=[
                 "Runtime monitoring",
                 "Manual review workflows",

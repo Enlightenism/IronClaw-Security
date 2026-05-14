@@ -135,8 +135,7 @@ class RegistryUnitLedgerEntry:
 
 
 class UnitWalletRegistry:
-    """
-    In-memory prepaid unit wallet registry.
+    """In-memory prepaid unit wallet registry.
 
     This supports:
     - creating or resolving a wallet for an owner,
@@ -196,7 +195,7 @@ class UnitWalletRegistry:
                     units=safe_units,
                     balance_after=wallet.balance_units,
                     metadata=metadata or {},
-                )
+                ),
             )
             return wallet
 
@@ -226,7 +225,7 @@ class UnitWalletRegistry:
                     units=safe_units,
                     balance_after=wallet.balance_units,
                     metadata=metadata or {},
-                )
+                ),
             )
             return wallet
 

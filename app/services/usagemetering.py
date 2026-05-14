@@ -44,8 +44,7 @@ class UsageConsumptionResult:
 
 
 class UsageMeteringService:
-    """
-    Enforces prepaid unit consumption against the billing subscription first,
+    """Enforces prepaid unit consumption against the billing subscription first,
     while mirroring purchased units into the local unit wallet for visibility.
     """
 
@@ -81,7 +80,7 @@ class UsageMeteringService:
 
         with self._lock:
             subscription = self._billing_registry.get_active_subscription_for_customer(
-                normalized_owner_key
+                normalized_owner_key,
             )
             wallet_balance_before = self._get_wallet_balance(normalized_owner_key)
 
@@ -198,7 +197,7 @@ class UsageMeteringService:
 
         with self._lock:
             subscription = self._billing_registry.get_active_subscription_for_customer(
-                normalized_owner_key
+                normalized_owner_key,
             )
             wallet = self._wallet_registry.get_wallet(normalized_owner_key)
 

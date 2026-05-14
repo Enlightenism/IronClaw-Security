@@ -15,10 +15,8 @@ router = APIRouter(
 )
 
 
-
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
 
 
 class RetentionRuleView(BaseModel):
@@ -32,7 +30,6 @@ class RetentionRuleView(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-
 class UIDataRetentionResponse(BaseModel):
     status: str
     service: str
@@ -41,7 +38,6 @@ class UIDataRetentionResponse(BaseModel):
     rules: list[RetentionRuleView] = Field(default_factory=list)
     total_rules: int
     metadata: dict[str, Any] = Field(default_factory=dict)
-
 
 
 def _build_retention_rules() -> list[RetentionRuleView]:
@@ -87,7 +83,6 @@ def _build_retention_rules() -> list[RetentionRuleView]:
             metadata={"contains_content": True},
         ),
     ]
-
 
 
 @router.get("/data-retention", response_model=UIDataRetentionResponse)

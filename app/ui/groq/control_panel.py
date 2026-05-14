@@ -24,8 +24,7 @@ def _utc_now() -> str:
 
 @dataclass(slots=True)
 class GroqControlFlags:
-    """
-    Centralized, mutable control flags for the Groq security brain.
+    """Centralized, mutable control flags for the Groq security brain.
 
     This is intentionally kept in memory so you can later swap it with
     a config service, database, or environment-backed settings without
@@ -84,8 +83,7 @@ class GroqControlPanelResponse(BaseModel):
 
 
 class GroqControlPanelPatch(BaseModel):
-    """
-    Partial update body for the control panel.
+    """Partial update body for the control panel.
 
     All fields are optional; only provided fields are changed.
     """
@@ -178,8 +176,7 @@ def _make_response_metadata() -> dict[str, Any]:
 
 @router.get("/control", response_model=GroqControlPanelResponse)
 def get_groq_control_panel() -> GroqControlPanelResponse:
-    """
-    Read the current Groq security brain mode and safety toggles.
+    """Read the current Groq security brain mode and safety toggles.
 
     This endpoint is designed for a control panel UI that needs to
     render switches and radio-buttons based on central brain state.
@@ -194,8 +191,7 @@ def get_groq_control_panel() -> GroqControlPanelResponse:
 
 @router.patch("/control", response_model=GroqControlPanelResponse)
 def patch_groq_control_panel(patch: GroqControlPanelPatch) -> GroqControlPanelResponse:
-    """
-    Partially update Groq security brain control flags.
+    """Partially update Groq security brain control flags.
 
     This is safe for UI forms that send only changed fields. It keeps
     the contract stable as you later wire flags into real policy logic.

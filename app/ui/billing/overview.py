@@ -258,18 +258,14 @@ def _sample_invoices() -> list[BillingInvoiceView]:
 
 def _build_plan_counts(subscriptions: list[BillingSubscriptionView]) -> list[BillingPlanCount]:
     counts = Counter(subscription.plan for subscription in subscriptions)
-    return [
-        BillingPlanCount(plan=plan, count=count)
-        for plan, count in sorted(counts.items())
-    ]
+    return [BillingPlanCount(plan=plan, count=count) for plan, count in sorted(counts.items())]
 
 
-def _build_invoice_status_counts(invoices: list[BillingInvoiceView]) -> list[BillingInvoiceStatusCount]:
+def _build_invoice_status_counts(
+    invoices: list[BillingInvoiceView],
+) -> list[BillingInvoiceStatusCount]:
     counts = Counter(invoice.status for invoice in invoices)
-    return [
-        BillingInvoiceStatusCount(status=status, count=count)
-        for status, count in sorted(counts.items())
-    ]
+    return [BillingInvoiceStatusCount(status=status, count=count) for status, count in sorted(counts.items())]
 
 
 @router.get("/overview", response_model=BillingOverviewResponse)
@@ -281,11 +277,7 @@ def get_billing_overview() -> BillingOverviewResponse:
     activepaid = sum(1 for subscription in subscriptions if subscription.status == "active")
     trialing = sum(1 for subscription in subscriptions if subscription.status == "trialing")
     pastdue = sum(1 for subscription in subscriptions if subscription.status == "past_due")
-    monthlyrevenuecents = sum(
-        subscription.monthlybaseprice.amountcents
-        for subscription in subscriptions
-        if subscription.status in {"active", "past_due"}
-    )
+    monthlyrevenuecents = sum(subscription.monthlybaseprice.amountcents for subscription in subscriptions if subscription.status in {"active", "past_due"})
 
     kpis = [
         BillingKpiView(

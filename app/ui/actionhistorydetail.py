@@ -84,9 +84,7 @@ def build_action_history_detail_view(
     normalized_record = dict(record or {})
 
     actionid = str(
-        normalized_record.get("actionid")
-        or normalized_record.get("executionid")
-        or "unknown-action"
+        normalized_record.get("actionid") or normalized_record.get("executionid") or "unknown-action",
     ).strip()
 
     preferred_order = [
@@ -120,7 +118,7 @@ def build_action_history_detail_view(
                     key=key,
                     value=_format_detail_value(value),
                     tone=_infer_detail_tone(key, value),
-                )
+                ),
             )
             seen_keys.add(key)
 
@@ -133,7 +131,7 @@ def build_action_history_detail_view(
                 key=key,
                 value=_format_detail_value(value),
                 tone=_infer_detail_tone(key, value),
-            )
+            ),
         )
 
     return ActionHistoryDetailView(

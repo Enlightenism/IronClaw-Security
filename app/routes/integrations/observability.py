@@ -156,8 +156,7 @@ def _build_metric_view(record: Any, fallback_index: int) -> IntegrationMetricVie
     data = _coerce_mapping(record)
 
     metric_id = str(
-        _extract_value(data, "metric_id", "metricid", "id", "name", "key")
-        or f"metric-{fallback_index}"
+        _extract_value(data, "metric_id", "metricid", "id", "name", "key") or f"metric-{fallback_index}",
     )
     name = str(_extract_value(data, "name", "title", "label") or metric_id)
     value = _safe_float(_extract_value(data, "value", "current_value", "amount"), 0.0)
@@ -185,18 +184,19 @@ def _build_event_view(record: Any, fallback_index: int) -> IntegrationEventView:
     data = _coerce_mapping(record)
 
     event_id = str(
-        _extract_value(data, "event_id", "eventid", "id", "name", "key")
-        or f"event-{fallback_index}"
+        _extract_value(data, "event_id", "eventid", "id", "name", "key") or f"event-{fallback_index}",
     )
     category = str(_extract_value(data, "category", "type", "kind") or "activity")
     message = str(
-        _extract_value(data, "message", "detail", "summary", "title", "description")
-        or event_id
+        _extract_value(data, "message", "detail", "summary", "title", "description") or event_id,
     )
     severity = str(_extract_value(data, "severity", "level") or "info").strip().lower()
-    timestamp = _datetime_to_iso(
-        _extract_value(data, "timestamp", "created_at", "occurred_at", "observed_at")
-    ) or _utc_now_iso()
+    timestamp = (
+        _datetime_to_iso(
+            _extract_value(data, "timestamp", "created_at", "occurred_at", "observed_at"),
+        )
+        or _utc_now_iso()
+    )
 
     metadata = _normalize_dict(data.get("metadata"))
     for key in ("source", "component", "provider", "code", "trace_id"):
@@ -217,8 +217,7 @@ def _build_alert_view(record: Any, fallback_index: int) -> IntegrationAlertView:
     data = _coerce_mapping(record)
 
     alert_id = str(
-        _extract_value(data, "alert_id", "alertid", "id", "name", "key")
-        or f"alert-{fallback_index}"
+        _extract_value(data, "alert_id", "alertid", "id", "name", "key") or f"alert-{fallback_index}",
     )
     title = str(_extract_value(data, "title", "name", "summary", "message") or alert_id)
     severity = str(_extract_value(data, "severity", "level") or "info").strip().lower()
@@ -274,25 +273,16 @@ def _build_response(
         "incidents",
     )
 
-    metrics = [
-        _build_metric_view(item, index + 1)
-        for index, item in enumerate(metrics_raw)
-    ]
-    events = [
-        _build_event_view(item, index + 1)
-        for index, item in enumerate(events_raw)
-    ]
-    alerts = [
-        _build_alert_view(item, index + 1)
-        for index, item in enumerate(alerts_raw)
-    ]
+    metrics = [_build_metric_view(item, index + 1) for index, item in enumerate(metrics_raw)]
+    events = [_build_event_view(item, index + 1) for index, item in enumerate(events_raw)]
+    alerts = [_build_alert_view(item, index + 1) for index, item in enumerate(alerts_raw)]
 
     open_alerts = sum(1 for item in alerts if item.status not in {"ok", "resolved", "closed"})
     warning_alerts = sum(1 for item in alerts if item.severity in {"warning", "warn", "medium"})
     error_alerts = sum(1 for item in alerts if item.severity in {"error", "critical", "high"})
 
     overall_status = _normalize_status(
-        _extract_value(observability, "overall_status", "status", "state")
+        _extract_value(observability, "overall_status", "status", "state"),
     )
     if overall_status == "ok":
         if error_alerts:
@@ -300,12 +290,15 @@ def _build_response(
         elif warning_alerts:
             overall_status = "warning"
 
-    updated_at = _datetime_to_iso(
-        _extract_value(observability, "updated_at", "timestamp", "generated_at")
-    ) or _utc_now_iso()
+    updated_at = (
+        _datetime_to_iso(
+            _extract_value(observability, "updated_at", "timestamp", "generated_at"),
+        )
+        or _utc_now_iso()
+    )
 
     signal_sources = _normalize_string_list(
-        _extract_value(observability, "signal_sources", "sources", "providers")
+        _extract_value(observability, "signal_sources", "sources", "providers"),
     )
 
     metadata = _normalize_dict(observability.get("metadata"))

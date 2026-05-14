@@ -105,8 +105,8 @@ def test_build_action_history_view_maps_item_fields_and_tones() -> None:
                 "metadata": {
                     "source": "web",
                 },
-            }
-        ]
+            },
+        ],
     )
 
     item = view.items[0]
@@ -137,8 +137,8 @@ def test_build_action_history_view_handles_missing_fields_with_safe_defaults() -
         actions=[
             {
                 "status": "review",
-            }
-        ]
+            },
+        ],
     )
 
     item = view.items[0]
@@ -173,8 +173,8 @@ def test_build_action_history_view_marks_prompt_injection_detection() -> None:
                     "remainingunits": 0,
                     "walletbalance": 0,
                 },
-            }
-        ]
+            },
+        ],
     )
 
     item = view.items[0]

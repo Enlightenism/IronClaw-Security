@@ -70,8 +70,7 @@ def usage_event_detail_page(
         description="If true, include raw event payload in the UI metadata.",
     ),
 ) -> dict[str, Any]:
-    """
-    UI metadata endpoint for a single usage / telemetry event.
+    """UI metadata endpoint for a single usage / telemetry event.
 
     This returns a shape optimized for route-driven UI:
     - High-level attributes for quick scan (timestamp, source, principal, key)
@@ -284,10 +283,7 @@ def usage_event_detail_page(
             title="View related events",
             method="GET",
             path="/ui/usagereports",
-            description=(
-                "Open usage reports filtered to the same principal, session, or request "
-                "for broader investigation."
-            ),
+            description=("Open usage reports filtered to the same principal, session, or request for broader investigation."),
             payload={
                 "principal_id": g("principal_id"),
                 "session_id": g("session_id"),

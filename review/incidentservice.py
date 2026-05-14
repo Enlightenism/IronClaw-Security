@@ -57,8 +57,7 @@ class IncidentRecord(BaseModel):
 
 
 class IncidentService:
-    """
-    In-memory incident manager with optional review queue escalation.
+    """In-memory incident manager with optional review queue escalation.
 
     Goals:
     - Deterministic lifecycle handling for orchestration/tests.
@@ -93,9 +92,7 @@ class IncidentService:
             incidents = [incident for incident in incidents if incident.severity == severity]
 
         if assigned_to is not None:
-            incidents = [
-                incident for incident in incidents if incident.assigned_to == assigned_to
-            ]
+            incidents = [incident for incident in incidents if incident.assigned_to == assigned_to]
 
         return sorted(incidents, key=self._sort_key)
 
@@ -170,7 +167,7 @@ class IncidentService:
                     "assigned_to": owner,
                     "status": IncidentStatus.TRIAGED,
                     "updated_at": self._utcnow(),
-                }
+                },
             )
             self._incidents[incident_id] = updated
             return updated
@@ -183,7 +180,7 @@ class IncidentService:
                     "status": IncidentStatus.RESOLVED,
                     "updated_at": self._utcnow(),
                     "resolved_at": self._utcnow(),
-                }
+                },
             )
             self._incidents[incident_id] = updated
 
@@ -207,7 +204,7 @@ class IncidentService:
                     "reasons": reasons,
                     "updated_at": self._utcnow(),
                     "resolved_at": self._utcnow(),
-                }
+                },
             )
             self._incidents[incident_id] = updated
 
@@ -226,7 +223,7 @@ class IncidentService:
                     "status": IncidentStatus.OPEN,
                     "updated_at": self._utcnow(),
                     "resolved_at": None,
-                }
+                },
             )
             self._incidents[incident_id] = updated
 
@@ -266,17 +263,13 @@ class IncidentService:
                 "title": title or incident.title,
                 "summary": summary or incident.summary,
                 "severity": self._max_severity(incident.severity, self._coerce_severity(severity)),
-                "status": IncidentStatus.OPEN
-                if incident.status in {IncidentStatus.DISMISSED, IncidentStatus.RESOLVED}
-                else incident.status,
+                "status": IncidentStatus.OPEN if incident.status in {IncidentStatus.DISMISSED, IncidentStatus.RESOLVED} else incident.status,
                 "reasons": self._dedupe_strings([*incident.reasons, *reasons]),
                 "evidence": self._dedupe_evidence([*incident.evidence, *evidence]),
                 "metadata": {**incident.metadata, **metadata},
                 "updated_at": self._utcnow(),
-                "resolved_at": None
-                if incident.status in {IncidentStatus.DISMISSED, IncidentStatus.RESOLVED}
-                else incident.resolved_at,
-            }
+                "resolved_at": None if incident.status in {IncidentStatus.DISMISSED, IncidentStatus.RESOLVED} else incident.resolved_at,
+            },
         )
 
         if escalate_for_review and self._review_queue_service is not None:

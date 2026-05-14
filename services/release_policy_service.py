@@ -40,7 +40,7 @@ class ReleasePolicyService:
                 ",".join(preflight_checks),
                 ",".join(upgrade_steps),
                 ",".join(rollback_steps),
-            ]
+            ],
         )
         return sha256(raw.encode("utf-8")).hexdigest()
 
@@ -126,10 +126,7 @@ class ReleasePolicyService:
         if channel is not None:
             items = [policy for policy in items if policy.channel == channel]
 
-        summaries = [
-            ReleasePolicySummary.model_validate(policy.model_dump())
-            for policy in items
-        ]
+        summaries = [ReleasePolicySummary.model_validate(policy.model_dump()) for policy in items]
         return ReleasePolicyListResponse(items=summaries, count=len(summaries))
 
     def get_policy(self, channel: ReleaseChannel) -> ReleasePolicyDetail:

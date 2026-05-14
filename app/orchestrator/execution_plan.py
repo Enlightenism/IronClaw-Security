@@ -149,7 +149,7 @@ def _recommended_actions_for_decision(
                 "Block execution immediately.",
                 "Record the denial in audit logs.",
                 "Escalate to security review.",
-            ]
+            ],
         )
     elif lane == "quarantine_isolation":
         actions.extend(
@@ -157,14 +157,14 @@ def _recommended_actions_for_decision(
                 "Route execution into quarantine handling.",
                 "Prevent direct execution outside the sandbox.",
                 "Require security review before release.",
-            ]
+            ],
         )
     elif lane == "review_required":
         actions.extend(
             [
                 "Hold for supervisor review before unrestricted execution.",
                 "Capture audit evidence for operator review.",
-            ]
+            ],
         )
     else:
         actions.append("Allow execution with normal audit logging.")
@@ -191,10 +191,7 @@ def build_execution_plan(decision: OrchestrationDecision) -> ExecutionPlan:
     approval_mode = _approval_mode_for_decision(decision)
     escalation_reason = _escalation_reason_for_decision(decision)
 
-    requires_sandbox = lane in {"quarantine_isolation", "hard_block"} or (
-        lane == "review_required"
-        and isolation_profile in {"restricted_sandbox", "full_quarantine"}
-    )
+    requires_sandbox = lane in {"quarantine_isolation", "hard_block"} or (lane == "review_required" and isolation_profile in {"restricted_sandbox", "full_quarantine"})
 
     requires_human_in_loop = approval_mode in {"operator_confirm", "security_review"}
 

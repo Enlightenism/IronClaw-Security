@@ -209,7 +209,7 @@ def test_verifier_rejects_invalid_bundle_signature():
             verdict="block",
             matched_rules=["signature_mismatch"],
             reasons=[{"label": "Bad signature", "details": "Bundle verification failed"}],
-        )
+        ),
     )
 
     result = verifier.verify(
@@ -394,7 +394,7 @@ def test_verifier_supports_cross_platform_runtimes():
                 runtime=runtime_name,
                 adapter=runtime_name,
                 matched_rules=[f"adapter:{runtime_name}:ready"],
-            )
+            ),
         )
 
         result = verifier.verify(
@@ -492,11 +492,7 @@ def test_rules_and_reasons_are_deduplicated_across_checks():
     )
 
     assert result.matched_rules.count("dup-rule") == 1
-    duplicates = [
-        item
-        for item in result.reasons
-        if item.get("label") == "Same" and item.get("details") == "duplicate"
-    ]
+    duplicates = [item for item in result.reasons if item.get("label") == "Same" and item.get("details") == "duplicate"]
     assert len(duplicates) == 1
 
 

@@ -274,10 +274,10 @@ def summarize_network_guard(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 __all__ = [
-    "LOCAL_HOSTS",
-    "HIGH_RISK_SCHEMES",
-    "MEDIUM_RISK_KEYWORDS",
     "HIGH_RISK_KEYWORDS",
+    "HIGH_RISK_SCHEMES",
+    "LOCAL_HOSTS",
+    "MEDIUM_RISK_KEYWORDS",
     "NetworkGuardDecision",
     "evaluate_network_request",
     "summarize_network_guard",

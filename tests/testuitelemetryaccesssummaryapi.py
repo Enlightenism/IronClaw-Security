@@ -10,7 +10,7 @@ from app.main import app
 UI_TELEMETRY_ACCESS_SUMMARY_PATH: Final[str] = "/ui/telemetry-access-summary"
 
 
-@pytest.fixture()
+@pytest.fixture
 def client() -> TestClient:
     with TestClient(app) as test_client:
         yield test_client
@@ -42,14 +42,8 @@ def test_ui_telemetry_access_summary_contains_core_fields(client: TestClient) ->
 
     assert data
     assert any(k in data for k in ("title", "headline", "summary", "dashboard_title"))
-    assert any(
-        k in data
-        for k in ("metrics", "stats", "items", "cards", "summary_blocks")
-    )
-    assert any(
-        k in data
-        for k in ("permissions", "scopes", "policies", "filters", "sections", "actions")
-    )
+    assert any(k in data for k in ("metrics", "stats", "items", "cards", "summary_blocks"))
+    assert any(k in data for k in ("permissions", "scopes", "policies", "filters", "sections", "actions"))
 
 
 def test_ui_telemetry_access_summary_surface_does_not_return_array_root(

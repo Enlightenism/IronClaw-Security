@@ -172,7 +172,7 @@ def runtime_status_summary(status: RuntimeStatus) -> dict[str, Any]:
             status.policy_engine_loaded,
             status.telemetry_pipeline_ready,
             status.review_queue_available,
-        )
+        ),
     )
 
     return {

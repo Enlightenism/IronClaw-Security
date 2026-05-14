@@ -19,7 +19,7 @@ HISTORY_DETAIL_PATHS: Final[tuple[str, ...]] = (
 )
 
 
-@pytest.fixture()
+@pytest.fixture
 def client() -> TestClient:
     with TestClient(app) as test_client:
         yield test_client
@@ -114,10 +114,7 @@ def test_history_endpoint_returns_collection_shape_when_available(
     if isinstance(payload, list):
         assert isinstance(payload, list)
     else:
-        assert items or any(
-            key in payload
-            for key in ("items", "entries", "events", "history", "results", "data")
-        )
+        assert items or any(key in payload for key in ("items", "entries", "events", "history", "results", "data"))
 
 
 def test_history_endpoint_entries_have_stable_shape_when_present(
@@ -146,7 +143,7 @@ def test_history_endpoint_supports_session_filter_when_implemented(
             return
 
     raise AssertionError(
-        f"history endpoint not available on expected paths: {observed_statuses}"
+        f"history endpoint not available on expected paths: {observed_statuses}",
     )
 
 

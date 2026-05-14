@@ -149,7 +149,7 @@ def _build_customer_keys() -> list[CustomerKeyItemView]:
                 last_used_at=_datetime_to_iso(record.last_used_at),
                 scopes=scopes,
                 metadata=metadata,
-            )
+            ),
         )
 
     views.sort(key=lambda item: item.created_at, reverse=True)

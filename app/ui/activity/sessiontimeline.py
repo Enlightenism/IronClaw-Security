@@ -90,7 +90,7 @@ def _sample_session_timelines() -> dict[str, SessionTimelineResponse]:
                     policyverdict="block",
                     reviewitemid="review-104",
                     reason="High-risk shell request denied by runtime boundary.",
-                )
+                ),
             ],
         ),
     }

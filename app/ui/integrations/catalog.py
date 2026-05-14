@@ -105,11 +105,7 @@ def build_integration_catalog_view(
             command_name=item.command_name,
             description=item.description,
             install_target=item.install_target,
-            enabled_capabilities=[
-                capability.name
-                for capability in item.capabilities
-                if capability.enabled
-            ],
+            enabled_capabilities=[capability.name for capability in item.capabilities if capability.enabled],
             metadata=dict(item.metadata),
         )
         for item in items

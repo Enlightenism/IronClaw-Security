@@ -164,11 +164,7 @@ def _promote_top_level_fields(
     traceid: str | None = None,
 ) -> dict[str, Any]:
     if "traceid" not in raw:
-        val = (
-            traceid
-            or raw.get("metadata", {}).get("traceid")
-            or getattr(result, "traceid", None)
-        )
+        val = traceid or raw.get("metadata", {}).get("traceid") or getattr(result, "traceid", None)
         if val:
             raw["traceid"] = val
 
@@ -245,11 +241,7 @@ def _promote_top_level_fields(
                 error_dict["status"] = statuscode
 
         if "decision" not in error_dict:
-            decision = (
-                error_dict.get("decision")
-                or raw.get("decision")
-                or getattr(result, "decision", None)
-            )
+            decision = error_dict.get("decision") or raw.get("decision") or getattr(result, "decision", None)
             if isinstance(decision, SkillDecision):
                 decision = decision.value
             if decision is not None:
@@ -287,12 +279,12 @@ def _normalize_reason_item(item: Any) -> SkillReason:
         return item
     if isinstance(item, Mapping):
         label = str(item.get("label") or item.get("code") or "reason").strip() or "reason"
-        detail = str(
-            item.get("detail")
-            or item.get("details")
-            or item.get("message")
+        detail = (
+            str(
+                item.get("detail") or item.get("details") or item.get("message") or label,
+            ).strip()
             or label
-        ).strip() or label
+        )
         metadata = _json_mapping(item.get("metadata") if isinstance(item.get("metadata"), Mapping) else None)
         return _make_skill_reason(label=label, detail=detail, metadata=metadata)
     text = str(item or "").strip() or "reason"
@@ -449,17 +441,23 @@ def _normalize_policy_hints(value: Any) -> tuple[SkillPolicyHint, ...]:
                     summary=summary,
                     severity=_risk_value(item.get("severity") or item.get("risk")),
                     metadata=_json_mapping(item.get("metadata") if isinstance(item.get("metadata"), Mapping) else None),
-                )
+                ),
             )
         except TypeError:
             try:
                 result.append(
                     SkillPolicyHint(
                         allownetwork=_bool_value(item.get("allownetwork") or item.get("allow_network"), False),
-                        allowfilesystemwrite=_bool_value(item.get("allowfilesystemwrite") or item.get("allow_filesystem_write"), False),
-                        allowtoolinvocation=_bool_value(item.get("allowtoolinvocation") or item.get("allow_tool_invocation"), False),
+                        allowfilesystemwrite=_bool_value(
+                            item.get("allowfilesystemwrite") or item.get("allow_filesystem_write"),
+                            False,
+                        ),
+                        allowtoolinvocation=_bool_value(
+                            item.get("allowtoolinvocation") or item.get("allow_tool_invocation"),
+                            False,
+                        ),
                         metadata=_json_mapping(item.get("metadata") if isinstance(item.get("metadata"), Mapping) else None),
-                    )
+                    ),
                 )
             except TypeError:
                 continue
@@ -568,16 +566,10 @@ def _result_from_payload(
     decision = _decision_value(payload.get("decision") or payload.get("verdict"))
     provider = _provider_value(payload.get("provider") or fallbackprovider)
     requestid = str(
-        payload.get("requestid")
-        or payload.get("request_id")
-        or _request_attr(requestcontext, "requestid", "request_id")
-        or _new_id("req")
+        payload.get("requestid") or payload.get("request_id") or _request_attr(requestcontext, "requestid", "request_id") or _new_id("req"),
     )
     traceid = str(
-        payload.get("traceid")
-        or payload.get("trace_id")
-        or _request_attr(requestcontext, "traceid", "trace_id")
-        or _new_id("trace")
+        payload.get("traceid") or payload.get("trace_id") or _request_attr(requestcontext, "traceid", "trace_id") or _new_id("trace"),
     )
     summary = _best_summary(payload, fallbacksummary)
     risk = _risk_value(payload.get("risk") or payload.get("risklevel") or payload.get("risk_level"))
@@ -708,9 +700,7 @@ class IronClawSkillMiddleware:
         request = dict(payload or {})
         requestcontext = self._build_request_context(request)
         provider = _provider_value(
-            request.get("provider")
-            or request.get("provider_name")
-            or _config_attr(self.config, "defaultprovider", "default_provider")
+            request.get("provider") or request.get("provider_name") or _config_attr(self.config, "defaultprovider", "default_provider"),
         )
         traceid: str | None = None
         try:
@@ -727,11 +717,7 @@ class IronClawSkillMiddleware:
                 request=request,
             )
 
-            traceid = (
-                _request_attr(requestcontext, "traceid", "trace_id")
-                or (_runtime_attr(runtimecontext, "metadata") or {}).get("traceid")
-                or _new_id("trace")
-            )
+            traceid = _request_attr(requestcontext, "traceid", "trace_id") or (_runtime_attr(runtimecontext, "metadata") or {}).get("traceid") or _new_id("trace")
 
             guardedrequest = dict(request)
             guardedrequest.setdefault(
@@ -774,10 +760,7 @@ class IronClawSkillMiddleware:
             )
             target = self._build_target(request)
             if traceid is None:
-                traceid = (
-                    _request_attr(requestcontext, "traceid", "trace_id")
-                    or str((_runtime_attr(runtimecontext, "metadata") or {}).get("traceid") or _new_id("trace"))
-                )
+                traceid = _request_attr(requestcontext, "traceid", "trace_id") or str((_runtime_attr(runtimecontext, "metadata") or {}).get("traceid") or _new_id("trace"))
             wrapped = self._normalize_error(
                 exc,
                 requestid=_request_attr(requestcontext, "requestid", "request_id"),
@@ -803,10 +786,7 @@ class IronClawSkillMiddleware:
             )
             target = self._build_target(request)
             if traceid is None:
-                traceid = (
-                    _request_attr(requestcontext, "traceid", "trace_id")
-                    or str((_runtime_attr(runtimecontext, "metadata") or {}).get("traceid") or _new_id("trace"))
-                )
+                traceid = _request_attr(requestcontext, "traceid", "trace_id") or str((_runtime_attr(runtimecontext, "metadata") or {}).get("traceid") or _new_id("trace"))
             wrapped = IronClawSkillError(
                 "Unhandled middleware execution error.",
                 context=self._error_context(
@@ -842,11 +822,13 @@ class IronClawSkillMiddleware:
         if not isinstance(content, str) and not isinstance(messages, (list, tuple)):
             raise SkillValidationError("Request must include content or messages.")
 
-        providername = str(
-            request.get("provider")
-            or _config_attr(self.config, "defaultprovider", "default_provider")
-            or ""
-        ).strip().lower()
+        providername = (
+            str(
+                request.get("provider") or _config_attr(self.config, "defaultprovider", "default_provider") or "",
+            )
+            .strip()
+            .lower()
+        )
         if providername not in {item.value for item in SkillProvider}:
             raise SkillValidationError(
                 "provider must be one of: claude, openclaw.",
@@ -866,15 +848,11 @@ class IronClawSkillMiddleware:
         if isinstance(existing, Mapping):
             return self._instantiate_request_context(
                 requestid=str(
-                    existing.get("requestid")
-                    or existing.get("request_id")
-                    or request.get("requestid")
-                    or request.get("request_id")
-                    or _new_id("req")
+                    existing.get("requestid") or existing.get("request_id") or request.get("requestid") or request.get("request_id") or _new_id("req"),
                 ),
                 sessionid=self._optional_text(existing.get("sessionid") or request.get("sessionid")),
                 traceid=self._optional_text(
-                    existing.get("traceid") or existing.get("trace_id") or request.get("traceid") or request.get("trace_id")
+                    existing.get("traceid") or existing.get("trace_id") or request.get("traceid") or request.get("trace_id"),
                 ),
                 organizationid=self._optional_text(existing.get("organizationid") or request.get("organizationid")),
                 customerid=self._optional_text(existing.get("customerid") or request.get("customerid")),
@@ -1239,7 +1217,7 @@ class IronClawSkillMiddleware:
                 "statuscode": error.statuscode,
                 "errorcode": error.errorcode,
                 "retryable": error.retryable,
-            }
+            },
         )
 
         reasons = (
@@ -1251,11 +1229,7 @@ class IronClawSkillMiddleware:
         )
 
         requestid = _request_attr(requestcontext, "requestid", "request_id") or _new_id("req")
-        resolved_traceid = (
-            traceid
-            or _request_attr(requestcontext, "traceid", "trace_id")
-            or str((_runtime_attr(runtimecontext, "metadata") or {}).get("traceid") or _new_id("trace"))
-        )
+        resolved_traceid = traceid or _request_attr(requestcontext, "traceid", "trace_id") or str((_runtime_attr(runtimecontext, "metadata") or {}).get("traceid") or _new_id("trace"))
 
         executionrequest = _build_execution_request(
             requestid=requestid,

@@ -83,7 +83,7 @@ def build_integration_packages_view(
                     "integration_id": record.integration_id,
                     "slug": record.slug,
                     "manifest": manifest.to_dict(),
-                }
+                },
             ],
             metadata={
                 "integration_id": record.integration_id,
@@ -107,7 +107,7 @@ def build_integration_packages_view(
                     "requested_by": requested_by,
                     "status": record.status,
                 },
-            )
+            ),
         )
 
     items.sort(key=lambda item: (item.platform, item.slug, item.integration_id))

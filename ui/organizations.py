@@ -307,7 +307,7 @@ def ui_organizations_page(
                     "title": "No organizations found",
                     "description": "Adjust your filters or search criteria to inspect different tenants.",
                 },
-            }
+            },
         ],
         "actions": [
             {

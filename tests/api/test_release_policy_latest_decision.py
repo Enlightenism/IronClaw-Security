@@ -32,7 +32,7 @@ class _StubDecisionStore:
                 actor="test-suite",
                 decided_at=datetime(2026, 4, 27, 22, 0, 0, tzinfo=UTC),
                 metadata={"source": "pytest"},
-            )
+            ),
         ]
 
 

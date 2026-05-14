@@ -18,7 +18,7 @@ def test_cli_list_returns_zero_and_outputs_integrations(capsys):
 
 def test_cli_install_dry_run_returns_zero_and_does_not_fail(capsys):
     exit_code = run_cli(
-        ["install", "integration-claude-code", "--dry-run", "--requested-by", "pytest"]
+        ["install", "integration-claude-code", "--dry-run", "--requested-by", "pytest"],
     )
 
     assert exit_code == 0
@@ -33,7 +33,7 @@ def test_cli_install_dry_run_returns_zero_and_does_not_fail(capsys):
 
 def test_cli_install_marks_known_integration_active(capsys):
     exit_code = run_cli(
-        ["install", "integration-openclaw", "--requested-by", "pytest"]
+        ["install", "integration-openclaw", "--requested-by", "pytest"],
     )
 
     assert exit_code == 0

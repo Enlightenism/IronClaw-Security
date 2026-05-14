@@ -10,7 +10,7 @@ from app.main import app
 UI_RUNTIME_STATUS_PATH: Final[str] = "/ui/runtime-status"
 
 
-@pytest.fixture()
+@pytest.fixture
 def client() -> TestClient:
     with TestClient(app) as test_client:
         yield test_client

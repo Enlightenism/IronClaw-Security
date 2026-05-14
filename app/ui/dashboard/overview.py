@@ -310,20 +310,14 @@ def _to_recent_execution_item(record: dict[str, object]) -> DashboardRecentExecu
 
 def _build_verdict_counts(records: list[dict[str, object]]) -> list[DashboardVerdictCount]:
     counts = Counter(str(record.get("policyverdict") or "unknown") for record in records)
-    return [
-        DashboardVerdictCount(policyverdict=verdict, count=count)
-        for verdict, count in sorted(counts.items())
-    ]
+    return [DashboardVerdictCount(policyverdict=verdict, count=count) for verdict, count in sorted(counts.items())]
 
 
 def _build_execution_state_counts(
     records: list[dict[str, object]],
 ) -> list[DashboardExecutionStateCount]:
     counts = Counter(str(record.get("executionstate") or "unknown") for record in records)
-    return [
-        DashboardExecutionStateCount(executionstate=state, count=count)
-        for state, count in sorted(counts.items())
-    ]
+    return [DashboardExecutionStateCount(executionstate=state, count=count) for state, count in sorted(counts.items())]
 
 
 def _build_risk_trend(records: list[dict[str, object]]) -> list[DashboardRiskTrendPoint]:
@@ -343,7 +337,7 @@ def _build_risk_trend(records: list[dict[str, object]]) -> list[DashboardRiskTre
                 timestamp=bucket_key,
                 average_riskscore=average,
                 totalexecutions=len(scores),
-            )
+            ),
         )
     return points
 

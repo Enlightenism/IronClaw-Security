@@ -116,19 +116,16 @@ def build_integration_inventory_view(
                 metadata={
                     "requested_by": requested_by,
                 },
-            )
+            ),
         )
 
     items.sort(
         key=lambda item: (
-            0 if _status_bucket(item.status) == "active"
-            else 1 if _status_bucket(item.status) == "planned"
-            else 2 if _status_bucket(item.status) == "disabled"
-            else 3,
+            0 if _status_bucket(item.status) == "active" else 1 if _status_bucket(item.status) == "planned" else 2 if _status_bucket(item.status) == "disabled" else 3,
             item.platform,
             item.slug,
             item.integration_id,
-        )
+        ),
     )
 
     return IntegrationInventoryView(

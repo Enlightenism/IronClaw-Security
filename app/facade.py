@@ -11,8 +11,7 @@ def guardandexecuteaction(
     *,
     pipeline: SecureRuntimePipeline | None = None,
 ) -> ActionExecuteResult:
-    """
-    High-level facade to guard and execute an action in one step.
+    """High-level facade to guard and execute an action in one step.
 
     This is the primary entrypoint used by HTTP handlers and other callers
     that already have an ExecuteRequest payload.
@@ -40,8 +39,7 @@ def guardandexecuteraw(
     file_path: str | None = None,
     pipeline: SecureRuntimePipeline | None = None,
 ) -> ActionExecuteResult:
-    """
-    Convenience facade for callers that want to pass raw parameters instead
+    """Convenience facade for callers that want to pass raw parameters instead
     of constructing an ExecuteRequest object.
     """
     request = ExecuteRequest(

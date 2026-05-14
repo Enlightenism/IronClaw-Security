@@ -110,9 +110,7 @@ def _string_list(value: Any) -> list[str]:
         return []
     if isinstance(value, list):
         items = value
-    elif isinstance(value, tuple):
-        items = list(value)
-    elif isinstance(value, set):
+    elif isinstance(value, tuple) or isinstance(value, set):
         items = list(value)
     else:
         items = [value]
@@ -134,37 +132,11 @@ def toview(item: StoredIncidentRecord | dict[str, Any]) -> IncidentRecordView:
         source=_normalize_source(payload.get("source")),
         createdat=str(payload.get("createdat") or payload.get("created_at") or utcnowiso()),
         updatedat=str(payload.get("updatedat") or payload.get("updated_at") or utcnowiso()),
-        requestid=(
-            str(payload["requestid"])
-            if payload.get("requestid") is not None
-            else str(payload["request_id"])
-            if payload.get("request_id") is not None
-            else None
-        ),
-        traceid=(
-            str(payload["traceid"])
-            if payload.get("traceid") is not None
-            else str(payload["trace_id"])
-            if payload.get("trace_id") is not None
-            else None
-        ),
-        assetref=(
-            str(payload["assetref"])
-            if payload.get("assetref") is not None
-            else str(payload["asset_ref"])
-            if payload.get("asset_ref") is not None
-            else None
-        ),
+        requestid=(str(payload["requestid"]) if payload.get("requestid") is not None else str(payload["request_id"]) if payload.get("request_id") is not None else None),
+        traceid=(str(payload["traceid"]) if payload.get("traceid") is not None else str(payload["trace_id"]) if payload.get("trace_id") is not None else None),
+        assetref=(str(payload["assetref"]) if payload.get("assetref") is not None else str(payload["asset_ref"]) if payload.get("asset_ref") is not None else None),
         verdict=str(payload["verdict"]) if payload.get("verdict") is not None else None,
-        owner=(
-            str(payload["owner"])
-            if payload.get("owner") is not None
-            else str(payload["assigned_to"])
-            if payload.get("assigned_to") is not None
-            else str(payload["owner_id"])
-            if payload.get("owner_id") is not None
-            else None
-        ),
+        owner=(str(payload["owner"]) if payload.get("owner") is not None else str(payload["assigned_to"]) if payload.get("assigned_to") is not None else str(payload["owner_id"]) if payload.get("owner_id") is not None else None),
         tags=_string_list(payload.get("tags")),
         metadata=metadata,
     )

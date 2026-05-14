@@ -113,7 +113,7 @@ def test_allows_claude_execution_when_policy_enforcer_allows():
             allowed=True,
             verdict="allow",
             matched_rules=["bundle:verified", "rollout:enabled"],
-        )
+        ),
     )
 
     result = adapter.execute(**_request_payload())
@@ -136,7 +136,7 @@ def test_blocks_claude_execution_when_policy_enforcer_blocks():
             verdict="block",
             matched_rules=["signature_mismatch"],
             reasons=[{"label": "Bad signature", "details": "Bundle verification failed"}],
-        )
+        ),
     )
 
     result = adapter.execute(**_request_payload())
@@ -157,7 +157,7 @@ def test_review_verdict_prevents_claude_runtime_call():
             verdict="review",
             matched_rules=["policy:review"],
             reasons=[{"label": "Review", "details": "Needs analyst approval"}],
-        )
+        ),
     )
 
     result = adapter.execute(**_request_payload())
@@ -191,7 +191,7 @@ def test_passes_messages_and_context_to_runtime_after_allow():
             allowed=True,
             verdict="allow",
             matched_rules=["bundle:verified"],
-        )
+        ),
     )
 
     payload = _request_payload()
@@ -241,7 +241,7 @@ def test_empty_messages_still_can_execute_when_policy_allows():
             allowed=True,
             verdict="allow",
             matched_rules=["bundle:verified"],
-        )
+        ),
     )
 
     payload = _request_payload()
@@ -262,7 +262,7 @@ def test_override_and_rollout_flags_are_exposed():
             override_active=True,
             rollout_enabled=False,
             matched_rules=["override:allow", "rollout:disabled-bypass"],
-        )
+        ),
     )
 
     result = adapter.execute(**_request_payload())
@@ -278,7 +278,7 @@ def test_runtime_exception_is_captured_as_error_result():
             allowed=True,
             verdict="allow",
             matched_rules=["bundle:verified"],
-        )
+        ),
     )
 
     def _boom(**kwargs: Any) -> dict[str, Any]:
@@ -299,7 +299,7 @@ def test_allow_helper_matches_policy_decision():
         _PolicyDecision(
             allowed=True,
             verdict="allow",
-        )
+        ),
     )
 
     allowed = adapter.allow(**_request_payload())
@@ -312,7 +312,7 @@ def test_allow_helper_false_when_policy_rejects():
         _PolicyDecision(
             allowed=False,
             verdict="block",
-        )
+        ),
     )
 
     allowed = adapter.allow(**_request_payload())
@@ -327,7 +327,7 @@ def test_response_shape_is_json_friendly():
             verdict="allow",
             matched_rules=["bundle:verified"],
             reasons=[{"label": "Verified", "details": "Signature valid"}],
-        )
+        ),
     )
 
     result = adapter.execute(**_request_payload())
@@ -350,17 +350,13 @@ def test_reason_and_rule_deduplication_in_policy_response():
                 {"label": "Same", "details": "duplicate"},
                 {"label": "Same", "details": "duplicate"},
             ],
-        )
+        ),
     )
 
     result = adapter.execute(**_request_payload())
 
     assert result["policy"]["matchedrules"].count("dup-rule") == 1
-    duplicates = [
-        item
-        for item in result["policy"]["reasons"]
-        if item["label"] == "Same" and item["details"] == "duplicate"
-    ]
+    duplicates = [item for item in result["policy"]["reasons"] if item["label"] == "Same" and item["details"] == "duplicate"]
     assert len(duplicates) == 1
 
 

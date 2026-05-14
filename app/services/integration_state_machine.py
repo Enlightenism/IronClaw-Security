@@ -49,28 +49,28 @@ _ALLOWED_TRANSITIONS: Mapping[IntegrationState, frozenset[IntegrationState]] = {
             IntegrationState.ACTIVE,
             IntegrationState.BLOCKED,
             IntegrationState.RETIRED,
-        }
+        },
     ),
     IntegrationState.ACTIVE: frozenset(
         {
             IntegrationState.DEGRADED,
             IntegrationState.BLOCKED,
             IntegrationState.RETIRED,
-        }
+        },
     ),
     IntegrationState.DEGRADED: frozenset(
         {
             IntegrationState.ACTIVE,
             IntegrationState.BLOCKED,
             IntegrationState.RETIRED,
-        }
+        },
     ),
     IntegrationState.BLOCKED: frozenset(
         {
             IntegrationState.DRAFT,
             IntegrationState.DEGRADED,
             IntegrationState.RETIRED,
-        }
+        },
     ),
     IntegrationState.RETIRED: frozenset(),
 }

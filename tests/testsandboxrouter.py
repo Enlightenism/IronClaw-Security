@@ -55,7 +55,7 @@ class _ToolCallGuardStub:
                 "cwd": getattr(request, "cwd", None),
                 "environment_scope": getattr(request, "environment_scope", None),
                 "metadata": dict(getattr(request, "metadata", {}) or {}),
-            }
+            },
         )
         return self.decision
 
@@ -90,7 +90,7 @@ class _ArtifactExecutorStub:
         return dict(self.result)
 
 
-@pytest.fixture()
+@pytest.fixture
 def allow_decision() -> _Decision:
     return _Decision(
         verdict="allow",
@@ -102,13 +102,13 @@ def allow_decision() -> _Decision:
                 "label": "Allowed",
                 "details": "Safe tool call.",
                 "score": 5,
-            }
+            },
         ],
         matched_rules=["toolcallguard:allow"],
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def review_decision() -> _Decision:
     return _Decision(
         verdict="review",
@@ -121,13 +121,13 @@ def review_decision() -> _Decision:
                 "label": "Review",
                 "details": "Requires analyst review.",
                 "score": 35,
-            }
+            },
         ],
         matched_rules=["toolcallguard:review"],
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def block_decision() -> _Decision:
     return _Decision(
         verdict="block",
@@ -140,13 +140,13 @@ def block_decision() -> _Decision:
                 "label": "Blocked",
                 "details": "Unsafe tool call.",
                 "score": 70,
-            }
+            },
         ],
         matched_rules=["toolcallguard:block"],
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def quarantine_decision() -> _Decision:
     return _Decision(
         verdict="quarantine",
@@ -160,7 +160,7 @@ def quarantine_decision() -> _Decision:
                 "label": "Quarantined",
                 "details": "Severe tool call risk.",
                 "score": 90,
-            }
+            },
         ],
         matched_rules=["toolcallguard:quarantine"],
     )
@@ -463,7 +463,10 @@ def test_passes_artifact_payload_to_executor(allow_decision):
         metadata={"request_id": "req-11"},
     )
 
-    assert artifact_executor.calls[0]["artifact_paths"] == ["artifacts/one.txt", "artifacts/two.txt"]
+    assert artifact_executor.calls[0]["artifact_paths"] == [
+        "artifacts/one.txt",
+        "artifacts/two.txt",
+    ]
     assert artifact_executor.calls[0]["content"] == "artifact body"
 
 
@@ -505,21 +508,27 @@ def test_executor_exception_is_captured_as_failed_execution(allow_decision):
 def test_allow_helper_reflects_route_allowed_state(allow_decision):
     router, _, _, _, _ = _build_router(decision=allow_decision)
 
-    assert router.allow(
-        tool_name="bash",
-        command="echo ok",
-        metadata={"request_id": "req-13"},
-    ) is True
+    assert (
+        router.allow(
+            tool_name="bash",
+            command="echo ok",
+            metadata={"request_id": "req-13"},
+        )
+        is True
+    )
 
 
 def test_allow_helper_returns_false_for_block(block_decision):
     router, _, _, _, _ = _build_router(decision=block_decision)
 
-    assert router.allow(
-        tool_name="bash",
-        command="rm -rf /",
-        metadata={"request_id": "req-14"},
-    ) is False
+    assert (
+        router.allow(
+            tool_name="bash",
+            command="rm -rf /",
+            metadata={"request_id": "req-14"},
+        )
+        is False
+    )
 
 
 def test_route_result_contains_expected_shapes(allow_decision):

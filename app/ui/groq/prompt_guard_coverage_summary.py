@@ -114,7 +114,7 @@ def _worst_status(statuses: list[CoverageStatus]) -> CoverageStatus:
     return max(statuses, key=_status_rank)
 
 
-def _find_metric_value(metrics: Any, name: str, default: float | int = 0) -> float | int:
+def _find_metric_value(metrics: Any, name: str, default: float = 0) -> float | int:
     kpi = next((item for item in metrics.kpis if item.name == name), None)
     if kpi is None:
         return default
@@ -240,9 +240,6 @@ def get_prompt_guard_coverage_summary() -> PromptGuardCoverageSummaryResponse:
         incident_coverage_ratio=data["incident_coverage_ratio"],
         linked_incidents=data["linked_incidents"],
         unlinked_incidents=data["unlinked_incidents"],
-        coverage_areas=[
-            PromptGuardCoverageAreaResponse(**area)
-            for area in data["coverage_areas"]
-        ],
+        coverage_areas=[PromptGuardCoverageAreaResponse(**area) for area in data["coverage_areas"]],
         metadata=data["metadata"],
     )

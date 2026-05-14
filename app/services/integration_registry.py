@@ -229,11 +229,7 @@ def list_integrations(
         records = [record for record in records if record.platform.strip().lower() == normalized_platform]
 
     if capability is not None:
-        records = [
-            record
-            for record in records
-            if any(item.name == capability and item.enabled for item in record.capabilities)
-        ]
+        records = [record for record in records if any(item.name == capability and item.enabled for item in record.capabilities)]
 
     return sorted(records, key=lambda item: (item.platform, item.name, item.integration_id))
 
@@ -279,9 +275,5 @@ def summarize_integration_registry(registry: IntegrationRegistry) -> dict[str, A
         "deprecated_integrations": by_status.get("deprecated", 0),
         "platforms": by_platform,
         "capabilities": capability_counts,
-        "one_command_ready_targets": [
-            record.slug
-            for record in records
-            if record.command_name
-        ],
+        "one_command_ready_targets": [record.slug for record in records if record.command_name],
     }

@@ -125,18 +125,16 @@ def _build_step_view(record: Any, fallback_index: int) -> InstallationStepView:
     data = _coerce_mapping(record)
 
     step_id = str(
-        _extract_value(data, "step_id", "stepid", "id", "name", "key")
-        or f"step-{fallback_index}"
+        _extract_value(data, "step_id", "stepid", "id", "name", "key") or f"step-{fallback_index}",
     )
     title = str(
-        _extract_value(data, "title", "label", "name", "summary")
-        or step_id.replace("-", " ").replace("_", " ").title()
+        _extract_value(data, "title", "label", "name", "summary") or step_id.replace("-", " ").replace("_", " ").title(),
     )
     detail = str(
-        _extract_value(data, "detail", "details", "message", "summary", "description") or ""
+        _extract_value(data, "detail", "details", "message", "summary", "description") or "",
     )
     status_value = _normalize_step_status(
-        _extract_value(data, "status", "state", "result")
+        _extract_value(data, "status", "state", "result"),
     )
 
     metadata = _normalize_dict(data.get("metadata"))
@@ -163,22 +161,22 @@ def _build_install_response(integration_id: str, result: Any) -> IntegrationInst
     steps_failed = sum(1 for item in steps if item.status == "failed")
 
     installed_value = _extract_value(data, "installed", "success")
-    installed = (
-        bool(installed_value)
-        if installed_value is not None
-        else steps_failed == 0 and len(steps) > 0
-    )
+    installed = bool(installed_value) if installed_value is not None else steps_failed == 0 and len(steps) > 0
 
-    state = str(
-        _extract_value(
-            data,
-            "state",
-            "installation_state",
-            "overall_status",
-            "status",
+    state = (
+        str(
+            _extract_value(
+                data,
+                "state",
+                "installation_state",
+                "overall_status",
+                "status",
+            )
+            or ("failed" if steps_failed else "completed" if installed else "pending"),
         )
-        or ("failed" if steps_failed else "completed" if installed else "pending")
-    ).strip().lower()
+        .strip()
+        .lower()
+    )
 
     platform = _extract_value(data, "platform")
     adapter_version = _extract_value(data, "adapter_version", "version")

@@ -83,7 +83,7 @@ _DANGEROUS_MIME_PREFIXES = (
     "application/x-msdownload",
 )
 _SUSPICIOUS_ARCHIVE_ENTRY_RE = re.compile(
-    r"(^/)|(^[A-Za-z]:\\)|(^\\\\)|(?:^|/)\.\.(?:/|$)|(?:^|\\)\.\.(?:\\|$)"
+    r"(^/)|(^[A-Za-z]:\\)|(^\\\\)|(?:^|/)\.\.(?:/|$)|(?:^|\\)\.\.(?:\\|$)",
 )
 _BASE64_RE = re.compile(r"\b(?:[A-Za-z0-9+/]{80,}={0,2})\b")
 _HIGH_ENTROPY_RE = re.compile(r"\b[A-Za-z0-9_\-]{32,}\b")
@@ -290,7 +290,11 @@ class FileInspectionService:
                 file_name=_coerce_text(mapping.get("file_name") or mapping.get("name") or "unnamed"),
                 content=mapping.get("content", b"") if isinstance(mapping.get("content"), bytes) else _coerce_text(mapping.get("content")).encode("utf-8", errors="replace"),
                 mime_type=_coerce_text(mapping.get("mime_type") or mapping.get("content_type") or "application/octet-stream"),
-                metadata={**_coerce_mapping(metadata), **_coerce_mapping(mapping.get("metadata")), "direction": direction},
+                metadata={
+                    **_coerce_mapping(metadata),
+                    **_coerce_mapping(mapping.get("metadata")),
+                    "direction": direction,
+                },
                 context=context,
                 direction=direction,
             )
@@ -350,7 +354,7 @@ class FileInspectionService:
                     "severity": "high",
                     "size_bytes": size_bytes,
                     "max_size_bytes": self._max_file_size_bytes,
-                }
+                },
             )
             reasons.append("File exceeds maximum allowed size.")
             risk_delta += 35
@@ -364,7 +368,7 @@ class FileInspectionService:
                     "label": "suspicious-path",
                     "severity": "medium",
                     "path": normalized_name,
-                }
+                },
             )
             reasons.append("File path contains restricted or sensitive directory markers.")
             risk_delta += 18
@@ -378,7 +382,7 @@ class FileInspectionService:
                     "label": "sensitive-filename",
                     "severity": "high",
                     "file_name": basename,
-                }
+                },
             )
             reasons.append("File name matches a known sensitive credential or system artifact.")
             risk_delta += 30
@@ -391,7 +395,7 @@ class FileInspectionService:
                     "label": "executable-extension",
                     "severity": "high",
                     "extension": extension,
-                }
+                },
             )
             reasons.append("Executable or script file detected.")
             risk_delta += 28
@@ -405,7 +409,7 @@ class FileInspectionService:
                         "label": "dangerous-binary",
                         "severity": "high",
                         "magic": label,
-                    }
+                    },
                 )
                 reasons.append("Binary executable content detected.")
                 risk_delta += 45
@@ -420,7 +424,7 @@ class FileInspectionService:
                     "label": "dangerous-mime-type",
                     "severity": "high",
                     "mime_type": effective_mime,
-                }
+                },
             )
             reasons.append("Dangerous executable MIME type detected.")
             risk_delta += 35
@@ -437,7 +441,17 @@ class FileInspectionService:
             "blocked": False,
         }
         if archive_report["is_archive"]:
-            archive_findings, archive_reasons, archive_risk, archive_verdict, archive_allowed, archive_blocked, archive_review, archive_quarantine, archive_payload = self._inspect_archive(
+            (
+                archive_findings,
+                archive_reasons,
+                archive_risk,
+                archive_verdict,
+                archive_allowed,
+                archive_blocked,
+                archive_review,
+                archive_quarantine,
+                archive_payload,
+            ) = self._inspect_archive(
                 normalized_name=normalized_name,
                 content=content,
             )
@@ -479,7 +493,7 @@ class FileInspectionService:
                     "findings_detected": secret_result.findings_detected,
                     "secrets_redacted": secret_result.secrets_redacted,
                     "verdict": secret_result.verdict,
-                }
+                },
             )
             if secret_result.findings_detected:
                 reasons.append("Sensitive content indicators were detected in file content.")
@@ -496,7 +510,7 @@ class FileInspectionService:
                     {
                         "label": "private-key-material",
                         "severity": "critical",
-                    }
+                    },
                 )
                 reasons.append("Private key material detected in file content.")
                 risk_delta += 50
@@ -510,7 +524,7 @@ class FileInspectionService:
                     {
                         "label": "encoded-payload",
                         "severity": "medium",
-                    }
+                    },
                 )
                 reasons.append("Large encoded payload detected.")
                 risk_delta += 12
@@ -522,7 +536,7 @@ class FileInspectionService:
                     {
                         "label": "unsafe-command-content",
                         "severity": "high",
-                    }
+                    },
                 )
                 reasons.append("Command content may support outbound exfiltration or remote code execution.")
                 risk_delta += 18
@@ -627,7 +641,7 @@ class FileInspectionService:
                             "severity": "high",
                             "entry_count": len(infos),
                             "max_entries": self._max_archive_entries,
-                        }
+                        },
                     )
                     reasons.append("Archive contains too many entries.")
                     risk_delta += 30
@@ -661,7 +675,7 @@ class FileInspectionService:
                                 "severity": "high",
                                 "entry": entry_name,
                                 "flags": list(entry_flags),
-                            }
+                            },
                         )
                         reasons.append(f"Archive entry flagged: {entry_name}.")
                         risk_delta += 14
@@ -673,7 +687,7 @@ class FileInspectionService:
                             "name": entry_name,
                             "size_bytes": entry_size,
                             "flags": list(entry_flags),
-                        }
+                        },
                     )
 
                 payload["total_uncompressed_bytes"] = total_uncompressed
@@ -686,7 +700,7 @@ class FileInspectionService:
                             "severity": "high",
                             "total_uncompressed_bytes": total_uncompressed,
                             "max_total_uncompressed_bytes": self._max_archive_total_uncompressed_bytes,
-                        }
+                        },
                     )
                     reasons.append("Archive expands beyond allowed uncompressed size.")
                     risk_delta += 35
@@ -705,7 +719,7 @@ class FileInspectionService:
                     "label": "invalid-archive",
                     "severity": "high",
                     "file_name": normalized_name,
-                }
+                },
             )
             reasons.append("Archive content is malformed or unreadable.")
             risk_delta += 25
@@ -714,7 +728,17 @@ class FileInspectionService:
             blocked = True
             payload["blocked"] = True
 
-        return findings, reasons, risk_delta, verdict, allowed, blocked, should_review, should_quarantine, payload
+        return (
+            findings,
+            reasons,
+            risk_delta,
+            verdict,
+            allowed,
+            blocked,
+            should_review,
+            should_quarantine,
+            payload,
+        )
 
     def _attempt_base64_decode(self, content: bytes) -> str:
         raw_text = _coerce_text(content)

@@ -6,8 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class GuardActionRequest(BaseModel):
-    """
-    Stable, transport-agnostic request model for the guard façade.
+    """Stable, transport-agnostic request model for the guard façade.
 
     This is what internal callers (agents, orchestrators, tools) should use
     instead of binding directly to the HTTP-layer ExecuteRequest.

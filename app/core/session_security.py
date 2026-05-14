@@ -277,11 +277,7 @@ def validate_session_record(
         )
 
     normalized_user_agent = _clean(user_agent) or None
-    if (
-        active_policy.require_user_agent_binding
-        and record.user_agent
-        and normalized_user_agent != record.user_agent
-    ):
+    if active_policy.require_user_agent_binding and record.user_agent and normalized_user_agent != record.user_agent:
         metadata["expected_user_agent"] = record.user_agent
         metadata["presented_user_agent"] = normalized_user_agent or ""
         return SessionValidationResult(
@@ -395,11 +391,7 @@ def revoke_session_record(
 
 def session_is_active(record: SessionRecord, *, now: datetime | None = None) -> bool:
     current_time = _ensure_utc(now) or utc_now()
-    return (
-        record.revoked_at is None
-        and current_time < record.expires_at
-        and current_time < record.idle_expires_at
-    )
+    return record.revoked_at is None and current_time < record.expires_at and current_time < record.idle_expires_at
 
 
 def _normalize_string_values(

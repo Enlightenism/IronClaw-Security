@@ -104,10 +104,4 @@ def test_integrations_list_can_filter_by_capability():
     payload = response.json()
 
     assert payload["total"] >= 1
-    assert all(
-        any(
-            capability["name"] == "groq_assist" and capability["enabled"] is True
-            for capability in item["capabilities"]
-        )
-        for item in payload["items"]
-    )
+    assert all(any(capability["name"] == "groq_assist" and capability["enabled"] is True for capability in item["capabilities"]) for item in payload["items"])

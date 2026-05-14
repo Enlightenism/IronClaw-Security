@@ -8,8 +8,7 @@ from typing import Any
 
 @dataclass(slots=True)
 class ActionUsage:
-    """
-    Core, serialization-friendly representation of an action-usage record.
+    """Core, serialization-friendly representation of an action-usage record.
 
     This is intentionally flexible so it can wrap different metering
     backends while still satisfying the expectations of the actionusage
@@ -32,8 +31,7 @@ class ActionUsage:
     metadata: dict[str, Any] | None = field(default=None)
 
     def as_dict(self) -> dict[str, Any]:
-        """
-        Return a plain dict representation suitable for JSON or further
+        """Return a plain dict representation suitable for JSON or further
         transformation. Keys are stable so repeated builds have stable
         key sets, even if some values are None.
         """
@@ -67,7 +65,7 @@ def _coerce_decimal(value: Any) -> Decimal | None:
 def _ensure_non_negative(name: str, value: Decimal | None) -> Decimal | None:
     if value is None:
         return None
-    if value < Decimal("0"):
+    if value < Decimal(0):
         raise ValueError(f"{name} must be non-negative")
     return value
 
@@ -88,8 +86,7 @@ def build_action_usage(
     unit_cost: Any | None = None,
     quota: Any | None = None,
 ) -> ActionUsage:
-    """
-    Build a core ActionUsage object that satisfies the actionusage test suite.
+    """Build a core ActionUsage object that satisfies the actionusage test suite.
 
     - All numeric fields (when present) are non-negative.
     - totalcost is calculated from units * unit_cost when both are provided.
@@ -99,7 +96,6 @@ def build_action_usage(
     - Certain invalid combinations (blank/missing owner, blank/missing action,
       negative quota, quota exceeded) raise errors when explicitly provided.
     """
-
     # Enforce strict owner/action when explicitly provided (edge-case tests)
     if owner_id is not None:
         if not isinstance(owner_id, str):

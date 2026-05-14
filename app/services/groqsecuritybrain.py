@@ -47,12 +47,6 @@ class _GroqSecurityBrain:
         prompt = kwargs.get("prompt", "")
         context = kwargs.get("context") or {}
 
-        bundle_id = ""
-        version = ""
-        if bundle:
-            bundle_id = bundle.get("bundle_id", "")
-            version = bundle.get("version", "")
-
         # --- Pre-policy guard checks ---
         if not bundle:
             return _block_response(matched_rules=["missing_bundle"])
@@ -96,7 +90,7 @@ class _GroqSecurityBrain:
             )
         except Exception as exc:
             policy_dict["matchedrules"] = _dedup_list(
-                policy_dict["matchedrules"] + ["runtime_execution_error"]
+                policy_dict["matchedrules"] + ["runtime_execution_error"],
             )
             return {
                 "allowed": False,

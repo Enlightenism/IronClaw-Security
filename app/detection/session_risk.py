@@ -70,11 +70,7 @@ def assess_session_risk(payload: Mapping[str, Any]) -> SessionRiskAssessment:
 
     weighted_score = min(
         100,
-        base_risk
-        + int(prompt_result.risk_score * 0.35)
-        + int(download_result.risk_score * 0.20)
-        + int(artifact_result.risk_score * 0.20)
-        + int(output_result.risk_score * 0.25),
+        base_risk + int(prompt_result.risk_score * 0.35) + int(download_result.risk_score * 0.20) + int(artifact_result.risk_score * 0.20) + int(output_result.risk_score * 0.25),
     )
 
     verdict, confidence = _derive_verdict(weighted_score)
@@ -93,15 +89,7 @@ def assess_session_risk(payload: Mapping[str, Any]) -> SessionRiskAssessment:
         *output_result.failed_checks,
     ]
 
-    reason = (
-        prompt_result.reason
-        if prompt_result.detected
-        else download_result.reason
-        if download_result.detected
-        else artifact_result.reason
-        if artifact_result.detected
-        else output_result.reason
-    )
+    reason = prompt_result.reason if prompt_result.detected else download_result.reason if download_result.detected else artifact_result.reason if artifact_result.detected else output_result.reason
 
     return SessionRiskAssessment(
         session_id=session_id,

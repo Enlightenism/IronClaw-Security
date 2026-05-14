@@ -156,11 +156,7 @@ def _build_context_snapshot(mode: GroqMode | None) -> CopilotContextSnapshot:
 
     posture_score = _estimate_posture_score_from_runtime(effective_mode)
     open_incident_count = sum(1 for incident in _INCIDENTS if incident.status == "open")
-    recent_high_risk_decisions = sum(
-        1
-        for event in _REQUEST_EVENTS[-50:]
-        if event.risk_score >= 70 or event.verdict in ("block", "quarantine")
-    )
+    recent_high_risk_decisions = sum(1 for event in _REQUEST_EVENTS[-50:] if event.risk_score >= 70 or event.verdict in ("block", "quarantine"))
 
     control_summary = {
         "mode": CONTROL_FLAGS.mode,
@@ -217,12 +213,9 @@ def _build_groq_messages(
     user_message: CopilotMessage,
 ) -> list[dict[str, str]]:
     payload: list[dict[str, str]] = [
-        {"role": system_message.role, "content": system_message.content}
+        {"role": system_message.role, "content": system_message.content},
     ]
-    payload.extend(
-        {"role": message.role, "content": message.content}
-        for message in history_messages
-    )
+    payload.extend({"role": message.role, "content": message.content} for message in history_messages)
     payload.append({"role": user_message.role, "content": user_message.content})
     return payload
 
@@ -287,15 +280,11 @@ def post_copilot_chat(payload: CopilotChatRequest) -> CopilotChatResponse:
     turn = build_copilot_turn(payload=payload, groq_client=groq_client)
     data = turn.to_dict()
 
-    visible_messages = [
-        message
-        for message in cast(list[dict[str, Any]], data["messages"])
-        if message["role"] != "system"
-    ]
+    visible_messages = [message for message in cast("list[dict[str, Any]]", data["messages"]) if message["role"] != "system"]
 
     return CopilotChatResponse(
         messages=[CopilotMessageView(**message) for message in visible_messages],
-        context=CopilotContextSnapshotView(**cast(dict[str, Any], data["context"])),
-        generated_at=cast(str, data["generated_at"]),
-        metadata=cast(dict[str, Any], data["metadata"]),
+        context=CopilotContextSnapshotView(**cast("dict[str, Any]", data["context"])),
+        generated_at=cast("str", data["generated_at"]),
+        metadata=cast("dict[str, Any]", data["metadata"]),
     )

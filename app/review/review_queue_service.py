@@ -92,8 +92,8 @@ def summarize_review_queue_item(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 __all__ = [
-    "DEFAULT_REVIEW_STATUS",
     "DEFAULT_REVIEW_PRIORITY",
+    "DEFAULT_REVIEW_STATUS",
     "ESCALATED_REVIEW_PRIORITY",
     "ReviewQueueItem",
     "create_review_queue_item",

@@ -214,18 +214,12 @@ def _to_quarantine_item(record: dict[str, object]) -> QuarantineItemView:
 
 def _build_status_counts(records: list[dict[str, object]]) -> list[QuarantineStatusCount]:
     counts = Counter(str(record.get("status") or "unknown") for record in records)
-    return [
-        QuarantineStatusCount(status=status, count=count)
-        for status, count in sorted(counts.items())
-    ]
+    return [QuarantineStatusCount(status=status, count=count) for status, count in sorted(counts.items())]
 
 
 def _build_severity_counts(records: list[dict[str, object]]) -> list[QuarantineSeverityCount]:
     counts = Counter(str(record.get("severity") or "unknown") for record in records)
-    return [
-        QuarantineSeverityCount(severity=severity, count=count)
-        for severity, count in sorted(counts.items())
-    ]
+    return [QuarantineSeverityCount(severity=severity, count=count) for severity, count in sorted(counts.items())]
 
 
 def _build_timeline(records: list[dict[str, object]]) -> list[QuarantineTimelinePoint]:
@@ -284,12 +278,8 @@ def get_quarantine_overview() -> QuarantineOverviewResponse:
     activealerts = _sample_alerts()
 
     totalitems = len(quarantine_records)
-    activeitems = sum(
-        1 for record in quarantine_records if str(record.get("status") or "") != "released"
-    )
-    criticalitems = sum(
-        1 for record in quarantine_records if str(record.get("severity") or "") == "critical"
-    )
+    activeitems = sum(1 for record in quarantine_records if str(record.get("status") or "") != "released")
+    criticalitems = sum(1 for record in quarantine_records if str(record.get("severity") or "") == "critical")
     unacknowledgedalerts = sum(1 for alert in activealerts if not alert.acknowledged)
 
     kpis = [

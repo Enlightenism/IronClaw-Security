@@ -111,7 +111,7 @@ def test_billing_wallet_numeric_fields_are_non_negative_when_present() -> None:
     ):
         value = _number(payload, *keys)
         if value is not None:
-            assert value >= Decimal("0")
+            assert value >= Decimal(0)
 
 
 def test_billing_wallet_available_and_reserved_do_not_exceed_balance_when_present() -> None:
@@ -156,11 +156,11 @@ def test_billing_wallet_credit_increases_balance_when_supported() -> None:
     if not any(hasattr(wallet, name) and callable(getattr(wallet, name)) for name in credit_methods):
         pytest.skip("billing wallet credit method not implemented")
 
-    before = _number(_payload_of(wallet), "balance") or Decimal("0")
-    _call_method_if_present(wallet, credit_methods, Decimal("10"))
-    after = _number(_payload_of(wallet), "balance") or Decimal("0")
+    before = _number(_payload_of(wallet), "balance") or Decimal(0)
+    _call_method_if_present(wallet, credit_methods, Decimal(10))
+    after = _number(_payload_of(wallet), "balance") or Decimal(0)
 
-    assert after - before == Decimal("10")
+    assert after - before == Decimal(10)
 
 
 def test_billing_wallet_debit_decreases_balance_when_supported() -> None:
@@ -173,13 +173,13 @@ def test_billing_wallet_debit_decreases_balance_when_supported() -> None:
         pytest.skip("billing wallet debit method not implemented")
 
     if any(hasattr(wallet, name) and callable(getattr(wallet, name)) for name in credit_methods):
-        _call_method_if_present(wallet, credit_methods, Decimal("20"))
+        _call_method_if_present(wallet, credit_methods, Decimal(20))
 
-    before = _number(_payload_of(wallet), "balance") or Decimal("0")
-    _call_method_if_present(wallet, debit_methods, Decimal("5"))
-    after = _number(_payload_of(wallet), "balance") or Decimal("0")
+    before = _number(_payload_of(wallet), "balance") or Decimal(0)
+    _call_method_if_present(wallet, debit_methods, Decimal(5))
+    after = _number(_payload_of(wallet), "balance") or Decimal(0)
 
-    assert before - after == Decimal("5")
+    assert before - after == Decimal(5)
 
 
 def test_billing_wallet_reserve_and_release_flow_when_supported() -> None:
@@ -196,14 +196,14 @@ def test_billing_wallet_reserve_and_release_flow_when_supported() -> None:
         pytest.skip("billing wallet reserve/release methods not implemented")
 
     if any(hasattr(wallet, name) and callable(getattr(wallet, name)) for name in credit_methods):
-        _call_method_if_present(wallet, credit_methods, Decimal("20"))
+        _call_method_if_present(wallet, credit_methods, Decimal(20))
 
     before_payload = _payload_of(wallet)
     before_available = _number(before_payload, "available", "availablebalance", "available_balance")
-    token = _call_method_if_present(wallet, reserve_methods, Decimal("5"))
+    token = _call_method_if_present(wallet, reserve_methods, Decimal(5))
     middle_payload = _payload_of(wallet)
     middle_reserved = _number(middle_payload, "reserved", "held", "pending")
-    _call_method_if_present(wallet, release_methods, token if token is not None else Decimal("5"))
+    _call_method_if_present(wallet, release_methods, token if token is not None else Decimal(5))
     after_payload = _payload_of(wallet)
     after_reserved = _number(after_payload, "reserved", "held", "pending")
 
@@ -212,9 +212,9 @@ def test_billing_wallet_reserve_and_release_flow_when_supported() -> None:
         if current_available is not None:
             assert current_available <= before_available
     if middle_reserved is not None:
-        assert middle_reserved >= Decimal("0")
+        assert middle_reserved >= Decimal(0)
     if after_reserved is not None:
-        assert after_reserved >= Decimal("0")
+        assert after_reserved >= Decimal(0)
 
 
 def test_billing_wallet_rejects_negative_credit_when_supported() -> None:
@@ -225,7 +225,7 @@ def test_billing_wallet_rejects_negative_credit_when_supported() -> None:
         pytest.skip("billing wallet credit method not implemented")
 
     with pytest.raises((ValueError, AssertionError)):
-        _call_method_if_present(wallet, credit_methods, Decimal("-1"))
+        _call_method_if_present(wallet, credit_methods, Decimal(-1))
 
 
 def test_billing_wallet_rejects_negative_debit_when_supported() -> None:
@@ -236,7 +236,7 @@ def test_billing_wallet_rejects_negative_debit_when_supported() -> None:
         pytest.skip("billing wallet debit method not implemented")
 
     with pytest.raises((ValueError, AssertionError)):
-        _call_method_if_present(wallet, debit_methods, Decimal("-1"))
+        _call_method_if_present(wallet, debit_methods, Decimal(-1))
 
 
 def test_billing_wallet_prevents_overdraft_when_supported() -> None:
@@ -246,10 +246,10 @@ def test_billing_wallet_prevents_overdraft_when_supported() -> None:
     if not any(hasattr(wallet, name) and callable(getattr(wallet, name)) for name in debit_methods):
         pytest.skip("billing wallet debit method not implemented")
 
-    balance = _number(_payload_of(wallet), "balance") or Decimal("0")
+    balance = _number(_payload_of(wallet), "balance") or Decimal(0)
 
     with pytest.raises((ValueError, AssertionError)):
-        _call_method_if_present(wallet, debit_methods, balance + Decimal("1"))
+        _call_method_if_present(wallet, debit_methods, balance + Decimal(1))
 
 
 def test_billing_wallet_payload_uses_json_friendly_values() -> None:

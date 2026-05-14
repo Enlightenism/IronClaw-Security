@@ -146,23 +146,14 @@ def _build_response(integration_id: str, result: Any) -> IntegrationVerification
     data = _coerce_mapping(result)
 
     raw_checks = data.get("checks") or data.get("items") or []
-    checks = [
-        _build_check_view(record, index + 1)
-        for index, record in enumerate(raw_checks)
-    ]
+    checks = [_build_check_view(record, index + 1) for index, record in enumerate(raw_checks)]
 
     passed = sum(1 for item in checks if item.status == "pass")
     warned = sum(1 for item in checks if item.status == "warn")
     failed = sum(1 for item in checks if item.status == "fail")
     total = len(checks)
 
-    state = (
-        data.get("state")
-        or data.get("verification_state")
-        or data.get("overall_status")
-        or data.get("status")
-        or ("failed" if failed else "warning" if warned else "passed")
-    )
+    state = data.get("state") or data.get("verification_state") or data.get("overall_status") or data.get("status") or ("failed" if failed else "warning" if warned else "passed")
     state = str(state).strip().lower()
 
     blockers = _normalize_list(data.get("blockers"))

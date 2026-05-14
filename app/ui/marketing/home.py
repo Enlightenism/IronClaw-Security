@@ -66,9 +66,7 @@ def get_marketing_home() -> HomePageResponse:
         eyebrow="IronClaw-Security",
         title="Stop dangerous AI actions before they reach the user's machine.",
         subtitle=(
-            "IronClaw-Security is an AI-native runtime protection platform for prompt injection, unsafe tool use, "
-            "excessive agent autonomy, hostile external content, and the hidden trust failures that happen when AI systems "
-            "are connected to files, browsers, APIs, workflows, and real machines."
+            "IronClaw-Security is an AI-native runtime protection platform for prompt injection, unsafe tool use, excessive agent autonomy, hostile external content, and the hidden trust failures that happen when AI systems are connected to files, browsers, APIs, workflows, and real machines."
         ),
         primaryctalabel="Request live demo",
         primaryctahref="/contact-sales",
@@ -93,37 +91,28 @@ def get_marketing_home() -> HomePageResponse:
             statid="prompt-injection-rank",
             value="LLM01",
             label="Prompt injection is the top-ranked LLM application risk",
-            context=(
-                "OWASP identifies prompt injection as LLM01 and warns it can lead to unauthorized access, "
-                "sensitive data disclosure, arbitrary command execution, and manipulated decisions."
-            ),
+            context=("OWASP identifies prompt injection as LLM01 and warns it can lead to unauthorized access, sensitive data disclosure, arbitrary command execution, and manipulated decisions."),
             source="OWASP GenAI Security Project",
         ),
         HomeProofStatView(
             statid="security-concern",
             value="92%",
             label="Security teams are concerned about AI agents in the workforce",
-            context=(
-                "Darktrace reports that 92% of security professionals are concerned about the impact of AI agents on security."
-            ),
+            context=("Darktrace reports that 92% of security professionals are concerned about the impact of AI agents on security."),
             source="Darktrace State of AI Cybersecurity 2026",
         ),
         HomeProofStatView(
             statid="buyer-trust",
             value="Proof-first",
             label="Enterprise homepages convert better when trust and evidence appear early",
-            context=(
-                "B2B homepage guidance recommends showing trust elements and evidence near the top so buyers understand why the vendor is credible."
-            ),
+            context=("B2B homepage guidance recommends showing trust elements and evidence near the top so buyers understand why the vendor is credible."),
             source="Forbes B2B homepage guidance",
         ),
         HomeProofStatView(
             statid="zero-click",
             value="Zero-click",
             label="Prompt injection can trigger compromise without user action",
-            context=(
-                "A 2026 enterprise AI security writeup described a zero-click prompt-injection path that enabled data compromise and unauthorized commands from upstream content."
-            ),
+            context=("A 2026 enterprise AI security writeup described a zero-click prompt-injection path that enabled data compromise and unauthorized commands from upstream content."),
             source="Doeren Mayhew enterprise AI prompt injection analysis",
         ),
     ]
@@ -132,72 +121,56 @@ def get_marketing_home() -> HomePageResponse:
         HomeSectionLinkView(
             sectionid="section-1",
             title="Platform overview",
-            summary=(
-                "See how IronClaw acts as a runtime security and governance platform for AI systems connected to tools, content, and real environments."
-            ),
+            summary=("See how IronClaw acts as a runtime security and governance platform for AI systems connected to tools, content, and real environments."),
             href="/ui/marketing/platform",
             emphasis="core",
         ),
         HomeSectionLinkView(
             sectionid="section-2",
             title="Security features",
-            summary=(
-                "Review the capabilities that allow, review, quarantine, and block risky AI actions before they execute."
-            ),
+            summary=("Review the capabilities that allow, review, quarantine, and block risky AI actions before they execute."),
             href="/ui/marketing/features",
             emphasis="core",
         ),
         HomeSectionLinkView(
             sectionid="section-3",
             title="Trust and security",
-            summary=(
-                "Understand why prompt injection, excessive agency, and operator risk make AI trust a first-order security problem."
-            ),
+            summary=("Understand why prompt injection, excessive agency, and operator risk make AI trust a first-order security problem."),
             href="/ui/marketing/trust",
             emphasis="core",
         ),
         HomeSectionLinkView(
             sectionid="section-4",
             title="Security architecture",
-            summary=(
-                "Explore the policy, boundary, review, and audit model behind IronClaw's protection approach."
-            ),
+            summary=("Explore the policy, boundary, review, and audit model behind IronClaw's protection approach."),
             href="/ui/marketing/architecture",
             emphasis="supporting",
         ),
         HomeSectionLinkView(
             sectionid="section-5",
             title="Why IronClaw",
-            summary=(
-                "Read the case for AI-native runtime defense instead of relying on generic legacy security approaches."
-            ),
+            summary=("Read the case for AI-native runtime defense instead of relying on generic legacy security approaches."),
             href="/ui/marketing/why-ironclaw",
             emphasis="supporting",
         ),
         HomeSectionLinkView(
             sectionid="section-6",
             title="Customer stories",
-            summary=(
-                "See why teams adopt IronClaw when AI moves from internal experimentation to operational exposure."
-            ),
+            summary=("See why teams adopt IronClaw when AI moves from internal experimentation to operational exposure."),
             href="/ui/marketing/customers",
             emphasis="supporting",
         ),
         HomeSectionLinkView(
             sectionid="section-7",
             title="Quickstart docs",
-            summary=(
-                "Move from interest to implementation with the onboarding and protected runtime quickstart flow."
-            ),
+            summary=("Move from interest to implementation with the onboarding and protected runtime quickstart flow."),
             href="/ui/docs/quickstart",
             emphasis="supporting",
         ),
         HomeSectionLinkView(
             sectionid="section-8",
             title="Talk to sales",
-            summary=(
-                "Start a serious buyer conversation about prompt injection, user-machine exposure, and secure AI rollout."
-            ),
+            summary=("Start a serious buyer conversation about prompt injection, user-machine exposure, and secure AI rollout."),
             href="/contact-sales",
             emphasis="conversion",
         ),

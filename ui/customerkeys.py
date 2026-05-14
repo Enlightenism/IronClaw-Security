@@ -120,10 +120,7 @@ def customer_keys_index(
     return {
         "page": "customer-keys",
         "title": "Customer API Keys",
-        "summary": (
-            "Manage customer-scoped API keys, inspect lifecycle operations, "
-            "and route into rotation, revocation, and detail workflows."
-        ),
+        "summary": ("Manage customer-scoped API keys, inspect lifecycle operations, and route into rotation, revocation, and detail workflows."),
         "selected": {
             "highlight": highlight,
             "status": normalized_status,
@@ -199,7 +196,7 @@ def customer_keys_index(
                             created_at="2026-04-21T08:30:00Z",
                             last_rotated_at="2026-04-22T10:15:00Z",
                         ),
-                    ]
+                    ],
                 },
             ),
             _section(

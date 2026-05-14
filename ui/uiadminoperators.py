@@ -324,7 +324,7 @@ def ui_admin_operators_page(
                     "title": "No operators found",
                     "description": "Adjust your filters or search criteria to inspect different operator accounts.",
                 },
-            }
+            },
         ],
         "actions": [
             {

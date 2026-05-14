@@ -58,8 +58,7 @@ class IronClawToolRunResult:
 
 
 class IronClawToolRunner:
-    """
-    Secure registry-backed tool executor for IronClaw.
+    """Secure registry-backed tool executor for IronClaw.
 
     Design goals:
     - explicit registration only
@@ -134,7 +133,7 @@ class IronClawToolRunner:
 
         if not result.ok:
             raise IronClawToolExecutionError(
-                f"Tool {spec.name!r} exited with code {result.returncode}"
+                f"Tool {spec.name!r} exited with code {result.returncode}",
             )
 
         return result
@@ -249,6 +248,6 @@ def build_default_tool_runner() -> IronClawToolRunner:
                 description="Run Ruff static analysis across the repository.",
                 timeout_seconds=30.0,
             ),
-        ]
+        ],
     )
     return runner

@@ -19,6 +19,7 @@ def _utcnow() -> datetime:
 # Records
 # ---------------------------------------------------------------------------
 
+
 @dataclass(slots=True)
 class MeterEventRecord:
     event_id: str
@@ -63,6 +64,7 @@ class SubscriptionRecord:
 # billing-transaction records / invoices / payments)
 # ---------------------------------------------------------------------------
 
+
 class SubscriptionMeterStore:
     def __init__(self) -> None:
         self._lock = Lock()
@@ -82,63 +84,67 @@ class SubscriptionMeterStore:
             period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
             period_end = now.replace(day=28, hour=23, minute=59, second=59, microsecond=0)
 
-            self._subscriptions.extend([
-                SubscriptionRecord(
-                    subscription_id=f"sub-{uuid4().hex[:12]}",
-                    org_id="org-seed-001",
-                    plan_name="enterprise",
-                    status="active",
-                    billing_email="billing@ironclaw.dev",
-                    period_start=period_start,
-                    period_end=period_end,
-                    included_units=100_000,
-                    used_units=28_440,
-                    overage_units=0,
-                    price_usd_monthly=2499,
-                    metadata={"seeded": True},
-                ),
-                SubscriptionRecord(
-                    subscription_id=f"sub-{uuid4().hex[:12]}",
-                    org_id="org-seed-002",
-                    plan_name="pro",
-                    status="trialing",
-                    billing_email="finance@sandbox.dev",
-                    period_start=period_start,
-                    period_end=period_end,
-                    included_units=10_000,
-                    used_units=2_140,
-                    overage_units=0,
-                    price_usd_monthly=299,
-                    metadata={"seeded": True},
-                ),
-            ])
+            self._subscriptions.extend(
+                [
+                    SubscriptionRecord(
+                        subscription_id=f"sub-{uuid4().hex[:12]}",
+                        org_id="org-seed-001",
+                        plan_name="enterprise",
+                        status="active",
+                        billing_email="billing@ironclaw.dev",
+                        period_start=period_start,
+                        period_end=period_end,
+                        included_units=100_000,
+                        used_units=28_440,
+                        overage_units=0,
+                        price_usd_monthly=2499,
+                        metadata={"seeded": True},
+                    ),
+                    SubscriptionRecord(
+                        subscription_id=f"sub-{uuid4().hex[:12]}",
+                        org_id="org-seed-002",
+                        plan_name="pro",
+                        status="trialing",
+                        billing_email="finance@sandbox.dev",
+                        period_start=period_start,
+                        period_end=period_end,
+                        included_units=10_000,
+                        used_units=2_140,
+                        overage_units=0,
+                        price_usd_monthly=299,
+                        metadata={"seeded": True},
+                    ),
+                ]
+            )
 
-            self._meter_events.extend([
-                MeterEventRecord(
-                    event_id=f"mtr-{uuid4().hex[:12]}",
-                    org_id="org-seed-001",
-                    event_type="scan",
-                    quantity=1200,
-                    occurred_at=now,
-                    metadata={"seeded": True},
-                ),
-                MeterEventRecord(
-                    event_id=f"mtr-{uuid4().hex[:12]}",
-                    org_id="org-seed-001",
-                    event_type="guard_request",
-                    quantity=420,
-                    occurred_at=now,
-                    metadata={"seeded": True},
-                ),
-                MeterEventRecord(
-                    event_id=f"mtr-{uuid4().hex[:12]}",
-                    org_id="org-seed-002",
-                    event_type="execution",
-                    quantity=84,
-                    occurred_at=now,
-                    metadata={"seeded": True},
-                ),
-            ])
+            self._meter_events.extend(
+                [
+                    MeterEventRecord(
+                        event_id=f"mtr-{uuid4().hex[:12]}",
+                        org_id="org-seed-001",
+                        event_type="scan",
+                        quantity=1200,
+                        occurred_at=now,
+                        metadata={"seeded": True},
+                    ),
+                    MeterEventRecord(
+                        event_id=f"mtr-{uuid4().hex[:12]}",
+                        org_id="org-seed-001",
+                        event_type="guard_request",
+                        quantity=420,
+                        occurred_at=now,
+                        metadata={"seeded": True},
+                    ),
+                    MeterEventRecord(
+                        event_id=f"mtr-{uuid4().hex[:12]}",
+                        org_id="org-seed-002",
+                        event_type="execution",
+                        quantity=84,
+                        occurred_at=now,
+                        metadata={"seeded": True},
+                    ),
+                ]
+            )
 
     # ------------------------------------------------------------------
     # Subscriptions
@@ -327,9 +333,9 @@ def reset_subscription_meter_store() -> None:
 
 
 # Back-compat factory aliases — remove after consumer sweep
-def get_billing_store() -> SubscriptionMeterStore:  # noqa: F811
+def get_billing_store() -> SubscriptionMeterStore:
     return _SUBSCRIPTION_METER_STORE
 
 
-def reset_billing_store() -> None:  # noqa: F811
+def reset_billing_store() -> None:
     reset_subscription_meter_store()

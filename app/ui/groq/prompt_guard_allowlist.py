@@ -186,7 +186,7 @@ def _seed_allowlist() -> None:
                 expires_at=None,
                 metadata={"seeded": True},
             ),
-        ]
+        ],
     )
     _ALLOWLIST_COUNTER = len(_ALLOWLIST)
 

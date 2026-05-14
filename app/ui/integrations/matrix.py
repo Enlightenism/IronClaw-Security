@@ -152,7 +152,7 @@ def build_integration_matrix_view(
 
         supports_install = bool(getattr(record, "install_target", None))
         supports_endpoint = bool(
-            getattr(record, "endpoint", None) or getattr(record, "base_url", None)
+            getattr(record, "endpoint", None) or getattr(record, "base_url", None),
         )
         supports_actions = len(supported_action_types) > 0
         supports_capabilities = len(capabilities) > 0
@@ -193,7 +193,7 @@ def build_integration_matrix_view(
                     "requested_by": requested_by,
                     "adapter_class": adapter.__class__.__name__,
                 },
-            )
+            ),
         )
 
     items.sort(
@@ -202,7 +202,7 @@ def build_integration_matrix_view(
             item.platform,
             item.slug,
             item.integration_id,
-        )
+        ),
     )
 
     return IntegrationMatrixView(

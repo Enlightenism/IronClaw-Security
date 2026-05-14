@@ -413,7 +413,7 @@ def test_billing_record_numeric_fields_are_non_negative_when_present() -> None:
     for key in ("amount", "price", "subtotal", "tax", "total"):
         number = _to_decimal(payload.get(key))
         if number is not None:
-            assert number >= Decimal("0")
+            assert number >= Decimal(0)
 
 
 def test_billing_store_rejects_blank_customer_id_when_supported() -> None:

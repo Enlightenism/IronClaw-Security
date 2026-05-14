@@ -106,7 +106,7 @@ def build_package_plan(
     normalized_format = package_format.strip().lower()
 
     checks = _build_checks(root, out_dir, normalized_format)
-    artifact_name = f"ironclaw-security-gen1.{ 'tar.gz' if normalized_format == 'tar' else normalized_format }"
+    artifact_name = f"ironclaw-security-gen1.{'tar.gz' if normalized_format == 'tar' else normalized_format}"
 
     includes = [
         "app/",

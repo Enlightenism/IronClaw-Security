@@ -73,7 +73,7 @@ def run_package_command(
                 "integration_id": record.integration_id,
                 "slug": record.slug,
                 "manifest": manifest.to_dict(),
-            }
+            },
         ],
         metadata={
             "integration_id": record.integration_id,

@@ -164,7 +164,7 @@ def build_prompt_guard_trends_summary() -> PromptGuardTrendsSummary:
                 flagged_requests=flagged_requests,
                 status=status,
                 details=point_data,
-            )
+            ),
         )
 
     latest_snapshot = snapshots[-1].to_dict() if snapshots else None
@@ -216,9 +216,6 @@ def get_prompt_guard_trends_summary() -> PromptGuardTrendsSummaryResponse:
         total_blocked_requests=data["total_blocked_requests"],
         total_flagged_requests=data["total_flagged_requests"],
         latest_snapshot=data["latest_snapshot"],
-        snapshots=[
-            PromptGuardTrendSnapshotResponse(**snapshot)
-            for snapshot in data["snapshots"]
-        ],
+        snapshots=[PromptGuardTrendSnapshotResponse(**snapshot) for snapshot in data["snapshots"]],
         metadata=data["metadata"],
     )

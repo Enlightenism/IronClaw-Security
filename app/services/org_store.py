@@ -104,12 +104,7 @@ class OrganizationRecord:
 
 
 def _member_from_canonical(payload: dict[str, Any]) -> OrgMemberRecord:
-    user_id = (
-        _text(payload.get("user_id"))
-        or _text(payload.get("owner_user_id"))
-        or _text(payload.get("owner_id"))
-        or f"user-{_text(payload.get('member_id'), 'unknown')}"
-    )
+    user_id = _text(payload.get("user_id")) or _text(payload.get("owner_user_id")) or _text(payload.get("owner_id")) or f"user-{_text(payload.get('member_id'), 'unknown')}"
     return OrgMemberRecord(
         member_id=_text(payload.get("member_id")) or f"mbr-{user_id}",
         user_id=user_id,
@@ -123,26 +118,18 @@ def _member_from_canonical(payload: dict[str, Any]) -> OrgMemberRecord:
 
 
 def _organization_from_canonical(payload: dict[str, Any]) -> OrganizationRecord:
-    owner_user_id = (
-        _text(payload.get("owner_user_id"))
-        or _text(payload.get("owner_id"))
-        or _text(payload.get("owner_email"))
-        or "unknown-owner"
+    owner_user_id = _text(payload.get("owner_user_id")) or _text(payload.get("owner_id")) or _text(payload.get("owner_email")) or "unknown-owner"
+    plan_name = (
+        _text(payload.get("plan_name"))
+        or _text(payload.get("tier"))
+        or _text(
+            payload.get("plan"),
+            "standard",
+        )
     )
-    plan_name = _text(payload.get("plan_name")) or _text(payload.get("tier")) or _text(
-        payload.get("plan"),
-        "standard",
-    )
-    members = [
-        _member_from_canonical(dict(member))
-        for member in list(payload.get("members") or [])
-    ]
+    members = [_member_from_canonical(dict(member)) for member in list(payload.get("members") or [])]
     return OrganizationRecord(
-        org_id=(
-            _text(payload.get("org_id"))
-            or _text(payload.get("organization_id"))
-            or _text(payload.get("id"))
-        ),
+        org_id=(_text(payload.get("org_id")) or _text(payload.get("organization_id")) or _text(payload.get("id"))),
         name=_text(payload.get("name")),
         slug=_text(payload.get("slug")),
         status=_org_status(payload.get("status")),
@@ -208,10 +195,10 @@ class OrgStore:
                             "seeded": False,
                             "provisioned_as": "owner",
                         },
-                    }
+                    },
                 ],
                 "member_count": 1,
-            }
+            },
         )
         return _organization_from_canonical(dict(created))
 
@@ -241,7 +228,7 @@ class OrgStore:
                 "status": status,
                 "joined_at": datetime.now(UTC).isoformat(),
                 "metadata": dict(metadata or {}),
-            }
+            },
         )
 
         updated = self._canonical_store.update_organization(

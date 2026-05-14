@@ -210,7 +210,7 @@ def test_request_union_validates_each_supported_operation():
                 "requestid": "req_scan",
                 "provider": "openclaw",
             },
-        }
+        },
     )
     assert isinstance(scan_request, contracts.SkillScanRequest)
     assert scan_request.operation == "scan"
@@ -228,7 +228,7 @@ def test_request_union_validates_each_supported_operation():
                 "requestid": "req_policy",
                 "provider": "claude",
             },
-        }
+        },
     )
     assert isinstance(action_policy_request, contracts.SkillActionPolicyRequest)
     assert action_policy_request.operation == "actionpolicy"
@@ -245,7 +245,7 @@ def test_request_union_validates_each_supported_operation():
                 "requestid": "req_decision",
                 "provider": "unknown",
             },
-        }
+        },
     )
     assert isinstance(action_decision_request, contracts.SkillActionDecisionRequest)
     assert action_decision_request.operation == "actiondecision"
@@ -266,7 +266,7 @@ def test_request_union_validates_each_supported_operation():
                 "requestid": "req_execute",
                 "provider": "openclaw",
             },
-        }
+        },
     )
     assert isinstance(execute_request, contracts.SkillExecuteRequest)
     assert execute_request.operation == "execute"
@@ -320,7 +320,7 @@ def test_buildskillsuccessresponse_shape_is_stable():
                 label="Prompt injection",
                 details="The prompt attempts to override system instructions.",
                 score=0.84,
-            )
+            ),
         ],
         rawresult={"engine": "ironclaw"},
     )
@@ -365,7 +365,7 @@ def test_buildskillerrorresponse_shape_is_stable():
                 label="Execution failure",
                 details="The sandbox runtime rejected the action.",
                 score=0.91,
-            )
+            ),
         ],
         rawresult={"phase": "dispatch"},
     )

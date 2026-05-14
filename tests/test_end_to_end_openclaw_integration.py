@@ -118,7 +118,7 @@ def test_end_to_end_openclaw_registry_install_and_verify():
                 "prompt": "Generate a guarded execution plan.",
                 "tool_name": "openclaw.builder.plan",
             },
-        )
+        ),
     )
 
     assert exec_result.adapter_slug == "openclaw"
@@ -143,7 +143,7 @@ def test_end_to_end_openclaw_cli_install_and_verify(capsys):
 
     # 2. Run CLI install in dry-run mode.
     exit_code = run_cli(
-        ["install", "integration-openclaw", "--dry-run", "--requested-by", "e2e-cli"]
+        ["install", "integration-openclaw", "--dry-run", "--requested-by", "e2e-cli"],
     )
     assert exit_code == 0
 
@@ -157,7 +157,7 @@ def test_end_to_end_openclaw_cli_install_and_verify(capsys):
 
     # 3. Run CLI install in real mode to activate the integration.
     exit_code = run_cli(
-        ["install", "integration-openclaw", "--requested-by", "e2e-cli"]
+        ["install", "integration-openclaw", "--requested-by", "e2e-cli"],
     )
     assert exit_code == 0
 
@@ -170,7 +170,7 @@ def test_end_to_end_openclaw_cli_install_and_verify(capsys):
 
     # 4. Run CLI verify in non-strict mode after activation.
     exit_code = run_cli(
-        ["verify", "integration-openclaw", "--requested-by", "e2e-cli"]
+        ["verify", "integration-openclaw", "--requested-by", "e2e-cli"],
     )
     assert exit_code == 0
 
@@ -183,7 +183,7 @@ def test_end_to_end_openclaw_cli_install_and_verify(capsys):
 
     # 5. Run CLI verify in strict mode; we only assert that it returns a structured summary.
     exit_code = run_cli(
-        ["verify", "integration-openclaw", "--strict", "--requested-by", "e2e-cli"]
+        ["verify", "integration-openclaw", "--strict", "--requested-by", "e2e-cli"],
     )
     assert exit_code == 0
 

@@ -118,7 +118,7 @@ def test_end_to_end_claude_code_registry_install_and_verify():
                 "prompt": "Summarize the project structure.",
                 "tool_name": "http.post",
             },
-        )
+        ),
     )
 
     assert exec_result.adapter_slug == "claude-code"
@@ -143,7 +143,7 @@ def test_end_to_end_claude_code_cli_install_and_verify(monkeypatch, capsys):
 
     # 2. Run CLI install in dry-run mode.
     exit_code = run_cli(
-        ["install", "integration-claude-code", "--dry-run", "--requested-by", "e2e-cli"]
+        ["install", "integration-claude-code", "--dry-run", "--requested-by", "e2e-cli"],
     )
     assert exit_code == 0
 
@@ -157,7 +157,7 @@ def test_end_to_end_claude_code_cli_install_and_verify(monkeypatch, capsys):
 
     # 3. Run CLI verify in non-strict mode after dry-run.
     exit_code = run_cli(
-        ["verify", "integration-claude-code", "--requested-by", "e2e-cli"]
+        ["verify", "integration-claude-code", "--requested-by", "e2e-cli"],
     )
     assert exit_code == 0
 
@@ -170,7 +170,7 @@ def test_end_to_end_claude_code_cli_install_and_verify(monkeypatch, capsys):
 
     # 4. Run CLI verify in strict mode; we only assert that it returns a structured summary.
     exit_code = run_cli(
-        ["verify", "integration-claude-code", "--strict", "--requested-by", "e2e-cli"]
+        ["verify", "integration-claude-code", "--strict", "--requested-by", "e2e-cli"],
     )
     assert exit_code == 0
 

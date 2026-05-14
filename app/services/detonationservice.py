@@ -9,23 +9,50 @@ from typing import Any
 
 NETWORK_PATTERNS = {
     "known_c2_port": (re.compile(r"\b(?:4444|1337|8081|9001)\b"), 0.18),
-    "dns_tunneling": (re.compile(r"\b(?:txt query|dns tunnel|nslookup -q=txt)\b", re.IGNORECASE), 0.24),
+    "dns_tunneling": (
+        re.compile(r"\b(?:txt query|dns tunnel|nslookup -q=txt)\b", re.IGNORECASE),
+        0.24,
+    ),
     "http_beacon": (re.compile(r"https?://[^\s\"']+", re.IGNORECASE), 0.16),
     "tor_indicator": (re.compile(r"\btor\b|\.onion\b", re.IGNORECASE), 0.28),
 }
 
 PROCESS_PATTERNS = {
-    "credential_access": (re.compile(r"\b(lsass|mimikatz|sekurlsa|sam hive)\b", re.IGNORECASE), 0.34),
-    "defense_evasion": (re.compile(r"\b(disabledefender|set-mppreference|realtimemonitoring)\b", re.IGNORECASE), 0.28),
-    "lolbin_chain": (re.compile(r"\b(powershell|mshta|rundll32|regsvr32|certutil|wmic)\b", re.IGNORECASE), 0.22),
-    "persistence": (re.compile(r"\b(schtasks|startup|run key|currentversion\\run)\b", re.IGNORECASE), 0.24),
-    "lateral_movement": (re.compile(r"\b(psexec|wmic /node|net use \\\\|winrm)\b", re.IGNORECASE), 0.28),
+    "credential_access": (
+        re.compile(r"\b(lsass|mimikatz|sekurlsa|sam hive)\b", re.IGNORECASE),
+        0.34,
+    ),
+    "defense_evasion": (
+        re.compile(r"\b(disabledefender|set-mppreference|realtimemonitoring)\b", re.IGNORECASE),
+        0.28,
+    ),
+    "lolbin_chain": (
+        re.compile(r"\b(powershell|mshta|rundll32|regsvr32|certutil|wmic)\b", re.IGNORECASE),
+        0.22,
+    ),
+    "persistence": (
+        re.compile(r"\b(schtasks|startup|run key|currentversion\\run)\b", re.IGNORECASE),
+        0.24,
+    ),
+    "lateral_movement": (
+        re.compile(r"\b(psexec|wmic /node|net use \\\\|winrm)\b", re.IGNORECASE),
+        0.28,
+    ),
 }
 
 FILE_PATTERNS = {
-    "drops_executable": (re.compile(r"\b(writefile|dropper|payload|temp\\.*\.(?:exe|dll|ps1))\b", re.IGNORECASE), 0.24),
-    "archive_unpack": (re.compile(r"\b(zip extract|unpack|inflate resource)\b", re.IGNORECASE), 0.14),
-    "self_delete": (re.compile(r"\b(del /f /q|self-delete|remove-item .* -force)\b", re.IGNORECASE), 0.18),
+    "drops_executable": (
+        re.compile(r"\b(writefile|dropper|payload|temp\\.*\.(?:exe|dll|ps1))\b", re.IGNORECASE),
+        0.24,
+    ),
+    "archive_unpack": (
+        re.compile(r"\b(zip extract|unpack|inflate resource)\b", re.IGNORECASE),
+        0.14,
+    ),
+    "self_delete": (
+        re.compile(r"\b(del /f /q|self-delete|remove-item .* -force)\b", re.IGNORECASE),
+        0.18,
+    ),
 }
 
 BEHAVIOR_BONUSES = {
@@ -175,7 +202,7 @@ class DetonationService:
                     category=category,
                     weight=weight,
                     evidence=evidence,
-                )
+                ),
             )
         return found
 
@@ -223,7 +250,7 @@ class DetonationService:
                     path=r"C:\Users\Public\svchost_update.exe",
                     artifact_type="dropped_file",
                     risk="high",
-                )
+                ),
             )
 
         if "persistence" in names:
@@ -232,7 +259,7 @@ class DetonationService:
                     path=r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Updater",
                     artifact_type="registry_persistence",
                     risk="high",
-                )
+                ),
             )
 
         if "http_beacon" in names or "tor_indicator" in names:
@@ -241,7 +268,7 @@ class DetonationService:
                     path="network://outbound/session-1",
                     artifact_type="network_connection",
                     risk="high",
-                )
+                ),
             )
 
         if "credential_access" in names:
@@ -250,7 +277,7 @@ class DetonationService:
                     path=r"memory://lsass-access",
                     artifact_type="process_access",
                     risk="critical",
-                )
+                ),
             )
 
         if not artifacts and file_name:
@@ -259,7 +286,7 @@ class DetonationService:
                     path=file_name,
                     artifact_type="submitted_sample",
                     risk="low",
-                )
+                ),
             )
 
         return artifacts

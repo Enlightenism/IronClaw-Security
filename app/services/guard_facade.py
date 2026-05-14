@@ -18,17 +18,10 @@ def _normalize_reasons(summary: ActionExecuteResult) -> ActionExecuteResult:
                     "source": str(item.get("source", "scan")),
                     "label": str(item.get("label", "Explanation")),
                     "details": str(
-                        item.get("details")
-                        or item.get("message")
-                        or item.get("summary")
-                        or ""
+                        item.get("details") or item.get("message") or item.get("summary") or "",
                     ),
-                    "score": (
-                        float(item["score"])
-                        if item.get("score") is not None
-                        else None
-                    ),
-                }
+                    "score": (float(item["score"]) if item.get("score") is not None else None),
+                },
             )
             continue
 
@@ -38,7 +31,7 @@ def _normalize_reasons(summary: ActionExecuteResult) -> ActionExecuteResult:
                 "label": "Explanation",
                 "details": str(item),
                 "score": None,
-            }
+            },
         )
 
     summary["reasons"] = normalized_reasons
@@ -46,8 +39,7 @@ def _normalize_reasons(summary: ActionExecuteResult) -> ActionExecuteResult:
 
 
 def guard_and_execute_action(request: GuardActionRequest) -> ExecuteResponse:
-    """
-    Single entrypoint for IronClaw callers to route high-risk actions
+    """Single entrypoint for IronClaw callers to route high-risk actions
     through the secure runtime pipeline and executor boundary.
 
     Internal services and external orchestrators should depend on this
@@ -78,8 +70,7 @@ def guard_and_execute_raw(
     file_path: str | None = None,
     extra_metadata: dict[str, Any] | None = None,
 ) -> ExecuteResponse:
-    """
-    Lower-level convenience wrapper for non-Pydantic callers.
+    """Lower-level convenience wrapper for non-Pydantic callers.
 
     Accepts raw primitives, passes them through the secure runtime pipeline,
     and returns a fully typed ExecuteResponse.

@@ -40,12 +40,12 @@ from app.ui.usage_event_detail import router as usage_event_detail_router
 from app.ui.usage_reports import router as usage_reports_router
 
 __all__ = [
-    "router",
     "UI_ROUTERS",
     "get_ui_routers",
-    "iter_ui_routers",
     "include_ui_routers",
     "includeuirouters",
+    "iter_ui_routers",
+    "router",
     "ui_router_status",
 ]
 

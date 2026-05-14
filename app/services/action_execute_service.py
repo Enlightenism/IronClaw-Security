@@ -22,9 +22,7 @@ def execute_guarded_action(
     file_path: str | None,
     pipeline: SecureRuntimePipeline | None = None,
 ) -> ActionExecuteResult:
-    active_pipeline: SecureRuntimePipeline = (
-        pipeline if pipeline is not None else get_action_execute_pipeline()
-    )
+    active_pipeline: SecureRuntimePipeline = pipeline if pipeline is not None else get_action_execute_pipeline()
 
     effective_file_path = file_path or "app/api/action_execute.py"
 
@@ -48,4 +46,4 @@ def execute_guarded_action(
     summary = summarize_execution_receipt(receipt, runtime_result)
     summary["risk_score"] = risk_score
     summary["file_path"] = effective_file_path
-    return cast(ActionExecuteResult, summary)
+    return cast("ActionExecuteResult", summary)

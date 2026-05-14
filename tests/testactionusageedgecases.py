@@ -135,7 +135,7 @@ def test_action_usage_allows_zero_units_only_if_model_explicitly_supports_it() -
     payload = _payload_of(usage)
     units = _number(payload, "units")
     if units is not None:
-        assert units == Decimal("0")
+        assert units == Decimal(0)
 
 
 def test_action_usage_handles_zero_unit_cost_when_supported() -> None:
@@ -154,9 +154,9 @@ def test_action_usage_handles_zero_unit_cost_when_supported() -> None:
     total_cost = _number(payload, "totalcost", "total_cost")
 
     if unit_cost is not None:
-        assert unit_cost == Decimal("0")
+        assert unit_cost == Decimal(0)
     if total_cost is not None:
-        assert total_cost == Decimal("0")
+        assert total_cost == Decimal(0)
 
 
 def test_action_usage_large_values_remain_non_negative_when_supported() -> None:
@@ -176,9 +176,9 @@ def test_action_usage_large_values_remain_non_negative_when_supported() -> None:
     total_cost = _number(payload, "totalcost", "total_cost")
 
     if units is not None:
-        assert units == Decimal("1000000")
+        assert units == Decimal(1000000)
     if total_cost is not None:
-        assert total_cost == Decimal("2000000")
+        assert total_cost == Decimal(2000000)
 
 
 def test_action_usage_remaining_is_never_negative_when_present() -> None:
@@ -186,7 +186,7 @@ def test_action_usage_remaining_is_never_negative_when_present() -> None:
 
     remaining = _number(payload, "remaining", "remainingunits", "available")
     if remaining is not None:
-        assert remaining >= Decimal("0")
+        assert remaining >= Decimal(0)
 
 
 def test_action_usage_total_cost_is_consistent_when_present() -> None:

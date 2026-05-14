@@ -37,17 +37,14 @@ class PromptBundleResult(TypedDict, total=False):
 
 
 class IronClawScanClient:
-    """
-    Thin HTTP client for IronClaw scan and guard-bundle endpoints.
+    """Thin HTTP client for IronClaw scan and guard-bundle endpoints.
 
     Renamed from IronclawClient to IronClawScanClient to prevent import
     collision with IronClawClient in ironclawclient.py.
     """
 
     def __init__(self, base_url: str | None = None, timeout: float = 5.0) -> None:
-        self.base_url = (
-            base_url or os.environ.get("IRONCLAW_BASE_URL", _DEFAULT_BASE_URL)
-        ).rstrip("/")
+        self.base_url = (base_url or os.environ.get("IRONCLAW_BASE_URL", _DEFAULT_BASE_URL)).rstrip("/")
         self.timeout = timeout
 
     def scan_text(self, text: str) -> ScanResult:
@@ -100,13 +97,9 @@ class IronClawScanClient:
         if should_halt:
             user_ctx = data.get("user_prompt") or {}
             model_ctx = data.get("model_output") or {}
-            summary = (
-                user_ctx.get("summary")
-                or model_ctx.get("summary")
-                or "No summary provided."
-            )
+            summary = user_ctx.get("summary") or model_ctx.get("summary") or "No summary provided."
             raise RuntimeError(
-                f"IronClaw policy halted bundle with verdict={highest_verdict!r}: {summary}"
+                f"IronClaw policy halted bundle with verdict={highest_verdict!r}: {summary}",
             )
 
         return {

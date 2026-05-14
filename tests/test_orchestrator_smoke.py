@@ -14,7 +14,7 @@ from app.orchestrator.supervisor import (
 
 
 def _build_runtime():
-    root = Path(".").resolve()
+    root = Path().resolve()
     orchestrator = IronClawOrchestrator(project_root=root)
     graph = build_dependency_graph(root)
     coordination_snapshot = initialize_coordination_state(orchestrator.registry, graph)

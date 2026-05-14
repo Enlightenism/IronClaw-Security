@@ -170,12 +170,9 @@ class SandboxRouter:
                 {
                     "source": "sandboxrouter",
                     "label": "Environment boundary",
-                    "details": (
-                        f"Execution requested environment scope '{normalized_request.environment_scope}' "
-                        "outside the default sandbox boundary."
-                    ),
+                    "details": (f"Execution requested environment scope '{normalized_request.environment_scope}' outside the default sandbox boundary."),
                     "score": 45,
-                }
+                },
             )
             riskdelta += 45
 
@@ -211,10 +208,7 @@ class SandboxRouter:
             {
                 "source": "sandboxrouter",
                 "label": "Sandbox routing",
-                "details": (
-                    f"Sandbox router evaluated action '{normalized_request.actiontype}' "
-                    f"for target '{normalized_request.target}' with cumulative risk {normalized_risk}."
-                ),
+                "details": (f"Sandbox router evaluated action '{normalized_request.actiontype}' for target '{normalized_request.target}' with cumulative risk {normalized_risk}."),
                 "score": normalized_risk,
             },
         )
@@ -287,7 +281,7 @@ class SandboxRouter:
                     path=artifact_path,
                     content=request.content,
                     metadata=request.metadata,
-                )
+                ),
             )
         return policies
 

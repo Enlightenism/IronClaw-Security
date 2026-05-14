@@ -187,7 +187,7 @@ def build_overview_history_series(
                 captured_at=ts,
                 index_from_oldest=idx,
                 total_points=len(timestamps),
-            )
+            ),
         )
 
     return OverviewHistorySeries(

@@ -90,10 +90,7 @@ def _summary_for_route(
     action_type: ProtectedAction,
     routing_mode: RoutingMode,
 ) -> str:
-    return (
-        f"Routed action '{action_type}' to agent {agent.agent_id} "
-        f"for file {agent.relative_path} via mode '{routing_mode}'."
-    )
+    return f"Routed action '{action_type}' to agent {agent.agent_id} for file {agent.relative_path} via mode '{routing_mode}'."
 
 
 def create_routed_task(
@@ -187,7 +184,7 @@ if __name__ == "__main__":
     from app.orchestrator.coordination_state import initialize_coordination_state
     from app.orchestrator.dependency_graph import build_dependency_graph
 
-    root = Path(".").resolve()
+    root = Path().resolve()
     orchestrator = IronClawOrchestrator(project_root=root)
     graph = build_dependency_graph(root)
     snapshot = initialize_coordination_state(orchestrator.registry, graph)

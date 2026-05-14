@@ -197,7 +197,7 @@ class BaseIntegrationAdapter:
         supported = self.supported_action_types()
         if supported and request.action_type not in supported:
             raise ValueError(
-                f"unsupported action_type '{request.action_type}' for adapter '{self.adapter_slug}'"
+                f"unsupported action_type '{request.action_type}' for adapter '{self.adapter_slug}'",
             )
 
     def build_result(
@@ -241,14 +241,8 @@ class BaseIntegrationAdapter:
                 summary=f"{self.record.name} is offline and cannot execute '{request.action_type}'.",
             )
 
-        status: AdapterExecutionStatus = (
-            "accepted" if self.health == "ready" else "accepted_with_warnings"
-        )
-        summary = (
-            f"{self.record.name} accepted action '{request.action_type}' for target '{request.target}'."
-            if self.health == "ready"
-            else f"{self.record.name} accepted action '{request.action_type}' for target '{request.target}' in degraded mode."
-        )
+        status: AdapterExecutionStatus = "accepted" if self.health == "ready" else "accepted_with_warnings"
+        summary = f"{self.record.name} accepted action '{request.action_type}' for target '{request.target}'." if self.health == "ready" else f"{self.record.name} accepted action '{request.action_type}' for target '{request.target}' in degraded mode."
 
         return self.build_result(
             request=request,

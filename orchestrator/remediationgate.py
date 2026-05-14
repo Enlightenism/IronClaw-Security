@@ -154,11 +154,7 @@ class RemediationGate:
             status = GateStatus.NEEDS_REVIEW
             allowed = False
             review_required = True
-        elif prompt_injection_detected or untrusted_output or risk_score >= 70:
-            action = RemediationAction.SANDBOX_ONLY
-            status = GateStatus.CONDITIONAL
-            sandbox_required = True
-        elif requires_network and risk_score >= 40:
+        elif prompt_injection_detected or untrusted_output or risk_score >= 70 or (requires_network and risk_score >= 40):
             action = RemediationAction.SANDBOX_ONLY
             status = GateStatus.CONDITIONAL
             sandbox_required = True
@@ -251,7 +247,7 @@ class RemediationGate:
                     kind="reasons",
                     label="upstream_reasons",
                     value=list(request.get("reasons") or []),
-                )
+                ),
             )
 
         return evidence
@@ -326,7 +322,7 @@ class RemediationGate:
                     "event": "remediation.gate.evaluated",
                     "decision": decision.to_dict(),
                     "timestamp": datetime.now(UTC).isoformat(),
-                }
+                },
             )
 
 

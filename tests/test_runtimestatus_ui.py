@@ -74,12 +74,7 @@ def test_runtime_status_values_are_consistent() -> None:
 
     metrics = payload["metrics"]
     total = metrics["totalrequests"]
-    subtotal = (
-        metrics["allowcount"]
-        + metrics["blockedcount"]
-        + metrics["quarantinecount"]
-        + metrics.get("reviewcount", 0)
-    )
+    subtotal = metrics["allowcount"] + metrics["blockedcount"] + metrics["quarantinecount"] + metrics.get("reviewcount", 0)
 
     assert isinstance(payload["defaultfilepath"], str)
     assert isinstance(payload["generatedat"], str)

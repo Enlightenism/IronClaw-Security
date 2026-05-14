@@ -24,8 +24,8 @@ def _reset_dependencies_for_tests() -> None:
 
 __all__ = [
     "ServiceRegistry",
-    "build_service_registry",
-    "get_service_registry",
-    "get_release_policy_client",
     "_reset_dependencies_for_tests",
+    "build_service_registry",
+    "get_release_policy_client",
+    "get_service_registry",
 ]

@@ -17,8 +17,7 @@ router = APIRouter()
 
 
 class ExecuteRequest(BaseModel):
-    """
-    Incoming request for guarded action execution.
+    """Incoming request for guarded action execution.
     Mirrors the payload used in testsactionexecute.py.
     """
 
@@ -40,8 +39,7 @@ PolicyVerdict = Literal["allow", "warn", "quarantine", "block"]
 
 
 class ExecuteResponse(BaseModel):
-    """
-    HTTP facade response for guarded execution.
+    """HTTP facade response for guarded execution.
     Constrained to the literals expected by tests and down‑stream callers.
     """
 
@@ -131,8 +129,7 @@ _DEFAULT_FILEPATH = "app/api/action/execute.py"
 
 
 def _map_http_status_to_execution_status(status_code: int) -> ExecutionStatus:
-    """
-    Map numeric HTTP-ish status into the literal status domain required
+    """Map numeric HTTP-ish status into the literal status domain required
     by ExecuteResponse.responsestatus and .executionstate.
 
     Tests assert that only 'completed', 'queuedforreview', or 'denied'
@@ -151,8 +148,7 @@ def _map_http_status_to_execution_status(status_code: int) -> ExecutionStatus:
 
 
 def _normalize_policy_verdict(raw: str | None) -> PolicyVerdict:
-    """
-    Ensure policyverdict stays within the allowed literal set.
+    """Ensure policyverdict stays within the allowed literal set.
     Some older components may emit 'deny'; tests expect block/quarantine
     membership checks instead.[file:4]
     """
@@ -168,8 +164,7 @@ def _normalize_policy_verdict(raw: str | None) -> PolicyVerdict:
 
 
 def _normalize_response_action(raw: str | None, verdict: PolicyVerdict) -> ResponseAction:
-    """
-    Normalize the raw response action from lower layers to the allowed literals.
+    """Normalize the raw response action from lower layers to the allowed literals.
     Tests assert responseaction is in allow, warn, quarantine, block, review.[file:4]
     """
     if not raw:
@@ -196,8 +191,7 @@ def _normalize_response_action(raw: str | None, verdict: PolicyVerdict) -> Respo
 
 
 def _normalize_execution_state(raw_state: str | None, status: ExecutionStatus) -> ExecutionStatus:
-    """
-    Normalize executionstate to the literal domain required by the tests,
+    """Normalize executionstate to the literal domain required by the tests,
     using either the raw state emitted by summarizeexecution or the
     mapped HTTPish status code.[file:1]
     """
@@ -228,8 +222,7 @@ def guardedexecute(
     payload: ExecuteRequest,
     pipeline: SecureRuntimePipeline = Depends(getactionexecutepipeline),
 ) -> ExecuteResponse:
-    """
-    Guard and optionally execute an action.
+    """Guard and optionally execute an action.
 
     This is the HTTP facade used by testsactionexecute.py as `client.post('/guard/execute')`
     (or similar alias), and it delegates to the guardandexecuteaction facade which in turn

@@ -344,11 +344,11 @@ class SecretService:
             reasons.append(f"Context: {context}.")
         if scan_result.found:
             reasons.append(
-                f"Secret scanner detected {len(scan_result.findings)} potential secret finding(s)."
+                f"Secret scanner detected {len(scan_result.findings)} potential secret finding(s).",
             )
         if redaction_result.changed:
             reasons.append(
-                f"Redaction transformed content and removed {redaction_result.findings_redacted} finding instance(s)."
+                f"Redaction transformed content and removed {redaction_result.findings_redacted} finding instance(s).",
             )
         if output_result.sanitized:
             reasons.append("Output sanitizer transformed content before release.")
@@ -356,7 +356,7 @@ class SecretService:
             reasons.append("Output sanitizer blocked unsafe content.")
         if network_result.verdict != "allow":
             reasons.append(
-                f"Network guard returned verdict '{network_result.verdict}' for outbound context."
+                f"Network guard returned verdict '{network_result.verdict}' for outbound context.",
             )
 
         reasons.extend(str(item) for item in output_result.reasons[:3])
@@ -383,7 +383,7 @@ def build_secret_service() -> SecretService:
 
 
 __all__ = [
-    "SecretServiceResult",
     "SecretService",
+    "SecretServiceResult",
     "build_secret_service",
 ]

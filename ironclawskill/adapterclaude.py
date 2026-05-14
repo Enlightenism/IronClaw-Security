@@ -22,7 +22,7 @@ def _normalize_messages(messages: Sequence[Any]) -> list[dict[str, str]]:
             {
                 "role": str(role or "user"),
                 "content": str(content or ""),
-            }
+            },
         )
     return normalized
 
@@ -65,7 +65,7 @@ class ClaudeAdapter:
 
     def healthcheck(self) -> dict[str, Any]:
         configured = self.config.enabled and bool(
-            self.config.endpoint and self.config.api_key and self.config.model
+            self.config.endpoint and self.config.api_key and self.config.model,
         )
         return {
             "provider": self.name,
@@ -126,7 +126,7 @@ class ClaudeAdapter:
 
         if response.status_code >= 400:
             raise ProviderExecutionError(
-                f"{self.name} returned {response.status_code}: {response.text}"
+                f"{self.name} returned {response.status_code}: {response.text}",
             )
 
         data = response.json()

@@ -159,7 +159,7 @@ def build_integration_lifecycle_view(
                     "warn_count": warn_count,
                     "fail_count": fail_count,
                 },
-            )
+            ),
         )
 
     items.sort(
@@ -168,7 +168,7 @@ def build_integration_lifecycle_view(
             item.platform,
             item.slug,
             item.integration_id,
-        )
+        ),
     )
 
     return IntegrationLifecycleView(

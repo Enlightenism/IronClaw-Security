@@ -44,38 +44,20 @@ def _normalize_key(record: Mapping[str, Any]) -> dict[str, Any]:
     metadata = _safe_dict(record.get("metadata"))
     return {
         "key_id": _safe_str(
-            record.get("key_id")
-            or record.get("keyid")
-            or record.get("id")
-            or metadata.get("key_id")
+            record.get("key_id") or record.get("keyid") or record.get("id") or metadata.get("key_id"),
         ),
         "display_name": _safe_str(
-            record.get("display_name")
-            or record.get("displayname")
-            or record.get("name")
-            or metadata.get("display_name")
-            or metadata.get("name")
-            or "Unnamed key"
+            record.get("display_name") or record.get("displayname") or record.get("name") or metadata.get("display_name") or metadata.get("name") or "Unnamed key",
         ),
         "masked_key": _safe_str(
-            record.get("masked_key")
-            or record.get("maskedkey")
-            or record.get("key_preview")
-            or record.get("preview")
-            or record.get("last4")
+            record.get("masked_key") or record.get("maskedkey") or record.get("key_preview") or record.get("preview") or record.get("last4"),
         ),
         "created_at": _safe_str(
-            record.get("created_at")
-            or record.get("createdat")
-            or record.get("created")
-            or record.get("timestamp")
+            record.get("created_at") or record.get("createdat") or record.get("created") or record.get("timestamp"),
         ),
         "last_used_at": (
             _safe_str(
-                record.get("last_used_at")
-                or record.get("lastusedat")
-                or record.get("last_used")
-                or record.get("last_seen_at")
+                record.get("last_used_at") or record.get("lastusedat") or record.get("last_used") or record.get("last_seen_at"),
             )
             or None
         ),
@@ -112,7 +94,7 @@ def _build_empty_state(now_iso: str) -> dict[str, Any]:
                 "label": "Create key",
                 "method": "POST",
                 "path": "/customer-keys",
-            }
+            },
         },
         "keys": [],
         "empty_state": {
@@ -140,9 +122,7 @@ def build_customer_keys_view(
     if not isinstance(raw_keys, list):
         return base
 
-    normalized_keys = [
-        _normalize_key(item) for item in raw_keys if isinstance(item, Mapping)
-    ]
+    normalized_keys = [_normalize_key(item) for item in raw_keys if isinstance(item, Mapping)]
 
     status_filter = _safe_str(selected_status, "all").strip().lower() or "all"
     if status_filter == "active":
@@ -175,9 +155,7 @@ def build_customer_keys_view(
                 "last_used_at": item["last_used_at"],
                 "active": item["active"],
                 "status": "active" if item["active"] else "revoked",
-                "detail_path": (
-                    f"/ui/customer-keys/{item['key_id']}" if item["key_id"] else None
-                ),
+                "detail_path": (f"/ui/customer-keys/{item['key_id']}" if item["key_id"] else None),
                 "scopes": [str(scope) for scope in scopes],
                 "environments": [str(environment) for environment in environments],
                 "metadata": metadata,
@@ -185,24 +163,16 @@ def build_customer_keys_view(
                     "view": {
                         "label": "View details",
                         "method": "GET",
-                        "path": (
-                            f"/ui/customer-keys/{item['key_id']}"
-                            if item["key_id"]
-                            else None
-                        ),
+                        "path": (f"/ui/customer-keys/{item['key_id']}" if item["key_id"] else None),
                     },
                     "revoke": {
                         "label": "Revoke key",
                         "method": "POST",
-                        "path": (
-                            f"/customer-keys/{item['key_id']}/revoke"
-                            if item["key_id"] and item["active"]
-                            else None
-                        ),
+                        "path": (f"/customer-keys/{item['key_id']}/revoke" if item["key_id"] and item["active"] else None),
                         "enabled": bool(item["key_id"] and item["active"]),
                     },
                 },
-            }
+            },
         )
 
     base["timestamp"] = now_iso or base["timestamp"]

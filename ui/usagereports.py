@@ -67,7 +67,7 @@ def _row(
     source: str | None,
     route: str | None,
     unit_type: str | None,
-    unit_count: int | float | None,
+    unit_count: float | None,
     verdict: str | None,
 ) -> dict[str, Any]:
     return {
@@ -93,8 +93,7 @@ def usage_reports_page(
     verdict: str | None = Query(default=None),
     period: str = Query(default="24h"),
 ) -> dict[str, Any]:
-    """
-    UI metadata page for usage reporting.
+    """UI metadata page for usage reporting.
 
     This route intentionally returns a presentation-oriented schema so the UI layer
     can render:
@@ -103,7 +102,6 @@ def usage_reports_page(
     - a tabular event feed
     - drilldown links into usage event detail
     """
-
     filters = [
         _filter(
             name="period",

@@ -61,7 +61,7 @@ async def get_current_principal_endpoint(
             "org_id": context.org_id,
             "roles": list(context.roles),
             "permissions": list(context.permissions),
-        }
+        },
     }
 
 

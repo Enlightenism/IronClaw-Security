@@ -109,7 +109,7 @@ def _build_checks() -> list[GateCheck]:
                     required=False,
                     category=f"{check.category}-missing-tool",
                     env={"IRONCLAW_SKIP_REASON": f"missing dependency: {command_name}"},
-                )
+                ),
             )
     return filtered_checks
 
@@ -132,6 +132,7 @@ def _run_check(check: GateCheck) -> GateResult:
     started = time.perf_counter()
     completed = subprocess.run(
         check.command,
+        check=False,
         cwd=PROJECT_ROOT,
         env={**_base_env(), **check.env},
         capture_output=True,

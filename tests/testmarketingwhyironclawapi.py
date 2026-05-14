@@ -30,7 +30,4 @@ def test_marketing_why_ironclaw_contains_core_fields() -> None:
     assert data
 
     assert any(k in data for k in ("title", "headline", "hero"))
-    assert any(
-        k in data
-        for k in ("sections", "reasons", "pillars", "proof_points", "blocks")
-    )
+    assert any(k in data for k in ("sections", "reasons", "pillars", "proof_points", "blocks"))

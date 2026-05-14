@@ -116,9 +116,7 @@ def adapter_evaluated_event(
     reason: str,
     actor: str = "system",
 ) -> IntegrationAuditEvent:
-    severity = AuditSeverity.ERROR if state == "unsupported" else (
-        AuditSeverity.WARNING if state == "warning" else AuditSeverity.INFO
-    )
+    severity = AuditSeverity.ERROR if state == "unsupported" else (AuditSeverity.WARNING if state == "warning" else AuditSeverity.INFO)
     return create_audit_event(
         integration_id=integration_id,
         event_type="adapter.evaluated",
@@ -143,9 +141,7 @@ def summary_generated_event(
     total_adapters: int,
     actor: str = "system",
 ) -> IntegrationAuditEvent:
-    severity = AuditSeverity.ERROR if overall_state == "unsupported" else (
-        AuditSeverity.WARNING if overall_state == "warning" else AuditSeverity.INFO
-    )
+    severity = AuditSeverity.ERROR if overall_state == "unsupported" else (AuditSeverity.WARNING if overall_state == "warning" else AuditSeverity.INFO)
     return create_audit_event(
         integration_id=integration_id,
         event_type="integration.summary_generated",
@@ -168,9 +164,7 @@ def state_changed_event(
     actor: str = "system",
     reason: str = "",
 ) -> IntegrationAuditEvent:
-    severity = AuditSeverity.ERROR if new_state == "unsupported" else (
-        AuditSeverity.WARNING if new_state == "warning" else AuditSeverity.INFO
-    )
+    severity = AuditSeverity.ERROR if new_state == "unsupported" else (AuditSeverity.WARNING if new_state == "warning" else AuditSeverity.INFO)
     return create_audit_event(
         integration_id=integration_id,
         event_type="integration.state_changed",

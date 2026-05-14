@@ -11,11 +11,7 @@ def _build_app() -> FastAPI:
 
 
 def _route_map(app: FastAPI) -> dict[str, APIRoute]:
-    return {
-        route.path: route
-        for route in app.routes
-        if isinstance(route, APIRoute)
-    }
+    return {route.path: route for route in app.routes if isinstance(route, APIRoute)}
 
 
 def test_auth_registry_includes_health_route() -> None:

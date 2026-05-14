@@ -100,11 +100,7 @@ def get_billing_wallet(
             has_activity=bool(entries),
             ledger_entry_count=len(entries),
             latest_entry_type=getattr(latest_entry, "entry_type", None),
-            latest_entry_at=(
-                latest_entry.created_at.isoformat().replace("+00:00", "Z")
-                if latest_entry is not None
-                else None
-            ),
+            latest_entry_at=(latest_entry.created_at.isoformat().replace("+00:00", "Z") if latest_entry is not None else None),
         ),
         recent_entries=[_ledger_entry_to_view(entry) for entry in entries],
         notes=[

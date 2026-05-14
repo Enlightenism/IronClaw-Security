@@ -151,7 +151,7 @@ def test_toolcall_guard_reviews_high_risk_tool() -> None:
             target="runtime",
             command="bash -lc 'echo hi'",
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert decision.verdict in {"review", "block", "quarantine"}
@@ -169,7 +169,7 @@ def test_toolcall_guard_blocks_private_metadata_fetch() -> None:
             network_url="http://169.254.169.254/latest/meta-data/",
             network_method="GET",
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert decision.allowed is False
@@ -188,7 +188,7 @@ def test_toolcall_guard_passes_file_artifact_to_guard(tmp_path) -> None:
             target="runtime",
             artifact_paths=[str(artifact)],
             environment_scope="sandbox",
-        )
+        ),
     )
 
     assert isinstance(decision.artifact_policies, list)

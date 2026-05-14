@@ -106,7 +106,7 @@ def _evaluate_compatibility(
                 key="compatibility",
                 level=ReadinessLevel.FAIL,
                 message="Compatibility state is unsupported.",
-            )
+            ),
         ]
     if state == "warning":
         return [
@@ -114,14 +114,14 @@ def _evaluate_compatibility(
                 key="compatibility",
                 level=ReadinessLevel.WARN,
                 message="Compatibility state contains warnings.",
-            )
+            ),
         ]
     return [
         ReadinessFinding(
             key="compatibility",
             level=ReadinessLevel.PASS,
             message="Compatibility checks passed.",
-        )
+        ),
     ]
 
 
@@ -135,7 +135,7 @@ def _evaluate_telemetry(
                 key="telemetry",
                 level=ReadinessLevel.FAIL,
                 message="Telemetry health is unsupported.",
-            )
+            ),
         ]
     if state == "warning":
         return [
@@ -143,14 +143,14 @@ def _evaluate_telemetry(
                 key="telemetry",
                 level=ReadinessLevel.WARN,
                 message="Telemetry health contains warnings.",
-            )
+            ),
         ]
     return [
         ReadinessFinding(
             key="telemetry",
             level=ReadinessLevel.PASS,
             message="Telemetry health is supported.",
-        )
+        ),
     ]
 
 
@@ -164,7 +164,7 @@ def _evaluate_lifecycle(
                 key="lifecycle",
                 level=ReadinessLevel.FAIL,
                 message="Lifecycle state is blocked.",
-            )
+            ),
         ]
     if state == "degraded":
         return [
@@ -172,7 +172,7 @@ def _evaluate_lifecycle(
                 key="lifecycle",
                 level=ReadinessLevel.WARN,
                 message="Lifecycle state is degraded.",
-            )
+            ),
         ]
     if state == "retired":
         return [
@@ -180,7 +180,7 @@ def _evaluate_lifecycle(
                 key="lifecycle",
                 level=ReadinessLevel.FAIL,
                 message="Lifecycle state is retired.",
-            )
+            ),
         ]
     if state == "draft":
         return [
@@ -188,14 +188,14 @@ def _evaluate_lifecycle(
                 key="lifecycle",
                 level=ReadinessLevel.WARN,
                 message="Lifecycle state is still draft.",
-            )
+            ),
         ]
     return [
         ReadinessFinding(
             key="lifecycle",
             level=ReadinessLevel.PASS,
             message="Lifecycle state is active.",
-        )
+        ),
     ]
 
 
@@ -209,7 +209,7 @@ def _evaluate_rollout(
                 key="rollout",
                 level=ReadinessLevel.FAIL,
                 message="Rollout recommendation is hold.",
-            )
+            ),
         ]
     if recommendation == "rollback_ready":
         return [
@@ -217,7 +217,7 @@ def _evaluate_rollout(
                 key="rollout",
                 level=ReadinessLevel.WARN,
                 message="Rollout requires rollback-ready posture.",
-            )
+            ),
         ]
     if recommendation == "limited_rollout":
         return [
@@ -225,14 +225,14 @@ def _evaluate_rollout(
                 key="rollout",
                 level=ReadinessLevel.WARN,
                 message="Rollout recommendation is limited rollout.",
-            )
+            ),
         ]
     return [
         ReadinessFinding(
             key="rollout",
             level=ReadinessLevel.PASS,
             message="Rollout recommendation allows release.",
-        )
+        ),
     ]
 
 
@@ -247,7 +247,7 @@ def _evaluate_controls(
                 key="open_blockers",
                 level=ReadinessLevel.FAIL,
                 message="Open blockers remain unresolved.",
-            )
+            ),
         )
     else:
         findings.append(
@@ -255,7 +255,7 @@ def _evaluate_controls(
                 key="open_blockers",
                 level=ReadinessLevel.PASS,
                 message="No open blockers remain.",
-            )
+            ),
         )
 
     if readiness_input.has_audit_gaps:
@@ -264,7 +264,7 @@ def _evaluate_controls(
                 key="audit_gaps",
                 level=ReadinessLevel.WARN,
                 message="Audit coverage is incomplete.",
-            )
+            ),
         )
     else:
         findings.append(
@@ -272,7 +272,7 @@ def _evaluate_controls(
                 key="audit_gaps",
                 level=ReadinessLevel.PASS,
                 message="Audit coverage is complete.",
-            )
+            ),
         )
 
     if readiness_input.has_rollback_plan:
@@ -281,7 +281,7 @@ def _evaluate_controls(
                 key="rollback_plan",
                 level=ReadinessLevel.PASS,
                 message="Rollback plan is available.",
-            )
+            ),
         )
     else:
         findings.append(
@@ -289,7 +289,7 @@ def _evaluate_controls(
                 key="rollback_plan",
                 level=ReadinessLevel.FAIL,
                 message="Rollback plan is missing.",
-            )
+            ),
         )
 
     if readiness_input.has_test_evidence:
@@ -298,7 +298,7 @@ def _evaluate_controls(
                 key="test_evidence",
                 level=ReadinessLevel.PASS,
                 message="Test evidence is available.",
-            )
+            ),
         )
     else:
         findings.append(
@@ -306,7 +306,7 @@ def _evaluate_controls(
                 key="test_evidence",
                 level=ReadinessLevel.FAIL,
                 message="Test evidence is missing.",
-            )
+            ),
         )
 
     if readiness_input.requires_manual_review and not readiness_input.manual_review_completed:
@@ -315,7 +315,7 @@ def _evaluate_controls(
                 key="manual_review",
                 level=ReadinessLevel.FAIL,
                 message="Manual review is required but not completed.",
-            )
+            ),
         )
     elif readiness_input.requires_manual_review and readiness_input.manual_review_completed:
         findings.append(
@@ -323,7 +323,7 @@ def _evaluate_controls(
                 key="manual_review",
                 level=ReadinessLevel.PASS,
                 message="Required manual review is complete.",
-            )
+            ),
         )
 
     return findings

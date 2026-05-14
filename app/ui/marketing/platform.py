@@ -70,9 +70,7 @@ def get_marketing_platform() -> PlatformPageResponse:
         eyebrow="Platform overview",
         title="One platform for governing what AI can do, not just what it can say.",
         subtitle=(
-            "IronClaw-Security is a runtime security and governance platform for AI systems that touch files, browsers, "
-            "tools, APIs, external knowledge, and real user environments. It is built to make risky actions visible, "
-            "reviewable, enforceable, and stoppable before they become incidents."
+            "IronClaw-Security is a runtime security and governance platform for AI systems that touch files, browsers, tools, APIs, external knowledge, and real user environments. It is built to make risky actions visible, reviewable, enforceable, and stoppable before they become incidents."
         ),
         primaryctalabel="Request platform walkthrough",
         primaryctahref="/contact-sales",
@@ -85,36 +83,28 @@ def get_marketing_platform() -> PlatformPageResponse:
             statid="secure-resilient",
             value="Primary",
             label="Secure and resilient behavior is a core trait of trustworthy AI",
-            context=(
-                "NIST says the trustworthiness of AI depends in part on how secure and resilient it is."
-            ),
+            context=("NIST says the trustworthiness of AI depends in part on how secure and resilient it is."),
             source="NIST AI research on security and resilience",
         ),
         PlatformProofStatView(
             statid="runtime-security",
             value="Real-time",
             label="Runtime security governs what AI can do at execution time",
-            context=(
-                "Recent enterprise analysis distinguishes runtime security from model-layer security by focusing on real-time evaluation and enforcement of AI actions."
-            ),
+            context=("Recent enterprise analysis distinguishes runtime security from model-layer security by focusing on real-time evaluation and enforcement of AI actions."),
             source="Enterprise AI agent security analysis",
         ),
         PlatformProofStatView(
             statid="path-governance",
             value="Path-aware",
             label="Execution-path governance is emerging as a central AI control model",
-            context=(
-                "Recent runtime governance research argues that the execution path is the central object for effective AI agent governance."
-            ),
+            context=("Recent runtime governance research argues that the execution path is the central object for effective AI agent governance."),
             source="Runtime Governance for AI Agents",
         ),
         PlatformProofStatView(
             statid="control-layer",
             value="Live",
             label="Governance only matters when signals change real runtime decisions",
-            context=(
-                "Architecture-first governance analysis says control becomes meaningful when policies, evidence, and consequence paths affect live behavior."
-            ),
+            context=("Architecture-first governance analysis says control becomes meaningful when policies, evidence, and consequence paths affect live behavior."),
             source="Runtime enforcement architecture analysis",
         ),
     ]
@@ -123,9 +113,7 @@ def get_marketing_platform() -> PlatformPageResponse:
         PlatformCapabilityView(
             capabilityid="capability-1",
             title="Runtime decision engine",
-            summary=(
-                "IronClaw evaluates intended AI actions at the moment they matter and decides whether they should be allowed, reviewed, quarantined, or blocked."
-            ),
+            summary=("IronClaw evaluates intended AI actions at the moment they matter and decides whether they should be allowed, reviewed, quarantined, or blocked."),
             bullets=[
                 "Turns AI security into live enforcement",
                 "Supports policy-backed decisions before execution",
@@ -135,9 +123,7 @@ def get_marketing_platform() -> PlatformPageResponse:
         PlatformCapabilityView(
             capabilityid="capability-2",
             title="AI-native threat protection",
-            summary=(
-                "The platform is built around prompt injection, indirect context abuse, excessive autonomy, and unsafe tool-connected behavior."
-            ),
+            summary=("The platform is built around prompt injection, indirect context abuse, excessive autonomy, and unsafe tool-connected behavior."),
             bullets=[
                 "Protects systems that browse, read files, and call tools",
                 "Treats external content as a real attack path",
@@ -147,9 +133,7 @@ def get_marketing_platform() -> PlatformPageResponse:
         PlatformCapabilityView(
             capabilityid="capability-3",
             title="Review and containment operations",
-            summary=(
-                "Not every risky action should be blocked instantly. Some should be slowed down, inspected, or isolated."
-            ),
+            summary=("Not every risky action should be blocked instantly. Some should be slowed down, inspected, or isolated."),
             bullets=[
                 "Routes suspicious activity into human review",
                 "Supports quarantine and operational containment",
@@ -159,9 +143,7 @@ def get_marketing_platform() -> PlatformPageResponse:
         PlatformCapabilityView(
             capabilityid="capability-4",
             title="Auditability and trust evidence",
-            summary=(
-                "Buyers, operators, and defenders need proof that controls are real and decisions are understandable."
-            ),
+            summary=("Buyers, operators, and defenders need proof that controls are real and decisions are understandable."),
             bullets=[
                 "Captures decision and policy evidence",
                 "Improves governance, procurement, and forensics",
@@ -171,9 +153,7 @@ def get_marketing_platform() -> PlatformPageResponse:
         PlatformCapabilityView(
             capabilityid="capability-5",
             title="Governance for evolving AI",
-            summary=(
-                "AI systems change quickly, so the platform is designed as a living control layer rather than a static rules page."
-            ),
+            summary=("AI systems change quickly, so the platform is designed as a living control layer rather than a static rules page."),
             bullets=[
                 "Supports evolving policy models",
                 "Fits autonomous and tool-connected workflows",
@@ -219,30 +199,22 @@ def get_marketing_platform() -> PlatformPageResponse:
         PlatformWorkflowView(
             workflowid="workflow-1",
             title="Guard AI actions before execution",
-            description=(
-                "Sensitive actions are intercepted and evaluated in real time before they reach tools, systems, or user environments."
-            ),
+            description=("Sensitive actions are intercepted and evaluated in real time before they reach tools, systems, or user environments."),
         ),
         PlatformWorkflowView(
             workflowid="workflow-2",
             title="Escalate suspicious behavior into review",
-            description=(
-                "Ambiguous or high-risk requests can be slowed down and routed into analyst-visible review workflows."
-            ),
+            description=("Ambiguous or high-risk requests can be slowed down and routed into analyst-visible review workflows."),
         ),
         PlatformWorkflowView(
             workflowid="workflow-3",
             title="Quarantine risky outcomes",
-            description=(
-                "When something looks wrong, the platform supports containment instead of letting questionable behavior continue downstream."
-            ),
+            description=("When something looks wrong, the platform supports containment instead of letting questionable behavior continue downstream."),
         ),
         PlatformWorkflowView(
             workflowid="workflow-4",
             title="Capture evidence for trust and governance",
-            description=(
-                "Every key decision can be traced so teams know what happened, why it happened, and how to improve policy."
-            ),
+            description=("Every key decision can be traced so teams know what happened, why it happened, and how to improve policy."),
         ),
     ]
 

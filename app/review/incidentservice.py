@@ -98,7 +98,7 @@ class IncidentService:
                 "incident_id": incident.incident_id,
                 "severity": incident.severity,
                 "title": incident.title,
-            }
+            },
         )
         return self._dedupe_dicts(evidence)
 

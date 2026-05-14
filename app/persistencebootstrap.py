@@ -300,21 +300,13 @@ def _normalize_mode(value: str | None) -> str:
 
 def _env_persistence_mode() -> str:
     return _normalize_mode(
-        os.getenv("IRONCLAW_PERSISTENCE_MODE")
-        or os.getenv("PERSISTENCE_MODE")
-        or os.getenv("STORE_BACKEND")
-        or DEFAULT_PERSISTENCE_MODE
+        os.getenv("IRONCLAW_PERSISTENCE_MODE") or os.getenv("PERSISTENCE_MODE") or os.getenv("STORE_BACKEND") or DEFAULT_PERSISTENCE_MODE,
     )
 
 
 def _supabase_env_present() -> bool:
     return bool(
-        (os.getenv("SUPABASE_URL") or "").strip()
-        and (
-            (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
-            or (os.getenv("SUPABASE_KEY") or "").strip()
-            or (os.getenv("SUPABASE_ANON_KEY") or "").strip()
-        )
+        (os.getenv("SUPABASE_URL") or "").strip() and ((os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip() or (os.getenv("SUPABASE_KEY") or "").strip() or (os.getenv("SUPABASE_ANON_KEY") or "").strip()),
     )
 
 
@@ -345,7 +337,7 @@ def build_store(
     client_factory: Callable[..., SupabaseClient] = create_supabase_client,
 ) -> StoreType:
     requested_mode = _normalize_mode(
-        mode or backend or provider or persistence or _env_persistence_mode()
+        mode or backend or provider or persistence or _env_persistence_mode(),
     )
 
     if requested_mode == MEMORY_MODE:
@@ -378,7 +370,7 @@ def build_store(
                 if not allow_fallback:
                     raise
                 logger.exception(
-                    "auto persistence bootstrap failed; falling back to memory store"
+                    "auto persistence bootstrap failed; falling back to memory store",
                 )
                 return _build_memory_store(reason="auto-supabase-bootstrap-failed")
         return _build_memory_store(reason="supabase-env-missing")

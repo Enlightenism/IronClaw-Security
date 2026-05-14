@@ -94,7 +94,7 @@ def build_requests_from_replay(report: ReplayReport) -> list[GateReviewRequest]:
                 verdict=step.verdict,
                 risk_score=step.risk_score,
                 reason=f"Replay outcome={step.replay_outcome} for trace={step.trace_id}.",
-            )
+            ),
         )
     return requests
 
@@ -112,12 +112,14 @@ def build_requests_from_escalations(
                 verdict=escalation.verdict,
                 risk_score=escalation.risk_score,
                 reason=escalation.reason,
-            )
+            ),
         )
     return requests
 
 
-def _decision_for_request(request: GateReviewRequest) -> tuple[GateStatus, RemediationDecision, ReviewAction, str]:
+def _decision_for_request(
+    request: GateReviewRequest,
+) -> tuple[GateStatus, RemediationDecision, ReviewAction, str]:
     if request.verdict == "block":
         return (
             "closed",
@@ -163,7 +165,7 @@ def review_requests(requests: list[GateReviewRequest]) -> RemediationGateReport:
                 decision=decision,
                 action=action,
                 rationale=rationale,
-            )
+            ),
         )
 
     approved_count = sum(1 for item in outcomes if item.decision == "approve")
@@ -233,4 +235,10 @@ if __name__ == "__main__":
     ]
 
     report = review_requests(sample_requests)
-    print(json.dumps({"summary": summarize_gate_report(report), "report": report.to_dict()}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {"summary": summarize_gate_report(report), "report": report.to_dict()},
+            ensure_ascii=False,
+            indent=2,
+        )
+    )

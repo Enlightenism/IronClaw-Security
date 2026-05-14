@@ -153,7 +153,7 @@ def list_history() -> HistoryListResponse:
                 quarantine_reason=getattr(i, "quarantinereason", None),
             )
             for i in items
-        ]
+        ],
     )
 
 
@@ -181,8 +181,8 @@ def get_history(scan_id: str) -> HistoryItem:
 def review_history_item(scan_id: str, request: ReviewRequest) -> dict[str, Any]:
     try:
         updated = history_svc.review_scan(scan_id=scan_id, action=request.action)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="scan_id not found")
+    except KeyError as err:
+        raise HTTPException(status_code=404, detail="scan_id not found") from err
 
     if updated is None:
         raise HTTPException(status_code=400, detail="review not applicable for this scan")

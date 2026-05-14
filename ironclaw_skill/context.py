@@ -175,32 +175,15 @@ def resolve_skill_context(
     )
 
     timeout_seconds = _coerce_timeout(
-        env.get("IRONCLAW_TIMEOUT_SECONDS")
-        or skill_payload.get("default_timeout_seconds")
-        or config_payload.get("timeout_seconds"),
+        env.get("IRONCLAW_TIMEOUT_SECONDS") or skill_payload.get("default_timeout_seconds") or config_payload.get("timeout_seconds"),
         default=DEFAULT_TIMEOUT_SECONDS,
     )
 
-    resolved_environment = (
-        _normalize_optional_text(environment)
-        or _normalize_optional_text(env.get("IRONCLAW_ENV"))
-        or _normalize_optional_text(env.get("IRONCLAW_MODE"))
-        or "development"
-    )
+    resolved_environment = _normalize_optional_text(environment) or _normalize_optional_text(env.get("IRONCLAW_ENV")) or _normalize_optional_text(env.get("IRONCLAW_MODE")) or "development"
 
-    backup_target = (
-        _normalize_optional_text(env.get("IRONCLAW_BACKUP_TARGET_NAME"))
-        or _normalize_optional_text(env.get("IRONCLAW_BACKUP_TARGET"))
-        or _normalize_optional_text(config_payload.get("backup_target"))
-        or "primary"
-    )
+    backup_target = _normalize_optional_text(env.get("IRONCLAW_BACKUP_TARGET_NAME")) or _normalize_optional_text(env.get("IRONCLAW_BACKUP_TARGET")) or _normalize_optional_text(config_payload.get("backup_target")) or "primary"
 
-    restore_target = (
-        _normalize_optional_text(env.get("IRONCLAW_RESTORE_TARGET_NAME"))
-        or _normalize_optional_text(env.get("IRONCLAW_RESTORE_TARGET"))
-        or _normalize_optional_text(config_payload.get("restore_target"))
-        or "primary"
-    )
+    restore_target = _normalize_optional_text(env.get("IRONCLAW_RESTORE_TARGET_NAME")) or _normalize_optional_text(env.get("IRONCLAW_RESTORE_TARGET")) or _normalize_optional_text(config_payload.get("restore_target")) or "primary"
 
     return IronClawSkillContext(
         environment=resolved_environment,

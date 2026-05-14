@@ -117,8 +117,14 @@ class VerdictAssistView:
 class VerdictAssistContextIn(BaseModel):
     """What the UI sends when it wants help explaining / adjusting a verdict."""
 
-    action_type: str = Field(..., description="High-level type such as shellcommand, toolcall, filewrite, network, prompt.")
-    target: str = Field(..., description="Logical target of the action, e.g. local, git, /tmp/file, https://api.example.com.")
+    action_type: str = Field(
+        ...,
+        description="High-level type such as shellcommand, toolcall, filewrite, network, prompt.",
+    )
+    target: str = Field(
+        ...,
+        description="Logical target of the action, e.g. local, git, /tmp/file, https://api.example.com.",
+    )
     content: str = Field(..., description="The content or payload associated with the action.")
     client_id: str | None = Field(default=None, description="Optional client identifier.")
     session_id: str | None = Field(default=None, description="Optional session identifier.")
@@ -310,8 +316,7 @@ def build_verdict_assist_view(
 
 @router.post("/verdict/assist", response_model=VerdictAssistResponse)
 def post_verdict_assist(payload: VerdictAssistContextIn) -> VerdictAssistResponse:
-    """
-    Given a potential action and current mode, evaluate it with the Groq security brain
+    """Given a potential action and current mode, evaluate it with the Groq security brain
     and return a rich explanation plus suggested adjustments.
     """
     view = build_verdict_assist_view(context_in=payload)

@@ -78,11 +78,7 @@ def _mapping(value: Any) -> dict[str, Any]:
         if isinstance(dumped, Mapping):
             return dict(dumped)
     if hasattr(value, "__dict__"):
-        return {
-            key: val
-            for key, val in vars(value).items()
-            if not key.startswith("_") and not callable(val)
-        }
+        return {key: val for key, val in vars(value).items() if not key.startswith("_") and not callable(val)}
     raise TypeError("value is not serializable to dict")
 
 
@@ -179,85 +175,37 @@ def _normalize_alert_payload(
     source_payload = _mapping(payload)
     source_payload.update({key: value for key, value in extra.items() if value is not None})
 
-    resolved_alert_id = (
-        _string(alert_id)
-        or _string(source_payload.get("alert_id"))
-        or _string(source_payload.get("id"))
-        or str(uuid4())
-    )
+    resolved_alert_id = _string(alert_id) or _string(source_payload.get("alert_id")) or _string(source_payload.get("id")) or str(uuid4())
 
-    resolved_title = (
-        _string(title)
-        or _string(source_payload.get("title"))
-        or _string(summary)
-        or _string(source_payload.get("summary"))
-        or _string(description)
-        or _string(source_payload.get("description"))
-        or "Security alert"
-    )
+    resolved_title = _string(title) or _string(source_payload.get("title")) or _string(summary) or _string(source_payload.get("summary")) or _string(description) or _string(source_payload.get("description")) or "Security alert"
 
-    resolved_summary = (
-        _string(summary)
-        or _string(source_payload.get("summary"))
-        or _string(description)
-        or _string(source_payload.get("description"))
-        or resolved_title
-    )
+    resolved_summary = _string(summary) or _string(source_payload.get("summary")) or _string(description) or _string(source_payload.get("description")) or resolved_title
 
-    resolved_description = (
-        _string(description)
-        or _string(source_payload.get("description"))
-        or resolved_summary
-    )
+    resolved_description = _string(description) or _string(source_payload.get("description")) or resolved_summary
 
     resolved_status = _normalize_status(status or source_payload.get("status"))
     resolved_severity = _normalize_severity(severity or source_payload.get("severity"))
     resolved_verdict = _normalize_verdict(verdict or source_payload.get("verdict"))
 
-    resolved_category = (
-        _string(category)
-        or _string(alert_type)
-        or _string(source_payload.get("category"))
-        or _string(source_payload.get("alert_type"))
-        or "security"
-    )
+    resolved_category = _string(category) or _string(alert_type) or _string(source_payload.get("category")) or _string(source_payload.get("alert_type")) or "security"
 
-    resolved_source = (
-        _string(source)
-        or _string(source_payload.get("source"))
-        or "ironclaw"
-    )
+    resolved_source = _string(source) or _string(source_payload.get("source")) or "ironclaw"
 
-    resolved_org = (
-        _string(organization_id)
-        or _string(org_id)
-        or _string(customer_id)
-        or _string(source_payload.get("organization_id"))
-        or _string(source_payload.get("org_id"))
-        or _string(source_payload.get("customer_id"))
-    )
+    resolved_org = _string(organization_id) or _string(org_id) or _string(customer_id) or _string(source_payload.get("organization_id")) or _string(source_payload.get("org_id")) or _string(source_payload.get("customer_id"))
 
     resolved_created_at = _normalize_timestamp(
-        created_at or source_payload.get("created_at") or detected_at or source_payload.get("detected_at")
+        created_at or source_payload.get("created_at") or detected_at or source_payload.get("detected_at"),
     )
     resolved_updated_at = _normalize_timestamp(
-        updated_at or source_payload.get("updated_at") or resolved_created_at
+        updated_at or source_payload.get("updated_at") or resolved_created_at,
     )
     resolved_detected_at = _normalize_timestamp(
-        detected_at or source_payload.get("detected_at") or resolved_created_at
+        detected_at or source_payload.get("detected_at") or resolved_created_at,
     )
 
-    resolved_acknowledged_at = (
-        _normalize_timestamp(acknowledged_at or source_payload.get("acknowledged_at"))
-        if (acknowledged_at is not None or source_payload.get("acknowledged_at") is not None)
-        else None
-    )
+    resolved_acknowledged_at = _normalize_timestamp(acknowledged_at or source_payload.get("acknowledged_at")) if (acknowledged_at is not None or source_payload.get("acknowledged_at") is not None) else None
 
-    resolved_resolved_at = (
-        _normalize_timestamp(resolved_at or source_payload.get("resolved_at"))
-        if (resolved_at is not None or source_payload.get("resolved_at") is not None)
-        else None
-    )
+    resolved_resolved_at = _normalize_timestamp(resolved_at or source_payload.get("resolved_at")) if (resolved_at is not None or source_payload.get("resolved_at") is not None) else None
 
     if resolved_status == "acknowledged" and resolved_acknowledged_at is None:
         resolved_acknowledged_at = resolved_updated_at
@@ -274,12 +222,7 @@ def _normalize_alert_payload(
         default=resolved_status == "suppressed",
     )
 
-    dedupe = (
-        _string(dedupe_key)
-        or _string(source_payload.get("dedupe_key"))
-        or _string(source_payload.get("fingerprint"))
-        or None
-    )
+    dedupe = _string(dedupe_key) or _string(source_payload.get("dedupe_key")) or _string(source_payload.get("fingerprint")) or None
 
     return {
         "alert_id": resolved_alert_id,
@@ -321,8 +264,7 @@ def _normalize_alert_payload(
 
 @dataclass(slots=True)
 class SecurityAlertStore:
-    """
-    Persistence-backed store for security alert records (incidents, threats,
+    """Persistence-backed store for security alert records (incidents, threats,
     policy violations). Full alert lifecycle: open → acknowledge → investigate
     → resolve / close / false_positive.
 
@@ -447,7 +389,11 @@ class SecurityAlertStore:
         if _normalize_status(merged.get("status")) == "acknowledged" and not merged.get("acknowledged_at"):
             merged["acknowledged_at"] = merged["updated_at"]
 
-        if _normalize_status(merged.get("status")) in {"resolved", "closed", "false_positive"} and not merged.get("resolved_at"):
+        if _normalize_status(merged.get("status")) in {
+            "resolved",
+            "closed",
+            "false_positive",
+        } and not merged.get("resolved_at"):
             merged["resolved_at"] = merged["updated_at"]
 
         normalized = _normalize_alert_payload(merged)

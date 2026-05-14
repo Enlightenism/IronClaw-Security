@@ -303,18 +303,14 @@ async def _echo_handler(payload: Mapping[str, Any]) -> dict[str, Any]:
                 "content": "ok",
                 "disposition": "inline",
                 "metadata": {"channel": "stdout"},
-            }
+            },
         ],
         "inputartifacts": [],
         "policyhints": [],
         "metadata": {
             "provider": provider.value,
             "operation": runtime_context.operation,
-            "targetid": (
-                target_payload.get("targetid")
-                if isinstance(target_payload, Mapping)
-                else None
-            ),
+            "targetid": (target_payload.get("targetid") if isinstance(target_payload, Mapping) else None),
         },
     }
 
@@ -352,7 +348,8 @@ async def test_middleware_executes_happy_path(
     }
 
     result_mapping = await middleware.dispatch(
-        payload, handler=_echo_handler  # type: ignore[arg-type]
+        payload,
+        handler=_echo_handler,  # type: ignore[arg-type]
     )
     assert isinstance(result_mapping, dict)
     assert result_mapping.get("decision") == SkillDecision.ALLOW.value
@@ -418,7 +415,8 @@ async def test_middleware_blocks_when_runtime_policy_conflicts_with_config(
         pytest.fail("Handler should not be called when policy blocks execution.")
 
     result_mapping = await mw.dispatch(
-        payload, handler=handler  # type: ignore[arg-type]
+        payload,
+        handler=handler,  # type: ignore[arg-type]
     )
     assert isinstance(result_mapping, dict)
     assert result_mapping.get("decision") in {
@@ -452,7 +450,8 @@ async def test_middleware_rejects_invalid_request_shape(
         pytest.fail("Handler should not be called when request is invalid.")
 
     result_mapping = await middleware.dispatch(
-        payload, handler=handler  # type: ignore[arg-type]
+        payload,
+        handler=handler,  # type: ignore[arg-type]
     )
     assert isinstance(result_mapping, dict)
     assert result_mapping.get("decision") == SkillDecision.ERROR.value
@@ -513,7 +512,8 @@ async def test_middleware_normalizes_ironclaw_skill_errors(
         raise _SentinelRuntimeError("Injected runtime failure.", context=context)
 
     result_mapping = await middleware.dispatch(
-        payload, handler=handler  # type: ignore[arg-type]
+        payload,
+        handler=handler,  # type: ignore[arg-type]
     )
     assert isinstance(result_mapping, dict)
     assert result_mapping.get("decision") == SkillDecision.ERROR.value

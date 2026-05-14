@@ -204,8 +204,7 @@ def _update_definition_metrics(
             execution_count=definition.metrics.execution_count + 1,
             completed_count=definition.metrics.completed_count + (1 if execution.status == "completed" else 0),
             failed_count=definition.metrics.failed_count + (1 if execution.status == "failed" else 0),
-            awaiting_manual_action_count=definition.metrics.awaiting_manual_action_count
-            + (1 if execution.status == "awaiting_manual_action" else 0),
+            awaiting_manual_action_count=definition.metrics.awaiting_manual_action_count + (1 if execution.status == "awaiting_manual_action" else 0),
             last_run_at=execution.updated_at,
         )
 
@@ -225,7 +224,7 @@ def _update_definition_metrics(
                 supersedes=definition.supersedes,
                 metadata=definition.metadata,
                 metrics=metrics,
-            )
+            ),
         )
 
     return updated
@@ -288,16 +287,11 @@ def select_registered_playbook(
         supervisor_escalation=supervisor_escalation,
     )
 
-    candidates = [
-        definition
-        for definition in list_enabled_playbooks(registry, trigger_type=trigger_type)
-        if decision_value in definition.supported_decisions
-        and _severity_in_range(case_file.severity, definition.min_severity, definition.max_severity)
-    ]
+    candidates = [definition for definition in list_enabled_playbooks(registry, trigger_type=trigger_type) if decision_value in definition.supported_decisions and _severity_in_range(case_file.severity, definition.min_severity, definition.max_severity)]
 
     if not candidates:
         raise LookupError(
-            f"No enabled playbook matches trigger={trigger_type}, decision={decision_value}, severity={case_file.severity}."
+            f"No enabled playbook matches trigger={trigger_type}, decision={decision_value}, severity={case_file.severity}.",
         )
 
     selected = sorted(
@@ -309,11 +303,7 @@ def select_registered_playbook(
         ),
     )[0]
 
-    rationale = (
-        f"Selected {selected.playbook_name} for trigger {trigger_type}, "
-        f"decision {decision_value}, severity {case_file.severity}, "
-        f"version {selected.version}."
-    )
+    rationale = f"Selected {selected.playbook_name} for trigger {trigger_type}, decision {decision_value}, severity {case_file.severity}, version {selected.version}."
 
     selection = RegistrySelection(
         selection_id=f"sel-{uuid4().hex[:12]}",
@@ -376,9 +366,7 @@ def disable_playbook(
 ) -> PlaybookRegistry:
     updated_definitions: list[PlaybookDefinition] = []
     for definition in registry.definitions:
-        should_disable = definition.playbook_name == playbook_name and (
-            version is None or definition.version == version
-        )
+        should_disable = definition.playbook_name == playbook_name and (version is None or definition.version == version)
 
         updated_definitions.append(
             PlaybookDefinition(
@@ -396,7 +384,7 @@ def disable_playbook(
                 supersedes=definition.supersedes,
                 metadata=definition.metadata,
                 metrics=definition.metrics,
-            )
+            ),
         )
 
     return PlaybookRegistry(
@@ -416,12 +404,8 @@ def summarize_registry(registry: PlaybookRegistry) -> dict[str, Any]:
         "enabled_playbook_count": sum(1 for item in registry.definitions if item.enabled),
         "selection_count": len(registry.selections),
         "execution_count": len(registry.execution_history),
-        "completed_execution_count": sum(
-            1 for item in registry.execution_history if item.status == "completed"
-        ),
-        "awaiting_manual_action_count": sum(
-            1 for item in registry.execution_history if item.status == "awaiting_manual_action"
-        ),
+        "completed_execution_count": sum(1 for item in registry.execution_history if item.status == "completed"),
+        "awaiting_manual_action_count": sum(1 for item in registry.execution_history if item.status == "awaiting_manual_action"),
         "definitions": [
             {
                 "playbook_name": item.playbook_name,
@@ -467,5 +451,5 @@ if __name__ == "__main__":
             "selection": selection.to_dict(),
             "execution": execution.to_dict(),
             "summary": summarize_registry(registry),
-        }
+        },
     )

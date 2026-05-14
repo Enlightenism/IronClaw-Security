@@ -114,7 +114,7 @@ def test_write_report_creates_json_payload(tmp_path: Path) -> None:
             status="passed",
             stdout="ok",
             stderr="",
-        )
+        ),
     ]
 
     gate._write_report(results, report_path)
@@ -134,7 +134,9 @@ def test_build_checks_includes_pytest_checks() -> None:
     assert "pytest-warnings-as-errors" in check_names
 
 
-def test_build_checks_marks_missing_optional_tools_as_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_checks_marks_missing_optional_tools_as_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     def fake_command_exists(command_name: str) -> bool:
         return command_name == "ruff"
 

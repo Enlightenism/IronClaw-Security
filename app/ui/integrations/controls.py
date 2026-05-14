@@ -81,7 +81,7 @@ def _control_state(
             command_control_enabled,
             install_control_enabled,
             endpoint_control_enabled,
-        ]
+        ],
     )
 
     if verified and enabled_count == 4:
@@ -115,7 +115,7 @@ def build_integration_controls_view(
         command_control_enabled = bool(getattr(record, "command_name", None))
         install_control_enabled = bool(getattr(record, "install_target", None))
         endpoint_control_enabled = bool(
-            getattr(record, "endpoint", None) or getattr(record, "base_url", None)
+            getattr(record, "endpoint", None) or getattr(record, "base_url", None),
         )
         strict_mode_enabled = summary["verified"] and summary["fail_count"] == 0
 
@@ -155,20 +155,16 @@ def build_integration_controls_view(
                     "fail_count": summary["fail_count"],
                     "verification_summary": summary,
                 },
-            )
+            ),
         )
 
     items.sort(
         key=lambda item: (
-            0
-            if item.control_state == "missing"
-            else 1
-            if item.control_state == "partial"
-            else 2,
+            0 if item.control_state == "missing" else 1 if item.control_state == "partial" else 2,
             item.platform,
             item.slug,
             item.integration_id,
-        )
+        ),
     )
 
     return IntegrationControlsView(

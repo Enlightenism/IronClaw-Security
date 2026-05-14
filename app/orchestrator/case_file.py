@@ -147,7 +147,7 @@ def create_case_file_from_packet(packet: ReviewPacket) -> CaseFile:
                 "due_at": packet.due_at,
                 **packet.metadata,
             },
-        )
+        ),
     ]
 
     timeline = [
@@ -157,7 +157,7 @@ def create_case_file_from_packet(packet: ReviewPacket) -> CaseFile:
             summary=f"Case opened from review packet {packet.packet_id}.",
             timestamp=packet.created_at,
             metadata={"source_type": packet.source_type},
-        )
+        ),
     ]
 
     return CaseFile(
@@ -212,7 +212,11 @@ def attach_decision_trace(case_file: CaseFile, trace: DecisionTrace) -> CaseFile
         title=case_file.title,
         target=case_file.target,
         status=case_file.status,
-        severity=max(case_file.severity, _severity_from_risk(plan.risk_score), key=lambda s: ["low", "medium", "high", "critical"].index(s)),
+        severity=max(
+            case_file.severity,
+            _severity_from_risk(plan.risk_score),
+            key=lambda s: ["low", "medium", "high", "critical"].index(s),
+        ),
         risk_score=max(case_file.risk_score, plan.risk_score),
         created_at=case_file.created_at,
         updated_at=_utcnow(),
@@ -257,7 +261,11 @@ def attach_escalation(case_file: CaseFile, escalation: SupervisorEscalation) -> 
         title=case_file.title,
         target=case_file.target,
         status="escalated" if escalation.level in {"high", "critical"} else case_file.status,
-        severity=max(case_file.severity, _severity_from_risk(escalation.risk_score), key=lambda s: ["low", "medium", "high", "critical"].index(s)),
+        severity=max(
+            case_file.severity,
+            _severity_from_risk(escalation.risk_score),
+            key=lambda s: ["low", "medium", "high", "critical"].index(s),
+        ),
         risk_score=max(case_file.risk_score, escalation.risk_score),
         created_at=case_file.created_at,
         updated_at=_utcnow(),
@@ -375,13 +383,7 @@ def attach_review_decision(case_file: CaseFile, decision: ReviewDecisionRecord) 
 
 
 def attach_audit_entries(case_file: CaseFile, entries: list[AuditLedgerEntry]) -> CaseFile:
-    relevant_entries = [
-        entry
-        for entry in entries
-        if entry.target == case_file.target
-        or entry.source in case_file.related_ids.values()
-        or entry.target in case_file.related_ids.values()
-    ]
+    relevant_entries = [entry for entry in entries if entry.target == case_file.target or entry.source in case_file.related_ids.values() or entry.target in case_file.related_ids.values()]
 
     added_evidence = [
         _evidence_item(

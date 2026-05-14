@@ -21,7 +21,7 @@ from ironclaw_skill.contracts import (
     build_skill_success_response,
 )
 
-OPENCLAW_PLATFORM: Final[Literal["openclaw"]] = "openclaw"
+OPENCLAW_PLATFORM: Final = "openclaw"
 REQUEST_ADAPTER: Final[TypeAdapter[SkillRequest]] = TypeAdapter(SkillRequest)
 
 
@@ -86,7 +86,7 @@ def _build_bundle_input(raw: dict[str, Any]) -> SkillPromptBundleInput:
     bundle_payload = raw.get("bundle")
     if not isinstance(bundle_payload, dict):
         raise OpenClawAdapterError(
-            "OpenClaw scan request with target_type=prompt_bundle must include a 'bundle' object."
+            "OpenClaw scan request with target_type=prompt_bundle must include a 'bundle' object.",
         )
 
     return SkillPromptBundleInput(
@@ -94,7 +94,7 @@ def _build_bundle_input(raw: dict[str, Any]) -> SkillPromptBundleInput:
         retrieved_doc=_normalize_optional_text(bundle_payload.get("retrieved_doc") or bundle_payload.get("retrieval")),
         tool_output=_normalize_optional_text(bundle_payload.get("tool_output")),
         model_output=_normalize_optional_text(
-            bundle_payload.get("model_output") or bundle_payload.get("assistant_output")
+            bundle_payload.get("model_output") or bundle_payload.get("assistant_output"),
         ),
     )
 
@@ -117,12 +117,7 @@ def _build_scan_request(raw: dict[str, Any]) -> SkillScanRequest:
         # (e.g. an empty dict sent during a default-operation probe).
         resolved_target_value: str = (
             _normalize_optional_text(
-                raw.get("target_value")
-                or raw.get("content")
-                or raw.get("input")
-                or raw.get("text")
-                or raw.get("url")
-                or raw.get("file_path")
+                raw.get("target_value") or raw.get("content") or raw.get("input") or raw.get("text") or raw.get("url") or raw.get("file_path"),
             )
             or ""
         )
@@ -140,23 +135,13 @@ def _build_scan_request(raw: dict[str, Any]) -> SkillScanRequest:
 
 def _build_action_input(raw: dict[str, Any]) -> SkillActionInput:
     return SkillActionInput(
-        action_type=(
-            _normalize_optional_text(raw.get("action_type") or raw.get("kind") or raw.get("tool_kind"))
-            or "other"
-        ).lower(),
+        action_type=(_normalize_optional_text(raw.get("action_type") or raw.get("kind") or raw.get("tool_kind")) or "other").lower(),
         target=_normalize_optional_text(
-            raw.get("target")
-            or raw.get("command")
-            or raw.get("path")
-            or raw.get("endpoint")
-            or raw.get("resource")
+            raw.get("target") or raw.get("command") or raw.get("path") or raw.get("endpoint") or raw.get("resource"),
         )
         or "unspecified",
         content=_normalize_optional_text(
-            raw.get("content")
-            or raw.get("payload")
-            or raw.get("body")
-            or raw.get("code")
+            raw.get("content") or raw.get("payload") or raw.get("body") or raw.get("code"),
         ),
         policy_mode=(_normalize_optional_text(raw.get("policy_mode")) or "review").lower(),
         dry_run=bool(raw.get("dry_run", False)),
@@ -264,7 +249,7 @@ def build_openclaw_error_response(
                 source="skill",
                 label="OpenClaw adapter error",
                 details=summary,
-            )
+            ),
         ],
     )
     return adapt_openclaw_response(response)
@@ -428,7 +413,7 @@ def openclaw_tool_input_schema() -> dict[str, Any]:
                             {
                                 "type": "string",
                             },
-                        ]
+                        ],
                     },
                 },
             },

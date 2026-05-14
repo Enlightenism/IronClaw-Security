@@ -10,7 +10,7 @@ from app.main import app
 UI_HEALTH_SNAPSHOT_PATH: Final[str] = "/ui/health-snapshot"
 
 
-@pytest.fixture()
+@pytest.fixture
 def client() -> TestClient:
     with TestClient(app) as test_client:
         yield test_client
@@ -42,10 +42,7 @@ def test_ui_health_snapshot_contains_core_fields(client: TestClient) -> None:
 
     assert data
     assert any(k in data for k in ("title", "headline", "summary", "status"))
-    assert any(
-        k in data
-        for k in ("checks", "items", "cards", "services", "components")
-    )
+    assert any(k in data for k in ("checks", "items", "cards", "services", "components"))
 
 
 def test_ui_health_snapshot_surface_does_not_return_array_root(

@@ -21,7 +21,7 @@ from ironclaw_skill.contracts import (
     build_skill_success_response,
 )
 
-CLAUDE_PLATFORM: Final[Literal["claude"]] = "claude"
+CLAUDE_PLATFORM: Final = "claude"
 REQUEST_ADAPTER: Final[TypeAdapter[SkillRequest]] = TypeAdapter(SkillRequest)
 
 
@@ -58,7 +58,7 @@ def _build_bundle_input(raw: dict[str, Any]) -> SkillPromptBundleInput:
     bundle_payload = raw.get("bundle")
     if not isinstance(bundle_payload, dict):
         raise ClaudeAdapterError(
-            "Claude scan request with target_type=prompt_bundle must include a 'bundle' object."
+            "Claude scan request with target_type=prompt_bundle must include a 'bundle' object.",
         )
 
     return SkillPromptBundleInput(
@@ -202,7 +202,7 @@ def build_claude_error_response(
                 source="skill",
                 label="Claude adapter error",
                 details=summary,
-            )
+            ),
         ],
     )
     return adapt_claude_response(response)

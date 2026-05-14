@@ -81,8 +81,7 @@ _JOB_COUNTER: int = 0
 
 
 class RemediationJobCreate(BaseModel):
-    """
-    Job creation payload. This is typically invoked by your queue/bridge
+    """Job creation payload. This is typically invoked by your queue/bridge
     when a remediation action moves to 'queued' state on the UI side.
     """
 
@@ -133,8 +132,7 @@ class RemediationJobListResponse(BaseModel):
 
 
 class RemediationJobStatusUpdate(BaseModel):
-    """
-    External status update for a job, for example from an out-of-process
+    """External status update for a job, for example from an out-of-process
     worker executor or orchestrator.[web:1300][web:1303]
     """
 
@@ -175,8 +173,7 @@ def _paginate_jobs(
 
 
 def _simulate_execution(job: RemediationJob) -> None:
-    """
-    Placeholder execution logic.
+    """Placeholder execution logic.
 
     In a real system, this would dispatch to a secure executor engine
     (e.g., workflow engine, Ansible, Terraform, internal tools) and
@@ -204,8 +201,7 @@ def _simulate_execution(job: RemediationJob) -> None:
 
 @router.post("/jobs", response_model=RemediationJobView, status_code=201)
 def create_remediation_job(payload: RemediationJobCreate) -> RemediationJobView:
-    """
-    Create a remediation execution job.
+    """Create a remediation execution job.
 
     Called by your queue/bridge component when a remediation action
     transitions to 'queued' on the UI side.[web:1300][web:1303]
@@ -248,8 +244,7 @@ def list_remediation_jobs(
         description="Optional filter by remediation action id.",
     ),
 ) -> RemediationJobListResponse:
-    """
-    List remediation jobs for monitoring and debugging.
+    """List remediation jobs for monitoring and debugging.
 
     Supports filtering by status and action_id, and basic pagination.[web:1301][web:1303]
     """
@@ -275,9 +270,7 @@ def list_remediation_jobs(
 
 @router.get("/jobs/{job_id}", response_model=RemediationJobView)
 def get_remediation_job(job_id: str) -> RemediationJobView:
-    """
-    Retrieve a single remediation job by id.
-    """
+    """Retrieve a single remediation job by id."""
     job = _JOBS.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -286,8 +279,7 @@ def get_remediation_job(job_id: str) -> RemediationJobView:
 
 @router.post("/jobs/{job_id}/execute", response_model=RemediationJobView)
 def execute_remediation_job(job_id: str) -> RemediationJobView:
-    """
-    Trigger execution of a remediation job.
+    """Trigger execution of a remediation job.
 
     In a real deployment, this would likely be restricted to internal
     workers only (e.g., via network policy, auth scopes, or mTLS).[web:1172][web:1291]
@@ -317,8 +309,7 @@ def update_remediation_job_status(
     job_id: str,
     payload: RemediationJobStatusUpdate,
 ) -> RemediationJobView:
-    """
-    Update job status from an external worker/orchestrator.
+    """Update job status from an external worker/orchestrator.
 
     This keeps the worker-side API generic if you later move execution
     out-of-process (e.g., to a queue consumer or Kubernetes Job).[web:1300][web:1303]

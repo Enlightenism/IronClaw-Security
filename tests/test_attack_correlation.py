@@ -134,7 +134,7 @@ def test_summarize_correlation_summary_returns_expected_shape():
             target="workspace://agent",
             verdict="warn",
             risk_score=45,
-        )
+        ),
     ]
 
     summary = correlate_attack_events(events)

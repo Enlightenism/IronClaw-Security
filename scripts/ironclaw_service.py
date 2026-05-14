@@ -161,9 +161,7 @@ def _build_env(project_root: Path) -> dict[str, str]:
     env = os.environ.copy()
     project_root_str = str(project_root)
     existing_pythonpath = env.get("PYTHONPATH", "").strip()
-    env["PYTHONPATH"] = (
-        project_root_str if not existing_pythonpath else f"{project_root_str}{os.pathsep}{existing_pythonpath}"
-    )
+    env["PYTHONPATH"] = project_root_str if not existing_pythonpath else f"{project_root_str}{os.pathsep}{existing_pythonpath}"
     return env
 
 
@@ -211,7 +209,7 @@ def start_service(
         if process.poll() is not None:
             _remove_pid(config.pid_file)
             raise IronClawServiceError(
-                f"IronClaw service exited early with code {process.returncode}. Check log: {config.log_file}"
+                f"IronClaw service exited early with code {process.returncode}. Check log: {config.log_file}",
             )
 
         time.sleep(0.25)
@@ -226,7 +224,7 @@ def start_service(
 
     _remove_pid(config.pid_file)
     raise IronClawServiceError(
-        f"IronClaw service did not become ready within {timeout_seconds} seconds."
+        f"IronClaw service did not become ready within {timeout_seconds} seconds.",
     )
 
 
@@ -296,7 +294,7 @@ def restart_service(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Manage the local IronClaw sidecar service for skill-style integrations."
+        description="Manage the local IronClaw sidecar service for skill-style integrations.",
     )
     parser.add_argument("--json", action="store_true", help="Print structured JSON output.")
     parser.add_argument(

@@ -81,9 +81,7 @@ class IntegrationRolloutService:
             ready=ready,
             updatedat=_utc_now(),
             steps=steps,
-            summary=(
-                f"Integration {record.integrationid} rollout stage is {stage}."
-            ),
+            summary=(f"Integration {record.integrationid} rollout stage is {stage}."),
         )
 
 

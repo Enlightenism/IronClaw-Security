@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+
 SECRET_PATTERNS: dict[str, str] = {
     "openai_api_key": r"\bsk-[A-Za-z0-9]{20,}\b",
     "aws_access_key": r"\bAKIA[0-9A-Z]{16}\b",
@@ -61,18 +62,18 @@ def _redact_patterns(
     failed_checks: list[str],
     redacted_items: list[str],
 ) -> tuple[str, int]:
-    total_hits = 0
+    hits = 0
     sanitized = text
 
     for label, pattern in patterns.items():
         matches = re.findall(pattern, sanitized, flags=re.IGNORECASE)
         if matches:
             sanitized = re.sub(pattern, REDACTION_TOKEN, sanitized, flags=re.IGNORECASE)
-            total_hits += len(matches)
+            hits += len(matches)
             redacted_items.append(label)
             failed_checks.append(f"redacted {label}")
 
-    return sanitized, total_hits
+    return sanitized, hits
 
 
 def sanitize_output(payload: Any) -> OutputSanitizationResult:
@@ -93,7 +94,6 @@ def sanitize_output(payload: Any) -> OutputSanitizationResult:
         redacted_items,
     )
 
-    total_hits = secret_hits + dangerous_hits
     modified = sanitized_text != original_text
     risk_score = min(100, secret_hits * 30 + dangerous_hits * 20)
 
@@ -124,9 +124,9 @@ def summarize_output_sanitizer(payload: Any) -> dict[str, Any]:
 
 
 __all__ = [
-    "SECRET_PATTERNS",
     "DANGEROUS_OUTPUT_PATTERNS",
     "REDACTION_TOKEN",
+    "SECRET_PATTERNS",
     "OutputSanitizationResult",
     "sanitize_output",
     "summarize_output_sanitizer",

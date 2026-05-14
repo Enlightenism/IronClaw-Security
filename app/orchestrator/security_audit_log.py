@@ -147,9 +147,10 @@ def read_security_audit_events(audit_log: SecurityAuditLog) -> list[SecurityAudi
                     request_id=payload.get("request_id"),
                     metadata=payload.get("metadata", {}),
                     created_at=payload.get(
-                        "created_at", datetime.now(UTC).isoformat()
+                        "created_at",
+                        datetime.now(UTC).isoformat(),
                     ),
-                )
+                ),
             )
     return events
 
@@ -159,30 +160,14 @@ def summarize_security_audit_log(audit_log: SecurityAuditLog) -> dict[str, Any]:
     return {
         "log_path": audit_log.log_path,
         "event_count": len(events),
-        "policy_decision_count": sum(
-            1 for event in events if event.event_type == "policy_decision"
-        ),
-        "execution_allowed_count": sum(
-            1 for event in events if event.event_type == "execution_allowed"
-        ),
-        "execution_warned_count": sum(
-            1 for event in events if event.event_type == "execution_warned"
-        ),
-        "execution_quarantined_count": sum(
-            1 for event in events if event.event_type == "execution_quarantined"
-        ),
-        "execution_blocked_count": sum(
-            1 for event in events if event.event_type == "execution_blocked"
-        ),
-        "review_requested_count": sum(
-            1 for event in events if event.event_type == "review_requested"
-        ),
-        "review_completed_count": sum(
-            1 for event in events if event.event_type == "review_completed"
-        ),
-        "supervisor_escalation_count": sum(
-            1 for event in events if event.event_type == "supervisor_escalation"
-        ),
+        "policy_decision_count": sum(1 for event in events if event.event_type == "policy_decision"),
+        "execution_allowed_count": sum(1 for event in events if event.event_type == "execution_allowed"),
+        "execution_warned_count": sum(1 for event in events if event.event_type == "execution_warned"),
+        "execution_quarantined_count": sum(1 for event in events if event.event_type == "execution_quarantined"),
+        "execution_blocked_count": sum(1 for event in events if event.event_type == "execution_blocked"),
+        "review_requested_count": sum(1 for event in events if event.event_type == "review_requested"),
+        "review_completed_count": sum(1 for event in events if event.event_type == "review_completed"),
+        "supervisor_escalation_count": sum(1 for event in events if event.event_type == "supervisor_escalation"),
         "latest_event_at": max((event.created_at for event in events), default=None),
         "updated_at": audit_log.updated_at,
     }
@@ -351,6 +336,8 @@ if __name__ == "__main__":
     )
     print(
         json.dumps(
-            summarize_security_audit_log(audit_log), ensure_ascii=False, indent=2
-        )
+            summarize_security_audit_log(audit_log),
+            ensure_ascii=False,
+            indent=2,
+        ),
     )

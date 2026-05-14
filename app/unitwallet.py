@@ -7,8 +7,7 @@ from typing import Any
 
 @dataclass(slots=True)
 class UnitWallet:
-    """
-    Minimal in-memory unit wallet compatible with the IronClaw tests.
+    """Minimal in-memory unit wallet compatible with the IronClaw tests.
 
     - Numeric balance is non-negative.
     - Optional owner identifier is supported.
@@ -17,15 +16,15 @@ class UnitWallet:
     """
 
     ownerid: str | None = None
-    balance: Decimal = field(default_factory=lambda: Decimal("0"))
+    balance: Decimal = field(default_factory=lambda: Decimal(0))
     status: str | None = "active"
 
     def _ensure_decimal(self, amount: Any, *, field_name: str) -> Decimal:
         try:
             value = Decimal(str(amount))
-        except (InvalidOperation, TypeError, ValueError):
-            raise TypeError(f"{field_name} must be numeric")  # noqa: TRY003
-        if value < Decimal("0"):
+        except (InvalidOperation, TypeError, ValueError) as err:
+            raise TypeError(f"{field_name} must be numeric") from err  # noqa: TRY003
+        if value < Decimal(0):
             raise ValueError(f"{field_name} must be non-negative")
         return value
 
@@ -36,8 +35,7 @@ class UnitWallet:
     # --- Public balance accessors used by tests ---
 
     def as_dict(self) -> dict[str, Any]:
-        """
-        Stable, JSON-friendly payload.
+        """Stable, JSON-friendly payload.
 
         Keys: ownerid, balance, status.
         """
@@ -108,8 +106,6 @@ class UnitWallet:
     def reserve(self, amount: Any) -> str:
         dec = self._ensure_decimal(amount, field_name="reserve")
         self._ensure_sufficient_funds(dec)
-        # Simple implementation: treat reserve as an immediate hold that does
-        # not alter balance but returns a non-empty token.
         return f"reserve-{dec}"
 
     def hold(self, amount: Any) -> str:
@@ -129,8 +125,7 @@ class UnitWallet:
 
 
 def build_unit_wallet(*, owner_id: str | None = None) -> UnitWallet:
-    """
-    Factory used by tests.
+    """Factory used by tests.
 
     - Returns a fresh UnitWallet instance (independent between calls).
     - Optional owner_id binds the wallet to an owner when provided and non-blank.

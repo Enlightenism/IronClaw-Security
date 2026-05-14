@@ -12,6 +12,7 @@ from typing import Any
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -47,8 +48,7 @@ def _require(value: str | None, label: str) -> str:
 
 
 def _parse_semver(version: str) -> tuple[int, ...]:
-    """
-    Parse a version string of the form YYYY.MM.DD or N.N.N into a comparable
+    """Parse a version string of the form YYYY.MM.DD or N.N.N into a comparable
     tuple of integers. Returns an empty tuple on any parse failure so callers
     can decide whether to surface a specific error.
     """
@@ -61,6 +61,7 @@ def _parse_semver(version: str) -> tuple[int, ...]:
 # ---------------------------------------------------------------------------
 # Result dataclasses
 # ---------------------------------------------------------------------------
+
 
 @dataclass(slots=True)
 class SignedBundle:
@@ -88,7 +89,7 @@ class SignedBundle:
 class VerificationVerdict:
     valid: bool
     allowed: bool
-    verdict: str                         # "allow" | "block" | "reject"
+    verdict: str  # "allow" | "block" | "reject"
     bundle_id: str
     version: str
     matched_rules: list[str] = field(default_factory=list)
@@ -112,9 +113,9 @@ class VerificationVerdict:
 # Service
 # ---------------------------------------------------------------------------
 
+
 class PolicyBundleSigningService:
-    """
-    Service-pattern signing and verification for IronClaw policy bundles.
+    """Service-pattern signing and verification for IronClaw policy bundles.
 
     Uses HMAC-SHA256 with base64-encoded signatures and SHA-256 content
     digests. All verification failures are accumulated into matched_rules
@@ -195,17 +196,26 @@ class PolicyBundleSigningService:
         manifest_digest = _normalize(manifest.get("digest"))
 
         if manifest_bundle_id and manifest_bundle_id != bundle_id:
-            _fail("bundle_id_mismatch", f"manifest bundleid={manifest_bundle_id!r} != bundle bundleid={bundle_id!r}")
+            _fail(
+                "bundle_id_mismatch",
+                f"manifest bundleid={manifest_bundle_id!r} != bundle bundleid={bundle_id!r}",
+            )
 
         if manifest_version and manifest_version != version:
-            _fail("version_mismatch", f"manifest version={manifest_version!r} != bundle version={version!r}")
+            _fail(
+                "version_mismatch",
+                f"manifest version={manifest_version!r} != bundle version={version!r}",
+            )
 
         # --- rollback check -----------------------------------------------
         if current_version:
             current_parts = _parse_semver(current_version)
             incoming_parts = _parse_semver(version)
             if current_parts and incoming_parts and incoming_parts < current_parts:
-                _fail("rollback_detected", f"incoming version {version!r} < current {current_version!r}")
+                _fail(
+                    "rollback_detected",
+                    f"incoming version {version!r} < current {current_version!r}",
+                )
 
         if matched_rules:
             return self._reject(bundle_id, version, matched_rules, reasons)
@@ -271,6 +281,7 @@ class PolicyBundleSigningService:
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
+
 
 def build_policy_bundle_signing_service() -> PolicyBundleSigningService:
     return PolicyBundleSigningService()

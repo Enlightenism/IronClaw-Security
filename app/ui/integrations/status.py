@@ -157,24 +157,16 @@ def build_integration_status_view(
                     "fail_count": summary["fail_count"],
                     "verification_summary": summary,
                 },
-            )
+            ),
         )
 
     items.sort(
         key=lambda item: (
-            0
-            if item.rollout_state == "blocked"
-            else 1
-            if item.rollout_state == "planned"
-            else 2
-            if item.rollout_state == "ready"
-            else 3
-            if item.rollout_state == "staged"
-            else 4,
+            0 if item.rollout_state == "blocked" else 1 if item.rollout_state == "planned" else 2 if item.rollout_state == "ready" else 3 if item.rollout_state == "staged" else 4,
             item.platform,
             item.slug,
             item.integration_id,
-        )
+        ),
     )
 
     return IntegrationStatusView(

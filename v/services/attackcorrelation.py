@@ -37,20 +37,24 @@ class CorrelatedSignal(BaseModel):
     severity: float = Field(..., ge=0.0, le=10.0, description="Signal severity on a 0–10 scale")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Detector confidence in [0,1]")
     session_id: str | None = Field(
-        None, description="Runtime session identifier when available"
+        None,
+        description="Runtime session identifier when available",
     )
     incident_id: str | None = Field(
-        None, description="Existing incident identifier if the signal is already attached"
+        None,
+        description="Existing incident identifier if the signal is already attached",
     )
     actor_id: str | None = Field(
         None,
         description="Logical actor identifier (API key, integration ID, user, unit wallet, etc.)",
     )
     tool_name: str | None = Field(
-        None, description="Tool or integration associated with the signal, if any"
+        None,
+        description="Tool or integration associated with the signal, if any",
     )
     source: str = Field(
-        ..., description="Source subsystem (promptguard, malware, secrets, runtime, etc.)"
+        ...,
+        description="Source subsystem (promptguard, malware, secrets, runtime, etc.)",
     )
     tags: set[str] = Field(
         default_factory=set,
@@ -122,8 +126,7 @@ class _CorrelationConfig:
 
 
 class AttackCorrelationService:
-    """
-    Lightweight, local-first attack correlation engine for IronClaw-Security.
+    """Lightweight, local-first attack correlation engine for IronClaw-Security.
 
     This service:
     - Normalizes incoming threat signals from PromptGuard, malware detonation, session risk, etc.
@@ -139,10 +142,10 @@ class AttackCorrelationService:
         self._config = config or _CorrelationConfig()
 
     def correlate(
-        self, signals: Sequence[CorrelatedSignal]
+        self,
+        signals: Sequence[CorrelatedSignal],
     ) -> list[CorrelationCluster]:
-        """
-        Correlate a batch of signals into higher-level campaigns/incident candidates.
+        """Correlate a batch of signals into higher-level campaigns/incident candidates.
 
         The algorithm is intentionally conservative and explainable:
         - Build edges for same session, same actor, shared IO, malware artifacts, hostile context.
@@ -172,7 +175,8 @@ class AttackCorrelationService:
         return [self._score_cluster(cluster) for cluster in clusters]
 
     def _link_same_session(
-        self, signals: Sequence[CorrelatedSignal]
+        self,
+        signals: Sequence[CorrelatedSignal],
     ) -> list[CorrelationEdge]:
         by_session: dict[str, list[CorrelatedSignal]] = {}
         for s in signals:
@@ -193,12 +197,13 @@ class AttackCorrelationService:
                             edge_type=CorrelationEdgeType.SAME_SESSION,
                             weight=self._config.same_session_weight,
                             reason="Signals share the same runtime session",
-                        )
+                        ),
                     )
         return edges
 
     def _link_same_actor(
-        self, signals: Sequence[CorrelatedSignal]
+        self,
+        signals: Sequence[CorrelatedSignal],
     ) -> list[CorrelationEdge]:
         by_actor: dict[str, list[CorrelatedSignal]] = {}
         for s in signals:
@@ -219,15 +224,15 @@ class AttackCorrelationService:
                             edge_type=CorrelationEdgeType.SAME_ACTOR,
                             weight=self._config.same_actor_weight,
                             reason="Signals originate from the same actor or API key",
-                        )
+                        ),
                     )
         return edges
 
     def _link_shared_io(
-        self, signals: Sequence[CorrelatedSignal]
+        self,
+        signals: Sequence[CorrelatedSignal],
     ) -> list[CorrelationEdge]:
-        """
-        Link signals that share IO artifacts (requests, tool calls, files).
+        """Link signals that share IO artifacts (requests, tool calls, files).
 
         We currently approximate shared IO via overlapping related_request_ids.
         """
@@ -250,15 +255,15 @@ class AttackCorrelationService:
                             edge_type=CorrelationEdgeType.SHARED_IO,
                             weight=self._config.shared_io_weight,
                             reason="Signals share one or more related requests or tool executions",
-                        )
+                        ),
                     )
         return edges
 
     def _link_hostile_context(
-        self, signals: Sequence[CorrelatedSignal]
+        self,
+        signals: Sequence[CorrelatedSignal],
     ) -> list[CorrelationEdge]:
-        """
-        Link signals that share hostile context patterns.
+        """Link signals that share hostile context patterns.
 
         This ties prompt injection, evasive chains, and other hostile context matches together.
         """
@@ -281,15 +286,15 @@ class AttackCorrelationService:
                             edge_type=CorrelationEdgeType.HOSTILE_CONTEXT,
                             weight=self._config.hostile_context_boost,
                             reason="Signals share hostile context pattern matches",
-                        )
+                        ),
                     )
         return edges
 
     def _link_malware_artifacts(
-        self, signals: Sequence[CorrelatedSignal]
+        self,
+        signals: Sequence[CorrelatedSignal],
     ) -> list[CorrelationEdge]:
-        """
-        Link signals that share malware artifacts or detonation runs.
+        """Link signals that share malware artifacts or detonation runs.
 
         This ties malware sandbox output back into higher-level incident reasoning.
         """
@@ -312,15 +317,15 @@ class AttackCorrelationService:
                             edge_type=CorrelationEdgeType.MALWARE_CAMPAIGN,
                             weight=self._config.malware_detonation_boost,
                             reason="Signals share malware or detonation artifacts",
-                        )
+                        ),
                     )
         return edges
 
     def _link_incidents(
-        self, signals: Sequence[CorrelatedSignal]
+        self,
+        signals: Sequence[CorrelatedSignal],
     ) -> list[CorrelationEdge]:
-        """
-        Link signals that are already associated with the same incident.
+        """Link signals that are already associated with the same incident.
 
         This helps keep enrichment from multiple detectors grouped coherently.
         """
@@ -343,7 +348,7 @@ class AttackCorrelationService:
                             edge_type=CorrelationEdgeType.INCIDENT_LINK,
                             weight=self._config.incident_link_weight,
                             reason="Signals are attached to the same existing incident",
-                        )
+                        ),
                     )
         return edges
 
@@ -352,8 +357,7 @@ class AttackCorrelationService:
         signals: Mapping[str, CorrelatedSignal],
         edges: Sequence[CorrelationEdge],
     ) -> list[CorrelationCluster]:
-        """
-        Compute connected components over the correlation graph.
+        """Compute connected components over the correlation graph.
 
         Each connected component becomes a correlation cluster.
         """
@@ -373,11 +377,7 @@ class AttackCorrelationService:
                 continue
             component_ids = self._dfs_component(sid, adjacency, visited)
             component_signals = [signals[cid] for cid in component_ids]
-            component_edges = [
-                e
-                for e in edges
-                if e.from_signal_id in component_ids and e.to_signal_id in component_ids
-            ]
+            component_edges = [e for e in edges if e.from_signal_id in component_ids and e.to_signal_id in component_ids]
             cluster_id = f"cluster-{cluster_index}"
             cluster_index += 1
             clusters.append(
@@ -389,7 +389,7 @@ class AttackCorrelationService:
                     priority="low",
                     recommended_action="review",
                     playbook_suggestion=None,
-                )
+                ),
             )
         return clusters
 
@@ -414,8 +414,7 @@ class AttackCorrelationService:
         return component
 
     def _score_cluster(self, cluster: CorrelationCluster) -> CorrelationCluster:
-        """
-        Compute a cluster-level risk score and triage metadata.
+        """Compute a cluster-level risk score and triage metadata.
 
         We combine:
         - max per-signal severity
@@ -429,19 +428,11 @@ class AttackCorrelationService:
         severities = [s.severity for s in cluster.signals]
         confidences = [s.confidence for s in cluster.signals]
         max_severity = max(severities)
-        weighted_severity = (
-            sum(s * c for s, c in zip(severities, confidences, strict=False)) / max(1e-6, sum(confidences))
-        )
+        weighted_severity = sum(s * c for s, c in zip(severities, confidences, strict=False)) / max(1e-6, sum(confidences))
 
-        hostile_boost = self._config.hostile_context_boost if any(
-            s.hostile_context_ids for s in cluster.signals
-        ) else 0.0
-        malware_boost = self._config.malware_detonation_boost if any(
-            s.detonated_artifact_ids for s in cluster.signals
-        ) else 0.0
-        session_boost = self._config.session_risk_boost if any(
-            s.kind == CorrelatedSignalKind.SESSION_RISK for s in cluster.signals
-        ) else 0.0
+        hostile_boost = self._config.hostile_context_boost if any(s.hostile_context_ids for s in cluster.signals) else 0.0
+        malware_boost = self._config.malware_detonation_boost if any(s.detonated_artifact_ids for s in cluster.signals) else 0.0
+        session_boost = self._config.session_risk_boost if any(s.kind == CorrelatedSignalKind.SESSION_RISK for s in cluster.signals) else 0.0
 
         # Simple graph density approximation
         n = len(cluster.signals)
@@ -480,22 +471,15 @@ class AttackCorrelationService:
         score: float,
         priority: str,
     ) -> tuple[str, str | None]:
-        """
-        Decide recommended action and playbook suggestion.
+        """Decide recommended action and playbook suggestion.
 
         This does NOT perform actions; it only provides guidance for:
         - remediationgate / responsecoordinator
         - reviewqueueservice / incidentservice
         """
-        contains_malware = any(
-            s.kind == CorrelatedSignalKind.MALWARE_DETONATION for s in cluster.signals
-        )
-        contains_prompt_injection = any(
-            s.kind == CorrelatedSignalKind.PROMPT_INJECTION for s in cluster.signals
-        )
-        contains_data_exfil = any(
-            s.kind == CorrelatedSignalKind.DATA_EXFIL for s in cluster.signals
-        )
+        contains_malware = any(s.kind == CorrelatedSignalKind.MALWARE_DETONATION for s in cluster.signals)
+        contains_prompt_injection = any(s.kind == CorrelatedSignalKind.PROMPT_INJECTION for s in cluster.signals)
+        contains_data_exfil = any(s.kind == CorrelatedSignalKind.DATA_EXFIL for s in cluster.signals)
 
         if priority == "critical":
             if contains_malware or contains_data_exfil:

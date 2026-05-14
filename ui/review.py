@@ -68,7 +68,7 @@ def _row(
     status: str,
     principal_id: str | None,
     source: str,
-    score: int | float | None,
+    score: float | None,
 ) -> dict[str, Any]:
     return {
         "review_id": review_id,

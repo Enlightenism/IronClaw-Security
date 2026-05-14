@@ -78,8 +78,7 @@ class BillingSubscription:
 
 
 class BillingRegistry:
-    """
-    Local-first billing foundation for fast revenue experiments.
+    """Local-first billing foundation for fast revenue experiments.
 
     This keeps the public contract simple so we can later swap in Stripe
     without changing route payloads or dashboard expectations.
@@ -174,12 +173,12 @@ class BillingRegistry:
         customer_id: str,
         units: int,
     ) -> BillingSubscription:
-        """
-        Record usage units for a customer.
+        """Record usage units for a customer.
 
         Raises:
             KeyError: if no active subscription exists.
             ValueError: if usage would exceed the subscription's unit limit.
+
         """
         if units <= 0:
             raise ValueError("units must be positive")
@@ -191,8 +190,7 @@ class BillingRegistry:
 
             if subscription.units_consumed + units > subscription.unit_limit:
                 raise ValueError(
-                    f"Usage would exceed plan limit: "
-                    f"{subscription.units_consumed + units} > {subscription.unit_limit}"
+                    f"Usage would exceed plan limit: {subscription.units_consumed + units} > {subscription.unit_limit}",
                 )
 
             subscription.units_consumed += units
@@ -204,9 +202,7 @@ class BillingRegistry:
         customer_id: str,
         units: int,
     ) -> bool:
-        """
-        Check if a customer can consume the requested units under current plan.
-        """
+        """Check if a customer can consume the requested units under current plan."""
         if units <= 0:
             return False
 

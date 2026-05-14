@@ -11,7 +11,7 @@ def list_integration_installers() -> dict[str, object]:
         "items": [
             {"integration_id": "claude-code", "status": "ready"},
             {"integration_id": "openclaw", "status": "ready"},
-        ]
+        ],
     }
 
 
@@ -30,7 +30,7 @@ def list_integration_verifiers() -> dict[str, object]:
         "items": [
             {"integration_id": "claude-code", "status": "ready"},
             {"integration_id": "openclaw", "status": "ready"},
-        ]
+        ],
     }
 
 

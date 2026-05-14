@@ -100,7 +100,7 @@ class DeploymentReadinessService:
             "guard_service",
             "action_policy_service",
             "action_decision_service",
-        )
+        ),
     )
 
     def evaluate(self) -> dict[str, Any]:

@@ -120,7 +120,7 @@ class SessionRiskAnalyzer:
                     weight=0.16,
                     evidence="Session is already attached to an active human or policy review workflow.",
                     category="workflow",
-                )
+                ),
             )
 
         factors = self._dedupe_factors(factors)
@@ -191,7 +191,7 @@ class SessionRiskAnalyzer:
                     weight=min(0.20, monitor_count * 0.05),
                     evidence=f"Session accumulated {monitor_count} monitor verdict event(s).",
                     category="verdict",
-                )
+                ),
             )
         if review_count:
             factors.append(
@@ -200,7 +200,7 @@ class SessionRiskAnalyzer:
                     weight=min(0.36, review_count * 0.12),
                     evidence=f"Session accumulated {review_count} review verdict event(s).",
                     category="verdict",
-                )
+                ),
             )
         if block_count:
             factors.append(
@@ -209,7 +209,7 @@ class SessionRiskAnalyzer:
                     weight=min(0.55, block_count * 0.22),
                     evidence=f"Session accumulated {block_count} block verdict event(s).",
                     category="verdict",
-                )
+                ),
             )
 
         return factors
@@ -226,7 +226,7 @@ class SessionRiskAnalyzer:
                     weight=min(0.30, len(high_events) * 0.08),
                     evidence=f"{len(high_events)} event(s) were marked high or critical severity.",
                     category="severity",
-                )
+                ),
             )
         if critical_events:
             factors.append(
@@ -235,7 +235,7 @@ class SessionRiskAnalyzer:
                     weight=min(0.44, len(critical_events) * 0.16),
                     evidence=f"{len(critical_events)} event(s) were marked critical severity.",
                     category="severity",
-                )
+                ),
             )
 
         return factors
@@ -255,7 +255,7 @@ class SessionRiskAnalyzer:
                     weight=min(0.24, sum(repeat_sources.values()) * 0.03),
                     evidence=f"Repeated activity across detectors: {details}.",
                     category="pattern",
-                )
+                ),
             )
 
         return factors
@@ -287,7 +287,7 @@ class SessionRiskAnalyzer:
                     weight=min(0.22, max_hits * 0.04),
                     evidence=f"Session produced {max_hits} events within a {recent_window_minutes}-minute window.",
                     category="tempo",
-                )
+                ),
             )
 
         return factors
@@ -302,7 +302,7 @@ class SessionRiskAnalyzer:
                     weight=min(0.18, len(unique_sources) * 0.04),
                     evidence=f"Risk surfaced across {len(unique_sources)} independent sources.",
                     category="correlation",
-                )
+                ),
             )
         return factors
 
@@ -323,7 +323,7 @@ class SessionRiskAnalyzer:
                     weight=0.10,
                     evidence=f"Latest risky event was observed within the past {recent_window_minutes} minutes.",
                     category="tempo",
-                )
+                ),
             )
 
         return factors
@@ -395,7 +395,7 @@ class SessionRiskAnalyzer:
         active_review: bool,
     ) -> list[str]:
         reasons = [
-            f"Session risk resolved to {verdict} with {severity} severity across {len(events)} event(s)."
+            f"Session risk resolved to {verdict} with {severity} severity across {len(events)} event(s).",
         ]
 
         if active_review:
@@ -406,7 +406,7 @@ class SessionRiskAnalyzer:
 
         strongest_event = max(events, key=lambda event: (event.score, VERDICT_RANK.get(event.verdict, 1)))
         reasons.append(
-            f"Strongest single event came from {strongest_event.source} with verdict {strongest_event.verdict} and score {strongest_event.score:.4f}."
+            f"Strongest single event came from {strongest_event.source} with verdict {strongest_event.verdict} and score {strongest_event.score:.4f}.",
         )
 
         return reasons
@@ -429,8 +429,8 @@ def build_session_risk_analyzer() -> SessionRiskAnalyzer:
 
 __all__ = [
     "SessionEvent",
+    "SessionRiskAnalyzer",
     "SessionRiskFactor",
     "SessionRiskResult",
-    "SessionRiskAnalyzer",
     "build_session_risk_analyzer",
 ]

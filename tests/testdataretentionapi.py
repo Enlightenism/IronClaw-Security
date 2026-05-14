@@ -10,7 +10,7 @@ from app.main import app
 DATA_RETENTION_PATH: Final[str] = "/data/retention"
 
 
-@pytest.fixture()
+@pytest.fixture
 def client() -> TestClient:
     with TestClient(app) as test_client:
         yield test_client

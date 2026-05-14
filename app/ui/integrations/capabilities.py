@@ -119,7 +119,7 @@ def build_integration_capabilities_view(
                     "requested_by": requested_by,
                     "status": record.status,
                 },
-            )
+            ),
         )
 
     items.sort(key=lambda item: (item.platform, item.slug, item.integration_id))

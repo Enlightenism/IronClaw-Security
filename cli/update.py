@@ -247,7 +247,15 @@ def run_update_command(
     git_fetch_ok, git_fetch_detail = _run_command(["git", "fetch", "--all", "--tags"], cwd=root)
     git_status_ok, git_status_detail = _run_command(["git", "status", "--short"], cwd=root)
     pip_upgrade_ok, pip_upgrade_detail = _run_command(
-        [str(venv_python), "-m", "pip", "install", "--upgrade", "-r", str(_requirements_path(root))],
+        [
+            str(venv_python),
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "-r",
+            str(_requirements_path(root)),
+        ],
         cwd=root,
     )
 

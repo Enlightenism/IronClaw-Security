@@ -52,10 +52,7 @@ async def _scan_chunk_with_policy_guard(
 
 
 def _build_block_warning(reason: str, bundle_verdict: str) -> bytes:
-    warning = (
-        "\n\n[IRONCLAW-GUARD] Stream truncated due to high-risk content. "
-        f"Reason: {reason or 'policy guard verdict: ' + bundle_verdict}.\n"
-    )
+    warning = f"\n\n[IRONCLAW-GUARD] Stream truncated due to high-risk content. Reason: {reason or 'policy guard verdict: ' + bundle_verdict}.\n"
     return warning.encode("utf-8")
 
 
@@ -85,7 +82,7 @@ async def _proxy_stream_with_guard(
                 if upstream.status_code != status.HTTP_200_OK:
                     text = await upstream.aread()
                     raise StreamGuardError(
-                        f"Upstream returned {upstream.status_code}: {text!r}"
+                        f"Upstream returned {upstream.status_code}: {text!r}",
                     )
 
                 buffer = ""
@@ -108,7 +105,7 @@ async def _proxy_stream_with_guard(
                         )
 
                         bundle_verdict = str(
-                            verdict.get("bundle_verdict", "allow")
+                            verdict.get("bundle_verdict", "allow"),
                         ).lower()
                         reason = str(verdict.get("reason", ""))
 
@@ -135,7 +132,7 @@ async def _proxy_stream_with_guard(
                     )
 
                     bundle_verdict = str(
-                        verdict.get("bundle_verdict", "allow")
+                        verdict.get("bundle_verdict", "allow"),
                     ).lower()
                     reason = str(verdict.get("reason", ""))
 
@@ -208,9 +205,5 @@ async def claude_stream_guard_proxy(
 
 def _infer_guard_base_url(request: Request) -> str:
     scheme = request.headers.get("X-Forwarded-Proto") or request.url.scheme
-    host = (
-        request.headers.get("X-Forwarded-Host")
-        or request.headers.get("Host")
-        or request.url.netloc
-    )
+    host = request.headers.get("X-Forwarded-Host") or request.headers.get("Host") or request.url.netloc
     return f"{scheme}://{host}".rstrip("/")

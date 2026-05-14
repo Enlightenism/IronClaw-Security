@@ -116,7 +116,7 @@ def test_wallet_balance_is_numeric_and_non_negative() -> None:
     wallet = build_unit_wallet()
 
     balance = _balance_of(wallet)
-    assert balance >= Decimal("0")
+    assert balance >= Decimal(0)
 
 
 def test_wallet_owner_can_be_bound_when_supported() -> None:
@@ -157,11 +157,11 @@ def test_wallet_credit_increases_balance_when_credit_method_exists() -> None:
         pytest.skip("wallet credit method not implemented")
 
     before = _balance_of(wallet)
-    _call_method_if_present(wallet, credit_methods, Decimal("25"))
+    _call_method_if_present(wallet, credit_methods, Decimal(25))
     after = _balance_of(wallet)
 
     assert after >= before
-    assert after - before == Decimal("25")
+    assert after - before == Decimal(25)
 
 
 def test_wallet_debit_decreases_balance_when_debit_method_exists() -> None:
@@ -174,14 +174,14 @@ def test_wallet_debit_decreases_balance_when_debit_method_exists() -> None:
         pytest.skip("wallet debit method not implemented")
 
     if any(hasattr(wallet, name) and callable(getattr(wallet, name)) for name in credit_methods):
-        _call_method_if_present(wallet, credit_methods, Decimal("30"))
+        _call_method_if_present(wallet, credit_methods, Decimal(30))
 
     before = _balance_of(wallet)
-    _call_method_if_present(wallet, debit_methods, Decimal("10"))
+    _call_method_if_present(wallet, debit_methods, Decimal(10))
     after = _balance_of(wallet)
 
     assert after <= before
-    assert before - after == Decimal("10")
+    assert before - after == Decimal(10)
 
 
 def test_wallet_rejects_negative_credit_when_credit_method_exists() -> None:
@@ -192,7 +192,7 @@ def test_wallet_rejects_negative_credit_when_credit_method_exists() -> None:
         pytest.skip("wallet credit method not implemented")
 
     with pytest.raises((TypeError, ValueError, AssertionError)):
-        _call_method_if_present(wallet, credit_methods, Decimal("-1"))
+        _call_method_if_present(wallet, credit_methods, Decimal(-1))
 
 
 def test_wallet_rejects_negative_debit_when_debit_method_exists() -> None:
@@ -203,7 +203,7 @@ def test_wallet_rejects_negative_debit_when_debit_method_exists() -> None:
         pytest.skip("wallet debit method not implemented")
 
     with pytest.raises((TypeError, ValueError, AssertionError)):
-        _call_method_if_present(wallet, debit_methods, Decimal("-1"))
+        _call_method_if_present(wallet, debit_methods, Decimal(-1))
 
 
 def test_wallet_prevents_overdraft_when_debit_method_exists() -> None:
@@ -216,7 +216,7 @@ def test_wallet_prevents_overdraft_when_debit_method_exists() -> None:
     current = _balance_of(wallet)
 
     with pytest.raises((TypeError, ValueError, AssertionError)):
-        _call_method_if_present(wallet, debit_methods, current + Decimal("1"))
+        _call_method_if_present(wallet, debit_methods, current + Decimal(1))
 
 
 def test_wallet_supports_reserve_and_release_when_available() -> None:
@@ -233,12 +233,12 @@ def test_wallet_supports_reserve_and_release_when_available() -> None:
 
     credit_methods = ("credit", "deposit", "add_units", "fund", "top_up")
     if any(hasattr(wallet, name) and callable(getattr(wallet, name)) for name in credit_methods):
-        _call_method_if_present(wallet, credit_methods, Decimal("20"))
+        _call_method_if_present(wallet, credit_methods, Decimal(20))
 
     before = _balance_of(wallet)
-    token = _call_method_if_present(wallet, reserve_methods, Decimal("5"))
+    token = _call_method_if_present(wallet, reserve_methods, Decimal(5))
     middle = _balance_of(wallet)
-    _call_method_if_present(wallet, release_methods, token if token is not None else Decimal("5"))
+    _call_method_if_present(wallet, release_methods, token if token is not None else Decimal(5))
     after = _balance_of(wallet)
 
     assert middle <= before
@@ -264,11 +264,11 @@ def test_wallet_multiple_instances_are_independent() -> None:
     if any(hasattr(first, name) and callable(getattr(first, name)) for name in credit_methods):
         before_first = _balance_of(first)
         before_second = _balance_of(second)
-        _call_method_if_present(first, credit_methods, Decimal("7"))
+        _call_method_if_present(first, credit_methods, Decimal(7))
         after_first = _balance_of(first)
         after_second = _balance_of(second)
 
-        assert after_first - before_first == Decimal("7")
+        assert after_first - before_first == Decimal(7)
         assert after_second == before_second
 
 

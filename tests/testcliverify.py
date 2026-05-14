@@ -19,12 +19,11 @@ def _import_cliverify_module() -> Any:
         except ModuleNotFoundError as exc:
             last_error = exc
     raise AssertionError(
-        "Unable to import cliverify module. Expected one of: "
-        + ", ".join(MODULE_CANDIDATES)
+        "Unable to import cliverify module. Expected one of: " + ", ".join(MODULE_CANDIDATES),
     ) from last_error
 
 
-@pytest.fixture()
+@pytest.fixture
 def cliverify_module() -> Any:
     return _import_cliverify_module()
 
@@ -80,11 +79,7 @@ def test_cliverify_help_style_main_returns_none_or_int(
 
     assert result is None or isinstance(result, int)
     if combined_output:
-        assert (
-            "help" in combined_output
-            or "usage" in combined_output
-            or "verify" in combined_output
-        )
+        assert "help" in combined_output or "usage" in combined_output or "verify" in combined_output
 
 
 def test_cliverify_verify_like_entrypoint_accepts_noninteractive_invocation(

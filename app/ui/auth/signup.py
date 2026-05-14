@@ -246,10 +246,7 @@ def get_signup_page() -> SignupPageResponse:
         generatedat=_utc_now(),
         environment="local",
         pageheadline="Start your protected IronClaw workspace.",
-        pagesubtitle=(
-            "Create the first organization, choose a plan, and generate the initial runtime guard "
-            "configuration for safe AI execution."
-        ),
+        pagesubtitle=("Create the first organization, choose a plan, and generate the initial runtime guard configuration for safe AI execution."),
         steps=steps,
         planoptions=planoptions,
         accountfields=accountfields,

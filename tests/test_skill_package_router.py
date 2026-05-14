@@ -279,13 +279,19 @@ class TestIronClawSkillRouterRegistration:
         def first(req):
             first_called.append(True)
             return build_skill_success_response(
-                operation="scan", verdict="review", summary="first", request_id=req.context.request_id
+                operation="scan",
+                verdict="review",
+                summary="first",
+                request_id=req.context.request_id,
             )
 
         def second(req):
             second_called.append(True)
             return build_skill_success_response(
-                operation="scan", verdict="block", summary="second", request_id=req.context.request_id
+                operation="scan",
+                verdict="block",
+                summary="second",
+                request_id=req.context.request_id,
             )
 
         router.register("scan", first)
@@ -761,7 +767,10 @@ class TestSkillMiddleware:
     def test_trace_populated_after_execution(self):
         def handler(req):
             return build_skill_success_response(
-                operation="scan", verdict="allow", summary="ok", request_id=req.context.request_id
+                operation="scan",
+                verdict="allow",
+                summary="ok",
+                request_id=req.context.request_id,
             )
 
         mw = create_middleware(
@@ -778,7 +787,9 @@ class TestSkillMiddleware:
     def test_trace_request_id_is_none_when_context_has_none(self):
         def handler(req):
             return build_skill_success_response(
-                operation="action_policy", verdict="allow", summary="ok"
+                operation="action_policy",
+                verdict="allow",
+                summary="ok",
             )
 
         ctx = _make_context(request_id=None)
@@ -793,7 +804,10 @@ class TestSkillMiddleware:
     def test_router_stub_billing_hook_charges_without_rejection(self):
         def handler(req):
             return build_skill_success_response(
-                operation="scan", verdict="allow", summary="ok", request_id=req.context.request_id
+                operation="scan",
+                verdict="allow",
+                summary="ok",
+                request_id=req.context.request_id,
             )
 
         hook = StubBillingHook()
@@ -812,7 +826,10 @@ class TestSkillMiddleware:
     def test_memory_billing_hook_tracks_balance(self):
         def handler(req):
             return build_skill_success_response(
-                operation="execute", verdict="allow", summary="ok", request_id=req.context.request_id
+                operation="execute",
+                verdict="allow",
+                summary="ok",
+                request_id=req.context.request_id,
             )
 
         policy = BillingPolicy(
@@ -835,7 +852,9 @@ class TestSkillMiddleware:
     def test_memory_billing_hook_blocks_on_exhausted(self):
         def handler(req):
             return build_skill_success_response(
-                operation="scan", verdict="allow", summary="ok"
+                operation="scan",
+                verdict="allow",
+                summary="ok",
             )
 
         policy = BillingPolicy(
@@ -861,7 +880,9 @@ class TestSkillMiddleware:
         def handler(req):
             executed.append(True)
             return build_skill_success_response(
-                operation="scan", verdict="allow", summary="ok"
+                operation="scan",
+                verdict="allow",
+                summary="ok",
             )
 
         class BrokenHook:
@@ -881,7 +902,9 @@ class TestSkillMiddleware:
     def test_fail_closed_on_billing_error_raises(self):
         def handler(req):
             return build_skill_success_response(
-                operation="scan", verdict="allow", summary="ok"
+                operation="scan",
+                verdict="allow",
+                summary="ok",
             )
 
         class BrokenHook:
@@ -900,7 +923,9 @@ class TestSkillMiddleware:
     def test_metadata_factory_enriches_trace(self):
         def handler(req):
             return build_skill_success_response(
-                operation="scan", verdict="allow", summary="ok"
+                operation="scan",
+                verdict="allow",
+                summary="ok",
             )
 
         def meta_factory(req):
@@ -919,7 +944,9 @@ class TestSkillMiddleware:
     def test_trace_metadata_excluded_when_flag_false(self):
         def handler(req):
             return build_skill_success_response(
-                operation="scan", verdict="allow", summary="ok"
+                operation="scan",
+                verdict="allow",
+                summary="ok",
             )
 
         def meta_factory(req):
@@ -937,7 +964,9 @@ class TestSkillMiddleware:
     def test_middleware_result_to_dict_contains_trace_and_response(self):
         def handler(req):
             return build_skill_success_response(
-                operation="action_decision", verdict="allow", summary="ok"
+                operation="action_decision",
+                verdict="allow",
+                summary="ok",
             )
 
         mw = create_middleware(
@@ -986,7 +1015,9 @@ class TestAttachTrace:
     def test_attach_trace_to_pydantic_model_returns_dict_with_trace(self):
         trace = self._make_trace()
         env = build_skill_success_response(
-            operation="scan", verdict="allow", summary="ok"
+            operation="scan",
+            verdict="allow",
+            summary="ok",
         )
         enriched = attach_trace(env, trace)
         if isinstance(enriched, dict):
@@ -1211,7 +1242,9 @@ class TestRouterMiddlewareBillingPipeline:
     def test_billing_exhaustion_blocks_pipeline(self):
         def scan_handler(req):
             return build_skill_success_response(
-                operation="scan", verdict="allow", summary="ok"
+                operation="scan",
+                verdict="allow",
+                summary="ok",
             )
 
         policy = BillingPolicy(

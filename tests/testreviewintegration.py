@@ -18,7 +18,7 @@ def test_register_and_escalate_incident_into_review_queue() -> None:
             artifact_id="artifact_789",
             reasons=["policy escalation", "hostile pattern"],
             evidence=[{"type": "signal", "name": "prompt_injection", "score": 0.98}],
-        )
+        ),
     )
 
     assert result.incident_id == "inc_001"
@@ -56,7 +56,7 @@ def test_escalating_same_incident_updates_existing_review_item() -> None:
             summary="Potential risky artifact delivery path detected.",
             severity="medium",
             reasons=["artifact anomaly"],
-        )
+        ),
     )
 
     second = service.register_and_escalate(
@@ -67,7 +67,7 @@ def test_escalating_same_incident_updates_existing_review_item() -> None:
             severity="critical",
             reasons=["artifact anomaly", "secondary confirmation"],
             evidence=[{"type": "signal", "name": "secondary_confirmation", "score": 1.0}],
-        )
+        ),
     )
 
     assert first.review_id == second.review_id

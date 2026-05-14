@@ -74,7 +74,7 @@ def test_build_action_history_test_view_uses_default_selection_when_none_request
             "kind": "review",
             "status": "queued",
             "summary": "Queued action",
-        }
+        },
     ]
 
     result = build_action_history_test_view(
@@ -113,7 +113,7 @@ def test_build_action_history_test_view_matches_executionid_when_actionid_missin
             "kind": "sync",
             "status": "completed",
             "summary": "Execution-backed action",
-        }
+        },
     ]
 
     result = build_action_history_test_view(

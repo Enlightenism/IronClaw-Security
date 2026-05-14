@@ -91,11 +91,7 @@ def _discover_migrations() -> list[str]:
     if not MIGRATIONS_DIR.exists():
         _print("No migrations directory found; skipping migration hooks")
         return []
-    files = sorted(
-        path.name
-        for path in MIGRATIONS_DIR.iterdir()
-        if path.is_file() and path.suffix.lower() in {".sql", ".py"}
-    )
+    files = sorted(path.name for path in MIGRATIONS_DIR.iterdir() if path.is_file() and path.suffix.lower() in {".sql", ".py"})
     _print(f"Discovered {len(files)} migration file(s)")
     return files
 
@@ -119,7 +115,7 @@ def _ensure_rollback_notes(version: str) -> None:
                     "- Restore database from backup before reverting incompatible migrations.",
                     "- Re-run verification after rollback.",
                     "",
-                ]
+                ],
             )
             + "\n",
             encoding="utf-8",
@@ -131,11 +127,7 @@ def _ensure_rollback_notes(version: str) -> None:
     if version not in existing:
         with ROLLBACK_NOTES_FILE.open("a", encoding="utf-8") as handle:
             handle.write(
-                "\n"
-                f"## Reviewed for version: {version}\n"
-                "- Confirm previous deployment artifact is available.\n"
-                "- Confirm database rollback or restore path is documented.\n"
-                "- Confirm post-rollback verification command is ready.\n"
+                f"\n## Reviewed for version: {version}\n- Confirm previous deployment artifact is available.\n- Confirm database rollback or restore path is documented.\n- Confirm post-rollback verification command is ready.\n",
             )
         _print("Appended version-specific rollback notes")
     else:

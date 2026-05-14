@@ -505,11 +505,7 @@ def test_telemetry_store_preserves_metadata_mapping_when_supported() -> None:
 
     rows = [_serialize(row) for row in _items(result)]
     matched = next(
-        (
-            row
-            for row in rows
-            if row.get("event_id") == event_id or row.get("id") == event_id
-        ),
+        (row for row in rows if row.get("event_id") == event_id or row.get("id") == event_id),
         None,
     )
     if matched is None:

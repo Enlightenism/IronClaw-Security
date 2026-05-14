@@ -184,7 +184,7 @@ def coordination_events_from_session(session: RuntimeSession) -> list[Coordinati
                 matched_patterns=event.matched_patterns,
                 scan_id=event.scan_id,
                 created_at=event.created_at,
-            )
+            ),
         )
     return events
 
@@ -206,7 +206,7 @@ if __name__ == "__main__":
     from app.orchestrator.coordination_state import initialize_coordination_state
     from app.orchestrator.dependency_graph import build_dependency_graph
 
-    root = Path(".").resolve()
+    root = Path().resolve()
     orchestrator = IronClawOrchestrator(project_root=root)
     graph = build_dependency_graph(root)
     snapshot = initialize_coordination_state(orchestrator.registry, graph)

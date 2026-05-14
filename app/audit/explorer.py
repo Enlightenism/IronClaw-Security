@@ -168,7 +168,10 @@ def _normalize_record(value: Any) -> AuditExplorerRecord | None:
 
     actor_value = value.get("actor")
     if isinstance(actor_value, dict):
-        actor = _coerce_str(actor_value.get("display_name") or actor_value.get("actor_id") or actor_value.get("actor_type"), "System")
+        actor = _coerce_str(
+            actor_value.get("display_name") or actor_value.get("actor_id") or actor_value.get("actor_type"),
+            "System",
+        )
     else:
         actor = _coerce_str(actor_value, "System") or "System"
 
@@ -218,8 +221,7 @@ def build_audit_explorer(
     returned_results = _coerce_int(source.get("returned_results"), len(records))
     total_results = _coerce_int(source.get("total_results"), returned_results)
 
-    if total_results < returned_results:
-        total_results = returned_results
+    total_results = max(total_results, returned_results)
 
     return AuditExplorer(
         query=_coerce_str(source.get("query"), current.query),

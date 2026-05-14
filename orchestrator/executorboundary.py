@@ -208,7 +208,7 @@ class ExecutorBoundary:
                     code="network_not_allowed",
                     message="Network access is outside the executor boundary.",
                     details={"requires_network": True},
-                )
+                ),
             )
 
         if request.requires_filesystem and not limits.filesystem_allowed:
@@ -217,7 +217,7 @@ class ExecutorBoundary:
                     code="filesystem_not_allowed",
                     message="Filesystem access is outside the executor boundary.",
                     details={"requires_filesystem": True},
-                )
+                ),
             )
 
         if request.requires_secrets and not limits.secrets_allowed:
@@ -226,7 +226,7 @@ class ExecutorBoundary:
                     code="secrets_not_allowed",
                     message="Secret handling is outside the executor boundary.",
                     details={"requires_secrets": True},
-                )
+                ),
             )
 
         path = str(request.attributes.get("path", "")).strip()
@@ -237,7 +237,7 @@ class ExecutorBoundary:
                         code="path_outside_boundary",
                         message="Requested path is outside the allowed boundary.",
                         details={"path": path, "allowed_paths": list(limits.allowed_paths)},
-                    )
+                    ),
                 )
 
         host = self._extract_host(request.attributes)
@@ -249,7 +249,7 @@ class ExecutorBoundary:
                         code="host_outside_boundary",
                         message="Requested host is outside the allowed network boundary.",
                         details={"host": host, "allowed_hosts": list(limits.allowed_hosts)},
-                    )
+                    ),
                 )
 
         return violations
@@ -272,7 +272,7 @@ class ExecutorBoundary:
                         "runtime_seconds": runtime_seconds,
                         "max_runtime_seconds": limits.max_runtime_seconds,
                     },
-                )
+                ),
             )
 
         if len(execution_result.artifacts) > limits.max_artifact_count:
@@ -284,7 +284,7 @@ class ExecutorBoundary:
                         "artifact_count": len(execution_result.artifacts),
                         "max_artifact_count": limits.max_artifact_count,
                     },
-                )
+                ),
             )
 
         output_size = self._estimate_output_bytes(execution_result)
@@ -297,7 +297,7 @@ class ExecutorBoundary:
                         "output_bytes": output_size,
                         "max_output_bytes": limits.max_output_bytes,
                     },
-                )
+                ),
             )
 
         if execution_result.verdict == PolicyVerdict.QUARANTINE.value:
@@ -307,7 +307,7 @@ class ExecutorBoundary:
                     message="Execution was quarantined by the secure runtime pipeline.",
                     severity="critical",
                     details={"execution_status": execution_result.status},
-                )
+                ),
             )
 
         if execution_result.verdict == PolicyVerdict.BLOCK.value:
@@ -317,7 +317,7 @@ class ExecutorBoundary:
                     message="Execution was blocked by the secure runtime pipeline.",
                     severity="critical",
                     details={"execution_status": execution_result.status},
-                )
+                ),
             )
 
         if request.requires_network and not limits.network_allowed:
@@ -326,7 +326,7 @@ class ExecutorBoundary:
                     code="unexpected_network_request",
                     message="Execution attempted network activity outside allowed limits.",
                     details={"requires_network": True},
-                )
+                ),
             )
 
         return self._dedupe_violations(violations)

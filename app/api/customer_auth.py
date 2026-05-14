@@ -90,7 +90,7 @@ async def get_customer_any_permission_endpoint(
             "customer:read",
             "customer:write",
             "session:read",
-        )
+        ),
     ),
 ) -> dict[str, Any]:
     return {

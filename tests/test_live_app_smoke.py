@@ -79,22 +79,14 @@ def test_live_app_integrations_endpoints_exist() -> None:
         "/integrations/{integration_id}",
     ]
 
-    registered_paths = {
-        route.path
-        for route in app.routes
-        if hasattr(route, "path")
-    }
+    registered_paths = {route.path for route in app.routes if hasattr(route, "path")}
 
     for path in expected_paths:
         assert path in registered_paths, path
 
 
 def test_live_app_docs_endpoints_are_registered() -> None:
-    registered_paths = {
-        route.path
-        for route in app.routes
-        if hasattr(route, "path")
-    }
+    registered_paths = {route.path for route in app.routes if hasattr(route, "path")}
 
     assert "/docs" in registered_paths
     assert "/openapi.json" in registered_paths

@@ -95,7 +95,7 @@ def test_allow_safe_supervised_request():
             allowed=True,
             risk_delta=10,
             matched_rules=["secureruntimepipeline:allow"],
-        )
+        ),
     )
 
     result = supervisor.evaluate(
@@ -163,7 +163,7 @@ def test_pipeline_allow_flows_through():
             allowed=True,
             risk_delta=5,
             matched_rules=["secureruntimepipeline:allow"],
-        )
+        ),
     )
 
     result = supervisor.evaluate(
@@ -188,7 +188,7 @@ def test_pipeline_review_enqueues_review():
             should_review=True,
             risk_delta=35,
             matched_rules=["secureruntimepipeline:review"],
-        )
+        ),
     )
 
     result = supervisor.evaluate(
@@ -216,7 +216,7 @@ def test_pipeline_block_blocks_request():
             should_block=True,
             risk_delta=70,
             matched_rules=["secureruntimepipeline:block"],
-        )
+        ),
     )
 
     result = supervisor.evaluate(
@@ -243,7 +243,7 @@ def test_pipeline_quarantine_quarantines_request():
             should_quarantine=True,
             risk_delta=90,
             matched_rules=["secureruntimepipeline:quarantine"],
-        )
+        ),
     )
 
     result = supervisor.evaluate(
@@ -268,7 +268,7 @@ def test_normalizes_fields_before_pipeline_dispatch():
             verdict="allow",
             allowed=True,
             matched_rules=["secureruntimepipeline:allow"],
-        )
+        ),
     )
 
     result = supervisor.evaluate(
@@ -292,7 +292,7 @@ def test_preserves_request_shape_for_network_calls():
             verdict="allow",
             allowed=True,
             matched_rules=["secureruntimepipeline:allow"],
-        )
+        ),
     )
 
     result = supervisor.evaluate(
@@ -314,7 +314,7 @@ def test_preserves_request_shape_for_artifact_calls():
             verdict="allow",
             allowed=True,
             matched_rules=["secureruntimepipeline:allow"],
-        )
+        ),
     )
 
     result = supervisor.evaluate(
@@ -335,7 +335,7 @@ def test_allow_helper_matches_safe_decision():
             verdict="allow",
             allowed=True,
             matched_rules=["secureruntimepipeline:allow"],
-        )
+        ),
     )
 
     allowed = supervisor.allow(
@@ -354,7 +354,7 @@ def test_allow_helper_matches_unsafe_decision():
             allowed=False,
             should_block=True,
             matched_rules=["secureruntimepipeline:block"],
-        )
+        ),
     )
 
     allowed = supervisor.allow(
@@ -373,7 +373,7 @@ def test_as_dict_contains_expected_shapes():
             allowed=True,
             reasons=[{"source": "secureruntimepipeline", "label": "Safe", "details": "ok", "score": 5}],
             matched_rules=["secureruntimepipeline:allow"],
-        )
+        ),
     )
 
     result = supervisor.evaluate(
@@ -406,7 +406,7 @@ def test_deduplicates_reasons_and_rules():
             should_review=True,
             reasons=[repeated_reason, repeated_reason],
             matched_rules=["repeat_rule", "repeat_rule"],
-        )
+        ),
     )
 
     result = supervisor.evaluate(
@@ -415,11 +415,7 @@ def test_deduplicates_reasons_and_rules():
         command="echo duplicate",
     )
 
-    repeated = [
-        item
-        for item in result.reasons
-        if item["label"] == "Repeated" and item["details"] == "Same reason"
-    ]
+    repeated = [item for item in result.reasons if item["label"] == "Repeated" and item["details"] == "Same reason"]
     assert len(repeated) == 1
     assert result.matched_rules.count("repeat_rule") == 1
 
@@ -430,7 +426,7 @@ def test_review_queue_not_called_for_allow():
             verdict="allow",
             allowed=True,
             matched_rules=["secureruntimepipeline:allow"],
-        )
+        ),
     )
 
     result = supervisor.evaluate(
@@ -461,7 +457,7 @@ def test_builder_accepts_submit_only_review_queue():
                 allowed=True,
                 should_review=True,
                 matched_rules=["secureruntimepipeline:review"],
-            )
+            ),
         ),
         review_queue=review_queue,
         audit_sink=audit_sink,
@@ -493,7 +489,7 @@ def test_audit_sink_optional_method_shapes_are_supported():
                 verdict="allow",
                 allowed=True,
                 matched_rules=["secureruntimepipeline:allow"],
-            )
+            ),
         ),
         review_queue=_ReviewQueueStub(),
         audit_sink=audit_sink,

@@ -34,12 +34,8 @@ class PermissionDecision:
 
 
 ROLE_PERMISSIONS: dict[str, tuple[str, ...]] = {
-    "platform_admin": (
-        "*",
-    ),
-    "system_admin": (
-        "*",
-    ),
+    "platform_admin": ("*",),
+    "system_admin": ("*",),
     "operator_admin": (
         "operator:read",
         "operator:write",
@@ -235,9 +231,7 @@ def evaluate_permission(
         direct_permissions=context.permissions,
         roles=context.roles,
     )
-    matched = tuple(
-        granted for granted in effective if _permission_matches(granted, required)
-    )
+    matched = tuple(granted for granted in effective if _permission_matches(granted, required))
 
     if matched:
         return PermissionDecision(

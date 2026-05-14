@@ -94,7 +94,12 @@ def _build_history_store(module: Any) -> Any:
                 except TypeError:
                     pytest.skip("history factory requires unsupported arguments")
 
-    for cls_name in ("HistoryStore", "HistoryService", "InMemoryHistoryStore", "SupabaseHistoryStore"):
+    for cls_name in (
+        "HistoryStore",
+        "HistoryService",
+        "InMemoryHistoryStore",
+        "SupabaseHistoryStore",
+    ):
         if hasattr(module, cls_name):
             cls = getattr(module, cls_name)
             if callable(cls):

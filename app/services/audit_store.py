@@ -33,8 +33,7 @@ class AuditEventRecord:
 
 
 class SecurityAuditEventStore:
-    """
-    In-memory store for raw security audit events.
+    """In-memory store for raw security audit events.
 
     Distinct from AuditStore (auditstore.py) which is the persistence-backed
     store for structured audit events. This store is for internal IronClaw
@@ -109,7 +108,7 @@ class SecurityAuditEventStore:
                             "seeded": True,
                         },
                     ),
-                ]
+                ],
             )
 
     def list_events(

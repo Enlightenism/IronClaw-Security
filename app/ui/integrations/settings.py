@@ -238,10 +238,7 @@ def read_ui_integration_settings() -> IntegrationSettingsResponse:
 
 def buildintegrationssettingsview() -> HTMLResponse:
     data = get_integration_settings()
-    providers_rows = "".join(
-        f"<tr><td>{p.name}</td><td>{p.mode}</td><td>{'Yes' if p.enabled else 'No'}</td></tr>"
-        for p in data.providers
-    )
+    providers_rows = "".join(f"<tr><td>{p.name}</td><td>{p.mode}</td><td>{'Yes' if p.enabled else 'No'}</td></tr>" for p in data.providers)
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -258,7 +255,7 @@ def buildintegrationssettingsview() -> HTMLResponse:
 
   <section data-testid="bidirectional-sync">
     <h2>Bidirectional Sync</h2>
-    <p>{'Enabled' if data.bidirectionalsyncenabled else 'Disabled'}</p>
+    <p>{"Enabled" if data.bidirectionalsyncenabled else "Disabled"}</p>
   </section>
 
   <section data-testid="providers-list">

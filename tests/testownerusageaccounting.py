@@ -126,7 +126,7 @@ def test_owner_usage_accounting_numeric_fields_are_non_negative_when_present() -
     ):
         value = _number(payload, *keys)
         if value is not None:
-            assert value >= Decimal("0")
+            assert value >= Decimal(0)
 
 
 def test_owner_usage_accounting_remaining_does_not_exceed_quota_when_both_present() -> None:
@@ -296,7 +296,7 @@ def test_owner_usage_accounting_record_method_tracks_owner_when_supported() -> N
         if owner is not None:
             assert owner == "owner-001"
         if units is not None:
-            assert units == Decimal("2")
+            assert units == Decimal(2)
 
 
 def test_owner_usage_accounting_record_method_distinguishes_owners_when_supported() -> None:

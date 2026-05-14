@@ -181,7 +181,6 @@ class McpToolAdapter(BaseIntegrationAdapter):
             self.metadata["guard_mode"] = self.guard_mode
 
     def supported_action_types(self) -> list[str]:
-        # All toolcall phases go through this adapter.
         return [
             "toolcall:plan",
             "toolcall:preflight",
@@ -194,7 +193,7 @@ class McpToolAdapter(BaseIntegrationAdapter):
             if isinstance(capability, IntegrationCapability):
                 caps.append(capability.to_dict())
             else:
-                caps.append(getattr(capability, "to_dict", lambda: dict(capability))())
+                caps.append(getattr(capability, "to_dict", lambda cap=capability: dict(cap))())
         return caps
 
     def guard_invocation(
@@ -244,17 +243,14 @@ class McpToolAdapter(BaseIntegrationAdapter):
         )
 
     def execute(self, request: AdapterExecutionRequest) -> AdapterExecutionResult:
-        """
-        Execute a tool call through the base adapter contract.
+        """Execute a tool call through the base adapter contract.
 
         At this layer we do not talk to a real MCP server yet; we envelope the request,
         attach guard decision metadata, and let upstream orchestration decide how to
         route the actual tool execution for IronClaw-Security.
         """
-        # Let the base adapter validate action_type/target and health first.
         base_result = super().execute(request)
 
-        # Derive tool name + phase from the request envelope if present.
         tool_name = _normalize_text(request.payload.get("tool_name")) or request.target
         phase = _normalize_text(request.payload.get("phase")) or "execute"
 
@@ -272,7 +268,6 @@ class McpToolAdapter(BaseIntegrationAdapter):
 
         decision = self.guard_invocation(invocation, mode=self.guard_mode)
 
-        # Attach guard decision into the adapter result without changing success.
         base_result.status = decision.status
         base_result.summary = decision.summary
         base_result.output.setdefault("request", request.to_dict())
@@ -284,8 +279,7 @@ class McpToolAdapter(BaseIntegrationAdapter):
 
 
 def build_mcp_tool_adapter(registry: IntegrationRegistry) -> McpToolAdapter:
-    """
-    Factory for the MCP tool adapter used in tests and integrations.
+    """Factory for the MCP tool adapter used in tests and integrations.
 
     Expects an IntegrationRecord with id 'integration-mcp-tools' to exist in the registry.
     """

@@ -239,8 +239,8 @@ def summarize_file_return_guard(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "HIGH_RISK_EXTENSIONS",
-    "MEDIUM_RISK_EXTENSIONS",
     "HIGH_RISK_KEYWORDS",
+    "MEDIUM_RISK_EXTENSIONS",
     "MEDIUM_RISK_KEYWORDS",
     "FileReturnGuardDecision",
     "evaluate_file_return",

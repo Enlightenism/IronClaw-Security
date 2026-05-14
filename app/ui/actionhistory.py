@@ -139,13 +139,7 @@ def _build_summary(
     requestedunits: int,
     remainingunits: Any,
 ) -> str:
-    return (
-        f"{actiontype} -> {target} | "
-        f"status={status} | "
-        f"risk={riskscore} | "
-        f"requested_units={requestedunits} | "
-        f"remaining_units={_format_compact_value(remainingunits)}"
-    )
+    return f"{actiontype} -> {target} | status={status} | risk={riskscore} | requested_units={requestedunits} | remaining_units={_format_compact_value(remainingunits)}"
 
 
 def _coerce_int(value: Any, default: int = 0) -> int:
@@ -194,25 +188,18 @@ def build_action_history_view(
         remaining_units = usage.get("remainingunits", usage.get("remaining_units"))
         wallet_balance = usage.get("walletbalance", usage.get("wallet_balance"))
 
-        action_id = (
-            _normalize_text(record.get("actionid"))
-            or _normalize_text(record.get("executionid"))
-            or _normalize_text(usage.get("executionid"))
-            or f"action-{index}"
-        )
+        action_id = _normalize_text(record.get("actionid")) or _normalize_text(record.get("executionid")) or _normalize_text(usage.get("executionid")) or f"action-{index}"
 
         action_type = _normalize_text(record.get("actiontype")) or "unknown"
         target = _normalize_text(record.get("target")) or "unknown"
         timestamp = _format_datetime(
-            record.get("timestamp") or record.get("createdat") or record.get("executedat")
+            record.get("timestamp") or record.get("createdat") or record.get("executedat"),
         )
         reason = _normalize_text(record.get("message") or usage.get("reason") or record.get("reason"))
         policy_verdict = _normalize_text(record.get("policyverdict") or record.get("policy_verdict"))
         executor_name = _normalize_text(record.get("executorname") or record.get("executor_name"))
         prompt_injection_detected = bool(
-            promptinjection.get("detected")
-            or promptinjection.get("suspicious")
-            or promptinjection.get("flagged")
+            promptinjection.get("detected") or promptinjection.get("suspicious") or promptinjection.get("flagged"),
         )
 
         items.append(
@@ -245,7 +232,7 @@ def build_action_history_view(
                     remainingunits=remaining_units,
                 ),
                 metadata=dict(record.get("metadata") or {}),
-            )
+            ),
         )
 
     total = len(items)

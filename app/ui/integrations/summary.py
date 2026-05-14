@@ -217,7 +217,7 @@ def build_integration_summary_view(
                     "checked_at": summary.get("checked_at"),
                     "verification_summary": summary,
                 },
-            )
+            ),
         )
 
     items.sort(
@@ -226,7 +226,7 @@ def build_integration_summary_view(
             item.platform,
             item.slug,
             item.integration_id,
-        )
+        ),
     )
 
     return IntegrationSummaryView(

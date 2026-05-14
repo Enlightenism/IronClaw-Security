@@ -79,7 +79,7 @@ def build_integration_registry_view(
                 metadata={
                     "requested_by": requested_by,
                 },
-            )
+            ),
         )
 
     items.sort(key=lambda item: (item.platform, item.slug, item.integration_id))

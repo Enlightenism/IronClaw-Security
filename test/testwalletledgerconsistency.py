@@ -84,7 +84,7 @@ def _entry_direction(entry: dict[str, Any]) -> str | None:
 
 
 def _sum_entries(entries: list[Any]) -> Decimal:
-    total = Decimal("0")
+    total = Decimal(0)
     for raw in entries:
         if not isinstance(raw, dict):
             continue
@@ -164,9 +164,9 @@ def test_wallet_and_ledger_balances_are_non_negative_when_present() -> None:
     wallet_balance = _wallet_balance_of(build_unit_wallet())
     ledger_balance = _ledger_balance_of(build_unit_ledger())
 
-    assert wallet_balance >= Decimal("0")
+    assert wallet_balance >= Decimal(0)
     if ledger_balance is not None:
-        assert ledger_balance >= Decimal("0")
+        assert ledger_balance >= Decimal(0)
 
 
 def test_wallet_and_ledger_initial_balances_match_when_built_for_same_owner() -> None:
@@ -201,23 +201,23 @@ def test_wallet_credit_and_ledger_credit_stay_consistent_when_supported() -> Non
         pytest.skip("ledger credit posting method not implemented")
 
     wallet_before = _wallet_balance_of(wallet)
-    ledger_before = _ledger_balance_of(ledger) or Decimal("0")
+    ledger_before = _ledger_balance_of(ledger) or Decimal(0)
     entries_before = list(_entries_of(ledger) or [])
 
-    _call_method_if_present(wallet, wallet_credit_methods, Decimal("10"))
+    _call_method_if_present(wallet, wallet_credit_methods, Decimal(10))
     _call_method_if_present(
         ledger,
         ledger_credit_methods,
-        amount=Decimal("10"),
+        amount=Decimal(10),
         reference_id="wallet-ledger-credit-001",
     )
 
     wallet_after = _wallet_balance_of(wallet)
-    ledger_after = _ledger_balance_of(ledger) or Decimal("0")
+    ledger_after = _ledger_balance_of(ledger) or Decimal(0)
     entries_after = list(_entries_of(ledger) or [])
 
-    assert wallet_after - wallet_before == Decimal("10")
-    assert ledger_after - ledger_before == Decimal("10")
+    assert wallet_after - wallet_before == Decimal(10)
+    assert ledger_after - ledger_before == Decimal(10)
     assert wallet_after == ledger_after
     assert len(entries_after) >= len(entries_before)
 
@@ -241,31 +241,31 @@ def test_wallet_debit_and_ledger_debit_stay_consistent_when_supported() -> None:
         pytest.skip("ledger debit posting method not implemented")
 
     if any(hasattr(wallet, name) and callable(getattr(wallet, name)) for name in wallet_credit_methods):
-        _call_method_if_present(wallet, wallet_credit_methods, Decimal("20"))
+        _call_method_if_present(wallet, wallet_credit_methods, Decimal(20))
     if any(hasattr(ledger, name) and callable(getattr(ledger, name)) for name in ledger_credit_methods):
         _call_method_if_present(
             ledger,
             ledger_credit_methods,
-            amount=Decimal("20"),
+            amount=Decimal(20),
             reference_id="wallet-ledger-fund-001",
         )
 
     wallet_before = _wallet_balance_of(wallet)
-    ledger_before = _ledger_balance_of(ledger) or Decimal("0")
+    ledger_before = _ledger_balance_of(ledger) or Decimal(0)
 
-    _call_method_if_present(wallet, wallet_debit_methods, Decimal("5"))
+    _call_method_if_present(wallet, wallet_debit_methods, Decimal(5))
     _call_method_if_present(
         ledger,
         ledger_debit_methods,
-        amount=Decimal("5"),
+        amount=Decimal(5),
         reference_id="wallet-ledger-debit-001",
     )
 
     wallet_after = _wallet_balance_of(wallet)
-    ledger_after = _ledger_balance_of(ledger) or Decimal("0")
+    ledger_after = _ledger_balance_of(ledger) or Decimal(0)
 
-    assert wallet_before - wallet_after == Decimal("5")
-    assert ledger_before - ledger_after == Decimal("5")
+    assert wallet_before - wallet_after == Decimal(5)
+    assert ledger_before - ledger_after == Decimal(5)
     assert wallet_after == ledger_after
 
 
@@ -278,15 +278,10 @@ def test_ledger_entry_sum_matches_ledger_balance_when_entries_are_directional() 
         pytest.skip("ledger does not expose balance and entries together")
 
     if not entries:
-        assert ledger_balance == Decimal("0")
+        assert ledger_balance == Decimal(0)
         return
 
-    has_directional_amounts = any(
-        isinstance(entry, dict)
-        and _entry_amount(entry) is not None
-        and _entry_direction(entry) is not None
-        for entry in entries
-    )
+    has_directional_amounts = any(isinstance(entry, dict) and _entry_amount(entry) is not None and _entry_direction(entry) is not None for entry in entries)
     if not has_directional_amounts:
         pytest.skip("ledger entries do not expose directional amounts")
 
@@ -310,8 +305,8 @@ def test_wallet_and_ledger_reject_overdraft_consistently_when_supported() -> Non
         pytest.skip("ledger debit posting method not implemented")
 
     wallet_balance = _wallet_balance_of(wallet)
-    ledger_balance = _ledger_balance_of(ledger) or Decimal("0")
-    attempt = max(wallet_balance, ledger_balance) + Decimal("1")
+    ledger_balance = _ledger_balance_of(ledger) or Decimal(0)
+    attempt = max(wallet_balance, ledger_balance) + Decimal(1)
 
     with pytest.raises((TypeError, ValueError, AssertionError)):
         _call_method_if_present(wallet, wallet_debit_methods, attempt)

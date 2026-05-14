@@ -188,7 +188,7 @@ def build_integration_coverage_view(
                 metadata={
                     "requested_by": requested_by,
                 },
-            )
+            ),
         )
 
     items.sort(
@@ -197,7 +197,7 @@ def build_integration_coverage_view(
             item.platform,
             item.slug,
             item.integration_id,
-        )
+        ),
     )
 
     return IntegrationCoverageView(

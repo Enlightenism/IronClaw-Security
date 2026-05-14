@@ -44,11 +44,7 @@ def call_brain_decision(payload: dict[str, Any], timeout: int = 10) -> dict[str,
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description=(
-            "IronClaw-Security tool runner.\n"
-            "Reads JSON input (tool arguments), calls the IronClaw API, "
-            "and prints JSON output for machine consumption."
-        )
+        description=("IronClaw-Security tool runner.\nReads JSON input (tool arguments), calls the IronClaw API, and prints JSON output for machine consumption."),
     )
 
     parser.add_argument(

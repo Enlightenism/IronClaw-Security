@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 try:
     from pydantic_settings import BaseSettings, SettingsConfigDict
+
     _HAS_PYDANTIC_SETTINGS = True
 except ModuleNotFoundError:  # pragma: no cover
     _HAS_PYDANTIC_SETTINGS = False
@@ -210,21 +211,16 @@ class Settings(BaseSettings):
 
     @property
     def effective_platform_api_key(self) -> str | None:
-        return (
-            self.internal_platform_api_key
-            or self.platform_api_key
-            or self.admin_api_key
-            or self.api_key
-        )
+        return self.internal_platform_api_key or self.platform_api_key or self.admin_api_key or self.api_key
 
     def validate_runtime(self) -> None:
         if self.risk_threshold_allow_max >= self.risk_threshold_quarantine_min:
             raise ValueError(
-                "RISK_THRESHOLD_ALLOW_MAX must be less than RISK_THRESHOLD_QUARANTINE_MIN"
+                "RISK_THRESHOLD_ALLOW_MAX must be less than RISK_THRESHOLD_QUARANTINE_MIN",
             )
         if self.risk_threshold_quarantine_min > self.risk_threshold_block_min:
             raise ValueError(
-                "RISK_THRESHOLD_QUARANTINE_MIN must be less than or equal to RISK_THRESHOLD_BLOCK_MIN"
+                "RISK_THRESHOLD_QUARANTINE_MIN must be less than or equal to RISK_THRESHOLD_BLOCK_MIN",
             )
         if self.groq_enabled and not self.groq_api_key:
             raise ValueError("GROQ_ENABLED is true but GROQ_API_KEY is not set")
@@ -232,15 +228,9 @@ class Settings(BaseSettings):
             raise ValueError("DEFAULT_SCAN_VERDICT is invalid")
         if self.default_review_status not in {"not_required", "pending", "approved", "rejected"}:
             raise ValueError("DEFAULT_REVIEW_STATUS is invalid")
-        if self.auth_required and not (
-            self.api_key
-            or self.admin_api_key
-            or self.platform_api_key
-            or self.internal_platform_api_key
-        ):
+        if self.auth_required and not (self.api_key or self.admin_api_key or self.platform_api_key or self.internal_platform_api_key):
             raise ValueError(
-                "AUTH_REQUIRED is true but no API key is configured "
-                "(API_KEY, ADMIN_API_KEY, PLATFORM_API_KEY, or INTERNAL_PLATFORM_API_KEY)"
+                "AUTH_REQUIRED is true but no API key is configured (API_KEY, ADMIN_API_KEY, PLATFORM_API_KEY, or INTERNAL_PLATFORM_API_KEY)",
             )
 
 

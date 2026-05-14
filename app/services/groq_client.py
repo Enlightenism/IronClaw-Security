@@ -21,8 +21,7 @@ class GroqChatMessage:
 
 @dataclass(slots=True)
 class GroqChatClient:
-    """
-    Thin Groq chat client abstraction for the IronClaw security brain + UI.
+    """Thin Groq chat client abstraction for the IronClaw security brain + UI.
 
     Design goals:
     - Keep the public surface tiny and stable: one .chat() method.
@@ -42,8 +41,7 @@ class GroqChatClient:
 
     @classmethod
     def default(cls) -> GroqChatClient:
-        """
-        Factory used throughout IronClaw (UI copilot, remediation, etc.).
+        """Factory used throughout IronClaw (UI copilot, remediation, etc.).
 
         The default model can be overridden with GROQ_MODEL_DEFAULT.
         """
@@ -57,8 +55,7 @@ class GroqChatClient:
         model: str | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> str:
-        """
-        Synchronous chat call.
+        """Synchronous chat call.
 
         Behavior:
         - If GROQ_API_KEY and groq SDK are available, call Groq.
@@ -106,12 +103,7 @@ class GroqChatClient:
 
         summary_bits.append(f"Conversation length: {len(messages)} message(s)")
 
-        return (
-            "Groq Security Copilot (local stub)\n"
-            "No live Groq backend is configured; this is a deterministic "
-            "echo-style response for testing.\n\n"
-            + "\n\n".join(summary_bits)
-        )
+        return "Groq Security Copilot (local stub)\nNo live Groq backend is configured; this is a deterministic echo-style response for testing.\n\n" + "\n\n".join(summary_bits)
 
 
 def _groq_sdk_available() -> bool:
@@ -163,7 +155,7 @@ def _call_groq_api(
 
     if isinstance(content, list):
         parts: list[str] = []
-        for item in cast(list[Any], content):
+        for item in cast("list[Any]", content):
             if isinstance(item, dict):
                 text = item.get("text")
                 if text:

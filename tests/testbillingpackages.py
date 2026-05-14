@@ -157,7 +157,7 @@ def test_billing_package_numeric_fields_are_non_negative_when_present() -> None:
         ):
             value = _number(payload, *keys)
             if value is not None:
-                assert value >= Decimal("0")
+                assert value >= Decimal(0)
 
 
 def test_billing_package_features_are_list_or_dict_when_present() -> None:

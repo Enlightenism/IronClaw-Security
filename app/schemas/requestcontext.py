@@ -6,8 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class RequestContextResponse(BaseModel):
-    """
-    Normalized request context snapshot for UI and API consumers.
+    """Normalized request context snapshot for UI and API consumers.
 
     This schema is wired to the `request-context` endpoint in the OpenAPI
     specification and must remain stable for tests and downstream clients.
@@ -41,10 +40,7 @@ class RequestContextResponse(BaseModel):
     request_started_at: float | None = Field(
         default=None,
         title="Request Started At",
-        description=(
-            "Wall-clock timestamp (seconds since epoch) when the request "
-            "was first received by IronClaw-Security."
-        ),
+        description=("Wall-clock timestamp (seconds since epoch) when the request was first received by IronClaw-Security."),
     )
     client_host: str | None = Field(
         default=None,
@@ -79,18 +75,12 @@ class RequestContextResponse(BaseModel):
     headers: dict[str, Any] = Field(
         default_factory=dict,
         title="Headers",
-        description=(
-            "Normalized request headers captured at the security boundary. "
-            "Values may be redacted according to policy."
-        ),
+        description=("Normalized request headers captured at the security boundary. Values may be redacted according to policy."),
     )
 
     model_config = {
         "title": "RequestContextResponse",
         "json_schema_extra": {
-            "description": (
-                "Snapshot of the current HTTP request, used for security telemetry, "
-                "audit trails, and UI inspection flows."
-            )
+            "description": ("Snapshot of the current HTTP request, used for security telemetry, audit trails, and UI inspection flows."),
         },
     }

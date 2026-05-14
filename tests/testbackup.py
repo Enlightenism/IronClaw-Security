@@ -53,7 +53,7 @@ def _base_env() -> dict[str, str]:
             "IRONCLAW_BACKUP_ENCRYPTION": "true",
             "IRONCLAW_BACKUP_CHECKSUM": "true",
             "IRONCLAW_BACKUP_DIR": str(ROOT / "output" / "test-backups"),
-        }
+        },
     )
     return env
 
@@ -206,10 +206,7 @@ def test_backup_fails_or_warns_with_backup_directory_disabled() -> None:
 
     checks = _payload_checks(payload)
     if any(_check_name(check) in {"backup-dir", "backup-target", "filesystem-write"} for check in checks):
-        assert any(
-            _check_name(check) in {"backup-dir", "backup-target", "filesystem-write"} and _check_ok(check) is False
-            for check in checks
-        )
+        assert any(_check_name(check) in {"backup-dir", "backup-target", "filesystem-write"} and _check_ok(check) is False for check in checks)
     else:
         pytest.skip("backup target validation check is not implemented by this script")
 

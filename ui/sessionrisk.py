@@ -81,7 +81,7 @@ def _event(
     timestamp: str,
     category: str,
     verdict: str,
-    score: int | float,
+    score: float,
     source: str,
     detail_path: str,
 ) -> dict[str, Any]:
@@ -335,7 +335,7 @@ def ui_session_risk_page(
                     "title": "No session events found",
                     "description": "Adjust your filters to inspect a different session or wider time range.",
                 },
-            }
+            },
         ],
         "actions": [
             {

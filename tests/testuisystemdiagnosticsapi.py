@@ -10,7 +10,7 @@ from app.main import app
 UI_SYSTEM_DIAGNOSTICS_PATH: Final[str] = "/ui/system-diagnostics"
 
 
-@pytest.fixture()
+@pytest.fixture
 def client() -> TestClient:
     with TestClient(app) as test_client:
         yield test_client
@@ -42,14 +42,8 @@ def test_ui_system_diagnostics_contains_core_fields(client: TestClient) -> None:
 
     assert data
     assert any(k in data for k in ("title", "headline", "summary", "dashboard_title"))
-    assert any(
-        k in data
-        for k in ("checks", "components", "services", "status_items", "metrics", "cards")
-    )
-    assert any(
-        k in data
-        for k in ("sections", "alerts", "actions", "health", "panels", "details")
-    )
+    assert any(k in data for k in ("checks", "components", "services", "status_items", "metrics", "cards"))
+    assert any(k in data for k in ("sections", "alerts", "actions", "health", "panels", "details"))
 
 
 def test_ui_system_diagnostics_surface_does_not_return_array_root(
@@ -64,7 +58,18 @@ def test_ui_system_diagnostics_nested_collections_are_json_safe_when_present(
 ) -> None:
     _, data = _get_payload(client)
 
-    for key in ("checks", "components", "services", "status_items", "metrics", "cards", "sections", "alerts", "actions", "panels"):
+    for key in (
+        "checks",
+        "components",
+        "services",
+        "status_items",
+        "metrics",
+        "cards",
+        "sections",
+        "alerts",
+        "actions",
+        "panels",
+    ):
         if key in data:
             assert isinstance(data[key], list)
 

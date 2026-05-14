@@ -124,8 +124,7 @@ def add_security_middleware(app: FastAPI) -> FastAPI:
 
 
 def bootstrap_app(app: FastAPI) -> FastAPI:
-    """
-    Entry point to configure global app state and middleware.
+    """Entry point to configure global app state and middleware.
     Call this once, right after creating the FastAPI() instance.
     """
     app = configure_app_state(app)

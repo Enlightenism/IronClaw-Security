@@ -23,11 +23,7 @@ def _load_module() -> Any:
 
 
 def _callable_names(module: Any) -> set[str]:
-    return {
-        name
-        for name in dir(module)
-        if not name.startswith("_") and callable(getattr(module, name))
-    }
+    return {name for name in dir(module) if not name.startswith("_") and callable(getattr(module, name))}
 
 
 def _first_callable(module: Any, *names: str) -> Any | None:

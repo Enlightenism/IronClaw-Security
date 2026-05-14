@@ -162,7 +162,7 @@ def assertrequestoperation(request: SkillExecutionRequest, expected: CliOperatio
     actual = getattr(request, "operation", None)
     if actual != expected:
         raise IronClawSkillCliError(
-            f"Request operation mismatch: expected {expected}, received {actual}."
+            f"Request operation mismatch: expected {expected}, received {actual}.",
         )
 
 
@@ -172,7 +172,7 @@ def assertresponseoperation(response: SkillResponseEnvelope, expected: CliOperat
     actual = getattr(response, "operation", None)
     if actual != expected:
         raise IronClawSkillCliError(
-            f"Response operation mismatch: expected {expected}, received {actual}."
+            f"Response operation mismatch: expected {expected}, received {actual}.",
         )
 
 
@@ -353,11 +353,11 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 __all__ = [
+    "DEFAULT_INPUT_FILE",
+    "DEFAULT_OUTPUT_FORMAT",
     "CliFormat",
     "CliOperation",
     "CliProvider",
-    "DEFAULT_INPUT_FILE",
-    "DEFAULT_OUTPUT_FORMAT",
     "IronClawSkillCliError",
     "adaptrequest",
     "adaptresponse",

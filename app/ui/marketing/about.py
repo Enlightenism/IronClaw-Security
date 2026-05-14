@@ -81,10 +81,7 @@ def get_marketing_about() -> AboutPageResponse:
     hero = AboutHeroView(
         eyebrow="About IronClaw",
         title="We are building the trust layer AI systems should have had from the beginning.",
-        subtitle=(
-            "IronClaw-Security exists because the world moved from using AI as a text interface to connecting it with "
-            "files, browsers, tools, workflows, and real machines faster than most people understood the risk."
-        ),
+        subtitle=("IronClaw-Security exists because the world moved from using AI as a text interface to connecting it with files, browsers, tools, workflows, and real machines faster than most people understood the risk."),
         primaryctalabel="Talk to our team",
         primaryctahref="/contact-sales",
         secondaryctalabel="Read trust and security",
@@ -93,10 +90,7 @@ def get_marketing_about() -> AboutPageResponse:
 
     mission = AboutMissionView(
         title="Mission",
-        statement=(
-            "Protect people, teams, and machines from unsafe AI behavior by making prompt injection, autonomous misuse, "
-            "and tool-connected risk visible, enforceable, and stoppable before damage is done."
-        ),
+        statement=("Protect people, teams, and machines from unsafe AI behavior by making prompt injection, autonomous misuse, and tool-connected risk visible, enforceable, and stoppable before damage is done."),
         supportingpoints=[
             "Protect the operator, not just the model.",
             "Treat external AI context as untrusted by default.",
@@ -109,26 +103,17 @@ def get_marketing_about() -> AboutPageResponse:
         AboutBeliefView(
             beliefid="belief-1",
             title="AI trust is being granted too cheaply",
-            description=(
-                "People sign into AI platforms, connect tools, upload files, and delegate actions long before they know "
-                "what protections truly exist between the model and their machine."
-            ),
+            description=("People sign into AI platforms, connect tools, upload files, and delegate actions long before they know what protections truly exist between the model and their machine."),
         ),
         AboutBeliefView(
             beliefid="belief-2",
             title="The real risk surface is bigger than most buyers realize",
-            description=(
-                "Prompt injection is only one part of the problem. The deeper issue is what happens when manipulated AI "
-                "behavior reaches tools, browsers, credentials, file systems, or automated workflows."
-            ),
+            description=("Prompt injection is only one part of the problem. The deeper issue is what happens when manipulated AI behavior reaches tools, browsers, credentials, file systems, or automated workflows."),
         ),
         AboutBeliefView(
             beliefid="belief-3",
             title="Legacy security was not designed for agentic AI",
-            description=(
-                "Traditional controls were built for endpoints, applications, and networks, not models that interpret "
-                "untrusted context and immediately turn output into actions."
-            ),
+            description=("Traditional controls were built for endpoints, applications, and networks, not models that interpret untrusted context and immediately turn output into actions."),
         ),
     ]
 
@@ -137,40 +122,28 @@ def get_marketing_about() -> AboutPageResponse:
             statid="trustworthy-ai",
             value="7",
             label="NIST defines seven core characteristics of trustworthy AI",
-            context=(
-                "NIST says trustworthy AI should be valid and reliable, safe, secure and resilient, accountable and "
-                "transparent, explainable and interpretable, privacy enhanced, and fair with harmful bias managed."
-            ),
+            context=("NIST says trustworthy AI should be valid and reliable, safe, secure and resilient, accountable and transparent, explainable and interpretable, privacy enhanced, and fair with harmful bias managed."),
             source="NIST AI RMF 1.0",
         ),
         AboutProofStatView(
             statid="prompt-injection-rank",
             value="#1",
             label="Prompt injection is OWASP's top 2025 LLM risk",
-            context=(
-                "OWASP places prompt injection at LLM01 and warns that it can lead to sensitive information disclosure, "
-                "unauthorized function access, arbitrary command execution, and manipulated decisions."
-            ),
+            context=("OWASP places prompt injection at LLM01 and warns that it can lead to sensitive information disclosure, unauthorized function access, arbitrary command execution, and manipulated decisions."),
             source="OWASP GenAI Security Project",
         ),
         AboutProofStatView(
             statid="agent-security-shift",
             value="New class",
             label="AI agent security now requires controls beyond traditional app security",
-            context=(
-                "Recent AI agent security analysis highlights prompt injection, token compromise, excessive privilege, "
-                "shadow deployments, and data exfiltration as distinct risks in autonomous systems."
-            ),
+            context=("Recent AI agent security analysis highlights prompt injection, token compromise, excessive privilege, shadow deployments, and data exfiltration as distinct risks in autonomous systems."),
             source="AI agent security landscape analysis",
         ),
         AboutProofStatView(
             statid="isolation-pattern",
             value="Recurring",
             label="Weak trust boundaries and isolation failures keep appearing across AI systems",
-            context=(
-                "A 2026 practitioner review says recurring patterns include prompt injection, weak authentication at trust "
-                "boundaries, and insufficient isolation between AI operations and sensitive resources."
-            ),
+            context=("A 2026 practitioner review says recurring patterns include prompt injection, weak authentication at trust boundaries, and insufficient isolation between AI operations and sensitive resources."),
             source="Practitioner guide to AI agent security incidents",
         ),
     ]
@@ -179,10 +152,7 @@ def get_marketing_about() -> AboutPageResponse:
         AboutPillarView(
             pillarid="pillar-1",
             title="Protect the machine behind the model",
-            summary=(
-                "The operator's machine, browser session, credentials, tools, and files are often the real prize. "
-                "IronClaw is built around defending that downstream surface."
-            ),
+            summary=("The operator's machine, browser session, credentials, tools, and files are often the real prize. IronClaw is built around defending that downstream surface."),
             bullets=[
                 "Focus on what the AI can cause, not just what it can say",
                 "Treat model-to-tool transitions as security boundaries",
@@ -192,9 +162,7 @@ def get_marketing_about() -> AboutPageResponse:
         AboutPillarView(
             pillarid="pillar-2",
             title="Enforcement beats awareness",
-            summary=(
-                "Security claims mean very little if the system cannot actually allow, review, quarantine, or block risky behavior."
-            ),
+            summary=("Security claims mean very little if the system cannot actually allow, review, quarantine, or block risky behavior."),
             bullets=[
                 "Runtime policy enforcement before action execution",
                 "Human review for suspicious or high-consequence behavior",
@@ -204,10 +172,7 @@ def get_marketing_about() -> AboutPageResponse:
         AboutPillarView(
             pillarid="pillar-3",
             title="AI-native security needs AI-native design",
-            summary=(
-                "IronClaw is being built for prompt injection, indirect context abuse, excessive agency, and chained tool actions "
-                "because these are the threats shaping the next generation of AI systems."
-            ),
+            summary=("IronClaw is being built for prompt injection, indirect context abuse, excessive agency, and chained tool actions because these are the threats shaping the next generation of AI systems."),
             bullets=[
                 "Designed for agentic systems and autonomous workflows",
                 "Built for external content risk and hidden instruction channels",
@@ -217,9 +182,7 @@ def get_marketing_about() -> AboutPageResponse:
         AboutPillarView(
             pillarid="pillar-4",
             title="Trust should be earned with evidence",
-            summary=(
-                "Security adoption happens faster when teams can see why a decision happened and what controls are active."
-            ),
+            summary=("Security adoption happens faster when teams can see why a decision happened and what controls are active."),
             bullets=[
                 "Audit evidence for allow, review, quarantine, and block paths",
                 "Operational visibility for buyers, builders, and defenders",
@@ -232,39 +195,28 @@ def get_marketing_about() -> AboutPageResponse:
         AboutPrincipleView(
             principleid="principle-1",
             title="Assume AI can be manipulated",
-            description=(
-                "If the system consumes prompts, web pages, files, emails, or retrieved knowledge, it can be influenced by an attacker."
-            ),
+            description=("If the system consumes prompts, web pages, files, emails, or retrieved knowledge, it can be influenced by an attacker."),
         ),
         AboutPrincipleView(
             principleid="principle-2",
             title="Assume unsafe autonomy will spread faster than safe autonomy",
-            description=(
-                "The market rewards speed, which means AI builders often connect powerful actions before they add durable controls."
-            ),
+            description=("The market rewards speed, which means AI builders often connect powerful actions before they add durable controls."),
         ),
         AboutPrincipleView(
             principleid="principle-3",
             title="Assume users are over-trusting vendors",
-            description=(
-                "Many people believe paying for an AI platform means they are protected, even when the actual execution risk lands on their own systems."
-            ),
+            description=("Many people believe paying for an AI platform means they are protected, even when the actual execution risk lands on their own systems."),
         ),
         AboutPrincipleView(
             principleid="principle-4",
             title="Assume the defense must keep adapting",
-            description=(
-                "Static security stories will not be enough in a field where model behavior, agent design, and attack methods change rapidly."
-            ),
+            description=("Static security stories will not be enough in a field where model behavior, agent design, and attack methods change rapidly."),
         ),
     ]
 
     future = AboutFutureView(
         title="Where we are headed",
-        description=(
-            "IronClaw is being shaped as a long-term protection layer for local apps, autonomous agent builders, browser-based AI workflows, "
-            "and future AI platforms that still need a hard security boundary between intelligence and action."
-        ),
+        description=("IronClaw is being shaped as a long-term protection layer for local apps, autonomous agent builders, browser-based AI workflows, and future AI platforms that still need a hard security boundary between intelligence and action."),
     )
 
     return AboutPageResponse(

@@ -112,8 +112,7 @@ class SkillExecutionAPIRequest(BaseModel):
 
 
 class SkillExecutionEnvelope(BaseModel):
-    """
-    Lightweight API envelope; keep `result` as an untyped mapping so Pydantic
+    """Lightweight API envelope; keep `result` as an untyped mapping so Pydantic
     does not recurse through arbitrary JsonValue and hit recursive type limits.
     """
 
@@ -172,7 +171,7 @@ class SkillRouterHealthResponse(BaseModel):
 class _RouterState:
     def __init__(self, *, config: IronClawSkillConfig | None = None) -> None:
         self.config = config or loadconfig()
-        self.runtime: IronClawSkillRuntime = createruntime(config=self.config)  # lazy adapters now
+        self.runtime: IronClawSkillRuntime = createruntime(config=self.config)
         self.middleware = IronClawSkillMiddleware(config=self.config)
         self.claude = ClaudeSkillAdapter(config=self.config)
         self.openclaw = OpenClawSkillAdapter(config=self.config)
@@ -216,7 +215,7 @@ class _RouterState:
                     connecttimeoutseconds=provider.connecttimeoutseconds,
                     maxretries=provider.maxretries,
                     metadata=dict(provider.metadata),
-                )
+                ),
             )
         return SkillProviderRegistryResponse(
             defaultprovider=self.config.defaultprovider,
@@ -296,7 +295,7 @@ class _RouterState:
                         operation=str(payload.get("operation") or "execute"),
                     ),
                     details={"error": str(exc)},
-                )
+                ),
             ) from exc
 
     def _result_payload(self, result: SkillExecutionResult) -> dict[str, Any]:
@@ -312,7 +311,7 @@ class _RouterState:
             SkillConfigurationError(
                 "Skill runtime returned an unsupported result payload.",
                 details={"resulttype": type(result).__name__},
-            )
+            ),
         )
 
     def _envelope_from_result(self, result: dict[str, Any]) -> SkillExecutionEnvelope:
@@ -390,40 +389,14 @@ def createrouter(*, config: IronClawSkillConfig | None = None) -> APIRouter:
 
 
 class IronClawSkillRouter:
-    """
-    Backwards-compatible router wrapper used by the CLI.
-    """
+    """Backwards-compatible router wrapper used by the CLI."""
 
     def __init__(self, *, config: IronClawSkillConfig | None = None) -> None:
         self._state = _RouterState(config=config)
 
     def route(self, request: SkillExecutionRequest) -> SkillExecutionEnvelope:
-        # Mirror the /execute path: wrap an API request, run through middleware + runtime.
-        api_request = SkillExecutionAPIRequest(
-            provider=request.provider.value if isinstance(request.provider, SkillProvider) else str(request.provider),
-            operation=getattr(request, "operation", "execute"),
-            action=getattr(request, "action", "execute"),
-            target=getattr(request, "target", "runtime"),
-            content=getattr(request, "content", "") or "",
-            model=getattr(request, "model", None),
-            systemprompt=getattr(request, "systemprompt", None),
-            messages=list(getattr(request, "messages", [])),
-            metadata=dict(getattr(request, "metadata", {})),
-            requestid=getattr(request, "requestid", None),
-            traceid=getattr(request, "traceid", None),
-            sessionid=getattr(request, "sessionid", None),
-            organizationid=getattr(request, "organizationid", None),
-            customerid=getattr(request, "customerid", None),
-            actorid=getattr(request, "actorid", None),
-            reviewrequired=bool(getattr(request, "reviewrequired", False)),
-            sandboxenabled=getattr(request, "sandboxenabled", None),
-            networkallowed=getattr(request, "networkallowed", None),
-            filesystemwriteallowed=getattr(request, "filesystemwriteallowed", None),
-            toolinvocationallowed=getattr(request, "toolinvocationallowed", None),
-        )
-        # Reuse existing execution path
         return self._state._envelope_from_result(
-            self._state._result_payload(self._state.runtime.execute(request))
+            self._state._result_payload(self._state.runtime.execute(request)),
         )
 
 

@@ -30,11 +30,5 @@ def test_ui_metrics_summary_contains_core_fields() -> None:
     assert data
 
     assert any(k in data for k in ("title", "headline", "summary", "page_title"))
-    assert any(
-        k in data
-        for k in ("metrics", "kpis", "cards", "totals", "aggregates", "stats")
-    )
-    assert any(
-        k in data
-        for k in ("charts", "sections", "trends", "comparisons", "filters", "breakdown")
-    )
+    assert any(k in data for k in ("metrics", "kpis", "cards", "totals", "aggregates", "stats"))
+    assert any(k in data for k in ("charts", "sections", "trends", "comparisons", "filters", "breakdown"))

@@ -53,10 +53,7 @@ def test_guardandexecuteraw_blockshighriskrequest():
     assert response["risk_score"] == 95
     assert response["reason"]
     assert response["reasons"]
-    assert any(
-        reason["source"] in {"policy", "scan", "ai"}
-        for reason in response["reasons"]
-    )
+    assert any(reason["source"] in {"policy", "scan", "ai"} for reason in response["reasons"])
 
 
 def test_guardandexecuteraw_usesdefaultfilepath():

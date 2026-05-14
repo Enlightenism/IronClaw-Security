@@ -50,7 +50,7 @@ def test_claude_code_adapter_execute_returns_guarded_result():
             action_type="toolcall",
             target="workspace://claude/session",
             payload={"tool": "read_file", "path": "README.md"},
-        )
+        ),
     )
 
     assert result.adapter_slug == "claude-code"

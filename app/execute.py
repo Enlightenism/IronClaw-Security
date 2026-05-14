@@ -125,7 +125,9 @@ def _normalize_reason(reason: ExecutionReason | dict | str) -> ExecuteReasonView
     )
 
 
-def _normalize_reasons(reasons: list[ExecutionReason] | list[dict] | list[str] | None) -> list[ExecuteReasonView]:
+def _normalize_reasons(
+    reasons: list[ExecutionReason] | list[dict] | list[str] | None,
+) -> list[ExecuteReasonView]:
     if not reasons:
         return []
     return [_normalize_reason(reason) for reason in reasons]

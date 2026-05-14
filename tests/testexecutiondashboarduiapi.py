@@ -30,11 +30,5 @@ def test_ui_executions_dashboard_contains_core_fields() -> None:
     assert data
 
     assert any(k in data for k in ("title", "headline", "dashboard_title"))
-    assert any(
-        k in data
-        for k in ("sections", "blocks", "cards", "tables", "panels")
-    )
-    assert any(
-        k in data
-        for k in ("executions", "runs", "activity", "series")
-    )
+    assert any(k in data for k in ("sections", "blocks", "cards", "tables", "panels"))
+    assert any(k in data for k in ("executions", "runs", "activity", "series"))

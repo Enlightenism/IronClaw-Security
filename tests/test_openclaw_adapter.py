@@ -51,7 +51,7 @@ def test_openclaw_adapter_execute_returns_guarded_result():
             action_type="workflow",
             target="workspace://openclaw/pipeline",
             payload={"step": "toolchain-build", "policy_gate": True},
-        )
+        ),
     )
 
     assert result.adapter_slug == "openclaw"

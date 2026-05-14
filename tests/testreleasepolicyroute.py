@@ -103,7 +103,7 @@ class _ReleasePolicyServiceStub:
         return [dict(item) for item in self.history]
 
 
-@pytest.fixture()
+@pytest.fixture
 def api(monkeypatch):
     service = _ReleasePolicyServiceStub()
 

@@ -176,7 +176,7 @@ def _update_review_status(
                 reviewed_at=datetime.now(UTC).isoformat(),
                 reviewed_by=reviewed_by,
                 review_note=review_note,
-            )
+            ),
         )
 
     if not found:

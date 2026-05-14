@@ -32,19 +32,23 @@ def _resolve_settings_key(raw_key: str) -> APIKeyRecord | None:
     candidates: list[tuple[str, str, tuple[str, ...]]] = []
     if settings.internal_platform_api_key:
         candidates.append(
-            (settings.internal_platform_api_key, "internal-platform", ("system", "admin", "internal"))
+            (
+                settings.internal_platform_api_key,
+                "internal-platform",
+                ("system", "admin", "internal"),
+            ),
         )
     if settings.platform_api_key:
         candidates.append(
-            (settings.platform_api_key, "platform", ("system", "admin"))
+            (settings.platform_api_key, "platform", ("system", "admin")),
         )
     if settings.admin_api_key:
         candidates.append(
-            (settings.admin_api_key, "admin", ("system", "admin"))
+            (settings.admin_api_key, "admin", ("system", "admin")),
         )
     if settings.api_key:
         candidates.append(
-            (settings.api_key, "default", ("system",))
+            (settings.api_key, "default", ("system",)),
         )
 
     import hmac
@@ -187,8 +191,7 @@ async def api_key_header_auth(
 
 
 def require_scopes(*required: str):
-    """
-    Returns a FastAPI dependency that validates the API key AND asserts
+    """Returns a FastAPI dependency that validates the API key AND asserts
     the resolved record holds all ``required`` scopes.
 
     Usage::

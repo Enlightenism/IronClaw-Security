@@ -161,7 +161,7 @@ def list_history() -> HistoryListResponse:
                 quarantine_reason=getattr(i, "quarantinereason", None),
             )
             for i in items
-        ]
+        ],
     )
 
 
@@ -189,8 +189,8 @@ def get_history(scan_id: str) -> HistoryItem:
 def review_history_item(scan_id: str, request: ReviewRequest) -> dict[str, Any]:
     try:
         updated = history_svc.review_scan(scan_id=scan_id, action=request.action)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="scan_id not found")
+    except KeyError as err:
+        raise HTTPException(status_code=404, detail="scan_id not found") from err
 
     if updated is None:
         raise HTTPException(status_code=400, detail="review not applicable for this scan")
@@ -201,7 +201,6 @@ def review_history_item(scan_id: str, request: ReviewRequest) -> dict[str, Any]:
 
 @router.post("/guard/action", response_model=GuardActionResponse)
 def guard_action(request: GuardActionRequest) -> GuardActionResponse:
-    # delegate to existing service; it should return verdict + patterns
     scan_result = action_guard_svc.evaluate_action(
         action_type=request.action_type,
         target=request.target,
@@ -239,7 +238,7 @@ def guard_action_policy(request: GuardActionRequest) -> GuardPolicyResponse:
         action_type=request.action_type,
         target=request.target,
         content=request.content,
-        policy_mode=policy.mode,  # "allow" | "review" | "block"
+        policy_mode=policy.mode,
         verdict=policy.verdict,  # type: ignore[assignment]
         should_halt=policy.should_halt,
         should_warn=policy.should_warn,
@@ -262,7 +261,7 @@ def guard_action_decision(request: GuardActionRequest) -> GuardDecisionResponse:
         content=request.content,
         policy_mode=decision.policy_mode,  # type: ignore[assignment]
         verdict=decision.verdict,  # type: ignore[assignment]
-        decision_source=decision.source,  # "policy" | "scan"
+        decision_source=decision.source,
         should_halt=decision.should_halt,
         should_warn=decision.should_warn,
         matched_patterns=list(getattr(decision, "matchedpatterns", [])),

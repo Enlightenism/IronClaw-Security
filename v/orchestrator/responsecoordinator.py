@@ -66,8 +66,7 @@ class CoordinatedResponse(BaseModel):
 
 
 class ResponseCoordinator:
-    """
-    Coordinates outputs from threat correlation and session risk into a single,
+    """Coordinates outputs from threat correlation and session risk into a single,
     explainable response plan.
 
     This class is intentionally orchestration-only:
@@ -106,8 +105,7 @@ class ResponseCoordinator:
         disposition = self._disposition_from_cluster_action(cluster_action)
 
         reasons.append(
-            f"Correlation cluster {cluster.cluster_id} scored {cluster.risk_score:.2f} "
-            f"with priority '{cluster.priority}'."
+            f"Correlation cluster {cluster.cluster_id} scored {cluster.risk_score:.2f} with priority '{cluster.priority}'.",
         )
 
         if cluster.playbook_suggestion:
@@ -115,8 +113,7 @@ class ResponseCoordinator:
 
         if session_snapshot is not None:
             reasons.append(
-                f"Session {session_snapshot.session_id} scored {session_snapshot.risk_score:.2f} "
-                f"with level '{session_snapshot.level.value}'."
+                f"Session {session_snapshot.session_id} scored {session_snapshot.risk_score:.2f} with level '{session_snapshot.level.value}'.",
             )
             disposition = self._tighten_disposition(disposition, session_snapshot)
             if session_snapshot.dominant_kinds:
@@ -157,7 +154,7 @@ class ResponseCoordinator:
                 incident_id=incident_id,
                 cluster=cluster,
                 playbook=playbook,
-            )
+            ),
         )
 
         if review_required:
@@ -173,7 +170,7 @@ class ResponseCoordinator:
                         "incident_id": incident_id,
                         "playbook": playbook,
                     },
-                )
+                ),
             )
 
         return CoordinatedResponse(
@@ -226,8 +223,7 @@ class ResponseCoordinator:
         disposition: ResponseDisposition,
         session_snapshot: SessionRiskSnapshot,
     ) -> ResponseDisposition:
-        """
-        Raise the response severity when session risk is higher than the cluster's
+        """Raise the response severity when session risk is higher than the cluster's
         default recommendation.
         """
         session_action = (session_snapshot.recommended_action or "").lower()
@@ -285,7 +281,7 @@ class ResponseCoordinator:
                     target_id=cluster.cluster_id,
                     reason="Risk posture remained below enforcement thresholds.",
                     metadata={"cluster_priority": cluster.priority},
-                )
+                ),
             )
             return actions
 
@@ -297,7 +293,7 @@ class ResponseCoordinator:
                     target_id=session_id or cluster.cluster_id,
                     reason="Elevated indicators detected; continue with warning and monitoring.",
                     metadata={"playbook": playbook, "incident_id": incident_id},
-                )
+                ),
             )
             return actions
 
@@ -313,7 +309,7 @@ class ResponseCoordinator:
                         "incident_id": incident_id,
                         "cluster_priority": cluster.priority,
                     },
-                )
+                ),
             )
             return actions
 
@@ -325,7 +321,7 @@ class ResponseCoordinator:
                     target_id=incident_id or cluster.cluster_id,
                     reason="Threat activity requires analyst review.",
                     metadata={"playbook": playbook, "cluster_risk_score": cluster.risk_score},
-                )
+                ),
             )
             return actions
 
@@ -337,7 +333,7 @@ class ResponseCoordinator:
                     target_id=session_id or cluster.cluster_id,
                     reason="Risk posture crossed quarantine threshold.",
                     metadata={"playbook": playbook, "incident_id": incident_id},
-                )
+                ),
             )
             return actions
 
@@ -349,7 +345,7 @@ class ResponseCoordinator:
                     target_id=session_id or cluster.cluster_id,
                     reason="Threat posture requires immediate blocking / restriction.",
                     metadata={"playbook": playbook, "incident_id": incident_id},
-                )
+                ),
             )
             return actions
 
@@ -361,7 +357,7 @@ class ResponseCoordinator:
                     target_id=incident_id or cluster.cluster_id,
                     reason="Automated remediation was selected for this threat cluster.",
                     metadata={"playbook": playbook, "cluster_priority": cluster.priority},
-                )
+                ),
             )
             return actions
 
@@ -372,6 +368,6 @@ class ResponseCoordinator:
                 target_id=cluster.cluster_id,
                 reason="Fallback review action selected.",
                 metadata={"playbook": playbook},
-            )
+            ),
         )
         return actions

@@ -51,11 +51,7 @@ def get_audit_log(
         "limit": limit,
     }
 
-    normalized_filters: dict[str, Any] = {
-        key: value
-        for key, value in filters.items()
-        if value is not None and value != ""
-    }
+    normalized_filters: dict[str, Any] = {key: value for key, value in filters.items() if value is not None and value != ""}
 
     return build_audit_log_page(
         selected_event_id=selected_event_id,

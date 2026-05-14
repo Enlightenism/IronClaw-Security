@@ -80,7 +80,7 @@ def _normalize_dependency_metadata(app: FastAPI) -> None:
 
 def _build_openapi(app: FastAPI) -> dict[str, Any]:
     if app.openapi_schema is not None:
-        return cast(dict[str, Any], app.openapi_schema)
+        return cast("dict[str, Any]", app.openapi_schema)
 
     app.openapi_schema = get_openapi(
         title=app.title,
@@ -88,7 +88,7 @@ def _build_openapi(app: FastAPI) -> dict[str, Any]:
         description=app.description,
         routes=app.routes,
     )
-    return cast(dict[str, Any], app.openapi_schema)
+    return cast("dict[str, Any]", app.openapi_schema)
 
 
 def _install_openapi_factory(app: FastAPI) -> None:
@@ -122,9 +122,18 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
     return [
         (_optional_router("app.api.requestcontext"), {"dependencies": dependencies}),
         (_optional_router("app.api.history"), {"prefix": "/history", "dependencies": dependencies}),
-        (_optional_router("app.api.action_guard"), {"prefix": "/guard", "dependencies": dependencies}),
-        (_optional_router("app.api.action_execute"), {"prefix": "/guard", "dependencies": dependencies}),
-        (_optional_router("app.api.review_queue"), {"prefix": "/guard", "dependencies": dependencies}),
+        (
+            _optional_router("app.api.action_guard"),
+            {"prefix": "/guard", "dependencies": dependencies},
+        ),
+        (
+            _optional_router("app.api.action_execute"),
+            {"prefix": "/guard", "dependencies": dependencies},
+        ),
+        (
+            _optional_router("app.api.review_queue"),
+            {"prefix": "/guard", "dependencies": dependencies},
+        ),
         (_optional_router("app.api.audit_log"), {"prefix": "/guard", "dependencies": dependencies}),
         (_optional_router("app.api.policy"), {"prefix": "/policy", "dependencies": dependencies}),
         (_optional_router("app.api.release_policy_routes"), {"dependencies": dependencies}),
@@ -342,10 +351,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="IronClaw-Security",
         version="1.0.0",
-        description=(
-            "Local-first AI security API for prompt inspection, guarded execution, "
-            "review workflows, and protected runtime controls."
-        ),
+        description=("Local-first AI security API for prompt inspection, guarded execution, review workflows, and protected runtime controls."),
         docs_url=None,
         redoc_url=None,
         openapi_url=None,

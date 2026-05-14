@@ -47,10 +47,10 @@ def test_analyze_action_quarantines_or_blocks_exfiltration_sequence() -> None:
     assert result["risk_score"] >= 40
     assert any(
         pattern in result["matched_patterns"]
-        for pattern in {
+        for pattern in (
             "system-prompt-exfiltration",
             "data-exfiltration",
-        }
+        )
     )
 
 

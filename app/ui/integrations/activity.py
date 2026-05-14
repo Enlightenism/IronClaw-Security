@@ -75,7 +75,7 @@ def build_integration_activity_view(
                     "version": record.version,
                     "integration_type": integration_type,
                 },
-            )
+            ),
         )
 
         verification = verify_integration(
@@ -95,7 +95,7 @@ def build_integration_activity_view(
             verification_summary.get(
                 "status",
                 "failed" if fail_count > 0 else "warning" if warn_count > 0 else "passed",
-            )
+            ),
         )
 
         items.append(
@@ -104,19 +104,14 @@ def build_integration_activity_view(
                 slug=record.slug,
                 platform=record.platform,
                 activity_type="verification",
-                summary=(
-                    f"Verification completed with "
-                    f"{pass_count} pass, "
-                    f"{warn_count} warn, "
-                    f"{fail_count} fail."
-                ),
+                summary=(f"Verification completed with {pass_count} pass, {warn_count} warn, {fail_count} fail."),
                 occurred_at=checked_at,
                 metadata={
                     "verified": verified,
                     "status": verification_status,
                     "requested_by": requested_by,
                 },
-            )
+            ),
         )
 
         if getattr(record, "command_name", None):
@@ -132,7 +127,7 @@ def build_integration_activity_view(
                         "install_target": getattr(record, "install_target", None),
                         "one_command_ready": True,
                     },
-                )
+                ),
             )
 
     items.sort(

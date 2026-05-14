@@ -248,8 +248,7 @@ def build_prompt_guard_activity_feed() -> PromptGuardActivityFeedResponse:
     response_model=PromptGuardActivityFeedResponse,
 )
 def get_prompt_guard_activity_feed() -> PromptGuardActivityFeedResponse:
-    """
-    Unified operational activity stream for the prompt guard UI.
+    """Unified operational activity stream for the prompt guard UI.
 
     This aggregates policy changes, key KPIs, incident coverage, trend snapshots,
     and recommendations into a single normalized feed for dashboard consumption.

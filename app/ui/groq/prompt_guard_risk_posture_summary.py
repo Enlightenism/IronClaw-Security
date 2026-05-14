@@ -155,7 +155,7 @@ def build_prompt_guard_risk_posture_summary() -> PromptGuardRiskPostureSummary:
             coverage_risk,
             alert_risk,
             recommendation_risk,
-        ]
+        ],
     )
 
     risk_factors: list[dict[str, Any]] = [
@@ -248,9 +248,6 @@ def get_prompt_guard_risk_posture_summary() -> PromptGuardRiskPostureSummaryResp
         critical_alerts=data["critical_alerts"],
         open_alerts=data["open_alerts"],
         recommendation_pressure=data["recommendation_pressure"],
-        risk_factors=[
-            PromptGuardRiskFactorResponse(**factor)
-            for factor in data["risk_factors"]
-        ],
+        risk_factors=[PromptGuardRiskFactorResponse(**factor) for factor in data["risk_factors"]],
         metadata=data["metadata"],
     )

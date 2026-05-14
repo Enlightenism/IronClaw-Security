@@ -120,10 +120,7 @@ class SupervisorSnapshot:
             "status": self.status,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
-            "active_sessions": {
-                key: _as_dict(value)
-                for key, value in self.active_sessions.items()
-            },
+            "active_sessions": {key: _as_dict(value) for key, value in self.active_sessions.items()},
             "execution_history": [record.to_dict() for record in self.execution_history],
             "escalations": [item.to_dict() for item in self.escalations],
         }
@@ -133,10 +130,11 @@ class SupervisorSnapshot:
 # Injected supervisor — used by build_supervisor / testsupervisor.py
 # ---------------------------------------------------------------------------
 
+
 def _merge_reasons(raw: Any) -> list[dict[str, Any]]:
     seen: set[tuple[str, str]] = set()
     merged: list[dict[str, Any]] = []
-    for item in (raw or []):
+    for item in raw or []:
         if isinstance(item, dict):
             key = (_text(item.get("label")), _text(item.get("details")))
             if key not in seen:
@@ -148,7 +146,7 @@ def _merge_reasons(raw: Any) -> list[dict[str, Any]]:
 def _merge_rules(raw: Any) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
-    for rule in (raw or []):
+    for rule in raw or []:
         r = _text(rule)
         if r and r not in seen:
             seen.add(r)
@@ -304,22 +302,26 @@ class _InjectedSupervisor:
             pipeline_decision=pipeline_dict,
         )
 
-        self._emit({
-            "event": verdict,
-            "session_id": session_id,
-            "tool_name": tool_name,
-            "allowed": allowed,
-            "risk_delta": risk_delta,
-        })
-
-        if should_review and verdict == "review":
-            self._enqueue({
+        self._emit(
+            {
+                "event": verdict,
                 "session_id": session_id,
                 "tool_name": tool_name,
-                "verdict": verdict,
+                "allowed": allowed,
                 "risk_delta": risk_delta,
-                "matched_rules": matched_rules,
-            })
+            }
+        )
+
+        if should_review and verdict == "review":
+            self._enqueue(
+                {
+                    "session_id": session_id,
+                    "tool_name": tool_name,
+                    "verdict": verdict,
+                    "risk_delta": risk_delta,
+                    "matched_rules": matched_rules,
+                }
+            )
 
         return result
 
@@ -343,6 +345,7 @@ def build_supervisor(
 # ---------------------------------------------------------------------------
 # Orchestrator-pattern functions (preserved exactly)
 # ---------------------------------------------------------------------------
+
 
 def initialize_supervisor(orchestrator: IronClawOrchestrator) -> SupervisorSnapshot:
     now = _utc_now_iso()
@@ -390,10 +393,7 @@ def _status_from_history(
         return "critical"
     if any(item.level == "high" for item in escalations_list):
         return "elevated"
-    if any(
-        getattr(record.execution_plan, "verdict", None) == "warn"
-        for record in history_list
-    ):
+    if any(getattr(record.execution_plan, "verdict", None) == "warn" for record in history_list):
         return "monitoring"
     if history_list:
         return "active"
@@ -473,7 +473,7 @@ def run_supervised_request(
                 reason=_escalation_reason(routed_result.execution_plan),
                 verdict=getattr(routed_result.execution_plan, "verdict", "unknown"),
                 risk_score=int(getattr(routed_result.execution_plan, "risk_score", 0) or 0),
-            )
+            ),
         )
     updated_supervisor = SupervisorSnapshot(
         supervisor_id=supervisor.supervisor_id,
@@ -495,15 +495,9 @@ def summarize_supervisor(supervisor: SupervisorSnapshot) -> dict[str, Any]:
         "active_session_count": len(supervisor.active_sessions),
         "execution_count": len(supervisor.execution_history),
         "escalation_count": len(supervisor.escalations),
-        "critical_escalations": sum(
-            1 for item in supervisor.escalations if item.level == "critical"
-        ),
-        "high_escalations": sum(
-            1 for item in supervisor.escalations if item.level == "high"
-        ),
-        "medium_escalations": sum(
-            1 for item in supervisor.escalations if item.level == "medium"
-        ),
+        "critical_escalations": sum(1 for item in supervisor.escalations if item.level == "critical"),
+        "high_escalations": sum(1 for item in supervisor.escalations if item.level == "high"),
+        "medium_escalations": sum(1 for item in supervisor.escalations if item.level == "medium"),
     }
 
 
@@ -513,7 +507,7 @@ if __name__ == "__main__":
     from app.orchestrator.coordination_state import initialize_coordination_state
     from app.orchestrator.dependency_graph import build_dependency_graph
 
-    root = Path(".").resolve()
+    root = Path().resolve()
     orchestrator = IronClawOrchestrator(project_root=root)
     graph = build_dependency_graph(root)
     coordination_snapshot = initialize_coordination_state(orchestrator.registry, graph)
@@ -540,5 +534,5 @@ if __name__ == "__main__":
             },
             ensure_ascii=False,
             indent=2,
-        )
+        ),
     )

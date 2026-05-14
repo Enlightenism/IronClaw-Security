@@ -64,7 +64,7 @@ def build_ui_integrations_page() -> dict[str, object]:
                     "summary": verifier_preview.summary,
                     "checks": [asdict(check) for check in verifier_preview.checks],
                     "missingcapabilities": list(
-                        verifier_preview.missingcapabilities
+                        verifier_preview.missingcapabilities,
                     ),
                 }
                 if verifier_preview is not None

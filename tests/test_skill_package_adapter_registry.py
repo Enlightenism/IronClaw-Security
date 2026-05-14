@@ -44,7 +44,11 @@ def _scan_payload(**overrides: Any) -> dict[str, Any]:
 
 
 def _action_payload(operation: str = "action_policy", **overrides: Any) -> dict[str, Any]:
-    base: dict[str, Any] = {"operation": operation, "action_type": "shell_command", "target": "/bin/ls"}
+    base: dict[str, Any] = {
+        "operation": operation,
+        "action_type": "shell_command",
+        "target": "/bin/ls",
+    }
     base.update(overrides)
     return base
 
@@ -525,7 +529,10 @@ class TestBuildClaudeResponses:
 
     def test_success_matched_patterns_propagated(self):
         r = build_claude_success_response(
-            operation="scan", verdict="block", summary="blocked", matched_patterns=["p1", "p2"]
+            operation="scan",
+            verdict="block",
+            summary="blocked",
+            matched_patterns=["p1", "p2"],
         )
         assert r["matched_patterns"] == ["p1", "p2"]
 
@@ -783,7 +790,10 @@ class TestBuildOpenClawResponses:
 
     def test_success_matched_patterns_propagated(self):
         r = build_openclaw_success_response(
-            operation="scan", verdict="block", summary="blocked", matched_patterns=["p1"]
+            operation="scan",
+            verdict="block",
+            summary="blocked",
+            matched_patterns=["p1"],
         )
         assert r["result"]["matched_patterns"] == ["p1"]
 

@@ -124,7 +124,7 @@ def _build_compatibility_item(
                 supported=supported,
                 support_level=support_level,
                 details=details,
-            )
+            ),
         )
 
     compatibility_score = int((passed_checks / len(checks)) * 100) if checks else 100
@@ -155,10 +155,7 @@ def build_integration_compatibility_view(
 ) -> IntegrationCompatibilityView:
     records = list_integrations(registry)
 
-    items = [
-        _build_compatibility_item(record.integration_id, registry=registry)
-        for record in records
-    ]
+    items = [_build_compatibility_item(record.integration_id, registry=registry) for record in records]
     compatible_count = sum(1 for item in items if item.compatible)
 
     return IntegrationCompatibilityView(

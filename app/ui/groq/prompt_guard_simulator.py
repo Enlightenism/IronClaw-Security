@@ -148,11 +148,7 @@ def _simulate_prompt(prompt: str) -> PromptGuardSimulation:
         if not rule.enabled:
             continue
 
-        matched_patterns = [
-            pattern
-            for pattern in rule.match_patterns
-            if pattern.lower() in normalized
-        ]
+        matched_patterns = [pattern for pattern in rule.match_patterns if pattern.lower() in normalized]
         if not matched_patterns:
             continue
 
@@ -169,7 +165,7 @@ def _simulate_prompt(prompt: str) -> PromptGuardSimulation:
                 metadata={
                     "pattern_match_count": len(matched_patterns),
                 },
-            )
+            ),
         )
 
     risk_score = max((match.score for match in matches), default=0)

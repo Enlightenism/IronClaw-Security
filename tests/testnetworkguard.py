@@ -5,7 +5,7 @@ import pytest
 from app.runtime.networkguard import build_network_guard
 
 
-@pytest.fixture()
+@pytest.fixture
 def guard():
     return build_network_guard()
 
@@ -224,10 +224,6 @@ def test_reasons_and_rules_are_deduplicated_when_detectors_repeat(monkeypatch, g
 
     policy = guard.evaluate(url="https://api.example.com/v1/status", method="GET")
 
-    repeated = [
-        item
-        for item in policy.reasons
-        if item["label"] == "Repeated" and item["details"] == "Same reason"
-    ]
+    repeated = [item for item in policy.reasons if item["label"] == "Repeated" and item["details"] == "Same reason"]
     assert len(repeated) == 1
     assert policy.matched_rules.count("repeat_rule") == 1

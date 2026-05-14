@@ -124,7 +124,7 @@ def test_usage_event_detail_numeric_fields_are_non_negative_when_present() -> No
     ):
         value = _number(payload, *keys)
         if value is not None:
-            assert value >= Decimal("0")
+            assert value >= Decimal(0)
 
 
 def test_usage_event_detail_collections_use_json_friendly_shapes_when_present() -> None:

@@ -165,7 +165,7 @@ class SecretScanner:
                             "fingerprint": self._fingerprint(token),
                             "length": len(token),
                         },
-                    )
+                    ),
                 )
                 occupied.append((start, end, rule.secret_type))
 
@@ -327,7 +327,7 @@ def _build_rules() -> list[_SecretRule]:
             confidence=0.95,
             pattern=re.compile(
                 r"(?i)(?:aws[\w\s._-]{0,24})?(?:secret|secret_access_key|secret-access-key)"
-                r"[\s\"':=]{1,8}([A-Za-z0-9/+=]{40})"
+                r"[\s\"':=]{1,8}([A-Za-z0-9/+=]{40})",
             ),
             min_match_length=40,
         ),
@@ -402,7 +402,7 @@ def _build_rules() -> list[_SecretRule]:
             confidence=1.0,
             pattern=re.compile(
                 r"-----BEGIN\s+(?:RSA|DSA|EC|OPENSSH|PGP|PRIVATE)\s+PRIVATE\s+KEY-----[\s\S]{32,}"
-                r"-----END\s+(?:RSA|DSA|EC|OPENSSH|PGP|PRIVATE)\s+PRIVATE\s+KEY-----"
+                r"-----END\s+(?:RSA|DSA|EC|OPENSSH|PGP|PRIVATE)\s+PRIVATE\s+KEY-----",
             ),
             min_match_length=64,
         ),
@@ -414,7 +414,7 @@ def _build_rules() -> list[_SecretRule]:
             confidence=0.93,
             pattern=re.compile(
                 r"-----BEGIN\s+(?:OPENSSH PRIVATE KEY|ENCRYPTED PRIVATE KEY)-----[\s\S]{32,}"
-                r"-----END\s+(?:OPENSSH PRIVATE KEY|ENCRYPTED PRIVATE KEY)-----"
+                r"-----END\s+(?:OPENSSH PRIVATE KEY|ENCRYPTED PRIVATE KEY)-----",
             ),
             min_match_length=64,
         ),
@@ -426,7 +426,7 @@ def _build_rules() -> list[_SecretRule]:
             confidence=0.96,
             pattern=re.compile(
                 r"\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis)://"
-                r"[^/\s:@]+:[^/\s@]+@[^/\s]+"
+                r"[^/\s:@]+:[^/\s@]+@[^/\s]+",
             ),
             min_match_length=18,
         ),
@@ -438,7 +438,7 @@ def _build_rules() -> list[_SecretRule]:
             confidence=0.75,
             pattern=re.compile(
                 r"(?i)\b(?:api[_-]?key|access[_-]?token|secret|token|client[_-]?secret)"
-                r"\b[\s\"':=]{1,8}[\"']?([A-Za-z0-9_\-+/=]{16,})[\"']?"
+                r"\b[\s\"':=]{1,8}[\"']?([A-Za-z0-9_\-+/=]{16,})[\"']?",
             ),
             min_match_length=16,
         ),

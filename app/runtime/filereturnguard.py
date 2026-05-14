@@ -105,7 +105,7 @@ _BINARY_MAGIC_LABELS: tuple[tuple[bytes, str, int], ...] = (
     (b"\xfe\xed\xfa", "mach-o-binary", 95),
 )
 _SUSPICIOUS_ARCHIVE_ENTRY_RE = re.compile(
-    r"(^/)|(^[A-Za-z]:\\)|(^\\\\)|(?:^|/)\.\.(?:/|$)|(?:^|\\)\.\.(?:\\|$)"
+    r"(^/)|(^[A-Za-z]:\\)|(^\\\\)|(?:^|/)\.\.(?:/|$)|(?:^|\\)\.\.(?:\\|$)",
 )
 
 
@@ -206,7 +206,7 @@ class FileReturnGuard:
                     label="Missing path",
                     details="Artifact return was denied because no file path was provided.",
                     score=80,
-                )
+                ),
             )
             return self._finalize(
                 reasons=reasons,
@@ -237,7 +237,7 @@ class FileReturnGuard:
                     label="Path escape attempt",
                     details="Artifact path references parent-directory traversal outside the return boundary.",
                     score=85,
-                )
+                ),
             )
             matched_rules.append("path_escape")
             risk_delta += 85
@@ -249,7 +249,7 @@ class FileReturnGuard:
                     label="Absolute path denied",
                     details="Artifact path must remain relative to an approved sandbox return directory.",
                     score=85,
-                )
+                ),
             )
             matched_rules.append("absolute_path")
             risk_delta += 85
@@ -263,7 +263,7 @@ class FileReturnGuard:
                     label="Unapproved artifact root",
                     details=f"Artifact root '{root_name}' is outside the approved return directories.",
                     score=25,
-                )
+                ),
             )
             matched_rules.append(f"unapproved_root:{root_name}")
             risk_delta += 25
@@ -275,7 +275,7 @@ class FileReturnGuard:
                     label="Blocked file type",
                     details=f"Extension '{extension}' is blocked from leaving the sandbox.",
                     score=90,
-                )
+                ),
             )
             matched_rules.append(f"blocked_extension:{extension}")
             risk_delta += 90
@@ -286,7 +286,7 @@ class FileReturnGuard:
                     label="Unapproved file type",
                     details=f"Extension '{extension}' is not in the approved artifact return set.",
                     score=25,
-                )
+                ),
             )
             matched_rules.append(f"unapproved_extension:{extension}")
             risk_delta += 25
@@ -297,7 +297,7 @@ class FileReturnGuard:
                     label="Missing extension",
                     details="Artifact has no extension and requires review before return.",
                     score=20,
-                )
+                ),
             )
             matched_rules.append("missing_extension")
             risk_delta += 20
@@ -310,7 +310,7 @@ class FileReturnGuard:
                         label="Blocked MIME type",
                         details=f"MIME type '{mime_type}' is blocked by artifact return policy.",
                         score=85,
-                    )
+                    ),
                 )
                 matched_rules.append(f"blocked_mime:{blocked_prefix}")
                 risk_delta += 85
@@ -323,7 +323,7 @@ class FileReturnGuard:
                     label="Unexpected MIME type",
                     details=f"MIME type '{mime_type}' does not match the expected type set for '{extension}'.",
                     score=35,
-                )
+                ),
             )
             matched_rules.append(f"mime_mismatch:{extension}")
             risk_delta += 35
@@ -333,12 +333,9 @@ class FileReturnGuard:
                 FileReturnReason(
                     source="filereturnguard",
                     label="Oversized artifact",
-                    details=(
-                        f"Artifact size {size_bytes} bytes exceeded the allowed maximum "
-                        f"of {self.max_file_size_bytes} bytes."
-                    ),
+                    details=(f"Artifact size {size_bytes} bytes exceeded the allowed maximum of {self.max_file_size_bytes} bytes."),
                     score=55,
-                )
+                ),
             )
             matched_rules.append("oversized_artifact")
             risk_delta += 55
@@ -349,7 +346,7 @@ class FileReturnGuard:
                     label="Empty artifact",
                     details="Artifact is empty and requires review before return.",
                     score=10,
-                )
+                ),
             )
             matched_rules.append("empty_artifact")
             risk_delta += 10
@@ -362,7 +359,7 @@ class FileReturnGuard:
                         label="Sensitive artifact name",
                         details=f"Artifact path matched sensitive rule '{rule_name}'.",
                         score=score,
-                    )
+                    ),
                 )
                 matched_rules.append(rule_name)
                 risk_delta += int(score)
@@ -460,7 +457,7 @@ class FileReturnGuard:
                         label=str(item.get("label", "File inspection")),
                         details=str(item.get("details", item.get("label", "File inspection detected."))),
                         score=int(item.get("score", 0) or 0),
-                    )
+                    ),
                 )
             else:
                 reasons.append(
@@ -469,7 +466,7 @@ class FileReturnGuard:
                         label="File inspection",
                         details=str(item),
                         score=0,
-                    )
+                    ),
                 )
 
         sanitizer = build_output_sanitizer()
@@ -487,7 +484,7 @@ class FileReturnGuard:
                     label="Sanitized output blocked",
                     details="Artifact content triggered output sanitization blocking rules.",
                     score=70,
-                )
+                ),
             )
             matched_rules.append("output_sanitizer_block")
             risk_delta += 70
@@ -500,7 +497,7 @@ class FileReturnGuard:
                         label="Sanitized output risk",
                         details="Artifact content triggered output sanitization review signals.",
                         score=sanitizer_score,
-                    )
+                    ),
                 )
                 matched_rules.append("output_sanitizer_risk")
                 risk_delta += sanitizer_score
@@ -595,7 +592,7 @@ class FileReturnGuard:
                         label="Dangerous binary signature",
                         details=f"Artifact '{filename}' matched binary signature '{label}'.",
                         score=score,
-                    )
+                    ),
                 )
                 matched_rules.append(f"binary_signature:{label}")
                 risk_delta += score
@@ -607,7 +604,7 @@ class FileReturnGuard:
                     label="Extension/content mismatch",
                     details="Artifact extension indicates an archive but payload signature indicates an executable.",
                     score=90,
-                )
+                ),
             )
             matched_rules.append("extension_content_mismatch")
             risk_delta += 90
@@ -639,7 +636,7 @@ class FileReturnGuard:
                                 label="Archive path traversal",
                                 details=f"Archive '{filename}' contains suspicious entry '{entry_name}'.",
                                 score=85,
-                            )
+                            ),
                         )
                         matched_rules.append("archive_path_traversal")
                         risk_delta += 85
@@ -651,7 +648,7 @@ class FileReturnGuard:
                                 label="Archive contains blocked file",
                                 details=f"Archive '{filename}' contains blocked entry '{entry_name}'.",
                                 score=90,
-                            )
+                            ),
                         )
                         matched_rules.append(f"archive_blocked_extension:{entry_extension}")
                         risk_delta += 90
@@ -662,7 +659,7 @@ class FileReturnGuard:
                     label="Invalid archive",
                     details=f"Artifact '{filename}' claims to be an archive but could not be parsed.",
                     score=60,
-                )
+                ),
             )
             matched_rules.append("invalid_archive")
             risk_delta += 60
@@ -688,7 +685,7 @@ class FileReturnGuard:
                         label=str(item.get("label", label_default)),
                         details=str(item.get("details", f"{label_default} detected.")),
                         score=int(item.get("score", 0) or 0),
-                    )
+                    ),
                 )
             else:
                 reasons.append(
@@ -697,7 +694,7 @@ class FileReturnGuard:
                         label=label_default,
                         details=str(item),
                         score=0,
-                    )
+                    ),
                 )
 
         if analysis.get("shouldquarantine"):
@@ -733,22 +730,9 @@ class FileReturnGuard:
         should_block = False
         should_quarantine = False
 
-        should_quarantine = (
-            bool(artifact_analysis.get("shouldquarantine"))
-            or bool(download_analysis.get("shouldquarantine"))
-            or bool(file_inspection.get("shouldquarantine"))
-        )
-        should_review = (
-            bool(artifact_analysis.get("shouldreview"))
-            or bool(download_analysis.get("shouldreview"))
-            or bool(file_inspection.get("shouldreview"))
-        )
-        should_block = (
-            bool(artifact_analysis.get("shouldblock"))
-            or bool(download_analysis.get("shouldblock"))
-            or bool(download_analysis.get("blocked"))
-            or bool(file_inspection.get("blocked"))
-        )
+        should_quarantine = bool(artifact_analysis.get("shouldquarantine")) or bool(download_analysis.get("shouldquarantine")) or bool(file_inspection.get("shouldquarantine"))
+        should_review = bool(artifact_analysis.get("shouldreview")) or bool(download_analysis.get("shouldreview")) or bool(file_inspection.get("shouldreview"))
+        should_block = bool(artifact_analysis.get("shouldblock")) or bool(download_analysis.get("shouldblock")) or bool(download_analysis.get("blocked")) or bool(file_inspection.get("blocked"))
 
         if normalized_risk >= self.quarantine_threshold or should_quarantine:
             verdict = "quarantine"

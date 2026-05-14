@@ -22,9 +22,7 @@ def executeguardedaction(
     file_path: str | None = None,
     pipeline: SecureRuntimePipeline | None = None,
 ) -> ActionExecuteResult:
-    active_pipeline: SecureRuntimePipeline = (
-        pipeline if pipeline is not None else get_action_execute_pipeline()
-    )
+    active_pipeline: SecureRuntimePipeline = pipeline if pipeline is not None else get_action_execute_pipeline()
 
     effective_file_path = file_path or "app/api/action_execute.py"
 
@@ -53,7 +51,7 @@ def executeguardedaction(
                     "label": raw.get("label", raw.get("reason", "reason")),
                     "details": raw.get("details", str(raw)),
                     "score": raw.get("score"),
-                }
+                },
             )
         else:
             text = str(raw)
@@ -63,7 +61,7 @@ def executeguardedaction(
                     "label": text[:80],
                     "details": text,
                     "score": None,
-                }
+                },
             )
 
     result: ActionExecuteResult = {

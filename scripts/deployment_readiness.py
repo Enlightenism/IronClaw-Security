@@ -117,10 +117,20 @@ def _check_external_integrations(results: list[dict[str, Any]]) -> None:
             configured.append(name)
 
     if not configured:
-        _record(results, "external-integrations", False, "no external integration credentials are configured")
+        _record(
+            results,
+            "external-integrations",
+            False,
+            "no external integration credentials are configured",
+        )
         return
 
-    _record(results, "external-integrations", True, f"configured integrations: {', '.join(sorted(configured))}")
+    _record(
+        results,
+        "external-integrations",
+        True,
+        f"configured integrations: {', '.join(sorted(configured))}",
+    )
 
 
 def _check_secrets_quality(results: list[dict[str, Any]]) -> None:
@@ -146,7 +156,12 @@ def _check_secrets_quality(results: list[dict[str, Any]]) -> None:
             bad.append(key)
 
     if bad:
-        _record(results, "secrets-quality", False, f"weak placeholder or short secrets: {', '.join(sorted(set(bad)))}")
+        _record(
+            results,
+            "secrets-quality",
+            False,
+            f"weak placeholder or short secrets: {', '.join(sorted(set(bad)))}",
+        )
         return
 
     _record(results, "secrets-quality", True, "configured secrets passed basic quality checks")
@@ -157,11 +172,7 @@ def _check_migrations(results: list[dict[str, Any]]) -> None:
         _record(results, "migrations", False, "migrations directory is missing")
         return
 
-    files = sorted(
-        path.name
-        for path in MIGRATIONS_DIR.iterdir()
-        if path.is_file() and path.suffix.lower() in {".sql", ".py"}
-    )
+    files = sorted(path.name for path in MIGRATIONS_DIR.iterdir() if path.is_file() and path.suffix.lower() in {".sql", ".py"})
     if not files:
         _record(results, "migrations", False, "no migration files found")
         return

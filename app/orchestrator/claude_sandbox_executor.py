@@ -15,8 +15,7 @@ ExecutionMode = Literal["dryrun", "sandboxed", "direct"]
 
 @runtime_checkable
 class SandboxRunner(Protocol):
-    """
-    Minimal protocol for a sandbox runner.
+    """Minimal protocol for a sandbox runner.
 
     A concrete implementation could:
       - talk to a firecracker/microVM pool,
@@ -33,15 +32,12 @@ class SandboxRunner(Protocol):
         timeout_seconds: float,
         read_only_fs: bool = True,
         network_enabled: bool = False,
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
 
 @dataclass
 class SandboxExecutorConfig:
-    """
-    Configuration for the Claude-focused sandbox executor.
-    """
+    """Configuration for the Claude-focused sandbox executor."""
 
     name: str = "claude-sandbox-executor"
     mode: ExecutionMode = "dryrun"
@@ -51,8 +47,7 @@ class SandboxExecutorConfig:
 
 
 class NoopSandboxRunner:
-    """
-    Default in-process sandbox runner placeholder.
+    """Default in-process sandbox runner placeholder.
 
     This does NOT provide real isolation. It exists purely to keep the
     orchestration path wired while a real sandbox backend is integrated.
@@ -81,8 +76,7 @@ class NoopSandboxRunner:
 
 
 class ClaudeSandboxExecutor:
-    """
-    Executor implementation focused on Claude Code workflows.
+    """Executor implementation focused on Claude Code workflows.
 
     Responsibilities:
       - Respect guard verdicts from the secure runtime pipeline.
@@ -128,9 +122,7 @@ class ClaudeSandboxExecutor:
         ctx: ActionExecutionContext,
         guarded_request: GuardedActionRequest,
     ) -> GuardedActionResult:
-        """
-        Execute a guarded action, respecting the guard verdict and executor mode.
-        """
+        """Execute a guarded action, respecting the guard verdict and executor mode."""
         verdict = guarded_request.policy_verdict.lower()
         should_execute = guarded_request.should_execute
         halted_by_boundary = guarded_request.halted_by_boundary
@@ -144,8 +136,7 @@ class ClaudeSandboxExecutor:
                 should_execute=False,
                 halted_by_boundary=True,
                 executor_name=self.name,
-                reason=guarded_request.reason
-                or "Guard policy prevented execution in Claude sandbox executor.",
+                reason=guarded_request.reason or "Guard policy prevented execution in Claude sandbox executor.",
                 raw_result=None,
                 started_at=self._now_iso(),
                 completed_at=self._now_iso(),
@@ -208,8 +199,7 @@ class ClaudeSandboxExecutor:
             should_execute=True,
             halted_by_boundary=False,
             executor_name=self.name,
-            reason=guarded_request.reason
-            or "Execution handled by Claude sandbox executor.",
+            reason=guarded_request.reason or "Execution handled by Claude sandbox executor.",
             raw_result=raw_result,
             started_at=started_at,
             completed_at=completed_at,

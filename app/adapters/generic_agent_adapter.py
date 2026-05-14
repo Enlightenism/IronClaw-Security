@@ -46,6 +46,7 @@ def _dedup_list(items: list[Any]) -> list[Any]:
 # Request / Response dataclasses (policy-engine path)
 # ---------------------------------------------------------------------------
 
+
 @dataclass(slots=True)
 class GenericAgentAdapterRequest:
     action_type: str
@@ -138,6 +139,7 @@ class GenericAgentAdapterResponse:
 # ---------------------------------------------------------------------------
 # Builder / adapter helpers (policy-engine path)
 # ---------------------------------------------------------------------------
+
 
 def build_generic_agent_adapter_request(
     *,
@@ -250,6 +252,7 @@ def summarize_generic_agent_adapter_response(
 # Stub-mode helpers — used when adapter is constructed with injected stubs
 # ---------------------------------------------------------------------------
 
+
 def _block_response(
     *,
     runtime: str,
@@ -358,7 +361,7 @@ def _execute_stub(
         )
     except Exception as exc:
         policy_dict["matchedrules"] = _dedup_list(
-            policy_dict["matchedrules"] + ["runtime_execution_error"]
+            policy_dict["matchedrules"] + ["runtime_execution_error"],
         )
         return {
             "allowed": False,
@@ -398,6 +401,7 @@ def _allow_stub(policy_enforcer: Any, **kwargs: Any) -> bool:
 # ---------------------------------------------------------------------------
 # GenericAgentAdapter — dual-mode: stub injection OR integration record
 # ---------------------------------------------------------------------------
+
 
 @dataclass(slots=True)
 class GenericAgentAdapter(BaseIntegrationAdapter):
@@ -439,10 +443,7 @@ class GenericAgentAdapter(BaseIntegrationAdapter):
         # Record mode: standard BaseIntegrationAdapter path.
         result = super().execute(request)
         result.status = "guarded"
-        result.summary = (
-            f"{self.record.name} guarded action "
-            f"'{request.action_type}' for target '{request.target}'."
-        )
+        result.summary = f"{self.record.name} guarded action '{request.action_type}' for target '{request.target}'."
         result.output.setdefault("request", request.to_dict())
         result.output["guard_applied"] = True
         result.metadata["runtime"] = self.runtime
@@ -459,9 +460,11 @@ class GenericAgentAdapter(BaseIntegrationAdapter):
 # Sentinel record used when constructing adapter in stub mode
 # ---------------------------------------------------------------------------
 
+
 def _stub_record() -> IntegrationRecord:
     """Returns a minimal IntegrationRecord for stub-mode construction."""
     from app.services.integration_registry import IntegrationRecord
+
     return IntegrationRecord(
         integration_id="integration-generic-agent-stub",
         name="Generic Agent Stub",
@@ -503,6 +506,7 @@ GenericAgentAdapter.__init__ = _patched_init  # type: ignore[method-assign]
 # ---------------------------------------------------------------------------
 # Factory for record mode
 # ---------------------------------------------------------------------------
+
 
 def build_generic_agent_adapter(registry: IntegrationRegistry) -> GenericAgentAdapter:
     """Factory for the generic-agent adapter used in integrations."""

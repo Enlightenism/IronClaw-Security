@@ -102,15 +102,7 @@ def _matching_escalations(
     if not escalations:
         return []
 
-    return [
-        item
-        for item in escalations
-        if item.session_id == session_id
-        or (
-            item.agent_id == agent_id
-            and item.file_path == file_path
-        )
-    ]
+    return [item for item in escalations if item.session_id == session_id or (item.agent_id == agent_id and item.file_path == file_path)]
 
 
 def build_decision_trace(
@@ -132,10 +124,7 @@ def build_decision_trace(
     )
 
     evidence = TraceEvidence(
-        matched_rules=[
-            match.to_dict()
-            for match in (policy_evaluation.matched_rules if policy_evaluation else [])
-        ],
+        matched_rules=[match.to_dict() for match in (policy_evaluation.matched_rules if policy_evaluation else [])],
         matched_patterns=list(execution_plan.matched_patterns),
         recommended_actions=list(execution_plan.recommended_actions),
         escalations=[item.to_dict() for item in matched_escalations],
@@ -150,7 +139,7 @@ def build_decision_trace(
     ]
     if policy_evaluation is not None:
         summary_parts.append(
-            f"Policy decision: {policy_evaluation.decision} ({policy_evaluation.final_effect})."
+            f"Policy decision: {policy_evaluation.decision} ({policy_evaluation.final_effect}).",
         )
     if matched_escalations:
         summary_parts.append(f"Escalations: {len(matched_escalations)}.")
@@ -230,7 +219,7 @@ if __name__ == "__main__":
         run_supervised_request,
     )
 
-    root = Path(".").resolve()
+    root = Path().resolve()
     orchestrator = IronClawOrchestrator(project_root=root)
     graph = build_dependency_graph(root)
     coordination_snapshot = initialize_coordination_state(orchestrator.registry, graph)

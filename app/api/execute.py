@@ -43,7 +43,7 @@ def guarded_execute(
 
     response_payload = _ensure_filepath(response_payload)
     response_payload["response_status"] = _normalize_response_status(
-        response_payload.get("response_status")
+        response_payload.get("response_status"),
     )
 
     return ExecuteResponse(**response_payload)

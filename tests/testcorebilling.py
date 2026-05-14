@@ -137,7 +137,7 @@ def test_core_billing_numeric_fields_are_non_negative_when_present() -> None:
     ):
         value = _number(payload, *keys)
         if value is not None:
-            assert value >= Decimal("0")
+            assert value >= Decimal(0)
 
 
 def test_core_billing_remaining_does_not_exceed_quota_when_both_present() -> None:
@@ -209,7 +209,7 @@ def test_core_billing_usage_recording_flow_when_supported() -> None:
         payload = _payload_of(result)
         units = _number(payload, "units")
         if units is not None:
-            assert units == Decimal("5")
+            assert units == Decimal(5)
 
 
 def test_core_billing_rejects_negative_usage_when_supported() -> None:

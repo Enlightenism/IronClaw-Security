@@ -59,7 +59,7 @@ def test_command_supervisor_allows_safe_python_command() -> None:
             allowed=True,
             reasons=[{"label": "safe-python"}],
             risk_delta=3,
-        )
+        ),
     )
     supervisor = build_command_supervisor(policy_engine=policy_engine)
 
@@ -86,7 +86,7 @@ def test_command_supervisor_reviews_network_shell_usage() -> None:
             should_review=True,
             reasons=[{"label": "network-shell"}],
             risk_delta=44,
-        )
+        ),
     )
     supervisor = build_command_supervisor(policy_engine=policy_engine)
 
@@ -113,7 +113,7 @@ def test_command_supervisor_blocks_destructive_command() -> None:
             should_block=True,
             reasons=[{"label": "destructive-command"}],
             risk_delta=95,
-        )
+        ),
     )
     supervisor = build_command_supervisor(policy_engine=policy_engine)
 
@@ -139,7 +139,7 @@ def test_command_supervisor_quarantines_exfiltration_attempt() -> None:
             should_quarantine=True,
             reasons=[{"label": "exfiltration-pattern"}],
             risk_delta=100,
-        )
+        ),
     )
     supervisor = build_command_supervisor(policy_engine=policy_engine)
 
@@ -190,7 +190,7 @@ def test_command_supervisor_handles_missing_command() -> None:
             should_review=True,
             reasons=[{"label": "missing-command"}],
             risk_delta=18,
-        )
+        ),
     )
     supervisor = build_command_supervisor(policy_engine=policy_engine)
 
@@ -214,7 +214,7 @@ def test_command_supervisor_handles_blank_command() -> None:
             should_review=True,
             reasons=[{"label": "blank-command"}],
             risk_delta=20,
-        )
+        ),
     )
     supervisor = build_command_supervisor(policy_engine=policy_engine)
 
@@ -238,7 +238,7 @@ def test_command_supervisor_handles_missing_tool_name() -> None:
             should_review=True,
             reasons=[{"label": "missing-tool-name"}],
             risk_delta=16,
-        )
+        ),
     )
     supervisor = build_command_supervisor(policy_engine=policy_engine)
 
@@ -261,7 +261,7 @@ def test_command_supervisor_inserts_default_reason_when_policy_has_none() -> Non
             allowed=True,
             reasons=None,
             risk_delta=0,
-        )
+        ),
     )
     supervisor = build_command_supervisor(policy_engine=policy_engine)
 
@@ -283,7 +283,7 @@ def test_command_supervisor_accepts_nested_metadata() -> None:
             verdict="allow",
             allowed=True,
             reasons=[{"label": "nested-metadata-ok"}],
-        )
+        ),
     )
     supervisor = build_command_supervisor(policy_engine=policy_engine)
 

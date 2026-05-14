@@ -50,17 +50,10 @@ def _normalize_reasons(reasons: list[object]) -> list[dict[str, object]]:
                     "source": _normalize_reason_source(item.get("source")),
                     "label": str(item.get("label") or item.get("code") or "Explanation"),
                     "details": str(
-                        item.get("details")
-                        or item.get("message")
-                        or item.get("summary")
-                        or ""
+                        item.get("details") or item.get("message") or item.get("summary") or "",
                     ),
-                    "score": (
-                        float(item["score"])
-                        if item.get("score") is not None
-                        else None
-                    ),
-                }
+                    "score": (float(item["score"]) if item.get("score") is not None else None),
+                },
             )
         else:
             normalized.append(
@@ -69,7 +62,7 @@ def _normalize_reasons(reasons: list[object]) -> list[dict[str, object]]:
                     "label": "Explanation",
                     "details": str(item),
                     "score": None,
-                }
+                },
             )
 
     return normalized

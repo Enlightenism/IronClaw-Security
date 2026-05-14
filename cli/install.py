@@ -114,7 +114,7 @@ def build_install_plan(install_root: Path | None = None) -> InstallPlan:
     checks = _build_checks(root)
 
     next_steps = [
-        f"Create virtual environment at { _default_virtualenv_path(root) }",
+        f"Create virtual environment at {_default_virtualenv_path(root)}",
         "Install project dependencies",
         "Set required environment variables and API keys",
         "Run CLI verify command after installation completes",

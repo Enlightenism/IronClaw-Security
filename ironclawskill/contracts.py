@@ -13,15 +13,12 @@ JsonPrimitive = str | int | float | bool | None
 JsonValue: TypeAlias = JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"]
 
 
-
 def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-
 def newid(prefix: str = "") -> str:
     return f"{prefix}{uuid4().hex}"
-
 
 
 class SkillProvider(str, Enum):
@@ -30,12 +27,10 @@ class SkillProvider(str, Enum):
     UNKNOWN = "unknown"
 
 
-
 class SkillMode(str, Enum):
     SYNC = "sync"
     ASYNC = "async"
     STREAM = "stream"
-
 
 
 class SkillDecision(str, Enum):
@@ -45,13 +40,11 @@ class SkillDecision(str, Enum):
     ERROR = "error"
 
 
-
 class RiskLevel(str, Enum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
-
 
 
 class EventKind(str, Enum):
@@ -63,7 +56,6 @@ class EventKind(str, Enum):
     ERROR = "error"
 
 
-
 @dataclass(slots=True, frozen=True)
 class SkillActor:
     actorid: str
@@ -73,14 +65,12 @@ class SkillActor:
     roles: tuple[str, ...] = ()
 
 
-
 @dataclass(slots=True, frozen=True)
 class SkillExecutionTarget:
     targetid: str
     targettype: Literal["agent", "tool", "runtime", "route", "workflow"] = "agent"
     name: str | None = None
     version: str | None = None
-
 
 
 @dataclass(slots=True, frozen=True)
@@ -97,7 +87,6 @@ class SkillContextSnapshot:
     metadata: Mapping[str, JsonValue] = field(default_factory=dict)
 
 
-
 @dataclass(slots=True, frozen=True)
 class SkillInputArtifact:
     artifactid: str
@@ -109,7 +98,6 @@ class SkillInputArtifact:
     sha256: str | None = None
     sizebytes: int | None = None
     metadata: Mapping[str, JsonValue] = field(default_factory=dict)
-
 
 
 @dataclass(slots=True, frozen=True)
@@ -125,7 +113,6 @@ class SkillPolicyHint:
     metadata: Mapping[str, JsonValue] = field(default_factory=dict)
 
 
-
 @dataclass(slots=True, frozen=True)
 class SkillReason:
     source: Literal["policy", "scan", "ai", "guard", "runtime", "billing", "usage"] = "policy"
@@ -133,7 +120,6 @@ class SkillReason:
     details: str = ""
     score: int | float | None = None
     metadata: Mapping[str, JsonValue] = field(default_factory=dict)
-
 
 
 @dataclass(slots=True, frozen=True)
@@ -149,7 +135,6 @@ class SkillDetection:
     evidence: Mapping[str, JsonValue] = field(default_factory=dict)
 
 
-
 @dataclass(slots=True, frozen=True)
 class SkillUsage:
     inputtokens: int = 0
@@ -159,7 +144,6 @@ class SkillUsage:
     billableunits: int = 0
     estimatedcostusd: float = 0.0
     latencyms: int = 0
-
 
 
 @dataclass(slots=True, frozen=True)
@@ -175,7 +159,6 @@ class SkillOutputArtifact:
     metadata: Mapping[str, JsonValue] = field(default_factory=dict)
 
 
-
 @dataclass(slots=True, frozen=True)
 class SkillExecutionEvent:
     eventid: str
@@ -183,7 +166,6 @@ class SkillExecutionEvent:
     message: str
     createdat: datetime = field(default_factory=utcnow)
     metadata: Mapping[str, JsonValue] = field(default_factory=dict)
-
 
 
 @dataclass(slots=True, frozen=True)
@@ -205,26 +187,21 @@ class SkillExecutionResult:
     startedat: datetime | None = None
     finishedat: datetime = field(default_factory=utcnow)
 
-
     @property
     def isallowed(self) -> bool:
         return self.decision is SkillDecision.ALLOW
-
 
     @property
     def requiresreview(self) -> bool:
         return self.decision is SkillDecision.REVIEW
 
-
     @property
     def isblocked(self) -> bool:
         return self.decision is SkillDecision.BLOCK
 
-
     @property
     def iserror(self) -> bool:
         return self.decision is SkillDecision.ERROR
-
 
     def asdict(self) -> dict[str, Any]:
         return {
@@ -253,7 +230,6 @@ class SkillExecutionResult:
         }
 
 
-
 @dataclass(slots=True, frozen=True)
 class SkillHealthStatus:
     name: str
@@ -263,14 +239,12 @@ class SkillHealthStatus:
     metadata: Mapping[str, JsonValue] = field(default_factory=dict)
 
 
-
 @dataclass(slots=True, frozen=True)
 class SkillCapability:
     name: str
     enabled: bool = True
     description: str | None = None
     metadata: Mapping[str, JsonValue] = field(default_factory=dict)
-
 
 
 @dataclass(slots=True, frozen=True)
@@ -284,29 +258,23 @@ class SkillProviderDecision:
     metadata: Mapping[str, JsonValue] = field(default_factory=dict)
 
 
-
 @runtime_checkable
 class SkillAdapter(Protocol):
     provider: SkillProvider
 
-
     def execute(self, request: SkillExecutionRequest) -> SkillExecutionResult: ...
-
 
 
 @runtime_checkable
 class SkillRuntime(Protocol):
     def run(self, request: SkillExecutionRequest) -> SkillExecutionResult: ...
 
-
     def health(self) -> SkillHealthStatus: ...
-
 
 
 @runtime_checkable
 class SkillBillingProvider(Protocol):
     def estimate(self, request: SkillExecutionRequest) -> SkillUsage: ...
-
 
 
 @dataclass(slots=True, frozen=True)
@@ -328,13 +296,11 @@ class SkillExecutionRequest:
     requestedat: datetime = field(default_factory=utcnow)
 
 
-
 @dataclass(slots=True, frozen=True)
 class SkillResponseEnvelopeRuntime:
     request: SkillExecutionRequest
     result: SkillExecutionResult
     metadata: Mapping[str, JsonValue] = field(default_factory=dict)
-
 
 
 def buildblockedresult(
@@ -352,7 +318,13 @@ def buildblockedresult(
         meta["rawresponse"] = dict(rawresponse)
     if reasons is not None and "reasons" not in meta:
         meta["reasons"] = [
-            {"source": r.source, "label": r.label, "details": r.details, "score": r.score, "metadata": dict(r.metadata)}
+            {
+                "source": r.source,
+                "label": r.label,
+                "details": r.details,
+                "score": r.score,
+                "metadata": dict(r.metadata),
+            }
             for r in reasons
         ]
     return SkillExecutionResult(
@@ -367,7 +339,6 @@ def buildblockedresult(
         outputtext=outputtext,
         metadata=meta,
     )
-
 
 
 def buildreviewresult(
@@ -385,7 +356,13 @@ def buildreviewresult(
         meta["rawresponse"] = dict(rawresponse)
     if reasons is not None and "reasons" not in meta:
         meta["reasons"] = [
-            {"source": r.source, "label": r.label, "details": r.details, "score": r.score, "metadata": dict(r.metadata)}
+            {
+                "source": r.source,
+                "label": r.label,
+                "details": r.details,
+                "score": r.score,
+                "metadata": dict(r.metadata),
+            }
             for r in reasons
         ]
     return SkillExecutionResult(
@@ -400,7 +377,6 @@ def buildreviewresult(
         outputtext=outputtext,
         metadata=meta,
     )
-
 
 
 def buildallowedresult(
@@ -419,7 +395,13 @@ def buildallowedresult(
         meta["rawresponse"] = dict(rawresponse)
     if reasons is not None and "reasons" not in meta:
         meta["reasons"] = [
-            {"source": r.source, "label": r.label, "details": r.details, "score": r.score, "metadata": dict(r.metadata)}
+            {
+                "source": r.source,
+                "label": r.label,
+                "details": r.details,
+                "score": r.score,
+                "metadata": dict(r.metadata),
+            }
             for r in reasons
         ]
     return SkillExecutionResult(
@@ -435,7 +417,6 @@ def buildallowedresult(
         usage=usage or SkillUsage(),
         metadata=meta,
     )
-
 
 
 def builderrorresult(
@@ -454,7 +435,13 @@ def builderrorresult(
         meta["rawresponse"] = dict(rawresponse)
     if reasons is not None and "reasons" not in meta:
         meta["reasons"] = [
-            {"source": r.source, "label": r.label, "details": r.details, "score": r.score, "metadata": dict(r.metadata)}
+            {
+                "source": r.source,
+                "label": r.label,
+                "details": r.details,
+                "score": r.score,
+                "metadata": dict(r.metadata),
+            }
             for r in reasons
         ]
     if traceid is not None:
@@ -482,10 +469,8 @@ def builderrorresult(
     )
 
 
-
 class SkillBaseModel(BaseModel):
     model_config = {"extra": "forbid", "populate_by_name": True}
-
 
 
 class SkillRequestContext(SkillBaseModel):
@@ -500,7 +485,6 @@ class SkillRequestContext(SkillBaseModel):
     sourceversion: str | None = Field(default=None, min_length=1, max_length=120)
     tags: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
-
 
     def model_post_init(self, __context: Any) -> None:
         normalized = [t.strip().lower() for t in self.tags if t and t.strip()]
@@ -524,25 +508,19 @@ class SkillRequestContext(SkillBaseModel):
             object.__setattr__(self, "sourceversion", self.sourceversion.strip())
 
 
-
 class SkillPromptBundleInput(SkillBaseModel):
     userprompt: str | None = Field(default=None, min_length=1)
     retrieveddoc: str | None = Field(default=None, min_length=1)
     tooloutput: str | None = Field(default=None, min_length=1)
     modeloutput: str | None = Field(default=None, min_length=1)
 
-
     def model_post_init(self, __context: Any) -> None:
         for field_name in ("userprompt", "retrieveddoc", "tooloutput", "modeloutput"):
             value = getattr(self, field_name)
             if isinstance(value, str):
                 object.__setattr__(self, field_name, value.strip())
-        if not any(
-            getattr(self, f) is not None
-            for f in ("userprompt", "retrieveddoc", "tooloutput", "modeloutput")
-        ):
+        if not any(getattr(self, f) is not None for f in ("userprompt", "retrieveddoc", "tooloutput", "modeloutput")):
             raise ValueError("At least one prompt bundle field must be provided")
-
 
 
 class SkillScanInput(SkillBaseModel):
@@ -550,7 +528,6 @@ class SkillScanInput(SkillBaseModel):
     targetvalue: str | None = Field(default=None, min_length=1)
     policymode: Literal["review", "block", "allow"] = "review"
     bundle: SkillPromptBundleInput | None = None
-
 
     def model_post_init(self, __context: Any) -> None:
         if self.targettype == "promptbundle":
@@ -564,7 +541,6 @@ class SkillScanInput(SkillBaseModel):
             object.__setattr__(self, "targetvalue", self.targetvalue.strip())
 
 
-
 class SkillActionInput(SkillBaseModel):
     actiontype: Literal["shellcommand", "pythoncode", "toolinvocation", "networkrequest", "httpfetch"]
     target: str = Field(min_length=1, max_length=2000)
@@ -573,12 +549,10 @@ class SkillActionInput(SkillBaseModel):
     dryrun: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-
     def model_post_init(self, __context: Any) -> None:
         object.__setattr__(self, "target", self.target.strip())
         if self.content is not None:
             object.__setattr__(self, "content", self.content.strip())
-
 
 
 class SkillExecutionInput(SkillBaseModel):
@@ -587,19 +561,16 @@ class SkillExecutionInput(SkillBaseModel):
     allowsideeffects: bool = False
 
 
-
 class SkillScanRequest(SkillBaseModel):
     operation: Literal["scan"] = "scan"
     input: SkillScanInput
     context: SkillRequestContext
 
 
-
 class SkillActionPolicyRequest(SkillBaseModel):
     operation: Literal["actionpolicy"] = "actionpolicy"
     input: SkillActionInput
     context: SkillRequestContext
-
 
 
 class SkillActionDecisionRequest(SkillBaseModel):
@@ -609,12 +580,10 @@ class SkillActionDecisionRequest(SkillBaseModel):
     decisionmetadata: dict[str, Any] = Field(default_factory=dict)
 
 
-
 class SkillExecuteRequest(SkillBaseModel):
     operation: Literal["execute"] = "execute"
     input: SkillExecutionInput
     context: SkillRequestContext
-
 
 
 class SkillDecisionMetadataModel(SkillBaseModel):
@@ -624,13 +593,11 @@ class SkillDecisionMetadataModel(SkillBaseModel):
     riskscore: int | float | None = None
 
 
-
 class SkillDecisionMetadata(SkillBaseModel):
     shouldhalt: bool = False
     shouldwarn: bool = False
     matchedpatterns: list[str] = Field(default_factory=list)
     riskscore: int | float | None = None
-
 
 
 class SkillReasonModel(SkillBaseModel):
@@ -639,7 +606,6 @@ class SkillReasonModel(SkillBaseModel):
     details: str = ""
     score: int | float | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-
 
 
 class SkillResponsePayload(SkillBaseModel):
@@ -655,11 +621,9 @@ class SkillResponsePayload(SkillBaseModel):
     reasons: list[SkillReasonModel] = Field(default_factory=list)
     rawresult: dict[str, Any] = Field(default_factory=dict)
 
-
     @property
     def allowed(self) -> bool:
         return self.verdict == "allow"
-
 
     @property
     def metadata(self) -> SkillDecisionMetadataModel:
@@ -670,7 +634,6 @@ class SkillResponsePayload(SkillBaseModel):
             riskscore=self.riskscore,
         )
 
-
     def model_post_init(self, __context: Any) -> None:
         if self.verdict == "allow":
             if self.riskscore is None:
@@ -679,27 +642,22 @@ class SkillResponsePayload(SkillBaseModel):
                 object.__setattr__(self, "matchedpatterns", [])
 
 
-
 class SkillResponseEnvelope(SkillBaseModel):
     payload: SkillResponsePayload
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-
     @property
     def ok(self) -> bool:
         return self.payload.verdict in {"allow", "review"}
-
 
     @property
     def operation(self) -> str | None:
         value = self.metadata.get("operation")
         return str(value) if value is not None else None
 
-
     @property
     def requestid(self) -> str | None:
         return self.payload.requestid
-
 
     @property
     def errorcode(self) -> str | None:
@@ -707,14 +665,10 @@ class SkillResponseEnvelope(SkillBaseModel):
         return str(code) if code is not None else None
 
 
-
-SkillRequest: TypeAlias = (
-    SkillScanRequest | SkillActionPolicyRequest | SkillActionDecisionRequest | SkillExecuteRequest
-)
+SkillRequest: TypeAlias = SkillScanRequest | SkillActionPolicyRequest | SkillActionDecisionRequest | SkillExecuteRequest
 
 
 SkillRequestUnion: TypeAlias = SkillRequest
-
 
 
 def buildskillsuccessresponse(
@@ -728,7 +682,7 @@ def buildskillsuccessresponse(
     scanid: str | None = None,
     decisionsource: Literal["scan", "policy", "runtime", "billing", "usage"] = "scan",
     matchedpatterns: list[str] | None = None,
-    riskscore: int | float | None = None,
+    riskscore: float | None = None,
     reasons: list[SkillReason] | None = None,
     rawresult: dict[str, Any] | None = None,
 ) -> SkillResponseEnvelope:
@@ -759,7 +713,6 @@ def buildskillsuccessresponse(
         payload=payload,
         metadata={"operation": operation},
     )
-
 
 
 def buildskillerrorresponse(
@@ -800,7 +753,6 @@ def buildskillerrorresponse(
     )
 
 
-
 @dataclass(slots=True, frozen=True)
 class SkillRequestContextRuntime:
     requestid: str = field(default_factory=lambda: newid("req_"))
@@ -821,23 +773,19 @@ class SkillRequestContextRuntime:
     metadata: Mapping[str, JsonValue] = field(default_factory=dict)
     createdat: datetime = field(default_factory=utcnow)
 
-
     def withmetadata(self, metadata: Mapping[str, JsonValue]) -> SkillRequestContextRuntime:
         merged = dict(self.metadata)
         merged.update(metadata)
         return replace(self, metadata=merged)
-
 
     def withlabels(self, labels: Mapping[str, str]) -> SkillRequestContextRuntime:
         merged = dict(self.labels)
         merged.update(labels)
         return replace(self, labels=merged)
 
-
     def withtags(self, tags: tuple[str, ...]) -> SkillRequestContextRuntime:
         combined = tuple(dict.fromkeys((*self.tags, *tags)))
         return replace(self, tags=combined)
-
 
     def child(
         self,
@@ -870,7 +818,6 @@ class SkillRequestContextRuntime:
             metadata=mergedmetadata,
         )
 
-
     def toheaders(self) -> dict[str, str]:
         headers: dict[str, str] = {
             "x-request-id": self.requestid,
@@ -892,7 +839,6 @@ class SkillRequestContextRuntime:
         return headers
 
 
-
 @dataclass(slots=True, frozen=True)
 class SkillRuntimeContext:
     request: SkillRequestContextRuntime
@@ -908,20 +854,16 @@ class SkillRuntimeContext:
     metadata: Mapping[str, JsonValue] = field(default_factory=dict)
     startedat: datetime = field(default_factory=utcnow)
 
-
     def withmetadata(self, metadata: Mapping[str, JsonValue]) -> SkillRuntimeContext:
         merged = dict(self.metadata)
         merged.update(metadata)
         return replace(self, metadata=merged)
 
-
     def markreviewrequired(self, value: bool = True) -> SkillRuntimeContext:
         return replace(self, reviewrequired=value)
 
-
     def enablesandbox(self, value: bool = True) -> SkillRuntimeContext:
         return replace(self, sandboxenabled=value)
-
 
     def toauditrecord(self) -> dict[str, JsonValue]:
         return {
@@ -952,7 +894,6 @@ class SkillRuntimeContext:
             "startedat": self.startedat.isoformat(),
             "createdat": self.request.createdat.isoformat(),
         }
-
 
 
 def createrequestcontext(
@@ -994,7 +935,6 @@ def createrequestcontext(
     )
 
 
-
 def createruntimecontext(
     *,
     provider: str,
@@ -1024,61 +964,60 @@ def createruntimecontext(
     )
 
 
-
 __all__ = [
     "EventKind",
     "JsonPrimitive",
     "JsonValue",
     "RiskLevel",
-    "SkillProvider",
-    "SkillMode",
-    "SkillDecision",
+    "SkillActionDecisionRequest",
+    "SkillActionInput",
+    "SkillActionPolicyRequest",
     "SkillActor",
     "SkillAdapter",
+    "SkillBaseModel",
     "SkillBillingProvider",
     "SkillCapability",
     "SkillContextSnapshot",
+    "SkillDecision",
+    "SkillDecisionMetadata",
+    "SkillDecisionMetadataModel",
     "SkillDetection",
+    "SkillExecuteRequest",
     "SkillExecutionEvent",
+    "SkillExecutionInput",
     "SkillExecutionRequest",
     "SkillExecutionResult",
     "SkillExecutionTarget",
     "SkillHealthStatus",
     "SkillInputArtifact",
+    "SkillMode",
     "SkillOutputArtifact",
     "SkillPolicyHint",
+    "SkillPromptBundleInput",
+    "SkillProvider",
     "SkillProviderDecision",
     "SkillReason",
+    "SkillReasonModel",
     "SkillRequest",
+    "SkillRequestContext",
+    "SkillRequestContextRuntime",
+    "SkillRequestUnion",
+    "SkillResponseEnvelope",
     "SkillResponseEnvelopeRuntime",
+    "SkillResponsePayload",
     "SkillRuntime",
     "SkillRuntimeContext",
-    "SkillUsage",
-    "SkillBaseModel",
-    "SkillRequestContext",
-    "SkillPromptBundleInput",
     "SkillScanInput",
-    "SkillActionInput",
-    "SkillExecutionInput",
     "SkillScanRequest",
-    "SkillActionPolicyRequest",
-    "SkillActionDecisionRequest",
-    "SkillExecuteRequest",
-    "SkillDecisionMetadata",
-    "SkillDecisionMetadataModel",
-    "SkillReasonModel",
-    "SkillResponsePayload",
-    "SkillResponseEnvelope",
-    "SkillRequestUnion",
-    "buildskillsuccessresponse",
-    "buildskillerrorresponse",
+    "SkillUsage",
     "buildallowedresult",
     "buildblockedresult",
     "builderrorresult",
     "buildreviewresult",
+    "buildskillerrorresponse",
+    "buildskillsuccessresponse",
     "createrequestcontext",
     "createruntimecontext",
     "newid",
     "utcnow",
-    "SkillRequestContextRuntime",
 ]

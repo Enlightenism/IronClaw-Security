@@ -100,8 +100,7 @@ def guard_prompt_bundle(
     payload: GuardBundleRequest,
     request: Request,
 ) -> PolicyBundleDecisionResponse:
-    """
-    Internal policy route for guarding multi-source prompt context.
+    """Internal policy route for guarding multi-source prompt context.
 
     Expected optional JSON fields:
     - user_prompt
@@ -118,7 +117,7 @@ def guard_prompt_bundle(
             _has_meaningful_content(payload.retrieved_doc),
             _has_meaningful_content(payload.tool_output),
             _has_meaningful_content(payload.model_output),
-        ]
+        ],
     ):
         raise AppError(
             error="empty_policy_bundle",
@@ -130,7 +129,7 @@ def guard_prompt_bundle(
                     "retrieved_doc",
                     "tool_output",
                     "model_output",
-                ]
+                ],
             },
         )
 

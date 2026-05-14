@@ -8,15 +8,11 @@ client = TestClient(app)
 
 
 def _assert_validation_failure(response) -> None:
-    assert response.status_code == 422, (
-        f"Expected 422 validation error, got {response.status_code}: {response.text}"
-    )
+    assert response.status_code == 422, f"Expected 422 validation error, got {response.status_code}: {response.text}"
 
 
 def _assert_client_input_failure(response) -> None:
-    assert response.status_code in {400, 422}, (
-        f"Expected 400 or 422 client input error, got {response.status_code}: {response.text}"
-    )
+    assert response.status_code in {400, 422}, f"Expected 400 or 422 client input error, got {response.status_code}: {response.text}"
 
 
 def test_scan_rejects_empty_body():

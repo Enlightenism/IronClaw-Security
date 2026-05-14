@@ -78,10 +78,7 @@ def get_marketing_contact_sales() -> ContactSalesPageResponse:
     hero = ContactSalesHeroView(
         eyebrow="Contact sales",
         title="Talk to the team protecting AI systems before they protect themselves into your machine.",
-        subtitle=(
-            "Use this page when your organization needs a serious conversation about prompt injection, unsafe agent autonomy, "
-            "tool-connected risk, runtime policy enforcement, and how IronClaw-Security fits into a real buyer evaluation."
-        ),
+        subtitle=("Use this page when your organization needs a serious conversation about prompt injection, unsafe agent autonomy, tool-connected risk, runtime policy enforcement, and how IronClaw-Security fits into a real buyer evaluation."),
         primarycta="Request live walkthrough",
         secondarycta="Send security requirements",
     )
@@ -91,40 +88,28 @@ def get_marketing_contact_sales() -> ContactSalesPageResponse:
             proofid="technical-eval",
             value="Required",
             label="Enterprise deals usually include technical and security evaluation",
-            context=(
-                "Enterprise software sales commonly move through discovery, qualification, technical evaluation, "
-                "business case review, and procurement stages."
-            ),
+            context=("Enterprise software sales commonly move through discovery, qualification, technical evaluation, business case review, and procurement stages."),
             source="Apollo enterprise software sales process",
         ),
         ContactSalesProofView(
             proofid="buyer-trust",
             value="Critical",
             label="Trust and cross-functional validation drive enterprise software adoption",
-            context=(
-                "Enterprise SaaS buyers expect robust features, security validation, and collaboration across sales, "
-                "product, marketing, and customer success."
-            ),
+            context=("Enterprise SaaS buyers expect robust features, security validation, and collaboration across sales, product, marketing, and customer success."),
             source="ZoomInfo enterprise SaaS sales process",
         ),
         ContactSalesProofView(
             proofid="qualification",
             value="BANT+",
             label="Qualified sales conversations capture budget, authority, need, and timing",
-            context=(
-                "Modern enterprise qualification forms are built to separate serious buyers from low-intent interest and "
-                "arm sales teams with context before the call."
-            ),
+            context=("Modern enterprise qualification forms are built to separate serious buyers from low-intent interest and arm sales teams with context before the call."),
             source="Martal and Orbit qualification guidance",
         ),
         ContactSalesProofView(
             proofid="security-review",
             value="Early",
             label="Security proof often determines whether evaluation continues",
-            context=(
-                "Enterprise buyers often expect security details, compliance signals, access controls, and auditability "
-                "early in the process."
-            ),
+            context=("Enterprise buyers often expect security details, compliance signals, access controls, and auditability early in the process."),
             source="Demandbase enterprise GTM expectations",
         ),
     ]
@@ -227,23 +212,17 @@ def get_marketing_contact_sales() -> ContactSalesPageResponse:
         ContactSalesReasonView(
             reasonid="high-risk-agents",
             title="You are deploying agentic systems with real permissions",
-            description=(
-                "If your AI can browse, open files, call tools, or take multi-step actions, you need a runtime control story."
-            ),
+            description=("If your AI can browse, open files, call tools, or take multi-step actions, you need a runtime control story."),
         ),
         ContactSalesReasonView(
             reasonid="buyer-proof",
             title="You need credible proof for internal or customer-facing trust",
-            description=(
-                "Buyers and stakeholders want to see how risky AI actions are blocked, reviewed, quarantined, and audited."
-            ),
+            description=("Buyers and stakeholders want to see how risky AI actions are blocked, reviewed, quarantined, and audited."),
         ),
         ContactSalesReasonView(
             reasonid="migration",
             title="You have outgrown trust-based AI adoption",
-            description=(
-                "This page is for teams moving from experimentation into managed, governable, production AI operations."
-            ),
+            description=("This page is for teams moving from experimentation into managed, governable, production AI operations."),
         ),
     ]
 
@@ -251,30 +230,22 @@ def get_marketing_contact_sales() -> ContactSalesPageResponse:
         ContactSalesExpectationView(
             itemid="expectation-1",
             title="Risk-focused discovery",
-            description=(
-                "The conversation starts with your actual threat surface, not a generic feature tour."
-            ),
+            description=("The conversation starts with your actual threat surface, not a generic feature tour."),
         ),
         ContactSalesExpectationView(
             itemid="expectation-2",
             title="Relevant product walkthrough",
-            description=(
-                "We focus on prompt injection, tool control, review workflows, policy enforcement, and audit evidence."
-            ),
+            description=("We focus on prompt injection, tool control, review workflows, policy enforcement, and audit evidence."),
         ),
         ContactSalesExpectationView(
             itemid="expectation-3",
             title="Buyer and operator alignment",
-            description=(
-                "The page supports technical champions, security leads, founders, and executive buyers in the same motion."
-            ),
+            description=("The page supports technical champions, security leads, founders, and executive buyers in the same motion."),
         ),
         ContactSalesExpectationView(
             itemid="expectation-4",
             title="Security-first evaluation path",
-            description=(
-                "The goal is not just interest. The goal is a serious adoption path with real trust criteria."
-            ),
+            description=("The goal is not just interest. The goal is a serious adoption path with real trust criteria."),
         ),
     ]
 

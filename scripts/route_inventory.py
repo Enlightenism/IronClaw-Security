@@ -49,11 +49,7 @@ def _route_auth_flags(route: APIRoute) -> dict[str, Any]:
         "security",
     )
 
-    auth_dependency_names = [
-        name
-        for name, lowered_name in zip(dependency_names, lowered, strict=False)
-        if any(marker in lowered_name for marker in auth_markers)
-    ]
+    auth_dependency_names = [name for name, lowered_name in zip(dependency_names, lowered, strict=False) if any(marker in lowered_name for marker in auth_markers)]
 
     has_auth_dependency = bool(auth_dependency_names)
     return {
@@ -84,14 +80,10 @@ def _inventory() -> dict[str, Any]:
                 "include_in_schema": route.include_in_schema,
                 "summary": route.summary,
                 "deprecated": bool(route.deprecated),
-                "response_model": (
-                    getattr(route.response_model, "__name__", str(route.response_model))
-                    if route.response_model is not None
-                    else None
-                ),
+                "response_model": (getattr(route.response_model, "__name__", str(route.response_model)) if route.response_model is not None else None),
                 "has_path_params": "{" in route.path and "}" in route.path,
                 **auth_flags,
-            }
+            },
         )
 
     routes.sort(key=lambda item: (item["path"], ",".join(item["methods"])))

@@ -168,7 +168,7 @@ def _build_placeholder_record(reviewitemid: str) -> dict[str, Any] | None:
                     "label": "mid-risk-fetch",
                     "details": "Request fell within the review band and requires manual approval.",
                     "score": 52,
-                }
+                },
             ],
         },
     }

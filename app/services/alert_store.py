@@ -18,7 +18,7 @@ AlertDeliveryStatus = Literal["active", "paused", "failed"]
 _VALID_CHANNELS: frozenset[str] = frozenset({"email", "webhook", "slack"})
 _VALID_STATUSES: frozenset[str] = frozenset({"active", "paused", "failed"})
 _VALID_EVENTS: frozenset[str] = frozenset(
-    {"incident_created", "incident_updated", "quarantine_created", "policy_changed"}
+    {"incident_created", "incident_updated", "quarantine_created", "policy_changed"},
 )
 
 
@@ -72,8 +72,7 @@ class AlertEndpointRecord:
 
 
 class AlertEndpointStore:
-    """
-    In-memory store for alert delivery endpoints (email / webhook / slack).
+    """In-memory store for alert delivery endpoints (email / webhook / slack).
 
     Distinct from AlertStore in alertstore.py, which manages security alert
     records. This class manages *notification routing targets* only.
@@ -166,9 +165,7 @@ class AlertEndpointStore:
         metadata: dict[str, Any] | None = None,
     ) -> AlertEndpointRecord | None:
         validated_status = _validate_status(status)
-        validated_events = (
-            _validate_events(list(subscribed_events)) if subscribed_events is not None else None
-        )
+        validated_events = _validate_events(list(subscribed_events)) if subscribed_events is not None else None
 
         with self._lock:
             for index, item in enumerate(self._items):
@@ -181,7 +178,7 @@ class AlertEndpointStore:
                     name=item.name,
                     target=item.target,
                     subscribed_events=list(
-                        validated_events if validated_events is not None else item.subscribed_events
+                        validated_events if validated_events is not None else item.subscribed_events,
                     ),
                     status=validated_status,
                     created_at=item.created_at,

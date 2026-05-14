@@ -93,21 +93,13 @@ def install_integration(
         InstallStepResult(
             name="validate-command",
             state="installed" if record.command_name else "skipped",
-            message=(
-                "Install command available."
-                if record.command_name
-                else "No install command registered yet."
-            ),
+            message=("Install command available." if record.command_name else "No install command registered yet."),
             command=record.command_name,
         ),
         InstallStepResult(
             name="prepare-target",
             state="installed" if effective_target else "skipped",
-            message=(
-                f"Prepared install target '{effective_target}'."
-                if effective_target
-                else "No install target declared."
-            ),
+            message=(f"Prepared install target '{effective_target}'." if effective_target else "No install target declared."),
             metadata={"install_target": effective_target},
         ),
     ]
@@ -127,7 +119,7 @@ def install_integration(
                 name="apply-install",
                 state="skipped",
                 message="Dry run only; no changes applied.",
-            )
+            ),
         )
     else:
         update_integration_status(registry, integration_id, "active")
@@ -138,7 +130,7 @@ def install_integration(
                 name="apply-install",
                 state="installed",
                 message=f"Integration '{record.slug}' marked active.",
-            )
+            ),
         )
 
     completed_at = _utc_now()

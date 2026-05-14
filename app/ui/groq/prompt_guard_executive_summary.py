@@ -132,24 +132,12 @@ def _derive_key_message(
     alerts: Any,
 ) -> str:
     if risk.overall_risk_level == "critical" or alerts.critical_alerts > 0:
-        return (
-            f"Critical signals are present with {alerts.critical_alerts} critical alerts, "
-            f"{queue.review_queue_total} reviews queued, and trend status '{health.trend_status}'."
-        )
+        return f"Critical signals are present with {alerts.critical_alerts} critical alerts, {queue.review_queue_total} reviews queued, and trend status '{health.trend_status}'."
     if queue.queue_status in {"critical", "elevated", "busy"}:
-        return (
-            f"Review operations are under load with {queue.review_queue_total} queued items "
-            f"and {alerts.warning_alerts} warning alerts requiring attention."
-        )
+        return f"Review operations are under load with {queue.review_queue_total} queued items and {alerts.warning_alerts} warning alerts requiring attention."
     if performance.error_pressure >= 0.1:
-        return (
-            f"Traffic is flowing, but error pressure is elevated at {performance.error_pressure} "
-            f"with {performance.blocked_requests} blocked and {performance.flagged_requests} flagged requests."
-        )
-    return (
-        f"System health is {health.overall_status}, risk posture is {risk.overall_risk_level}, "
-        f"and the review queue is at {queue.review_queue_total} items."
-    )
+        return f"Traffic is flowing, but error pressure is elevated at {performance.error_pressure} with {performance.blocked_requests} blocked and {performance.flagged_requests} flagged requests."
+    return f"System health is {health.overall_status}, risk posture is {risk.overall_risk_level}, and the review queue is at {queue.review_queue_total} items."
 
 
 def build_prompt_guard_executive_summary() -> PromptGuardExecutiveSummary:
@@ -185,10 +173,7 @@ def build_prompt_guard_executive_summary() -> PromptGuardExecutiveSummary:
             id="exec:health",
             title="System health",
             tone=_normalize_tone(health.overall_status),
-            summary=(
-                f"Overall health is {health.overall_status} with policy mode '{health.policy_mode}' "
-                f"and trend status '{health.trend_status}'."
-            ),
+            summary=(f"Overall health is {health.overall_status} with policy mode '{health.policy_mode}' and trend status '{health.trend_status}'."),
             source_module="prompt_guard_health_snapshot",
             details={
                 "policy_mode": health.policy_mode,
@@ -200,10 +185,7 @@ def build_prompt_guard_executive_summary() -> PromptGuardExecutiveSummary:
             id="exec:risk",
             title="Risk posture",
             tone=_normalize_tone(risk.overall_risk_level),
-            summary=(
-                f"Risk posture is {risk.overall_risk_level} with {risk.critical_alerts} critical alerts "
-                f"and incident coverage ratio {risk.incident_coverage_ratio}."
-            ),
+            summary=(f"Risk posture is {risk.overall_risk_level} with {risk.critical_alerts} critical alerts and incident coverage ratio {risk.incident_coverage_ratio}."),
             source_module="prompt_guard_risk_posture_summary",
             details={
                 "overall_risk_level": risk.overall_risk_level,
@@ -215,10 +197,7 @@ def build_prompt_guard_executive_summary() -> PromptGuardExecutiveSummary:
             id="exec:queue",
             title="Review queue",
             tone=_normalize_tone(queue.queue_status),
-            summary=(
-                f"Queue status is {queue.queue_status} with {queue.review_queue_total} total reviews "
-                f"and backlog pressure from {queue.recommendation_backlog} recommendations."
-            ),
+            summary=(f"Queue status is {queue.queue_status} with {queue.review_queue_total} total reviews and backlog pressure from {queue.recommendation_backlog} recommendations."),
             source_module="prompt_guard_review_queue_summary",
             details={
                 "queue_status": queue.queue_status,
@@ -230,10 +209,7 @@ def build_prompt_guard_executive_summary() -> PromptGuardExecutiveSummary:
             id="exec:performance",
             title="Traffic pressure",
             tone="action-required" if performance.error_pressure >= 0.1 else "watch" if performance.error_pressure > 0 else "stable",
-            summary=(
-                f"Current request volume is {performance.request_volume} with {performance.blocked_requests} blocked, "
-                f"{performance.flagged_requests} flagged, and error pressure {performance.error_pressure}."
-            ),
+            summary=(f"Current request volume is {performance.request_volume} with {performance.blocked_requests} blocked, {performance.flagged_requests} flagged, and error pressure {performance.error_pressure}."),
             source_module="prompt_guard_performance_snapshot",
             details={
                 "request_volume": performance.request_volume,
@@ -278,9 +254,6 @@ def get_prompt_guard_executive_summary() -> PromptGuardExecutiveSummaryResponse:
         overall_tone=data["overall_tone"],
         headline=data["headline"],
         key_message=data["key_message"],
-        highlights=[
-            PromptGuardExecutiveHighlightResponse(**item)
-            for item in data["highlights"]
-        ],
+        highlights=[PromptGuardExecutiveHighlightResponse(**item) for item in data["highlights"]],
         metadata=data["metadata"],
     )

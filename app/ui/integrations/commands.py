@@ -146,7 +146,7 @@ def build_integration_commands_view(
                     **record_metadata,
                     "requested_by": requested_by,
                 },
-            )
+            ),
         )
 
     items.sort(
@@ -156,7 +156,7 @@ def build_integration_commands_view(
             item.platform,
             item.name,
             item.integration_id,
-        )
+        ),
     )
 
     return IntegrationCommandView(

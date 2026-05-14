@@ -93,11 +93,7 @@ def _build_platform_integration_summary(
     *,
     registry: IntegrationRegistry,
 ) -> PlatformIntegrationSummary:
-    records = [
-        record
-        for record in list_integrations(registry)
-        if record.platform.strip().lower() == platform.strip().lower()
-    ]
+    records = [record for record in list_integrations(registry) if record.platform.strip().lower() == platform.strip().lower()]
 
     status_counts: dict[str, int] = {
         "active": 0,
@@ -111,9 +107,13 @@ def _build_platform_integration_summary(
         status_counts[record.status] = status_counts.get(record.status, 0) + 1
         for capability in record.capabilities:
             if capability.enabled:
-                capability_counts[capability.name] = capability_counts.get(
-                    capability.name, 0
-                ) + 1
+                capability_counts[capability.name] = (
+                    capability_counts.get(
+                        capability.name,
+                        0,
+                    )
+                    + 1
+                )
 
     if records:
         display_name = records[0].platform
@@ -165,7 +165,7 @@ def build_platforms_view(
                 unsupported_capabilities=platform_summary["unsupported_capabilities"],
                 integration_summary=integration_summary,
                 profile=profile.to_dict(),
-            )
+            ),
         )
 
     # Ensure any platforms present in the registry but missing a profile still appear.
@@ -195,7 +195,7 @@ def build_platforms_view(
                     "metadata": {},
                     "checked_at": None,
                 },
-            )
+            ),
         )
 
     items.sort(key=lambda item: item.platform)

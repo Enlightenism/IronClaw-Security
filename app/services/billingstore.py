@@ -16,6 +16,7 @@ DEFAULT_BILLING_TABLE = "billing_records"
 # Utilities
 # ---------------------------------------------------------------------------
 
+
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -53,11 +54,7 @@ def _mapping(value: Any) -> dict[str, Any]:
         if isinstance(dumped, Mapping):
             return dict(dumped)
     if hasattr(value, "__dict__"):
-        return {
-            key: val
-            for key, val in vars(value).items()
-            if not key.startswith("_") and not callable(val)
-        }
+        return {key: val for key, val in vars(value).items() if not key.startswith("_") and not callable(val)}
     raise TypeError("value is not serializable to dict")
 
 
@@ -84,6 +81,7 @@ def _decimal_text(value: Any, default: str = "0") -> str:
 # ---------------------------------------------------------------------------
 # Payload normalizer
 # ---------------------------------------------------------------------------
+
 
 def _normalize_billing_payload(
     payload: dict[str, Any] | None = None,
@@ -123,108 +121,61 @@ def _normalize_billing_payload(
     src = _mapping(payload)
     src.update({k: v for k, v in extra.items() if v is not None})
 
-    resolved_billing_id = (
-        _string(billing_id)
-        or _string(src.get("billing_id"))
-        or _string(src.get("id"))
-        or str(uuid4())
-    )
+    resolved_billing_id = _string(billing_id) or _string(src.get("billing_id")) or _string(src.get("id")) or str(uuid4())
 
-    resolved_owner_id = (
-        _string(owner_id)
-        or _string(src.get("owner_id"))
-        or _string(src.get("account_id"))
-    )
+    resolved_owner_id = _string(owner_id) or _string(src.get("owner_id")) or _string(src.get("account_id"))
 
-    resolved_org = (
-        _string(organization_id)
-        or _string(org_id)
-        or _string(customer_id)
-        or _string(src.get("organization_id"))
-        or _string(src.get("org_id"))
-        or _string(src.get("customer_id"))
-    )
+    resolved_org = _string(organization_id) or _string(org_id) or _string(customer_id) or _string(src.get("organization_id")) or _string(src.get("org_id")) or _string(src.get("customer_id"))
 
-    resolved_package_id = (
-        _string(package_id)
-        or _string(package_code)
-        or _string(plan_id)
-        or _string(src.get("package_id"))
-        or _string(src.get("package_code"))
-        or _string(src.get("plan_id"))
-    )
+    resolved_package_id = _string(package_id) or _string(package_code) or _string(plan_id) or _string(src.get("package_id")) or _string(src.get("package_code")) or _string(src.get("plan_id"))
 
-    resolved_package_name = (
-        _string(package_name)
-        or _string(src.get("package_name"))
-        or _string(src.get("plan_name"))
-        or resolved_package_id
-        or "standard"
-    )
+    resolved_package_name = _string(package_name) or _string(src.get("package_name")) or _string(src.get("plan_name")) or resolved_package_id or "standard"
 
-    resolved_currency = (
-        _string(currency)
-        or _string(src.get("currency"))
-        or "USD"
-    ).upper()
+    resolved_currency = (_string(currency) or _string(src.get("currency")) or "USD").upper()
 
     resolved_amount = _decimal_text(
-        amount if amount is not None else src.get("amount", src.get("price"))
+        amount if amount is not None else src.get("amount", src.get("price")),
     )
     resolved_subtotal = _decimal_text(
-        subtotal if subtotal is not None else src.get("subtotal", resolved_amount)
+        subtotal if subtotal is not None else src.get("subtotal", resolved_amount),
     )
     resolved_tax_amount = _decimal_text(
-        tax_amount if tax_amount is not None
-        else src.get("tax_amount", src.get("tax", "0"))
+        tax_amount if tax_amount is not None else src.get("tax_amount", src.get("tax", "0")),
     )
     resolved_total_amount = _decimal_text(
-        total_amount if total_amount is not None
+        total_amount
+        if total_amount is not None
         else src.get(
             "total_amount",
             src.get(
                 "total",
                 Decimal(resolved_subtotal) + Decimal(resolved_tax_amount),
             ),
-        )
+        ),
     )
 
     resolved_units = int(
-        units if units is not None
-        else src.get("units", src.get("credits", 0))
+        units if units is not None else src.get("units", src.get("credits", 0)),
     )
     resolved_quota = int(
-        quota if quota is not None
-        else src.get("quota", src.get("limit", 0))
+        quota if quota is not None else src.get("quota", src.get("limit", 0)),
     )
 
-    resolved_status = (
-        _string(status) or _string(src.get("status")) or "pending"
-    )
-    resolved_billing_type = (
-        _string(billing_type) or _string(src.get("billing_type")) or "package_purchase"
-    )
-    resolved_interval = (
-        _string(interval) or _string(src.get("interval")) or "monthly"
-    )
-    resolved_source = (
-        _string(source) or _string(src.get("source")) or "ironclaw"
-    )
+    resolved_status = _string(status) or _string(src.get("status")) or "pending"
+    resolved_billing_type = _string(billing_type) or _string(src.get("billing_type")) or "package_purchase"
+    resolved_interval = _string(interval) or _string(src.get("interval")) or "monthly"
+    resolved_source = _string(source) or _string(src.get("source")) or "ironclaw"
 
     resolved_created_at = _normalize_timestamp(
-        created_at or src.get("created_at") or billed_at or src.get("billed_at")
+        created_at or src.get("created_at") or billed_at or src.get("billed_at"),
     )
     resolved_updated_at = _normalize_timestamp(
-        updated_at or src.get("updated_at") or resolved_created_at
+        updated_at or src.get("updated_at") or resolved_created_at,
     )
     resolved_billed_at = _normalize_timestamp(
-        billed_at or src.get("billed_at") or resolved_created_at
+        billed_at or src.get("billed_at") or resolved_created_at,
     )
-    resolved_paid_at = (
-        _normalize_timestamp(paid_at or src.get("paid_at"))
-        if (paid_at is not None or src.get("paid_at") is not None)
-        else None
-    )
+    resolved_paid_at = _normalize_timestamp(paid_at or src.get("paid_at")) if (paid_at is not None or src.get("paid_at") is not None) else None
 
     return {
         "billing_id": resolved_billing_id,
@@ -236,12 +187,7 @@ def _normalize_billing_payload(
         "package_id": resolved_package_id or None,
         "package_code": resolved_package_id or None,
         "package_name": resolved_package_name,
-        "plan_id": (
-            _string(plan_id)
-            or _string(src.get("plan_id"))
-            or resolved_package_id
-            or None
-        ),
+        "plan_id": (_string(plan_id) or _string(src.get("plan_id")) or resolved_package_id or None),
         "invoice_id": _string(invoice_id) or _string(src.get("invoice_id")) or None,
         "purchase_id": _string(purchase_id) or _string(src.get("purchase_id")) or None,
         "transaction_id": _string(transaction_id) or _string(src.get("transaction_id")) or None,
@@ -256,12 +202,9 @@ def _normalize_billing_payload(
         "units": resolved_units,
         "quota": resolved_quota,
         "source": resolved_source,
-        "metadata": (
-            metadata if isinstance(metadata, dict)
-            else _mapping(src.get("metadata"))
-        ),
+        "metadata": (metadata if isinstance(metadata, dict) else _mapping(src.get("metadata"))),
         "line_items": _listify(
-            line_items if line_items is not None else src.get("line_items")
+            line_items if line_items is not None else src.get("line_items"),
         ),
         "tags": _listify(tags if tags is not None else src.get("tags")),
         "created_at": resolved_created_at,
@@ -277,6 +220,7 @@ def _normalize_billing_payload(
 # billing-transaction records: invoices, package purchases, payments, refunds.
 # billing_store.py owns subscriptions + metering.)
 # ---------------------------------------------------------------------------
+
 
 @dataclass(slots=True)
 class BillingTransactionStore:
@@ -315,7 +259,9 @@ class BillingTransactionStore:
     # ------------------------------------------------------------------
 
     def create_record(
-        self, payload: dict[str, Any] | None = None, **kwargs: Any
+        self,
+        payload: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         record = _normalize_billing_payload(payload, **kwargs)
         inserted = self.backend.insert(self.table_name, record)
@@ -326,12 +272,16 @@ class BillingTransactionStore:
         return record
 
     def create(
-        self, payload: dict[str, Any] | None = None, **kwargs: Any
+        self,
+        payload: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         return self.create_record(payload, **kwargs)
 
     def charge(
-        self, payload: dict[str, Any] | None = None, **kwargs: Any
+        self,
+        payload: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         return self.create_record(payload, **kwargs)
 
@@ -399,7 +349,7 @@ class BillingTransactionStore:
         items = [dict(row) for row in rows]
         items.sort(
             key=lambda row: _normalize_timestamp(
-                row.get("updated_at") or row.get("created_at")
+                row.get("updated_at") or row.get("created_at"),
             ),
             reverse=True,
         )
@@ -413,7 +363,9 @@ class BillingTransactionStore:
             raise ValueError("billing_id is required")
         for key in ("billing_id", "id"):
             rows = self.backend.select(
-                self.table_name, filters={key: billing_id}, limit=1
+                self.table_name,
+                filters={key: billing_id},
+                limit=1,
             )
             if rows:
                 return dict(rows[0])
@@ -427,7 +379,9 @@ class BillingTransactionStore:
     # ------------------------------------------------------------------
 
     def update_record(
-        self, billing_id: str, updates: dict[str, Any]
+        self,
+        billing_id: str,
+        updates: dict[str, Any],
     ) -> dict[str, Any] | None:
         existing = self.get_record(billing_id)
         if existing is None:
@@ -435,23 +389,20 @@ class BillingTransactionStore:
 
         merged = dict(existing)
         merged.update(_mapping(updates))
-        merged["billing_id"] = (
-            existing.get("billing_id") or existing.get("id") or billing_id
-        )
+        merged["billing_id"] = existing.get("billing_id") or existing.get("id") or billing_id
         merged["id"] = merged["billing_id"]
         merged["updated_at"] = _utc_now()
 
-        if (
-            _string(merged.get("status")).lower() in {"paid", "settled"}
-            and not merged.get("paid_at")
-        ):
+        if _string(merged.get("status")).lower() in {"paid", "settled"} and not merged.get("paid_at"):
             merged["paid_at"] = merged["updated_at"]
 
         normalized = _normalize_billing_payload(merged)
 
         for key in ("billing_id", "id"):
             updated = self.backend.update(
-                self.table_name, normalized, filters={key: billing_id}
+                self.table_name,
+                normalized,
+                filters={key: billing_id},
             )
             if isinstance(updated, list) and updated:
                 return dict(updated[0])
@@ -459,7 +410,9 @@ class BillingTransactionStore:
         return normalized
 
     def update(
-        self, billing_id: str, updates: dict[str, Any]
+        self,
+        billing_id: str,
+        updates: dict[str, Any],
     ) -> dict[str, Any] | None:
         return self.update_record(billing_id, updates)
 
@@ -506,7 +459,8 @@ class BillingTransactionStore:
             raise ValueError("billing_id is required")
         for key in ("billing_id", "id"):
             deleted = self.backend.delete(
-                self.table_name, filters={key: billing_id}
+                self.table_name,
+                filters={key: billing_id},
             )
             if isinstance(deleted, list) and deleted:
                 return dict(deleted[0])
@@ -541,13 +495,15 @@ class BillingTransactionStore:
             total_amount += amount
             running = Decimal(by_currency.get(currency, "0.00")) + amount
             by_currency[currency] = format(
-                running.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f"
+                running.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+                "f",
             )
 
         return {
             "total_records": len(records),
             "total_amount": format(
-                total_amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f"
+                total_amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+                "f",
             ),
             "by_status": by_status,
             "by_currency": by_currency,
@@ -568,6 +524,7 @@ BillingStore = BillingTransactionStore
 # ---------------------------------------------------------------------------
 # Factories
 # ---------------------------------------------------------------------------
+
 
 def build_billing_store(
     *,

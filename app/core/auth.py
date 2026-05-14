@@ -61,7 +61,7 @@ def _extract_configured_api_key(request: Request) -> str | None:
             return value
 
     return _clean_optional_string(
-        getattr(settings, "effective_platform_api_key", None)
+        getattr(settings, "effective_platform_api_key", None),
     )
 
 
@@ -142,7 +142,9 @@ def _resolve_registry_api_key(provided_api_key: str) -> APIKeyRecord | None:
                     except Exception:
                         pass
                 records_by_id = getattr(registry, "_records_by_id", None) or getattr(
-                    registry, "keys_by_id", None
+                    registry,
+                    "keys_by_id",
+                    None,
                 )
                 if records_by_id is not None:
                     try:

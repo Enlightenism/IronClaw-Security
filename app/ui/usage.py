@@ -32,8 +32,7 @@ def _render_html(title: str, body_content: str) -> str:
 
 @router.get("", response_class=HTMLResponse)
 async def usage_root(request: Request) -> HTMLResponse:
-    """
-    Fallback usage UI landing page.
+    """Fallback usage UI landing page.
 
     Satisfies tests that look for:
     - non-empty HTML
@@ -71,8 +70,7 @@ async def usage_root(request: Request) -> HTMLResponse:
 
 @router.get("/reports", response_class=HTMLResponse)
 async def usage_reports(request: Request) -> HTMLResponse:
-    """
-    Reports view used by tests as primary candidate for usage reports UI.
+    """Reports view used by tests as primary candidate for usage reports UI.
 
     Must:
     - return 200 with text/html
@@ -118,8 +116,7 @@ async def usage_reports(request: Request) -> HTMLResponse:
 
 @router.get("/event", response_class=HTMLResponse)
 async def usage_event(request: Request) -> HTMLResponse:
-    """
-    Event/detail view.
+    """Event/detail view.
 
     Tests expect:
     - 200 + text/html
@@ -150,8 +147,7 @@ async def usage_event(request: Request) -> HTMLResponse:
 
 @router.get("/summary", response_class=HTMLResponse)
 async def usage_summary(request: Request) -> HTMLResponse:
-    """
-    Summary view.
+    """Summary view.
 
     Tests expect:
     - 200 + text/html

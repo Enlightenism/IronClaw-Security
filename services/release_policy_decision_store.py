@@ -60,10 +60,7 @@ class ReleasePolicyDecisionStore:
     ) -> ReleasePolicyDecision:
         decided_at = self._utcnow_iso()
         decision = ReleasePolicyDecision(
-            decision_id=(
-                f"release-policy-{channel}-"
-                f"{decided_at.replace(':', '').replace('-', '').replace('+', '').replace('.', '')}"
-            ),
+            decision_id=(f"release-policy-{channel}-{decided_at.replace(':', '').replace('-', '').replace('+', '').replace('.', '')}"),
             channel=channel,
             allowed=allowed,
             requested_version=requested_version.strip(),

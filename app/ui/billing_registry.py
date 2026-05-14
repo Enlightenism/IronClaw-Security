@@ -79,7 +79,7 @@ def _build_packages() -> list[BillingRegistryPackageView]:
                     "effective_price_per_1k_units": unit_price_per_1k,
                     "featured": package_id == "team-security",
                 },
-            )
+            ),
         )
 
     return packages

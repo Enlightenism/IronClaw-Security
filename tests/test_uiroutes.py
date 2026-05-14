@@ -6,11 +6,7 @@ from app.main import app
 
 
 def _paths() -> set[str]:
-    return {
-        route.path
-        for route in app.routes
-        if isinstance(route, APIRoute)
-    }
+    return {route.path for route in app.routes if isinstance(route, APIRoute)}
 
 
 def test_ui_runtime_status_route_is_registered() -> None:

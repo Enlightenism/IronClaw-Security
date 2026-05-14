@@ -58,8 +58,7 @@ def _env_timeout() -> float:
 
 
 class IronClawInfraClient:
-    """
-    Synchronous API client for IronClaw infrastructure endpoints.
+    """Synchronous API client for IronClaw infrastructure endpoints.
 
     Renamed from IronClawClient to IronClawInfraClient to prevent import
     collision with IronClawScanClient in ironclaw_client.py.

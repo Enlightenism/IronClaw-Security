@@ -139,9 +139,7 @@ class Orchestrator:
         self.review_queue = review_queue or ReviewQueue()
 
     def orchestrate(self, request: OrchestrationRequest | Mapping[str, Any] | None) -> OrchestrationResult:
-        normalized_request = (
-            request if isinstance(request, OrchestrationRequest) else OrchestrationRequest.from_mapping(request)
-        )
+        normalized_request = request if isinstance(request, OrchestrationRequest) else OrchestrationRequest.from_mapping(request)
 
         result = OrchestrationResult(
             orchestration_id=f"orch-{uuid4().hex}",
@@ -274,9 +272,7 @@ class Orchestrator:
         }
 
     def _build_coordination(self, runtime_result: RuntimeExecutionResult) -> CoordinatedResponse:
-        review_required = runtime_result.status == "needs_review" or any(
-            step.name == "human_review" for step in runtime_result.steps
-        )
+        review_required = runtime_result.status == "needs_review" or any(step.name == "human_review" for step in runtime_result.steps)
         quarantine_required = runtime_result.status == "quarantined"
         blocked = runtime_result.status == "blocked" or not runtime_result.allowed
 
@@ -343,7 +339,7 @@ class Orchestrator:
                     "runtime": runtime_result.to_dict(),
                     "coordination": coordination.to_dict(),
                 },
-            }
+            },
         )
 
     def _record_step(
@@ -361,7 +357,7 @@ class Orchestrator:
                 status=status,
                 message=message,
                 details=dict(details or {}),
-            )
+            ),
         )
 
     def _emit_telemetry(self, result: OrchestrationResult, *, event: str) -> None:
@@ -375,7 +371,7 @@ class Orchestrator:
                 "status": result.status,
                 "outcome": result.outcome,
                 "allowed": result.allowed,
-            }
+            },
         )
 
 
@@ -397,10 +393,10 @@ def orchestrate_request_dict(
 
 
 __all__ = [
-    "Orchestrator",
     "OrchestrationRequest",
     "OrchestrationResult",
     "OrchestrationStep",
+    "Orchestrator",
     "orchestrate_request",
     "orchestrate_request_dict",
 ]

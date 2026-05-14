@@ -85,8 +85,7 @@ def metrics_summary_page(
     source: str | None = Query(default=None),
     metric_group: str = Query(default="platform"),
 ) -> dict[str, Any]:
-    """
-    Presentation-oriented UI metadata for platform metrics.
+    """Presentation-oriented UI metadata for platform metrics.
 
     This route returns:
     - filter controls
@@ -95,7 +94,6 @@ def metrics_summary_page(
     - sectional summaries
     - jump actions to related pages
     """
-
     filters = [
         _filter_field(
             name="period",

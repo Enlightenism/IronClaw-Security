@@ -247,37 +247,27 @@ def get_marketing_nav() -> MarketingNavPageResponse:
         MarketingNavRuleView(
             ruleid="rule-1",
             title="Keep the primary navigation focused",
-            description=(
-                "The main bar should stay limited to the most valuable destinations so buyers understand the offering without overload."
-            ),
+            description=("The main bar should stay limited to the most valuable destinations so buyers understand the offering without overload."),
         ),
         MarketingNavRuleView(
             ruleid="rule-2",
             title="Use clear and descriptive labels",
-            description=(
-                "Navigation labels should match what the page contains instead of relying on vague category words."
-            ),
+            description=("Navigation labels should match what the page contains instead of relying on vague category words."),
         ),
         MarketingNavRuleView(
             ruleid="rule-3",
             title="Keep the structure consistent across pages",
-            description=(
-                "The same labels, order, and CTA placement should appear throughout the marketing experience."
-            ),
+            description=("The same labels, order, and CTA placement should appear throughout the marketing experience."),
         ),
         MarketingNavRuleView(
             ruleid="rule-4",
             title="Support accessibility from the shell outward",
-            description=(
-                "Navigation should use semantic structure, visible focus states, keyboard support, and predictable behavior on desktop and mobile."
-            ),
+            description=("Navigation should use semantic structure, visible focus states, keyboard support, and predictable behavior on desktop and mobile."),
         ),
         MarketingNavRuleView(
             ruleid="rule-5",
             title="Balance buyer exploration with conversion",
-            description=(
-                "The shell should help visitors explore trust, platform, and features while always preserving a strong evaluation path."
-            ),
+            description=("The shell should help visitors explore trust, platform, and features while always preserving a strong evaluation path."),
         ),
     ]
 

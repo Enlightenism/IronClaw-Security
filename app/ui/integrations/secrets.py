@@ -105,7 +105,7 @@ def build_integration_secrets_view(
                     "status": record.status,
                     "requested_by": requested_by,
                 },
-            )
+            ),
         )
 
     items.sort(key=lambda item: (item.platform, item.name, item.integration_id))

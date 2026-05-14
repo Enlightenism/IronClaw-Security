@@ -6,11 +6,7 @@ from app.main import app
 
 
 def _route_map() -> dict[str, APIRoute]:
-    return {
-        route.path: route
-        for route in app.routes
-        if isinstance(route, APIRoute)
-    }
+    return {route.path: route for route in app.routes if isinstance(route, APIRoute)}
 
 
 def test_operations_health_routes_are_registered() -> None:

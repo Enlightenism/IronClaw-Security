@@ -46,7 +46,7 @@ class TagSummaryItem:
             "name": self.name,
             "usage_count": self.usage_count,
             "active_usage_count": self.active_usage_count,
-            "platforms": list(sorted(set(self.platforms))),
+            "platforms": sorted(set(self.platforms)),
             "metadata": dict(self.metadata),
         }
 
@@ -151,7 +151,7 @@ def build_integration_tags_view(
             item.name,
             item.slug,
             item.integration_id,
-        )
+        ),
     )
 
     # Build sorted tag summaries: highest usage, then name.
@@ -161,7 +161,7 @@ def build_integration_tags_view(
             -t.usage_count,
             -t.active_usage_count,
             t.name.lower(),
-        )
+        ),
     )
 
     unique_tag_count = len(tag_items)

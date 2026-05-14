@@ -31,7 +31,7 @@ def test_adapt_openclaw_scan_text_request() -> None:
                 "conversation_id": "conv-001",
                 "tags": ["Prompt-Injection", " Prompt-Injection ", "security"],
             },
-        }
+        },
     )
 
     assert isinstance(request, SkillScanRequest)
@@ -59,7 +59,7 @@ def test_adapt_openclaw_scan_bundle_request() -> None:
             "context": {
                 "trace_id": "trace-bundle",
             },
-        }
+        },
     )
 
     assert isinstance(request, SkillScanRequest)
@@ -85,7 +85,7 @@ def test_adapt_openclaw_action_policy_request() -> None:
                 "agent_id": "openclaw-agent",
                 "trace_id": "trace-policy",
             },
-        }
+        },
     )
 
     assert isinstance(request, SkillActionPolicyRequest)
@@ -106,7 +106,7 @@ def test_adapt_openclaw_action_decision_request() -> None:
             "path": "app/main.py",
             "body": "patched code",
             "policy_mode": "review",
-        }
+        },
     )
 
     assert isinstance(request, SkillActionDecisionRequest)
@@ -125,7 +125,7 @@ def test_adapt_openclaw_execute_request() -> None:
             "require_confirmation": True,
             "allow_side_effects": False,
             "context": {"trace_id": "trace-exec"},
-        }
+        },
     )
 
     assert isinstance(request, SkillExecuteRequest)
@@ -144,7 +144,7 @@ def test_adapt_openclaw_request_rejects_unknown_operation() -> None:
                 "operation": "nuke_system",
                 "content_type": "text",
                 "input": "bad payload",
-            }
+            },
         )
 
 
@@ -154,7 +154,7 @@ def test_adapt_openclaw_request_rejects_missing_bundle_for_prompt_bundle() -> No
             {
                 "operation": "scan",
                 "target_type": "prompt_bundle",
-            }
+            },
         )
 
 

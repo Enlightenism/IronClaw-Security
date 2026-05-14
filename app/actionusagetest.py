@@ -50,7 +50,7 @@ def _to_decimal(value: Any) -> Decimal | None:
 def _non_negative_or_none(value: Decimal | None) -> Decimal | None:
     if value is None:
         return None
-    if value < Decimal("0"):
+    if value < Decimal(0):
         raise ValueError("numeric usage test values must be non-negative")
     return value
 
@@ -99,7 +99,7 @@ def _build_default_cases(
             "units": str(units) if isinstance(units, Decimal) else None,
             "unitcost": str(unit_cost) if isinstance(unit_cost, Decimal) else None,
             "expectedtotalcost": str(expected_total) if isinstance(expected_total, Decimal) else None,
-        }
+        },
     ]
 
 
@@ -107,12 +107,11 @@ def build_action_usage_test(
     *,
     owner_id: str | None = None,
     action: str | None = None,
-    units: int | float | str | Decimal | None = None,
-    unit_cost: int | float | str | Decimal | None = None,
+    units: float | str | Decimal | None = None,
+    unit_cost: float | str | Decimal | None = None,
     metadata: Mapping[str, Any] | None = None,
 ) -> ActionUsageTest:
-    """
-    Build an action usage metering test harness payload.
+    """Build an action usage metering test harness payload.
 
     Behaviour required by tests (tests/testactionusagetest.py):
     - Callable with no arguments (all fields optional).
@@ -125,7 +124,6 @@ def build_action_usage_test(
     - Metadata, when present, is a dict; cases, when present, is a list.
     - generatedat/timestamp-like field is non-empty when present.
     """
-
     units_decimal = _to_decimal(units)
     unit_cost_decimal = _to_decimal(unit_cost)
 

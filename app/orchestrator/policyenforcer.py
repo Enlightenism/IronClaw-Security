@@ -140,12 +140,7 @@ class PolicyEnforcer:
             context=context,
         )
 
-        bundle_verification_dict = (
-            verification.as_dict()
-            if hasattr(verification, "as_dict")
-            else dict(verification) if isinstance(verification, dict)
-            else {}
-        )
+        bundle_verification_dict = verification.as_dict() if hasattr(verification, "as_dict") else dict(verification) if isinstance(verification, dict) else {}
 
         v_valid: bool = bool(getattr(verification, "valid", bundle_verification_dict.get("valid", False)))
         v_allowed: bool = bool(getattr(verification, "allowed", bundle_verification_dict.get("allowed", False)))
@@ -176,12 +171,7 @@ class PolicyEnforcer:
             context=context,
         )
 
-        override_dict = (
-            override.as_dict()
-            if hasattr(override, "as_dict")
-            else dict(override) if isinstance(override, dict)
-            else {}
-        )
+        override_dict = override.as_dict() if hasattr(override, "as_dict") else dict(override) if isinstance(override, dict) else {}
 
         o_active: bool = bool(getattr(override, "active", override_dict.get("active", False)))
         o_allowed: bool = bool(getattr(override, "allowed", override_dict.get("allowed", False)))
@@ -215,12 +205,7 @@ class PolicyEnforcer:
             context=context,
         )
 
-        rollout_dict = (
-            rollout.as_dict()
-            if hasattr(rollout, "as_dict")
-            else dict(rollout) if isinstance(rollout, dict)
-            else {}
-        )
+        rollout_dict = rollout.as_dict() if hasattr(rollout, "as_dict") else dict(rollout) if isinstance(rollout, dict) else {}
 
         r_enabled: bool = bool(getattr(rollout, "enabled", rollout_dict.get("enabled", False)))
         r_allowed: bool = bool(getattr(rollout, "allowed", rollout_dict.get("allowed", False)))

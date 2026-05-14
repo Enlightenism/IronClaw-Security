@@ -235,7 +235,11 @@ def get_policy_settings() -> PolicySettingsResponse:
             mode="quarantine",
             enabled=True,
             description="Escalate when combined prompt, tool output, and retrieval context creates a coordinated injection pattern.",
-            patternexamples=["ignore prior instructions", "override policy", "tool output claims trusted authority"],
+            patternexamples=[
+                "ignore prior instructions",
+                "override policy",
+                "tool output claims trusted authority",
+            ],
         ),
     ]
 

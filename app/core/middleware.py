@@ -60,8 +60,7 @@ def _resolve_units(request: Request) -> int:
 
 
 class UsageMeteringMiddleware(BaseHTTPMiddleware):
-    """
-    Middleware that records lightweight per-request usage events.
+    """Middleware that records lightweight per-request usage events.
 
     Design goals:
     - No hard dependency on auth success.

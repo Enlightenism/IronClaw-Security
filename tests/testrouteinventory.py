@@ -56,10 +56,7 @@ def _route_paths() -> set[str]:
 
 
 def _route_methods() -> dict[str, set[str]]:
-    return {
-        route.path: set(route.methods or set())
-        for route in _api_routes()
-    }
+    return {route.path: set(route.methods or set()) for route in _api_routes()}
 
 
 def _paths_with_prefix(prefix: str) -> list[str]:
@@ -100,13 +97,8 @@ def test_ui_route_inventory_contains_core_pages() -> None:
 
 def test_route_inventory_has_no_duplicate_paths() -> None:
     paths = [route.path for route in _api_routes()]
-    unexpected_duplicates = [
-        p for p in dict.fromkeys(paths)
-        if paths.count(p) > 1 and p not in _KNOWN_DUPLICATE_PATHS
-    ]
-    assert not unexpected_duplicates, (
-        f"unexpected duplicate route paths detected: {sorted(unexpected_duplicates)}"
-    )
+    unexpected_duplicates = [p for p in dict.fromkeys(paths) if paths.count(p) > 1 and p not in _KNOWN_DUPLICATE_PATHS]
+    assert not unexpected_duplicates, f"unexpected duplicate route paths detected: {sorted(unexpected_duplicates)}"
 
 
 def test_expected_inventory_routes_allow_get() -> None:

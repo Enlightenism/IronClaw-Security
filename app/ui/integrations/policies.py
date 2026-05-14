@@ -90,7 +90,7 @@ def build_integration_policies_view(
                 "slug": record.slug,
                 "manifest_version": manifest.manifest_version,
                 "capabilities": list(manifest.capabilities),
-            }
+            },
         ]
 
         bundle = PolicyBundle(
@@ -133,7 +133,7 @@ def build_integration_policies_view(
                 metadata={
                     "requested_by": requested_by,
                 },
-            )
+            ),
         )
 
     items.sort(
@@ -142,7 +142,7 @@ def build_integration_policies_view(
             item.platform,
             item.slug,
             item.integration_id,
-        )
+        ),
     )
 
     return IntegrationPoliciesView(

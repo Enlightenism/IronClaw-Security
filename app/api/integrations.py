@@ -129,6 +129,7 @@ class PolicyBundleVerificationResponse(BaseModel):
 # Sub-route response models
 # ---------------------------------------------------------------------------
 
+
 class IntegrationCompatibilityResponse(BaseModel):
     integration_id: str
     compatible: bool
@@ -178,6 +179,7 @@ class IntegrationObservabilityResponse(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _record_slug(record: Any) -> str:
     slug = str(record.metadata.get("slug", "")).strip()
     if slug:
@@ -203,10 +205,7 @@ def _matches_capability(record: Any, capability: str | None) -> bool:
     if not capability:
         return True
     target = capability.strip().lower()
-    return any(
-        str(item.name).strip().lower() == target and bool(item.enabled)
-        for item in record.capabilities
-    )
+    return any(str(item.name).strip().lower() == target and bool(item.enabled) for item in record.capabilities)
 
 
 def _serialize_record(record: Any) -> IntegrationRecordResponse:
@@ -284,16 +283,14 @@ def _require_record(integration_id: str) -> Any:
 # Installer sub-routes  (before /{integration_id} catch-all)
 # ---------------------------------------------------------------------------
 
+
 @router.get("/installers", response_model=dict)
 def list_installers() -> dict[str, Any]:
     return {
         "status": "ok",
         "service": "IronClaw-Security",
         "timestamp": _now(),
-        "items": [
-            _installer_payload(_record_slug(r))
-            for r in get_integration_registry().list_integrations()
-        ],
+        "items": [_installer_payload(_record_slug(r)) for r in get_integration_registry().list_integrations()],
     }
 
 
@@ -309,16 +306,14 @@ def get_installer(integration_id: str) -> dict[str, Any]:
 # Verifier sub-routes  (before /{integration_id} catch-all)
 # ---------------------------------------------------------------------------
 
+
 @router.get("/verifiers", response_model=dict)
 def list_verifiers() -> dict[str, Any]:
     return {
         "status": "ok",
         "service": "IronClaw-Security",
         "timestamp": _now(),
-        "items": [
-            _verifier_payload(_record_slug(r))
-            for r in get_integration_registry().list_integrations()
-        ],
+        "items": [_verifier_payload(_record_slug(r)) for r in get_integration_registry().list_integrations()],
     }
 
 
@@ -334,6 +329,7 @@ def get_verifier(integration_id: str) -> dict[str, Any]:
 # Summary  (before /{integration_id} catch-all)
 # ---------------------------------------------------------------------------
 
+
 @router.get("/summary", response_model=IntegrationRegistrySummaryResponse)
 def read_integrations_summary() -> IntegrationRegistrySummaryResponse:
     registry = get_integration_registry()
@@ -341,16 +337,9 @@ def read_integrations_summary() -> IntegrationRegistrySummaryResponse:
     summary = registry.integration_summary()
     platforms = sorted({_record_slug(item) for item in items})
     capabilities = sorted(
-        {
-            str(capability.name)
-            for item in items
-            for capability in item.capabilities
-            if capability.enabled
-        }
+        {str(capability.name) for item in items for capability in item.capabilities if capability.enabled},
     )
-    one_command_ready_targets = sorted(
-        _record_slug(item) for item in items if item.status in ("available", "ready")
-    )
+    one_command_ready_targets = sorted(_record_slug(item) for item in items if item.status in ("available", "ready"))
     return IntegrationRegistrySummaryResponse(
         total_integrations=summary["total_integrations"],
         statuses=summary,
@@ -364,17 +353,14 @@ def read_integrations_summary() -> IntegrationRegistrySummaryResponse:
 # Registry list  (before /{integration_id} catch-all)
 # ---------------------------------------------------------------------------
 
+
 @router.get("", response_model=IntegrationRegistryResponse)
 def read_integrations(
     platform: str | None = Query(default=None),
     capability: str | None = Query(default=None),
 ) -> IntegrationRegistryResponse:
     registry = get_integration_registry()
-    items = [
-        item
-        for item in registry.list_integrations()
-        if _matches_platform(item, platform) and _matches_capability(item, capability)
-    ]
+    items = [item for item in registry.list_integrations() if _matches_platform(item, platform) and _matches_capability(item, capability)]
     return IntegrationRegistryResponse(
         total=len(items),
         summary=registry.integration_summary(),
@@ -385,6 +371,7 @@ def read_integrations(
 # ---------------------------------------------------------------------------
 # Per-integration detail sub-routes  (before generic catch-all)
 # ---------------------------------------------------------------------------
+
 
 @router.get(
     "/{integration_id}/compatibility",
@@ -491,6 +478,7 @@ def get_integration_observability(integration_id: str) -> IntegrationObservabili
 # Per-integration catch-all routes  (must stay LAST)
 # ---------------------------------------------------------------------------
 
+
 @router.get("/{integration_id}", response_model=IntegrationRecordResponse)
 def read_integration(integration_id: str) -> IntegrationRecordResponse:
     record = _find_record(integration_id)
@@ -591,7 +579,7 @@ def sign_policy_bundle_route(
     payload: PolicyBundleSignRequest,
 ) -> SignedPolicyBundleResponse:
     created_at = str(
-        payload.metadata.get("created_at") or datetime.now(UTC).isoformat()
+        payload.metadata.get("created_at") or datetime.now(UTC).isoformat(),
     )
     return SignedPolicyBundleResponse(
         bundle_id=payload.bundle_id,

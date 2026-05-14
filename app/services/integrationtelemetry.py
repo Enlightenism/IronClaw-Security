@@ -41,7 +41,7 @@ class IntegrationTelemetryService:
                         "status": record.status,
                         "settingsroute": record.settingsroute,
                     },
-                )
+                ),
             )
 
             events.append(
@@ -57,7 +57,7 @@ class IntegrationTelemetryService:
                         "verificationroute": record.verificationroute,
                         "manifestroute": record.manifestroute,
                     },
-                )
+                ),
             )
 
         return events

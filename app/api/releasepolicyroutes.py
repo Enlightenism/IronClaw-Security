@@ -18,8 +18,10 @@ router = APIRouter(
 # missing app.services.releasepolicy module never crashes collection.
 # ---------------------------------------------------------------------------
 
+
 def build_release_policy_service():  # noqa: ANN201
     from app.services.release_policy import build_release_policy_service as _factory
+
     return _factory()
 
 

@@ -27,7 +27,7 @@ def _record(
             "ok": ok,
             "detail": detail,
             "status_code": status_code,
-        }
+        },
     )
     label = "PASS" if ok else "FAIL"
     suffix = f" (status={status_code})" if status_code is not None else ""
@@ -77,12 +77,7 @@ def _smoke_health(results: list[dict[str, Any]]) -> None:
 
 def _smoke_openapi(results: list[dict[str, Any]]) -> None:
     status_code, content_type, body = _get_json("/openapi.json")
-    ok = (
-        status_code == 200
-        and content_type.startswith("application/json")
-        and isinstance(body, dict)
-        and "paths" in body
-    )
+    ok = status_code == 200 and content_type.startswith("application/json") and isinstance(body, dict) and "paths" in body
     _record(
         results,
         name="openapi",

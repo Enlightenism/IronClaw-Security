@@ -15,9 +15,7 @@ router = APIRouter(
 )
 
 
-
 DeploymentStatus = Literal["ready", "warning", "blocked"]
-
 
 
 class DeploymentCheckView(BaseModel):
@@ -26,7 +24,6 @@ class DeploymentCheckView(BaseModel):
     status: DeploymentStatus
     detail: str
     metadata: dict[str, Any] = Field(default_factory=dict)
-
 
 
 class DeploymentReadinessView(BaseModel):
@@ -38,7 +35,6 @@ class DeploymentReadinessView(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-
 class DeploymentReadinessResponse(BaseModel):
     status: str
     service: str
@@ -46,16 +42,13 @@ class DeploymentReadinessResponse(BaseModel):
     readiness: DeploymentReadinessView
 
 
-
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
 
 
 @router.get("/readiness", response_model=DeploymentReadinessResponse)
 def get_deployment_readiness() -> DeploymentReadinessResponse:
     now = _utc_now_iso()
-
 
     readiness = DeploymentReadinessView(
         release_id="IronClaw-Security",
@@ -103,7 +96,6 @@ def get_deployment_readiness() -> DeploymentReadinessResponse:
             "recommended_next_action": "validate live alert targets and complete production billing persistence",
         },
     )
-
 
     return DeploymentReadinessResponse(
         status="ok",

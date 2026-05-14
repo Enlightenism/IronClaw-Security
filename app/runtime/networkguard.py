@@ -51,7 +51,11 @@ DEFAULT_BLOCKED_PATH_PATTERNS: tuple[tuple[str, str, int], ...] = (
 DEFAULT_SENSITIVE_FIELD_PATTERNS: tuple[tuple[str, str, int], ...] = (
     ("authorization_header", r"(?i)^authorization$", 60),
     ("cookie_header", r"(?i)^(cookie|set-cookie)$", 55),
-    ("api_key_field", r"(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret)$", 45),
+    (
+        "api_key_field",
+        r"(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret)$",
+        45,
+    ),
     ("password_field", r"(?i)(password|passwd|pwd)$", 50),
     ("private_key_field", r"(?i)(private[_-]?key|ssh[_-]?key|pem)$", 80),
 )
@@ -175,7 +179,7 @@ class NetworkGuard:
                     label="Missing URL",
                     details="Network request was denied because no URL was provided.",
                     score=80,
-                )
+                ),
             )
             return self._finalize(
                 reasons=reasons,
@@ -203,7 +207,7 @@ class NetworkGuard:
                     label="Missing scheme",
                     details="Network request must include an explicit scheme such as https.",
                     score=60,
-                )
+                ),
             )
             matched_rules.append("missing_scheme")
             risk_delta += 60
@@ -215,7 +219,7 @@ class NetworkGuard:
                     label="Blocked scheme",
                     details=f"Scheme '{scheme}' is blocked by runtime network policy.",
                     score=85,
-                )
+                ),
             )
             matched_rules.append(f"blocked_scheme:{scheme}")
             risk_delta += 85
@@ -226,7 +230,7 @@ class NetworkGuard:
                     label="Unapproved scheme",
                     details=f"Scheme '{scheme}' is outside the approved network policy set.",
                     score=35,
-                )
+                ),
             )
             matched_rules.append(f"unapproved_scheme:{scheme}")
             risk_delta += 35
@@ -238,7 +242,7 @@ class NetworkGuard:
                     label="Missing host",
                     details="Network request URL did not resolve to a host component.",
                     score=70,
-                )
+                ),
             )
             matched_rules.append("missing_host")
             risk_delta += 70
@@ -280,7 +284,7 @@ class NetworkGuard:
                     label="Unexpected method",
                     details=f"HTTP method '{normalized_method}' is non-standard for this runtime profile.",
                     score=10,
-                )
+                ),
             )
             matched_rules.append(f"unexpected_method:{normalized_method}")
             risk_delta += 10
@@ -292,7 +296,7 @@ class NetworkGuard:
                     label="Approved destination",
                     details=f"Host '{host}' is explicitly allowlisted for sandbox egress.",
                     score=0,
-                )
+                ),
             )
             matched_rules.append(f"allowed_host:{host}")
 
@@ -330,7 +334,7 @@ class NetworkGuard:
                         label="Blocked destination",
                         details=f"Destination host matched blocked rule '{rule_name}'.",
                         score=score,
-                    )
+                    ),
                 )
                 matched_rules.append(rule_name)
                 risk_delta += int(score)
@@ -347,7 +351,7 @@ class NetworkGuard:
                     label="Single-label host",
                     details=f"Host '{host}' is a single-label destination and requires review.",
                     score=25,
-                )
+                ),
             )
             matched_rules.append("single_label_host")
             risk_delta += 25
@@ -359,7 +363,7 @@ class NetworkGuard:
                     label="Unapproved destination",
                     details=f"Host '{host}' is not on the approved egress allowlist.",
                     score=20,
-                )
+                ),
             )
             matched_rules.append("host_not_allowlisted")
             risk_delta += 20
@@ -383,7 +387,7 @@ class NetworkGuard:
                     label="Loopback destination",
                     details=f"Destination IP '{host}' is loopback and is blocked.",
                     score=95,
-                )
+                ),
             )
             matched_rules.append("loopback_ip")
             risk_delta += 95
@@ -395,7 +399,7 @@ class NetworkGuard:
                     label="Link-local destination",
                     details=f"Destination IP '{host}' is link-local and is blocked.",
                     score=95,
-                )
+                ),
             )
             matched_rules.append("link_local_ip")
             risk_delta += 95
@@ -407,7 +411,7 @@ class NetworkGuard:
                     label="Restricted IP range",
                     details=f"Destination IP '{host}' is in a restricted address range.",
                     score=85,
-                )
+                ),
             )
             matched_rules.append("restricted_ip_range")
             risk_delta += 85
@@ -419,7 +423,7 @@ class NetworkGuard:
                     label="Private network destination",
                     details=f"Destination IP '{host}' is private and blocked by sandbox egress policy.",
                     score=90,
-                )
+                ),
             )
             matched_rules.append("private_ip")
             risk_delta += 90
@@ -439,7 +443,7 @@ class NetworkGuard:
                         label="Blocked path",
                         details=f"Request path matched blocked rule '{rule_name}'.",
                         score=score,
-                    )
+                    ),
                 )
                 matched_rules.append(rule_name)
                 risk_delta += int(score)
@@ -462,7 +466,7 @@ class NetworkGuard:
                     label="Non-standard port",
                     details=f"Port '{port}' is non-standard for scheme '{scheme}'.",
                     score=15,
-                )
+                ),
             )
             matched_rules.append(f"non_standard_port:{port}")
             risk_delta += 15
@@ -475,7 +479,7 @@ class NetworkGuard:
                     label="High-risk port",
                     details=f"Port '{port}' is high risk for sandbox egress.",
                     score=score,
-                )
+                ),
             )
             matched_rules.append(f"high_risk_port:{port}")
             risk_delta += score
@@ -510,7 +514,7 @@ class NetworkGuard:
                         label="Secret in query string",
                         details=f"Query parameter '{key}' appears to contain credential or secret material.",
                         score=70,
-                    )
+                    ),
                 )
                 matched_rules.append(f"secret_query_param:{key.lower()}")
                 risk_delta += 70
@@ -544,7 +548,7 @@ class NetworkGuard:
                         label="Secret-bearing header",
                         details=f"Header '{header_name}' appears to carry secret or credential material.",
                         score=75,
-                    )
+                    ),
                 )
                 matched_rules.append(f"secret_header:{header_name.lower()}")
                 risk_delta += 75
@@ -581,7 +585,7 @@ class NetworkGuard:
                         label="Secret-bearing outbound content",
                         details=f"Outbound {location} appears to contain secret or credential material.",
                         score=min(90, 35 + secret_scan.risk_delta),
-                    )
+                    ),
                 )
                 matched_rules.append(f"secret_outbound_content:{location}")
                 risk_delta += min(90, 35 + secret_scan.risk_delta)
@@ -618,7 +622,7 @@ class NetworkGuard:
                         label="Sensitive outbound field",
                         details=f"{location.title()} '{normalized}' matched sensitive field rule '{rule_name}'.",
                         score=score,
-                    )
+                    ),
                 )
                 matched_rules.append(f"{location.replace(' ', '_')}:{rule_name}")
                 risk_delta += int(score)
@@ -643,7 +647,7 @@ class NetworkGuard:
                         label="Exfiltration indicator",
                         details=f"Outbound {location} matched exfiltration rule '{rule_name}'.",
                         score=score,
-                    )
+                    ),
                 )
                 matched_rules.append(f"content:{rule_name}")
                 risk_delta += int(score)

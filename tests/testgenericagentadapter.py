@@ -118,7 +118,7 @@ def test_allows_generic_runtime_execution_when_policy_allows():
             verdict="allow",
             runtime="future-runtime",
             matched_rules=["bundle:verified", "rollout:enabled"],
-        )
+        ),
     )
 
     result = adapter.execute(**_request_payload())
@@ -142,7 +142,7 @@ def test_blocks_generic_runtime_when_policy_blocks():
             runtime="future-runtime",
             matched_rules=["signature_mismatch"],
             reasons=[{"label": "Bad signature", "details": "Bundle verification failed"}],
-        )
+        ),
     )
 
     result = adapter.execute(**_request_payload())
@@ -164,7 +164,7 @@ def test_review_verdict_prevents_generic_runtime_call():
             runtime="future-runtime",
             matched_rules=["policy:review"],
             reasons=[{"label": "Review", "details": "Needs analyst approval"}],
-        )
+        ),
     )
 
     result = adapter.execute(**_request_payload())
@@ -199,7 +199,7 @@ def test_passes_payload_and_context_to_runtime_after_allow():
             verdict="allow",
             runtime="future-runtime",
             matched_rules=["bundle:verified"],
-        )
+        ),
     )
 
     payload = _request_payload()
@@ -264,7 +264,7 @@ def test_empty_payload_still_can_execute_when_policy_allows():
             verdict="allow",
             runtime="future-runtime",
             matched_rules=["bundle:verified"],
-        )
+        ),
     )
 
     payload = _request_payload()
@@ -286,7 +286,7 @@ def test_override_and_rollout_flags_are_exposed():
             override_active=True,
             rollout_enabled=False,
             matched_rules=["override:allow", "rollout:disabled-bypass"],
-        )
+        ),
     )
 
     result = adapter.execute(**_request_payload())
@@ -303,7 +303,7 @@ def test_runtime_exception_is_captured_as_error_result():
             verdict="allow",
             runtime="future-runtime",
             matched_rules=["bundle:verified"],
-        )
+        ),
     )
 
     def _boom(**kwargs: Any) -> dict[str, Any]:
@@ -325,7 +325,7 @@ def test_allow_helper_matches_policy_decision():
             allowed=True,
             verdict="allow",
             runtime="future-runtime",
-        )
+        ),
     )
 
     allowed = adapter.allow(**_request_payload())
@@ -339,7 +339,7 @@ def test_allow_helper_false_when_policy_rejects():
             allowed=False,
             verdict="block",
             runtime="future-runtime",
-        )
+        ),
     )
 
     allowed = adapter.allow(**_request_payload())
@@ -355,7 +355,7 @@ def test_response_shape_is_json_friendly():
             runtime="future-runtime",
             matched_rules=["bundle:verified"],
             reasons=[{"label": "Verified", "details": "Signature valid"}],
-        )
+        ),
     )
 
     result = adapter.execute(**_request_payload())
@@ -379,17 +379,13 @@ def test_reason_and_rule_deduplication_in_policy_response():
                 {"label": "Same", "details": "duplicate"},
                 {"label": "Same", "details": "duplicate"},
             ],
-        )
+        ),
     )
 
     result = adapter.execute(**_request_payload())
 
     assert result["policy"]["matchedrules"].count("dup-rule") == 1
-    duplicates = [
-        item
-        for item in result["policy"]["reasons"]
-        if item["label"] == "Same" and item["details"] == "duplicate"
-    ]
+    duplicates = [item for item in result["policy"]["reasons"] if item["label"] == "Same" and item["details"] == "duplicate"]
     assert len(duplicates) == 1
 
 
@@ -401,7 +397,7 @@ def test_supports_future_runtime_names(runtime_name: str):
             verdict="allow",
             runtime=runtime_name,
             matched_rules=["bundle:verified"],
-        )
+        ),
     )
 
     payload = _request_payload()

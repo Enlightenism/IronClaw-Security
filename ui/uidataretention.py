@@ -310,7 +310,7 @@ def ui_data_retention_page(
                     "title": "No retention policies found",
                     "description": "Adjust your filters to inspect a different scope or resource type.",
                 },
-            }
+            },
         ],
         "actions": [
             {

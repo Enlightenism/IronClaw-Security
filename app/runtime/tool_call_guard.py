@@ -235,10 +235,10 @@ def summarize_tool_call_guard(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 __all__ = [
-    "HIGH_RISK_TOOL_NAMES",
-    "MEDIUM_RISK_TOOL_NAMES",
     "HIGH_RISK_KEYWORDS",
+    "HIGH_RISK_TOOL_NAMES",
     "MEDIUM_RISK_KEYWORDS",
+    "MEDIUM_RISK_TOOL_NAMES",
     "ToolCallGuardDecision",
     "evaluate_tool_call",
     "summarize_tool_call_guard",

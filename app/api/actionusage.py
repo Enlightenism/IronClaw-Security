@@ -38,8 +38,7 @@ def getactionusage(ownerkey: str) -> ActionUsageResponse:
 
 @router.get("/usage", response_model=dict[str, Any])
 def getactionusage_summary() -> dict[str, Any]:
-    """
-    Root-level usage summary endpoint for integration tests.
+    """Root-level usage summary endpoint for integration tests.
 
     Returns a JSON object with usage-related fields so that generic
     usage API integration tests against `/action/usage` can succeed

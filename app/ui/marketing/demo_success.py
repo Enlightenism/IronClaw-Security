@@ -66,10 +66,7 @@ def get_marketing_demo_success() -> DemoSuccessPageResponse:
     hero = DemoSuccessHeroView(
         eyebrow="Demo requested",
         title="Your IronClaw evaluation is in motion.",
-        subtitle=(
-            "Your request has been received. This page confirms the next step in a serious security conversation about "
-            "prompt injection, unsafe agent autonomy, tool-connected risk, and how IronClaw-Security can protect real users and machines."
-        ),
+        subtitle=("Your request has been received. This page confirms the next step in a serious security conversation about prompt injection, unsafe agent autonomy, tool-connected risk, and how IronClaw-Security can protect real users and machines."),
         statuslabel="Request confirmed",
     )
 
@@ -78,37 +75,28 @@ def get_marketing_demo_success() -> DemoSuccessPageResponse:
             statid="thank-you-purpose",
             value="Core",
             label="Post-conversion pages should confirm, reassure, and guide next steps",
-            context=(
-                "B2B and SaaS guidance consistently recommends that thank-you pages confirm successful submission, "
-                "set expectations, and keep high-intent prospects engaged with relevant next actions."
-            ),
+            context=("B2B and SaaS guidance consistently recommends that thank-you pages confirm successful submission, set expectations, and keep high-intent prospects engaged with relevant next actions."),
             source="Productive Shop and Incredo guidance",
         ),
         DemoSuccessProofStatView(
             statid="high-intent",
             value="High-intent",
             label="Demo request pages capture bottom-of-funnel buyers",
-            context=(
-                "Demo request pages are positioned for prospects who have already evaluated alternatives and want a closer look."
-            ),
+            context=("Demo request pages are positioned for prospects who have already evaluated alternatives and want a closer look."),
             source="Genesys Growth demo request page guide",
         ),
         DemoSuccessProofStatView(
             statid="next-step",
             value="Required",
             label="Clear follow-up improves conversion momentum",
-            context=(
-                "Best-practice demo experiences set a clear next action, such as a follow-up call, proof-of-concept step, or prep guidance."
-            ),
+            context=("Best-practice demo experiences set a clear next action, such as a follow-up call, proof-of-concept step, or prep guidance."),
             source="Demostack and SaaS conversion guidance",
         ),
         DemoSuccessProofStatView(
             statid="conversion-lift",
             value="5x-10x",
             label="Demo leads often convert better than non-demo leads",
-            context=(
-                "SaaS funnel analysis reports that demo leads can convert at materially higher rates than those who never request a demo."
-            ),
+            context=("SaaS funnel analysis reports that demo leads can convert at materially higher rates than those who never request a demo."),
             source="SaaS Funnel Lab research summary",
         ),
     ]
@@ -117,23 +105,17 @@ def get_marketing_demo_success() -> DemoSuccessPageResponse:
         DemoSuccessStepView(
             stepid="step-1",
             title="We review your request",
-            description=(
-                "The IronClaw team reviews your role, AI use case, security concerns, and environment details so the conversation starts with your real threat surface."
-            ),
+            description=("The IronClaw team reviews your role, AI use case, security concerns, and environment details so the conversation starts with your real threat surface."),
         ),
         DemoSuccessStepView(
             stepid="step-2",
             title="We prepare a risk-relevant walkthrough",
-            description=(
-                "Your evaluation is tailored around prompt injection, runtime policy enforcement, review, quarantine, and the exact places your AI system touches tools or user machines."
-            ),
+            description=("Your evaluation is tailored around prompt injection, runtime policy enforcement, review, quarantine, and the exact places your AI system touches tools or user machines."),
         ),
         DemoSuccessStepView(
             stepid="step-3",
             title="We align on next adoption steps",
-            description=(
-                "If there is a fit, the outcome is a clear path forward for technical evaluation, buyer review, and secure rollout."
-            ),
+            description=("If there is a fit, the outcome is a clear path forward for technical evaluation, buyer review, and secure rollout."),
         ),
     ]
 
@@ -172,23 +154,17 @@ def get_marketing_demo_success() -> DemoSuccessPageResponse:
         DemoSuccessExpectationView(
             itemid="expectation-1",
             title="No generic sales motion",
-            description=(
-                "This is not meant to feel like a standard software pitch. The evaluation should focus on the AI risk your team is actually carrying."
-            ),
+            description=("This is not meant to feel like a standard software pitch. The evaluation should focus on the AI risk your team is actually carrying."),
         ),
         DemoSuccessExpectationView(
             itemid="expectation-2",
             title="Security-first conversation",
-            description=(
-                "The most important discussion points are prompt injection, unsafe actions, user-machine exposure, runtime policy, and operational trust."
-            ),
+            description=("The most important discussion points are prompt injection, unsafe actions, user-machine exposure, runtime policy, and operational trust."),
         ),
         DemoSuccessExpectationView(
             itemid="expectation-3",
             title="Buyer-grade clarity",
-            description=(
-                "You should leave the conversation understanding what IronClaw controls, what it helps prevent, and why that matters before AI gets more autonomy in your environment."
-            ),
+            description=("You should leave the conversation understanding what IronClaw controls, what it helps prevent, and why that matters before AI gets more autonomy in your environment."),
         ),
     ]
 

@@ -223,9 +223,6 @@ def get_prompt_guard_status_board_summary() -> PromptGuardStatusBoardSummaryResp
     return PromptGuardStatusBoardSummaryResponse(
         generated_at=data["generated_at"],
         overall_status=data["overall_status"],
-        board_cards=[
-            PromptGuardStatusBoardCardResponse(**card)
-            for card in data["board_cards"]
-        ],
+        board_cards=[PromptGuardStatusBoardCardResponse(**card) for card in data["board_cards"]],
         metadata=data["metadata"],
     )

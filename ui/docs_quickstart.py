@@ -211,7 +211,7 @@ def ui_docs_quickstart_page(
             id="store-key",
             title="Set your API key header",
             description="Send the customer key using X-API-Key or Bearer authorization on protected requests.",
-            code='X-API-Key: <your-customer-key>',
+            code="X-API-Key: <your-customer-key>",
         ),
         _step(
             id="send-request",

@@ -14,8 +14,7 @@ from app.services.integrationtelemetry import IntegrationTelemetryService
 
 
 class IntegrationsOverviewIntegrationItem(BaseModel):
-    """
-    Compact integration row for the UI overview.
+    """Compact integration row for the UI overview.
 
     This intentionally mirrors the shapes already exposed in the public
     IntegrationRecordResponse / IntegrationSettingsItem schemas but keeps
@@ -45,8 +44,7 @@ class IntegrationsOverviewIntegrationItem(BaseModel):
 
 
 class IntegrationsOverviewSummary(BaseModel):
-    """
-    High-level summary metrics for the integrations overview page.
+    """High-level summary metrics for the integrations overview page.
 
     This is a thin wrapper around the IntegrationRegistrySummaryResponse
     and the IntegrationSettingsSummary shapes already exposed via the API.
@@ -64,8 +62,7 @@ class IntegrationsOverviewSummary(BaseModel):
 
 
 class IntegrationsOverviewPage(BaseModel):
-    """
-    View model for the /ui/integrations overview page.
+    """View model for the /ui/integrations overview page.
 
     This is what the ui router will serialize for the UI manifest and
     for any dedicated integrations overview endpoint.
@@ -83,19 +80,13 @@ def _map_integration_record_to_item(
     record: IntegrationRecord,
     risk_score: int | None = None,
 ) -> IntegrationsOverviewIntegrationItem:
-    """
-    Map a core IntegrationRecord domain object into the compact
+    """Map a core IntegrationRecord domain object into the compact
     overview item model used by the UI layer.
 
     We intentionally normalize enums to their value strings so the UI
     doesn’t need to know about Python enum types.
     """
-
-    status_value = (
-        record.status.value
-        if isinstance(record.status, IntegrationStatus)
-        else str(record.status)
-    )
+    status_value = record.status.value if isinstance(record.status, IntegrationStatus) else str(record.status)
 
     capabilities: list[str] = []
     if getattr(record, "capabilities", None):
@@ -123,15 +114,13 @@ def _map_integration_record_to_item(
 
 
 def get_page() -> IntegrationsOverviewPage:
-    """
-    Build the integrations overview UI page model.
+    """Build the integrations overview UI page model.
 
     This function is intentionally side-effect free and uses the existing
     integration registry + telemetry services to assemble a consistent view
     for operators. It is designed to be safe to call from tests and from
     the ui router bootstrap.
     """
-
     registry = IntegrationRegistryService()
     telemetry = IntegrationTelemetryService()
 
@@ -148,16 +137,24 @@ def get_page() -> IntegrationsOverviewPage:
     # Build summary view, tolerating missing attributes to avoid brittle failures.
     summary = IntegrationsOverviewSummary(
         totalintegrations=getattr(
-            registry_snapshot.summary, "totalintegrations", len(registry_snapshot.items)
+            registry_snapshot.summary,
+            "totalintegrations",
+            len(registry_snapshot.items),
         ),
         configurableintegrations=getattr(
-            registry_snapshot.summary, "configurableintegrations", 0
+            registry_snapshot.summary,
+            "configurableintegrations",
+            0,
         ),
         verifiedintegrations=getattr(
-            registry_snapshot.summary, "verifiedintegrations", 0
+            registry_snapshot.summary,
+            "verifiedintegrations",
+            0,
         ),
         pendingintegrations=getattr(
-            registry_snapshot.summary, "pendingintegrations", 0
+            registry_snapshot.summary,
+            "pendingintegrations",
+            0,
         ),
         platforms=list(getattr(registry_snapshot.summary, "platforms", []) or []),
         capabilities=list(getattr(registry_snapshot.summary, "capabilities", []) or []),

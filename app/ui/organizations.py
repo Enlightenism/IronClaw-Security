@@ -46,10 +46,7 @@ def _organization_item(record: dict[str, Any], fallback_timestamp: str) -> dict[
     member_count = _coerce_member_count(record)
     metadata = _coerce_metadata(record)
     owner_email = str(
-        record.get("owner_email")
-        or metadata.get("owner_email")
-        or metadata.get("ownerEmail")
-        or ""
+        record.get("owner_email") or metadata.get("owner_email") or metadata.get("ownerEmail") or "",
     ).strip()
 
     return {
@@ -97,11 +94,7 @@ def get_ui_organizations() -> dict[str, Any]:
     if not isinstance(records, list):
         records = []
 
-    items = [
-        _organization_item(record, timestamp)
-        for record in records
-        if isinstance(record, dict)
-    ]
+    items = [_organization_item(record, timestamp) for record in records if isinstance(record, dict)]
 
     if not items:
         return _empty_response(timestamp)

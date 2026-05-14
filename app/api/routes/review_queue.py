@@ -82,7 +82,7 @@ _SAMPLE_REVIEWS: list[dict[str, Any]] = [
                 "label": "Destructive command",
                 "details": "The request attempts to remove a workspace path recursively.",
                 "score": 97,
-            }
+            },
         ],
         "metadata": {"filepath": "/workspace"},
     },
@@ -107,7 +107,7 @@ _SAMPLE_REVIEWS: list[dict[str, Any]] = [
                 "label": "Untrusted source",
                 "details": "The destination is unknown and returned suspicious content indicators.",
                 "score": 72,
-            }
+            },
         ],
         "metadata": {"url": "https://unknown.example/payload"},
     },

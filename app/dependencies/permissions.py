@@ -46,11 +46,7 @@ def require_permission_dependency(permission: str):
 
 
 def require_any_permission(*permissions: str):
-    normalized_permissions = tuple(
-        permission.strip().lower()
-        for permission in permissions
-        if isinstance(permission, str) and permission.strip()
-    )
+    normalized_permissions = tuple(permission.strip().lower() for permission in permissions if isinstance(permission, str) and permission.strip())
 
     async def dependency(
         context: AuthContext = Depends(get_auth_context),
@@ -82,11 +78,7 @@ def require_any_permission(*permissions: str):
 
 
 def require_all_permissions(*permissions: str):
-    normalized_permissions = tuple(
-        permission.strip().lower()
-        for permission in permissions
-        if isinstance(permission, str) and permission.strip()
-    )
+    normalized_permissions = tuple(permission.strip().lower() for permission in permissions if isinstance(permission, str) and permission.strip())
 
     async def dependency(
         context: AuthContext = Depends(get_auth_context),

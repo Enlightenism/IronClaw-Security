@@ -93,9 +93,7 @@ def get_dashboard_overview() -> DashboardResponse:
     audit_events = audit_store.list_events(limit=500)
 
     open_incidents = [i for i in incidents if i.status in {"open", "triaged"}]
-    blocked_events = [
-        e for e in audit_events if (e.verdict or "").lower() in {"block", "quarantine"}
-    ]
+    blocked_events = [e for e in audit_events if (e.verdict or "").lower() in {"block", "quarantine"}]
 
     integration_rollups: dict[str, dict[str, int | str]] = {}
     for event in audit_events:

@@ -71,7 +71,7 @@ def _build_targets(install_root: Path, config_root: Path, data_root: Path, purge
                 path=str(path),
                 exists=exists,
                 removable=removable,
-            )
+            ),
         )
 
     if purge_data:
@@ -82,7 +82,7 @@ def _build_targets(install_root: Path, config_root: Path, data_root: Path, purge
                 path=str(data_root),
                 exists=exists,
                 removable=removable,
-            )
+            ),
         )
 
     return targets
@@ -98,7 +98,7 @@ def _build_checks(targets: list[UninstallTarget]) -> list[UninstallCheck]:
                 ok=False,
                 detail="No uninstall targets were generated.",
                 recommendation="Provide at least one valid uninstall target.",
-            )
+            ),
         )
         return checks
 
@@ -108,7 +108,7 @@ def _build_checks(targets: list[UninstallTarget]) -> list[UninstallCheck]:
             ok=True,
             detail=f"Prepared {len(targets)} uninstall target(s).",
             recommendation=None,
-        )
+        ),
     )
 
     for target in targets:
@@ -119,7 +119,7 @@ def _build_checks(targets: list[UninstallTarget]) -> list[UninstallCheck]:
                     ok=True,
                     detail=f"Target not present, nothing to remove: {target.path}",
                     recommendation=None,
-                )
+                ),
             )
         else:
             checks.append(
@@ -128,7 +128,7 @@ def _build_checks(targets: list[UninstallTarget]) -> list[UninstallCheck]:
                     ok=target.removable,
                     detail=f"Target path: {target.path}",
                     recommendation=None if target.removable else "Refuse uninstall for unsafe root-level paths.",
-                )
+                ),
             )
 
     return checks
@@ -232,7 +232,7 @@ def _render_text(plan: UninstallPlan) -> str:
 
     for target in plan.targets:
         lines.append(
-            f"- {target.label}: path={target.path}, exists={str(target.exists).lower()}, removable={str(target.removable).lower()}"
+            f"- {target.label}: path={target.path}, exists={str(target.exists).lower()}, removable={str(target.removable).lower()}",
         )
 
     lines.append("")

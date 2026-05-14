@@ -259,6 +259,7 @@ class ClaudeCodeAdapter:
         from datetime import datetime
 
         from app.adapters.base import AdapterHandshake
+
         return AdapterHandshake(
             adapter_slug=self.adapter_slug,
             platform=self.platform,
@@ -271,6 +272,7 @@ class ClaudeCodeAdapter:
 
     def manifest(self) -> Any:
         from app.services.adapter_manifest import build_adapter_manifest
+
         return build_adapter_manifest(
             self.record,
             extra_metadata={

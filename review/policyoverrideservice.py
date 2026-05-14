@@ -7,8 +7,7 @@ from review.policyevaluator import PolicyOverride
 
 
 class PolicyOverrideService:
-    """
-    In-memory override registry for policy evaluation flows.
+    """In-memory override registry for policy evaluation flows.
 
     Goals:
     - Deterministic behavior for tests and orchestration.
@@ -51,11 +50,7 @@ class PolicyOverrideService:
             overrides = [override for override in overrides if override.enabled]
 
         if target_field is not None:
-            overrides = [
-                override
-                for override in overrides
-                if override.target_field == target_field
-            ]
+            overrides = [override for override in overrides if override.target_field == target_field]
 
         return sorted(overrides, key=self._sort_key)
 

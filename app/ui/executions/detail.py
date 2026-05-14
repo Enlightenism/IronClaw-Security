@@ -60,11 +60,7 @@ def _object_to_dict(value: Any) -> dict[str, Any]:
     if is_dataclass(value):
         return asdict(value)
     if hasattr(value, "__dict__"):
-        return {
-            key: val
-            for key, val in vars(value).items()
-            if not key.startswith("_")
-        }
+        return {key: val for key, val in vars(value).items() if not key.startswith("_")}
     return {}
 
 
@@ -220,7 +216,7 @@ def _build_placeholder_record(executionid: str) -> dict[str, Any] | None:
                     "label": "low-risk-httpfetch",
                     "details": "Low-risk public fetch request matched allow policy.",
                     "score": 3,
-                }
+                },
             ],
         },
         "exec-demo-002": {

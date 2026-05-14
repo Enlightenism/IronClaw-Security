@@ -116,8 +116,8 @@ RELEASE_POLICY_OPENAPI_RESPONSES: Final[dict[int, dict[str, Any]]] = {
                         "summary": "No release policy decision recorded yet",
                         "value": RELEASE_POLICY_LATEST_DECISION_EMPTY_RESPONSE_EXAMPLE,
                     },
-                }
-            }
+                },
+            },
         },
     },
     404: {

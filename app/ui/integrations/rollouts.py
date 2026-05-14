@@ -133,7 +133,7 @@ def build_integration_rollouts_view(
                     "command_name": record.command_name,
                     "install_target": record.install_target,
                 },
-            )
+            ),
         )
 
     items.sort(key=lambda item: (item.rollout_state, item.platform, item.slug))

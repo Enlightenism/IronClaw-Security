@@ -52,11 +52,7 @@ def _mapping(value: Any) -> dict[str, Any]:
         if isinstance(dumped, Mapping):
             return dict(dumped)
     if hasattr(value, "__dict__"):
-        return {
-            key: val
-            for key, val in vars(value).items()
-            if not key.startswith("_") and not callable(val)
-        }
+        return {key: val for key, val in vars(value).items() if not key.startswith("_") and not callable(val)}
     raise TypeError("value is not serializable to dict")
 
 
@@ -121,61 +117,27 @@ def _normalize_audit_log_payload(
     source_payload = _mapping(payload)
     source_payload.update({key: value for key, value in extra.items() if value is not None})
 
-    resolved_log_id = (
-        _string(log_id)
-        or _string(source_payload.get("log_id"))
-        or _string(source_payload.get("audit_id"))
-        or _string(source_payload.get("id"))
-        or str(uuid4())
-    )
+    resolved_log_id = _string(log_id) or _string(source_payload.get("log_id")) or _string(source_payload.get("audit_id")) or _string(source_payload.get("id")) or str(uuid4())
 
-    resolved_action = (
-        _string(action)
-        or _string(event_type)
-        or _string(source_payload.get("action"))
-        or _string(source_payload.get("event_type"))
-        or _AUDIT_ACTION_FALLBACK
-    )
+    resolved_action = _string(action) or _string(event_type) or _string(source_payload.get("action")) or _string(source_payload.get("event_type")) or _AUDIT_ACTION_FALLBACK
 
-    resolved_category = (
-        _string(category)
-        or _string(source_payload.get("category"))
-        or "audit"
-    )
+    resolved_category = _string(category) or _string(source_payload.get("category")) or "audit"
 
-    resolved_actor_type = (
-        _string(actor_type)
-        or _string(source_payload.get("actor_type"))
-        or _AUDIT_ACTOR_TYPE_FALLBACK
-    )
+    resolved_actor_type = _string(actor_type) or _string(source_payload.get("actor_type")) or _AUDIT_ACTOR_TYPE_FALLBACK
 
-    resolved_org = (
-        _string(organization_id)
-        or _string(org_id)
-        or _string(customer_id)
-        or _string(source_payload.get("organization_id"))
-        or _string(source_payload.get("org_id"))
-        or _string(source_payload.get("customer_id"))
-    )
+    resolved_org = _string(organization_id) or _string(org_id) or _string(customer_id) or _string(source_payload.get("organization_id")) or _string(source_payload.get("org_id")) or _string(source_payload.get("customer_id"))
 
     resolved_result = _normalize_result(
-        result
-        or outcome
-        or source_payload.get("result")
-        or source_payload.get("outcome")
+        result or outcome or source_payload.get("result") or source_payload.get("outcome"),
     )
 
-    resolved_source = (
-        _string(source)
-        or _string(source_payload.get("source"))
-        or "ironclaw"
-    )
+    resolved_source = _string(source) or _string(source_payload.get("source")) or "ironclaw"
 
     resolved_created_at = _normalize_timestamp(
-        created_at or source_payload.get("created_at") or occurred_at or source_payload.get("occurred_at")
+        created_at or source_payload.get("created_at") or occurred_at or source_payload.get("occurred_at"),
     )
     resolved_occurred_at = _normalize_timestamp(
-        occurred_at or source_payload.get("occurred_at") or resolved_created_at
+        occurred_at or source_payload.get("occurred_at") or resolved_created_at,
     )
 
     return {

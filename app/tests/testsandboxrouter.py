@@ -61,7 +61,7 @@ def test_sandbox_router_allows_safe_python_execution() -> None:
             allowed=True,
             reasons=[{"label": "safe-python"}],
             risk_delta=4,
-        )
+        ),
     )
     router = build_sandbox_router(policy_engine=policy_engine)
 
@@ -88,7 +88,7 @@ def test_sandbox_router_reviews_networked_shell_execution() -> None:
             should_review=True,
             reasons=[{"label": "networked-shell"}],
             risk_delta=45,
-        )
+        ),
     )
     router = build_sandbox_router(policy_engine=policy_engine)
 
@@ -114,7 +114,7 @@ def test_sandbox_router_blocks_dangerous_command() -> None:
             should_block=True,
             reasons=[{"label": "destructive-command"}],
             risk_delta=95,
-        )
+        ),
     )
     router = build_sandbox_router(policy_engine=policy_engine)
 
@@ -140,7 +140,7 @@ def test_sandbox_router_quarantines_exfiltration_pattern() -> None:
             should_quarantine=True,
             reasons=[{"label": "exfiltration-pattern"}],
             risk_delta=100,
-        )
+        ),
     )
     router = build_sandbox_router(policy_engine=policy_engine)
 
@@ -187,7 +187,7 @@ def test_sandbox_router_handles_missing_command() -> None:
             should_review=True,
             reasons=[{"label": "missing-command"}],
             risk_delta=20,
-        )
+        ),
     )
     router = build_sandbox_router(policy_engine=policy_engine)
 
@@ -211,7 +211,7 @@ def test_sandbox_router_handles_missing_tool_name() -> None:
             should_review=True,
             reasons=[{"label": "missing-tool-name"}],
             risk_delta=18,
-        )
+        ),
     )
     router = build_sandbox_router(policy_engine=policy_engine)
 
@@ -234,7 +234,7 @@ def test_sandbox_router_inserts_default_reason_if_policy_returns_none() -> None:
             allowed=True,
             reasons=None,
             risk_delta=0,
-        )
+        ),
     )
     router = build_sandbox_router(policy_engine=policy_engine)
 

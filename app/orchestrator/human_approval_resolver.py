@@ -44,9 +44,7 @@ class ApprovalResolution:
             "final_state": self.final_state,
             "reason": self.reason,
             "approval": self.approval.to_dict(),
-            "execution_receipt": (
-                self.execution_receipt.to_dict() if self.execution_receipt else None
-            ),
+            "execution_receipt": (self.execution_receipt.to_dict() if self.execution_receipt else None),
             "created_at": self.created_at,
         }
 
@@ -66,7 +64,7 @@ def create_approval_record(
     normalized_decision = decision.strip().lower()
     if normalized_decision not in {"approved", "rejected", "pending"}:
         raise HumanApprovalResolverError(
-            "decision must be one of: approved, rejected, pending"
+            "decision must be one of: approved, rejected, pending",
         )
 
     return ApprovalRecord(
@@ -146,16 +144,8 @@ def summarize_approval_resolution(resolution: ApprovalResolution) -> dict[str, A
         "outcome": resolution.outcome,
         "final_state": resolution.final_state,
         "reason": resolution.reason,
-        "execution_id": (
-            resolution.execution_receipt.execution_id
-            if resolution.execution_receipt
-            else None
-        ),
-        "execution_state": (
-            resolution.execution_receipt.state
-            if resolution.execution_receipt
-            else None
-        ),
+        "execution_id": (resolution.execution_receipt.execution_id if resolution.execution_receipt else None),
+        "execution_state": (resolution.execution_receipt.state if resolution.execution_receipt else None),
     }
 
 
@@ -192,9 +182,7 @@ def _execute_after_approval(
             decision_id=prior_receipt.decision_id if prior_receipt else "manual-decision",
             reason=f"Approved execution failed: {exc}",
             review_item_id=approval.review_item_id,
-            executor_name=getattr(executor, "__name__", "dry_run_executor")
-            if executor
-            else "dry_run_executor",
+            executor_name=getattr(executor, "__name__", "dry_run_executor") if executor else "dry_run_executor",
             executor_result=None,
         )
 
@@ -293,5 +281,5 @@ if __name__ == "__main__":
             },
             ensure_ascii=False,
             indent=2,
-        )
+        ),
     )

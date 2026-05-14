@@ -21,14 +21,7 @@ def _normalize_text(text: str) -> str:
     s = CONTROL_RE.sub(" ", s)
     s = s.lower().strip()
     s = re.sub(r"\s+", " ", s)
-    s = (
-        s.replace("0", "o")
-        .replace("1", "i")
-        .replace("3", "e")
-        .replace("4", "a")
-        .replace("5", "s")
-        .replace("@", "a")
-    )
+    s = s.replace("0", "o").replace("1", "i").replace("3", "e").replace("4", "a").replace("5", "s").replace("@", "a")
     return s
 
 
@@ -202,11 +195,7 @@ def _choose_sandbox_lane(matched_patterns: list[str]) -> str:
     if "heuristic_prompt_injection_score" in matched_patterns:
         return "prompt_injection"
 
-    if (
-        "powershell_download_execute_combo" in matched_patterns
-        or "shell_download_execute_combo" in matched_patterns
-        or "download and execute" in matched_patterns
-    ):
+    if "powershell_download_execute_combo" in matched_patterns or "shell_download_execute_combo" in matched_patterns or "download and execute" in matched_patterns:
         return "code_execution"
 
     exfiltration_ids = {
@@ -239,7 +228,7 @@ def _build_rule_details(matched_patterns: list[str]) -> list[dict[str, Any]]:
         meta = RULE_INDEX.get(rule_id)
         if not meta:
             details.append(
-                {"id": rule_id, "severity": None, "category": None, "pattern": None}
+                {"id": rule_id, "severity": None, "category": None, "pattern": None},
             )
         else:
             details.append(
@@ -248,7 +237,7 @@ def _build_rule_details(matched_patterns: list[str]) -> list[dict[str, Any]]:
                     "severity": meta["severity"],
                     "category": meta["category"],
                     "pattern": meta["pattern"],
-                }
+                },
             )
     return details
 

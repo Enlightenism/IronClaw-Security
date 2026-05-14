@@ -71,7 +71,7 @@ class CoordinatedResponse:
                 status=status,
                 message=message,
                 metadata=dict(metadata or {}),
-            )
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -97,8 +97,7 @@ class CoordinatedResponse:
 
 
 class ResponseCoordinator:
-    """
-    ResponseCoordinator is the single place that turns lower-level decisions
+    """ResponseCoordinator is the single place that turns lower-level decisions
     (gate, supervisor, runtime session) into one coherent response envelope
     for the secure runtime pipeline.
     """
@@ -134,7 +133,7 @@ class ResponseCoordinator:
                         "source": "response_coordinator",
                         "incoming_verdict": gate.metadata.get("verdict"),
                     },
-                }
+                },
             )
         else:
             session.merge_context(
@@ -143,7 +142,7 @@ class ResponseCoordinator:
                     "allowed_tools": base_request.get("allowed_tools"),
                     "blocked_tools": base_request.get("blocked_tools"),
                     "tags": base_request.get("tags"),
-                }
+                },
             )
 
         session.apply_supervisor_decision(supervisor.to_dict())

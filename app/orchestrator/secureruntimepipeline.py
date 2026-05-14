@@ -96,7 +96,7 @@ def _safe_detector_result(
                         "label": "Detector failure",
                         "details": f"{detector_name} failed during runtime evaluation.",
                         "score": 15,
-                    }
+                    },
                 ],
                 "shouldreview": True,
                 "shouldquarantine": False,
@@ -141,7 +141,7 @@ def _merge_reasons(
         if raw_reasons is None:
             d = _as_dict(decision)
             raw_reasons = d.get("reasons") or []
-        for reason in (raw_reasons or []):
+        for reason in raw_reasons or []:
             if isinstance(reason, dict):
                 key = (_text(reason.get("label")), _text(reason.get("details")))
                 if key not in seen:
@@ -337,7 +337,8 @@ class SecureRuntimePipeline:
             return result
 
         class _Request:
-            __slots__ = ("session_id", "tool_name", "cwd", "kwargs")
+            __slots__ = ("cwd", "kwargs", "session_id", "tool_name")
+
             def __init__(self, session_id: str, tool_name: str, **kw: Any) -> None:
                 self.session_id = session_id
                 self.tool_name = tool_name
@@ -410,13 +411,15 @@ class SecureRuntimePipeline:
         self._emit_telemetry({"event": verdict, "session_id": session_id, "tool_name": tool_name})
 
         if enqueue:
-            self._enqueue_review({
-                "session_id": session_id,
-                "tool_name": tool_name,
-                "verdict": verdict,
-                "risk_delta": total_risk_delta,
-                "matched_rules": matched_rules,
-            })
+            self._enqueue_review(
+                {
+                    "session_id": session_id,
+                    "tool_name": tool_name,
+                    "verdict": verdict,
+                    "risk_delta": total_risk_delta,
+                    "matched_rules": matched_rules,
+                }
+            )
 
         return result
 

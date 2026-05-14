@@ -58,8 +58,7 @@ class PolicyEvaluationResult:
 
 
 class PolicyEvaluator:
-    """
-    Deterministic policy evaluator for review and incident workflows.
+    """Deterministic policy evaluator for review and incident workflows.
 
     Goals:
     - Pure in-memory evaluation for tests and orchestration flows.
@@ -127,7 +126,7 @@ class PolicyEvaluator:
                     "decision": rule.decision.value,
                     "severity": rule.severity,
                     "metadata": dict(rule.metadata),
-                }
+                },
             )
 
         for override in active_overrides:
@@ -146,13 +145,9 @@ class PolicyEvaluator:
                 {
                     "type": "override_match",
                     "override_id": override.override_id,
-                    "force_decision": (
-                        override.force_decision.value
-                        if override.force_decision is not None
-                        else None
-                    ),
+                    "force_decision": (override.force_decision.value if override.force_decision is not None else None),
                     "metadata": dict(override.metadata),
-                }
+                },
             )
 
         deduped_reasons = self._dedupe(reasons)

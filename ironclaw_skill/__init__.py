@@ -13,8 +13,8 @@ __description__ = "Skill-style integration surface for IronClaw-Security."
 __package_name__ = "ironclaw_skill"
 
 __all__ = [
-    "__version__",
-    "__title__",
     "__description__",
     "__package_name__",
+    "__title__",
+    "__version__",
 ]

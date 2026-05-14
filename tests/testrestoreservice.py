@@ -56,7 +56,14 @@ def _write_manifest(
         "sha256": sha256,
         "rotation_tier": "hourly",
         "encryption_applied": False,
-        "meta": {"rotation_policy": {"max_hourly": 24, "max_daily": 7, "max_weekly": 4, "max_monthly": 12}},
+        "meta": {
+            "rotation_policy": {
+                "max_hourly": 24,
+                "max_daily": 7,
+                "max_weekly": 4,
+                "max_monthly": 12,
+            }
+        },
     }
     manifest_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return manifest_path

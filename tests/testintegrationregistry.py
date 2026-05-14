@@ -105,7 +105,8 @@ def test_each_integration_uses_json_friendly_value_types() -> None:
         for key, value in integration.items():
             assert isinstance(key, str)
             assert value is None or isinstance(
-                value, (str, int, float, bool, list, dict)
+                value,
+                (str, int, float, bool, list, dict),
             )
 
 

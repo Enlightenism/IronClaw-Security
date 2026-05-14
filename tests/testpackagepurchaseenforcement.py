@@ -131,7 +131,7 @@ def test_package_purchase_enforcement_numeric_fields_are_non_negative_when_prese
     ):
         value = _number(payload, *keys)
         if value is not None:
-            assert value >= Decimal("0")
+            assert value >= Decimal(0)
 
 
 def test_package_purchase_enforcement_remaining_does_not_exceed_quota_when_both_present() -> None:

@@ -231,15 +231,15 @@ if __name__ == "__main__":
                 },
                 ensure_ascii=False,
                 indent=2,
-            )
+            ),
         )
     else:
         print(
             json.dumps(
                 {
-                    "message": "Create artifacts/runtime-checkpoint.json before running replay_controller directly."
+                    "message": "Create artifacts/runtime-checkpoint.json before running replay_controller directly.",
                 },
                 ensure_ascii=False,
                 indent=2,
-            )
+            ),
         )

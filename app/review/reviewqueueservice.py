@@ -34,11 +34,7 @@ def _mapping(value: Any) -> dict[str, Any]:
         if isinstance(dumped, dict):
             return dict(dumped)
     if hasattr(value, "__dict__"):
-        return {
-            key: val
-            for key, val in vars(value).items()
-            if not key.startswith("_") and not callable(val)
-        }
+        return {key: val for key, val in vars(value).items() if not key.startswith("_") and not callable(val)}
     raise TypeError("value is not serializable to dict")
 
 
@@ -99,33 +95,14 @@ def _normalize_queue_item(
     source_payload = _mapping(payload)
     source_payload.update({key: value for key, value in extra.items() if value is not None})
 
-    resolved_review_id = (
-        _string(review_id)
-        or _string(source_payload.get("review_id"))
-        or _string(source_payload.get("id"))
-        or str(uuid4())
-    )
+    resolved_review_id = _string(review_id) or _string(source_payload.get("review_id")) or _string(source_payload.get("id")) or str(uuid4())
 
-    resolved_incident_id = (
-        _string(incident_id)
-        or _string(source_payload.get("incident_id"))
-    )
-    resolved_quarantine_id = (
-        _string(quarantine_id)
-        or _string(source_payload.get("quarantine_id"))
-    )
+    resolved_incident_id = _string(incident_id) or _string(source_payload.get("incident_id"))
+    resolved_quarantine_id = _string(quarantine_id) or _string(source_payload.get("quarantine_id"))
 
-    resolved_item_type = (
-        _string(item_type)
-        or _string(source_payload.get("item_type"))
-        or ("incident" if resolved_incident_id else "quarantine" if resolved_quarantine_id else "review")
-    )
+    resolved_item_type = _string(item_type) or _string(source_payload.get("item_type")) or ("incident" if resolved_incident_id else "quarantine" if resolved_quarantine_id else "review")
 
-    resolved_severity = (
-        _string(severity)
-        or _string(source_payload.get("severity"))
-        or "medium"
-    )
+    resolved_severity = _string(severity) or _string(source_payload.get("severity")) or "medium"
 
     resolved_priority = _normalize_priority(
         priority or source_payload.get("priority"),
@@ -134,18 +111,9 @@ def _normalize_queue_item(
 
     resolved_status = _normalize_status(status or source_payload.get("status"))
 
-    resolved_title = (
-        _string(title)
-        or _string(source_payload.get("title"))
-        or _string(source_payload.get("summary"))
-        or f"{resolved_item_type.title()} review"
-    )
+    resolved_title = _string(title) or _string(source_payload.get("title")) or _string(source_payload.get("summary")) or f"{resolved_item_type.title()} review"
 
-    resolved_summary = (
-        _string(summary)
-        or _string(source_payload.get("summary"))
-        or resolved_title
-    )
+    resolved_summary = _string(summary) or _string(source_payload.get("summary")) or resolved_title
 
     resolved_created_at = _string(created_at) or _string(source_payload.get("created_at")) or _utc_now()
     resolved_updated_at = _string(updated_at) or _string(source_payload.get("updated_at")) or resolved_created_at
@@ -240,7 +208,7 @@ class ReviewQueueService:
                 "metadata": metadata or {"origin": "incident_store"},
                 "evidence": incident.get("evidence") or [],
                 "tags": incident.get("tags") or [],
-            }
+            },
         )
 
     def queue_quarantine_review(
@@ -274,7 +242,7 @@ class ReviewQueueService:
                 "metadata": metadata or {"origin": "quarantine_store"},
                 "evidence": item.get("evidence") or [],
                 "tags": item.get("tags") or [],
-            }
+            },
         )
 
     def list_reviews(
@@ -383,7 +351,14 @@ class ReviewQueueService:
             self.incident_store.update_incident(incident_id, incident_updates)
 
         if quarantine_id:
-            if item["verdict"] in {"allow", "approved", "release", "released", "restore", "restored"}:
+            if item["verdict"] in {
+                "allow",
+                "approved",
+                "release",
+                "released",
+                "restore",
+                "restored",
+            }:
                 self.quarantine_store.release_item(
                     quarantine_id,
                     verdict=item["verdict"],

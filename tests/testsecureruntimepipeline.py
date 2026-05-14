@@ -481,11 +481,7 @@ def test_deduplicates_reasons_and_rules():
         command="echo duplicate",
     )
 
-    repeated = [
-        item
-        for item in result.reasons
-        if item["label"] == "Repeated" and item["details"] == "Same reason"
-    ]
+    repeated = [item for item in result.reasons if item["label"] == "Repeated" and item["details"] == "Same reason"]
     assert len(repeated) == 1
     assert result.matched_rules.count("repeat_rule") == 1
 
@@ -519,10 +515,15 @@ def test_builder_accepts_submit_style_review_queue_only():
     telemetry_sink = _TelemetrySinkStub()
     pipeline = build_secure_runtime_pipeline(
         sandbox_router=_SandboxRouterStub(
-            _GuardDecision(verdict="allow", allowed=True, matched_rules=["sandboxrouter:allow"])
+            _GuardDecision(verdict="allow", allowed=True, matched_rules=["sandboxrouter:allow"]),
         ),
         tool_call_guard=_ToolCallGuardStub(
-            _GuardDecision(verdict="review", allowed=True, should_review=True, matched_rules=["toolcallguard:review"])
+            _GuardDecision(
+                verdict="review",
+                allowed=True,
+                should_review=True,
+                matched_rules=["toolcallguard:review"],
+            ),
         ),
         telemetry_sink=telemetry_sink,
         review_queue=review_queue,

@@ -56,7 +56,7 @@ def test_verify_policy_bundle_signature_detects_tampering():
                 "rule_id": "pi-instruction-override",
                 "verdict": "warn",
                 "risk_level": "medium",
-            }
+            },
         ],
         metadata={"source": "pytest"},
     )
@@ -67,7 +67,7 @@ def test_verify_policy_bundle_signature_detects_tampering():
             "rule_id": "network-high-risk-destination",
             "verdict": "block",
             "risk_level": "critical",
-        }
+        },
     )
 
     verification = verify_policy_bundle_signature(signed, keyset)

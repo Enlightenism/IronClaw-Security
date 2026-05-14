@@ -207,8 +207,8 @@ def summarize_command_supervisor(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "DANGEROUS_COMMAND_PATTERNS",
-    "SENSITIVE_PATH_PATTERNS",
     "RESTRICTED_COMMANDS",
+    "SENSITIVE_PATH_PATTERNS",
     "CommandSupervisorDecision",
     "evaluate_command",
     "summarize_command_supervisor",

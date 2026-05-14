@@ -103,7 +103,7 @@ def test_action_usage_test_numeric_fields_are_non_negative_when_present() -> Non
     ):
         value = _number(payload, *keys)
         if value is not None:
-            assert value >= Decimal("0")
+            assert value >= Decimal(0)
 
 
 def test_action_usage_test_total_costs_match_when_both_present() -> None:

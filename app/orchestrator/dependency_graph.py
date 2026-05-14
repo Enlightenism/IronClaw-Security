@@ -17,7 +17,7 @@ IMPORT_RE = re.compile(
         |
         from\s+([a-zA-Z0-9_\.]+)\s+import\s+
     )
-    """
+    """,
 )
 
 
@@ -162,10 +162,7 @@ def build_dependency_graph(project_root: str | Path) -> DependencyGraph:
     registry = discover_agents(project_root)
     module_index = _build_module_index(registry)
 
-    node_map: dict[str, FileDependencyNode] = {
-        item.relative_path: FileDependencyNode(relative_path=item.relative_path)
-        for item in registry.items
-    }
+    node_map: dict[str, FileDependencyNode] = {item.relative_path: FileDependencyNode(relative_path=item.relative_path) for item in registry.items}
 
     edge_keys: set[tuple[str, str, str]] = set()
     edges: list[DependencyEdge] = []
@@ -196,7 +193,7 @@ def build_dependency_graph(project_root: str | Path) -> DependencyGraph:
                     target_path=target_path,
                     relation="imports",
                     confidence="high",
-                )
+                ),
             )
 
     for edge in edges:
@@ -227,5 +224,5 @@ def save_dependency_graph(graph: DependencyGraph, output_path: str | Path) -> Pa
 
 
 if __name__ == "__main__":
-    graph = build_dependency_graph(Path("."))
+    graph = build_dependency_graph(Path())
     print(json.dumps(graph.to_dict(), ensure_ascii=False, indent=2))

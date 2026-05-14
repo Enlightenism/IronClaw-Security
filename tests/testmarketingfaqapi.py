@@ -30,7 +30,4 @@ def test_marketing_faq_contains_core_fields() -> None:
     assert data
 
     assert any(k in data for k in ("title", "headline", "hero"))
-    assert any(
-        k in data
-        for k in ("faqs", "questions", "entries", "sections", "items")
-    )
+    assert any(k in data for k in ("faqs", "questions", "entries", "sections", "items"))

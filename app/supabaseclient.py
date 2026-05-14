@@ -61,16 +61,10 @@ def _clean_env(value: str | None) -> str | None:
 
 def get_supabase_config() -> SupabaseConfig:
     url = _clean_env(
-        os.getenv("SUPABASE_URL")
-        or os.getenv("IRONCLAW_SUPABASE_URL")
-        or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
+        os.getenv("SUPABASE_URL") or os.getenv("IRONCLAW_SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL"),
     )
     key = _clean_env(
-        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-        or os.getenv("SUPABASE_KEY")
-        or os.getenv("IRONCLAW_SUPABASE_KEY")
-        or os.getenv("SUPABASE_ANON_KEY")
-        or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY") or os.getenv("IRONCLAW_SUPABASE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
     )
 
     if not url:
@@ -79,7 +73,7 @@ def get_supabase_config() -> SupabaseConfig:
         raise SupabaseConfigurationError("missing supabase api key")
     if not url.startswith(("http://", "https://")):
         raise SupabaseConfigurationError(
-            "SUPABASE_URL must start with http:// or https://"
+            "SUPABASE_URL must start with http:// or https://",
         )
 
     return SupabaseConfig(url=url.rstrip("/"), key=key)
@@ -142,17 +136,12 @@ class SupabaseClient:
                 body = None
 
             if isinstance(body, dict):
-                detail = (
-                    body.get("message")
-                    or body.get("error_description")
-                    or body.get("error")
-                    or response.text
-                )
+                detail = body.get("message") or body.get("error_description") or body.get("error") or response.text
             else:
                 detail = response.text
 
             raise SupabaseAPIError(
-                f"supabase request failed with status {response.status_code}: {detail}"
+                f"supabase request failed with status {response.status_code}: {detail}",
             )
 
         if not response.content:
@@ -305,7 +294,7 @@ class SupabaseClient:
                 json.dumps(payload)
             except TypeError as exc:
                 raise SupabaseClientError(
-                    f"rpc payload for {function_name!r} is not JSON serializable: {exc}"
+                    f"rpc payload for {function_name!r} is not JSON serializable: {exc}",
                 ) from exc
 
         return self.request(

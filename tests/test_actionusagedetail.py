@@ -40,10 +40,7 @@ def test_build_action_usage_detail_view_formats_special_value_types() -> None:
     )
 
     assert any(row.key == "flags" and row.value == "metered, active" for row in view.rows)
-    assert any(
-        row.key == "attributes" and row.value == "region=mx, tier=pro"
-        for row in view.rows
-    )
+    assert any(row.key == "attributes" and row.value == "region=mx, tier=pro" for row in view.rows)
     assert any(row.key == "active" and row.value == "Yes" for row in view.rows)
     assert any(row.key == "notes" and row.value == "—" for row in view.rows)
 
@@ -59,13 +56,7 @@ def test_build_action_usage_detail_view_assigns_expected_tones() -> None:
         },
     )
 
-    assert any(
-        row.key == "remaining_units" and row.tone == "warning"
-        for row in view.rows
-    )
-    assert any(
-        row.key == "wallet_balance" and row.tone == "critical"
-        for row in view.rows
-    )
+    assert any(row.key == "remaining_units" and row.tone == "warning" for row in view.rows)
+    assert any(row.key == "wallet_balance" and row.tone == "critical" for row in view.rows)
     assert any(row.key == "status" and row.tone == "critical" for row in view.rows)
     assert any(row.key == "allowed" and row.tone == "warning" for row in view.rows)

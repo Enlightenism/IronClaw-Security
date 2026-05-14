@@ -30,11 +30,5 @@ def test_ui_usage_reports_contains_core_fields() -> None:
     assert data
 
     assert any(k in data for k in ("title", "headline", "summary", "page_title"))
-    assert any(
-        k in data
-        for k in ("reports", "items", "rows", "metrics", "cards", "tables")
-    )
-    assert any(
-        k in data
-        for k in ("filters", "sections", "actions", "date_range", "summary_blocks", "charts")
-    )
+    assert any(k in data for k in ("reports", "items", "rows", "metrics", "cards", "tables"))
+    assert any(k in data for k in ("filters", "sections", "actions", "date_range", "summary_blocks", "charts"))

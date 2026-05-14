@@ -11,7 +11,6 @@ from app.services.telemetry import append_telemetry_event
 router = APIRouter()
 
 
-
 def _request_meta(request: Request) -> dict[str, str | None]:
     return {
         "request_id": getattr(request.state, "request_id", None),
@@ -19,7 +18,6 @@ def _request_meta(request: Request) -> dict[str, str | None]:
         "path": request.url.path,
         "method": request.method,
     }
-
 
 
 @router.post("/execute", response_model=ExecuteResponse)

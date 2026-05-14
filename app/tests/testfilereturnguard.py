@@ -59,7 +59,7 @@ def test_file_return_guard_allows_safe_text_file() -> None:
             allowed=True,
             reasons=[{"label": "safe-text-output"}],
             risk_delta=2,
-        )
+        ),
     )
     guard = build_file_return_guard(policy_engine=policy_engine)
 
@@ -88,7 +88,7 @@ def test_file_return_guard_reviews_unknown_binary_file() -> None:
             should_review=True,
             reasons=[{"label": "unknown-binary-output"}],
             risk_delta=38,
-        )
+        ),
     )
     guard = build_file_return_guard(policy_engine=policy_engine)
 
@@ -116,7 +116,7 @@ def test_file_return_guard_blocks_sensitive_file_exfiltration() -> None:
             should_block=True,
             reasons=[{"label": "sensitive-file-output"}],
             risk_delta=92,
-        )
+        ),
     )
     guard = build_file_return_guard(policy_engine=policy_engine)
 
@@ -149,7 +149,7 @@ def test_file_return_guard_quarantines_malicious_artifact() -> None:
             should_quarantine=True,
             reasons=[{"label": "malicious-artifact"}],
             risk_delta=100,
-        )
+        ),
     )
     guard = build_file_return_guard(policy_engine=policy_engine)
 
@@ -215,7 +215,7 @@ def test_file_return_guard_handles_missing_file_path() -> None:
             should_review=True,
             reasons=[{"label": "missing-file-path"}],
             risk_delta=18,
-        )
+        ),
     )
     guard = build_file_return_guard(policy_engine=policy_engine)
 
@@ -241,7 +241,7 @@ def test_file_return_guard_handles_blank_file_path() -> None:
             should_review=True,
             reasons=[{"label": "blank-file-path"}],
             risk_delta=18,
-        )
+        ),
     )
     guard = build_file_return_guard(policy_engine=policy_engine)
 
@@ -267,7 +267,7 @@ def test_file_return_guard_handles_missing_file_name() -> None:
             should_review=True,
             reasons=[{"label": "missing-file-name"}],
             risk_delta=12,
-        )
+        ),
     )
     guard = build_file_return_guard(policy_engine=policy_engine)
 
@@ -293,7 +293,7 @@ def test_file_return_guard_handles_missing_tool_name() -> None:
             should_review=True,
             reasons=[{"label": "missing-tool-name"}],
             risk_delta=14,
-        )
+        ),
     )
     guard = build_file_return_guard(policy_engine=policy_engine)
 
@@ -318,7 +318,7 @@ def test_file_return_guard_inserts_default_reason_when_policy_has_none() -> None
             allowed=True,
             reasons=None,
             risk_delta=0,
-        )
+        ),
     )
     guard = build_file_return_guard(policy_engine=policy_engine)
 
@@ -342,7 +342,7 @@ def test_file_return_guard_accepts_nested_metadata() -> None:
             verdict="allow",
             allowed=True,
             reasons=[{"label": "nested-metadata-ok"}],
-        )
+        ),
     )
     guard = build_file_return_guard(policy_engine=policy_engine)
 

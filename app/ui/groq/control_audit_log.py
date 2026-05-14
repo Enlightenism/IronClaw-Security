@@ -98,8 +98,7 @@ def record_control_audit_event(
     client_ip: str | None = None,
     user_agent: str | None = None,
 ) -> ControlAuditEvent:
-    """
-    Append a control-audit event to the in-memory buffer.
+    """Append a control-audit event to the in-memory buffer.
 
     Intended to be called from the control_panel PATCH handler whenever
     flags change.
@@ -129,7 +128,7 @@ def record_control_audit_event(
     _AUDIT_EVENTS.append(event)
     if len(_AUDIT_EVENTS) > _AUDIT_MAX_EVENTS:
         # drop oldest to keep bounded memory
-        _AUDIT_EVENTS = _AUDIT_EVENTS[-_AUDIT_MAX_EVENTS :]
+        _AUDIT_EVENTS = _AUDIT_EVENTS[-_AUDIT_MAX_EVENTS:]
 
     return event
 
@@ -243,8 +242,7 @@ def get_control_audit_log(
         description="Optional filter to return events where this mode was before/after.",
     ),
 ) -> ControlAuditLogResponse:
-    """
-    Paginated audit log of Groq control-panel changes.
+    """Paginated audit log of Groq control-panel changes.
 
     Designed for security / ops UIs and export tools that need to answer:
     * who changed which control flags

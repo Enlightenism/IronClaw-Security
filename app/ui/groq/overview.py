@@ -175,8 +175,7 @@ class GroqSecurityOverviewResponse(BaseModel):
 
 
 def _compute_posture_widget(mode: GroqMode) -> OverviewPostureWidget:
-    """
-    Lightweight overall posture score using current decision stats and mode.
+    """Lightweight overall posture score using current decision stats and mode.
     This is tuned for always-on prompt protection rather than a fixed window.[web:1277][web:1309]
     """
     brain_view = build_groq_brain_status_view(mode=mode)
@@ -202,10 +201,7 @@ def _compute_posture_widget(mode: GroqMode) -> OverviewPostureWidget:
 
     score = max(0, min(100, int(round(base))))
 
-    description = (
-        f"Protecting live AI prompts in {mode} mode with {total} recent decisions; "
-        f"{high_risk} high-risk actions and {warns} warnings observed."
-    )
+    description = f"Protecting live AI prompts in {mode} mode with {total} recent decisions; {high_risk} high-risk actions and {warns} warnings observed."
 
     indicators = {
         "total_decisions": total,
@@ -226,9 +222,7 @@ def _compute_posture_widget(mode: GroqMode) -> OverviewPostureWidget:
 
 
 def _compute_traffic_widget() -> OverviewTrafficWidget:
-    """
-    Summarize current request stream, focusing on risk for prompt traffic.[web:1277]
-    """
+    """Summarize current request stream, focusing on risk for prompt traffic.[web:1277]"""
     events = _REQUEST_EVENTS
     total = len(events)
 
@@ -258,14 +252,10 @@ def _compute_traffic_widget() -> OverviewTrafficWidget:
 
 
 def _compute_incidents_widget() -> OverviewIncidentsWidget:
-    """
-    Current AI-created incident load; important for continuous prompt defense.[web:1253][web:1257]
-    """
+    """Current AI-created incident load; important for continuous prompt defense.[web:1253][web:1257]"""
     incidents = _INCIDENTS
     open_incidents = [i for i in incidents if i.status == "open"]
-    high_or_critical = [
-        i for i in open_incidents if i.severity in ("high", "critical")
-    ]
+    high_or_critical = [i for i in open_incidents if i.severity in ("high", "critical")]
 
     newest_at = open_incidents[-1].created_at if open_incidents else None
 
@@ -286,9 +276,7 @@ def _compute_incidents_widget() -> OverviewIncidentsWidget:
 
 
 def _compute_controls_widget() -> OverviewControlsWidget:
-    """
-    Control hygiene snapshot (mode + toggles) with inline risk notes.[web:1275][web:1312]
-    """
+    """Control hygiene snapshot (mode + toggles) with inline risk notes.[web:1275][web:1312]"""
     f = CONTROL_FLAGS
     flags = {
         "allow_shell_commands": f.allow_shell_commands,
@@ -325,9 +313,7 @@ def _compute_controls_widget() -> OverviewControlsWidget:
 
 
 def _compute_remediation_widget() -> OverviewRemediationWidget:
-    """
-    Quick view of AI remediation pipeline health (suggested vs queued actions).[
-    """
+    """Quick view of AI remediation pipeline health (suggested vs queued actions).["""
     actions = list(_REMEDIATION_ACTIONS.values())
     suggested = [a for a in actions if a.status == "suggested"]
     queued = [a for a in actions if a.status == "queued"]
@@ -344,8 +330,7 @@ def _compute_remediation_widget() -> OverviewRemediationWidget:
 
 
 def build_groq_security_overview() -> GroqSecurityOverview:
-    """
-    Build the full AI security cockpit snapshot.
+    """Build the full AI security cockpit snapshot.
 
     This is intentionally a current-state view tailored to continuous
     prompt protection rather than a fixed time window.[web:1277][web:1309]
@@ -376,8 +361,7 @@ def build_groq_security_overview() -> GroqSecurityOverview:
 
 @router.get("/overview", response_model=GroqSecurityOverviewResponse)
 def get_groq_security_overview() -> GroqSecurityOverviewResponse:
-    """
-    AI security cockpit overview for prompt protection.
+    """AI security cockpit overview for prompt protection.
 
     Designed as the main dashboard payload: summarizes current posture,
     live request risk, AI-created incidents, control state, and remediation

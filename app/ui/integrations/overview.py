@@ -133,7 +133,7 @@ def build_integration_overview_view(
                 command_ready=bool(getattr(record, "command_name", None)),
                 install_ready=bool(getattr(record, "install_target", None)),
                 endpoint_ready=bool(
-                    getattr(record, "endpoint", None) or getattr(record, "base_url", None)
+                    getattr(record, "endpoint", None) or getattr(record, "base_url", None),
                 ),
                 metadata={
                     "requested_by": requested_by,
@@ -142,19 +142,16 @@ def build_integration_overview_view(
                     "warn_count": summary["warn_count"],
                     "fail_count": summary["fail_count"],
                 },
-            )
+            ),
         )
 
     items.sort(
         key=lambda item: (
-            0 if item.health == "failing"
-            else 1 if item.health == "warning"
-            else 2 if item.health == "healthy"
-            else 3,
+            0 if item.health == "failing" else 1 if item.health == "warning" else 2 if item.health == "healthy" else 3,
             item.platform,
             item.slug,
             item.integration_id,
-        )
+        ),
     )
 
     return IntegrationOverviewView(

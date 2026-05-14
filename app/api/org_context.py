@@ -20,6 +20,7 @@ async def get_org_context_endpoint(
 ) -> dict[str, Any]:
     if not context.authenticated:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=401, detail="Missing API key")
     return {
         "org": org_context.to_dict(),

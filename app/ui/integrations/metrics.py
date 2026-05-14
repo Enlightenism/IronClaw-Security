@@ -178,7 +178,7 @@ def _build_metric_snapshot(
                 metadata={
                     "rate_window_seconds": throughput.window_seconds,
                 },
-            )
+            ),
         )
 
     return snapshots
@@ -200,14 +200,8 @@ def get_integration_metrics() -> IntegrationMetricsResponse:
         incident_store=incident_store,
     )
 
-    active_count = sum(
-        1 for snap in snapshots if _is_active_status(snap.status)
-    )
-    degraded_count = sum(
-        1
-        for snap in snapshots
-        if snap.critical_incident_count > 0 or snap.error_count_1h > 0
-    )
+    active_count = sum(1 for snap in snapshots if _is_active_status(snap.status))
+    degraded_count = sum(1 for snap in snapshots if snap.critical_incident_count > 0 or snap.error_count_1h > 0)
 
     snapshots.sort(
         key=lambda s: (
@@ -215,7 +209,7 @@ def get_integration_metrics() -> IntegrationMetricsResponse:
             -s.error_count_1h,
             -s.request_count_1h,
             s.slug,
-        )
+        ),
     )
 
     items = [_snapshot_to_view(s) for s in snapshots]

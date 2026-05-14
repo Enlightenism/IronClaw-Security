@@ -168,9 +168,7 @@ def correlate_attack_events(
 
     target_counts: Counter[str] = Counter(event.target for event in events)
     action_counts: Counter[str] = Counter(event.action_type for event in events)
-    session_counts: Counter[str] = Counter(
-        event.session_id for event in events if event.session_id
-    )
+    session_counts: Counter[str] = Counter(event.session_id for event in events if event.session_id)
 
     reasons: list[str] = []
     escalation_score = 0
@@ -193,7 +191,7 @@ def correlate_attack_events(
         escalation_score += 10
     if repeated_sessions:
         reasons.append(
-            f"Detected {len(repeated_sessions)} session(s) with repeated correlated events."
+            f"Detected {len(repeated_sessions)} session(s) with repeated correlated events.",
         )
         escalation_score += 12
     if total_events >= 5:

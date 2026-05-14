@@ -7,7 +7,7 @@ import pytest
 from app.runtime.filereturnguard import build_file_return_guard
 
 
-@pytest.fixture()
+@pytest.fixture
 def guard():
     return build_file_return_guard()
 
@@ -289,10 +289,6 @@ def test_reasons_and_rules_are_deduplicated_when_analyzers_repeat_signals(monkey
 
     policy = guard.evaluate(path="artifacts/report.txt", content="safe")
 
-    repeated = [
-        item
-        for item in policy.reasons
-        if item["label"] == "Repeated" and item["details"] == "Same reason"
-    ]
+    repeated = [item for item in policy.reasons if item["label"] == "Repeated" and item["details"] == "Same reason"]
     assert len(repeated) == 1
     assert policy.matched_rules.count("artifactanalyzer:review") == 1

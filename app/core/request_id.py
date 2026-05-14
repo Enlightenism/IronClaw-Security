@@ -10,8 +10,7 @@ REQUEST_ID_HEADER_NAME = "X-Request-ID"
 
 
 class SimpleRequestIDMiddleware(BaseHTTPMiddleware):
-    """
-    Attach a stable request ID to each request/response cycle.
+    """Attach a stable request ID to each request/response cycle.
 
     Behavior:
     - Reuse an incoming X-Request-ID if the caller provides one.

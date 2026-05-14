@@ -147,7 +147,7 @@ def _build_issue_view(record: Any, fallback_index: int) -> CompatibilityIssueVie
     data = _coerce_mapping(record)
 
     issue_id = str(
-        _extract_value(data, "issue_id", "id", "code") or f"issue-{fallback_index}"
+        _extract_value(data, "issue_id", "id", "code") or f"issue-{fallback_index}",
     )
     severity = _normalize_severity(_extract_value(data, "severity", "level"))
     category = str(_extract_value(data, "category", "type") or "compatibility")
@@ -173,14 +173,13 @@ def _build_check_view(record: Any, fallback_index: int) -> CompatibilityCheckVie
     data = _coerce_mapping(record)
 
     check_id = str(
-        _extract_value(data, "check_id", "id", "name") or f"check-{fallback_index}"
+        _extract_value(data, "check_id", "id", "name") or f"check-{fallback_index}",
     )
     name = str(
-        _extract_value(data, "name", "title", "check")
-        or check_id.replace("-", " ").title()
+        _extract_value(data, "name", "title", "check") or check_id.replace("-", " ").title(),
     )
     status_value = _normalize_status(
-        _extract_value(data, "status", "result", "outcome")
+        _extract_value(data, "status", "result", "outcome"),
     )
     detail = str(_extract_value(data, "detail", "message", "description") or "")
 
@@ -209,7 +208,10 @@ def _build_target_view(
 
     provider_value = _extract_value(payload, "provider", "vendor")
     version_value = _extract_value(
-        payload, "version", "platform_version", "target_version"
+        payload,
+        "version",
+        "platform_version",
+        "target_version",
     )
     runtime_value = _extract_value(payload, "runtime", "runtime_version")
     environment_value = _extract_value(payload, "environment") or environment
@@ -233,16 +235,10 @@ def _build_compatibility_response(
     payload = _coerce_mapping(_extract_value(data, "compatibility", "verification") or result)
 
     raw_checks = _extract_value(payload, "checks", "results", "verifications") or []
-    checks = [
-        _build_check_view(item, index + 1)
-        for index, item in enumerate(_normalize_list(raw_checks))
-    ]
+    checks = [_build_check_view(item, index + 1) for index, item in enumerate(_normalize_list(raw_checks))]
 
     raw_issues = _extract_value(payload, "issues", "findings", "errors") or []
-    issues = [
-        _build_issue_view(item, index + 1)
-        for index, item in enumerate(_normalize_list(raw_issues))
-    ]
+    issues = [_build_issue_view(item, index + 1) for index, item in enumerate(_normalize_list(raw_issues))]
 
     compatible = bool(_extract_value(payload, "compatible", "is_compatible"))
     if not compatible and checks:
@@ -263,7 +259,10 @@ def _build_compatibility_response(
             metadata[key] = payload.get(key)
 
     checked_at_value = _extract_value(
-        payload, "checked_at", "verified_at", "timestamp"
+        payload,
+        "checked_at",
+        "verified_at",
+        "timestamp",
     )
 
     return IntegrationCompatibilityResponse(

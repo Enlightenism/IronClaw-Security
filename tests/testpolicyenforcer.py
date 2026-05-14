@@ -182,7 +182,7 @@ def test_reject_invalid_signed_bundle_before_override():
             allowed=False,
             verdict="block",
             matched_rules=["signature_mismatch"],
-        )
+        ),
     )
 
     result = enforcer.evaluate(
@@ -559,11 +559,7 @@ def test_deduplicates_rules_and_reasons_across_stages():
         action="execute",
     )
 
-    duplicates = [
-        item
-        for item in result.reasons
-        if item["label"] == "Same" and item["details"] == "duplicate"
-    ]
+    duplicates = [item for item in result.reasons if item["label"] == "Same" and item["details"] == "duplicate"]
     assert len(duplicates) == 1
     assert result.matched_rules.count("dup-rule") == 1
 

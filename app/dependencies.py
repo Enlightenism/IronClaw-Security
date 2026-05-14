@@ -8,8 +8,7 @@ _service_registry: ServiceRegistry | None = None
 
 
 def get_service_registry() -> ServiceRegistry:
-    """
-    Return the shared ServiceRegistry instance.
+    """Return the shared ServiceRegistry instance.
 
     The registry is created lazily on first access so that imports
     remain cheap and we avoid initialization ordering issues.
@@ -21,8 +20,7 @@ def get_service_registry() -> ServiceRegistry:
 
 
 def get_release_policy_client() -> ReleasePolicyClient:
-    """
-    Convenience accessor for the ReleasePolicyClient.
+    """Convenience accessor for the ReleasePolicyClient.
 
     This is the main entry point most callers will use when they need
     to evaluate release policy from routes, tasks, or scripts.
@@ -31,8 +29,7 @@ def get_release_policy_client() -> ReleasePolicyClient:
 
 
 def _reset_dependencies_for_tests() -> None:
-    """
-    Test-only helper to reset the global registry.
+    """Test-only helper to reset the global registry.
 
     This should not be used in application code, but can be imported
     in test suites to ensure isolation between test cases.

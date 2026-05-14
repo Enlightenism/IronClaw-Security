@@ -49,7 +49,7 @@ def _to_decimal(value: Any) -> Decimal | None:
 def _non_negative_or_none(value: Decimal | None) -> Decimal | None:
     if value is None:
         return None
-    if value < Decimal("0"):
+    if value < Decimal(0):
         raise ValueError("numeric usage detail values must be non-negative")
     return value
 
@@ -79,14 +79,13 @@ def build_action_usage_detail(
     usage_id: str | None = None,
     owner_id: str | None = None,
     action: str | None = None,
-    units: int | float | str | Decimal | None = None,
-    unit_cost: int | float | str | Decimal | None = None,
+    units: float | str | Decimal | None = None,
+    unit_cost: float | str | Decimal | None = None,
     status: str | None = None,
     request_id: str | None = None,
     metadata: Mapping[str, Any] | None = None,
 ) -> ActionUsageDetail:
-    """
-    Build a serializable action usage detail payload.
+    """Build a serializable action usage detail payload.
 
     This function is intentionally tolerant of inputs:
     - All fields are optional for backward compatibility with tests that call it
@@ -95,7 +94,6 @@ def build_action_usage_detail(
       provided, satisfying tests that expect rejection of negative inputs.
     - When both units and unit_cost are present, totalcost is derived as units * unit_cost.
     """
-
     units_decimal = _to_decimal(units)
     unit_cost_decimal = _to_decimal(unit_cost)
 

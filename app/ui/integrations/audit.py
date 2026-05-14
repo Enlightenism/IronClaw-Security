@@ -75,7 +75,7 @@ def _build_audit_entries(*, requested_by: str = "ui-audit") -> list[IntegrationA
                 record,
                 "updated_at",
                 getattr(record, "created_at", datetime.now(UTC).isoformat()),
-            )
+            ),
         )
 
         items.append(
@@ -94,7 +94,7 @@ def _build_audit_entries(*, requested_by: str = "ui-audit") -> list[IntegrationA
                     "version": getattr(record, "version", None),
                     "integration_type": getattr(record, "integration_type", "unknown"),
                 },
-            )
+            ),
         )
 
     items.sort(

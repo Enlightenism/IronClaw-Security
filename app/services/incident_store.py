@@ -63,11 +63,7 @@ class IncidentRecordInMemory:
         payload = asdict(self)
         payload["created_at"] = self.created_at.isoformat().replace("+00:00", "Z")
         payload["updated_at"] = self.updated_at.isoformat().replace("+00:00", "Z")
-        payload["resolved_at"] = (
-            self.resolved_at.isoformat().replace("+00:00", "Z")
-            if self.resolved_at is not None
-            else None
-        )
+        payload["resolved_at"] = self.resolved_at.isoformat().replace("+00:00", "Z") if self.resolved_at is not None else None
         # Dual-key aliases so routers using either naming convention work
         payload["incidentid"] = self.incident_id
         payload["id"] = self.incident_id
@@ -109,61 +105,63 @@ class IncidentStoreInMemory:
             if self._items:
                 return
             now = _utcnow()
-            self._items.extend([
-                IncidentRecordInMemory(
-                    incident_id=f"inc-{uuid4().hex[:12]}",
-                    title="Prompt injection attempt quarantined",
-                    summary="A prompt payload matched high-risk injection heuristics and was quarantined before execution.",
-                    severity="high",
-                    status="open",
-                    source="scan",
-                    created_at=now,
-                    updated_at=now,
-                    request_id="req-seed-001",
-                    trace_id="trace-seed-001",
-                    asset_ref="prompt:user-input",
-                    verdict="quarantine",
-                    tags=["prompt-injection", "quarantine", "scanner"],
-                    metadata={"seeded": True},
-                    category="security",
-                ),
-                IncidentRecordInMemory(
-                    incident_id=f"inc-{uuid4().hex[:12]}",
-                    title="Unsafe tool action blocked",
-                    summary="A guarded execution request was blocked due to policy restrictions on high-risk tool use.",
-                    severity="critical",
-                    status="triaged",
-                    source="guard",
-                    created_at=now,
-                    updated_at=now,
-                    request_id="req-seed-002",
-                    trace_id="trace-seed-002",
-                    asset_ref="tool:filesystem",
-                    verdict="block",
-                    owner="ironclaw",
-                    tags=["tool-guard", "policy", "block"],
-                    metadata={"seeded": True},
-                    category="security",
-                ),
-                IncidentRecordInMemory(
-                    incident_id=f"inc-{uuid4().hex[:12]}",
-                    title="Sandbox isolation event recorded",
-                    summary="Returned content was isolated in sandbox flow for additional review after suspicious output analysis.",
-                    severity="medium",
-                    status="contained",
-                    source="sandbox",
-                    created_at=now,
-                    updated_at=now,
-                    request_id="req-seed-003",
-                    trace_id="trace-seed-003",
-                    asset_ref="response:model-output",
-                    verdict="warn",
-                    owner="sandbox-review",
-                    tags=["sandbox", "review", "containment"],
-                    metadata={"seeded": True},
-                    category="security",
-                ),
-            ])
+            self._items.extend(
+                [
+                    IncidentRecordInMemory(
+                        incident_id=f"inc-{uuid4().hex[:12]}",
+                        title="Prompt injection attempt quarantined",
+                        summary="A prompt payload matched high-risk injection heuristics and was quarantined before execution.",
+                        severity="high",
+                        status="open",
+                        source="scan",
+                        created_at=now,
+                        updated_at=now,
+                        request_id="req-seed-001",
+                        trace_id="trace-seed-001",
+                        asset_ref="prompt:user-input",
+                        verdict="quarantine",
+                        tags=["prompt-injection", "quarantine", "scanner"],
+                        metadata={"seeded": True},
+                        category="security",
+                    ),
+                    IncidentRecordInMemory(
+                        incident_id=f"inc-{uuid4().hex[:12]}",
+                        title="Unsafe tool action blocked",
+                        summary="A guarded execution request was blocked due to policy restrictions on high-risk tool use.",
+                        severity="critical",
+                        status="triaged",
+                        source="guard",
+                        created_at=now,
+                        updated_at=now,
+                        request_id="req-seed-002",
+                        trace_id="trace-seed-002",
+                        asset_ref="tool:filesystem",
+                        verdict="block",
+                        owner="ironclaw",
+                        tags=["tool-guard", "policy", "block"],
+                        metadata={"seeded": True},
+                        category="security",
+                    ),
+                    IncidentRecordInMemory(
+                        incident_id=f"inc-{uuid4().hex[:12]}",
+                        title="Sandbox isolation event recorded",
+                        summary="Returned content was isolated in sandbox flow for additional review after suspicious output analysis.",
+                        severity="medium",
+                        status="contained",
+                        source="sandbox",
+                        created_at=now,
+                        updated_at=now,
+                        request_id="req-seed-003",
+                        trace_id="trace-seed-003",
+                        asset_ref="response:model-output",
+                        verdict="warn",
+                        owner="sandbox-review",
+                        tags=["sandbox", "review", "containment"],
+                        metadata={"seeded": True},
+                        category="security",
+                    ),
+                ]
+            )
 
     # ------------------------------------------------------------------
     # List / query
@@ -534,6 +532,7 @@ def reset_incident_store_memory() -> None:
 # ---------------------------------------------------------------------------
 # Legacy free-function API — test and router compatibility
 # ---------------------------------------------------------------------------
+
 
 def get_incident_store() -> IncidentStoreInMemory:
     return _INCIDENT_STORE_MEMORY

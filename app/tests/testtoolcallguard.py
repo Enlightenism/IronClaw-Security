@@ -59,7 +59,7 @@ def test_tool_call_guard_allows_safe_read_only_tool() -> None:
             allowed=True,
             reasons=[{"label": "read-only-tool"}],
             risk_delta=3,
-        )
+        ),
     )
     guard = build_tool_call_guard(policy_engine=policy_engine)
 
@@ -85,7 +85,7 @@ def test_tool_call_guard_reviews_shell_execution() -> None:
             should_review=True,
             reasons=[{"label": "shell-execution"}],
             risk_delta=40,
-        )
+        ),
     )
     guard = build_tool_call_guard(policy_engine=policy_engine)
 
@@ -110,7 +110,7 @@ def test_tool_call_guard_blocks_dangerous_tool_call() -> None:
             should_block=True,
             reasons=[{"label": "destructive-command"}],
             risk_delta=95,
-        )
+        ),
     )
     guard = build_tool_call_guard(policy_engine=policy_engine)
 
@@ -136,7 +136,7 @@ def test_tool_call_guard_quarantines_exfiltration_attempt() -> None:
             should_quarantine=True,
             reasons=[{"label": "exfiltration-attempt"}],
             risk_delta=100,
-        )
+        ),
     )
     guard = build_tool_call_guard(policy_engine=policy_engine)
 
@@ -207,7 +207,7 @@ def test_tool_call_guard_handles_missing_tool_name() -> None:
             should_review=True,
             reasons=[{"label": "missing-tool-name"}],
             risk_delta=20,
-        )
+        ),
     )
     guard = build_tool_call_guard(policy_engine=policy_engine)
 
@@ -231,7 +231,7 @@ def test_tool_call_guard_handles_blank_tool_name() -> None:
             should_review=True,
             reasons=[{"label": "blank-tool-name"}],
             risk_delta=20,
-        )
+        ),
     )
     guard = build_tool_call_guard(policy_engine=policy_engine)
 
@@ -255,7 +255,7 @@ def test_tool_call_guard_handles_missing_arguments() -> None:
             should_review=True,
             reasons=[{"label": "missing-arguments"}],
             risk_delta=12,
-        )
+        ),
     )
     guard = build_tool_call_guard(policy_engine=policy_engine)
 
@@ -279,7 +279,7 @@ def test_tool_call_guard_handles_missing_target() -> None:
             should_review=True,
             reasons=[{"label": "missing-target"}],
             risk_delta=10,
-        )
+        ),
     )
     guard = build_tool_call_guard(policy_engine=policy_engine)
 
@@ -303,7 +303,7 @@ def test_tool_call_guard_handles_missing_environment_scope() -> None:
             should_review=True,
             reasons=[{"label": "missing-environment-scope"}],
             risk_delta=15,
-        )
+        ),
     )
     guard = build_tool_call_guard(policy_engine=policy_engine)
 
@@ -326,7 +326,7 @@ def test_tool_call_guard_inserts_default_reason_if_policy_returns_none() -> None
             allowed=True,
             reasons=None,
             risk_delta=0,
-        )
+        ),
     )
     guard = build_tool_call_guard(policy_engine=policy_engine)
 
@@ -368,7 +368,7 @@ def test_tool_call_guard_accepts_nested_metadata() -> None:
             verdict="allow",
             allowed=True,
             reasons=[{"label": "nested-metadata-ok"}],
-        )
+        ),
     )
     guard = build_tool_call_guard(policy_engine=policy_engine)
 

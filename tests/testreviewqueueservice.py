@@ -48,6 +48,7 @@ class _FakeQuarantineItem:
 # while holding the canonical ReviewItem internally.
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _QueueItem:
     review_id: str
@@ -133,7 +134,6 @@ _RISK_TO_REVIEW_PRIORITY = {
 
 
 class _ReviewQueueServiceAdapter:
-
     def __init__(self) -> None:
         _rqs.reset_review_queue()
 
@@ -205,7 +205,7 @@ class _ReviewQueueServiceAdapter:
                         status=item.status,
                         incident_id=item.metadata.get("incident_id"),
                         quarantine_id=item.metadata.get("quarantine_id"),
-                    )
+                    ),
                 )
         return result
 
@@ -259,7 +259,7 @@ class _ReviewQueueServiceAdapter:
         )
 
 
-@pytest.fixture()
+@pytest.fixture
 def service() -> _ReviewQueueServiceAdapter:
     return _ReviewQueueServiceAdapter()
 

@@ -143,7 +143,7 @@ def build_integration_readiness_view(
         command_ready = bool(getattr(record, "command_name", None))
         install_ready = bool(getattr(record, "install_target", None))
         endpoint_ready = bool(
-            getattr(record, "endpoint", None) or getattr(record, "base_url", None)
+            getattr(record, "endpoint", None) or getattr(record, "base_url", None),
         )
 
         score = _readiness_score(
@@ -188,18 +188,16 @@ def build_integration_readiness_view(
                     "requested_by": requested_by,
                     "checked_at": summary["checked_at"],
                 },
-            )
+            ),
         )
 
     items.sort(
         key=lambda item: (
-            0 if item.readiness_state == "blocked"
-            else 1 if item.readiness_state == "nearly-ready"
-            else 2,
+            0 if item.readiness_state == "blocked" else 1 if item.readiness_state == "nearly-ready" else 2,
             -item.readiness_score,
             item.platform,
             item.slug,
-        )
+        ),
     )
 
     return IntegrationReadinessView(

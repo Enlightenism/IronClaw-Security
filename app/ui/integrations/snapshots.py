@@ -140,19 +140,16 @@ def build_integration_snapshots_view(
                     "warn_count": summary["warn_count"],
                     "fail_count": summary["fail_count"],
                 },
-            )
+            ),
         )
 
     items.sort(
         key=lambda item: (
-            0 if item.health == "failing"
-            else 1 if item.health == "warning"
-            else 2 if item.health == "healthy"
-            else 3,
+            0 if item.health == "failing" else 1 if item.health == "warning" else 2 if item.health == "healthy" else 3,
             item.platform,
             item.slug,
             item.integration_id,
-        )
+        ),
     )
 
     return IntegrationSnapshotsView(

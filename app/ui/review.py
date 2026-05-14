@@ -60,7 +60,7 @@ def _build_actions(item: ReviewQueueItem) -> list[ReviewDetailAction]:
                 api_path=f"/api/review-queue/{item.review_id}/assign",
                 body={"reviewer_id": "analyst-1"},
                 style="primary",
-            )
+            ),
         )
 
     if item.status == ReviewStatus.IN_PROGRESS:
@@ -71,7 +71,7 @@ def _build_actions(item: ReviewQueueItem) -> list[ReviewDetailAction]:
                 api_path=f"/api/review-queue/{item.review_id}/complete",
                 body={},
                 style="success",
-            )
+            ),
         )
         actions.append(
             ReviewDetailAction(
@@ -80,7 +80,7 @@ def _build_actions(item: ReviewQueueItem) -> list[ReviewDetailAction]:
                 api_path=f"/api/review-queue/{item.review_id}/dismiss",
                 body={"reason": "dismissed-by-analyst"},
                 style="danger",
-            )
+            ),
         )
 
     if item.status in {ReviewStatus.COMPLETED, ReviewStatus.DISMISSED}:
@@ -91,7 +91,7 @@ def _build_actions(item: ReviewQueueItem) -> list[ReviewDetailAction]:
                 api_path=f"/api/review-queue/{item.review_id}/reopen",
                 body={},
                 style="default",
-            )
+            ),
         )
 
     return actions
@@ -137,9 +137,6 @@ def get_review_detail(review_id: str) -> ReviewDetailResponse:
         completed_at=item.completed_at,
         fields=_build_fields(item),
         reasons=list(item.reasons),
-        evidence=[
-            ReviewEvidenceItem(index=index + 1, data=dict(evidence))
-            for index, evidence in enumerate(item.evidence)
-        ],
+        evidence=[ReviewEvidenceItem(index=index + 1, data=dict(evidence)) for index, evidence in enumerate(item.evidence)],
         actions=_build_actions(item),
     )

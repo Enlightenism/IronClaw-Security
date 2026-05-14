@@ -41,8 +41,7 @@ class SecretRecord:
 
 
 class SecretService:
-    """
-    Local-first secret registry for integration credentials and platform secrets.
+    """Local-first secret registry for integration credentials and platform secrets.
 
     This service is intentionally in-memory for the first build phase so routes,
     UI pages, and tests can stabilize before persistence is added.

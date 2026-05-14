@@ -173,10 +173,7 @@ def test_end_to_end_backup_rotation_and_restore_validation_coexist(
         now=_utc_dt(2026, 4, 27, 19, 22, 0),
     )
 
-    manifests = [
-        backup_service.run_export("runtime-metadata")
-        for _ in range(3)
-    ]
+    manifests = [backup_service.run_export("runtime-metadata") for _ in range(3)]
     removed = backup_service.rotate("runtime-metadata")
 
     restore_service = RestoreService(now=_utc_dt(2026, 4, 27, 19, 23, 0))

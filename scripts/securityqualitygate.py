@@ -102,7 +102,7 @@ def _check_coverage(results: list[GateCheckResult], min_coverage: int) -> None:
             f"--cov-fail-under={min_coverage}",
             "--cov-report=term-missing:skip-covered",
             "-q",
-        ]
+        ],
     )
     if completed.returncode == 0:
         _record(results, "coverage", True, f"coverage meets fail-under {min_coverage}%")

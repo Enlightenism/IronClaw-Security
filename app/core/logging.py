@@ -78,11 +78,7 @@ def _extract_extra_fields(record: logging.LogRecord) -> dict[str, Any]:
         "asctime",
         "request_id",
     }
-    return {
-        key: value
-        for key, value in record.__dict__.items()
-        if key not in standard_fields and not key.startswith("_")
-    }
+    return {key: value for key, value in record.__dict__.items() if key not in standard_fields and not key.startswith("_")}
 
 
 def configure_logging(settings: Settings) -> None:
@@ -97,8 +93,8 @@ def configure_logging(settings: Settings) -> None:
     else:
         handler.setFormatter(
             logging.Formatter(
-                "%(asctime)s %(levelname)s %(name)s [request_id=%(request_id)s] %(message)s"
-            )
+                "%(asctime)s %(levelname)s %(name)s [request_id=%(request_id)s] %(message)s",
+            ),
         )
 
     root_logger.addHandler(handler)
@@ -123,7 +119,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next) -> Response:
         request_id = getattr(request.state, "request_id", None) or request.headers.get(
-            REQUEST_ID_HEADER_NAME
+            REQUEST_ID_HEADER_NAME,
         )
         if not request_id:
             request_id = "unknown-request-id"

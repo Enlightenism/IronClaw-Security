@@ -131,7 +131,7 @@ def scan_for_skill(
                             label="Runtime scan completed",
                             details=summary,
                             score=(risk_score / 100.0) if isinstance(risk_score, int) else None,
-                        )
+                        ),
                     ],
                     raw_result=response_payload,
                 )
@@ -147,7 +147,7 @@ def scan_for_skill(
                         source="runtime",
                         label="Scan request failed",
                         details=f"HTTP {response.status_code}",
-                    )
+                    ),
                 ],
                 raw_result=response_payload,
             )
@@ -163,7 +163,7 @@ def scan_for_skill(
                     source="runtime",
                     label="Runtime unreachable",
                     details=str(exc),
-                )
+                ),
             ],
         )
         return SkillRuntimeResult(response=envelope, context=resolved_context)
@@ -215,7 +215,7 @@ def evaluate_action_for_skill(
                             label="Runtime policy evaluation completed",
                             details=summary,
                             score=(risk_score / 100.0) if isinstance(risk_score, int) else None,
-                        )
+                        ),
                     ],
                     raw_result=response_payload,
                 )
@@ -231,7 +231,7 @@ def evaluate_action_for_skill(
                         source="runtime",
                         label="Policy request failed",
                         details=f"HTTP {response.status_code}",
-                    )
+                    ),
                 ],
                 raw_result=response_payload,
             )
@@ -247,7 +247,7 @@ def evaluate_action_for_skill(
                     source="runtime",
                     label="Runtime unreachable",
                     details=str(exc),
-                )
+                ),
             ],
         )
         return SkillRuntimeResult(response=envelope, context=resolved_context)
@@ -278,7 +278,7 @@ def execute_guarded_for_skill(
                     source="policy",
                     label="Side effects blocked",
                     details="This skill runtime path only permits guarded command evaluation without elevated side effects.",
-                )
+                ),
             ],
             raw_result={"command": command},
         )
@@ -318,7 +318,7 @@ def execute_guarded_for_skill(
                     label="Shell guard execution complete",
                     details=f"Command completed with return code {result.returncode}.",
                     score=0.15 if result.returncode == 0 else 0.45,
-                )
+                ),
             ],
             raw_result=result.to_dict(),
         )
@@ -334,7 +334,7 @@ def execute_guarded_for_skill(
                     source="runtime",
                     label="Shell guard error",
                     details=str(exc),
-                )
+                ),
             ],
             raw_result={"command": command},
         )

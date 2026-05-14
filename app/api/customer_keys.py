@@ -21,11 +21,9 @@ router = APIRouter(
 )
 
 
-
 class CustomerKeyCreateRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=120)
     metadata: dict[str, Any] = Field(default_factory=dict)
-
 
 
 class CustomerKeyView(BaseModel):
@@ -38,14 +36,12 @@ class CustomerKeyView(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-
 class CustomerKeyCreateResponse(BaseModel):
     status: str
     service: str
     timestamp: str
     api_key: str
     key: CustomerKeyView
-
 
 
 class CustomerKeyListResponse(BaseModel):
@@ -56,7 +52,6 @@ class CustomerKeyListResponse(BaseModel):
     keys: list[CustomerKeyView] = Field(default_factory=list)
 
 
-
 class CustomerKeyRevokeResponse(BaseModel):
     status: str
     service: str
@@ -64,17 +59,14 @@ class CustomerKeyRevokeResponse(BaseModel):
     revoked_key_id: str
 
 
-
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
 
 
 def _to_iso(value: datetime | None) -> str | None:
     if value is None:
         return None
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
-
 
 
 def _to_view(record: APIKeyRecord, masked_value: str | None = None) -> CustomerKeyView:
@@ -89,13 +81,11 @@ def _to_view(record: APIKeyRecord, masked_value: str | None = None) -> CustomerK
     )
 
 
-
 @router.get("", response_model=CustomerKeyListResponse)
 def list_customer_keys() -> CustomerKeyListResponse:
     registry = get_api_key_registry()
     records = list(getattr(registry, "_keys_by_id", {}).values())
     records = sorted(records, key=lambda record: record.created_at, reverse=True)
-
 
     return CustomerKeyListResponse(
         status="ok",
@@ -104,7 +94,6 @@ def list_customer_keys() -> CustomerKeyListResponse:
         total_keys=len(records),
         keys=[_to_view(record) for record in records],
     )
-
 
 
 @router.post(
@@ -121,7 +110,6 @@ def create_customer_key(payload: CustomerKeyCreateRequest) -> CustomerKeyCreateR
         metadata=payload.metadata,
     )
 
-
     return CustomerKeyCreateResponse(
         status="ok",
         service="IronClaw-Security",
@@ -131,12 +119,10 @@ def create_customer_key(payload: CustomerKeyCreateRequest) -> CustomerKeyCreateR
     )
 
 
-
 @router.post("/{key_id}/revoke", response_model=CustomerKeyRevokeResponse)
 def revoke_customer_key(key_id: str) -> CustomerKeyRevokeResponse:
     registry = get_api_key_registry()
     registry.deactivate_key(key_id)
-
 
     return CustomerKeyRevokeResponse(
         status="ok",

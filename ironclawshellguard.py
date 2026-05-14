@@ -86,8 +86,7 @@ class GuardedCommandResult:
 
 
 class IronClawShellGuard:
-    """
-    IronClaw shell command policy guard.
+    """IronClaw shell command policy guard.
 
     Security goals:
     - never uses shell=True
@@ -134,6 +133,7 @@ class IronClawShellGuard:
         try:
             completed = subprocess.run(
                 argv,
+                check=False,
                 cwd=str(effective_cwd) if effective_cwd else None,
                 env=effective_env,
                 shell=False,
@@ -159,11 +159,11 @@ class IronClawShellGuard:
             )
             self._append_audit(result)
             raise ShellGuardExecutionError(
-                f"Command timed out after {effective_timeout} seconds: {self._render_command(argv)}"
+                f"Command timed out after {effective_timeout} seconds: {self._render_command(argv)}",
             ) from exc
         except OSError as exc:
             raise ShellGuardExecutionError(
-                f"Command execution failed for {self._render_command(argv)}: {exc}"
+                f"Command execution failed for {self._render_command(argv)}: {exc}",
             ) from exc
 
         result = GuardedCommandResult(
@@ -179,7 +179,7 @@ class IronClawShellGuard:
 
         if check and completed.returncode != 0:
             raise ShellGuardExecutionError(
-                f"Command failed with exit code {completed.returncode}: {self._render_command(argv)}"
+                f"Command failed with exit code {completed.returncode}: {self._render_command(argv)}",
             )
 
         return result

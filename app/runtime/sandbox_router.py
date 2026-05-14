@@ -125,12 +125,7 @@ def route_to_sandbox(payload: Mapping[str, Any]) -> SandboxRouteDecision:
             metadata={"source": "sandbox_router"},
         )
 
-    if (
-        "prompt injection" in signal_text
-        or "jailbreak" in signal_text
-        or "ignore previous instructions" in signal_text
-        or "system prompt" in signal_text
-    ):
+    if "prompt injection" in signal_text or "jailbreak" in signal_text or "ignore previous instructions" in signal_text or "system prompt" in signal_text:
         reasons.append("prompt injection indicators detected")
         return SandboxRouteDecision(
             lane=SandboxLane.PROMPT_INJECTION,
@@ -147,13 +142,7 @@ def route_to_sandbox(payload: Mapping[str, Any]) -> SandboxRouteDecision:
             metadata={"source": "sandbox_router"},
         )
 
-    if (
-        "quarantine" in signal_text
-        or "malware" in signal_text
-        or "payload" in signal_text
-        or "executable" in signal_text
-        or "macro" in signal_text
-    ):
+    if "quarantine" in signal_text or "malware" in signal_text or "payload" in signal_text or "executable" in signal_text or "macro" in signal_text:
         reasons.append("file or artifact should be isolated in quarantine lane")
         return SandboxRouteDecision(
             lane=SandboxLane.FILE_QUARANTINE,
@@ -170,13 +159,7 @@ def route_to_sandbox(payload: Mapping[str, Any]) -> SandboxRouteDecision:
             metadata={"source": "sandbox_router"},
         )
 
-    if (
-        "download" in signal_text
-        or "dependency" in signal_text
-        or "package" in signal_text
-        or "repository" in signal_text
-        or "repo" in signal_text
-    ):
+    if "download" in signal_text or "dependency" in signal_text or "package" in signal_text or "repository" in signal_text or "repo" in signal_text:
         reasons.append("downloaded or imported material requires restricted review lane")
         return SandboxRouteDecision(
             lane=SandboxLane.DOWNLOAD_REVIEW,
@@ -193,13 +176,7 @@ def route_to_sandbox(payload: Mapping[str, Any]) -> SandboxRouteDecision:
             metadata={"source": "sandbox_router"},
         )
 
-    if (
-        "http" in signal_text
-        or "network" in signal_text
-        or "fetch" in signal_text
-        or "url" in signal_text
-        or risk_score >= 70
-    ):
+    if "http" in signal_text or "network" in signal_text or "fetch" in signal_text or "url" in signal_text or risk_score >= 70:
         reasons.append("network-linked action routed to restricted network lane")
         return SandboxRouteDecision(
             lane=SandboxLane.NETWORK_RESTRICTED,
@@ -216,13 +193,7 @@ def route_to_sandbox(payload: Mapping[str, Any]) -> SandboxRouteDecision:
             metadata={"source": "sandbox_router"},
         )
 
-    if (
-        "toolcall" in signal_text
-        or "tool call" in signal_text
-        or "shell" in signal_text
-        or "command" in signal_text
-        or "subprocess" in signal_text
-    ):
+    if "toolcall" in signal_text or "tool call" in signal_text or "shell" in signal_text or "command" in signal_text or "subprocess" in signal_text:
         reasons.append("tool or command execution requires restricted tool-call lane")
         return SandboxRouteDecision(
             lane=SandboxLane.TOOL_CALL_RESTRICTED,

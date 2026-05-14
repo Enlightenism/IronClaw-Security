@@ -108,8 +108,7 @@ def _build_secure_runtime_component() -> ComponentHealth:
 
 @router.get("", response_model=HealthSnapshot)
 def read_compact_health() -> HealthSnapshot:
-    """
-    Compact health snapshot for readiness and operational dashboards.
+    """Compact health snapshot for readiness and operational dashboards.
 
     This endpoint is designed to be:
     - Lightweight enough for frequent polling (readiness / uptime checks),

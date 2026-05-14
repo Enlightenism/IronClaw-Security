@@ -30,11 +30,5 @@ def test_ui_customer_keys_contains_core_fields() -> None:
     assert data
 
     assert any(k in data for k in ("title", "headline", "summary", "page_title"))
-    assert any(
-        k in data
-        for k in ("keys", "items", "rows", "records", "customers", "entries")
-    )
-    assert any(
-        k in data
-        for k in ("actions", "filters", "status", "sections", "policies", "columns")
-    )
+    assert any(k in data for k in ("keys", "items", "rows", "records", "customers", "entries"))
+    assert any(k in data for k in ("actions", "filters", "status", "sections", "policies", "columns"))

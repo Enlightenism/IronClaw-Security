@@ -120,39 +120,19 @@ def _extract_items(payload: Any) -> list[dict[str, Any]]:
 
 def _collect_filter_options(items: list[dict[str, Any]]) -> AuditExplorerFilterOptions:
     severities = sorted(
-        {
-            value
-            for item in items
-            if (value := _normalize_lower(item.get("severity")))
-        }
+        {value for item in items if (value := _normalize_lower(item.get("severity")))},
     )
     event_types = sorted(
-        {
-            value
-            for item in items
-            if (value := _normalize_lower(item.get("event_type")))
-        }
+        {value for item in items if (value := _normalize_lower(item.get("event_type")))},
     )
     verdicts = sorted(
-        {
-            value
-            for item in items
-            if (value := _normalize_lower(item.get("verdict")))
-        }
+        {value for item in items if (value := _normalize_lower(item.get("verdict")))},
     )
     actor_ids = sorted(
-        {
-            value
-            for item in items
-            if (value := _normalize_text(item.get("actor_id")))
-        }
+        {value for item in items if (value := _normalize_text(item.get("actor_id")))},
     )
     integration_ids = sorted(
-        {
-            value
-            for item in items
-            if (value := _normalize_text(item.get("integration_id")))
-        }
+        {value for item in items if (value := _normalize_text(item.get("integration_id")))},
     )
     return AuditExplorerFilterOptions(
         severities=severities,
@@ -289,28 +269,11 @@ def _build_summary(
     total: int,
     active_filters: dict[str, str],
 ) -> AuditExplorerSummary:
-    severity_counter = Counter(
-        _normalize_lower(item.get("severity")) or "unknown"
-        for item in items
-    )
-    verdict_counter = Counter(
-        _normalize_lower(item.get("verdict")) or "none"
-        for item in items
-    )
-    event_type_counter = Counter(
-        _normalize_text(item.get("event_type")) or "unknown"
-        for item in items
-    )
-    actor_counter = Counter(
-        _normalize_text(item.get("actor_id"))
-        for item in items
-        if _normalize_text(item.get("actor_id"))
-    )
-    integration_counter = Counter(
-        _normalize_text(item.get("integration_id"))
-        for item in items
-        if _normalize_text(item.get("integration_id"))
-    )
+    severity_counter = Counter(_normalize_lower(item.get("severity")) or "unknown" for item in items)
+    verdict_counter = Counter(_normalize_lower(item.get("verdict")) or "none" for item in items)
+    event_type_counter = Counter(_normalize_text(item.get("event_type")) or "unknown" for item in items)
+    actor_counter = Counter(_normalize_text(item.get("actor_id")) for item in items if _normalize_text(item.get("actor_id")))
+    integration_counter = Counter(_normalize_text(item.get("integration_id")) for item in items if _normalize_text(item.get("integration_id")))
 
     counts = AuditExplorerCounts(
         total_events=total,
@@ -320,25 +283,15 @@ def _build_summary(
         quarantined_events=verdict_counter.get("quarantine", 0),
         unique_actors=len(actor_counter),
         unique_sessions=len(
-            {
-                value
-                for item in items
-                if (value := _normalize_text(item.get("session_id")))
-            }
+            {value for item in items if (value := _normalize_text(item.get("session_id")))},
         ),
         unique_traces=len(
-            {
-                value
-                for item in items
-                if (value := _normalize_text(item.get("trace_id")))
-            }
+            {value for item in items if (value := _normalize_text(item.get("trace_id")))},
         ),
         unique_integrations=len(integration_counter),
     )
 
-    subtitle = (
-        "Search, filter, and triage security audit events across actors, requests, traces, and policy outcomes."
-    )
+    subtitle = "Search, filter, and triage security audit events across actors, requests, traces, and policy outcomes."
     if total == 0:
         subtitle = "No audit events matched the current filter set."
 
@@ -427,10 +380,6 @@ def get_audit_explorer(
         total=len(filtered_items),
         limit=safe_limit,
         has_more=len(filtered_items) > safe_limit,
-        empty_state=(
-            "No audit events matched the current filters."
-            if not rows
-            else None
-        ),
+        empty_state=("No audit events matched the current filters." if not rows else None),
         notes=notes,
     )

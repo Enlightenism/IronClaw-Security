@@ -15,6 +15,7 @@ DEFAULT_AUDIT_TABLE = "audit_events"
 # Utilities
 # ---------------------------------------------------------------------------
 
+
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -45,11 +46,7 @@ def _to_dict(value: Any) -> dict[str, Any]:
         if isinstance(dumped, Mapping):
             return dict(dumped)
     if hasattr(value, "__dict__"):
-        return {
-            str(key): val
-            for key, val in vars(value).items()
-            if not str(key).startswith("_") and not callable(val)
-        }
+        return {str(key): val for key, val in vars(value).items() if not str(key).startswith("_") and not callable(val)}
     return {"value": value}
 
 
@@ -85,20 +82,41 @@ def _ensure_target(target: dict[str, Any] | None, payload: dict[str, Any]) -> di
 def _ensure_metadata(metadata: dict[str, Any] | None, payload: dict[str, Any]) -> dict[str, Any]:
     explicit = _clean_mapping(metadata)
     reserved = {
-        "event_id", "id", "timestamp", "created_at", "occurred_at",
-        "action", "event", "event_type", "category", "severity",
-        "status", "result", "message", "summary", "description",
-        "request_id", "trace_id", "session_id",
-        "organization_id", "org_id", "tenant_id", "customer_id",
-        "actor", "actor_id", "actor_type", "actor_name",
-        "target", "target_id", "target_type", "resource_id", "resource_type",
-        "metadata", "details",
+        "event_id",
+        "id",
+        "timestamp",
+        "created_at",
+        "occurred_at",
+        "action",
+        "event",
+        "event_type",
+        "category",
+        "severity",
+        "status",
+        "result",
+        "message",
+        "summary",
+        "description",
+        "request_id",
+        "trace_id",
+        "session_id",
+        "organization_id",
+        "org_id",
+        "tenant_id",
+        "customer_id",
+        "actor",
+        "actor_id",
+        "actor_type",
+        "actor_name",
+        "target",
+        "target_id",
+        "target_type",
+        "resource_id",
+        "resource_type",
+        "metadata",
+        "details",
     }
-    derived = {
-        str(key): value
-        for key, value in payload.items()
-        if key not in reserved and value is not None
-    }
+    derived = {str(key): value for key, value in payload.items() if key not in reserved and value is not None}
     derived.update(explicit)
     return derived
 
@@ -116,6 +134,7 @@ def _normalize_rows(rows: Any) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Payload normalization
 # ---------------------------------------------------------------------------
+
 
 def _normalize_event_payload(
     payload: dict[str, Any] | None = None,
@@ -150,69 +169,21 @@ def _normalize_event_payload(
     source = _clean_mapping(payload or {})
     source.update({key: value for key, value in extra.items() if value is not None})
 
-    resolved_event_id = (
-        _string(event_id)
-        or _string(source.get("event_id"))
-        or _string(source.get("id"))
-        or str(uuid4())
-    )
+    resolved_event_id = _string(event_id) or _string(source.get("event_id")) or _string(source.get("id")) or str(uuid4())
 
-    resolved_action = (
-        _string(action)
-        or _string(event)
-        or _string(event_type)
-        or _string(source.get("action"))
-        or _string(source.get("event"))
-        or _string(source.get("event_type"))
-    )
+    resolved_action = _string(action) or _string(event) or _string(event_type) or _string(source.get("action")) or _string(source.get("event")) or _string(source.get("event_type"))
     if not resolved_action:
         raise ValueError("action is required")
 
-    resolved_category = (
-        _string(category)
-        or _string(source.get("category"))
-        or "audit"
-    )
-    resolved_severity = (
-        _string(severity)
-        or _string(source.get("severity"))
-        or "info"
-    )
-    resolved_status = (
-        _string(status)
-        or _string(result)
-        or _string(source.get("status"))
-        or _string(source.get("result"))
-        or "success"
-    )
-    resolved_message = (
-        _string(message)
-        or _string(summary)
-        or _string(description)
-        or _string(source.get("message"))
-        or _string(source.get("summary"))
-        or _string(source.get("description"))
-        or resolved_action
-    )
+    resolved_category = _string(category) or _string(source.get("category")) or "audit"
+    resolved_severity = _string(severity) or _string(source.get("severity")) or "info"
+    resolved_status = _string(status) or _string(result) or _string(source.get("status")) or _string(source.get("result")) or "success"
+    resolved_message = _string(message) or _string(summary) or _string(description) or _string(source.get("message")) or _string(source.get("summary")) or _string(source.get("description")) or resolved_action
     resolved_timestamp = _normalize_iso8601(
-        timestamp
-        or created_at
-        or occurred_at
-        or source.get("timestamp")
-        or source.get("created_at")
-        or source.get("occurred_at")
+        timestamp or created_at or occurred_at or source.get("timestamp") or source.get("created_at") or source.get("occurred_at"),
     )
 
-    resolved_org = (
-        _string(organization_id)
-        or _string(org_id)
-        or _string(tenant_id)
-        or _string(customer_id)
-        or _string(source.get("organization_id"))
-        or _string(source.get("org_id"))
-        or _string(source.get("tenant_id"))
-        or _string(source.get("customer_id"))
-    )
+    resolved_org = _string(organization_id) or _string(org_id) or _string(tenant_id) or _string(customer_id) or _string(source.get("organization_id")) or _string(source.get("org_id")) or _string(source.get("tenant_id")) or _string(source.get("customer_id"))
     resolved_request_id = _string(request_id) or _string(source.get("request_id"))
     resolved_trace_id = _string(trace_id) or _string(source.get("trace_id"))
     resolved_session_id = _string(session_id) or _string(source.get("session_id"))
@@ -221,7 +192,7 @@ def _normalize_event_payload(
     resolved_target = _ensure_target(target, source)
 
     details_payload = _clean_mapping(details) or _clean_mapping(
-        _to_dict(source.get("details"))
+        _to_dict(source.get("details")),
     )
     metadata_payload = _ensure_metadata(metadata, source)
     if details_payload:
@@ -265,10 +236,10 @@ def _normalize_event_payload(
 # defaults and thread-safe access.
 # ---------------------------------------------------------------------------
 
+
 @dataclass(slots=True)
 class AuditStore:
-    """
-    Persistence-backed store for structured audit events.
+    """Persistence-backed store for structured audit events.
 
     Uses the build_store backend (Supabase or in-memory depending on
     environment). For in-memory seeded security runtime events, use
@@ -306,7 +277,9 @@ class AuditStore:
     # ------------------------------------------------------------------
 
     def log_event(
-        self, payload: dict[str, Any] | None = None, **kwargs: Any
+        self,
+        payload: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         event = _normalize_event_payload(payload, **kwargs)
         insert = getattr(self.backend, "insert", None)
@@ -320,17 +293,23 @@ class AuditStore:
         return event
 
     def create_event(
-        self, payload: dict[str, Any] | None = None, **kwargs: Any
+        self,
+        payload: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         return self.log_event(payload, **kwargs)
 
     def write_event(
-        self, payload: dict[str, Any] | None = None, **kwargs: Any
+        self,
+        payload: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         return self.log_event(payload, **kwargs)
 
     def append(
-        self, payload: dict[str, Any] | None = None, **kwargs: Any
+        self,
+        payload: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         return self.log_event(payload, **kwargs)
 
@@ -407,7 +386,7 @@ class AuditStore:
             return []
 
         rows = _normalize_rows(
-            select(self.table_name, limit=limit, filters=query_filters or None)
+            select(self.table_name, limit=limit, filters=query_filters or None),
         )
         results = [dict(row) for row in rows]
 
@@ -425,7 +404,7 @@ class AuditStore:
 
         results.sort(
             key=lambda row: _string(
-                row.get("timestamp") or row.get("created_at") or row.get("occurred_at")
+                row.get("timestamp") or row.get("created_at") or row.get("occurred_at"),
             ),
             reverse=True,
         )
@@ -445,7 +424,7 @@ class AuditStore:
 
         for key in ("event_id", "id"):
             rows = _normalize_rows(
-                select(self.table_name, filters={key: normalized_id}, limit=1)
+                select(self.table_name, filters={key: normalized_id}, limit=1),
             )
             if rows:
                 return dict(rows[0])
@@ -514,6 +493,7 @@ class AuditStore:
 # ---------------------------------------------------------------------------
 # Factories
 # ---------------------------------------------------------------------------
+
 
 def build_audit_store(
     *,

@@ -68,11 +68,7 @@ def _mapping(value: Any) -> dict[str, Any]:
         if isinstance(dumped, Mapping):
             return dict(dumped)
     if hasattr(value, "__dict__"):
-        return {
-            key: item
-            for key, item in vars(value).items()
-            if not key.startswith("_") and not callable(item)
-        }
+        return {key: item for key, item in vars(value).items() if not key.startswith("_") and not callable(item)}
     raise TypeError("value is not serializable to dict")
 
 
@@ -144,72 +140,36 @@ def _normalize_report_payload(
     source_payload = _mapping(payload)
     source_payload.update({key: value for key, value in extra.items() if value is not None})
 
-    resolved_report_id = (
-        _string(report_id)
-        or _string(source_payload.get("report_id"))
-        or _string(source_payload.get("id"))
-        or str(uuid4())
-    )
+    resolved_report_id = _string(report_id) or _string(source_payload.get("report_id")) or _string(source_payload.get("id")) or str(uuid4())
 
     resolved_report_type = _normalize_report_type(
-        report_type or source_payload.get("report_type")
+        report_type or source_payload.get("report_type"),
     )
 
     resolved_status = _normalize_report_status(
-        status or source_payload.get("status")
+        status or source_payload.get("status"),
     )
 
-    resolved_org = (
-        _string(organization_id)
-        or _string(org_id)
-        or _string(customer_id)
-        or _string(source_payload.get("organization_id"))
-        or _string(source_payload.get("org_id"))
-        or _string(source_payload.get("customer_id"))
-    )
+    resolved_org = _string(organization_id) or _string(org_id) or _string(customer_id) or _string(source_payload.get("organization_id")) or _string(source_payload.get("org_id")) or _string(source_payload.get("customer_id"))
 
-    resolved_title = (
-        _string(title)
-        or _string(source_payload.get("title"))
-        or _string(summary)
-        or _string(source_payload.get("summary"))
-        or f"{resolved_report_type.replace('_', ' ').title()} Report"
-    )
+    resolved_title = _string(title) or _string(source_payload.get("title")) or _string(summary) or _string(source_payload.get("summary")) or f"{resolved_report_type.replace('_', ' ').title()} Report"
 
-    resolved_summary = (
-        _string(summary)
-        or _string(source_payload.get("summary"))
-        or _string(description)
-        or _string(source_payload.get("description"))
-        or resolved_title
-    )
+    resolved_summary = _string(summary) or _string(source_payload.get("summary")) or _string(description) or _string(source_payload.get("description")) or resolved_title
 
-    resolved_description = (
-        _string(description)
-        or _string(source_payload.get("description"))
-        or resolved_summary
-    )
+    resolved_description = _string(description) or _string(source_payload.get("description")) or resolved_summary
 
-    resolved_source = (
-        _string(source)
-        or _string(source_payload.get("source"))
-        or "ironclaw"
-    )
+    resolved_source = _string(source) or _string(source_payload.get("source")) or "ironclaw"
 
     resolved_created_at = _normalize_timestamp(
-        created_at or source_payload.get("created_at") or generated_at or source_payload.get("generated_at")
+        created_at or source_payload.get("created_at") or generated_at or source_payload.get("generated_at"),
     )
     resolved_updated_at = _normalize_timestamp(
-        updated_at or source_payload.get("updated_at") or resolved_created_at
+        updated_at or source_payload.get("updated_at") or resolved_created_at,
     )
     resolved_generated_at = _normalize_timestamp(
-        generated_at or source_payload.get("generated_at") or resolved_created_at
+        generated_at or source_payload.get("generated_at") or resolved_created_at,
     )
-    resolved_published_at = (
-        _normalize_timestamp(published_at or source_payload.get("published_at"))
-        if (published_at is not None or source_payload.get("published_at") is not None)
-        else None
-    )
+    resolved_published_at = _normalize_timestamp(published_at or source_payload.get("published_at")) if (published_at is not None or source_payload.get("published_at") is not None) else None
 
     if resolved_status == "published" and resolved_published_at is None:
         resolved_published_at = resolved_updated_at
@@ -239,7 +199,7 @@ def _normalize_report_payload(
         "content": content if isinstance(content, dict) else _mapping(source_payload.get("content")),
         "findings": _listify(findings if findings is not None else source_payload.get("findings")),
         "recommendations": _listify(
-            recommendations if recommendations is not None else source_payload.get("recommendations")
+            recommendations if recommendations is not None else source_payload.get("recommendations"),
         ),
         "attachments": _listify(attachments if attachments is not None else source_payload.get("attachments")),
         "tags": _listify(tags if tags is not None else source_payload.get("tags")),

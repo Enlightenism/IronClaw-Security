@@ -133,18 +133,16 @@ def _build_check_view(record: Any, fallback_index: int) -> ReadinessCheckView:
     data = _coerce_mapping(record)
 
     check_id = str(
-        _extract_value(data, "check_id", "checkid", "id", "name", "key")
-        or f"check-{fallback_index}"
+        _extract_value(data, "check_id", "checkid", "id", "name", "key") or f"check-{fallback_index}",
     )
     title = str(
-        _extract_value(data, "title", "label", "name", "summary")
-        or check_id.replace("-", " ").replace("_", " ").title()
+        _extract_value(data, "title", "label", "name", "summary") or check_id.replace("-", " ").replace("_", " ").title(),
     )
     detail = str(
-        _extract_value(data, "detail", "details", "message", "summary", "description") or ""
+        _extract_value(data, "detail", "details", "message", "summary", "description") or "",
     )
     status_value = _normalize_check_status(
-        _extract_value(data, "status", "state", "result")
+        _extract_value(data, "status", "state", "result"),
     )
 
     metadata = _normalize_dict(data.get("metadata"))
@@ -170,10 +168,7 @@ def _build_readiness_response(
     readiness = _coerce_mapping(_extract_value(data, "readiness") or result)
 
     raw_checks = _extract_value(readiness, "checks", "items") or []
-    checks = [
-        _build_check_view(item, index + 1)
-        for index, item in enumerate(raw_checks)
-    ]
+    checks = [_build_check_view(item, index + 1) for index, item in enumerate(raw_checks)]
 
     ready_checks = sum(1 for item in checks if item.status == "ready")
     warning_checks = sum(1 for item in checks if item.status == "warning")

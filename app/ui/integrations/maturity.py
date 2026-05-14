@@ -178,7 +178,7 @@ def build_integration_maturity_view(
         has_command = bool(getattr(record, "command_name", None))
         has_install_target = bool(getattr(record, "install_target", None))
         has_endpoint = bool(
-            getattr(record, "endpoint", None) or getattr(record, "base_url", None)
+            getattr(record, "endpoint", None) or getattr(record, "base_url", None),
         )
 
         score = _maturity_score(
@@ -225,22 +225,16 @@ def build_integration_maturity_view(
                     "warn_count": warn_count,
                     "fail_count": fail_count,
                 },
-            )
+            ),
         )
 
     items.sort(
         key=lambda item: (
-            0
-            if item.maturity_level in {"ad-hoc", "emerging"}
-            else 1
-            if item.maturity_level == "defined"
-            else 2
-            if item.maturity_level == "managed"
-            else 3,
+            0 if item.maturity_level in {"ad-hoc", "emerging"} else 1 if item.maturity_level == "defined" else 2 if item.maturity_level == "managed" else 3,
             -item.maturity_score,
             item.platform,
             item.slug,
-        )
+        ),
     )
 
     return IntegrationMaturityView(

@@ -89,11 +89,7 @@ def list_roles(*, principal_type: str | None = None) -> list[RoleDefinition]:
 
     normalized_principal_type = _clean_role(principal_type)
     return sorted(
-        (
-            role
-            for role in roles
-            if _clean_role(role.principal_type) == normalized_principal_type
-        ),
+        (role for role in roles if _clean_role(role.principal_type) == normalized_principal_type),
         key=lambda item: item.name,
     )
 
@@ -152,8 +148,4 @@ def roles_for_principal_type(principal_type: str) -> tuple[str, ...]:
 
 
 def describe_roles(roles: Iterable[object] | None) -> list[dict[str, object]]:
-    return [
-        definition.to_dict()
-        for role_name in normalize_roles(roles)
-        if (definition := get_role_definition(role_name)) is not None
-    ]
+    return [definition.to_dict() for role_name in normalize_roles(roles) if (definition := get_role_definition(role_name)) is not None]

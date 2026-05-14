@@ -73,7 +73,8 @@ def _parse_timestamp(value: Any) -> datetime:
 
 def _severity_rank(value: str) -> int:
     return {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}.get(
-        value.lower(), 0
+        value.lower(),
+        0,
     )
 
 
@@ -188,8 +189,7 @@ class CorrelationSignal:
 
 
 class AttackCorrelationService:
-    """
-    Correlates security signals from scan, execution, quarantine, review,
+    """Correlates security signals from scan, execution, quarantine, review,
     hostile-context, detonation, malware, telemetry, and threat-intel surfaces.
 
     Dependency-light by design — usable from routes, orchestration, or tests
@@ -284,8 +284,7 @@ class AttackCorrelationService:
         request_id: str | None = None,
         now: datetime | None = None,
     ) -> dict[str, Any]:
-        """
-        Test-focused correlation entrypoint used by tests/testattackcorrelation.py.
+        """Test-focused correlation entrypoint used by tests/testattackcorrelation.py.
 
         Accepts a flat list of signal-like mappings and optional context
         identifiers, normalizes them, and returns a summary with top-level
@@ -361,8 +360,10 @@ class AttackCorrelationService:
             sig = normalized_signals[0]
             if sig.severity == "medium":
                 top_incident = {
-                    "incident_id": sig.incident_id or _stable_id(
-                        "incident", sig.signal_id
+                    "incident_id": sig.incident_id
+                    or _stable_id(
+                        "incident",
+                        sig.signal_id,
                     ),
                     "status": "observed",
                     "severity": sig.severity,
@@ -413,9 +414,7 @@ class AttackCorrelationService:
         threat_intel_hits: Sequence[Mapping[str, Any]] | None = None,
         now: datetime | None = None,
     ) -> dict[str, Any]:
-        """
-        Original multi-source correlation engine, preserved for existing callers.
-        """
+        """Original multi-source correlation engine, preserved for existing callers."""
         reference_now = now.astimezone(UTC) if isinstance(now, datetime) else _utcnow()
 
         normalized = self._normalize_sources(
@@ -518,7 +517,8 @@ class AttackCorrelationService:
     # ------------------------------------------------------------------
 
     def _normalize_sources(
-        self, **sources: Sequence[Mapping[str, Any]]
+        self,
+        **sources: Sequence[Mapping[str, Any]],
     ) -> dict[str, list[dict[str, Any]]]:
         return {name: [dict(item) for item in items] for name, items in sources.items()}
 
@@ -527,7 +527,8 @@ class AttackCorrelationService:
     # ------------------------------------------------------------------
 
     def _build_signals(
-        self, normalized: Mapping[str, Sequence[Mapping[str, Any]]]
+        self,
+        normalized: Mapping[str, Sequence[Mapping[str, Any]]],
     ) -> list[CorrelationSignal]:
         signals: list[CorrelationSignal] = []
         dispatch = {
@@ -553,7 +554,9 @@ class AttackCorrelationService:
     # ------------------------------------------------------------------
 
     def _group_by_key(
-        self, signals: Sequence[CorrelationSignal], key: str
+        self,
+        signals: Sequence[CorrelationSignal],
+        key: str,
     ) -> dict[str, list[CorrelationSignal]]:
         grouped: dict[str, list[CorrelationSignal]] = defaultdict(list)
         for signal in signals:
@@ -561,8 +564,9 @@ class AttackCorrelationService:
             if value:
                 grouped[value].append(signal)
         return grouped
-    
+
         # ------------------------------------------------------------------
+
     # Campaigns
     # ------------------------------------------------------------------
 
@@ -590,11 +594,11 @@ class AttackCorrelationService:
 
                 tags = sorted({tag for item in items for tag in item.tags})
                 indicators = sorted(
-                    {ind for item in items for ind in item.indicators}
+                    {ind for item in items for ind in item.indicators},
                 )
                 playbook_ids = self._match_playbooks(items, risk_score)
                 incident_ids = sorted(
-                    {item.incident_id for item in items if item.incident_id}
+                    {item.incident_id for item in items if item.incident_id},
                 )
                 severity = _severity_from_score(risk_score)
                 confidence = round(min(0.97, 0.45 + len(items) * 0.08), 3)
@@ -602,7 +606,11 @@ class AttackCorrelationService:
                 campaigns.append(
                     {
                         "campaign_id": _stable_id(
-                            "campaign", namespace, correlation_key, risk_score, len(items)
+                            "campaign",
+                            namespace,
+                            correlation_key,
+                            risk_score,
+                            len(items),
                         ),
                         "namespace": namespace,
                         "correlation_key": correlation_key,
@@ -610,40 +618,44 @@ class AttackCorrelationService:
                         "risk_score": risk_score,
                         "risk_band": _risk_band(risk_score),
                         "confidence": confidence,
-                        "status": (
-                            "active"
-                            if self._is_recent(items, reference_now)
-                            else "historical"
-                        ),
+                        "status": ("active" if self._is_recent(items, reference_now) else "historical"),
                         "signal_count": len(items),
                         "signal_types": sorted({item.signal_type for item in items}),
                         "sources": sorted({item.source for item in items}),
                         "first_seen_at": items[0].timestamp,
                         "last_seen_at": items[-1].timestamp,
                         "session_id": next(
-                            (item.session_id for item in items if item.session_id), None
+                            (item.session_id for item in items if item.session_id),
+                            None,
                         ),
                         "client_id": next(
-                            (item.client_id for item in items if item.client_id), None
+                            (item.client_id for item in items if item.client_id),
+                            None,
                         ),
                         "request_id": next(
-                            (item.request_id for item in items if item.request_id), None
+                            (item.request_id for item in items if item.request_id),
+                            None,
                         ),
                         "trace_id": next(
-                            (item.trace_id for item in items if item.trace_id), None
+                            (item.trace_id for item in items if item.trace_id),
+                            None,
                         ),
                         "incident_ids": incident_ids,
                         "playbook_ids": playbook_ids,
                         "tags": tags,
                         "indicators": indicators,
                         "summary": self._campaign_summary(
-                            namespace, correlation_key, items, risk_score
+                            namespace,
+                            correlation_key,
+                            items,
+                            risk_score,
                         ),
-                    }
+                    },
                 )
 
         campaigns.sort(
-            key=lambda c: (c["risk_score"], c["signal_count"]), reverse=True
+            key=lambda c: (c["risk_score"], c["signal_count"]),
+            reverse=True,
         )
         return campaigns
 
@@ -664,24 +676,23 @@ class AttackCorrelationService:
                 {
                     "session_id": session_id,
                     "client_id": next(
-                        (s.client_id for s in signals if s.client_id), None
+                        (s.client_id for s in signals if s.client_id),
+                        None,
                     ),
                     "risk_score": score,
                     "risk_band": band,
                     "risk_level": band,
                     "severity": _severity_from_score(score),
                     "signal_count": len(signals),
-                    "high_severity_count": sum(
-                        1 for s in signals if _severity_rank(s.severity) >= 3
-                    ),
+                    "high_severity_count": sum(1 for s in signals if _severity_rank(s.severity) >= 3),
                     "open_incident_count": len(
-                        {s.incident_id for s in signals if s.incident_id}
+                        {s.incident_id for s in signals if s.incident_id},
                     ),
                     "quarantine_count": len(
-                        {s.quarantine_id for s in signals if s.quarantine_id}
+                        {s.quarantine_id for s in signals if s.quarantine_id},
                     ),
                     "review_count": len(
-                        {s.review_item_id for s in signals if s.review_item_id}
+                        {s.review_item_id for s in signals if s.review_item_id},
                     ),
                     "first_seen_at": signals[0].timestamp,
                     "last_seen_at": signals[-1].timestamp,
@@ -689,7 +700,7 @@ class AttackCorrelationService:
                     "signal_types": sorted({s.signal_type for s in signals}),
                     "recommended_priority": _priority_from_score(score),
                     "summary": self._session_summary(session_id, signals, score),
-                }
+                },
             )
         items.sort(key=lambda i: i["risk_score"], reverse=True)
         return items
@@ -705,7 +716,7 @@ class AttackCorrelationService:
     ) -> list[dict[str, Any]]:
         incident_map = {
             _coerce_str(
-                item.get("incidentid") or item.get("incident_id") or item.get("id")
+                item.get("incidentid") or item.get("incident_id") or item.get("id"),
             ): dict(item)
             for item in incidents
         }
@@ -716,17 +727,11 @@ class AttackCorrelationService:
             if not incident_id:
                 continue
 
-            related = [
-                c
-                for c in signals
-                if c.incident_id == incident_id
-                or (c.request_id and c.request_id == signal.request_id)
-                or (c.trace_id and c.trace_id == signal.trace_id)
-                or (c.session_id and c.session_id == signal.session_id)
-            ]
+            related = [c for c in signals if c.incident_id == incident_id or (c.request_id and c.request_id == signal.request_id) or (c.trace_id and c.trace_id == signal.trace_id) or (c.session_id and c.session_id == signal.session_id)]
             related.sort(key=lambda s: s.timestamp)
             highest_score = max(
-                (s.risk_score for s in related), default=signal.risk_score
+                (s.risk_score for s in related),
+                default=signal.risk_score,
             )
             band = _risk_band(highest_score)
             incident_record = incident_map.get(incident_id, {})
@@ -748,14 +753,16 @@ class AttackCorrelationService:
                 "request_ids": sorted({s.request_id for s in related if s.request_id}),
                 "trace_ids": sorted({s.trace_id for s in related if s.trace_id}),
                 "quarantine_ids": sorted(
-                    {s.quarantine_id for s in related if s.quarantine_id}
+                    {s.quarantine_id for s in related if s.quarantine_id},
                 ),
                 "review_item_ids": sorted(
-                    {s.review_item_id for s in related if s.review_item_id}
+                    {s.review_item_id for s in related if s.review_item_id},
                 ),
                 "playbook_ids": self._match_playbooks(related, highest_score),
                 "summary": self._incident_summary(
-                    incident_id, related, incident_record
+                    incident_id,
+                    related,
+                    incident_record,
                 ),
             }
 
@@ -781,16 +788,12 @@ class AttackCorrelationService:
         for playbook in self._playbooks:
             playbook_id = _coerce_str(playbook.get("playbook_id"))
             raw_triggers = playbook.get("triggers", set())
-            trigger_terms: set[str] = (
-                {t.lower() for t in raw_triggers}
-                if isinstance(raw_triggers, (set, list, tuple))
-                else {_coerce_str(raw_triggers).lower()}
-            )
+            trigger_terms: set[str] = {t.lower() for t in raw_triggers} if isinstance(raw_triggers, (set, list, tuple)) else {_coerce_str(raw_triggers).lower()}
             candidate_signals = [
                 s
                 for s in signals
                 if trigger_terms.intersection(
-                    {s.signal_type.lower(), *[t.lower() for t in s.tags]}
+                    {s.signal_type.lower(), *[t.lower() for t in s.tags]},
                 )
             ]
             if not candidate_signals:
@@ -810,12 +813,12 @@ class AttackCorrelationService:
                     "matched_signal_ids": [s.signal_id for s in candidate_signals],
                     "related_campaign_ids": campaigns_by_playbook.get(playbook_id, []),
                     "recommended_actions": _coerce_list(
-                        playbook.get("recommended_actions")
+                        playbook.get("recommended_actions"),
                     ),
                     "risk_score": max_score,
                     "risk_band": _risk_band(max_score),
                     "severity": _severity_from_score(max_score),
-                }
+                },
             )
 
         matches.sort(key=lambda m: m["risk_score"], reverse=True)
@@ -846,7 +849,7 @@ class AttackCorrelationService:
                         reason=session["summary"],
                         risk_score=score,
                         severity=session["severity"],
-                    )
+                    ),
                 )
             if score >= 90:
                 actions.append(
@@ -857,7 +860,7 @@ class AttackCorrelationService:
                         reason="Session exceeds critical correlation risk threshold.",
                         risk_score=score,
                         severity="critical",
-                    )
+                    ),
                 )
 
         for campaign in campaigns:
@@ -870,7 +873,7 @@ class AttackCorrelationService:
                         reason=campaign["summary"],
                         risk_score=campaign["risk_score"],
                         severity=campaign["severity"],
-                    )
+                    ),
                 )
 
         for incident in incident_links:
@@ -886,24 +889,16 @@ class AttackCorrelationService:
                         reason=incident["summary"],
                         risk_score=incident["risk_score"],
                         severity=incident["severity"],
-                    )
+                    ),
                 )
 
         unique_actions = self._dedupe_actions(actions)
         return {
             "total_actions": len(unique_actions),
-            "review_actions": sum(
-                1 for a in unique_actions if a["action_type"] == "review"
-            ),
-            "quarantine_actions": sum(
-                1 for a in unique_actions if a["action_type"] == "quarantine"
-            ),
-            "incident_actions": sum(
-                1 for a in unique_actions if a["action_type"] == "incident"
-            ),
-            "remediation_actions": sum(
-                1 for a in unique_actions if a["action_type"] == "remediation"
-            ),
+            "review_actions": sum(1 for a in unique_actions if a["action_type"] == "review"),
+            "quarantine_actions": sum(1 for a in unique_actions if a["action_type"] == "quarantine"),
+            "incident_actions": sum(1 for a in unique_actions if a["action_type"] == "incident"),
+            "remediation_actions": sum(1 for a in unique_actions if a["action_type"] == "remediation"),
             "items": unique_actions,
         }
 
@@ -928,14 +923,10 @@ class AttackCorrelationService:
             "overall_risk_level": band,
             "overall_severity": _severity_from_score(overall),
             "total_signals": len(signals),
-            "active_campaigns": sum(
-                1 for c in campaigns if c["status"] == "active"
-            ),
+            "active_campaigns": sum(1 for c in campaigns if c["status"] == "active"),
             "sessions_tracked": len(session_risk),
             "recommended_actions": escalation.get("total_actions", 0),
-            "high_confidence_signals": sum(
-                1 for s in signals if s.confidence >= 0.8
-            ),
+            "high_confidence_signals": sum(1 for s in signals if s.confidence >= 0.8),
         }
 
     def _build_metrics(
@@ -954,18 +945,15 @@ class AttackCorrelationService:
 
         return {
             "generated_at": _isoformat(reference_now),
-            "average_signal_risk_score": (
-                round(mean([s.risk_score for s in signals]), 2) if signals else 0.0
-            ),
+            "average_signal_risk_score": (round(mean([s.risk_score for s in signals]), 2) if signals else 0.0),
             "highest_signal_risk_score": max(
-                (s.risk_score for s in signals), default=0
+                (s.risk_score for s in signals),
+                default=0,
             ),
             "signals_last_24h": len(recent),
             "campaign_count": len(campaigns),
             "incident_link_count": len(incident_links),
-            "sessions_over_70": sum(
-                1 for i in session_risk if i["risk_score"] >= 70
-            ),
+            "sessions_over_70": sum(1 for i in session_risk if i["risk_score"] >= 70),
             "source_counts": dict(source_counts),
             "signal_type_counts": dict(type_counts),
             "severity_counts": dict(severity_counts),
@@ -979,59 +967,61 @@ class AttackCorrelationService:
         risk_score = _coerce_int(item.get("riskscore") or item.get("risk_score"))
         verdict = _coerce_str(item.get("verdict"))
         matched_patterns = _coerce_list(
-            item.get("matchedpatterns") or item.get("matched_patterns")
+            item.get("matchedpatterns") or item.get("matched_patterns"),
         )
         risky_files = _coerce_list(item.get("riskyfiles") or item.get("risky_files"))
         primary_category = _coerce_str(
-            item.get("primarycategory") or item.get("primary_category")
+            item.get("primarycategory") or item.get("primary_category"),
         )
         timestamp = _isoformat(_parse_timestamp(item.get("timestamp")))
 
         extra_tags = self._tags_from_patterns(matched_patterns)
         tags = _nonempty(
-            sorted({"scan"} | ({primary_category} if primary_category else set()) | extra_tags)
+            sorted({"scan"} | ({primary_category} if primary_category else set()) | extra_tags),
         )
         indicators = _nonempty([*matched_patterns, *risky_files])
 
         return CorrelationSignal(
-            signal_id=_coerce_str(item.get("scanid") or item.get("scan_id"))
-            or _stable_id("scan", timestamp, verdict, risk_score),
-            signal_type=primary_category
-            or (
-                "promptinjection"
-                if "prompt" in " ".join(matched_patterns).lower()
-                else "scan"
-            ),
+            signal_id=_coerce_str(item.get("scanid") or item.get("scan_id")) or _stable_id("scan", timestamp, verdict, risk_score),
+            signal_type=primary_category or ("promptinjection" if "prompt" in " ".join(matched_patterns).lower() else "scan"),
             source="scan",
             title="Scan detection",
             summary=_coerce_str(
-                item.get("summary"), "Scan generated a security signal."
+                item.get("summary"),
+                "Scan generated a security signal.",
             ),
             risk_score=risk_score,
             severity=_coerce_str(
-                item.get("maxseverity"), _severity_from_score(risk_score)
+                item.get("maxseverity"),
+                _severity_from_score(risk_score),
             ),
             confidence=0.78,
             status=_coerce_str(
-                item.get("reviewstatus") or item.get("review_status"), "observed"
+                item.get("reviewstatus") or item.get("review_status"),
+                "observed",
             ),
             timestamp=timestamp,
             session_id=_coerce_str(
-                item.get("sessionid") or item.get("session_id")
-            ) or None,
+                item.get("sessionid") or item.get("session_id"),
+            )
+            or None,
             client_id=_coerce_str(
-                item.get("clientid") or item.get("client_id")
-            ) or None,
+                item.get("clientid") or item.get("client_id"),
+            )
+            or None,
             request_id=_coerce_str(
-                item.get("requestid") or item.get("request_id")
-            ) or None,
+                item.get("requestid") or item.get("request_id"),
+            )
+            or None,
             trace_id=_coerce_str(
-                item.get("traceid") or item.get("trace_id")
-            ) or None,
+                item.get("traceid") or item.get("trace_id"),
+            )
+            or None,
             verdict=verdict or None,
             quarantine_id=_coerce_str(
-                item.get("quarantineid") or item.get("quarantine_id")
-            ) or None,
+                item.get("quarantineid") or item.get("quarantine_id"),
+            )
+            or None,
             tags=tags,
             indicators=indicators,
             evidence={
@@ -1046,16 +1036,17 @@ class AttackCorrelationService:
     def _signal_from_execution(self, item: Mapping[str, Any]) -> CorrelationSignal:
         risk_score = _coerce_int(item.get("riskscore") or item.get("risk_score"))
         action_type = _coerce_str(
-            item.get("actiontype") or item.get("action_type"), "execution"
+            item.get("actiontype") or item.get("action_type"),
+            "execution",
         )
         execution_state = _coerce_str(
-            item.get("executionstate") or item.get("execution_state")
+            item.get("executionstate") or item.get("execution_state"),
         )
         response_status = _coerce_str(
-            item.get("responsestatus") or item.get("response_status")
+            item.get("responsestatus") or item.get("response_status"),
         )
         policy_verdict = _coerce_str(
-            item.get("policyverdict") or item.get("policy_verdict")
+            item.get("policyverdict") or item.get("policy_verdict"),
         )
         timestamp = _isoformat(_parse_timestamp(item.get("timestamp")))
 
@@ -1067,8 +1058,9 @@ class AttackCorrelationService:
 
         return CorrelationSignal(
             signal_id=_coerce_str(
-                item.get("executionid") or item.get("execution_id")
-            ) or _stable_id("exec", timestamp, action_type, risk_score),
+                item.get("executionid") or item.get("execution_id"),
+            )
+            or _stable_id("exec", timestamp, action_type, risk_score),
             signal_type="unsafeexecution",
             source="execution",
             title="Execution security event",
@@ -1082,21 +1074,26 @@ class AttackCorrelationService:
             status=response_status or "observed",
             timestamp=timestamp,
             session_id=_coerce_str(
-                item.get("sessionid") or item.get("session_id")
-            ) or None,
+                item.get("sessionid") or item.get("session_id"),
+            )
+            or None,
             client_id=_coerce_str(
-                item.get("clientid") or item.get("client_id")
-            ) or None,
+                item.get("clientid") or item.get("client_id"),
+            )
+            or None,
             request_id=_coerce_str(
-                item.get("requestid") or item.get("request_id")
-            ) or None,
+                item.get("requestid") or item.get("request_id"),
+            )
+            or None,
             trace_id=_coerce_str(
-                item.get("traceid") or item.get("trace_id")
-            ) or None,
+                item.get("traceid") or item.get("trace_id"),
+            )
+            or None,
             verdict=policy_verdict or None,
             review_item_id=_coerce_str(
-                item.get("reviewitemid") or item.get("review_item_id")
-            ) or None,
+                item.get("reviewitemid") or item.get("review_item_id"),
+            )
+            or None,
             tags=sorted(tags),
             indicators=_nonempty([action_type, execution_state, policy_verdict]),
             evidence={
@@ -1112,22 +1109,25 @@ class AttackCorrelationService:
     def _signal_from_quarantine(self, item: Mapping[str, Any]) -> CorrelationSignal:
         risk_level = _coerce_str(item.get("risklevel") or item.get("risk_level"))
         risk_score = {"low": 35, "medium": 55, "high": 78, "critical": 95}.get(
-            risk_level, 60
+            risk_level,
+            60,
         )
         timestamp = _isoformat(
-            _parse_timestamp(item.get("createdat") or item.get("timestamp"))
+            _parse_timestamp(item.get("createdat") or item.get("timestamp")),
         )
         source_tag = _coerce_str(item.get("source"), "system")
 
         return CorrelationSignal(
             signal_id=_coerce_str(
-                item.get("quarantineid") or item.get("quarantine_id")
-            ) or _stable_id("quarantine", timestamp, item.get("title")),
+                item.get("quarantineid") or item.get("quarantine_id"),
+            )
+            or _stable_id("quarantine", timestamp, item.get("title")),
             signal_type="quarantine",
             source="quarantine",
             title=_coerce_str(item.get("title"), "Quarantine item created"),
             summary=_coerce_str(
-                item.get("summary"), "Security material isolated for containment."
+                item.get("summary"),
+                "Security material isolated for containment.",
             ),
             risk_score=risk_score,
             severity=risk_level or _severity_from_score(risk_score),
@@ -1135,23 +1135,29 @@ class AttackCorrelationService:
             status=_coerce_str(item.get("status"), "isolated"),
             timestamp=timestamp,
             session_id=_coerce_str(
-                item.get("sessionid") or item.get("session_id")
-            ) or None,
+                item.get("sessionid") or item.get("session_id"),
+            )
+            or None,
             client_id=_coerce_str(
-                item.get("clientid") or item.get("client_id")
-            ) or None,
+                item.get("clientid") or item.get("client_id"),
+            )
+            or None,
             request_id=_coerce_str(
-                item.get("requestid") or item.get("request_id")
-            ) or None,
+                item.get("requestid") or item.get("request_id"),
+            )
+            or None,
             trace_id=_coerce_str(
-                item.get("traceid") or item.get("trace_id")
-            ) or None,
+                item.get("traceid") or item.get("trace_id"),
+            )
+            or None,
             incident_id=_coerce_str(
-                item.get("incidentid") or item.get("incident_id")
-            ) or None,
+                item.get("incidentid") or item.get("incident_id"),
+            )
+            or None,
             quarantine_id=_coerce_str(
-                item.get("quarantineid") or item.get("quarantine_id")
-            ) or None,
+                item.get("quarantineid") or item.get("quarantine_id"),
+            )
+            or None,
             tags=_nonempty(["quarantine", source_tag]),
             indicators=_coerce_list(item.get("tags")),
             evidence={
@@ -1165,50 +1171,50 @@ class AttackCorrelationService:
     def _signal_from_review(self, item: Mapping[str, Any]) -> CorrelationSignal:
         risk_score = _coerce_int(item.get("riskscore") or item.get("risk_score"), 50)
         timestamp = _isoformat(
-            _parse_timestamp(item.get("createdat") or item.get("timestamp"))
+            _parse_timestamp(item.get("createdat") or item.get("timestamp")),
         )
         action_type = _coerce_str(
-            item.get("actiontype") or item.get("action_type")
+            item.get("actiontype") or item.get("action_type"),
         )
         target = _coerce_str(item.get("target"))
         priority = _coerce_str(item.get("priority"), "standard")
         review_id = _coerce_str(
-            item.get("reviewid")
-            or item.get("reviewitemid")
-            or item.get("review_item_id")
+            item.get("reviewid") or item.get("reviewitemid") or item.get("review_item_id"),
         )
 
         return CorrelationSignal(
-            signal_id=review_id
-            or _stable_id("review", timestamp, target),
+            signal_id=review_id or _stable_id("review", timestamp, target),
             signal_type="review",
             source="review",
             title="Review queue escalation",
             summary=_coerce_str(
-                item.get("reason"), "Security action escalated for human review."
+                item.get("reason"),
+                "Security action escalated for human review.",
             ),
             risk_score=risk_score,
             severity=_severity_from_score(risk_score),
             confidence=0.72,
             status=_coerce_str(
-                item.get("status")
-                or item.get("reviewstatus")
-                or item.get("review_status"),
+                item.get("status") or item.get("reviewstatus") or item.get("review_status"),
                 "pending",
             ),
             timestamp=timestamp,
             session_id=_coerce_str(
-                item.get("sessionid") or item.get("session_id")
-            ) or None,
+                item.get("sessionid") or item.get("session_id"),
+            )
+            or None,
             client_id=_coerce_str(
-                item.get("clientid") or item.get("client_id")
-            ) or None,
+                item.get("clientid") or item.get("client_id"),
+            )
+            or None,
             request_id=_coerce_str(
-                item.get("requestid") or item.get("request_id")
-            ) or None,
+                item.get("requestid") or item.get("request_id"),
+            )
+            or None,
             trace_id=_coerce_str(
-                item.get("traceid") or item.get("trace_id")
-            ) or None,
+                item.get("traceid") or item.get("trace_id"),
+            )
+            or None,
             verdict=_coerce_str(item.get("verdict")) or None,
             review_item_id=review_id or None,
             tags=_nonempty(["review", priority]),
@@ -1228,10 +1234,11 @@ class AttackCorrelationService:
             "Telemetry recorded a security-relevant event.",
         )
         event_type = _coerce_str(
-            item.get("eventtype") or item.get("event_type"), "telemetry"
+            item.get("eventtype") or item.get("event_type"),
+            "telemetry",
         )
         timestamp = _isoformat(
-            _parse_timestamp(item.get("timestamp") or item.get("createdat"))
+            _parse_timestamp(item.get("timestamp") or item.get("createdat")),
         )
 
         risk_score = max(
@@ -1244,54 +1251,50 @@ class AttackCorrelationService:
             risk_score = 80
 
         return CorrelationSignal(
-            signal_id=_coerce_str(item.get("eventid") or item.get("id"))
-            or _stable_id("telemetry", timestamp, event_type, summary),
+            signal_id=_coerce_str(item.get("eventid") or item.get("id")) or _stable_id("telemetry", timestamp, event_type, summary),
             signal_type=self._infer_signal_type(summary, event_type, details),
             source="telemetry",
             title=_coerce_str(
-                item.get("title"), event_type.replace("_", " ").title()
+                item.get("title"),
+                event_type.replace("_", " ").title(),
             ),
             summary=summary,
             risk_score=risk_score,
             severity=_coerce_str(
-                item.get("severity"), _severity_from_score(risk_score)
+                item.get("severity"),
+                _severity_from_score(risk_score),
             ),
             confidence=0.64,
             status=_coerce_str(item.get("status"), "observed"),
             timestamp=timestamp,
             session_id=_coerce_str(
-                item.get("sessionid")
-                or item.get("session_id")
-                or details.get("session_id")
-            ) or None,
+                item.get("sessionid") or item.get("session_id") or details.get("session_id"),
+            )
+            or None,
             client_id=_coerce_str(
-                item.get("clientid")
-                or item.get("client_id")
-                or details.get("client_id")
-            ) or None,
+                item.get("clientid") or item.get("client_id") or details.get("client_id"),
+            )
+            or None,
             request_id=_coerce_str(
-                item.get("requestid")
-                or item.get("request_id")
-                or details.get("request_id")
-            ) or None,
+                item.get("requestid") or item.get("request_id") or details.get("request_id"),
+            )
+            or None,
             trace_id=_coerce_str(
-                item.get("traceid")
-                or item.get("trace_id")
-                or details.get("trace_id")
-            ) or None,
+                item.get("traceid") or item.get("trace_id") or details.get("trace_id"),
+            )
+            or None,
             verdict=_coerce_str(
-                item.get("verdict") or details.get("verdict")
-            ) or None,
+                item.get("verdict") or details.get("verdict"),
+            )
+            or None,
             incident_id=_coerce_str(
-                item.get("incidentid")
-                or item.get("incident_id")
-                or details.get("incident_id")
-            ) or None,
+                item.get("incidentid") or item.get("incident_id") or details.get("incident_id"),
+            )
+            or None,
             review_item_id=_coerce_str(
-                item.get("reviewitemid")
-                or item.get("review_item_id")
-                or details.get("review_item_id")
-            ) or None,
+                item.get("reviewitemid") or item.get("review_item_id") or details.get("review_item_id"),
+            )
+            or None,
             tags=sorted({"telemetry", event_type}),
             indicators=_coerce_list(details.get("indicators")),
             evidence=details,
@@ -1305,15 +1308,12 @@ class AttackCorrelationService:
         )
         risk_score = risk_score or 68
         indicators = _coerce_list(
-            item.get("signals")
-            or item.get("matchedpatterns")
-            or item.get("matched_patterns")
+            item.get("signals") or item.get("matchedpatterns") or item.get("matched_patterns"),
         )
         timestamp = _isoformat(_parse_timestamp(item.get("timestamp")))
 
         return CorrelationSignal(
-            signal_id=_coerce_str(item.get("id"))
-            or _stable_id("hostile", timestamp, risk_score, len(indicators)),
+            signal_id=_coerce_str(item.get("id")) or _stable_id("hostile", timestamp, risk_score, len(indicators)),
             signal_type="hostilecontext",
             source="hostile-context",
             title="Hostile context detected",
@@ -1323,25 +1323,31 @@ class AttackCorrelationService:
             ),
             risk_score=risk_score,
             severity=_coerce_str(
-                item.get("severity"), _severity_from_score(risk_score)
+                item.get("severity"),
+                _severity_from_score(risk_score),
             ),
             confidence=max(
-                0.6, min(0.95, _coerce_float(item.get("confidence"), 0.82))
+                0.6,
+                min(0.95, _coerce_float(item.get("confidence"), 0.82)),
             ),
             status=_coerce_str(item.get("status"), "observed"),
             timestamp=timestamp,
             session_id=_coerce_str(
-                item.get("sessionid") or item.get("session_id")
-            ) or None,
+                item.get("sessionid") or item.get("session_id"),
+            )
+            or None,
             client_id=_coerce_str(
-                item.get("clientid") or item.get("client_id")
-            ) or None,
+                item.get("clientid") or item.get("client_id"),
+            )
+            or None,
             request_id=_coerce_str(
-                item.get("requestid") or item.get("request_id")
-            ) or None,
+                item.get("requestid") or item.get("request_id"),
+            )
+            or None,
             trace_id=_coerce_str(
-                item.get("traceid") or item.get("trace_id")
-            ) or None,
+                item.get("traceid") or item.get("trace_id"),
+            )
+            or None,
             tags=["hostilecontext", "promptinjection"],
             indicators=indicators,
             evidence={
@@ -1358,35 +1364,45 @@ class AttackCorrelationService:
         return CorrelationSignal(
             signal_id=_coerce_str(item.get("id"))
             or _stable_id(
-                "sessionrisk", timestamp, item.get("sessionid"), risk_score
+                "sessionrisk",
+                timestamp,
+                item.get("sessionid"),
+                risk_score,
             ),
             signal_type="sessionrisk",
             source="session-risk",
             title="Session risk score updated",
             summary=_coerce_str(
-                item.get("summary"), "Session risk posture changed."
+                item.get("summary"),
+                "Session risk posture changed.",
             ),
             risk_score=risk_score,
             severity=_coerce_str(
-                item.get("severity"), _severity_from_score(risk_score)
+                item.get("severity"),
+                _severity_from_score(risk_score),
             ),
             confidence=max(
-                0.5, min(0.95, _coerce_float(item.get("confidence"), 0.7))
+                0.5,
+                min(0.95, _coerce_float(item.get("confidence"), 0.7)),
             ),
             status=_coerce_str(item.get("status"), "observed"),
             timestamp=timestamp,
             session_id=_coerce_str(
-                item.get("sessionid") or item.get("session_id")
-            ) or None,
+                item.get("sessionid") or item.get("session_id"),
+            )
+            or None,
             client_id=_coerce_str(
-                item.get("clientid") or item.get("client_id")
-            ) or None,
+                item.get("clientid") or item.get("client_id"),
+            )
+            or None,
             request_id=_coerce_str(
-                item.get("requestid") or item.get("request_id")
-            ) or None,
+                item.get("requestid") or item.get("request_id"),
+            )
+            or None,
             trace_id=_coerce_str(
-                item.get("traceid") or item.get("trace_id")
-            ) or None,
+                item.get("traceid") or item.get("trace_id"),
+            )
+            or None,
             tags=_nonempty(["sessionrisk", _risk_band(risk_score)]),
             indicators=_coerce_list(item.get("reasons") or item.get("signals")),
             evidence={"inputs": _coerce_mapping(item.get("inputs"))},
@@ -1401,12 +1417,11 @@ class AttackCorrelationService:
         score = score or 82
         verdict = _coerce_str(item.get("verdict"), "suspicious")
         timestamp = _isoformat(
-            _parse_timestamp(item.get("timestamp") or item.get("createdat"))
+            _parse_timestamp(item.get("timestamp") or item.get("createdat")),
         )
 
         return CorrelationSignal(
-            signal_id=_coerce_str(item.get("detonationid") or item.get("id"))
-            or _stable_id("detonation", timestamp, verdict, score),
+            signal_id=_coerce_str(item.get("detonationid") or item.get("id")) or _stable_id("detonation", timestamp, verdict, score),
             signal_type="detonation",
             source="detonation",
             title="Detonation finding",
@@ -1416,39 +1431,47 @@ class AttackCorrelationService:
             ),
             risk_score=score,
             severity=_coerce_str(
-                item.get("severity"), _severity_from_score(score)
+                item.get("severity"),
+                _severity_from_score(score),
             ),
             confidence=max(
-                0.7, min(0.99, _coerce_float(item.get("confidence"), 0.88))
+                0.7,
+                min(0.99, _coerce_float(item.get("confidence"), 0.88)),
             ),
             status=_coerce_str(item.get("status"), "observed"),
             timestamp=timestamp,
             session_id=_coerce_str(
-                item.get("sessionid") or item.get("session_id")
-            ) or None,
+                item.get("sessionid") or item.get("session_id"),
+            )
+            or None,
             client_id=_coerce_str(
-                item.get("clientid") or item.get("client_id")
-            ) or None,
+                item.get("clientid") or item.get("client_id"),
+            )
+            or None,
             request_id=_coerce_str(
-                item.get("requestid") or item.get("request_id")
-            ) or None,
+                item.get("requestid") or item.get("request_id"),
+            )
+            or None,
             trace_id=_coerce_str(
-                item.get("traceid") or item.get("trace_id")
-            ) or None,
+                item.get("traceid") or item.get("trace_id"),
+            )
+            or None,
             verdict=verdict,
             incident_id=_coerce_str(
-                item.get("incidentid") or item.get("incident_id")
-            ) or None,
+                item.get("incidentid") or item.get("incident_id"),
+            )
+            or None,
             quarantine_id=_coerce_str(
-                item.get("quarantineid") or item.get("quarantine_id")
-            ) or None,
+                item.get("quarantineid") or item.get("quarantine_id"),
+            )
+            or None,
             tags=["detonation", "artifact", "malware"],
             indicators=_coerce_list(item.get("iocs") or item.get("indicators")),
             evidence={
                 "artifact_name": item.get("artifactname") or item.get("artifact_name"),
                 "sandbox_verdict": verdict,
                 "network_contacts": _coerce_list(
-                    item.get("networkcontacts") or item.get("network_contacts")
+                    item.get("networkcontacts") or item.get("network_contacts"),
                 ),
             },
             metadata=_coerce_mapping(item.get("metadata")),
@@ -1462,12 +1485,11 @@ class AttackCorrelationService:
         score = score or 84
         family = _coerce_str(item.get("family"), "unknown")
         timestamp = _isoformat(
-            _parse_timestamp(item.get("timestamp") or item.get("createdat"))
+            _parse_timestamp(item.get("timestamp") or item.get("createdat")),
         )
 
         return CorrelationSignal(
-            signal_id=_coerce_str(item.get("findingid") or item.get("id"))
-            or _stable_id("malware", timestamp, family, score),
+            signal_id=_coerce_str(item.get("findingid") or item.get("id")) or _stable_id("malware", timestamp, family, score),
             signal_type="malware",
             source="malware",
             title="Malware enrichment",
@@ -1477,34 +1499,42 @@ class AttackCorrelationService:
             ),
             risk_score=score,
             severity=_coerce_str(
-                item.get("severity"), _severity_from_score(score)
+                item.get("severity"),
+                _severity_from_score(score),
             ),
             confidence=max(
-                0.7, min(0.99, _coerce_float(item.get("confidence"), 0.9))
+                0.7,
+                min(0.99, _coerce_float(item.get("confidence"), 0.9)),
             ),
             status=_coerce_str(item.get("status"), "observed"),
             timestamp=timestamp,
             session_id=_coerce_str(
-                item.get("sessionid") or item.get("session_id")
-            ) or None,
+                item.get("sessionid") or item.get("session_id"),
+            )
+            or None,
             client_id=_coerce_str(
-                item.get("clientid") or item.get("client_id")
-            ) or None,
+                item.get("clientid") or item.get("client_id"),
+            )
+            or None,
             request_id=_coerce_str(
-                item.get("requestid") or item.get("request_id")
-            ) or None,
+                item.get("requestid") or item.get("request_id"),
+            )
+            or None,
             trace_id=_coerce_str(
-                item.get("traceid") or item.get("trace_id")
-            ) or None,
+                item.get("traceid") or item.get("trace_id"),
+            )
+            or None,
             incident_id=_coerce_str(
-                item.get("incidentid") or item.get("incident_id")
-            ) or None,
+                item.get("incidentid") or item.get("incident_id"),
+            )
+            or None,
             quarantine_id=_coerce_str(
-                item.get("quarantineid") or item.get("quarantine_id")
-            ) or None,
+                item.get("quarantineid") or item.get("quarantine_id"),
+            )
+            or None,
             tags=_nonempty(["malware", family]),
             indicators=_coerce_list(
-                item.get("indicators") or item.get("signatures")
+                item.get("indicators") or item.get("signatures"),
             ),
             evidence={
                 "family": family,
@@ -1518,19 +1548,18 @@ class AttackCorrelationService:
         score = max(
             _coerce_int(item.get("riskscore") or item.get("risk_score")),
             _coerce_int(
-                item.get("reputationscore") or item.get("reputation_score")
+                item.get("reputationscore") or item.get("reputation_score"),
             ),
         )
         score = score or 72
         indicator = _coerce_str(item.get("indicator") or item.get("observable"))
         feed = _coerce_str(item.get("feed"), "feed")
         timestamp = _isoformat(
-            _parse_timestamp(item.get("timestamp") or item.get("createdat"))
+            _parse_timestamp(item.get("timestamp") or item.get("createdat")),
         )
 
         return CorrelationSignal(
-            signal_id=_coerce_str(item.get("hitid") or item.get("id"))
-            or _stable_id("ti", timestamp, indicator, score),
+            signal_id=_coerce_str(item.get("hitid") or item.get("id")) or _stable_id("ti", timestamp, indicator, score),
             signal_type="threatintel",
             source="threat-intel",
             title="Threat intelligence hit",
@@ -1540,33 +1569,39 @@ class AttackCorrelationService:
             ),
             risk_score=score,
             severity=_coerce_str(
-                item.get("severity"), _severity_from_score(score)
+                item.get("severity"),
+                _severity_from_score(score),
             ),
             confidence=max(
-                0.65, min(0.98, _coerce_float(item.get("confidence"), 0.84))
+                0.65,
+                min(0.98, _coerce_float(item.get("confidence"), 0.84)),
             ),
             status=_coerce_str(item.get("status"), "observed"),
             timestamp=timestamp,
             session_id=_coerce_str(
-                item.get("sessionid") or item.get("session_id")
-            ) or None,
+                item.get("sessionid") or item.get("session_id"),
+            )
+            or None,
             client_id=_coerce_str(
-                item.get("clientid") or item.get("client_id")
-            ) or None,
+                item.get("clientid") or item.get("client_id"),
+            )
+            or None,
             request_id=_coerce_str(
-                item.get("requestid") or item.get("request_id")
-            ) or None,
+                item.get("requestid") or item.get("request_id"),
+            )
+            or None,
             trace_id=_coerce_str(
-                item.get("traceid") or item.get("trace_id")
-            ) or None,
+                item.get("traceid") or item.get("trace_id"),
+            )
+            or None,
             incident_id=_coerce_str(
-                item.get("incidentid") or item.get("incident_id")
-            ) or None,
+                item.get("incidentid") or item.get("incident_id"),
+            )
+            or None,
             tags=_nonempty(["threatintel", feed]),
             indicators=[indicator] if indicator else [],
             evidence={
-                "indicator_type": item.get("indicatortype")
-                or item.get("indicator_type"),
+                "indicator_type": item.get("indicatortype") or item.get("indicator_type"),
                 "feed": feed,
                 "reputation": item.get("reputation"),
             },
@@ -1581,17 +1616,18 @@ class AttackCorrelationService:
         summary = _coerce_str(item.get("summary"), "Generic correlation signal.")
 
         return CorrelationSignal(
-            signal_id=_coerce_str(item.get("signal_id"))
-            or _stable_id("signal", timestamp, source, signal_type, summary),
+            signal_id=_coerce_str(item.get("signal_id")) or _stable_id("signal", timestamp, source, signal_type, summary),
             signal_type=signal_type,
             source=source,
             title=_coerce_str(
-                item.get("title"), signal_type.replace("_", " ").title()
+                item.get("title"),
+                signal_type.replace("_", " ").title(),
             ),
             summary=summary,
             risk_score=score,
             severity=_coerce_str(
-                item.get("severity"), _severity_from_score(score)
+                item.get("severity"),
+                _severity_from_score(score),
             ),
             confidence=_coerce_float(item.get("confidence"), 0.5),
             status=_coerce_str(item.get("status"), "observed"),
@@ -1645,31 +1681,28 @@ class AttackCorrelationService:
     # ------------------------------------------------------------------
 
     def _compute_session_score(
-        self, signals: Sequence[CorrelationSignal]
+        self,
+        signals: Sequence[CorrelationSignal],
     ) -> int:
         if not signals:
             return 0
         base = max(s.risk_score for s in signals)
         bonus = min(20, (len(signals) - 1) * 3)
-        high_sev_bonus = sum(
-            5 for s in signals if _severity_rank(s.severity) >= 3
-        )
+        high_sev_bonus = sum(5 for s in signals if _severity_rank(s.severity) >= 3)
         return min(100, base + bonus + high_sev_bonus)
 
     def _match_playbooks(
-        self, signals: Sequence[CorrelationSignal], risk_score: int
+        self,
+        signals: Sequence[CorrelationSignal],
+        risk_score: int,
     ) -> list[str]:
         matched: list[str] = []
         for playbook in self._playbooks:
             raw_triggers = playbook.get("triggers", set())
-            trigger_terms: set[str] = (
-                {t.lower() for t in raw_triggers}
-                if isinstance(raw_triggers, (set, list, tuple))
-                else {_coerce_str(raw_triggers).lower()}
-            )
+            trigger_terms: set[str] = {t.lower() for t in raw_triggers} if isinstance(raw_triggers, (set, list, tuple)) else {_coerce_str(raw_triggers).lower()}
             hits = any(
                 trigger_terms.intersection(
-                    {s.signal_type.lower(), *[t.lower() for t in s.tags]}
+                    {s.signal_type.lower(), *[t.lower() for t in s.tags]},
                 )
                 for s in signals
             )
@@ -1733,10 +1766,7 @@ class AttackCorrelationService:
         risk_score: int,
     ) -> str:
         types = sorted({s.signal_type for s in signals})
-        return (
-            f"{namespace.title()} '{correlation_key}' has {len(signals)} correlated "
-            f"signals ({', '.join(types)}) with risk score {risk_score}."
-        )
+        return f"{namespace.title()} '{correlation_key}' has {len(signals)} correlated signals ({', '.join(types)}) with risk score {risk_score}."
 
     @staticmethod
     def _session_summary(
@@ -1745,10 +1775,7 @@ class AttackCorrelationService:
         risk_score: int,
     ) -> str:
         types = sorted({s.signal_type for s in signals})
-        return (
-            f"Session '{session_id}' recorded {len(signals)} signals "
-            f"({', '.join(types)}) — risk score {risk_score}."
-        )
+        return f"Session '{session_id}' recorded {len(signals)} signals ({', '.join(types)}) — risk score {risk_score}."
 
     @staticmethod
     def _incident_summary(
@@ -1757,10 +1784,7 @@ class AttackCorrelationService:
         incident_record: Mapping[str, Any],
     ) -> str:
         title = _coerce_str(incident_record.get("title"), incident_id)
-        return (
-            f"Incident '{title}' is linked to {len(signals)} signals across "
-            f"{len({s.session_id for s in signals if s.session_id})} session(s)."
-        )
+        return f"Incident '{title}' is linked to {len(signals)} signals across {len({s.session_id for s in signals if s.session_id})} session(s)."
 
     # ------------------------------------------------------------------
     # Helpers — tag / type inference
@@ -1783,7 +1807,9 @@ class AttackCorrelationService:
 
     @staticmethod
     def _infer_signal_type(
-        summary: str, event_type: str, details: Mapping[str, Any]
+        summary: str,
+        event_type: str,
+        details: Mapping[str, Any],
     ) -> str:
         material = " ".join(
             [
@@ -1791,7 +1817,7 @@ class AttackCorrelationService:
                 event_type.lower(),
                 " ".join(_coerce_list(details.get("tags"))).lower(),
                 " ".join(_coerce_list(details.get("indicators"))).lower(),
-            ]
+            ],
         )
         if "prompt" in material or "inject" in material:
             return "promptinjection"

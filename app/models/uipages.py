@@ -18,8 +18,7 @@ class PageSection:
 
 @dataclass(slots=True)
 class UIPageDefinition:
-    """
-    Lightweight UI page contract for internal admin/telemetry views.
+    """Lightweight UI page contract for internal admin/telemetry views.
 
     This is intentionally simple for Gen1; you can hang richer UI metadata
     off the metadata dict later without breaking existing contracts.

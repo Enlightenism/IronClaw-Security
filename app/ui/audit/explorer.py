@@ -202,11 +202,7 @@ def _to_audit_event(record: dict[str, object]) -> AuditEventView:
     details = record.get("details")
     details_dict: dict[str, str] = {}
     if isinstance(details, dict):
-        details_dict = {
-            str(key): str(value)
-            for key, value in details.items()
-            if value is not None
-        }
+        details_dict = {str(key): str(value) for key, value in details.items() if value is not None}
 
     return AuditEventView(
         auditeventid=str(record.get("auditeventid") or "unknown-audit-event"),
@@ -231,18 +227,12 @@ def _to_audit_event(record: dict[str, object]) -> AuditEventView:
 
 def _build_category_counts(records: list[dict[str, object]]) -> list[AuditCategoryCount]:
     counts = Counter(str(record.get("category") or "unknown") for record in records)
-    return [
-        AuditCategoryCount(category=category, count=count)
-        for category, count in sorted(counts.items())
-    ]
+    return [AuditCategoryCount(category=category, count=count) for category, count in sorted(counts.items())]
 
 
 def _build_verdict_counts(records: list[dict[str, object]]) -> list[AuditVerdictCount]:
     counts = Counter(str(record.get("verdict") or "unknown") for record in records)
-    return [
-        AuditVerdictCount(verdict=verdict, count=count)
-        for verdict, count in sorted(counts.items())
-    ]
+    return [AuditVerdictCount(verdict=verdict, count=count) for verdict, count in sorted(counts.items())]
 
 
 def _build_timeline(records: list[dict[str, object]]) -> list[AuditTimelinePoint]:
@@ -250,9 +240,7 @@ def _build_timeline(records: list[dict[str, object]]) -> list[AuditTimelinePoint
 
     points: list[AuditTimelinePoint] = []
     for bucket in buckets:
-        bucket_records = [
-            record for record in records if str(record.get("timestamp") or "").startswith(bucket[:13])
-        ]
+        bucket_records = [record for record in records if str(record.get("timestamp") or "").startswith(bucket[:13])]
         blocked = sum(1 for record in bucket_records if str(record.get("verdict") or "") == "block")
         review = sum(1 for record in bucket_records if str(record.get("verdict") or "") == "review")
 
@@ -262,7 +250,7 @@ def _build_timeline(records: list[dict[str, object]]) -> list[AuditTimelinePoint
                 totalevents=len(bucket_records),
                 blockedevents=blocked,
                 reviewevents=review,
-            )
+            ),
         )
     return points
 
@@ -272,11 +260,7 @@ def _build_filters(records: list[dict[str, object]]) -> list[AuditFilterView]:
     severities = sorted({str(record.get("severity") or "unknown") for record in records})
     verdicts = sorted({str(record.get("verdict") or "unknown") for record in records})
     actors = sorted(
-        {
-            str(record.get("actorid"))
-            for record in records
-            if isinstance(record.get("actorid"), str) and str(record.get("actorid")).strip()
-        }
+        {str(record.get("actorid")) for record in records if isinstance(record.get("actorid"), str) and str(record.get("actorid")).strip()},
     )
 
     return [

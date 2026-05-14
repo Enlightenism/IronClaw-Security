@@ -244,18 +244,12 @@ def _matches_text(value: str | None, expected: str | None) -> bool:
 
 def _build_execution_state_counts(records: list[dict[str, Any]]) -> list[ExecutionStateCount]:
     counts = Counter(_safe_str(record.get("executionstate"), "unknown") for record in records)
-    return [
-        ExecutionStateCount(executionstate=executionstate, count=count)
-        for executionstate, count in sorted(counts.items())
-    ]
+    return [ExecutionStateCount(executionstate=executionstate, count=count) for executionstate, count in sorted(counts.items())]
 
 
 def _build_verdict_counts(records: list[dict[str, Any]]) -> list[ExecutionVerdictCount]:
     counts = Counter(_safe_str(record.get("policyverdict"), "unknown") for record in records)
-    return [
-        ExecutionVerdictCount(policyverdict=policyverdict, count=count)
-        for policyverdict, count in sorted(counts.items())
-    ]
+    return [ExecutionVerdictCount(policyverdict=policyverdict, count=count) for policyverdict, count in sorted(counts.items())]
 
 
 def _build_timeline(records: list[dict[str, Any]]) -> list[ExecutionTimelinePoint]:
@@ -263,14 +257,10 @@ def _build_timeline(records: list[dict[str, Any]]) -> list[ExecutionTimelinePoin
 
     points: list[ExecutionTimelinePoint] = []
     for bucket in buckets:
-        bucket_records = [
-            record for record in records if _safe_str(record.get("timestamp")).startswith(bucket[:13])
-        ]
+        bucket_records = [record for record in records if _safe_str(record.get("timestamp")).startswith(bucket[:13])]
         denied = sum(1 for record in bucket_records if _safe_str(record.get("executionstate")) == "denied")
         review = sum(1 for record in bucket_records if _safe_str(record.get("policyverdict")) == "review")
-        completed = sum(
-            1 for record in bucket_records if _safe_str(record.get("responsestatus")) == "completed"
-        )
+        completed = sum(1 for record in bucket_records if _safe_str(record.get("responsestatus")) == "completed")
 
         points.append(
             ExecutionTimelinePoint(
@@ -279,7 +269,7 @@ def _build_timeline(records: list[dict[str, Any]]) -> list[ExecutionTimelinePoin
                 deniedexecutions=denied,
                 reviewexecutions=review,
                 completedexecutions=completed,
-            )
+            ),
         )
     return points
 
@@ -290,11 +280,7 @@ def _build_filters(records: list[dict[str, Any]]) -> list[ExecutionFilterView]:
     responsestatuses = sorted({_safe_str(record.get("responsestatus"), "unknown") for record in records})
     verdicts = sorted({_safe_str(record.get("policyverdict"), "unknown") for record in records})
     clients = sorted(
-        {
-            _safe_str(record.get("clientid"))
-            for record in records
-            if _safe_str(record.get("clientid")).strip()
-        }
+        {_safe_str(record.get("clientid")) for record in records if _safe_str(record.get("clientid")).strip()},
     )
 
     return [

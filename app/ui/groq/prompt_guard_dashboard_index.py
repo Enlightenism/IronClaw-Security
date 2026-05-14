@@ -295,9 +295,6 @@ def get_prompt_guard_dashboard_index() -> PromptGuardDashboardIndexResponse:
     return PromptGuardDashboardIndexResponse(
         generated_at=data["generated_at"],
         dashboard=data["dashboard"],
-        sections=[
-            PromptGuardDashboardIndexEntryResponse(**section)
-            for section in data["sections"]
-        ],
+        sections=[PromptGuardDashboardIndexEntryResponse(**section) for section in data["sections"]],
         metadata=data["metadata"],
     )

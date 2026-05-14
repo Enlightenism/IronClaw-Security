@@ -64,7 +64,7 @@ def get_recent_runtime_events(
                 adjusted_risk_score=event.adjustedriskscore,
                 review_required=event.reviewrequired,
                 quarantine=event.quarantine,
-            )
+            ),
         )
 
     return results

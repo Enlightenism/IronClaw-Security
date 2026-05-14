@@ -55,7 +55,7 @@ def _base_env() -> dict[str, str]:
             "IRONCLAW_BACKUP_RETENTION_DAYS": "30",
             "IRONCLAW_BACKUP_ENCRYPTION": "true",
             "IRONCLAW_BACKUP_CHECKSUM": "true",
-        }
+        },
     )
     return env
 
@@ -179,10 +179,7 @@ def test_deployment_readiness_fails_with_missing_supabase_configuration() -> Non
     assert _normalize_top_level_status(payload) in NONPASS_STATUSES
 
     checks = _payload_checks(payload)
-    assert any(
-        _check_name(check) in {"supabase-config", "environment_configuration"} and _check_ok(check) is False
-        for check in checks
-    )
+    assert any(_check_name(check) in {"supabase-config", "environment_configuration"} and _check_ok(check) is False for check in checks)
 
 
 def test_deployment_readiness_fails_with_missing_database_configuration() -> None:
@@ -219,10 +216,7 @@ def test_deployment_readiness_fails_on_weak_secret_values_when_enforced() -> Non
 
     checks = _payload_checks(payload)
     if any(_check_name(check) == "secrets-quality" for check in checks):
-        assert any(
-            _check_name(check) == "secrets-quality" and _check_ok(check) is False
-            for check in checks
-        )
+        assert any(_check_name(check) == "secrets-quality" and _check_ok(check) is False for check in checks)
     else:
         pytest.skip("secrets-quality readiness check is not implemented by this script")
 

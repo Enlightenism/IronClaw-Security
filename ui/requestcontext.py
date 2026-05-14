@@ -160,29 +160,14 @@ def request_context_page(
     mode: str = Query(default="enforce"),
     source: str = Query(default="ui-console"),
 ) -> dict[str, Any]:
-    selected_target_type = (
-        target_type
-        if target_type in {option["value"] for option in _target_type_options()}
-        else "text"
-    )
-    selected_mode = (
-        mode
-        if mode in {option["value"] for option in _mode_options()}
-        else "enforce"
-    )
-    selected_source = (
-        source
-        if source in {option["value"] for option in _source_options()}
-        else "ui-console"
-    )
+    selected_target_type = target_type if target_type in {option["value"] for option in _target_type_options()} else "text"
+    selected_mode = mode if mode in {option["value"] for option in _mode_options()} else "enforce"
+    selected_source = source if source in {option["value"] for option in _source_options()} else "ui-console"
 
     return {
         "page": "request-context",
         "title": "Request Context",
-        "summary": (
-            "Build, inspect, and submit context metadata attached to scans, "
-            "brain decisions, history lookups, and customer-key-driven actions."
-        ),
+        "summary": ("Build, inspect, and submit context metadata attached to scans, brain decisions, history lookups, and customer-key-driven actions."),
         "selected": {
             "target_type": selected_target_type,
             "mode": selected_mode,
@@ -372,10 +357,7 @@ def request_context_page(
                 "title": "Run Brain Decision",
                 "method": "POST",
                 "path": "/brain/decision",
-                "description": (
-                    "Submit a contextual decision request that can use history "
-                    "for higher-confidence actioning."
-                ),
+                "description": ("Submit a contextual decision request that can use history for higher-confidence actioning."),
                 "example_payload": {
                     **_example_payload(
                         target_type=selected_target_type,

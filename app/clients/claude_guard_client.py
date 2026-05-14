@@ -27,7 +27,7 @@ class ClaudeGuardClientConfig:
 
         if not base_url or not api_key:
             raise RuntimeError(
-                "IRONCLAW_GUARD_BASE_URL and IRONCLAW_GUARD_API_KEY must be set."
+                "IRONCLAW_GUARD_BASE_URL and IRONCLAW_GUARD_API_KEY must be set.",
             )
 
         mode = os.environ.get("IRONCLAW_GUARD_MODE", "enforce").lower()
@@ -56,8 +56,7 @@ class ClaudeGuardClientConfig:
 
 
 class ClaudeGuardClient:
-    """
-    Thin client for Claude Code proxy/tooling to talk to IronClaw.
+    """Thin client for Claude Code proxy/tooling to talk to IronClaw.
 
     This client is intentionally minimal and synchronous so it can be
     dropped into existing proxy code paths without refactors.
@@ -83,8 +82,7 @@ class ClaudeGuardClient:
         return f"{self._config.guard_base_url.rstrip('/')}/{path.lstrip('/')}"
 
     def guard_execute(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """
-        Send an ExecuteRequest-style payload to /guard/execute.
+        """Send an ExecuteRequest-style payload to /guard/execute.
 
         Expected response (high level):
           - status / verdict fields indicating allow/review/block
@@ -99,8 +97,7 @@ class ClaudeGuardClient:
         return resp.json()  # type: ignore[no-any-return]
 
     def guard_bundle(self, bundle: dict[str, Any]) -> dict[str, Any]:
-        """
-        Send a prompt/output bundle to /policy/guard-bundle.
+        """Send a prompt/output bundle to /policy/guard-bundle.
 
         Typical bundle keys:
           - userprompt

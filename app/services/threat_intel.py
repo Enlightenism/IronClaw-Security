@@ -285,7 +285,7 @@ def scan_text_against_threat_feed(
                     "confidence": indicator.confidence,
                     "tags": list(indicator.tags),
                 },
-            )
+            ),
         )
 
         if _SEVERITY_ORDER[indicator.severity] > _SEVERITY_ORDER[highest_severity]:

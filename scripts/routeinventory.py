@@ -101,7 +101,7 @@ def _iter_python_files(target: ScanTarget) -> list[RouteModule]:
                 path=_to_posix(rel),
                 file_name=path.name,
                 stem=path.stem,
-            )
+            ),
         )
 
     return modules
@@ -138,7 +138,7 @@ def _write_inventory(inventory: RouteInventory, output_file: Path) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Emit a JSON inventory of IronClaw route modules for audit coverage and regression tracking."
+        description="Emit a JSON inventory of IronClaw route modules for audit coverage and regression tracking.",
     )
     parser.add_argument(
         "--json",

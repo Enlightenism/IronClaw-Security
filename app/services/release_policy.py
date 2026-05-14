@@ -89,10 +89,7 @@ def _evaluate_rollout(policy_input: ReleasePolicyInput) -> RolloutDecision:
         risk_score=policy_input.risk_score,
         has_open_blockers=policy_input.has_open_blockers,
         has_audit_gaps=policy_input.has_audit_gaps,
-        requires_manual_review=(
-            policy_input.requires_manual_review
-            and not policy_input.manual_review_completed
-        ),
+        requires_manual_review=(policy_input.requires_manual_review and not policy_input.manual_review_completed),
     )
     return recommend_rollout(rollout_signals)
 

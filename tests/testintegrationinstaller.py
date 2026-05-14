@@ -204,7 +204,7 @@ def test_installer_stops_when_verification_fails():
             verdict="block",
             matched_rules=["signature_mismatch"],
             reasons=[{"label": "Bad signature", "details": "Bundle verification failed"}],
-        )
+        ),
     )
 
     result = installer.install(
@@ -560,9 +560,5 @@ def test_rules_and_reasons_are_deduplicated_across_steps():
     )
 
     assert result.matched_rules.count("dup-rule") == 1
-    duplicates = [
-        item
-        for item in result.reasons
-        if item.get("label") == "Same" and item.get("details") == "duplicate"
-    ]
+    duplicates = [item for item in result.reasons if item.get("label") == "Same" and item.get("details") == "duplicate"]
     assert len(duplicates) == 1

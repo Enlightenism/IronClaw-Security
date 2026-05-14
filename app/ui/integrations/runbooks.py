@@ -189,25 +189,19 @@ def build_integration_runbooks_view(
                 key="verified",
                 title="Verification",
                 completed=verified,
-                detail=(
-                    f"Verification summary: {pass_count} pass, {warn_count} warn, {fail_count} fail."
-                ),
+                detail=(f"Verification summary: {pass_count} pass, {warn_count} warn, {fail_count} fail."),
             ),
             IntegrationRunbookStep(
                 key="command",
                 title="Command Ready",
                 completed=has_command,
-                detail=(
-                    f"Command available: {getattr(record, 'command_name', None) or 'not configured'}."
-                ),
+                detail=(f"Command available: {getattr(record, 'command_name', None) or 'not configured'}."),
             ),
             IntegrationRunbookStep(
                 key="install_target",
                 title="Install Target",
                 completed=has_install_target,
-                detail=(
-                    f"Install target: {getattr(record, 'install_target', None) or 'not configured'}."
-                ),
+                detail=(f"Install target: {getattr(record, 'install_target', None) or 'not configured'}."),
             ),
         ]
 
@@ -226,7 +220,7 @@ def build_integration_runbooks_view(
                     "requested_by": requested_by,
                     "integration_type": getattr(record, "integration_type", "unknown"),
                 },
-            )
+            ),
         )
 
     items.sort(
@@ -235,7 +229,7 @@ def build_integration_runbooks_view(
             -item.runbook_score,
             item.platform,
             item.slug,
-        )
+        ),
     )
 
     return IntegrationRunbooksView(

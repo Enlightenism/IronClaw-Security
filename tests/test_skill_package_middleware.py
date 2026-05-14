@@ -6,9 +6,11 @@ from typing import Any
 
 import pytest
 
+
 # ---------------------------------------------------------------------------
 # Helpers / Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _org_id() -> str:
     return str(uuid.uuid4())
@@ -81,6 +83,7 @@ def _make_tool_call(
 # Section 1 — Package Boundary Enforcement
 # ---------------------------------------------------------------------------
 
+
 class TestPackageBoundaryEnforcement:
     """Verify that skill packages cannot exceed declared capability boundaries."""
 
@@ -89,9 +92,7 @@ class TestPackageBoundaryEnforcement:
         call = _make_tool_call(tool_name="delete_file", package=pkg["name"])
 
         allowed_tools = set(pkg["tools"])
-        assert call["tool_name"] not in allowed_tools, (
-            "Tool 'delete_file' not in manifest should be blocked"
-        )
+        assert call["tool_name"] not in allowed_tools, "Tool 'delete_file' not in manifest should be blocked"
 
     def test_tool_in_package_manifest_is_allowed(self):
         pkg = _make_skill_package(tools=["read_file", "list_dir"])
@@ -167,6 +168,7 @@ class TestPackageBoundaryEnforcement:
 # Section 2 — Skill Middleware Pipeline
 # ---------------------------------------------------------------------------
 
+
 class TestSkillMiddlewarePipeline:
     """Verify middleware stages execute in correct order and enforce boundaries."""
 
@@ -227,9 +229,16 @@ class TestSkillMiddlewarePipeline:
             def _fn(call, ctx):
                 results.append(name)
                 return call
+
             return _fn
 
-        pipeline = [stage("auth"), stage("policy"), stage("boundary"), stage("sandbox"), stage("execute")]
+        pipeline = [
+            stage("auth"),
+            stage("policy"),
+            stage("boundary"),
+            stage("sandbox"),
+            stage("execute"),
+        ]
         ctx = _make_runtime_context()
         call = _make_tool_call()
 
@@ -273,6 +282,7 @@ class TestSkillMiddlewarePipeline:
 # Section 3 — Runtime Context Integration
 # ---------------------------------------------------------------------------
 
+
 class TestRuntimeContextIntegration:
     """Verify skill middleware correctly reads and enforces runtime context."""
 
@@ -299,7 +309,6 @@ class TestRuntimeContextIntegration:
         ctx = _make_runtime_context(sandbox_enabled=False)
         pkg = _make_skill_package(requires_sandbox=True)
 
-        can_run = pkg["requires_sandbox"] and ctx["sandbox_enabled"]
         blocked = pkg["requires_sandbox"] and not ctx["sandbox_enabled"]
         assert blocked is True
 
@@ -371,6 +380,7 @@ class TestRuntimeContextIntegration:
 # Section 4 — Org Isolation
 # ---------------------------------------------------------------------------
 
+
 class TestOrgIsolation:
     """Verify packages and tool calls cannot cross org boundaries."""
 
@@ -421,6 +431,7 @@ class TestOrgIsolation:
 # Section 5 — Policy Gating
 # ---------------------------------------------------------------------------
 
+
 class TestPolicyGating:
     """Verify org and system policies gate skill package execution correctly."""
 
@@ -429,7 +440,7 @@ class TestPolicyGating:
             "rules": [
                 {"tool": "delete_file", "action": "block"},
                 {"tool": "read_file", "action": "allow"},
-            ]
+            ],
         }
 
         def evaluate_policy(tool_name: str, rules: list) -> str:
@@ -486,7 +497,6 @@ class TestPolicyGating:
         ]
 
         def evaluate(tool: str, rules: list) -> str:
-            # Specific rules take priority
             for r in rules:
                 if r["tool"] == tool:
                     return r["action"]
@@ -529,6 +539,7 @@ class TestPolicyGating:
 # ---------------------------------------------------------------------------
 # Section 6 — Quota Enforcement
 # ---------------------------------------------------------------------------
+
 
 class TestQuotaEnforcement:
     """Verify quota checks prevent over-usage at the skill middleware layer."""
@@ -591,15 +602,19 @@ class TestQuotaEnforcement:
 # Section 7 — Verdict Propagation
 # ---------------------------------------------------------------------------
 
+
 class TestVerdictPropagation:
     """Verify verdicts flow correctly through the middleware stack."""
 
-    @pytest.mark.parametrize("verdict,expected_pass", [
-        ("allow", True),
-        ("warn", True),
-        ("quarantine", False),
-        ("block", False),
-    ])
+    @pytest.mark.parametrize(
+        "verdict,expected_pass",
+        [
+            ("allow", True),
+            ("warn", True),
+            ("quarantine", False),
+            ("block", False),
+        ],
+    )
     def test_verdict_pass_through_rules(self, verdict: str, expected_pass: bool):
         passes = verdict in ("allow", "warn")
         assert passes == expected_pass
@@ -694,6 +709,7 @@ class TestVerdictPropagation:
 # Section 8 — Audit Trail Integrity
 # ---------------------------------------------------------------------------
 
+
 class TestAuditTrailIntegrity:
     """Verify every skill middleware event produces a complete, tamper-evident audit record."""
 
@@ -713,8 +729,17 @@ class TestAuditTrailIntegrity:
             "timestamp": datetime.now(UTC).isoformat(),
         }
 
-        required = {"record_id", "call_id", "org_id", "user_id", "session_id",
-                    "tool_name", "package", "verdict", "timestamp"}
+        required = {
+            "record_id",
+            "call_id",
+            "org_id",
+            "user_id",
+            "session_id",
+            "tool_name",
+            "package",
+            "verdict",
+            "timestamp",
+        }
         assert required.issubset(record.keys())
 
     def test_audit_record_has_non_null_org_id(self):
@@ -785,13 +810,12 @@ class TestAuditTrailIntegrity:
 # Section 9 — Sandbox Boundary Enforcement
 # ---------------------------------------------------------------------------
 
+
 class TestSandboxBoundaryEnforcement:
     """Verify sandboxed skill packages cannot escape sandbox constraints."""
 
     def test_sandboxed_package_cannot_access_host_filesystem(self):
-        pkg = _make_skill_package(requires_sandbox=True)
         sandboxed_paths = {"/tmp", "/sandbox"}
-        blocked_paths = {"/etc", "/home", "/root", "/var"}
 
         requested_path = "/etc/passwd"
         allowed = any(requested_path.startswith(p) for p in sandboxed_paths)
@@ -830,6 +854,7 @@ class TestSandboxBoundaryEnforcement:
 
         def scrub(text: str) -> str:
             import re
+
             return re.sub(r"(secret_token|sk-)[^\s]+", "[REDACTED]", text)
 
         scrubbed = scrub(raw_output)
@@ -838,7 +863,6 @@ class TestSandboxBoundaryEnforcement:
 
     def test_sandbox_process_cannot_spawn_subprocesses(self):
         allowed_syscalls = {"read", "write", "open", "close", "stat"}
-        blocked_syscalls = {"fork", "execve", "clone", "execveat"}
 
         requested_syscall = "execve"
         allowed = requested_syscall in allowed_syscalls
@@ -855,6 +879,7 @@ class TestSandboxBoundaryEnforcement:
 # ---------------------------------------------------------------------------
 # Section 10 — End-to-End Middleware Chain
 # ---------------------------------------------------------------------------
+
 
 class TestEndToEndMiddlewareChain:
     """Simulate the full middleware chain from intake to verdict to audit."""
@@ -889,7 +914,11 @@ class TestEndToEndMiddlewareChain:
                 if rule.get("enabled", True) and rule["action"] == "block":
                     return {"verdict": "block", "reason": "policy_block", "stage": "policy"}
                 if rule.get("enabled", True) and rule["action"] == "quarantine":
-                    return {"verdict": "quarantine", "reason": "policy_quarantine", "stage": "policy"}
+                    return {
+                        "verdict": "quarantine",
+                        "reason": "policy_quarantine",
+                        "stage": "policy",
+                    }
                 if rule.get("enabled", True) and rule["action"] == "warn":
                     return {"verdict": "warn", "reason": "policy_warn", "stage": "policy"}
 
@@ -909,7 +938,11 @@ class TestEndToEndMiddlewareChain:
 
         # Stage 7: Sandbox enforcement
         if pkg.get("requires_sandbox") and not ctx.get("sandbox_enabled"):
-            return {"verdict": "block", "reason": "sandbox_required_but_disabled", "stage": "sandbox"}
+            return {
+                "verdict": "block",
+                "reason": "sandbox_required_but_disabled",
+                "stage": "sandbox",
+            }
 
         return {"verdict": "allow", "reason": "all_checks_passed", "stage": "execute"}
 

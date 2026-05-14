@@ -21,28 +21,19 @@ PACKAGE_CATALOG: dict[str, dict[str, Any]] = {
         "name": "Single User",
         "price_usd": 20.0,
         "included_units": 20_000,
-        "description": (
-            "Prepaid protection units for individual builders who want guarded prompt handling, "
-            "tool-call review, source inspection, and safe response release."
-        ),
+        "description": ("Prepaid protection units for individual builders who want guarded prompt handling, tool-call review, source inspection, and safe response release."),
     },
     "team-security": {
         "name": "Team Security",
         "price_usd": 90.0,
         "included_units": 100_000,
-        "description": (
-            "Prepaid protection units for teams running higher volumes of AI-assisted development, "
-            "research, and guarded agent workflows."
-        ),
+        "description": ("Prepaid protection units for teams running higher volumes of AI-assisted development, research, and guarded agent workflows."),
     },
     "enterprise-security": {
         "name": "Enterprise Security",
         "price_usd": 150.0,
         "included_units": 200_000,
-        "description": (
-            "Prepaid protection units for organizations protecting large-scale agent operations, "
-            "sensitive workflows, and high-frequency prompt activity."
-        ),
+        "description": ("Prepaid protection units for organizations protecting large-scale agent operations, sensitive workflows, and high-frequency prompt activity."),
     },
 }
 
@@ -166,10 +157,7 @@ def _build_unit_policy() -> UnitPolicyView:
     return UnitPolicyView(
         unit_definition="1 protection unit = 1 IronClaw protection event.",
         delivery_model="All packages are prepaid unit bundles with no recurring subscription requirement.",
-        buyer_positioning=(
-            "Customers are buying protected AI usage, not raw API calls. "
-            "Each unit funds layered security checks around prompts, tool activity, returned content, and release decisions."
-        ),
+        buyer_positioning=("Customers are buying protected AI usage, not raw API calls. Each unit funds layered security checks around prompts, tool activity, returned content, and release decisions."),
         protection_layers=[
             ProtectionValueView(
                 title="Prompt ingress protection",
@@ -227,10 +215,7 @@ def _ledger_entry_to_view(entry: Any) -> WalletLedgerEntryView:
 
 @router.get("/packages", response_model=BillingPackagesResponse)
 def list_billing_packages() -> BillingPackagesResponse:
-    packages = [
-        _package_to_view(package_id, package_data)
-        for package_id, package_data in PACKAGE_CATALOG.items()
-    ]
+    packages = [_package_to_view(package_id, package_data) for package_id, package_data in PACKAGE_CATALOG.items()]
 
     return BillingPackagesResponse(
         status="ok",

@@ -81,16 +81,10 @@ def _build_explanation_text(
     matched_rule_names: list[str],
 ) -> str:
     if not matched_rule_names:
-        return (
-            f"The prompt did not trigger any active prompt guard rules, so the system "
-            f"returned a {verdict} verdict with a risk score of {risk_score}."
-        )
+        return f"The prompt did not trigger any active prompt guard rules, so the system returned a {verdict} verdict with a risk score of {risk_score}."
 
     joined_rules = ", ".join(matched_rule_names)
-    return (
-        f"The system returned a {verdict} verdict with a risk score of {risk_score} "
-        f"because the prompt matched active guard rules: {joined_rules}."
-    )
+    return f"The system returned a {verdict} verdict with a risk score of {risk_score} because the prompt matched active guard rules: {joined_rules}."
 
 
 def _build_operator_guidance(
@@ -137,7 +131,7 @@ def build_prompt_guard_explanation(prompt: str) -> PromptGuardExplanation:
                 "action": match.action,
                 "score": match.score,
                 "matched_patterns": list(match.matched_patterns),
-            }
+            },
         )
 
     explanation = _build_explanation_text(

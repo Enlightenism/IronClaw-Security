@@ -23,12 +23,11 @@ def _import_service_module() -> Any:
         except ModuleNotFoundError as exc:
             last_error = exc
     raise AssertionError(
-        "Unable to import service bootstrap module. Expected one of: "
-        + ", ".join(MODULE_CANDIDATES)
+        "Unable to import service bootstrap module. Expected one of: " + ", ".join(MODULE_CANDIDATES),
     ) from last_error
 
 
-@pytest.fixture()
+@pytest.fixture
 def service_module() -> Any:
     return _import_service_module()
 
@@ -100,7 +99,7 @@ def test_service_module_build_parser_accepts_common_bootstrap_flags(service_modu
             "127.0.0.1",
             "--port",
             "8000",
-        ]
+        ],
     )
 
     assert getattr(args, "host", "127.0.0.1") == "127.0.0.1"
@@ -162,7 +161,9 @@ def test_service_module_bootstrap_like_entrypoint_runs_with_temp_paths(
 
     # Fast path: if the bootstrap is CLI-style (main/run), exercise it via its own parser
     if bootstrap_func is getattr(service_module, "main", None) or bootstrap_func is getattr(
-        service_module, "run", None
+        service_module,
+        "run",
+        None,
     ):
         try:
             result = _invoke_with_supported_kwargs(
@@ -194,7 +195,7 @@ def test_service_module_bootstrap_like_entrypoint_runs_with_temp_paths(
                     "app.main:app",
                     "--log-level",
                     "info",
-                ]
+                ],
             )
             config = config_from_args(args)
             try:

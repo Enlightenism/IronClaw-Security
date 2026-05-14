@@ -117,20 +117,11 @@ def build_prompt_guard_alerts_overview() -> PromptGuardAlertsOverviewResponse:
     status_counts = summary.get("by_status", {})
 
     critical_incidents = int(
-        severity_counts.get("critical", 0)
-        + severity_counts.get("high", 0)
-    )
-
-    warning_incidents = int(
-        severity_counts.get("medium", 0)
-        + severity_counts.get("low", 0)
+        severity_counts.get("critical", 0) + severity_counts.get("high", 0),
     )
 
     open_alerts = int(
-        status_counts.get("open", 0)
-        + status_counts.get("investigating", 0)
-        + status_counts.get("triaged", 0)
-        + status_counts.get("pending", 0)
+        status_counts.get("open", 0) + status_counts.get("investigating", 0) + status_counts.get("triaged", 0) + status_counts.get("pending", 0),
     )
 
     if critical_incidents > 0:
@@ -148,7 +139,7 @@ def build_prompt_guard_alerts_overview() -> PromptGuardAlertsOverviewResponse:
                     "status_breakdown": status_counts,
                 },
                 tags=["incidents", "critical"],
-            )
+            ),
         )
 
     if review_queue_total > 0:
@@ -164,7 +155,7 @@ def build_prompt_guard_alerts_overview() -> PromptGuardAlertsOverviewResponse:
                     "review_queue_total": review_queue_total,
                 },
                 tags=["reviews", "queue"],
-            )
+            ),
         )
 
     for rec in recommendations.items:
@@ -180,7 +171,7 @@ def build_prompt_guard_alerts_overview() -> PromptGuardAlertsOverviewResponse:
                 source_module="prompt_guard_recommendations",
                 details=rec_dict,
                 tags=["recommendation", rec_dict.get("category", "general")],
-            )
+            ),
         )
 
     for item in activity_feed.items:
@@ -198,7 +189,7 @@ def build_prompt_guard_alerts_overview() -> PromptGuardAlertsOverviewResponse:
                 source_module=item.source_module,
                 details=item.details,
                 tags=list(item.tags),
-            )
+            ),
         )
 
     latest_alerts.sort(key=_sort_key)
@@ -209,14 +200,14 @@ def build_prompt_guard_alerts_overview() -> PromptGuardAlertsOverviewResponse:
 
     return PromptGuardAlertsOverviewResponse(
         generated_at=generated_at,
-        open_alerts=max(open_alerts, len([a for a in latest_alerts if (a.status or "").lower() in {"open", "pending", "investigating", "triaged"}])),
+        open_alerts=max(
+            open_alerts,
+            len([a for a in latest_alerts if (a.status or "").lower() in {"open", "pending", "investigating", "triaged"}]),
+        ),
         critical_alerts=critical_alerts,
         warning_alerts=warning_alerts,
         review_queue_total=review_queue_total,
-        latest_alerts=[
-            PromptGuardAlertItemResponse(**alert.to_dict())
-            for alert in latest_alerts
-        ],
+        latest_alerts=[PromptGuardAlertItemResponse(**alert.to_dict()) for alert in latest_alerts],
         metadata={
             "source_modules": [
                 "prompt_guard_incident_summary",

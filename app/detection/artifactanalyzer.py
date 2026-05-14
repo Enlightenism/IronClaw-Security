@@ -327,7 +327,7 @@ class ArtifactAnalyzer:
 
         strongest_component = max(components, key=lambda component: component.score)
         reasons.append(
-            f"Strongest contributing subsystem was {strongest_component.name} with score {strongest_component.score:.4f}."
+            f"Strongest contributing subsystem was {strongest_component.name} with score {strongest_component.score:.4f}.",
         )
 
         if not reasons:

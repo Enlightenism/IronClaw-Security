@@ -161,10 +161,7 @@ def heuristic_prompt_injection_score(text: str) -> int:
     if "ignore" in normalized and ("instructions" in normalized or "rules" in normalized):
         score += 2
 
-    if (
-        ("reveal" in normalized or "show" in normalized or "print" in normalized)
-        and ("prompt" in normalized or "instructions" in normalized)
-    ):
+    if ("reveal" in normalized or "show" in normalized or "print" in normalized) and ("prompt" in normalized or "instructions" in normalized):
         score += 3
 
     return score

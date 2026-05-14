@@ -150,12 +150,10 @@ def _build_stage_view(record: Any, fallback_index: int) -> RolloutStageView:
     data = _coerce_mapping(record)
 
     stage_id = str(
-        _extract_value(data, "stage_id", "stageid", "id", "name", "key")
-        or f"stage-{fallback_index}"
+        _extract_value(data, "stage_id", "stageid", "id", "name", "key") or f"stage-{fallback_index}",
     )
     title = str(
-        _extract_value(data, "title", "label", "name", "summary")
-        or stage_id.replace("-", " ").replace("_", " ").title()
+        _extract_value(data, "title", "label", "name", "summary") or stage_id.replace("-", " ").replace("_", " ").title(),
     )
     detail = str(_extract_value(data, "detail", "details", "message", "summary", "description") or "")
     status_value = _normalize_stage_status(_extract_value(data, "status", "state", "result"))
@@ -208,10 +206,10 @@ def _build_rollout_response(
             environment=str(_extract_value(rollout, "environment") or environment),
             adapter_version=str(adapter_version_value) if adapter_version_value is not None else None,
             target_percentage=_normalize_percent(
-                _extract_value(rollout, "target_percentage", "target_percent")
+                _extract_value(rollout, "target_percentage", "target_percent"),
             ),
             current_percentage=_normalize_percent(
-                _extract_value(rollout, "current_percentage", "current_percent", "percentage")
+                _extract_value(rollout, "current_percentage", "current_percent", "percentage"),
             ),
             updated_at=_datetime_to_iso(updated_at_value) or _utc_now_iso(),
             blockers=_normalize_list(_extract_value(rollout, "blockers", "errors")),

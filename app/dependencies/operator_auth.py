@@ -19,7 +19,13 @@ async def require_operator_auth(
     require_access(
         context,
         action="operator_authenticated",
-        required_roles=("platform_admin", "system_admin", "operator_admin", "operator_analyst", "auditor"),
+        required_roles=(
+            "platform_admin",
+            "system_admin",
+            "operator_admin",
+            "operator_analyst",
+            "auditor",
+        ),
         metadata={"dependency": "require_operator_auth"},
     )
     if context.principal_type != "operator":

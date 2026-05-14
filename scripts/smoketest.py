@@ -180,7 +180,7 @@ def _write_report(report: SmokeTestReport) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run IronClaw smoke tests against a running instance."
+        description="Run IronClaw smoke tests against a running instance.",
     )
     parser.add_argument(
         "--base-url",

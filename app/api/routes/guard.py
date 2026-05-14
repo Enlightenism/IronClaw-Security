@@ -83,7 +83,7 @@ def action_decision(payload: ActionDecisionRequest, request: Request) -> dict[st
             "action_type": payload.action_type,
             "target": payload.target,
             "response": response,
-        }
+        },
     )
 
     return response
@@ -144,7 +144,7 @@ def guarded_execute(payload: ExecuteRequest, request: Request) -> dict[str, Any]
             "action_type": payload.action_type,
             "target": payload.target,
             "response": response,
-        }
+        },
     )
 
     return response

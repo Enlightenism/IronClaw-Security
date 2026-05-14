@@ -91,15 +91,9 @@ def _resolve_agent(
 
 def _default_summary_for_registry_only(agent: AgentDescriptor, action_type: ProtectedAction) -> str:
     if action_type not in agent.protected_actions:
-        return (
-            f"Action '{action_type}' is not explicitly registered for agent "
-            f"{agent.agent_id}, but the file remains under orchestration visibility."
-        )
+        return f"Action '{action_type}' is not explicitly registered for agent {agent.agent_id}, but the file remains under orchestration visibility."
 
-    return (
-        f"Agent {agent.agent_id} is assigned to {agent.relative_path} and "
-        f"recognizes protected action '{action_type}'."
-    )
+    return f"Agent {agent.agent_id} is assigned to {agent.relative_path} and recognizes protected action '{action_type}'."
 
 
 def _fallback_decision_from_registry(
@@ -113,11 +107,7 @@ def _fallback_decision_from_registry(
     fail_secure: bool = True,
 ) -> OrchestrationDecision:
     registry_risk = _registry_risk_score(agent, action_type)
-    should_warn = (
-        agent.threat_profile in {"sensitive", "execution_capable", "security_critical"}
-        or action_type in {"shell_command", "network_request", "git_operation", "tool_call"}
-        or action_type not in agent.protected_actions
-    )
+    should_warn = agent.threat_profile in {"sensitive", "execution_capable", "security_critical"} or action_type in {"shell_command", "network_request", "git_operation", "tool_call"} or action_type not in agent.protected_actions
 
     summary = _default_summary_for_registry_only(agent, action_type)
     if should_warn:
@@ -127,10 +117,7 @@ def _fallback_decision_from_registry(
     should_halt = bool(fail_secure and registry_risk >= 70)
     if should_halt:
         verdict = "block"
-        summary = (
-            f"{summary} Guard API was unavailable and fail-secure fallback blocked this action "
-            f"based on registry threat profile."
-        )
+        summary = f"{summary} Guard API was unavailable and fail-secure fallback blocked this action based on registry threat profile."
 
     return OrchestrationDecision(
         agent_id=agent.agent_id,
@@ -265,11 +252,7 @@ class IronClawOrchestrator:
                 should_warn=bool(getattr(decision, "should_warn", False)),
                 summary=_text(getattr(decision, "summary", ""), "Guard API decision completed."),
                 risk_score=_clamp_risk(getattr(decision, "risk_score", 0)),
-                matched_patterns=[
-                    _text(item)
-                    for item in getattr(decision, "matched_patterns", []) or []
-                    if _text(item)
-                ],
+                matched_patterns=[_text(item) for item in getattr(decision, "matched_patterns", []) or [] if _text(item)],
                 decision_source="guard_api",
                 registry_tags=_normalized_tags(agent),
                 registry_threat_profile=agent.threat_profile,
@@ -290,5 +273,5 @@ class IronClawOrchestrator:
 
 
 if __name__ == "__main__":
-    orchestrator = IronClawOrchestrator(project_root=Path("."))
+    orchestrator = IronClawOrchestrator(project_root=Path())
     print(f"Loaded {len(orchestrator.list_agents())} agents from {orchestrator.project_root}")

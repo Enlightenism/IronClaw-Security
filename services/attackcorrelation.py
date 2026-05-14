@@ -201,7 +201,7 @@ class AttackCorrelationService:
                 str(detonation_summary.get("severity", "")),
                 str(hostile_context.get("severity", "")),
                 _risk_band(risk_score),
-            ]
+            ],
         )
         confidence = self._compute_confidence(
             all_signals,
@@ -318,7 +318,7 @@ class AttackCorrelationService:
                 raw.get("session_id"),
                 raw.get("tool_name"),
                 raw.get("prompt_fingerprint"),
-            ]
+            ],
         )
         return CorrelatedSignal(
             signal_id=signal_id,
@@ -427,7 +427,10 @@ class AttackCorrelationService:
         if malware_summary:
             verdict = str(malware_summary.get("verdict") or malware_summary.get("status") or "").lower()
             severity = str(malware_summary.get("severity") or ("high" if verdict in {"malicious", "suspicious"} else "medium"))
-            score = _safe_int(malware_summary.get("risk_score"), _safe_int(malware_summary.get("score"), self._default_score_for_severity(severity)))
+            score = _safe_int(
+                malware_summary.get("risk_score"),
+                _safe_int(malware_summary.get("score"), self._default_score_for_severity(severity)),
+            )
             derived.append(
                 CorrelatedSignal(
                     signal_id=f"sig_{_hash_parts('malware', verdict, malware_summary.get('family'), malware_summary.get('summary'))}",
@@ -442,14 +445,25 @@ class AttackCorrelationService:
                             *_as_list(malware_summary.get("hashes")),
                             *_as_list(malware_summary.get("families")),
                             *_as_list(malware_summary.get("files")),
-                        ]
+                        ],
                     ),
-                )
+                ),
             )
 
         if detonation_summary:
-            severity = str(detonation_summary.get("severity") or _risk_band(_safe_int(detonation_summary.get("risk_score"), _safe_int(detonation_summary.get("score")) or 50)))
-            score = _safe_int(detonation_summary.get("risk_score"), _safe_int(detonation_summary.get("score"), self._default_score_for_severity(severity)))
+            severity = str(
+                detonation_summary.get("severity")
+                or _risk_band(
+                    _safe_int(
+                        detonation_summary.get("risk_score"),
+                        _safe_int(detonation_summary.get("score")) or 50,
+                    )
+                )
+            )
+            score = _safe_int(
+                detonation_summary.get("risk_score"),
+                _safe_int(detonation_summary.get("score"), self._default_score_for_severity(severity)),
+            )
             derived.append(
                 CorrelatedSignal(
                     signal_id=f"sig_{_hash_parts('detonation', detonation_summary.get('verdict'), detonation_summary.get('summary'))}",
@@ -464,14 +478,25 @@ class AttackCorrelationService:
                             *_as_list(detonation_summary.get("hashes")),
                             *_as_list(detonation_summary.get("domains")),
                             *_as_list(detonation_summary.get("ips")),
-                        ]
+                        ],
                     ),
-                )
+                ),
             )
 
         if hostile_context:
-            severity = str(hostile_context.get("severity") or _risk_band(_safe_int(hostile_context.get("risk_score"), _safe_int(hostile_context.get("score")) or 60)))
-            score = _safe_int(hostile_context.get("risk_score"), _safe_int(hostile_context.get("score"), self._default_score_for_severity(severity)))
+            severity = str(
+                hostile_context.get("severity")
+                or _risk_band(
+                    _safe_int(
+                        hostile_context.get("risk_score"),
+                        _safe_int(hostile_context.get("score")) or 60,
+                    )
+                )
+            )
+            score = _safe_int(
+                hostile_context.get("risk_score"),
+                _safe_int(hostile_context.get("score"), self._default_score_for_severity(severity)),
+            )
             derived.append(
                 CorrelatedSignal(
                     signal_id=f"sig_{_hash_parts('hostile', hostile_context.get('campaign'), hostile_context.get('cluster'))}",
@@ -486,9 +511,9 @@ class AttackCorrelationService:
                             hostile_context.get("campaign"),
                             hostile_context.get("cluster"),
                             *_as_list(hostile_context.get("ttp_ids")),
-                        ]
+                        ],
                     ),
-                )
+                ),
             )
 
         return derived
@@ -646,7 +671,7 @@ class AttackCorrelationService:
                 "threatintel" if hostile_context else None,
                 "critical" if risk_score >= 85 else None,
                 *signal_types,
-            ]
+            ],
         )
 
         result = self._call_optional(
@@ -740,11 +765,7 @@ class AttackCorrelationService:
         if self.quarantine_store is None:
             return []
 
-        requires_quarantine = (
-            risk_score >= 85
-            or str(malware_summary.get("verdict") or "").lower() == "malicious"
-            or str(detonation_summary.get("verdict") or "").lower() in {"malicious", "blocked"}
-        )
+        requires_quarantine = risk_score >= 85 or str(malware_summary.get("verdict") or "").lower() == "malicious" or str(detonation_summary.get("verdict") or "").lower() in {"malicious", "blocked"}
         if not requires_quarantine:
             return []
 

@@ -38,7 +38,7 @@ def build_action_history_test_view(
     if normalized_selected_actionid:
         for record in normalized_actions:
             record_actionid = str(
-                record.get("actionid") or record.get("executionid") or ""
+                record.get("actionid") or record.get("executionid") or "",
             ).strip()
             if record_actionid == normalized_selected_actionid:
                 selected_record = record

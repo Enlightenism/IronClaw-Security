@@ -141,7 +141,13 @@ def _build_trend_point(
 
     total_reviews = max(0, current["total_reviews"] - review_penalty)
     pending_reviews = max(0, min(total_reviews, current["pending_reviews"] + int(round((1.0 - progress) * 2))))
-    approved_reviews = max(0, min(total_reviews - pending_reviews, current["approved_reviews"] - int(round((1.0 - progress) * 1))))
+    approved_reviews = max(
+        0,
+        min(
+            total_reviews - pending_reviews,
+            current["approved_reviews"] - int(round((1.0 - progress) * 1)),
+        ),
+    )
     rejected_reviews = max(0, total_reviews - pending_reviews - approved_reviews)
 
     total_allowlist_entries = max(0, current["total_allowlist_entries"] - allowlist_penalty)

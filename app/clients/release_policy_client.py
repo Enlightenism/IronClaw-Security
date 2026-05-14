@@ -13,8 +13,7 @@ from app.services.release_policy import (
 
 @dataclass
 class ReleasePolicyClient:
-    """
-    Thin, ergonomic client for evaluating release policy.
+    """Thin, ergonomic client for evaluating release policy.
 
     This wraps the underlying service input model so call sites can pass
     simple primitives and get back a structured result or plain dict.
@@ -36,9 +35,7 @@ class ReleasePolicyClient:
         manual_review_completed: bool = False,
         metadata: Mapping[str, Any] | None = None,
     ) -> ReleasePolicyResult:
-        """
-        Evaluate release policy and return the full typed result.
-        """
+        """Evaluate release policy and return the full typed result."""
         policy_input = ReleasePolicyInput(
             integration_id=integration_id,
             compatibility_state=compatibility_state,
@@ -71,8 +68,7 @@ class ReleasePolicyClient:
         manual_review_completed: bool = False,
         metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """
-        Evaluate release policy and return a JSON‑safe dict suitable
+        """Evaluate release policy and return a JSON‑safe dict suitable
         for API responses or logging.
         """
         result = self.evaluate(

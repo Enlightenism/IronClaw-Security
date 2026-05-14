@@ -140,7 +140,7 @@ def build_prompt_guard_alerts_timeline_summary() -> PromptGuardAlertsTimelineSum
                 source_module=alert.source_module,
                 details=alert.details,
                 tags=list(alert.tags),
-            )
+            ),
         )
 
     for entry in timeline.entries:
@@ -157,7 +157,7 @@ def build_prompt_guard_alerts_timeline_summary() -> PromptGuardAlertsTimelineSum
                 source_module=entry.source_module,
                 details=entry.details,
                 tags=list(entry.tags),
-            )
+            ),
         )
 
     for signal in signals.latest_signals:
@@ -173,19 +173,14 @@ def build_prompt_guard_alerts_timeline_summary() -> PromptGuardAlertsTimelineSum
                     source_module=signal.source_module,
                     details=signal.details,
                     tags=list(signal.tags),
-                )
+                ),
             )
 
     latest_snapshot = trends.latest_snapshot
     if latest_snapshot is not None:
         blocked = int(latest_snapshot.get("blocked_requests", 0) or 0)
         flagged = int(latest_snapshot.get("flagged_requests", 0) or 0)
-        severity: TimelineAlertSeverity = (
-            "critical" if blocked >= 10 else
-            "high" if blocked > 0 else
-            "medium" if flagged > 0 else
-            "low"
-        )
+        severity: TimelineAlertSeverity = "critical" if blocked >= 10 else "high" if blocked > 0 else "medium" if flagged > 0 else "low"
         entries.append(
             PromptGuardAlertsTimelineItem(
                 id=f"alerts-timeline:trend:{latest_snapshot.get('timestamp', generated_at)}",
@@ -196,7 +191,7 @@ def build_prompt_guard_alerts_timeline_summary() -> PromptGuardAlertsTimelineSum
                 source_module="prompt_guard_trends_summary",
                 details=latest_snapshot,
                 tags=["trend", "snapshot"],
-            )
+            ),
         )
 
     entries.sort(key=lambda item: (_severity_rank(item.severity), item.timestamp), reverse=False)
@@ -243,9 +238,6 @@ def get_prompt_guard_alerts_timeline_summary() -> PromptGuardAlertsTimelineSumma
         high_alerts=data["high_alerts"],
         medium_alerts=data["medium_alerts"],
         low_alerts=data["low_alerts"],
-        entries=[
-            PromptGuardAlertsTimelineItemResponse(**entry)
-            for entry in data["entries"]
-        ],
+        entries=[PromptGuardAlertsTimelineItemResponse(**entry) for entry in data["entries"]],
         metadata=data["metadata"],
     )

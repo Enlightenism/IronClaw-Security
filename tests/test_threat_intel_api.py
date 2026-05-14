@@ -10,7 +10,7 @@ from app.services.threat_intel import initialize_default_threat_feed
 
 def _build_test_app() -> FastAPI:
     threat_intel_module._STATE = threat_intel_module._ThreatIntelState(
-        feed=initialize_default_threat_feed()
+        feed=initialize_default_threat_feed(),
     )
     app = FastAPI()
     app.include_router(threat_intel_router)

@@ -63,8 +63,7 @@ def _resolve_path(value: str | None, *, base_dir: Path | None = None) -> Path | 
 
 
 def _load_structured_config(path: Path) -> dict[str, Any]:
-    """
-    Backwards-compatible loader for structured config files.
+    """Backwards-compatible loader for structured config files.
 
     Primary source of truth is TOML; if TOML parsing fails, fall back to JSON
     so tests can exercise legacy JSON configs without changing the core model.
@@ -82,7 +81,7 @@ def _load_structured_config(path: Path) -> dict[str, Any]:
         return json.loads(text)
     except json.JSONDecodeError as exc:  # pragma: no cover - defensive
         raise ProviderConfigurationError(
-            f"Failed to parse configuration file '{path}': {exc}"
+            f"Failed to parse configuration file '{path}': {exc}",
         ) from exc
 
 
@@ -185,10 +184,10 @@ class IronClawSkillConfig:
 
     # Backwards-compatible Pydantic-style export used in tests
     def model_dump(self) -> dict[str, Any]:
-        """
-        Provide a Pydantic-like export API so tests can compare configs
+        """Provide a Pydantic-like export API so tests can compare configs
         using model_dump() even though this is a dataclass-based model.
         """
+
         def _provider_dict(p: ProviderConfig) -> dict[str, Any]:
             d = asdict(p)
             return d
@@ -246,11 +245,9 @@ class IronClawSkillConfig:
         paths = PathsConfig(
             root_dir=resolved_root,
             config_file=config_file.resolve() if config_file else None,
-            audit_log_path=_resolve_path(raw_paths.get("audit_log_path"), base_dir=base_dir)
-            or default_paths.audit_log_path,
+            audit_log_path=_resolve_path(raw_paths.get("audit_log_path"), base_dir=base_dir) or default_paths.audit_log_path,
             rules_dir=_resolve_path(raw_paths.get("rules_dir"), base_dir=base_dir) or default_paths.rules_dir,
-            quarantine_dir=_resolve_path(raw_paths.get("quarantine_dir"), base_dir=base_dir)
-            or default_paths.quarantine_dir,
+            quarantine_dir=_resolve_path(raw_paths.get("quarantine_dir"), base_dir=base_dir) or default_paths.quarantine_dir,
             output_dir=_resolve_path(raw_paths.get("output_dir"), base_dir=base_dir) or default_paths.output_dir,
         )
 
@@ -340,7 +337,7 @@ class IronClawSkillConfig:
             [
                 search_root / "config" / "ironclawskill.toml",
                 search_root / "config" / "ironclawskill.example.toml",
-            ]
+            ],
         )
 
         for candidate in candidates:
@@ -445,9 +442,7 @@ class IronClawSkillConfig:
         return IronClawSkillConfig(
             app_name=_env("IRONCLAWSKILL_APP_NAME", self.app_name) or self.app_name,
             environment=_env("IRONCLAWSKILL_ENV", self.environment) or self.environment,
-            default_provider=(
-                _env("IRONCLAWSKILL_DEFAULT_PROVIDER", self.default_provider) or self.default_provider
-            ).lower(),
+            default_provider=(_env("IRONCLAWSKILL_DEFAULT_PROVIDER", self.default_provider) or self.default_provider).lower(),
             fail_closed=_env_bool("IRONCLAWSKILL_FAIL_CLOSED", self.fail_closed),
             telemetry_enabled=_env_bool(
                 "IRONCLAWSKILL_TELEMETRY_ENABLED",

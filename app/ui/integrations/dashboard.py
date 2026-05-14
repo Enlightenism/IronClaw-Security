@@ -232,7 +232,7 @@ def build_integration_dashboard_view(
                     "requested_by": requested_by,
                     "integration_type": getattr(record, "integration_type", "unknown"),
                 },
-            )
+            ),
         )
 
     items.sort(
@@ -242,7 +242,7 @@ def build_integration_dashboard_view(
             -item.error_count_1h,
             item.platform,
             item.slug,
-        )
+        ),
     )
 
     kpis = [

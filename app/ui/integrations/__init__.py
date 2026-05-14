@@ -12,12 +12,12 @@ from app.ui.integrations.settings import (
 )
 
 __all__ = [
-    "router",
     "IntegrationProviderView",
-    "IntegrationSettingsItem",
-    "IntegrationSettingsSummary",
     "IntegrationSettingsActions",
+    "IntegrationSettingsItem",
     "IntegrationSettingsResponse",
+    "IntegrationSettingsSummary",
     "get_integration_settings",
     "read_ui_integration_settings",
+    "router",
 ]

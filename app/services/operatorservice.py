@@ -102,7 +102,16 @@ class OperatorService:
                 metadata=_stringify_metadata(metadata),
             )
 
-        if not any(role in principal.roles for role in ("platform_admin", "system_admin", "operator_admin", "operator_analyst", "auditor")):
+        if not any(
+            role in principal.roles
+            for role in (
+                "platform_admin",
+                "system_admin",
+                "operator_admin",
+                "operator_analyst",
+                "auditor",
+            )
+        ):
             return OperatorAccessResult(
                 allowed=False,
                 scope="operator_auth",

@@ -142,7 +142,7 @@ def test_list_integrations_supports_status_platform_and_capability_filters():
             name="audit_export",
             enabled=False,
             details="Disabled audit export capability.",
-        )
+        ),
     ]
 
     register_integration(registry, active_record)
@@ -157,10 +157,7 @@ def test_list_integrations_supports_status_platform_and_capability_filters():
 
     capability_results = list_integrations(registry, capability="tool_interception")
     assert any(record.integration_id == "integration-slack-active" for record in capability_results)
-    assert all(
-        any(cap.name == "tool_interception" and cap.enabled for cap in record.capabilities)
-        for record in capability_results
-    )
+    assert all(any(cap.name == "tool_interception" and cap.enabled for cap in record.capabilities) for record in capability_results)
 
 
 def test_update_integration_status_changes_record_and_registry_timestamp():

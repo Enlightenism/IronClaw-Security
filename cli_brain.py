@@ -43,7 +43,7 @@ def call_brain_decision(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="IronClaw-Security brain CLI — scan text and get a security decision."
+        description="IronClaw-Security brain CLI — scan text and get a security decision.",
     )
     src = parser.add_mutually_exclusive_group(required=True)
     src.add_argument(
@@ -162,11 +162,7 @@ def main() -> None:
     patterns_str = ",".join(matched_patterns) if matched_patterns else "none"
 
     print(
-        f"ACTION={final_action} "
-        f"CONFIDENCE={confidence:.2f} "
-        f"RISK_SCORE={risk_score} "
-        f"LANE={sandbox_lane} "
-        f"PATTERNS={patterns_str}"
+        f"ACTION={final_action} CONFIDENCE={confidence:.2f} RISK_SCORE={risk_score} LANE={sandbox_lane} PATTERNS={patterns_str}",
     )
     if reason:
         print(f"REASON: {reason}")

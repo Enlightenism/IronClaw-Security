@@ -427,13 +427,13 @@ def update_incident_status(
 
 
 __all__ = [
+    "_INCIDENTS",
     "Incident",
     "IncidentDetailResponse",
     "IncidentListResponse",
     "IncidentStatus",
     "IncidentStatusPatch",
     "IncidentView",
-    "_INCIDENTS",
     "router",
     "seed_demo_incidents",
 ]

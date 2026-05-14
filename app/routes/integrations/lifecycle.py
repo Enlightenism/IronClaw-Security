@@ -184,14 +184,13 @@ def _build_transition_view(record: Any, fallback_index: int) -> IntegrationTrans
     data = _coerce_mapping(record)
 
     transition_id = str(
-        _extract_value(data, "transition_id", "id", "event_id", "sequence")
-        or f"transition-{fallback_index}"
+        _extract_value(data, "transition_id", "id", "event_id", "sequence") or f"transition-{fallback_index}",
     )
     from_state = str(_extract_value(data, "from_state", "previous_state") or "unknown")
     to_state = str(_extract_value(data, "to_state", "next_state", "state") or "unknown")
     action = str(_extract_value(data, "action", "event", "reason") or "unknown")
     status_value = _normalize_transition_status(
-        _extract_value(data, "status", "result", "outcome")
+        _extract_value(data, "status", "result", "outcome"),
     )
     detail = str(_extract_value(data, "detail", "details", "message", "description") or "")
     timestamp_value = _extract_value(data, "timestamp", "occurred_at", "created_at")
@@ -224,10 +223,7 @@ def _build_state_machine_response(
     transitions_payload = _extract_value(data, "transitions", "history", "events") or []
 
     state_view = _build_state_view(state_payload, environment=environment)
-    transitions = [
-        _build_transition_view(item, index + 1)
-        for index, item in enumerate(transitions_payload)
-    ]
+    transitions = [_build_transition_view(item, index + 1) for index, item in enumerate(transitions_payload)]
 
     return IntegrationStateMachineResponse(
         status="ok",
@@ -377,4 +373,3 @@ def change_integration_state(
         result=lookup,
         environment=effective_request.environment,
     )
-}

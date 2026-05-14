@@ -49,8 +49,7 @@ def analyze_text(
     client_id: str | None = None,
     session_id: str | None = None,
 ) -> GuardedText:
-    """
-    Run the Ironclaw scan for the given context and return a structured
+    """Run the Ironclaw scan for the given context and return a structured
     decision the agent / UI can act on.
 
     Policy:
@@ -108,8 +107,7 @@ def analyze_prompt_bundle(
     client_id: str | None = None,
     session_id: str | None = None,
 ) -> PromptGuardBundle:
-    """
-    Guard multiple text sources that may participate in one agent turn.
+    """Guard multiple text sources that may participate in one agent turn.
 
     This is useful for internal routing where you want one consolidated
     decision across:
@@ -130,26 +128,10 @@ def analyze_prompt_bundle(
         True if the highest_verdict is 'warn' or 'quarantine'
         (we do not warn for 'block' because the action must not proceed anyway)
     """
-    guarded_user_prompt = (
-        analyze_text("user_prompt", user_prompt, client_id=client_id, session_id=session_id)
-        if user_prompt is not None
-        else None
-    )
-    guarded_retrieved_doc = (
-        analyze_text("retrieved_doc", retrieved_doc, client_id=client_id, session_id=session_id)
-        if retrieved_doc is not None
-        else None
-    )
-    guarded_tool_output = (
-        analyze_text("tool_output", tool_output, client_id=client_id, session_id=session_id)
-        if tool_output is not None
-        else None
-    )
-    guarded_model_output = (
-        analyze_text("model_output", model_output, client_id=client_id, session_id=session_id)
-        if model_output is not None
-        else None
-    )
+    guarded_user_prompt = analyze_text("user_prompt", user_prompt, client_id=client_id, session_id=session_id) if user_prompt is not None else None
+    guarded_retrieved_doc = analyze_text("retrieved_doc", retrieved_doc, client_id=client_id, session_id=session_id) if retrieved_doc is not None else None
+    guarded_tool_output = analyze_text("tool_output", tool_output, client_id=client_id, session_id=session_id) if tool_output is not None else None
+    guarded_model_output = analyze_text("model_output", model_output, client_id=client_id, session_id=session_id) if model_output is not None else None
 
     results: list[GuardedText] = [
         item

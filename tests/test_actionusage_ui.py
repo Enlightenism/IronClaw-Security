@@ -46,10 +46,7 @@ def test_build_action_usage_detail_view_formats_rows() -> None:
     assert any(row.key == "status" and row.tone == "good" for row in view.rows)
     assert any(row.key == "remaining_units" and row.tone == "warning" for row in view.rows)
     assert any(row.key == "flags" and row.value == "prepaid, active" for row in view.rows)
-    assert any(
-        row.key == "context" and row.value == "region=mx, tier=edge"
-        for row in view.rows
-    )
+    assert any(row.key == "context" and row.value == "region=mx, tier=edge" for row in view.rows)
 
 
 def test_build_action_usage_test_view_combines_summary_detail_and_checks() -> None:

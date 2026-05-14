@@ -170,7 +170,7 @@ if __name__ == "__main__":
 
     from app.orchestrator.agent_registry import discover_agents
 
-    registry = discover_agents(Path(".").resolve())
+    registry = discover_agents(Path().resolve())
     if not registry.items:
         print({"error": "No agents discovered."})
     else:

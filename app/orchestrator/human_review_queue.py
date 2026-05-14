@@ -209,7 +209,7 @@ def assign_packet(
                     created_at=packet.created_at,
                     updated_at=datetime.now(UTC).isoformat(),
                     metadata=packet.metadata,
-                )
+                ),
             )
         else:
             updated_packets.append(packet)
@@ -263,7 +263,7 @@ def apply_review_decision(
                         "last_decision": decision,
                         "last_rationale": rationale,
                     },
-                )
+                ),
             )
         else:
             updated_packets.append(packet)
@@ -294,11 +294,7 @@ def expire_overdue_packets(queue: ReviewQueueSnapshot, *, now: str | None = None
     updated_packets: list[ReviewPacket] = []
 
     for packet in queue.packets:
-        if (
-            packet.status in {"pending", "in_review"}
-            and packet.due_at is not None
-            and datetime.fromisoformat(packet.due_at) < reference
-        ):
+        if packet.status in {"pending", "in_review"} and packet.due_at is not None and datetime.fromisoformat(packet.due_at) < reference:
             updated_packets.append(
                 ReviewPacket(
                     packet_id=packet.packet_id,
@@ -314,7 +310,7 @@ def expire_overdue_packets(queue: ReviewQueueSnapshot, *, now: str | None = None
                     created_at=packet.created_at,
                     updated_at=datetime.now(UTC).isoformat(),
                     metadata=packet.metadata,
-                )
+                ),
             )
         else:
             updated_packets.append(packet)
@@ -363,7 +359,7 @@ def ingest_gate_outcome(
                         "gate_decision": outcome.decision,
                         "gate_status": outcome.status,
                     },
-                )
+                ),
             )
         else:
             updated_packets.append(packet)

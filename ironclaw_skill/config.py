@@ -210,32 +210,18 @@ def load_skill_config(
     )
 
     policy_mode = _coerce_policy_mode(
-        env.get("IRONCLAW_POLICY_MODE")
-        or skill_payload.get("default_policy_mode")
-        or config_payload.get("policy_mode"),
+        env.get("IRONCLAW_POLICY_MODE") or skill_payload.get("default_policy_mode") or config_payload.get("policy_mode"),
         default=DEFAULT_POLICY_MODE,
     )
 
     timeout_seconds = _coerce_timeout(
-        env.get("IRONCLAW_TIMEOUT_SECONDS")
-        or skill_payload.get("default_timeout_seconds")
-        or config_payload.get("timeout_seconds"),
+        env.get("IRONCLAW_TIMEOUT_SECONDS") or skill_payload.get("default_timeout_seconds") or config_payload.get("timeout_seconds"),
         default=DEFAULT_TIMEOUT_SECONDS,
     )
 
-    backup_target = (
-        _normalize_optional_text(env.get("IRONCLAW_BACKUP_TARGET_NAME"))
-        or _normalize_optional_text(env.get("IRONCLAW_BACKUP_TARGET"))
-        or _normalize_optional_text(config_payload.get("backup_target"))
-        or DEFAULT_BACKUP_TARGET
-    )
+    backup_target = _normalize_optional_text(env.get("IRONCLAW_BACKUP_TARGET_NAME")) or _normalize_optional_text(env.get("IRONCLAW_BACKUP_TARGET")) or _normalize_optional_text(config_payload.get("backup_target")) or DEFAULT_BACKUP_TARGET
 
-    restore_target = (
-        _normalize_optional_text(env.get("IRONCLAW_RESTORE_TARGET_NAME"))
-        or _normalize_optional_text(env.get("IRONCLAW_RESTORE_TARGET"))
-        or _normalize_optional_text(config_payload.get("restore_target"))
-        or DEFAULT_RESTORE_TARGET
-    )
+    restore_target = _normalize_optional_text(env.get("IRONCLAW_RESTORE_TARGET_NAME")) or _normalize_optional_text(env.get("IRONCLAW_RESTORE_TARGET")) or _normalize_optional_text(config_payload.get("restore_target")) or DEFAULT_RESTORE_TARGET
 
     skill_enabled = _coerce_bool(
         env.get("IRONCLAW_SKILL_ENABLED", skill_payload.get("enabled")),
@@ -243,15 +229,10 @@ def load_skill_config(
     )
 
     provider_targets = _coerce_provider_targets(
-        env.get("IRONCLAW_PROVIDER_TARGETS") or skill_payload.get("provider_targets")
+        env.get("IRONCLAW_PROVIDER_TARGETS") or skill_payload.get("provider_targets"),
     )
 
-    resolved_environment = (
-        _normalize_optional_text(environment)
-        or _normalize_optional_text(env.get("IRONCLAW_ENV"))
-        or _normalize_optional_text(env.get("IRONCLAW_MODE"))
-        or "development"
-    )
+    resolved_environment = _normalize_optional_text(environment) or _normalize_optional_text(env.get("IRONCLAW_ENV")) or _normalize_optional_text(env.get("IRONCLAW_MODE")) or "development"
 
     return IronClawSkillConfig(
         environment=resolved_environment,

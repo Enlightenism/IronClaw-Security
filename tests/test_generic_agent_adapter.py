@@ -54,7 +54,7 @@ def test_generic_agent_adapter_execute_returns_guarded_result():
                 "prompt": "Summarize the repository status.",
                 "tool_name": "http.post",
             },
-        )
+        ),
     )
 
     assert result.adapter_slug == "generic-agent"

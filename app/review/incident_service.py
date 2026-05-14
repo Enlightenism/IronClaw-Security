@@ -72,16 +72,10 @@ def create_incident_record(payload: dict[str, Any]) -> IncidentRecord:
     incident_id = str(payload.get("incident_id") or _build_incident_id(source, session_id, created_at))
 
     raw_patterns = payload.get("matched_patterns") or []
-    matched_patterns = (
-        [str(item) for item in raw_patterns] if isinstance(raw_patterns, list) else [str(raw_patterns)]
-    )
+    matched_patterns = [str(item) for item in raw_patterns] if isinstance(raw_patterns, list) else [str(raw_patterns)]
 
     raw_failed_checks = payload.get("failed_checks") or []
-    failed_checks = (
-        [str(item) for item in raw_failed_checks]
-        if isinstance(raw_failed_checks, list)
-        else [str(raw_failed_checks)]
-    )
+    failed_checks = [str(item) for item in raw_failed_checks] if isinstance(raw_failed_checks, list) else [str(raw_failed_checks)]
 
     return IncidentRecord(
         incident_id=incident_id,
@@ -108,10 +102,10 @@ def summarize_incident_record(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 __all__ = [
-    "DEFAULT_INCIDENT_STATUS",
-    "DEFAULT_INCIDENT_SEVERITY",
-    "ESCALATED_INCIDENT_SEVERITY",
     "CRITICAL_INCIDENT_SEVERITY",
+    "DEFAULT_INCIDENT_SEVERITY",
+    "DEFAULT_INCIDENT_STATUS",
+    "ESCALATED_INCIDENT_SEVERITY",
     "IncidentRecord",
     "create_incident_record",
     "summarize_incident_record",

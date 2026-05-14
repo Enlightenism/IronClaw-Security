@@ -50,11 +50,7 @@ def _as_dict(value: Any) -> dict[str, Any]:
         if isinstance(dumped, Mapping):
             return dict(dumped)
     if hasattr(value, "__dict__"):
-        return {
-            key: item
-            for key, item in vars(value).items()
-            if not key.startswith("_") and not callable(item)
-        }
+        return {key: item for key, item in vars(value).items() if not key.startswith("_") and not callable(item)}
     raise TypeError("runtime session payload must be a mapping-like object")
 
 
@@ -185,84 +181,31 @@ class RuntimeSessionStore:
         base = _as_dict(payload)
         base.update({key: value for key, value in extra.items() if value is not None})
 
-        resolved_session_id = (
-            _text(session_id)
-            or _text(base.get("session_id"))
-            or _text(base.get("id"))
-            or str(uuid4())
-        )
-        resolved_request_id = (
-            _text(request_id)
-            or _text(base.get("request_id"))
-            or _text(getattr(request, "request_id", None))
-        )
-        resolved_org_id = (
-            _text(organization_id)
-            or _text(base.get("organization_id"))
-            or _text(base.get("org_id"))
-        )
-        resolved_owner_id = (
-            _text(owner_id)
-            or _text(base.get("owner_id"))
-        )
+        resolved_session_id = _text(session_id) or _text(base.get("session_id")) or _text(base.get("id")) or str(uuid4())
+        resolved_request_id = _text(request_id) or _text(base.get("request_id")) or _text(getattr(request, "request_id", None))
+        resolved_org_id = _text(organization_id) or _text(base.get("organization_id")) or _text(base.get("org_id"))
+        resolved_owner_id = _text(owner_id) or _text(base.get("owner_id"))
 
         now_iso = _utc_now_iso()
         started_iso = started_at or _text(base.get("started_at")) or now_iso
         last_updated_iso = last_updated_at or _text(base.get("last_updated_at")) or now_iso
         completed_iso = completed_at or _text(base.get("completed_at"))
 
-        resolved_status = (
-            _text(status)
-            or _text(base.get("status"))
-            or "pending"
-        )
+        resolved_status = _text(status) or _text(base.get("status")) or "pending"
 
-        resolved_total_steps = (
-            total_steps
-            if total_steps is not None
-            else base.get("total_steps")
-            if isinstance(base.get("total_steps"), int)
-            else None
-        )
+        resolved_total_steps = total_steps if total_steps is not None else base.get("total_steps") if isinstance(base.get("total_steps"), int) else None
 
-        resolved_steps_completed = (
-            steps_completed
-            if steps_completed is not None
-            else base.get("steps_completed")
-            if isinstance(base.get("steps_completed"), int)
-            else 0
-        )
+        resolved_steps_completed = steps_completed if steps_completed is not None else base.get("steps_completed") if isinstance(base.get("steps_completed"), int) else 0
 
-        resolved_trace_id = (
-            _text(trace_id)
-            or _text(base.get("trace_id"))
-        )
+        resolved_trace_id = _text(trace_id) or _text(base.get("trace_id"))
 
-        resolved_review_id = (
-            _text(review_id)
-            or _text(base.get("review_id"))
-        )
+        resolved_review_id = _text(review_id) or _text(base.get("review_id"))
 
-        resolved_resume_from_checkpoint_id = (
-            _text(resume_from_checkpoint_id)
-            or _text(base.get("resume_from_checkpoint_id"))
-        )
+        resolved_resume_from_checkpoint_id = _text(resume_from_checkpoint_id) or _text(base.get("resume_from_checkpoint_id"))
 
-        resolved_resume_from_step_index = (
-            resume_from_step_index
-            if resume_from_step_index is not None
-            else base.get("resume_from_step_index")
-            if isinstance(base.get("resume_from_step_index"), int)
-            else None
-        )
+        resolved_resume_from_step_index = resume_from_step_index if resume_from_step_index is not None else base.get("resume_from_step_index") if isinstance(base.get("resume_from_step_index"), int) else None
 
-        resolved_resume_count = (
-            resume_count
-            if resume_count is not None
-            else base.get("resume_count")
-            if isinstance(base.get("resume_count"), int)
-            else 0
-        )
+        resolved_resume_count = resume_count if resume_count is not None else base.get("resume_count") if isinstance(base.get("resume_count"), int) else 0
 
         resolved_metadata = _merge_metadata(base.get("metadata"), metadata)
         resolved_checkpoints = _as_list(base.get("checkpoints"))
@@ -290,21 +233,9 @@ class RuntimeSessionStore:
             "resume_count": resolved_resume_count,
             "metadata": resolved_metadata,
             "checkpoints": resolved_checkpoints,
-            "plan": (
-                resolved_plan.as_dict()
-                if hasattr(resolved_plan, "as_dict")
-                else _as_dict(resolved_plan) if resolved_plan is not None else None
-            ),
-            "request": (
-                resolved_request.as_dict()
-                if hasattr(resolved_request, "as_dict")
-                else _as_dict(resolved_request) if resolved_request is not None else None
-            ),
-            "result": (
-                resolved_result.as_dict()
-                if hasattr(resolved_result, "as_dict")
-                else _as_dict(resolved_result) if resolved_result is not None else None
-            ),
+            "plan": (resolved_plan.as_dict() if hasattr(resolved_plan, "as_dict") else _as_dict(resolved_plan) if resolved_plan is not None else None),
+            "request": (resolved_request.as_dict() if hasattr(resolved_request, "as_dict") else _as_dict(resolved_request) if resolved_request is not None else None),
+            "result": (resolved_result.as_dict() if hasattr(resolved_result, "as_dict") else _as_dict(resolved_result) if resolved_result is not None else None),
         }
 
     def create_session(

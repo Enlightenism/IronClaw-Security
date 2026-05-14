@@ -101,7 +101,7 @@ def _normalize_reasons(items: Any) -> list[ExecutionReason]:
                 label="Execution reason",
                 details=str(items),
                 score=0,
-            )
+            ),
         ]
 
     if not isinstance(items, Iterable):
@@ -145,38 +145,30 @@ def _extract_summary_from_runtime_result(runtimeresult: Any) -> dict[str, Any]:
 def summarizeexecutionreceipt(receipt: Any, runtimeresult: Any) -> dict[str, Any]:
     summary = _extract_summary_from_runtime_result(runtimeresult)
 
-    executionstate = (
-        summary.get("executionstate")
-        or getattr(receipt, "state", None)
-        or "executed"
-    )
+    executionstate = summary.get("executionstate") or getattr(receipt, "state", None) or "executed"
     responseaction = summary.get("responseaction") or getattr(
-        receipt, "responseaction", None
+        receipt,
+        "responseaction",
+        None,
     )
     responsestatus = summary.get("responsestatus") or getattr(
-        receipt, "responsestatus", None
+        receipt,
+        "responsestatus",
+        None,
     )
-    policyverdict = (
-        summary.get("policyverdict")
-        or getattr(receipt, "policyverdict", None)
-        or "allow"
-    )
+    policyverdict = summary.get("policyverdict") or getattr(receipt, "policyverdict", None) or "allow"
     riskscore = _safe_int(summary.get("riskscore", getattr(receipt, "riskscore", 0)))
     shouldexecute = bool(
-        summary.get("shouldexecute", getattr(receipt, "shouldexecute", False))
+        summary.get("shouldexecute", getattr(receipt, "shouldexecute", False)),
     )
     haltedbyboundary = bool(
-        summary.get("haltedbyboundary", getattr(receipt, "haltedbyboundary", False))
+        summary.get("haltedbyboundary", getattr(receipt, "haltedbyboundary", False)),
     )
     reviewitemid = summary.get("reviewitemid", getattr(receipt, "reviewitemid", None))
     executorname = summary.get("executorname", getattr(receipt, "executorname", None))
     executorresult = summary.get("executorresult")
     reason = summary.get("reason") or getattr(receipt, "reason", None)
-    filepath = (
-        summary.get("filepath")
-        or getattr(receipt, "filepath", None)
-        or DEFAULT_FILEPATH
-    )
+    filepath = summary.get("filepath") or getattr(receipt, "filepath", None) or DEFAULT_FILEPATH
     promptinjection = _normalize_mapping(summary.get("promptinjection"))
 
     if executorresult is None and isinstance(runtimeresult, Mapping) and "summary" not in runtimeresult:
@@ -184,9 +176,7 @@ def summarizeexecutionreceipt(receipt: Any, runtimeresult: Any) -> dict[str, Any
 
     normalized_executor_result = None
     if executorresult is not None:
-        normalized_executor_result = _normalize_mapping(executorresult) or (
-            executorresult if isinstance(executorresult, dict) else {"value": executorresult}
-        )
+        normalized_executor_result = _normalize_mapping(executorresult) or (executorresult if isinstance(executorresult, dict) else {"value": executorresult})
 
     if responseaction is None:
         if executionstate == "denied":
@@ -221,7 +211,7 @@ def summarizeexecutionreceipt(receipt: Any, runtimeresult: Any) -> dict[str, Any
         "executorresult": normalized_executor_result,
         "reason": None if reason is None else str(reason),
         "reasons": _normalize_reasons(
-            summary.get("reasons") or getattr(receipt, "reasons", [])
+            summary.get("reasons") or getattr(receipt, "reasons", []),
         ),
         "filepath": str(filepath) if filepath is not None else None,
         "promptinjection": promptinjection,

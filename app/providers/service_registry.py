@@ -7,20 +7,20 @@ from app.clients.release_policy_client import ReleasePolicyClient
 
 @dataclass
 class ServiceRegistry:
-    """
-    Lightweight registry/factory for shared service clients.
+    """Lightweight registry/factory for shared service clients.
 
     This keeps construction in one place so the rest of the app can
     depend on stable, lazily‑created instances.
     """
 
     _release_policy_client: ReleasePolicyClient | None = field(
-        default=None, init=False, repr=False
+        default=None,
+        init=False,
+        repr=False,
     )
 
     def get_release_policy_client(self) -> ReleasePolicyClient:
-        """
-        Return a singleton ReleasePolicyClient instance.
+        """Return a singleton ReleasePolicyClient instance.
 
         The client is created lazily on first access to avoid import
         cycles during application startup.
@@ -31,8 +31,7 @@ class ServiceRegistry:
 
 
 def build_service_registry() -> ServiceRegistry:
-    """
-    Factory for a ServiceRegistry instance.
+    """Factory for a ServiceRegistry instance.
 
     Hook this into your app startup so other modules can import a
     single registry and retrieve shared services as needed.

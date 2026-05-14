@@ -30,11 +30,5 @@ def test_ui_docs_quickstart_contains_core_fields() -> None:
     assert data
 
     assert any(k in data for k in ("title", "headline", "summary", "page_title"))
-    assert any(
-        k in data
-        for k in ("steps", "items", "sections", "quickstart", "getting_started")
-    )
-    assert any(
-        k in data
-        for k in ("actions", "links", "resources", "commands", "next_steps")
-    )
+    assert any(k in data for k in ("steps", "items", "sections", "quickstart", "getting_started"))
+    assert any(k in data for k in ("actions", "links", "resources", "commands", "next_steps"))

@@ -153,7 +153,7 @@ def test_usage_reports_numeric_fields_are_non_negative_when_present() -> None:
         ):
             value = _number(payload, *keys)
             if value is not None:
-                assert value >= Decimal("0")
+                assert value >= Decimal(0)
 
 
 def test_usage_reports_routes_are_list_or_dict_when_present() -> None:
@@ -177,7 +177,7 @@ def test_usage_reports_average_is_consistent_with_totals_when_present() -> None:
 
         if total_requests is not None and total_units is not None and average is not None:
             if total_requests == 0:
-                assert average == Decimal("0")
+                assert average == Decimal(0)
             else:
                 assert average == total_units / total_requests
 

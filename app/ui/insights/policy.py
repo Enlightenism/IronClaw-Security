@@ -126,18 +126,12 @@ def _safe_str(value: object, default: str) -> str:
 
 def _build_verdict_counts(records: list[dict]) -> list[PolicyVerdictCount]:
     counts = Counter(_safe_str(record.get("policyverdict"), "unknown") for record in records)
-    return [
-        PolicyVerdictCount(policyverdict=verdict, count=count)
-        for verdict, count in sorted(counts.items())
-    ]
+    return [PolicyVerdictCount(policyverdict=verdict, count=count) for verdict, count in sorted(counts.items())]
 
 
 def _build_executionstate_counts(records: list[dict]) -> list[ExecutionStateCount]:
     counts = Counter(_safe_str(record.get("executionstate"), "unknown") for record in records)
-    return [
-        ExecutionStateCount(executionstate=state, count=count)
-        for state, count in sorted(counts.items())
-    ]
+    return [ExecutionStateCount(executionstate=state, count=count) for state, count in sorted(counts.items())]
 
 
 def _build_risk_trend(records: list[dict]) -> list[RiskTrendPoint]:
@@ -157,7 +151,7 @@ def _build_risk_trend(records: list[dict]) -> list[RiskTrendPoint]:
                 timestamp=bucket_key,
                 average_riskscore=round(average, 2),
                 totalexecutions=len(scores),
-            )
+            ),
         )
     return points
 
@@ -178,10 +172,7 @@ def _build_common_reasons(records: list[dict]) -> list[ReasonLabelCount]:
             counts[(source, label)] += 1
 
     ordered = sorted(counts.items(), key=lambda item: (-item[1], item[0][0], item[0][1]))
-    return [
-        ReasonLabelCount(source=source, label=label, count=count)
-        for (source, label), count in ordered
-    ]
+    return [ReasonLabelCount(source=source, label=label, count=count) for (source, label), count in ordered]
 
 
 @router.get("/policy", response_model=PolicyInsightsResponse)

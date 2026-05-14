@@ -61,7 +61,7 @@ def _build_package_items() -> list[BillingPackagesItemView]:
                     "units_display": f"{included_units:,} units",
                     "effective_price_per_1k_units": round((price_usd / included_units) * 1000, 4),
                 },
-            )
+            ),
         )
 
     return items

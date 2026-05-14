@@ -101,7 +101,7 @@ def test_allow_safe_command_request():
             command="echo hello",
             cwd="/workspace",
             metadata={"request_id": "req-1"},
-        )
+        ),
     )
 
     assert decision.allowed is True
@@ -130,7 +130,7 @@ def test_normalizes_request_fields_before_evaluation():
             cwd=" /tmp/run ",
             environment_scope="  sandbox  ",
             metadata={"trace": "abc"},
-        )
+        ),
     )
 
     assert decision.tool_name == "bash"
@@ -148,7 +148,7 @@ def test_missing_tool_name_quarantines():
         request=ToolCallRequest(
             tool_name="",
             command=None,
-        )
+        ),
     )
 
     assert decision.allowed is False
@@ -168,7 +168,7 @@ def test_non_sandbox_scope_triggers_review_or_block():
             allowed=True,
             risk_delta=0,
             matched_rules=["commandsupervisor:allow"],
-        )
+        ),
     )
 
     decision = guard.evaluate(
@@ -176,7 +176,7 @@ def test_non_sandbox_scope_triggers_review_or_block():
             tool_name="bash",
             command="echo hi",
             environment_scope="host",
-        )
+        ),
     )
 
     assert decision.verdict in {"review", "block", "quarantine"}
@@ -196,7 +196,7 @@ def test_missing_command_for_command_tool_raises_risk():
         request=ToolCallRequest(
             tool_name="bash",
             command=None,
-        )
+        ),
     )
 
     assert decision.verdict in {"review", "block", "quarantine"}
@@ -211,7 +211,7 @@ def test_missing_network_url_for_network_tool_raises_risk():
         request=ToolCallRequest(
             tool_name="fetch",
             network_url=None,
-        )
+        ),
     )
 
     assert decision.verdict in {"review", "block", "quarantine"}
@@ -225,7 +225,7 @@ def test_missing_artifact_paths_for_file_tool_raises_risk():
         request=ToolCallRequest(
             tool_name="return_file",
             artifact_paths=[],
-        )
+        ),
     )
 
     assert decision.verdict in {"review", "block", "quarantine"}
@@ -248,7 +248,7 @@ def test_network_request_invokes_network_guard():
             network_url="https://api.example.com/v1/status",
             network_method="POST",
             metadata={"request_id": "req-2"},
-        )
+        ),
     )
 
     assert decision.allowed is True
@@ -287,7 +287,7 @@ def test_file_request_invokes_file_return_guard_for_each_artifact():
             artifact_paths=["artifacts/one.txt", "artifacts/two.txt"],
             content="safe output",
             metadata={"request_id": "req-3"},
-        )
+        ),
     )
 
     assert decision.allowed is True
@@ -314,7 +314,7 @@ def test_command_policy_block_forces_block_verdict():
         request=ToolCallRequest(
             tool_name="bash",
             command="rm -rf /",
-        )
+        ),
     )
 
     assert decision.allowed is False
@@ -338,7 +338,7 @@ def test_network_policy_quarantine_forces_quarantine_verdict():
         request=ToolCallRequest(
             tool_name="fetch",
             network_url="http://169.254.169.254/latest/meta-data",
-        )
+        ),
     )
 
     assert decision.allowed is False
@@ -361,7 +361,7 @@ def test_risk_threshold_alone_can_trigger_review():
         request=ToolCallRequest(
             tool_name="powershell",
             command="Get-Process",
-        )
+        ),
     )
 
     assert decision.verdict == "review"
@@ -377,7 +377,7 @@ def test_risk_threshold_alone_can_trigger_block():
         request=ToolCallRequest(
             tool_name="powershell",
             environment_scope="host",
-        )
+        ),
     )
 
     assert decision.allowed is False
@@ -394,7 +394,7 @@ def test_risk_threshold_alone_can_trigger_quarantine():
         request=ToolCallRequest(
             tool_name="",
             environment_scope="host",
-        )
+        ),
     )
 
     assert decision.allowed is False
@@ -416,7 +416,7 @@ def test_allow_helper_matches_decision():
         request=ToolCallRequest(
             tool_name="bash",
             command="echo ok",
-        )
+        ),
     )
 
     assert allowed is True
@@ -436,7 +436,7 @@ def test_as_dict_contains_expected_shapes():
         request=ToolCallRequest(
             tool_name="bash",
             command="echo ok",
-        )
+        ),
     )
     body = decision.as_dict()
 
@@ -493,14 +493,10 @@ def test_reasons_and_rules_are_deduplicated():
         request=ToolCallRequest(
             tool_name="bash",
             command="echo duplicate",
-        )
+        ),
     )
 
-    repeated = [
-        item
-        for item in decision.reasons
-        if item["label"] == "Repeated" and item["details"] == "Same reason"
-    ]
+    repeated = [item for item in decision.reasons if item["label"] == "Repeated" and item["details"] == "Same reason"]
     assert len(repeated) == 1
     assert decision.matched_rules.count("repeat_rule") == 1
 
@@ -527,7 +523,7 @@ def test_initialize_builder_uses_custom_high_risk_tools():
         request=ToolCallRequest(
             tool_name="custom_exec",
             command="do-something",
-        )
+        ),
     )
 
     assert "toolcallguard:high_risk:custom_exec" in decision.matched_rules

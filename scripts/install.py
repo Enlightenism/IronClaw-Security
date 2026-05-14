@@ -79,7 +79,7 @@ def _upgrade_packaging_tools(venv_python: Path) -> None:
             "pip",
             "setuptools",
             "wheel",
-        ]
+        ],
     )
 
 
@@ -96,7 +96,7 @@ def _install_requirements(venv_python: Path) -> None:
             "--no-input",
             "--requirement",
             str(REQUIREMENTS_FILE),
-        ]
+        ],
     )
 
 
@@ -118,11 +118,7 @@ def _verify_install(venv_python: Path) -> None:
 
 
 def _print_next_steps(venv_python: Path) -> None:
-    activate_hint = (
-        r".venv\Scripts\activate"
-        if os.name == "nt"
-        else "source .venv/bin/activate"
-    )
+    activate_hint = r".venv\Scripts\activate" if os.name == "nt" else "source .venv/bin/activate"
     _print("Install completed successfully")
     _print(f"Venv python: {venv_python}")
     _print(f"Activate with: {activate_hint}")
@@ -132,6 +128,7 @@ def _print_next_steps(venv_python: Path) -> None:
 # ---------------------------------------------------------------------------
 # Installer API — required by tests/test_installer_flow.py
 # ---------------------------------------------------------------------------
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(

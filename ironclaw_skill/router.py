@@ -94,7 +94,7 @@ class IronClawSkillRouter:
                         source="runtime",
                         label="Router handler exception",
                         details=str(exc),
-                    )
+                    ),
                 ],
                 raw_result={"operation": operation},
             )
@@ -110,9 +110,12 @@ class IronClawSkillRouter:
                         source="runtime",
                         label="Operation mismatch",
                         details=f"Expected {operation}, got {response.operation}",
-                    )
+                    ),
                 ],
-                raw_result={"expected_operation": operation, "actual_operation": response.operation},
+                raw_result={
+                    "expected_operation": operation,
+                    "actual_operation": response.operation,
+                },
             )
 
         return response
@@ -147,7 +150,7 @@ class IronClawSkillRouter:
                     label="Placeholder scan handler",
                     details="The skill router accepted the scan request, but the downstream IronClaw scan runtime is not connected yet.",
                     score=0.25,
-                )
+                ),
             ],
             raw_result=details,
         )
@@ -174,7 +177,7 @@ class IronClawSkillRouter:
                     label="Placeholder action policy handler",
                     details="The action was normalized successfully, but final policy evaluation is still pending runtime integration.",
                     score=min(risk_score / 100.0, 1.0),
-                )
+                ),
             ],
             raw_result={
                 "action_type": request.input.action_type,
@@ -217,7 +220,7 @@ class IronClawSkillRouter:
                     label="Placeholder decision logic",
                     details="This decision is provisional until the full IronClaw runtime and policy engine are connected.",
                     score=min(risk_score / 100.0, 1.0),
-                )
+                ),
             ],
             raw_result={
                 "action_type": request.input.action_type,
@@ -246,7 +249,7 @@ class IronClawSkillRouter:
                     label="Execution runtime unavailable",
                     details="The router intentionally blocks execution until IronClaw guarded execution is connected.",
                     score=0.85,
-                )
+                ),
             ],
             raw_result={
                 "action_type": request.input.action.action_type,

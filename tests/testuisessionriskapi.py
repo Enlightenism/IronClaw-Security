@@ -30,11 +30,5 @@ def test_ui_session_risk_contains_core_fields() -> None:
     assert payload
 
     assert any(key in payload for key in ("title", "headline", "page_title", "summary"))
-    assert any(
-        key in payload
-        for key in ("session", "sessions", "risk", "risk_summary", "assessment")
-    )
-    assert any(
-        key in payload
-        for key in ("score", "level", "signals", "factors", "recommendations", "actions")
-    )
+    assert any(key in payload for key in ("session", "sessions", "risk", "risk_summary", "assessment"))
+    assert any(key in payload for key in ("score", "level", "signals", "factors", "recommendations", "actions"))

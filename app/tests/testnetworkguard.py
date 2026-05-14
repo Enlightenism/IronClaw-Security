@@ -59,7 +59,7 @@ def test_network_guard_allows_safe_outbound_request() -> None:
             allowed=True,
             reasons=[{"label": "approved-destination"}],
             risk_delta=4,
-        )
+        ),
     )
     guard = build_network_guard(policy_engine=policy_engine)
 
@@ -87,7 +87,7 @@ def test_network_guard_reviews_unknown_destination() -> None:
             should_review=True,
             reasons=[{"label": "unknown-destination"}],
             risk_delta=42,
-        )
+        ),
     )
     guard = build_network_guard(policy_engine=policy_engine)
 
@@ -114,7 +114,7 @@ def test_network_guard_blocks_sensitive_exfiltration_attempt() -> None:
             should_block=True,
             reasons=[{"label": "sensitive-exfiltration"}],
             risk_delta=96,
-        )
+        ),
     )
     guard = build_network_guard(policy_engine=policy_engine)
 
@@ -142,7 +142,7 @@ def test_network_guard_quarantines_known_malicious_destination() -> None:
             should_quarantine=True,
             reasons=[{"label": "malicious-destination"}],
             risk_delta=100,
-        )
+        ),
     )
     guard = build_network_guard(policy_engine=policy_engine)
 
@@ -196,7 +196,7 @@ def test_network_guard_handles_missing_destination() -> None:
             should_review=True,
             reasons=[{"label": "missing-destination"}],
             risk_delta=20,
-        )
+        ),
     )
     guard = build_network_guard(policy_engine=policy_engine)
 
@@ -221,7 +221,7 @@ def test_network_guard_handles_blank_destination() -> None:
             should_review=True,
             reasons=[{"label": "blank-destination"}],
             risk_delta=18,
-        )
+        ),
     )
     guard = build_network_guard(policy_engine=policy_engine)
 
@@ -246,7 +246,7 @@ def test_network_guard_handles_missing_tool_name() -> None:
             should_review=True,
             reasons=[{"label": "missing-tool-name"}],
             risk_delta=16,
-        )
+        ),
     )
     guard = build_network_guard(policy_engine=policy_engine)
 
@@ -270,7 +270,7 @@ def test_network_guard_inserts_default_reason_when_policy_has_none() -> None:
             allowed=True,
             reasons=None,
             risk_delta=0,
-        )
+        ),
     )
     guard = build_network_guard(policy_engine=policy_engine)
 
@@ -293,7 +293,7 @@ def test_network_guard_accepts_nested_metadata() -> None:
             verdict="allow",
             allowed=True,
             reasons=[{"label": "nested-metadata-ok"}],
-        )
+        ),
     )
     guard = build_network_guard(policy_engine=policy_engine)
 

@@ -44,8 +44,7 @@ def _action(
 def customer_key_detail_view(
     key_id: str = Path(..., description="Customer API key identifier."),
 ) -> dict[str, Any]:
-    """
-    UI metadata endpoint for a single customer key.
+    """UI metadata endpoint for a single customer key.
 
     Returns a shape that UI routers can use to render:
     - the key metadata pane
@@ -68,20 +67,14 @@ def customer_key_detail_view(
             _action(
                 id="rotate",
                 title="Rotate key",
-                description=(
-                    "Rotate this customer API key and receive a new raw key value. "
-                    "The previous raw key becomes invalid."
-                ),
+                description=("Rotate this customer API key and receive a new raw key value. The previous raw key becomes invalid."),
                 method="POST",
                 path=f"/customerkeys/{key_id}/rotate",
             ),
             _action(
                 id="revoke",
                 title="Revoke key",
-                description=(
-                    "Revoke this customer API key. Once revoked, it can no longer be used "
-                    "for authentication."
-                ),
+                description=("Revoke this customer API key. Once revoked, it can no longer be used for authentication."),
                 method="POST",
                 path=f"/customerkeys/{key_id}/revoke",
             ),
@@ -96,8 +89,7 @@ def customer_key_detail_view(
 def ui_get_customer_key(
     key_id: str = Path(..., description="Customer API key identifier."),
 ) -> CustomerApiKeyResponse:
-    """
-    Thin UI-facing wrapper around the core get_customer_key endpoint.
+    """Thin UI-facing wrapper around the core get_customer_key endpoint.
 
     This exists so the UI router namespace stays consistent (`/ui/customerkeys/...`)
     while delegating all logic to the core API implementation.
@@ -113,8 +105,7 @@ def ui_get_customer_key(
 def ui_rotate_customer_key(
     key_id: str = Path(..., description="Customer API key identifier."),
 ) -> CustomerApiKeyRotateResponse:
-    """
-    UI-facing rotate endpoint that delegates to the core rotate_customer_key.
+    """UI-facing rotate endpoint that delegates to the core rotate_customer_key.
 
     The raw key is returned in the response exactly once and should be treated
     as sensitive.
@@ -130,8 +121,7 @@ def ui_rotate_customer_key(
 def ui_revoke_customer_key(
     key_id: str = Path(..., description="Customer API key identifier."),
 ) -> CustomerApiKeyResponse:
-    """
-    UI-facing revoke endpoint that delegates to the core revoke_customer_key.
+    """UI-facing revoke endpoint that delegates to the core revoke_customer_key.
 
     The operation is idempotent; revoking an already-revoked key simply returns
     the current record.
@@ -148,8 +138,7 @@ def ui_create_customer_key_and_return_detail(
     body: CustomerApiKeyCreateRequest,
     principal: AuthPrincipal = Depends(resolve_api_key),
 ) -> CustomerApiKeyResponse:
-    """
-    Convenience endpoint primarily for UI flows that need to:
+    """Convenience endpoint primarily for UI flows that need to:
     - create a new customer key
     - immediately display the full persisted record (without raw key)
 

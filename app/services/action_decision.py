@@ -51,11 +51,7 @@ def _resolve_final_verdict(
     policy_verdict: VerdictType,
     guard_verdict: VerdictType,
 ) -> VerdictType:
-    return (
-        policy_verdict
-        if _verdict_rank(policy_verdict) >= _verdict_rank(guard_verdict)
-        else guard_verdict
-    )
+    return policy_verdict if _verdict_rank(policy_verdict) >= _verdict_rank(guard_verdict) else guard_verdict
 
 
 def _decision_source(
@@ -124,14 +120,7 @@ def _build_ai_reason(
         *guard_decision["reasons"],
     ]
 
-    system_prompt = (
-        "You are a security reasoning engine. "
-        "Return only valid JSON with keys: source, label, details, score. "
-        "Use source='ai'. "
-        "label must be short. "
-        "details must be concise and useful. "
-        "score must be a float from 0 to 1."
-    )
+    system_prompt = "You are a security reasoning engine. Return only valid JSON with keys: source, label, details, score. Use source='ai'. label must be short. details must be concise and useful. score must be a float from 0 to 1."
 
     user_prompt = json.dumps(
         {
@@ -146,7 +135,7 @@ def _build_ai_reason(
             "risk_score": guard_decision["risk_score"],
             "matched_patterns": guard_decision["matched_patterns"],
             "existing_reasons": existing_reasons,
-        }
+        },
     )
 
     try:

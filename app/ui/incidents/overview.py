@@ -202,18 +202,12 @@ def _to_incident_item(record: dict[str, object]) -> IncidentOverviewItem:
 
 def _build_severity_counts(records: list[dict[str, object]]) -> list[IncidentSeverityCount]:
     counts = Counter(str(record.get("severity") or "unknown") for record in records)
-    return [
-        IncidentSeverityCount(severity=severity, count=count)
-        for severity, count in sorted(counts.items())
-    ]
+    return [IncidentSeverityCount(severity=severity, count=count) for severity, count in sorted(counts.items())]
 
 
 def _build_status_counts(records: list[dict[str, object]]) -> list[IncidentStatusCount]:
     counts = Counter(str(record.get("status") or "unknown") for record in records)
-    return [
-        IncidentStatusCount(status=status, count=count)
-        for status, count in sorted(counts.items())
-    ]
+    return [IncidentStatusCount(status=status, count=count) for status, count in sorted(counts.items())]
 
 
 def _build_timeline(records: list[dict[str, object]]) -> list[IncidentTimelinePoint]:
@@ -222,7 +216,7 @@ def _build_timeline(records: list[dict[str, object]]) -> list[IncidentTimelinePo
     running_critical_open: dict[str, int] = {}
 
     created_buckets = sorted(
-        {str(record.get("createdat") or "")[:13] + ":00:00+00:00" for record in records}
+        {str(record.get("createdat") or "")[:13] + ":00:00+00:00" for record in records},
     )
 
     critical_open_count = 0
@@ -275,12 +269,8 @@ def get_incidents_overview() -> IncidentOverviewResponse:
     activealerts = _sample_alerts()
 
     totalincidents = len(incident_records)
-    openincidents = sum(
-        1 for record in incident_records if str(record.get("status") or "") != "resolved"
-    )
-    criticalincidents = sum(
-        1 for record in incident_records if str(record.get("severity") or "") == "critical"
-    )
+    openincidents = sum(1 for record in incident_records if str(record.get("status") or "") != "resolved")
+    criticalincidents = sum(1 for record in incident_records if str(record.get("severity") or "") == "critical")
     unacknowledgedalerts = sum(1 for alert in activealerts if not alert.acknowledged)
 
     kpis = [

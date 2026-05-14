@@ -305,18 +305,12 @@ def _sample_recent_activity() -> list[OrganizationRecentActivityView]:
 
 def _build_plan_counts(organizations: list[OrganizationView]) -> list[OrganizationPlanCount]:
     counts = Counter(organization.plan for organization in organizations)
-    return [
-        OrganizationPlanCount(plan=plan, count=count)
-        for plan, count in sorted(counts.items())
-    ]
+    return [OrganizationPlanCount(plan=plan, count=count) for plan, count in sorted(counts.items())]
 
 
 def _build_status_counts(organizations: list[OrganizationView]) -> list[OrganizationStatusCount]:
     counts = Counter(organization.status for organization in organizations)
-    return [
-        OrganizationStatusCount(status=status, count=count)
-        for status, count in sorted(counts.items())
-    ]
+    return [OrganizationStatusCount(status=status, count=count) for status, count in sorted(counts.items())]
 
 
 @router.get("/organizations", response_model=OrganizationsOverviewResponse)

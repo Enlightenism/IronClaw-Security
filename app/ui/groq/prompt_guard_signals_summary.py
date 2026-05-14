@@ -155,7 +155,7 @@ def build_prompt_guard_signals_summary() -> PromptGuardSignalsSummary:
                 source_module=alert.source_module,
                 details=alert.details,
                 tags=list(alert.tags),
-            )
+            ),
         )
 
     for item in activity_feed.items:
@@ -171,7 +171,7 @@ def build_prompt_guard_signals_summary() -> PromptGuardSignalsSummary:
                 source_module=item.source_module,
                 details=item.details,
                 tags=list(item.tags),
-            )
+            ),
         )
 
     latest_point: dict[str, Any] | None = None
@@ -197,7 +197,7 @@ def build_prompt_guard_signals_summary() -> PromptGuardSignalsSummary:
                         "bucket_start": latest_point.get("bucket_start"),
                     },
                     tags=["trend", "detections"],
-                )
+                ),
             )
 
     signals.sort(key=lambda item: (_severity_rank(item.severity), item.timestamp))
@@ -255,9 +255,6 @@ def get_prompt_guard_signals_summary() -> PromptGuardSignalsSummaryResponse:
         medium_signals=data["medium_signals"],
         low_signals=data["low_signals"],
         signal_pressure=data["signal_pressure"],
-        latest_signals=[
-            PromptGuardSignalItemResponse(**item)
-            for item in data["latest_signals"]
-        ],
+        latest_signals=[PromptGuardSignalItemResponse(**item) for item in data["latest_signals"]],
         metadata=data["metadata"],
     )

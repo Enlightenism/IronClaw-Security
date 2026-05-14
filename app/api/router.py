@@ -87,8 +87,7 @@ def validate_api_routers() -> None:
 
             if signature in seen_route_signatures:
                 raise ValueError(
-                    f"duplicate API route registration detected: {path} {methods} "
-                    f"already registered under {seen_route_signatures[signature]}"
+                    f"duplicate API route registration detected: {path} {methods} already registered under {seen_route_signatures[signature]}",
                 )
             seen_route_signatures[signature] = label
 
@@ -124,18 +123,10 @@ def api_unit_wallet_inventory() -> dict[str, str]:
 def include_api_routers() -> None:
     validate_api_routers()
 
-    existing_route_signatures = {
-        _route_signature(cast(APIRoute, route))
-        for route in router.routes
-        if isinstance(route, APIRoute)
-    }
+    existing_route_signatures = {_route_signature(cast("APIRoute", route)) for route in router.routes if isinstance(route, APIRoute)}
 
     for api_router in get_api_routers():
-        router_signatures = {
-            _route_signature(cast(APIRoute, route))
-            for route in api_router.routes
-            if isinstance(route, APIRoute)
-        }
+        router_signatures = {_route_signature(cast("APIRoute", route)) for route in api_router.routes if isinstance(route, APIRoute)}
 
         if router_signatures and router_signatures.issubset(existing_route_signatures):
             continue
@@ -143,11 +134,7 @@ def include_api_routers() -> None:
         router.include_router(api_router)
         existing_route_signatures.update(router_signatures)
 
-    inventory_signatures = {
-        _route_signature(cast(APIRoute, route))
-        for route in inventory_router.routes
-        if isinstance(route, APIRoute)
-    }
+    inventory_signatures = {_route_signature(cast("APIRoute", route)) for route in inventory_router.routes if isinstance(route, APIRoute)}
 
     if not inventory_signatures.issubset(existing_route_signatures):
         router.include_router(inventory_router)

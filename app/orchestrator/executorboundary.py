@@ -133,7 +133,7 @@ def executewithboundary(
     )
 
     combined_risk_delta = int(injectionscan.get("riskdelta", 0)) + int(
-        hostilecontextscan.get("riskdelta", 0)
+        hostilecontextscan.get("riskdelta", 0),
     )
     adjusted_riskscore = max(0, min(100, int(riskscore) + combined_risk_delta))
 
@@ -151,13 +151,9 @@ def executewithboundary(
         _make_reason(
             source="boundary",
             label="Base risk evaluation",
-            details=(
-                f"Boundary evaluated action '{actiontype}' targeting '{target}' with base risk "
-                f"score {riskscore} and adjusted risk score {adjusted_riskscore} from prompt "
-                f"injection and hostile context analysis."
-            ),
+            details=(f"Boundary evaluated action '{actiontype}' targeting '{target}' with base risk score {riskscore} and adjusted risk score {adjusted_riskscore} from prompt injection and hostile context analysis."),
             score=int(adjusted_riskscore),
-        )
+        ),
     )
 
     for reason in injectionscan.get("reasons", []):
@@ -168,7 +164,7 @@ def executewithboundary(
                     "label": reason.get("label", "Prompt injection indicator"),
                     "details": reason.get("details", "Prompt injection indicator detected."),
                     "score": int(reason.get("score", 0)),
-                }
+                },
             )
         else:
             reasons.append(
@@ -177,7 +173,7 @@ def executewithboundary(
                     label="Prompt injection indicator",
                     details=str(reason),
                     score=0,
-                )
+                ),
             )
 
     for reason in hostilecontextscan.get("reasons", []):
@@ -188,7 +184,7 @@ def executewithboundary(
                     "label": reason.get("label", "Hostile context indicator"),
                     "details": reason.get("details", "Hostile external context indicator detected."),
                     "score": int(reason.get("score", 0)),
-                }
+                },
             )
         else:
             reasons.append(
@@ -197,15 +193,15 @@ def executewithboundary(
                     label="Hostile context indicator",
                     details=str(reason),
                     score=0,
-                )
+                ),
             )
 
     if injectionscan.get("flagged") or hostilecontextscan.get("flagged"):
         should_quarantine = bool(
-            injectionscan.get("shouldquarantine") or hostilecontextscan.get("shouldquarantine")
+            injectionscan.get("shouldquarantine") or hostilecontextscan.get("shouldquarantine"),
         )
         should_review = bool(
-            injectionscan.get("shouldreview") or hostilecontextscan.get("shouldreview")
+            injectionscan.get("shouldreview") or hostilecontextscan.get("shouldreview"),
         )
 
         if should_quarantine:
@@ -288,7 +284,7 @@ def executewithboundary(
                 "filepath": receipt.filepath,
                 "promptinjection": injectionscan,
                 "hostilecontext": hostilecontextscan,
-            }
+            },
         }
         return receipt, runtimeresult
 
@@ -322,6 +318,6 @@ def executewithboundary(
             "filepath": receipt.filepath,
             "promptinjection": injectionscan,
             "hostilecontext": hostilecontextscan,
-        }
+        },
     }
     return receipt, runtimeresult

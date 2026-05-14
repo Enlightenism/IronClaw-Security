@@ -255,7 +255,7 @@ def evaluate_policy(
                     effect=rule.effect,
                     priority=rule.priority,
                     reason=reason,
-                )
+                ),
             )
 
     final_effect = resolve_policy_effect(matches)
@@ -436,5 +436,5 @@ if __name__ == "__main__":
             },
             ensure_ascii=False,
             indent=2,
-        )
+        ),
     )

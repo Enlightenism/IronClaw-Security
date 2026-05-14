@@ -92,7 +92,7 @@ def _request(
         )
     except Timeout as exc:
         raise SupabaseConnectionError(
-            f"Request to {url} timed out after {timeout} seconds."
+            f"Request to {url} timed out after {timeout} seconds.",
         ) from exc
     except RequestException as exc:
         raise SupabaseConnectionError(f"Could not connect to {url}: {exc}") from exc

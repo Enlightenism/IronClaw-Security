@@ -9,8 +9,7 @@ router = APIRouter()
 
 @router.get("/", summary="Root")
 def root() -> dict[str, Any]:
-    """
-    Root endpoint for IronClaw-Security.
+    """Root endpoint for IronClaw-Security.
 
     Returns a minimal capability and docs pointer payload so that
     clients and humans landing on / have something structured to read.

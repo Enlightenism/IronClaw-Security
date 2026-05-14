@@ -126,8 +126,8 @@ def test_review_behavior_enqueues_exactly_once():
                 should_review=True,
                 risk_delta=41,
                 matched_rules=["pipeline:review"],
-            )
-        ]
+            ),
+        ],
     )
 
     result = supervisor.evaluate(
@@ -156,7 +156,7 @@ def test_review_behavior_uses_submit_when_enqueue_missing():
                 allowed=True,
                 should_review=True,
                 matched_rules=["pipeline:review"],
-            )
+            ),
         ],
         review_queue=review_queue,
     )
@@ -182,8 +182,8 @@ def test_allow_behavior_never_enqueues_review():
                 allowed=True,
                 risk_delta=4,
                 matched_rules=["pipeline:allow"],
-            )
-        ]
+            ),
+        ],
     )
 
     result = supervisor.evaluate(
@@ -209,8 +209,8 @@ def test_block_behavior_never_enqueues_review():
                 should_block=True,
                 risk_delta=72,
                 matched_rules=["pipeline:block"],
-            )
-        ]
+            ),
+        ],
     )
 
     result = supervisor.evaluate(
@@ -237,8 +237,8 @@ def test_quarantine_behavior_never_enqueues_review():
                 should_quarantine=True,
                 risk_delta=95,
                 matched_rules=["pipeline:quarantine"],
-            )
-        ]
+            ),
+        ],
     )
 
     result = supervisor.evaluate(
@@ -291,7 +291,7 @@ def test_missing_tool_short_circuits_pipeline():
 
 def test_input_normalization_behavior_is_stable():
     supervisor, pipeline, _, _ = _build(
-        decisions=[_Decision(verdict="allow", allowed=True, matched_rules=["pipeline:allow"])]
+        decisions=[_Decision(verdict="allow", allowed=True, matched_rules=["pipeline:allow"])],
     )
 
     result = supervisor.evaluate(
@@ -323,8 +323,8 @@ def test_reason_dedup_behavior_is_stable():
                 should_review=True,
                 reasons=[repeated, repeated],
                 matched_rules=["dup-rule", "dup-rule"],
-            )
-        ]
+            ),
+        ],
     )
 
     result = supervisor.evaluate(
@@ -333,11 +333,7 @@ def test_reason_dedup_behavior_is_stable():
         command="echo x",
     )
 
-    same = [
-        item
-        for item in result.reasons
-        if item["label"] == "Same" and item["details"] == "duplicate"
-    ]
+    same = [item for item in result.reasons if item["label"] == "Same" and item["details"] == "duplicate"]
     assert len(same) == 1
     assert result.matched_rules.count("dup-rule") == 1
 
@@ -401,7 +397,7 @@ def test_missing_review_queue_methods_does_not_break_review_flow():
                 allowed=True,
                 should_review=True,
                 matched_rules=["pipeline:review"],
-            )
+            ),
         ],
         review_queue=_ReviewQueueBroken(),
     )
@@ -455,7 +451,7 @@ def test_multiple_calls_follow_pipeline_sequence():
                 should_block=True,
                 matched_rules=["pipeline:block"],
             ),
-        ]
+        ],
     )
 
     first = supervisor.evaluate(
@@ -493,7 +489,7 @@ def test_multiple_calls_follow_pipeline_sequence():
 )
 def test_behavior_preserves_tool_specific_context(tool_name: str, payload: dict[str, Any]):
     supervisor, pipeline, _, _ = _build(
-        decisions=[_Decision(verdict="allow", allowed=True, matched_rules=["pipeline:allow"])]
+        decisions=[_Decision(verdict="allow", allowed=True, matched_rules=["pipeline:allow"])],
     )
 
     kwargs = {"session_id": f"sess-{tool_name}", "tool_name": tool_name}

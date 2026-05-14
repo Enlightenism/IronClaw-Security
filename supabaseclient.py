@@ -1,4 +1,3 @@
-# supabaseclient.py
 from __future__ import annotations
 
 import json
@@ -46,8 +45,7 @@ class SupabaseConfig:
 
     @classmethod
     def from_env(cls) -> SupabaseConfig:
-        """
-        Load Supabase configuration from environment variables.
+        """Load Supabase configuration from environment variables.
 
         Priority:
         - SUPABASE_URL (or SUPABASEURL)
@@ -55,21 +53,14 @@ class SupabaseConfig:
         """
         url = os.getenv("SUPABASE_URL") or os.getenv("SUPABASEURL") or ""
         service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASESERVICEROLEKEY") or None
-        key = (
-            service_role_key
-            or os.getenv("SUPABASE_KEY")
-            or os.getenv("SUPABASEANONKEY")
-            or os.getenv("SUPABASE_ANON_KEY")
-            or ""
-        )
+        key = service_role_key or os.getenv("SUPABASE_KEY") or os.getenv("SUPABASEANONKEY") or os.getenv("SUPABASE_ANON_KEY") or ""
 
         url = url.strip()
         key = key.strip()
 
         if not url or not key:
             raise SupabaseConfigurationError(
-                "Supabase configuration is missing. "
-                "Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_KEY/SUPABASE_ANON_KEY)."
+                "Supabase configuration is missing. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_KEY/SUPABASE_ANON_KEY).",
             )
 
         schema = (os.getenv("SUPABASE_SCHEMA") or "public").strip() or "public"
@@ -85,8 +76,7 @@ class SupabaseConfig:
 
 
 class SupabaseClient:
-    """
-    Minimal Supabase HTTP client specialized for IronClaw persistence use.
+    """Minimal Supabase HTTP client specialized for IronClaw persistence use.
 
     This client:
     - Uses the REST PostgREST endpoint (/{schema}/{table}) for select/insert/update/delete.
@@ -140,7 +130,7 @@ class SupabaseClient:
                     return response.json()
                 except json.JSONDecodeError:
                     logger.exception("Supabase JSON decode error")
-                    raise SupabaseAPIError(response.status_code, "Invalid JSON in Supabase response")
+                    raise SupabaseAPIError(response.status_code, "Invalid JSON in Supabase response") from None
             # Fallback: return text content
             return response.text
 
@@ -148,12 +138,7 @@ class SupabaseClient:
             payload = response.json()
         except Exception:
             payload = {"body": response.text or ""}
-        message = (
-            payload.get("message")
-            or payload.get("error_description")
-            or payload.get("error")
-            or f"HTTP {response.status_code}"
-        )
+        message = payload.get("message") or payload.get("error_description") or payload.get("error") or f"HTTP {response.status_code}"
         raise SupabaseAPIError(response.status_code, str(message), payload)
 
     def request(
@@ -165,8 +150,7 @@ class SupabaseClient:
         json_body: Json | None = None,
         headers: Mapping[str, str] | None = None,
     ) -> Json:
-        """
-        Low-level request wrapper.
+        """Low-level request wrapper.
 
         - `url` may be absolute or relative to the configured Supabase URL.
         - Raises SupabaseConnectionError on network failures.
@@ -205,8 +189,7 @@ class SupabaseClient:
         limit: int | None = None,
         order: tuple[str, str] | None = None,
     ) -> list[JsonDict]:
-        """
-        SELECT rows from a table.
+        """SELECT rows from a table.
 
         - filters: dict of column -> value; uses `eq.column=value` query params.
         - limit: maximum number of rows.
@@ -242,8 +225,7 @@ class SupabaseClient:
         *,
         returning: str = "representation",
     ) -> list[JsonDict]:
-        """
-        INSERT rows into a table.
+        """INSERT rows into a table.
 
         - payload: single dict or list of dicts.
         - returning: 'representation' (default) to get inserted rows back.
@@ -272,8 +254,7 @@ class SupabaseClient:
         filters: Mapping[str, Any],
         returning: str = "representation",
     ) -> list[JsonDict]:
-        """
-        UPDATE rows in a table.
+        """UPDATE rows in a table.
 
         - filters: dict of column -> value; all must match (AND).
         """
@@ -295,8 +276,7 @@ class SupabaseClient:
         return []
 
     def delete(self, table: str, *, filters: Mapping[str, Any]) -> list[JsonDict]:
-        """
-        DELETE rows from a table.
+        """DELETE rows from a table.
 
         - filters: dict of column -> value; all must match (AND).
         """
@@ -326,8 +306,7 @@ class SupabaseClient:
         head: bool = False,
         count: str | None = None,
     ) -> Json:
-        """
-        Call a Postgres function via the RPC endpoint.
+        """Call a Postgres function via the RPC endpoint.
 
         - function_name: name of the function in the database.
         - payload: JSON body sent to the function.
@@ -344,8 +323,7 @@ class SupabaseClient:
 
 
 def createsupabaseclient() -> SupabaseClient:
-    """
-    Factory used by the persistence layer and repositories.
+    """Factory used by the persistence layer and repositories.
 
     - Validates environment configuration.
     - Returns a ready SupabaseClient instance.
@@ -360,10 +338,10 @@ def createsupabaseclient() -> SupabaseClient:
 
 # Convenience alias used throughout the app.persistence layer
 __all__ = [
-    "SupabaseConfig",
+    "SupabaseAPIError",
     "SupabaseClient",
+    "SupabaseConfig",
     "SupabaseConfigurationError",
     "SupabaseConnectionError",
-    "SupabaseAPIError",
     "createsupabaseclient",
 ]

@@ -85,8 +85,7 @@ async def scan_with_policy_guard(
     guard_base_url: str,
     payload: dict[str, Any],
 ) -> GuardBundleVerdict:
-    """
-    Call the policy guard bundle route once per request using the shared AsyncClient.
+    """Call the policy guard bundle route once per request using the shared AsyncClient.
     This function is intentionally small; tests monkeypatch httpx.AsyncClient to
     intercept POSTs to the guard bundle URL.
     """
@@ -119,8 +118,7 @@ async def _stream_upstream(
     upstream_url: str,
     payload: dict[str, Any],
 ) -> AsyncIterator[bytes]:
-    """
-    Minimal upstream streaming helper; tests will usually mock this path, so we
+    """Minimal upstream streaming helper; tests will usually mock this path, so we
     keep behavior simple and predictable.
     """
     async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
@@ -136,8 +134,7 @@ async def _guarded_upstream_stream(
     upstreampayload: dict[str, Any],
     guard_payload: dict[str, Any],
 ) -> AsyncIterator[bytes]:
-    """
-    Wrap the upstream stream with a policy guard decision.
+    """Wrap the upstream stream with a policy guard decision.
 
     - assist mode: never truncates the upstream; just annotates metadata.
     - enforce mode: if guard verdict is block, truncate the stream and yield
@@ -162,8 +159,7 @@ async def _guarded_stream_context(
     upstreampayload: dict[str, Any],
     guard_payload: dict[str, Any],
 ) -> AsyncIterator[AsyncIterator[bytes]]:
-    """
-    Async context manager to provide a guarded upstream stream suitable for use
+    """Async context manager to provide a guarded upstream stream suitable for use
     in StreamingResponse, while making it easy to reason about lifecycle in tests.
     """
     gen = _guarded_upstream_stream(cfg, upstreampayload, guard_payload)
@@ -179,8 +175,7 @@ async def _guarded_stream_context(
     response_model=GuardProxyResponse,
 )
 async def guard_proxy_summary(payload: GuardProxyRequest) -> GuardProxyResponse:
-    """
-    Non-streaming summary endpoint that simply calls the guard bundle and
+    """Non-streaming summary endpoint that simply calls the guard bundle and
     returns the decision in a structured response.
     """
     verdict = await scan_with_policy_guard(payload.guard_base_url, payload.guard_payload)
@@ -205,8 +200,7 @@ async def guard_proxy_stream(
     payload: GuardProxyRequest,
     request: Request,
 ) -> StreamingResponse:
-    """
-    Streaming proxy endpoint used by tests:
+    """Streaming proxy endpoint used by tests:
 
     - Calls the guard bundle first to get a verdict.
     - In enforce mode, truncates the upstream stream on block.

@@ -119,7 +119,7 @@ def test_action_usage_detail_numeric_fields_are_non_negative_when_present() -> N
     for key in ("units", "unitcost", "totalcost"):
         value = _number(payload, key, key.replace("cost", "_cost"))
         if value is not None:
-            assert value >= Decimal("0")
+            assert value >= Decimal(0)
 
 
 def test_action_usage_detail_total_cost_matches_units_times_unit_cost_when_present() -> None:

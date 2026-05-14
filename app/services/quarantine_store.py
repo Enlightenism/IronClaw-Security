@@ -87,7 +87,7 @@ class QuarantineStore:
                         metadata={"verdict": "quarantine", "seeded": True},
                         tags=["sandbox", "tool-output", "containment"],
                     ),
-                ]
+                ],
             )
 
     def list_items(

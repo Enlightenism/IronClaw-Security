@@ -81,8 +81,7 @@ def _build_review_summary(summary: Any, action: Literal["approve", "reject"]) ->
 
 
 def _normalize_history_item(item: Mapping[str, Any]) -> dict[str, Any]:
-    """
-    Normalize a raw scan history item so downstream code and UI always see
+    """Normalize a raw scan history item so downstream code and UI always see
     the expected keys and safe default values.
     """
     normalized: dict[str, Any] = dict(item)
@@ -120,10 +119,8 @@ def get_history_events(
         le=_HISTORY_EVENTS_LIMIT_MAX,
     ),
 ) -> list[dict[str, Any]]:
-    """
-    Return recent security history events, newest-first.
-    """
-    return cast(list[dict[str, Any]], list_audit_events(limit=limit))
+    """Return recent security history events, newest-first."""
+    return cast("list[dict[str, Any]]", list_audit_events(limit=limit))
 
 
 @router.get("/events/by-session/{session_id}")
@@ -135,11 +132,9 @@ def get_history_events_by_session(
         le=_HISTORY_EVENTS_LIMIT_MAX,
     ),
 ) -> list[dict[str, Any]]:
-    """
-    Return recent security history events for a given session_id, newest-first.
-    """
+    """Return recent security history events for a given session_id, newest-first."""
     return cast(
-        list[dict[str, Any]],
+        "list[dict[str, Any]]",
         list_audit_events_for_session(session_id=session_id, limit=limit),
     )
 
@@ -153,11 +148,9 @@ def get_history_events_by_actor(
         le=_HISTORY_EVENTS_LIMIT_MAX,
     ),
 ) -> list[dict[str, Any]]:
-    """
-    Return recent security history events for a given actor_id, newest-first.
-    """
+    """Return recent security history events for a given actor_id, newest-first."""
     return cast(
-        list[dict[str, Any]],
+        "list[dict[str, Any]]",
         list_audit_events_for_actor(actor_id=actor_id, limit=limit),
     )
 
@@ -170,9 +163,7 @@ def get_scan_history(
         le=_SCAN_HISTORY_LIMIT_MAX,
     ),
 ) -> ScanHistoryResponse:
-    """
-    Return recent scan history records, normalized for UI consumption.
-    """
+    """Return recent scan history records, normalized for UI consumption."""
     history = read_scan_history(limit=limit)
     items = history.get("items", [])
     normalized_items = [_normalize_history_item(item) for item in items]
@@ -185,9 +176,7 @@ def get_scan_history(
 
 @router.get("/{scan_id}", response_model=ScanHistoryItem)
 def get_scan_record(scan_id: str) -> ScanHistoryItem:
-    """
-    Return a single normalized scan history record by its identifier.
-    """
+    """Return a single normalized scan history record by its identifier."""
     item = get_scan_by_id(scan_id)
     if not item:
         raise NotFoundError(
@@ -199,8 +188,7 @@ def get_scan_record(scan_id: str) -> ScanHistoryItem:
 
 @router.post("/{scan_id}/review", response_model=ScanHistoryItem)
 def review_scan_record(scan_id: str, request: ReviewRequest) -> ScanHistoryItem:
-    """
-    Review a quarantined scan record and update its verdict + review status.
+    """Review a quarantined scan record and update its verdict + review status.
 
     Only scans with verdict == "quarantine" are eligible for review.
     """

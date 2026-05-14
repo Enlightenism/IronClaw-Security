@@ -116,7 +116,7 @@ def build_integration_health_view(
                     "strict": strict,
                     "requested_by": requested_by,
                 },
-            )
+            ),
         )
 
     items.sort(key=lambda item: (item.fail_count == 0, item.warn_count == 0, item.platform, item.slug))

@@ -56,10 +56,7 @@ class ReleasePolicyRepository:
             if not isinstance(raw_policies, dict):
                 raise ValueError("release policy repository 'policies' must be a JSON object")
 
-            items = [
-                ReleasePolicyDetail.model_validate(item)
-                for _, item in sorted(raw_policies.items(), key=lambda entry: entry[0])
-            ]
+            items = [ReleasePolicyDetail.model_validate(item) for _, item in sorted(raw_policies.items(), key=lambda entry: entry[0])]
 
         return items
 

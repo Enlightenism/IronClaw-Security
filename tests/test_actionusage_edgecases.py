@@ -69,7 +69,4 @@ def test_action_usage_summary_uses_neutral_tone_for_non_numeric_balance() -> Non
         },
     )
 
-    assert any(
-        item.label == "wallet_balance" and item.tone == "neutral"
-        for item in summary.stats
-    )
+    assert any(item.label == "wallet_balance" and item.tone == "neutral" for item in summary.stats)

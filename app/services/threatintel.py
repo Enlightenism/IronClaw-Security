@@ -16,7 +16,7 @@ IOC_PATTERN = re.compile(
     r"(?P<sha1>\b[a-fA-F0-9]{40}\b)|"
     r"(?P<md5>\b[a-fA-F0-9]{32}\b)|"
     r"(?P<domain>\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b)|"
-    r"(?P<url>https?://[^\s\"'<>]+)"
+    r"(?P<url>https?://[^\s\"'<>]+)",
 )
 
 SUSPICIOUS_KEYWORDS = {
@@ -280,7 +280,7 @@ class ThreatIntelService:
                     tags=list(indicator.tags),
                     matched_on=context or "text",
                     reference=indicator.reference,
-                )
+                ),
             )
             risk_families.update(indicator.tags)
 

@@ -22,12 +22,11 @@ def _import_install_module() -> Any:
         except ModuleNotFoundError as exc:
             last_error = exc
     raise AssertionError(
-        "Unable to import installer module. Expected one of: "
-        + ", ".join(MODULE_CANDIDATES)
+        "Unable to import installer module. Expected one of: " + ", ".join(MODULE_CANDIDATES),
     ) from last_error
 
 
-@pytest.fixture()
+@pytest.fixture
 def install_module() -> Any:
     return _import_install_module()
 
@@ -54,7 +53,7 @@ def test_build_install_config_defaults(install_module: Any, tmp_path: Path) -> N
             str(tmp_path),
             "--config-dir",
             str(tmp_path / ".ironclaw-user"),
-        ]
+        ],
     )
 
     config = install_module.build_install_config(args)
@@ -87,7 +86,7 @@ def test_build_install_config_rejects_invalid_retention_days(
             str(tmp_path / ".ironclaw-user"),
             "--retention-days",
             "0",
-        ]
+        ],
     )
 
     with pytest.raises(install_module.IronClawInstallerError, match="retention-days"):
@@ -111,7 +110,7 @@ def test_build_install_config_normalizes_provider_targets(
             "openclaw",
             "--provider-target",
             "claude",
-        ]
+        ],
     )
 
     config = install_module.build_install_config(args)
@@ -143,7 +142,7 @@ def test_run_install_writes_expected_files(
             "claude",
             "--provider-target",
             "openclaw",
-        ]
+        ],
     )
     config = install_module.build_install_config(args)
 
@@ -215,7 +214,7 @@ def test_run_install_skips_existing_files_without_overwrite(
             str(project_root),
             "--config-dir",
             str(config_dir),
-        ]
+        ],
     )
     config = install_module.build_install_config(args)
 
@@ -260,7 +259,7 @@ def test_main_returns_zero_for_json_install(
             "--config-dir",
             str(config_dir),
             "--json",
-        ]
+        ],
     )
 
     captured = capsys.readouterr()
@@ -284,7 +283,7 @@ def test_main_returns_one_when_project_root_is_invalid(
             str(project_root),
             "--config-dir",
             str(config_dir),
-        ]
+        ],
     )
 
     captured = capsys.readouterr()

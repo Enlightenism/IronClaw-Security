@@ -112,7 +112,7 @@ def build_integration_adapters_view(
                 supported_action_types=supported_action_types,
                 handshake=handshake.to_dict(),
                 metadata=dict(adapter.metadata),
-            )
+            ),
         )
 
     items.sort(key=lambda item: (item.platform, item.slug, item.integration_id))
