@@ -298,7 +298,6 @@ def _execute_stub(
         bundle_id = bundle.get("bundle_id", "")
         version = bundle.get("version", "")
 
-    # --- Pre-policy guard checks ---
     if not bundle:
         return _block_response(
             runtime=runtime_name,
@@ -321,7 +320,6 @@ def _execute_stub(
             matched_rules=["missing_runtime"],
         )
 
-    # --- Policy evaluation ---
     decision = policy_enforcer.evaluate(
         bundle=bundle,
         signature=signature,
@@ -337,7 +335,6 @@ def _execute_stub(
     verdict: str = decision.verdict
     policy_dict = decision.as_dict()
 
-    # Deduplicate matched_rules and reasons
     policy_dict["matchedrules"] = _dedup_list(policy_dict.get("matchedrules", []))
     raw_reasons: list[Any] = policy_dict.get("reasons", [])
     policy_dict["reasons"] = _dedup_list(raw_reasons)
@@ -351,7 +348,6 @@ def _execute_stub(
             "result": None,
         }
 
-    # --- Runtime execution ---
     try:
         runtime_result = runtime_client.execute(
             payload=payload,
@@ -414,36 +410,35 @@ class GenericAgentAdapter(BaseIntegrationAdapter):
 
     runtime: str = "generic-agent"
     guard_mode: str = "strict"
-    # Stub-mode injected dependencies (None in record mode)
     policy_enforcer: Any = field(default=None)
     runtime_client: Any = field(default=None)
 
     def __post_init__(self) -> None:
-        # Skip BaseIntegrationAdapter.__post_init__ validation when in stub mode.
         if self.policy_enforcer is not None or self.runtime_client is not None:
-            # Stub mode — record may be a sentinel; skip base validation.
             return
-        # Record mode — run normal base validation.
-        super().__post_init__()
+        super(GenericAgentAdapter, self).__post_init__()
         if "runtime" not in self.metadata:
             self.metadata["runtime"] = self.runtime
         if "guard_mode" not in self.metadata:
             self.metadata["guard_mode"] = self.guard_mode
 
     def execute(self, request: AdapterExecutionRequest | None = None, **kwargs: Any) -> Any:
-        # Stub mode: called with keyword arguments from test suite.
         if self.policy_enforcer is not None or self.runtime_client is not None:
             if kwargs:
                 return _execute_stub(self.policy_enforcer, self.runtime_client, **kwargs)
-            # request object passed positionally in stub mode (rare but safe)
             if request is not None and isinstance(request, dict):
                 return _execute_stub(self.policy_enforcer, self.runtime_client, **request)
             raise TypeError("execute() in stub mode requires keyword arguments")
 
-        # Record mode: standard BaseIntegrationAdapter path.
-        result = super().execute(request)
+        if request is None:
+            raise TypeError("request is required in record mode")
+
+        result = super(GenericAgentAdapter, self).execute(request)
         result.status = "guarded"
-        result.summary = f"{self.record.name} guarded action '{request.action_type}' for target '{request.target}'."
+        result.summary = (
+            f"{self.record.name} guarded action '{request.action_type}' "
+            f"for target '{request.target}'."
+        )
         result.output.setdefault("request", request.to_dict())
         result.output["guard_applied"] = True
         result.metadata["runtime"] = self.runtime
@@ -462,9 +457,6 @@ class GenericAgentAdapter(BaseIntegrationAdapter):
 
 
 def _stub_record() -> IntegrationRecord:
-    """Returns a minimal IntegrationRecord for stub-mode construction."""
-    from app.services.integration_registry import IntegrationRecord
-
     return IntegrationRecord(
         integration_id="integration-generic-agent-stub",
         name="Generic Agent Stub",
@@ -475,9 +467,6 @@ def _stub_record() -> IntegrationRecord:
     )
 
 
-# Patch GenericAgentAdapter.__new__ to support stub-mode construction
-# without requiring `record` — done via __init_subclass__ override is
-# not possible with slots=True dataclass; instead we override __new__.
 _ORIG_INIT = GenericAgentAdapter.__init__
 
 
@@ -509,7 +498,6 @@ GenericAgentAdapter.__init__ = _patched_init  # type: ignore[method-assign]
 
 
 def build_generic_agent_adapter(registry: IntegrationRegistry) -> GenericAgentAdapter:
-    """Factory for the generic-agent adapter used in integrations."""
     record: IntegrationRecord | None = get_integration(registry, "integration-generic-agent")
     if record is None:
         raise KeyError("unknown integration_id: integration-generic-agent")
