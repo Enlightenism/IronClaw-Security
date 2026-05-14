@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from core.settings import get_settings
 from fastapi import Header, HTTPException, Request, status
 
 from core.apikeys import ApiKeyRecord, registry
-from core.settings import get_settings
 
 PrincipalType = Literal["system", "customer", "service"]
 

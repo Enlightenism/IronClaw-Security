@@ -4,7 +4,6 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-
 from app.monetizationreporting import build_monetization_reporting
 
 

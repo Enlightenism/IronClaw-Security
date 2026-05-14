@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Query
-
 from app.ui.uiauditlog import build_audit_log_page
+from fastapi import APIRouter, Query
 
 router = APIRouter(tags=["audit-log"])
 
