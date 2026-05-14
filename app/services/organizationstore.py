@@ -174,15 +174,19 @@ def _normalize_organization_payload(
             member_count if member_count is not None else source.get("member_count", 0),
         ),
         "tags": _as_list(tags if tags is not None else source.get("tags")),
-        "metadata": metadata
-        if isinstance(metadata, dict)
-        else _as_dict(
-            source.get("metadata"),
+        "metadata": (
+            metadata
+            if isinstance(metadata, dict)
+            else _as_dict(
+                source.get("metadata"),
+            )
         ),
-        "settings": settings
-        if isinstance(settings, dict)
-        else _as_dict(
-            source.get("settings"),
+        "settings": (
+            settings
+            if isinstance(settings, dict)
+            else _as_dict(
+                source.get("settings"),
+            )
         ),
         "enabled": _bool(
             enabled if enabled is not None else source.get("enabled"),

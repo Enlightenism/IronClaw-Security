@@ -143,14 +143,16 @@ def _normalize_billing_payload(
         tax_amount if tax_amount is not None else src.get("tax_amount", src.get("tax", "0")),
     )
     resolved_total_amount = _decimal_text(
-        total_amount
-        if total_amount is not None
-        else src.get(
-            "total_amount",
-            src.get(
-                "total",
-                Decimal(resolved_subtotal) + Decimal(resolved_tax_amount),
-            ),
+        (
+            total_amount
+            if total_amount is not None
+            else src.get(
+                "total_amount",
+                src.get(
+                    "total",
+                    Decimal(resolved_subtotal) + Decimal(resolved_tax_amount),
+                ),
+            )
         ),
     )
 

@@ -146,9 +146,7 @@ class PolicyEvaluator:
                 {
                     "type": "override_match",
                     "override_id": override.override_id,
-                    "force_decision": (
-                        override.force_decision.value if override.force_decision is not None else None
-                    ),
+                    "force_decision": (override.force_decision.value if override.force_decision is not None else None),
                     "metadata": dict(override.metadata),
                 },
             )

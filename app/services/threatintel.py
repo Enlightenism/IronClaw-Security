@@ -11,12 +11,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 IOC_PATTERN = re.compile(
-    r"(?P<ipv4>\b(?:\d{1,3}\.){3}\d{1,3}\b)|"
-    r"(?P<sha256>\b[a-fA-F0-9]{64}\b)|"
-    r"(?P<sha1>\b[a-fA-F0-9]{40}\b)|"
-    r"(?P<md5>\b[a-fA-F0-9]{32}\b)|"
-    r"(?P<domain>\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b)|"
-    r"(?P<url>https?://[^\s\"'<>]+)",
+    r"(?P<ipv4>\b(?:\d{1,3}\.){3}\d{1,3}\b)|" r"(?P<sha256>\b[a-fA-F0-9]{64}\b)|" r"(?P<sha1>\b[a-fA-F0-9]{40}\b)|" r"(?P<md5>\b[a-fA-F0-9]{32}\b)|" r"(?P<domain>\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b)|" r"(?P<url>https?://[^\s\"'<>]+)",
 )
 
 SUSPICIOUS_KEYWORDS = {
