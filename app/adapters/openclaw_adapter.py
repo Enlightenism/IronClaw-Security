@@ -285,10 +285,7 @@ class OpenClawAdapter(BaseIntegrationAdapter):
         result = super(OpenClawAdapter, self).execute(request)
 
         result.status = "guarded"
-        result.summary = (
-            f"{self.record.name} guarded workflow action "
-            f"'{request.action_type}' for target '{request.target}'."
-        )
+        result.summary = f"{self.record.name} guarded workflow action " f"'{request.action_type}' for target '{request.target}'."
 
         result.output.setdefault("guard_applied", True)
         result.output.setdefault("execution_mode", "workflow-gated")

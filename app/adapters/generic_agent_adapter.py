@@ -435,10 +435,7 @@ class GenericAgentAdapter(BaseIntegrationAdapter):
 
         result = super(GenericAgentAdapter, self).execute(request)
         result.status = "guarded"
-        result.summary = (
-            f"{self.record.name} guarded action '{request.action_type}' "
-            f"for target '{request.target}'."
-        )
+        result.summary = f"{self.record.name} guarded action '{request.action_type}' " f"for target '{request.target}'."
         result.output.setdefault("request", request.to_dict())
         result.output["guard_applied"] = True
         result.metadata["runtime"] = self.runtime
