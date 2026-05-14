@@ -33,7 +33,7 @@ def extract_text(payload):
             parts.append(f"tool_name={tool_name}")
 
         tool_input = payload.get("tool_input")
-        if isinstance(tool_input, (dict, list)):
+        if isinstance(tool_input, dict | list):
             parts.append(json.dumps(tool_input, ensure_ascii=False))
         elif isinstance(tool_input, str):
             parts.append(tool_input)

@@ -200,7 +200,7 @@ class PolicyEvaluator:
             return actual == rule.value
 
         if rule.match_type is PolicyMatchType.CONTAINS:
-            if isinstance(actual, (list, tuple, set)):
+            if isinstance(actual, list | tuple | set):
                 return rule.value in actual
             return str(rule.value).lower() in str(actual).lower()
 
@@ -263,7 +263,7 @@ class PolicyEvaluator:
     def _coerce_number(self, value: Any) -> float:
         if isinstance(value, bool):
             return float(int(value))
-        if isinstance(value, (int, float)):
+        if isinstance(value, int | float):
             return float(value)
         return float(str(value).strip())
 

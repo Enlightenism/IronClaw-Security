@@ -92,7 +92,7 @@ def test_ui_system_diagnostics_health_and_details_are_json_safe_when_present(
 
     for key in ("health", "details"):
         if key in data:
-            assert isinstance(data[key], (dict, list, str))
+            assert isinstance(data[key], dict | list | str)
 
 
 def test_ui_system_diagnostics_response_is_stable_across_repeated_reads(

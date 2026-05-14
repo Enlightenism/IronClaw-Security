@@ -27,7 +27,7 @@ def _utc_now_iso() -> str:
 
 
 def _coerce_json_safe(value: Any) -> Any:
-    if value is None or isinstance(value, (str, int, float, bool)):
+    if value is None or isinstance(value, str | int | float | bool):
         return value
 
     if isinstance(value, datetime):
@@ -39,7 +39,7 @@ def _coerce_json_safe(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): _coerce_json_safe(item) for key, item in value.items()}
 
-    if isinstance(value, (list, tuple, set, frozenset)):
+    if isinstance(value, list | tuple | set | frozenset):
         return [_coerce_json_safe(item) for item in value]
 
     if hasattr(value, "model_dump") and callable(value.model_dump):

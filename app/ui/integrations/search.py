@@ -71,14 +71,14 @@ def _collect_tags(metadata: dict[str, Any]) -> list[str]:
     raw_tags = metadata.get("tags") or metadata.get("labels") or []
     if isinstance(raw_tags, dict):
         values: Iterable[Any] = raw_tags.values()
-    elif isinstance(raw_tags, (list, tuple, set)):
+    elif isinstance(raw_tags, list | tuple | set):
         values = raw_tags
     else:
         values = [raw_tags]
 
     tags: list[str] = []
     for value in values:
-        if isinstance(value, (list, tuple, set)):
+        if isinstance(value, list | tuple | set):
             for nested in value:
                 token = _normalize(str(nested))
                 if token:

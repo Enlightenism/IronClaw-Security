@@ -21,7 +21,7 @@ def _payload_of(result: Any) -> dict[str, Any]:
         value = getattr(result, name)
         if callable(value):
             continue
-        if isinstance(value, (str, int, float, bool, list, dict, type(None))):
+        if isinstance(value, str | int | float | bool | list | dict | type(None)):
             payload[name] = value
     return payload
 
@@ -96,7 +96,7 @@ def test_history_collections_have_expected_types_when_present() -> None:
     entries = _value(payload, "entries", "events", "items", "records")
 
     if entries is not None:
-        assert isinstance(entries, (list, dict))
+        assert isinstance(entries, list | dict)
 
 
 def test_history_supports_session_bound_build_when_available() -> None:
@@ -202,4 +202,4 @@ def test_history_payload_uses_json_friendly_values() -> None:
 
     for key, value in payload.items():
         assert isinstance(key, str)
-        assert value is None or isinstance(value, (str, int, float, bool, list, dict))
+        assert value is None or isinstance(value, str | int | float | bool | list | dict)

@@ -22,7 +22,7 @@ def _payload_of(result: Any) -> dict[str, Any]:
         value = getattr(result, name)
         if callable(value):
             continue
-        if isinstance(value, (str, int, float, bool, list, dict, type(None))):
+        if isinstance(value, str | int | float | bool | list | dict | type(None)):
             payload[name] = value
     return payload
 
@@ -137,7 +137,7 @@ def test_usage_event_detail_collections_use_json_friendly_shapes_when_present() 
     ):
         value = _value(payload, *key_group)
         if value is not None:
-            assert isinstance(value, (dict, list))
+            assert isinstance(value, dict | list)
 
 
 def test_usage_event_detail_reason_entries_are_strings_or_dicts_when_present() -> None:
@@ -146,7 +146,7 @@ def test_usage_event_detail_reason_entries_are_strings_or_dicts_when_present() -
 
     if isinstance(reasons, list):
         for item in reasons:
-            assert isinstance(item, (str, dict))
+            assert isinstance(item, str | dict)
 
 
 def test_usage_event_detail_accepts_owner_context_when_supported() -> None:
@@ -197,7 +197,7 @@ def test_usage_event_detail_payload_uses_json_friendly_values() -> None:
 
     for key, value in payload.items():
         assert isinstance(key, str)
-        assert value is None or isinstance(value, (str, int, float, bool, list, dict))
+        assert value is None or isinstance(value, str | int | float | bool | list | dict)
 
 
 def test_usage_event_detail_multiple_builds_have_stable_shape() -> None:

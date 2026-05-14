@@ -21,7 +21,7 @@ def _payload_of(result: Any) -> dict[str, Any]:
         value = getattr(result, name)
         if callable(value):
             continue
-        if isinstance(value, (str, int, float, bool, list, dict, type(None))):
+        if isinstance(value, str | int | float | bool | list | dict | type(None)):
             payload[name] = value
     return payload
 
@@ -35,7 +35,7 @@ def _items_of(result: Any) -> list[Any]:
             if isinstance(value, list):
                 return value
         return [result]
-    if hasattr(result, "__iter__") and not isinstance(result, (str, bytes)):
+    if hasattr(result, "__iter__") and not isinstance(result, str | bytes):
         try:
             return list(result)
         except TypeError:
@@ -75,7 +75,7 @@ def test_build_billing_registry_returns_object() -> None:
 def test_billing_registry_is_serializable_to_supported_shape() -> None:
     registry = build_billing_registry()
 
-    assert isinstance(registry, (dict, list)) or hasattr(registry, "as_dict") or hasattr(registry, "__iter__")
+    assert isinstance(registry, dict | list) or hasattr(registry, "as_dict") or hasattr(registry, "__iter__")
 
 
 def test_billing_registry_contains_at_least_one_entry() -> None:
@@ -145,7 +145,7 @@ def test_billing_registry_nested_sections_are_dict_or_list_when_present() -> Non
             _value(payload, "events", "history", "records"),
         ):
             if value is not None:
-                assert isinstance(value, (dict, list))
+                assert isinstance(value, dict | list)
 
 
 def test_billing_registry_supports_owner_bound_build_when_available() -> None:
@@ -288,7 +288,7 @@ def test_billing_registry_payload_uses_json_friendly_values() -> None:
         payload = _payload_of(item)
         for key, value in payload.items():
             assert isinstance(key, str)
-            assert value is None or isinstance(value, (str, int, float, bool, list, dict))
+            assert value is None or isinstance(value, str | int | float | bool | list | dict)
 
 
 def test_billing_registry_multiple_builds_have_stable_top_level_shape() -> None:

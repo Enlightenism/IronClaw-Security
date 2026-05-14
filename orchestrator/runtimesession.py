@@ -218,7 +218,7 @@ class RuntimeSession:
         if isinstance(value, str):
             items = [part.strip() for part in value.split(",")]
             return [item for item in items if item]
-        if isinstance(value, (list, tuple, set)):
+        if isinstance(value, list | tuple | set):
             normalized = [str(item).strip() for item in value]
             return [item for item in normalized if item]
         return list(fallback or [])

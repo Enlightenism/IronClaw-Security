@@ -22,7 +22,7 @@ def _payload_of(result: Any) -> dict[str, Any]:
         value = getattr(result, name)
         if callable(value):
             continue
-        if isinstance(value, (str, int, float, bool, list, dict, type(None))):
+        if isinstance(value, str | int | float | bool | list | dict | type(None)):
             payload[name] = value
     return payload
 
@@ -139,7 +139,7 @@ def test_action_usage_snapshot_events_collection_is_list_or_dict_when_present() 
 
     events = _value(payload, "events", "records", "entries", "usage")
     if events is not None:
-        assert isinstance(events, (list, dict))
+        assert isinstance(events, list | dict)
 
 
 def test_action_usage_snapshot_supports_owner_bound_build_when_available() -> None:
@@ -188,7 +188,7 @@ def test_action_usage_snapshot_payload_uses_json_friendly_values() -> None:
 
     for key, value in payload.items():
         assert isinstance(key, str)
-        assert value is None or isinstance(value, (str, int, float, bool, list, dict))
+        assert value is None or isinstance(value, str | int | float | bool | list | dict)
 
 
 def test_action_usage_snapshot_rejects_negative_total_units_when_supported() -> None:

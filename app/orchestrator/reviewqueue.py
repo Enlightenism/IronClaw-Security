@@ -54,7 +54,7 @@ def _bool(value: Any, default: bool = False) -> bool:
         return default
     if isinstance(value, bool):
         return value
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return bool(value)
     lowered = str(value).strip().lower()
     if lowered in {"1", "true", "yes", "y", "on", "enabled", "active"}:

@@ -81,7 +81,7 @@ def test_ui_audit_explorer_structured_fields_are_json_safe_when_present(
 
     for key in ("filters", "facets"):
         if key in data:
-            assert isinstance(data[key], (dict, list, str))
+            assert isinstance(data[key], dict | list | str)
 
 
 def test_ui_audit_explorer_response_is_stable_across_repeated_reads(

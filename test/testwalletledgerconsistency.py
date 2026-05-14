@@ -23,7 +23,7 @@ def _payload_of(result: Any) -> dict[str, Any]:
         value = getattr(result, name)
         if callable(value):
             continue
-        if isinstance(value, (str, int, float, bool, list, dict, type(None))):
+        if isinstance(value, str | int | float | bool | list | dict | type(None)):
             payload[name] = value
     return payload
 
@@ -324,4 +324,4 @@ def test_wallet_and_ledger_payloads_use_json_friendly_values() -> None:
     for payload in (_payload_of(build_unit_wallet()), _payload_of(build_unit_ledger())):
         for key, value in payload.items():
             assert isinstance(key, str)
-            assert value is None or isinstance(value, (str, int, float, bool, list, dict))
+            assert value is None or isinstance(value, str | int | float | bool | list | dict)

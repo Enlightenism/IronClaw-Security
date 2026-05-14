@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header
 
@@ -24,7 +24,7 @@ router = APIRouter(prefix="/api/access-control", tags=["access-control"])
 
 @router.get("/context")
 async def get_access_control_context_endpoint(
-    context=Depends(require_authenticated),
+    context: Annotated[Any, Depends(require_authenticated)],
 ) -> dict[str, Any]:
     return {
         "authenticated": True,
@@ -39,7 +39,7 @@ async def get_access_control_context_endpoint(
 
 @router.get("/read")
 async def get_access_control_read_endpoint(
-    context=Depends(require_any_permission("permissions:read", "operator:read")),
+    context: Annotated[Any, Depends(require_any_permission("permissions:read", "operator:read"))],
 ) -> dict[str, Any]:
     return {
         "authorized": True,
@@ -51,7 +51,7 @@ async def get_access_control_read_endpoint(
 
 @router.get("/write")
 async def get_access_control_write_endpoint(
-    context=Depends(require_permissions_write),
+    context: Annotated[Any, Depends(require_permissions_write)],
 ) -> dict[str, Any]:
     return {
         "authorized": True,
@@ -63,7 +63,7 @@ async def get_access_control_write_endpoint(
 
 @router.get("/operator")
 async def get_access_control_operator_endpoint(
-    context=Depends(require_operator_auth),
+    context: Annotated[Any, Depends(require_operator_auth)],
 ) -> dict[str, Any]:
     return {
         "authorized": True,
@@ -77,7 +77,7 @@ async def get_access_control_operator_endpoint(
 
 @router.get("/operator/manage")
 async def get_access_control_operator_manage_endpoint(
-    context=Depends(require_operator_manage),
+    context: Annotated[Any, Depends(require_operator_manage)],
 ) -> dict[str, Any]:
     return {
         "authorized": True,
@@ -89,7 +89,7 @@ async def get_access_control_operator_manage_endpoint(
 
 @router.get("/permissions")
 async def get_access_control_permissions_endpoint(
-    context=Depends(require_permissions_read),
+    context: Annotated[Any, Depends(require_permissions_read)],
 ) -> dict[str, Any]:
     return {
         "authorized": True,
@@ -102,7 +102,7 @@ async def get_access_control_permissions_endpoint(
 
 @router.get("/permissions/all")
 async def get_access_control_all_permissions_endpoint(
-    context=Depends(require_all_permissions("permissions:read", "operator:read")),
+    context: Annotated[Any, Depends(require_all_permissions("permissions:read", "operator:read"))],
 ) -> dict[str, Any]:
     return {
         "authorized": True,
@@ -114,7 +114,7 @@ async def get_access_control_all_permissions_endpoint(
 
 @router.get("/permissions/operator-write")
 async def get_access_control_operator_write_permission_endpoint(
-    context=Depends(require_operator_permission("operator:write")),
+    context: Annotated[Any, Depends(require_operator_permission("operator:write"))],
 ) -> dict[str, Any]:
     return {
         "authorized": True,
@@ -126,9 +126,9 @@ async def get_access_control_operator_write_permission_endpoint(
 
 @router.get("/org")
 async def get_access_control_org_endpoint(
-    context=Depends(require_operator_read),
-    org_context=Depends(get_org_context),
-    x_org_id: str | None = Header(default=None),
+    context: Annotated[Any, Depends(require_operator_read)],
+    org_context: Annotated[Any, Depends(get_org_context)],
+    x_org_id: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     return {
         "authorized": True,

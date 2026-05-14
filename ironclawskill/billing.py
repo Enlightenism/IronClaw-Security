@@ -370,7 +370,7 @@ def build_billing_context_from_request_context(
         return None
 
     tags_value = getattr(request_context, "tags", ())
-    if isinstance(tags_value, (list, tuple, set)):
+    if isinstance(tags_value, list | tuple | set):
         tags = tuple(str(item).strip() for item in tags_value if str(item).strip())
     elif isinstance(tags_value, str) and tags_value.strip():
         tags = tuple(part.strip() for part in tags_value.split(",") if part.strip())

@@ -205,30 +205,34 @@ class TestMain:
         code = main(["version"])
         assert code == 0
 
-    def test_status_subcommand_returns_0_with_env_override(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_status_subcommand_returns_0_with_env_override(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         code = main(["status"])
         assert code == 0
 
-    def test_doctor_returns_nonzero_when_config_dir_missing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_doctor_returns_nonzero_when_config_dir_missing(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
         missing_dir = tmp_path / "nonexistent_config"
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(missing_dir))
         code = main(["doctor"])
         assert code != 0
 
-    def test_ironclaw_cli_error_returns_1(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    def test_ironclaw_cli_error_returns_1(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
 
         def bad_func(_: argparse.Namespace) -> int:
             raise IronClawSkillCliError("test error")
-
-        parser = build_parser()
-        original_parse_args = parser.parse_args
-
-        def patched_parse_args(argv=None):
-            result = original_parse_args(argv)
-            result.func = bad_func
-            return result
 
         with patch("ironclaw_skill.cli.build_parser") as mock_parser_factory:
             mock_parser = MagicMock()
@@ -237,7 +241,11 @@ class TestMain:
             code = main(["status"])
         assert code == 1
 
-    def test_unexpected_exception_returns_1(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    def test_unexpected_exception_returns_1(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
 
         def crashing_func(_: argparse.Namespace) -> int:
@@ -250,7 +258,12 @@ class TestMain:
             code = main(["version"])
         assert code == 1
 
-    def test_json_flag_passed_through_to_status(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
+    def test_json_flag_passed_through_to_status(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
+    ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         code = main(["--json", "status"])
         captured = capsys.readouterr()
@@ -259,7 +272,12 @@ class TestMain:
         assert "installed" in payload
         assert "version" in payload
 
-    def test_json_flag_passed_through_to_doctor(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
+    def test_json_flag_passed_through_to_doctor(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
+    ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         code = main(["--json", "doctor"])
         captured = capsys.readouterr()
@@ -290,7 +308,7 @@ class TestCmdVersion:
     def test_version_output_is_single_line(self, capsys):
         _cmd_version(_args())
         captured = capsys.readouterr()
-        lines = [l for l in captured.out.strip().splitlines() if l.strip()]
+        lines = [line for line in captured.out.strip().splitlines() if line.strip()]
         assert len(lines) == 1
 
 
@@ -890,7 +908,7 @@ class TestLoadJsonFile:
     def test_raises_for_invalid_json(self, tmp_path: Path):
         path = tmp_path / "corrupt.json"
         path.write_text("{not valid json}", encoding="utf-8")
-        with pytest.raises(Exception):
+        with pytest.raises((IronClawSkillCliError, json.JSONDecodeError, ValueError, TypeError)):
             _load_json_file(path)
 
     def test_returns_empty_dict_for_empty_object(self, tmp_path: Path):
@@ -954,10 +972,17 @@ class TestDeriveStatus:
         result = _derive_status()
         assert result.base_url is None
 
-    def test_base_url_from_config_file_when_env_absent(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_base_url_from_config_file_when_env_absent(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         monkeypatch.delenv("IRONCLAW_BASE_URL", raising=False)
-        (tmp_path / "config.json").write_text(json.dumps({"base_url": "http://from-file:8080"}), encoding="utf-8")
+        (tmp_path / "config.json").write_text(
+            json.dumps({"base_url": "http://from-file:8080"}),
+            encoding="utf-8",
+        )
         result = _derive_status()
         assert result.base_url == "http://from-file:8080"
 
@@ -1047,7 +1072,11 @@ class TestDoctor:
         names = {c["name"] for c in result.checks}
         assert "base-url" in names
 
-    def test_ok_false_aggregated_from_any_failed_check(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_ok_false_aggregated_from_any_failed_check(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         monkeypatch.delenv("IRONCLAW_BASE_URL", raising=False)
         result = _doctor()
@@ -1065,7 +1094,7 @@ class TestDoctor:
 
 
 # ---------------------------------------------------------------------------
-# SkillStatus — to_dict and field types
+# SkillStatus / SkillDoctorResult
 # ---------------------------------------------------------------------------
 
 
@@ -1120,16 +1149,11 @@ class TestSkillStatus:
             status.installed = False  # type: ignore[misc]
 
 
-# ---------------------------------------------------------------------------
-# SkillDoctorResult — to_dict
-# ---------------------------------------------------------------------------
-
-
 class TestSkillDoctorResult:
     def _make_result(self, ok: bool = True) -> SkillDoctorResult:
         checks = (
-            {"name": "config-file", "ok": ok, "detail": "/some/path/config.json"},
-            {"name": "skill-file", "ok": ok, "detail": "/some/path/skill.json"},
+            {"name": "config-file", "ok": ok, "detail": "some/path/config.json"},
+            {"name": "skill-file", "ok": ok, "detail": "some/path/skill.json"},
         )
         return SkillDoctorResult(ok=ok, checks=checks)
 
@@ -1168,13 +1192,13 @@ class TestPrintJson:
     def test_outputs_indented_json(self, capsys):
         _print_json({"key": "value"})
         captured = capsys.readouterr()
-        assert "\n" in captured.out
-        assert "  " in captured.out
+        assert "{\n" in captured.out
+        assert '  "key": "value"\n' in captured.out
 
     def test_handles_unicode_without_escape(self, capsys):
-        _print_json({"message": "IronClaw – Sécurité"})
+        _print_json({"message": "IronClaw Sécurité"})
         captured = capsys.readouterr()
-        assert "IronClaw" in captured.out
+        assert "IronClaw Sécurité" in captured.out
         assert "\\u" not in captured.out
 
     def test_nested_dicts_render_correctly(self, capsys):
@@ -1190,7 +1214,7 @@ class TestPrintJson:
 
 
 # ---------------------------------------------------------------------------
-# Environment variable integration
+# environment integration
 # ---------------------------------------------------------------------------
 
 
@@ -1201,13 +1225,13 @@ class TestEnvironmentVariableIntegration:
         monkeypatch: pytest.MonkeyPatch,
         capsys,
     ):
-        custom_dir = tmp_path / "custom_config"
+        custom_dir = tmp_path / "customconfig"
         custom_dir.mkdir()
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(custom_dir))
         _cmd_status(_args(json=True))
         captured = capsys.readouterr()
         payload = json.loads(captured.out)
-        assert str(custom_dir) in payload["config_dir"]
+        assert str(custom_dir.resolve()) in payload["config_dir"]
 
     def test_ironclaw_base_url_env_reflected_in_status(
         self,
@@ -1253,37 +1277,57 @@ class TestEnvironmentVariableIntegration:
 
 
 # ---------------------------------------------------------------------------
-# End-to-end CLI surface via main()
+# end-to-end smoke tests
 # ---------------------------------------------------------------------------
 
 
 class TestMainEndToEnd:
-    def test_version_output_is_non_empty(self, capsys):
+    def test_version_output_is_nonempty(self, capsys):
         main(["version"])
         captured = capsys.readouterr()
         assert captured.out.strip() != ""
 
-    def test_status_json_output_is_parseable(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
+    def test_status_json_output_is_parseable(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
+    ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         main(["--json", "status"])
         captured = capsys.readouterr()
         payload = json.loads(captured.out)
         assert isinstance(payload, dict)
 
-    def test_doctor_json_output_is_parseable(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
+    def test_doctor_json_output_is_parseable(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
+    ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         main(["--json", "doctor"])
         captured = capsys.readouterr()
         payload = json.loads(captured.out)
         assert isinstance(payload, dict)
 
-    def test_status_human_output_is_non_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
+    def test_status_human_output_is_nonempty(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
+    ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         main(["status"])
         captured = capsys.readouterr()
         assert captured.out.strip() != ""
 
-    def test_doctor_human_output_is_non_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
+    def test_doctor_human_output_is_nonempty(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys,
+    ):
         monkeypatch.setenv("IRONCLAW_CONFIG_DIR", str(tmp_path))
         main(["doctor"])
         captured = capsys.readouterr()
@@ -1308,16 +1352,7 @@ class TestMainEndToEnd:
             patch("ironclaw_skill.cli.build_install_config", return_value=MagicMock()),
             patch("ironclaw_skill.cli.run_install", return_value=mock_result),
         ):
-            code = main(
-                [
-                    "--json",
-                    "install",
-                    "--project-root",
-                    str(tmp_path),
-                    "--config-dir",
-                    str(tmp_path),
-                ]
-            )
+            code = main(["--json", "install", "--project-root", str(tmp_path), "--config-dir", str(tmp_path)])
         captured = capsys.readouterr()
         assert code == 0
         payload = json.loads(captured.out)

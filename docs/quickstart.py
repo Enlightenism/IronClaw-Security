@@ -11,7 +11,7 @@ PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from ironclawclient import IronClawClient, IronClawClientError
+from ironclawclient import IronClawClient, IronClawClientError  # noqa: E402
 
 DEFAULT_BASE_URL: Final[str] = os.getenv("IRONCLAW_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 DEFAULT_BACKUP_TARGET: Final[str] = os.getenv("IRONCLAW_BACKUP_TARGET_NAME", "primary")

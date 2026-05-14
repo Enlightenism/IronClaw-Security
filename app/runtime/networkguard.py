@@ -675,11 +675,11 @@ class NetworkGuard:
             return ""
         if isinstance(value, str):
             return value
-        if isinstance(value, (bytes, bytearray)):
+        if isinstance(value, bytes | bytearray):
             return value.decode("utf-8", errors="ignore")
         if isinstance(value, Mapping):
             return self._serialize_mapping(value)
-        if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
             return "\n".join(self._to_text(item) for item in value)
         return str(value)
 

@@ -342,7 +342,7 @@ class IronClawRuntime:
     def _coerce_str_list(value: Any) -> list[str]:
         if value is None:
             return []
-        if isinstance(value, (list, tuple, set)):
+        if isinstance(value, list | tuple | set):
             return [str(item).strip() for item in value if str(item).strip()]
         text = str(value).strip()
         return [text] if text else []

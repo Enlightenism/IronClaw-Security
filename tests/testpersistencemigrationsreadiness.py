@@ -68,7 +68,7 @@ def _serialize(value: Any) -> dict[str, Any]:
         attr = getattr(value, name)
         if callable(attr):
             continue
-        if isinstance(attr, (str, int, float, bool, list, dict, type(None))):
+        if isinstance(attr, str | int | float | bool | list | dict | type(None)):
             data[name] = attr
     return data
 
@@ -336,7 +336,7 @@ def test_store_exposes_readiness_or_backend_identity_when_supported() -> None:
 
         if readiness is not None:
             observed = True
-            assert isinstance(readiness, (bool, str, dict))
+            assert isinstance(readiness, bool | str | dict)
             break
 
         if backend:

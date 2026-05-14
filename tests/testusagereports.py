@@ -22,7 +22,7 @@ def _payload_of(result: Any) -> dict[str, Any]:
         value = getattr(result, name)
         if callable(value):
             continue
-        if isinstance(value, (str, int, float, bool, list, dict, type(None))):
+        if isinstance(value, str | int | float | bool | list | dict | type(None)):
             payload[name] = value
     return payload
 
@@ -36,7 +36,7 @@ def _items_of(result: Any) -> list[Any]:
             if isinstance(value, list):
                 return value
         return [result]
-    if hasattr(result, "__iter__") and not isinstance(result, (str, bytes)):
+    if hasattr(result, "__iter__") and not isinstance(result, str | bytes):
         try:
             return list(result)
         except TypeError:
@@ -83,7 +83,7 @@ def test_build_usage_reports_returns_object() -> None:
 def test_usage_reports_is_serializable_to_supported_shape() -> None:
     reports = build_usage_reports()
 
-    assert isinstance(reports, (dict, list)) or hasattr(reports, "as_dict") or hasattr(reports, "__iter__")
+    assert isinstance(reports, dict | list) or hasattr(reports, "as_dict") or hasattr(reports, "__iter__")
 
 
 def test_usage_reports_contains_at_least_one_record() -> None:
@@ -163,7 +163,7 @@ def test_usage_reports_routes_are_list_or_dict_when_present() -> None:
         payload = _payload_of(item)
         routes = _value(payload, "routes", "samples", "events", "history")
         if routes is not None:
-            assert isinstance(routes, (list, dict))
+            assert isinstance(routes, list | dict)
 
 
 def test_usage_reports_average_is_consistent_with_totals_when_present() -> None:
@@ -253,7 +253,7 @@ def test_usage_reports_payload_uses_json_friendly_values() -> None:
         payload = _payload_of(item)
         for key, value in payload.items():
             assert isinstance(key, str)
-            assert value is None or isinstance(value, (str, int, float, bool, list, dict))
+            assert value is None or isinstance(value, str | int | float | bool | list | dict)
 
 
 def test_usage_reports_multiple_builds_have_stable_top_level_shape() -> None:

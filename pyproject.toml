@@ -120,6 +120,7 @@ line-length = 300
 target-version = "py311"
 
 [tool.ruff.lint]
+ignore = ["B008", "UP038"]
 select = [
   "E",
   "F",

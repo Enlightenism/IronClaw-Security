@@ -107,7 +107,7 @@ def _payload_of(result: Any) -> dict[str, Any]:
             continue
         if isinstance(value, datetime):
             payload[name] = value.isoformat()
-        elif isinstance(value, (str, int, float, bool, list, dict, type(None))):
+        elif isinstance(value, str | int | float | bool | list | dict | type(None)):
             payload[name] = value
     return payload
 
@@ -367,7 +367,7 @@ def test_review_queue_service_exposes_json_friendly_items(
     payload = _payload_of(item)
     for key, value in payload.items():
         assert isinstance(key, str)
-        assert value is None or isinstance(value, (str, int, float, bool, list, dict))
+        assert value is None or isinstance(value, str | int | float | bool | list | dict)
 
 
 def test_review_queue_service_can_return_item_by_id(

@@ -124,7 +124,7 @@ def test_billing_packages_response_exposes_collection_if_present() -> None:
 
     for key in ("packages", "items", "catalog", "plans"):
         if key in payload:
-            assert isinstance(payload[key], (list, dict))
+            assert isinstance(payload[key], list | dict)
 
 
 def test_billing_ledger_response_exposes_entries_if_present() -> None:
@@ -132,7 +132,7 @@ def test_billing_ledger_response_exposes_entries_if_present() -> None:
 
     for key in ("entries",):
         if key in payload:
-            assert isinstance(payload[key], (list, dict))
+            assert isinstance(payload[key], list | dict)
 
 
 def test_billing_ledger_response_exposes_limit_if_present() -> None:
@@ -156,7 +156,7 @@ def test_billing_routes_are_json_serialization_friendly(path: str) -> None:
     payload = _get_json(path)
 
     for value in payload.values():
-        assert value is None or isinstance(value, (str, int, float, bool, list, dict))
+        assert value is None or isinstance(value, str | int | float | bool | list | dict)
 
 
 def test_billing_packages_response_has_consistent_structure() -> None:

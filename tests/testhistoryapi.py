@@ -99,7 +99,7 @@ def test_history_endpoint_returns_json_when_available(client: TestClient) -> Non
     _, response = _first_available_history_response(client)
 
     payload = response.json()
-    assert isinstance(payload, (list, dict))
+    assert isinstance(payload, list | dict)
 
 
 def test_history_endpoint_returns_collection_shape_when_available(
@@ -108,7 +108,7 @@ def test_history_endpoint_returns_collection_shape_when_available(
     _, response = _first_available_history_response(client)
 
     payload = response.json()
-    assert isinstance(payload, (list, dict))
+    assert isinstance(payload, list | dict)
 
     items = _items_payload(payload)
     if isinstance(payload, list):
@@ -137,7 +137,7 @@ def test_history_endpoint_supports_session_filter_when_implemented(
         observed_statuses.append((path, response.status_code))
         if response.status_code == 200:
             payload = response.json()
-            assert isinstance(payload, (list, dict))
+            assert isinstance(payload, list | dict)
             return
         if response.status_code in {400, 422}:
             return
@@ -183,7 +183,7 @@ def test_history_endpoint_response_is_json_friendly(client: TestClient) -> None:
     _, response = _first_available_history_response(client)
 
     payload = response.json()
-    assert isinstance(payload, (list, dict))
+    assert isinstance(payload, list | dict)
 
 
 def test_history_endpoint_response_is_stable_across_repeated_reads(

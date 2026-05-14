@@ -22,10 +22,10 @@ def _normalize_tags(raw: Any) -> list[str]:
     if isinstance(raw, dict):
         for key in ("tags", "labels"):
             value = raw.get(key)
-            if isinstance(value, (list, tuple, set)):
+            if isinstance(value, list | tuple | set):
                 return sorted({str(tag).strip() for tag in value if str(tag).strip()})
         return sorted({str(value).strip() for value in raw.values() if str(value).strip()})
-    if isinstance(raw, (list, tuple, set)):
+    if isinstance(raw, list | tuple | set):
         return sorted({str(tag).strip() for tag in raw if str(tag).strip()})
     return [str(raw).strip()] if str(raw).strip() else []
 

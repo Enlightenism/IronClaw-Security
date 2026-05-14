@@ -250,7 +250,7 @@ def _coerce_roles(record: APIKeyRecord | None) -> tuple[str, ...]:
 
     for attr_name in ("roles", "role_names", "grants"):
         value = getattr(record, attr_name, None)
-        if isinstance(value, (list, tuple, set)):
+        if isinstance(value, list | tuple | set):
             return tuple(str(item).strip() for item in value if str(item).strip())
 
     role = getattr(record, "role", None)
@@ -264,7 +264,7 @@ def _coerce_permissions(record: APIKeyRecord | None) -> tuple[str, ...]:
 
     for attr_name in ("permissions", "scopes", "allowed_actions"):
         value = getattr(record, attr_name, None)
-        if isinstance(value, (list, tuple, set)):
+        if isinstance(value, list | tuple | set):
             return tuple(str(item).strip() for item in value if str(item).strip())
 
     return ()

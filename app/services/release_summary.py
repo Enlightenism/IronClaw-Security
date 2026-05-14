@@ -201,7 +201,7 @@ def _normalize_value(value: Any) -> Any:
         return value.isoformat()
     if isinstance(value, dict):
         return {str(key): _normalize_value(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return [_normalize_value(item) for item in value]
     if hasattr(value, "value"):
         return value.value

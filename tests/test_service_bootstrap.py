@@ -223,7 +223,7 @@ def test_service_module_bootstrap_like_entrypoint_runs_with_temp_paths(
     except SystemExit as exc:
         result = exc.code
 
-    assert result is None or isinstance(result, (int, dict, str, Path, tuple))
+    assert result is None or isinstance(result, int | dict | str | Path | tuple)
 
 
 def test_service_module_can_build_runtime_command_shape(service_module: Any) -> None:
@@ -263,7 +263,7 @@ def test_service_module_can_build_runtime_command_shape(service_module: Any) -> 
     if isinstance(result, str):
         lowered = result.lower()
         assert "uvicorn" in lowered or "app.main:app" in lowered
-    elif isinstance(result, (list, tuple)):
+    elif isinstance(result, list | tuple):
         flattened = " ".join(str(part) for part in result).lower()
         assert "uvicorn" in flattened or "app.main:app" in flattened
     else:
@@ -311,7 +311,7 @@ def test_service_module_status_like_function_returns_serializable_payload(
             port=8000,
         )
 
-    assert result is None or isinstance(result, (dict, str, service_module.ServiceState))
+    assert result is None or isinstance(result, dict | str | service_module.ServiceState)
     if isinstance(result, dict):
         json.dumps(result)
 

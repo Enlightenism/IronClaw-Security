@@ -22,7 +22,7 @@ def _payload_of(result: Any) -> dict[str, Any]:
         value = getattr(result, name)
         if callable(value):
             continue
-        if isinstance(value, (str, int, float, bool, list, dict, type(None))):
+        if isinstance(value, str | int | float | bool | list | dict | type(None)):
             payload[name] = value
     return payload
 
@@ -166,7 +166,7 @@ def test_action_usage_collection_fields_are_json_friendly_when_present() -> None
     payload = _payload_of(usage)
 
     for value in payload.values():
-        assert value is None or isinstance(value, (str, int, float, bool, list, dict))
+        assert value is None or isinstance(value, str | int | float | bool | list | dict)
 
 
 def test_action_usage_event_list_is_list_when_present() -> None:

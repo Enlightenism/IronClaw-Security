@@ -22,7 +22,7 @@ def _payload_of(result: Any) -> dict[str, Any]:
         value = getattr(result, name)
         if callable(value):
             continue
-        if isinstance(value, (str, int, float, bool, list, dict, type(None))):
+        if isinstance(value, str | int | float | bool | list | dict | type(None)):
             payload[name] = value
     return payload
 
@@ -295,7 +295,7 @@ def test_package_purchase_enforcement_payload_uses_json_friendly_values() -> Non
 
     for key, value in payload.items():
         assert isinstance(key, str)
-        assert value is None or isinstance(value, (str, int, float, bool, list, dict))
+        assert value is None or isinstance(value, str | int | float | bool | list | dict)
 
 
 def test_package_purchase_enforcement_multiple_builds_have_stable_key_sets() -> None:

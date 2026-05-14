@@ -56,7 +56,7 @@ def _serialize(value: Any) -> dict[str, Any]:
         attr = getattr(value, name)
         if callable(attr):
             continue
-        if isinstance(attr, (str, int, float, bool, list, dict, type(None))):
+        if isinstance(attr, str | int | float | bool | list | dict | type(None)):
             payload[name] = attr
     return payload
 

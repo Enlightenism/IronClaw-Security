@@ -97,7 +97,7 @@ def test_ui_runtime_status_metrics_fields_are_json_safe_when_present(
 
     for key in ("metrics_summary", "metrics", "kpis", "health_snapshot", "health"):
         if key in data:
-            assert isinstance(data[key], (dict, list, str))
+            assert isinstance(data[key], dict | list | str)
 
 
 def test_ui_runtime_status_response_is_stable_across_repeated_reads(

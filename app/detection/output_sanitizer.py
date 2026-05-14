@@ -5,7 +5,6 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-
 SECRET_PATTERNS: dict[str, str] = {
     "openai_api_key": r"\bsk-[A-Za-z0-9]{20,}\b",
     "aws_access_key": r"\bAKIA[0-9A-Z]{16}\b",

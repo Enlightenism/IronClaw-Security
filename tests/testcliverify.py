@@ -109,7 +109,7 @@ def test_cliverify_verify_like_entrypoint_accepts_noninteractive_invocation(
     except TypeError:
         result = verify_func()
 
-    assert result is None or isinstance(result, (int, bool, dict, str, tuple))
+    assert result is None or isinstance(result, int | bool | dict | str | tuple)
 
 
 def test_cliverify_main_noninteractive_execution_is_process_safe(

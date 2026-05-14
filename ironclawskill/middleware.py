@@ -80,7 +80,7 @@ def _json_mapping(value: Mapping[str, Any] | None) -> dict[str, JsonValue]:
 def _string_tuple(value: Any) -> tuple[str, ...]:
     if value is None:
         return ()
-    if isinstance(value, (list, tuple, set)):
+    if isinstance(value, list | tuple | set):
         result: list[str] = []
         seen: set[str] = set()
         for item in value:
@@ -294,7 +294,7 @@ def _normalize_reason_item(item: Any) -> SkillReason:
 def _normalize_reasons(value: Any) -> tuple[SkillReason, ...]:
     if not value:
         return ()
-    items = value if isinstance(value, (list, tuple, set)) else (value,)
+    items = value if isinstance(value, list | tuple | set) else (value,)
     result: list[SkillReason] = []
     seen: set[tuple[str, str]] = set()
     for item in items:
@@ -356,7 +356,7 @@ def _build_input_artifact_from_mapping(item: Mapping[str, Any]) -> SkillInputArt
 def _normalize_input_artifacts(value: Any) -> tuple[SkillInputArtifact, ...]:
     if not value:
         return ()
-    items = value if isinstance(value, (list, tuple)) else (value,)
+    items = value if isinstance(value, list | tuple) else (value,)
     result: list[SkillInputArtifact] = []
     for item in items:
         if isinstance(item, SkillInputArtifact):
@@ -399,7 +399,7 @@ def _build_output_artifact_from_mapping(item: Mapping[str, Any]) -> SkillOutputA
 def _normalize_output_artifacts(value: Any) -> tuple[SkillOutputArtifact, ...]:
     if not value:
         return ()
-    items = value if isinstance(value, (list, tuple)) else (value,)
+    items = value if isinstance(value, list | tuple) else (value,)
     result: list[SkillOutputArtifact] = []
     for item in items:
         if isinstance(item, SkillOutputArtifact):
@@ -414,7 +414,7 @@ def _normalize_output_artifacts(value: Any) -> tuple[SkillOutputArtifact, ...]:
 def _normalize_policy_hints(value: Any) -> tuple[SkillPolicyHint, ...]:
     if not value:
         return ()
-    items = value if isinstance(value, (list, tuple)) else (value,)
+    items = value if isinstance(value, list | tuple) else (value,)
     result: list[SkillPolicyHint] = []
     seen: set[tuple[str, str]] = set()
     for item in items:
@@ -819,7 +819,7 @@ class IronClawSkillMiddleware:
 
         content = request.get("content")
         messages = request.get("messages")
-        if not isinstance(content, str) and not isinstance(messages, (list, tuple)):
+        if not isinstance(content, str) and not isinstance(messages, list | tuple):
             raise SkillValidationError("Request must include content or messages.")
 
         providername = (

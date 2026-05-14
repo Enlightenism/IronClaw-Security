@@ -85,7 +85,7 @@ def test_review_queue_collection_fields_are_json_safe_when_present(
     if "items" in data:
         assert isinstance(data["items"], list)
     if "queue" in data:
-        assert isinstance(data["queue"], (list, dict, str))
+        assert isinstance(data["queue"], list | dict | str)
 
 
 def test_review_queue_response_is_stable_across_repeated_reads(

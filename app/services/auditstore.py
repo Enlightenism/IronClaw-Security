@@ -126,7 +126,7 @@ def _normalize_rows(rows: Any) -> list[dict[str, Any]]:
         return []
     if isinstance(rows, Mapping):
         return [dict(rows)]
-    if isinstance(rows, Iterable) and not isinstance(rows, (str, bytes)):
+    if isinstance(rows, Iterable) and not isinstance(rows, str | bytes):
         return [dict(row) for row in rows]
     return []
 

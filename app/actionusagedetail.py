@@ -140,6 +140,6 @@ def build_action_usage_detail(
             # metadata may be a dict, handled elsewhere
             continue
         assert isinstance(key, str)
-        assert value is None or isinstance(value, (str, int, float, bool, list, dict))
+        assert value is None or isinstance(value, str | int | float | bool | list | dict)
 
     return detail

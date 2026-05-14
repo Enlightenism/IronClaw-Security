@@ -22,7 +22,7 @@ def _payload_of(result: Any) -> dict[str, Any]:
         value = getattr(result, name)
         if callable(value):
             continue
-        if isinstance(value, (str, int, float, bool, list, dict, type(None))):
+        if isinstance(value, str | int | float | bool | list | dict | type(None)):
             payload[name] = value
     return payload
 
@@ -105,9 +105,9 @@ def test_billing_store_collections_have_expected_types_when_present() -> None:
     purchases = _value(payload, "purchases", "orders", "entitlements")
 
     if packages is not None:
-        assert isinstance(packages, (list, dict))
+        assert isinstance(packages, list | dict)
     if purchases is not None:
-        assert isinstance(purchases, (list, dict))
+        assert isinstance(purchases, list | dict)
 
 
 def test_billing_store_nested_wallet_and_ledger_are_dicts_when_present() -> None:
@@ -307,4 +307,4 @@ def test_billing_store_payload_uses_json_friendly_values() -> None:
 
     for key, value in payload.items():
         assert isinstance(key, str)
-        assert value is None or isinstance(value, (str, int, float, bool, list, dict))
+        assert value is None or isinstance(value, str | int | float | bool | list | dict)

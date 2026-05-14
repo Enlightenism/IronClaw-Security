@@ -75,7 +75,7 @@ def _normalize_bool(value: Any, default: bool = False) -> bool:
         return value
     if value is None:
         return default
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return bool(value)
     text = str(value).strip().lower()
     if text in {"1", "true", "yes", "on"}:

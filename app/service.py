@@ -94,7 +94,7 @@ def _normalize_reasons(items: Any) -> list[ExecutionReason]:
     if not items:
         return []
 
-    if isinstance(items, (str, bytes)):
+    if isinstance(items, str | bytes):
         return [
             ExecutionReason(
                 source="runtime",

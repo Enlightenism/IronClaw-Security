@@ -5,14 +5,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.dependencies import get_integration_registry
-from app.services.incident_store import (
-    IncidentStore,
-    list_incidents,
-)
-from app.services.integration_registry import (
-    IntegrationRegistry,
-    list_integrations,
-)
+from app.services.incident_store import IncidentStore, list_incidents
+from app.services.integration_registry import IntegrationRegistry, list_integrations
 from app.services.metrics_store import (
     MetricsStore,
     get_integration_latency_summary,
@@ -95,11 +89,9 @@ def _observability_score(
 ) -> int:
     score = 100
 
-    # Penalize high error rates.
     if error_rate_1m > 0:
         score -= min(int(error_rate_1m * 50), 40)
 
-    # Penalize high latency.
     if p95_latency_ms > 0:
         if p95_latency_ms > 2000:
             score -= 30
@@ -108,11 +100,9 @@ def _observability_score(
         elif p95_latency_ms > 500:
             score -= 10
 
-    # Penalize open incidents.
     if open_incident_count > 0:
         score -= min(open_incident_count * 10, 40)
 
-    # Clamp between 0 and 100.
     return max(0, min(score, 100))
 
 
@@ -126,8 +116,7 @@ def _index_incidents_by_integration(
             continue
         incidents_by_integration.setdefault(integration_id, []).append(incident)
 
-    # Sort each integration's incidents newest-first by created_at / updated_at.
-    for integration_id, incidents in incidents_by_integration.items():
+    for incidents in incidents_by_integration.values():
         incidents.sort(
             key=lambda inc: str(
                 getattr(inc, "updated_at", getattr(inc, "created_at", "")),
@@ -171,14 +160,16 @@ def build_integration_observability_view() -> IntegrationObservabilityView:
         latency = get_integration_latency_summary(metrics_store, record.integration_id)
         throughput = get_integration_throughput_summary(metrics_store, record.integration_id)
 
-        # Derive simple rates from the 1-minute window.
         request_rate_1m = float(getattr(throughput, "requests_1m", 0))
         error_rate_1m = float(getattr(throughput, "errors_1m", 0))
-
         p95_latency_ms = float(getattr(latency, "p95_ms", 0.0))
 
         integration_incidents = incidents_by_integration.get(record.integration_id, [])
-        open_incident_count = sum(1 for inc in integration_incidents if str(getattr(inc, "status", "")).lower() in {"open", "acknowledged", "investigating"})
+        open_incident_count = sum(
+            1
+            for inc in integration_incidents
+            if str(getattr(inc, "status", "")).lower() in {"open", "acknowledged", "investigating"}
+        )
 
         if open_incident_count > 0 or error_rate_1m > 0 or p95_latency_ms > 1000:
             degraded_count += 1

@@ -22,7 +22,7 @@ def _payload_of(result: Any) -> dict[str, Any]:
         value = getattr(result, name)
         if callable(value):
             continue
-        if isinstance(value, (str, int, float, bool, list, dict, type(None))):
+        if isinstance(value, str | int | float | bool | list | dict | type(None)):
             payload[name] = value
     return payload
 
@@ -40,7 +40,7 @@ def _items_of(result: Any) -> list[Any]:
         payload = result.as_dict()
         if isinstance(payload, dict):
             return _items_of(payload)
-    if hasattr(result, "__iter__") and not isinstance(result, (str, bytes)):
+    if hasattr(result, "__iter__") and not isinstance(result, str | bytes):
         try:
             return list(result)
         except TypeError:
@@ -87,7 +87,7 @@ def test_build_billing_packages_returns_object() -> None:
 def test_billing_packages_is_serializable_to_supported_shape() -> None:
     result = build_billing_packages()
 
-    assert isinstance(result, (dict, list)) or hasattr(result, "as_dict") or hasattr(result, "__iter__")
+    assert isinstance(result, dict | list) or hasattr(result, "as_dict") or hasattr(result, "__iter__")
 
 
 def test_billing_packages_contains_at_least_one_package_record() -> None:
@@ -167,7 +167,7 @@ def test_billing_package_features_are_list_or_dict_when_present() -> None:
         payload = _payload_of(item)
         features = _value(payload, "features", "entitlements", "benefits")
         if features is not None:
-            assert isinstance(features, (list, dict))
+            assert isinstance(features, list | dict)
 
 
 def test_billing_packages_support_owner_bound_build_when_available() -> None:
@@ -264,7 +264,7 @@ def test_billing_packages_payload_uses_json_friendly_values() -> None:
         payload = _payload_of(item)
         for key, value in payload.items():
             assert isinstance(key, str)
-            assert value is None or isinstance(value, (str, int, float, bool, list, dict))
+            assert value is None or isinstance(value, str | int | float | bool | list | dict)
 
 
 def test_billing_packages_multiple_builds_have_stable_top_level_shape() -> None:

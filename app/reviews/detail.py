@@ -32,7 +32,7 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
             return True
         if normalized in {"0", "false", "no", "off", "disabled"}:
             return False
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return bool(value)
     return default
 
@@ -65,7 +65,7 @@ def _coerce_datetime(value: Any, default: datetime | None = None) -> datetime | 
 
 
 def _coerce_list_of_str(value: Any) -> tuple[str, ...]:
-    if isinstance(value, (list, tuple, set)):
+    if isinstance(value, list | tuple | set):
         normalized = []
         for item in value:
             text = _coerce_str(item)

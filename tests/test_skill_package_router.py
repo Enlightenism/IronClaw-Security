@@ -503,15 +503,15 @@ class TestSkillResponseEnvelopeShape:
 
 class TestSkillScanInputValidation:
     def test_text_target_requires_target_value(self):
-        with pytest.raises(Exception):
+        with pytest.raises((ValueError, TypeError)):
             SkillScanInput(target_type="text", target_value=None)
 
     def test_prompt_bundle_requires_bundle(self):
-        with pytest.raises(Exception):
+        with pytest.raises((ValueError, TypeError)):
             SkillScanInput(target_type="prompt_bundle", bundle=None)
 
     def test_prompt_bundle_rejects_target_value(self):
-        with pytest.raises(Exception):
+        with pytest.raises((ValueError, TypeError)):
             SkillScanInput(
                 target_type="prompt_bundle",
                 target_value="something",
@@ -519,7 +519,7 @@ class TestSkillScanInputValidation:
             )
 
     def test_non_bundle_rejects_bundle_field(self):
-        with pytest.raises(Exception):
+        with pytest.raises((ValueError, TypeError)):
             SkillScanInput(
                 target_type="text",
                 target_value="hello",
@@ -527,7 +527,7 @@ class TestSkillScanInputValidation:
             )
 
     def test_prompt_bundle_requires_at_least_one_field(self):
-        with pytest.raises(Exception):
+        with pytest.raises((ValueError, TypeError)):
             SkillPromptBundleInput()
 
     def test_valid_text_scan_input(self):
@@ -560,7 +560,7 @@ class TestSkillScanInputValidation:
 
 class TestSkillActionInputValidation:
     def test_target_required_and_non_empty(self):
-        with pytest.raises(Exception):
+        with pytest.raises((ValueError, TypeError)):
             SkillActionInput(action_type="python_code", target="  ")
 
     def test_valid_action_types(self):
@@ -574,16 +574,16 @@ class TestSkillActionInputValidation:
             "system_change",
             "other",
         ]
-        for at in valid_types:
-            action = SkillActionInput(action_type=at, target="some_target")
-            assert action.action_type == at
+        for action_type in valid_types:
+            action = SkillActionInput(action_type=action_type, target="some_target")
+            assert action.action_type == action_type
 
     def test_invalid_action_type_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises((ValueError, TypeError)):
             SkillActionInput(action_type="unknown_type", target="x")
 
     def test_extra_fields_forbidden(self):
-        with pytest.raises(Exception):
+        with pytest.raises((ValueError, TypeError)):
             SkillActionInput(action_type="python_code", target="x", illegal_field="y")
 
     def test_content_optional(self):
@@ -616,7 +616,7 @@ class TestSkillRequestContextValidation:
             assert ctx.source_platform == platform
 
     def test_invalid_source_platform_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises((ValueError, TypeError)):
             SkillRequestContext(source_platform="openai")
 
     def test_tags_normalized_lowercase_deduplicated(self):
@@ -647,33 +647,33 @@ class TestSkillRequestContextValidation:
 
 class TestSkillReasonValidation:
     def test_valid_reason(self):
-        r = SkillReason(source="policy", label="Matched rule", details="Pattern found in target.")
-        assert r.source == "policy"
-        assert r.score is None
+        reason = SkillReason(source="policy", label="Matched rule", details="Pattern found in target.")
+        assert reason.source == "policy"
+        assert reason.score is None
 
     def test_score_range_valid(self):
-        r = SkillReason(source="scan", label="Risk factor", details="High entropy.", score=0.87)
-        assert r.score == pytest.approx(0.87)
+        reason = SkillReason(source="scan", label="Risk factor", details="High entropy.", score=0.87)
+        assert reason.score == pytest.approx(0.87)
 
     def test_score_out_of_range_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises((ValueError, TypeError)):
             SkillReason(source="ai", label="test", details="detail", score=1.5)
 
     def test_empty_label_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises((ValueError, TypeError)):
             SkillReason(source="runtime", label="", details="some detail")
 
     def test_empty_details_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises((ValueError, TypeError)):
             SkillReason(source="runtime", label="label", details="")
 
     def test_valid_sources(self):
-        for src in ("policy", "scan", "ai", "runtime", "installer", "skill"):
-            r = SkillReason(source=src, label="ok", details="ok detail")
-            assert r.source == src
+        for source in ("policy", "scan", "ai", "runtime", "installer", "skill"):
+            reason = SkillReason(source=source, label="ok", details="ok detail")
+            assert reason.source == source
 
     def test_invalid_source_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises((ValueError, TypeError)):
             SkillReason(source="unknown_src", label="x", details="y")
 
 

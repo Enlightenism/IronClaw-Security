@@ -83,7 +83,7 @@ def _normalize_tags(raw: Any) -> list[str]:
                 return [str(t).strip() for t in raw[key] if str(t).strip()]
         # Fallback: take all values as tags
         return [str(v).strip() for v in raw.values() if str(v).strip()]
-    if isinstance(raw, (list, tuple, set)):
+    if isinstance(raw, list | tuple | set):
         return [str(t).strip() for t in raw if str(t).strip()]
     # Single string or scalar
     return [str(raw).strip()]

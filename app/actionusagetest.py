@@ -180,6 +180,6 @@ def build_action_usage_test(
     payload = harness.as_dict()
     for key, value in payload.items():
         assert isinstance(key, str)
-        assert value is None or isinstance(value, (str, int, float, bool, list, dict))
+        assert value is None or isinstance(value, str | int | float | bool | list | dict)
 
     return harness

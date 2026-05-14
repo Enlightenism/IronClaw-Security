@@ -54,7 +54,7 @@ def _normalize_value(value: Any) -> Any:
         return value.value
     if isinstance(value, Mapping):
         return {str(k): _normalize_value(v) for k, v in sorted(value.items(), key=lambda item: str(item[0]))}
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return [_normalize_value(item) for item in value]
     return value
 

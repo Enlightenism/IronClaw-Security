@@ -25,7 +25,7 @@ def _format_detail_value(value: Any) -> str:
         return "—"
     if isinstance(value, bool):
         return "Yes" if value else "No"
-    if isinstance(value, (list, tuple, set)):
+    if isinstance(value, list | tuple | set):
         if not value:
             return "[]"
         return ", ".join(str(item) for item in value)

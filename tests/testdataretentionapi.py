@@ -86,7 +86,7 @@ def test_data_retention_summary_field_is_json_safe_when_present(client: TestClie
     _, data = _get_payload(client)
 
     if "summary" in data:
-        assert isinstance(data["summary"], (str, dict, list))
+        assert isinstance(data["summary"], str | dict | list)
 
 
 def test_data_retention_response_is_stable_across_repeated_reads(client: TestClient) -> None:

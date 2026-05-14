@@ -269,11 +269,11 @@ class SecretScanner:
             return ""
         if isinstance(value, str):
             return value
-        if isinstance(value, (bytes, bytearray)):
+        if isinstance(value, bytes | bytearray):
             return value.decode("utf-8", errors="ignore")
         if isinstance(value, Mapping):
             return self._serialize_json(value)
-        if isinstance(value, (list, tuple, set)):
+        if isinstance(value, list | tuple | set):
             return self._serialize_json(list(value))
         return str(value)
 

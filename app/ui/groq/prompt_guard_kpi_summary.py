@@ -166,7 +166,7 @@ def build_prompt_guard_kpi_summary() -> PromptGuardKpiSummary:
             name="pass_rate",
             value=pass_rate,
             label="Pass rate",
-            trend="healthy" if isinstance(pass_rate, (int, float)) and pass_rate >= 0.9 else "watch",
+            trend="healthy" if isinstance(pass_rate, int | float) and pass_rate >= 0.9 else "watch",
             source_module="prompt_guard_metrics",
             details={
                 "health_status": health.overall_status,
@@ -178,7 +178,7 @@ def build_prompt_guard_kpi_summary() -> PromptGuardKpiSummary:
             name="block_rate",
             value=block_rate,
             label="Block rate",
-            trend="watch" if isinstance(block_rate, (int, float)) and block_rate > 0 else "stable",
+            trend="watch" if isinstance(block_rate, int | float) and block_rate > 0 else "stable",
             source_module="prompt_guard_metrics",
             details={
                 "policy_health": health.policy_health,

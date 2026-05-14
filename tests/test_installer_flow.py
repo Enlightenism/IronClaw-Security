@@ -195,8 +195,8 @@ def test_installer_status_or_plan_payload_is_serializable(installer_module: Any,
         integration="claude",
     )
 
-    assert result is None or isinstance(result, (dict, list, str, tuple))
-    if isinstance(result, (dict, list)):
+    assert result is None or isinstance(result, dict | list | str | tuple)
+    if isinstance(result, dict | list):
         _assert_json_serializable(result)
 
 
@@ -317,8 +317,8 @@ def test_installer_flow_entrypoint_accepts_temp_paths(
     except Exception:
         result = None
 
-    assert result is None or isinstance(result, (int, dict, str, Path, tuple, list))
-    if isinstance(result, (dict, list)):
+    assert result is None or isinstance(result, int | dict | str | Path | tuple | list)
+    if isinstance(result, dict | list):
         _assert_json_serializable(result)
 
 
@@ -339,6 +339,6 @@ def test_installer_manifest_or_output_shape_is_stable(installer_module: Any, tmp
         dry_run=True,
     )
 
-    assert result is None or isinstance(result, (dict, str, list, tuple))
-    if isinstance(result, (dict, list)):
+    assert result is None or isinstance(result, dict | str | list | tuple)
+    if isinstance(result, dict | list):
         _assert_json_serializable(result)

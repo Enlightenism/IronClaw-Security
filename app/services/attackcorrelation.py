@@ -44,7 +44,7 @@ def _coerce_float(value: Any, default: float = 0.0) -> float:
 def _coerce_list(value: Any) -> list[str]:
     if value is None:
         return []
-    if isinstance(value, (list, tuple, set)):
+    if isinstance(value, list | tuple | set):
         return [str(item).strip() for item in value if str(item).strip()]
     text = str(value).strip()
     return [text] if text else []
@@ -788,7 +788,7 @@ class AttackCorrelationService:
         for playbook in self._playbooks:
             playbook_id = _coerce_str(playbook.get("playbook_id"))
             raw_triggers = playbook.get("triggers", set())
-            trigger_terms: set[str] = {t.lower() for t in raw_triggers} if isinstance(raw_triggers, (set, list, tuple)) else {_coerce_str(raw_triggers).lower()}
+            trigger_terms: set[str] = {t.lower() for t in raw_triggers} if isinstance(raw_triggers, set | list | tuple) else {_coerce_str(raw_triggers).lower()}
             candidate_signals = [
                 s
                 for s in signals
@@ -1699,7 +1699,7 @@ class AttackCorrelationService:
         matched: list[str] = []
         for playbook in self._playbooks:
             raw_triggers = playbook.get("triggers", set())
-            trigger_terms: set[str] = {t.lower() for t in raw_triggers} if isinstance(raw_triggers, (set, list, tuple)) else {_coerce_str(raw_triggers).lower()}
+            trigger_terms: set[str] = {t.lower() for t in raw_triggers} if isinstance(raw_triggers, set | list | tuple) else {_coerce_str(raw_triggers).lower()}
             hits = any(
                 trigger_terms.intersection(
                     {s.signal_type.lower(), *[t.lower() for t in s.tags]},

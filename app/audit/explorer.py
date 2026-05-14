@@ -32,7 +32,7 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
             return True
         if normalized in {"0", "false", "no", "off", "disabled"}:
             return False
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return bool(value)
     return default
 

@@ -112,7 +112,7 @@ def test_usage_api_payload_values_are_json_friendly_when_present(path: str) -> N
 
     for key, value in payload.items():
         assert isinstance(key, str)
-        assert value is None or isinstance(value, (str, int, float, bool, list, dict))
+        assert value is None or isinstance(value, str | int | float | bool | list | dict)
 
 
 @pytest.mark.parametrize("path", USAGE_API_PATHS)
@@ -160,7 +160,7 @@ def test_usage_api_usage_collection_is_valid_when_present() -> None:
         payload = response.json()
         for key in ("events", "records", "entries", "usage"):
             if key in payload:
-                assert isinstance(payload[key], (list, dict))
+                assert isinstance(payload[key], list | dict)
                 return
 
     pytest.skip("no usage collection field exposed")

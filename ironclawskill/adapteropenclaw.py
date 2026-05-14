@@ -1,13 +1,5 @@
 from __future__ import annotations
 
-"""
-Thin compatibility wrapper for the OpenClaw adapter.
-
-This keeps ironclawskill.* as the skill package boundary while delegating
-the actual implementation to the canonical ironclaw_skill.adapter_openclaw
-module, avoiding duplicate logic.
-"""
-
 from typing import Any, Final, Literal
 
 from ironclaw_skill.adapter_openclaw import (  # type: ignore[import-not-found]
@@ -33,6 +25,14 @@ from ironclaw_skill.contracts import (  # re-exported for local type signatures
     SkillRequest,
     SkillResponseEnvelope,
 )
+
+"""
+Thin compatibility wrapper for the OpenClaw adapter.
+
+This keeps ironclawskill.* as the skill package boundary while delegating
+the actual implementation to the canonical ironclaw_skill.adapter_openclaw
+module, avoiding duplicate logic.
+"""
 
 OPENCLAW_PLATFORM: Final = "openclaw"
 
@@ -118,8 +118,6 @@ class OpenClawSkillAdapter:
     """
 
     def __init__(self, config: Any) -> None:
-        # We do not duplicate config types here; the runtime passes whatever
-        # provider config it owns, and the underlying skill layer interprets it.
         self._config = config
 
 

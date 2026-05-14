@@ -379,7 +379,7 @@ def test_guard_action_blocks_malicious_shell_command():
     assert data["session_id"] == "session-abc-456"
     assert isinstance(data.get("reasons", []), list)
     for item in data.get("reasons", []):
-        assert isinstance(item, (str, dict))
+        assert isinstance(item, str | dict)
         if isinstance(item, dict):
             assert item.get("source") in {"policy", "scan", "ai"}
 

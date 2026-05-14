@@ -199,7 +199,7 @@ class SupabaseClient:
             headers={"Accept-Profile": schema},
         )
 
-        if isinstance(result, (list, dict)):
+        if isinstance(result, list | dict):
             return result
 
         raise SupabaseAPIError("unexpected supabase select response shape")

@@ -65,7 +65,7 @@ def test_package_rejects_unknown_attribute_access() -> None:
     package = importlib.import_module("ironclawskill")
 
     with pytest.raises(AttributeError):
-        package.does_not_exist
+        _ = package.does_not_exist
 
 
 def test_package_all_exports_match_public_contract() -> None:

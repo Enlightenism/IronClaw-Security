@@ -22,7 +22,7 @@ def _payload_of(result: Any) -> dict[str, Any]:
         value = getattr(result, name)
         if callable(value):
             continue
-        if isinstance(value, (str, int, float, bool, list, dict, type(None))):
+        if isinstance(value, str | int | float | bool | list | dict | type(None)):
             payload[name] = value
     return payload
 
@@ -126,7 +126,7 @@ def test_billing_summary_collection_sections_are_list_or_dict_when_present() -> 
         _value(payload, "events", "records"),
     ):
         if value is not None:
-            assert isinstance(value, (list, dict))
+            assert isinstance(value, list | dict)
 
 
 def test_billing_summary_numeric_fields_are_non_negative_when_present() -> None:
@@ -273,7 +273,7 @@ def test_billing_summary_payload_uses_json_friendly_values() -> None:
 
     for key, value in payload.items():
         assert isinstance(key, str)
-        assert value is None or isinstance(value, (str, int, float, bool, list, dict))
+        assert value is None or isinstance(value, str | int | float | bool | list | dict)
 
 
 def test_billing_summary_multiple_builds_have_stable_key_sets() -> None:
