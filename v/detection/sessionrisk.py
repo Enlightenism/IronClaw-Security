@@ -2,20 +2,20 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class SessionRiskLevel(str, Enum):
+class SessionRiskLevel(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
 
 
-class SessionRiskSignalKind(str, Enum):
+class SessionRiskSignalKind(StrEnum):
     PROMPT_INJECTION = "prompt_injection"
     MALWARE_DETONATION = "malware_detonation"
     DATA_EXFIL = "data_exfiltration"

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class TelemetryState(str, Enum):
+class TelemetryState(StrEnum):
     """Normalized state for adapter and integration health."""
 
     SUPPORTED = "supported"

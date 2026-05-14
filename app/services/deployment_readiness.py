@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class ReadinessLevel(str, Enum):
+class ReadinessLevel(StrEnum):
     PASS = "pass"
     WARN = "warn"
     FAIL = "fail"

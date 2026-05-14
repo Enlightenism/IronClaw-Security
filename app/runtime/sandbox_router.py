@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class SandboxLane(str, Enum):
+class SandboxLane(StrEnum):
     SAFE_READONLY = "safe_readonly"
     PROMPT_INJECTION = "prompt_injection"
     DOWNLOAD_REVIEW = "download_review"

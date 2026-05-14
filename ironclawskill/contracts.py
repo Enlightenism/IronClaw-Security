@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Literal, Protocol, TypeAlias, runtime_checkable
 from uuid import uuid4
 
@@ -21,33 +21,33 @@ def newid(prefix: str = "") -> str:
     return f"{prefix}{uuid4().hex}"
 
 
-class SkillProvider(str, Enum):
+class SkillProvider(StrEnum):
     CLAUDE = "claude"
     OPENCLAW = "openclaw"
     UNKNOWN = "unknown"
 
 
-class SkillMode(str, Enum):
+class SkillMode(StrEnum):
     SYNC = "sync"
     ASYNC = "async"
     STREAM = "stream"
 
 
-class SkillDecision(str, Enum):
+class SkillDecision(StrEnum):
     ALLOW = "allow"
     REVIEW = "review"
     BLOCK = "block"
     ERROR = "error"
 
 
-class RiskLevel(str, Enum):
+class RiskLevel(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
 
 
-class EventKind(str, Enum):
+class EventKind(StrEnum):
     REQUEST = "request"
     GUARD = "guard"
     EXECUTION = "execution"

@@ -3,12 +3,12 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
 
-class RuntimeSessionStatus(str, Enum):
+class RuntimeSessionStatus(StrEnum):
     CREATED = "created"
     ACTIVE = "active"
     PAUSED = "paused"

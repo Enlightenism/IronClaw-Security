@@ -3,19 +3,19 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
 
-class PolicyVerdict(str, Enum):
+class PolicyVerdict(StrEnum):
     ALLOW = "allow"
     WARN = "warn"
     QUARANTINE = "quarantine"
     BLOCK = "block"
 
 
-class PolicyTarget(str, Enum):
+class PolicyTarget(StrEnum):
     PROMPT = "prompt"
     ACTION = "action"
     TOOL = "tool"
@@ -25,7 +25,7 @@ class PolicyTarget(str, Enum):
     UNKNOWN = "unknown"
 
 
-class RiskLevel(str, Enum):
+class RiskLevel(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"

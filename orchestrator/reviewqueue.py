@@ -3,12 +3,12 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
 
-class ReviewStatus(str, Enum):
+class ReviewStatus(StrEnum):
     PENDING = "pending"
     ASSIGNED = "assigned"
     IN_REVIEW = "in_review"
@@ -19,7 +19,7 @@ class ReviewStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class ReviewPriority(str, Enum):
+class ReviewPriority(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"

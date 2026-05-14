@@ -1,27 +1,27 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class IntegrationStatus(str, Enum):
+class IntegrationStatus(StrEnum):
     PLANNED = "planned"
     ACTIVE = "active"
     DISABLED = "disabled"
     DEPRECATED = "deprecated"
 
 
-class IntegrationType(str, Enum):
+class IntegrationType(StrEnum):
     NATIVE = "native"
     ADAPTER = "adapter"
     CLI = "cli"
     REMOTE = "remote"
 
 
-class CapabilityName(str, Enum):
+class CapabilityName(StrEnum):
     PROMPT_INTERCEPTION = "prompt_interception"
     TOOL_INTERCEPTION = "tool_interception"
     EXECUTION_INTERCEPTION = "execution_interception"
@@ -36,13 +36,13 @@ class CapabilityName(str, Enum):
     GROQ_ASSIST = "groq_assist"
 
 
-class VerificationState(str, Enum):
+class VerificationState(StrEnum):
     PASS = "pass"
     WARN = "warn"
     FAIL = "fail"
 
 
-class PlatformCapabilitySupport(str, Enum):
+class PlatformCapabilitySupport(StrEnum):
     NATIVE = "native"
     PARTIAL = "partial"
     UNSUPPORTED = "unsupported"
@@ -195,7 +195,7 @@ class PlatformProfileSummaryResponse(IntegrationBaseModel):
     checked_at: str = Field(default_factory=utc_now_iso)
 
 
-class PolicyBundleVerificationStatus(str, Enum):
+class PolicyBundleVerificationStatus(StrEnum):
     VALID = "valid"
     INVALID = "invalid"
     EXPIRED = "expired"

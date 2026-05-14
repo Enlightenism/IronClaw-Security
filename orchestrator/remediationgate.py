@@ -3,12 +3,12 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
 
-class GateStatus(str, Enum):
+class GateStatus(StrEnum):
     OPEN = "open"
     CONDITIONAL = "conditional"
     CLOSED = "closed"
@@ -16,7 +16,7 @@ class GateStatus(str, Enum):
     NEEDS_REVIEW = "needs_review"
 
 
-class RemediationAction(str, Enum):
+class RemediationAction(StrEnum):
     NONE = "none"
     REQUIRE_REVIEW = "require_review"
     APPLY_REDACTION = "apply_redaction"

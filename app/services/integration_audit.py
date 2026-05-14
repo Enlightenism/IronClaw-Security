@@ -3,13 +3,13 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import Enum, StrEnum
 from hashlib import sha256
 from typing import Any
 from uuid import uuid4
 
 
-class AuditSeverity(str, Enum):
+class AuditSeverity(StrEnum):
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from fastapi import APIRouter
@@ -21,7 +21,7 @@ OK_STATUSES = frozenset({"ok", "healthy"})
 WARN_STATUSES = frozenset({"warn", "warning", "degraded"})
 
 
-class HealthStatus(str, Enum):
+class HealthStatus(StrEnum):
     ok = "ok"
     warn = "warn"
     degraded = "degraded"

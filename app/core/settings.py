@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from enum import Enum
+from enum import Enum, StrEnum
 from functools import lru_cache
 from typing import Literal, get_args, get_origin
 
@@ -68,7 +68,7 @@ def _coerce_env_value(value: str, annotation):
     return value
 
 
-class Environment(str, Enum):
+class Environment(StrEnum):
     DEVELOPMENT = "development"
     TEST = "test"
     STAGING = "staging"

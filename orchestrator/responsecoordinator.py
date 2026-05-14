@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
@@ -12,7 +12,7 @@ from orchestrator.runtimesession import RuntimeSession, RuntimeSessionManager, R
 from orchestrator.supervisor import SupervisorDecision, SupervisorStatus
 
 
-class ResponseOutcome(str, Enum):
+class ResponseOutcome(StrEnum):
     ALLOW = "allow"
     ALLOW_WITH_SANDBOX = "allow_with_sandbox"
     ALLOW_WITH_REDACTION = "allow_with_redaction"

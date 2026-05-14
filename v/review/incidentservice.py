@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -11,7 +11,7 @@ from v.orchestrator.responsecoordinator import CoordinatedResponse, ResponseDisp
 from v.services.attackcorrelation import CorrelationCluster
 
 
-class IncidentStatus(str, Enum):
+class IncidentStatus(StrEnum):
     OPEN = "open"
     TRIAGED = "triaged"
     QUARANTINED = "quarantined"
@@ -19,7 +19,7 @@ class IncidentStatus(str, Enum):
     RESOLVED = "resolved"
 
 
-class IncidentSeverity(str, Enum):
+class IncidentSeverity(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"

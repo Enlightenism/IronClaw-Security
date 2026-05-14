@@ -2,28 +2,28 @@ from __future__ import annotations
 
 from collections import deque
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from threading import Lock
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class ReviewPriority(str, Enum):
+class ReviewPriority(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
 
 
-class ReviewStatus(str, Enum):
+class ReviewStatus(StrEnum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     DISMISSED = "dismissed"
 
 
-class ReviewSource(str, Enum):
+class ReviewSource(StrEnum):
     INCIDENT = "incident"
     SESSION = "session"
     SIGNAL = "signal"

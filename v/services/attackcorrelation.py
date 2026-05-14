@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class CorrelatedSignalKind(str, Enum):
+class CorrelatedSignalKind(StrEnum):
     PROMPT_INJECTION = "prompt_injection"
     MALWARE_DETONATION = "malware_detonation"
     DATA_EXFIL = "data_exfiltration"
@@ -20,7 +20,7 @@ class CorrelatedSignalKind(str, Enum):
     OTHER = "other"
 
 
-class CorrelationEdgeType(str, Enum):
+class CorrelationEdgeType(StrEnum):
     SAME_SESSION = "same_session"
     SAME_ACTOR = "same_actor"
     SHARED_IO = "shared_io"

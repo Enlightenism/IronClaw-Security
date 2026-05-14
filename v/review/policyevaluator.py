@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
-from enum import Enum
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
+from enum import StrEnum
 from typing import Any
 
 
-class PolicyDecision(str, Enum):
+class PolicyDecision(StrEnum):
     ALLOW = "allow"
     REVIEW = "review"
     BLOCK = "block"
     ESCALATE = "escalate"
 
 
-class PolicyMatchType(str, Enum):
+class PolicyMatchType(StrEnum):
     EXACT = "exact"
     CONTAINS = "contains"
     PREFIX = "prefix"
@@ -32,7 +33,7 @@ class PolicyRule:
     decision: PolicyDecision = PolicyDecision.REVIEW
     severity: str = "medium"
     reason: str = ""
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = dataclass_field(default_factory=dict)
 
 
 @dataclass
@@ -41,8 +42,8 @@ class PolicyOverride:
     target_field: str | None = None
     target_value: Any | None = None
     force_decision: PolicyDecision | None = None
-    add_reasons: list[str] = field(default_factory=list)
-    metadata: dict[str, Any] = field(default_factory=dict)
+    add_reasons: list[str] = dataclass_field(default_factory=list)
+    metadata: dict[str, Any] = dataclass_field(default_factory=dict)
     enabled: bool = True
 
 
@@ -50,11 +51,11 @@ class PolicyOverride:
 class PolicyEvaluationResult:
     decision: PolicyDecision
     severity: str
-    matched_rules: list[str] = field(default_factory=list)
-    matched_overrides: list[str] = field(default_factory=list)
-    reasons: list[str] = field(default_factory=list)
-    signals: list[dict[str, Any]] = field(default_factory=list)
-    metadata: dict[str, Any] = field(default_factory=dict)
+    matched_rules: list[str] = dataclass_field(default_factory=list)
+    matched_overrides: list[str] = dataclass_field(default_factory=list)
+    reasons: list[str] = dataclass_field(default_factory=list)
+    signals: list[dict[str, Any]] = dataclass_field(default_factory=list)
+    metadata: dict[str, Any] = dataclass_field(default_factory=dict)
 
 
 class PolicyEvaluator:
@@ -145,7 +146,9 @@ class PolicyEvaluator:
                 {
                     "type": "override_match",
                     "override_id": override.override_id,
-                    "force_decision": (override.force_decision.value if override.force_decision is not None else None),
+                    "force_decision": (
+                        override.force_decision.value if override.force_decision is not None else None
+                    ),
                     "metadata": dict(override.metadata),
                 },
             )
@@ -200,7 +203,7 @@ class PolicyEvaluator:
             return actual == rule.value
 
         if rule.match_type is PolicyMatchType.CONTAINS:
-            if isinstance(actual, list | tuple | set):
+            if isinstance(actual, (list, tuple, set)):
                 return rule.value in actual
             return str(rule.value).lower() in str(actual).lower()
 
@@ -256,19 +259,21 @@ class PolicyEvaluator:
             "high": 2,
             "critical": 3,
         }
-        left_value = rank.get((left or "low").lower(), 0)
-        right_value = rank.get((right or "low").lower(), 0)
-        return left if left_value >= right_value else right
+        left_normalized = (left or "low").lower()
+        right_normalized = (right or "low").lower()
+        left_value = rank.get(left_normalized, 0)
+        right_value = rank.get(right_normalized, 0)
+        return left_normalized if left_value >= right_value else right_normalized
 
     def _coerce_number(self, value: Any) -> float:
         if isinstance(value, bool):
             return float(int(value))
-        if isinstance(value, int | float):
+        if isinstance(value, (int, float)):
             return float(value)
         return float(str(value).strip())
 
     def _dedupe(self, values: Sequence[str]) -> list[str]:
-        seen = set()
+        seen: set[str] = set()
         result: list[str] = []
         for value in values:
             if not value or value in seen:

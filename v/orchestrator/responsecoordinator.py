@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -9,7 +9,7 @@ from v.detection.sessionrisk import SessionRiskLevel, SessionRiskSnapshot
 from v.services.attackcorrelation import CorrelationCluster
 
 
-class ResponseDisposition(str, Enum):
+class ResponseDisposition(StrEnum):
     ALLOW = "allow"
     WARN = "warn"
     STEP_UP = "step_up"
