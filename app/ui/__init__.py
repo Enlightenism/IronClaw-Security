@@ -18,7 +18,6 @@ from app.ui.billing_summary import router as billing_summary_router
 from app.ui.billing_wallet import router as billing_wallet_router
 from app.ui.customer_key_detail import router as customer_key_detail_router
 from app.ui.customer_keys import router as customer_keys_router
-from app.ui.data.retention import router as data_retention_router
 from app.ui.executions.dashboard import router as execution_dashboard_router
 from app.ui.executions.detail import router as execution_detail_router
 from app.ui.executions.explorer import router as execution_explorer_router
@@ -69,7 +68,6 @@ UI_ROUTERS: tuple[APIRouter, ...] = (
     alert_notifications_router,
     system_diagnostics_router,
     integration_settings_router,
-    data_retention_router,
     incident_triage_router,
     operator_management_router,
     access_control_roles_router,
@@ -99,17 +97,8 @@ def iter_ui_routers() -> Iterable[APIRouter]:
 
 
 def include_ui_routers(app: FastAPI) -> None:
-    included_keys: set[tuple[str, tuple[str, ...]]] = set()
-
-    for ui_router in iter_ui_routers():
-        key = (
-            ui_router.prefix or "",
-            tuple(str(tag) for tag in (ui_router.tags or [])),
-        )
-        if key in included_keys:
-            continue
+    for ui_router in UI_ROUTERS:
         app.include_router(ui_router)
-        included_keys.add(key)
 
 
 def includeuirouters(app: FastAPI) -> None:
