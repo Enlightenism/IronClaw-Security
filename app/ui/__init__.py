@@ -49,11 +49,10 @@ __all__ = [
     "ui_router_status",
 ]
 
-
 router = APIRouter(prefix="/ui", tags=["ui"])
 
-
 UI_ROUTERS: tuple[APIRouter, ...] = (
+    router,
     execution_dashboard_router,
     execution_detail_router,
     review_queue_router,
@@ -100,8 +99,17 @@ def iter_ui_routers() -> Iterable[APIRouter]:
 
 
 def include_ui_routers(app: FastAPI) -> None:
+    included_keys: set[tuple[str, tuple[str, ...]]] = set()
+
     for ui_router in iter_ui_routers():
+        key = (
+            ui_router.prefix or "",
+            tuple(str(tag) for tag in (ui_router.tags or [])),
+        )
+        if key in included_keys:
+            continue
         app.include_router(ui_router)
+        included_keys.add(key)
 
 
 def includeuirouters(app: FastAPI) -> None:
