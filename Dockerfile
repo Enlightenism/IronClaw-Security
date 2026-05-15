@@ -19,6 +19,12 @@ RUN python -m pip install --upgrade pip \
     && python -m pip install -r /app/requirements.txt
 
 COPY . /app
+
+# Export OpenAPI schema during build to ensure locked schema is present in container
+RUN python3 scripts/export_openapi.py --output /app/openapi.json \
+    && echo "[docker-build] OpenAPI schema exported successfully" \
+    || (echo "[docker-build] WARNING: OpenAPI export failed, continuing build" && touch /app/openapi.json)
+
 RUN chown -R ironclaw:ironclaw /app
 
 USER ironclaw
@@ -26,8 +32,8 @@ USER ironclaw
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl --fail --silent http://127.0.0.1:8000/api/health \
-    || curl --fail --silent http://127.0.0.1:8000/api/health/liveness \
+    CMD curl --fail --silent http://127.0.0.1:8000/health \
+    || curl --fail --silent http://127.0.0.1:8000/health/liveness \
     || exit 1
 
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

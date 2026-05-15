@@ -57,3 +57,77 @@ jobs:
           SUPABASE_ANON_KEY: ""
         run: |
           pytest --tb=short --strict-markers
+
+  openapi-export:
+    name: OpenAPI Schema Export & Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -e ".[dev]"
+
+      - name: Export OpenAPI schema
+        env:
+          IRONCLAW_PERSISTENCE_MODE: memory
+          ENVIRONMENT: test
+          SUPABASE_URL: ""
+          SUPABASE_SERVICE_ROLE_KEY: ""
+          SUPABASE_KEY: ""
+          SUPABASE_ANON_KEY: ""
+        run: |
+          python scripts/export_openapi.py --output openapi.json
+
+      - name: Validate OpenAPI schema exists
+        run: |
+          if [ ! -f openapi.json ]; then
+            echo "ERROR: openapi.json was not generated"
+            exit 1
+          fi
+          echo "✓ openapi.json generated successfully"
+
+      - name: Check OpenAPI schema size
+        run: |
+          size=$(stat -c%s openapi.json 2>/dev/null || stat -f%z openapi.json)
+          if [ "$size" -lt 100 ]; then
+            echo "ERROR: openapi.json is suspiciously small ($size bytes)"
+            exit 1
+          fi
+          echo "✓ openapi.json size: $size bytes"
+
+      - name: Validate OpenAPI schema structure
+        run: |
+          python scripts/export_openapi.py --validate
+
+      - name: Check for schema drift (on PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          if git show origin/${{ github.base_ref }}:openapi.json > openapi-base.json 2>/dev/null; then
+            if ! diff -q openapi.json openapi-base.json > /dev/null; then
+              echo "❌ ERROR: OpenAPI schema drift detected — committed schema does not match live routes."
+              echo "Run: python scripts/export_openapi.py --output openapi.json"
+              echo "Then commit the updated openapi.json before merging."
+              echo ""
+              echo "--- Diff (base → head) ---"
+              diff -u openapi-base.json openapi.json || true
+              exit 1
+            else
+              echo "✓ No schema drift detected"
+            fi
+          else
+            echo "ℹ️  No baseline openapi.json on base branch — skipping drift check"
+          fi
+
+      - name: Upload OpenAPI schema artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-schema-${{ github.sha }}
+          path: openapi.json
+          retention-days: 30

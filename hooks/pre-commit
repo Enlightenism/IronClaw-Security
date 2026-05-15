@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# hooks/pre-commit
+#
+# IronClaw pre-commit hook: validate OpenAPI schema before commit.
+# Ensures API contract stays synchronized with code on every commit.
+#
+# Installation:
+#   ln -s ../../hooks/pre-commit .git/hooks/pre-commit
+#   chmod +x hooks/pre-commit
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+echo "[pre-commit] IronClaw OpenAPI validation"
+
+cd "$PROJECT_ROOT"
+
+if ! command -v python3 &> /dev/null; then
+    echo "[pre-commit] ERROR: python3 not found in PATH"
+    exit 1
+fi
+
+if [ ! -f "scripts/export_openapi.py" ]; then
+    echo "[pre-commit] ERROR: scripts/export_openapi.py not found"
+    exit 1
+fi
+
+echo "[pre-commit] Running OpenAPI schema export validation..."
+
+if python3 scripts/export_openapi.py --validate --quiet; then
+    echo "[pre-commit] ✓ OpenAPI schema validation passed"
+else
+    echo "[pre-commit] ✗ OpenAPI schema validation failed"
+    echo "[pre-commit] Run 'python3 scripts/export_openapi.py' to regenerate schema"
+    exit 1
+fi
+
+if [ -f "openapi.json" ]; then
+    if git diff --cached --name-only | grep -q "^app/"; then
+        echo "[pre-commit] App code changes detected, checking for OpenAPI drift..."
+        
+        TEMP_SCHEMA=$(mktemp)
+        python3 scripts/export_openapi.py --output "$TEMP_SCHEMA" --quiet
+        
+        if ! diff -q "$TEMP_SCHEMA" "openapi.json" > /dev/null 2>&1; then
+            echo "[pre-commit] ⚠ OpenAPI schema drift detected!"
+            echo "[pre-commit] Run 'python3 scripts/export_openapi.py' to update openapi.json"
+            echo "[pre-commit] Then stage the updated openapi.json with 'git add openapi.json'"
+            rm -f "$TEMP_SCHEMA"
+            exit 1
+        fi
+        
+        rm -f "$TEMP_SCHEMA"
+        echo "[pre-commit] ✓ OpenAPI schema is synchronized"
+    fi
+fi
+
+echo "[pre-commit] ✓ All checks passed"
+exit 0
