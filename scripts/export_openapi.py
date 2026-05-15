@@ -48,12 +48,13 @@ def load_app():
     """Load FastAPI app instance from app.main or app_init using create_app() factory."""
     try:
         sys.path.insert(0, str(Path(__file__).parent.parent))
-        
+
         try:
             from app.main import create_app
         except (ImportError, AttributeError):
             try:
                 from app.main import app
+
                 return app
             except (ImportError, AttributeError):
                 from app_init import create_app
