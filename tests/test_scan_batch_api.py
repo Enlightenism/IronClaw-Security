@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.api.scan import _rate_limit_buckets
 from app.dependencies.action_execute import reset_action_execute_pipeline
 from app.main import app
 from app.services.audit_log_service import reset_audit_log
@@ -16,6 +17,7 @@ def setup_function() -> None:
     reset_action_execute_pipeline()
     reset_audit_log()
     reset_scan_history()
+    _rate_limit_buckets.clear()
 
 
 def test_scan_batch_accepts_valid_items():
@@ -35,7 +37,7 @@ def test_scan_batch_accepts_valid_items():
     }
 
     response = client.post(
-        "/scan/batch",
+        "/api/scan/batch",
         headers={"x-api-key": "test-api-key"},
         json=payload,
     )
@@ -54,7 +56,7 @@ def test_scan_batch_rejects_empty_items():
     }
 
     response = client.post(
-        "/scan/batch",
+        "/api/scan/batch",
         headers={"x-api-key": "test-api-key"},
         json=payload,
     )
@@ -74,7 +76,7 @@ def test_scan_batch_rejects_invalid_item_shape():
     }
 
     response = client.post(
-        "/scan/batch",
+        "/api/scan/batch",
         headers={"x-api-key": "test-api-key"},
         json=payload,
     )
@@ -94,7 +96,7 @@ def test_scan_batch_route_allows_access_with_api_key():
     }
 
     response = client.post(
-        "/scan/batch",
+        "/api/scan/batch",
         headers={"x-api-key": "test-api-key"},
         json=payload,
     )

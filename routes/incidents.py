@@ -4,9 +4,9 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from review.reviewqueueservice import ReviewQueueService
 
 from review.incidentservice import IncidentRecord, IncidentService
+from review.reviewqueueservice import ReviewQueueService
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 

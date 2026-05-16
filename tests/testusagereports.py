@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
+
 from app.usagereports import build_usage_reports
 
 

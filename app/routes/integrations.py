@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from app.routes.integrations.health import router as health_router
 from fastapi import APIRouter
 
 from app.routes.integrations.compatibility import router as compatibility_router
+from app.routes.integrations.health import router as health_router
 from app.routes.integrations.installer import router as installer_router
 from app.routes.integrations.lifecycle import router as lifecycle_router
 from app.routes.integrations.observability import router as observability_router

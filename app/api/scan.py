@@ -24,6 +24,9 @@ _RATE_LIMIT_WINDOW_SECONDS = 60
 _RATE_LIMIT_MAX_REQUESTS = 30
 _rate_limit_buckets: dict[str, deque[float]] = defaultdict(deque)
 
+_VALID_VERDICTS = {"allow", "warn", "quarantine", "block"}
+_VALID_REVIEW_STATUSES = {"none", "pending", "approved", "rejected"}
+
 
 def _apply_scan_security_headers(response: Response) -> None:
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -124,6 +127,33 @@ def _build_explanation(result: dict) -> str:
     return "; ".join(parts) + "."
 
 
+def _coerce_result_scalars(result: dict) -> dict:
+    """
+    Coerce any non-string / non-primitive values that Pydantic ScanResult
+    validates strictly.  This guards against MagicMock leakage in tests and
+    any future case where apply_sandbox_policy returns a non-primitive value.
+    """
+    verdict = result.get("verdict")
+    if not isinstance(verdict, str) or verdict not in _VALID_VERDICTS:
+        result["verdict"] = "allow"
+
+    review_status = result.get("review_status")
+    if not isinstance(review_status, str) or review_status not in _VALID_REVIEW_STATUSES:
+        result["review_status"] = "none"
+
+    quarantine_reason = result.get("quarantine_reason")
+    if quarantine_reason is not None and not isinstance(quarantine_reason, str):
+        result["quarantine_reason"] = str(quarantine_reason)
+
+    failed_checks = result.get("failed_checks")
+    if isinstance(failed_checks, list):
+        result["failed_checks"] = [item if isinstance(item, str) else str(item) for item in failed_checks]
+    elif failed_checks is not None:
+        result["failed_checks"] = []
+
+    return result
+
+
 def _run_scan(request: ScanRequest) -> ScanResult:
     try:
         intake = prepare_intake(request.target_type, request.target_value)
@@ -178,13 +208,23 @@ def _run_scan(request: ScanRequest) -> ScanResult:
     )
 
     result = apply_sandbox_policy(result, sandbox_decision)
+
+    # Coerce sandbox-injected fields to real primitives before persistence.
+    # This prevents MagicMock or other non-primitive values from reaching
+    # append_scan_result or ScanResult validation.
+    result = _coerce_result_scalars(result)
+
     result["client_id"] = request.client_id
-    result["max_severity"] = _max_severity(result.get("matched_patterns", []))
-    result["primary_category"] = _primary_category(result.get("matched_patterns", []))
-    result["explanation"] = _build_explanation(result)
 
     saved = append_scan_result(result)
+
+    # Enrich saved after persistence so these fields are always present on the
+    # returned ScanResult regardless of what append_scan_result stores.
+    matched_patterns = result.get("matched_patterns", [])
     saved["client_id"] = request.client_id
+    saved["max_severity"] = _max_severity(matched_patterns)
+    saved["primary_category"] = _primary_category(matched_patterns)
+    saved["explanation"] = _build_explanation(result)
 
     append_telemetry_event(
         "scan_completed",

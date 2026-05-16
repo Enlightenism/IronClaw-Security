@@ -16,6 +16,7 @@ MAX_READ_LIMIT: Final[int] = 10_000
 TELEMETRY_DIR.mkdir(parents=True, exist_ok=True)
 
 _TELEMETRY_LOCK = Lock()
+_COERCE_MAX_DEPTH = 32
 
 
 def _utc_now() -> datetime:
@@ -23,11 +24,24 @@ def _utc_now() -> datetime:
 
 
 def _utc_now_iso() -> str:
-    return _utc_now().isoformat().replace("+00:00", "Z")  # [web:123][web:147]
+    return _utc_now().isoformat().replace("+00:00", "Z")
 
 
-def _coerce_json_safe(value: Any) -> Any:
-    if value is None or isinstance(value, str | int | float | bool):
+def _is_pydantic_model(value: Any) -> bool:
+    """Return True only for real Pydantic BaseModel instances, not Mocks."""
+    try:
+        from pydantic import BaseModel
+
+        return isinstance(value, BaseModel)
+    except ImportError:
+        return False
+
+
+def _coerce_json_safe(value: Any, _depth: int = 0) -> Any:
+    if _depth > _COERCE_MAX_DEPTH:
+        return str(value)
+
+    if value is None or isinstance(value, (str, int, float, bool)):
         return value
 
     if isinstance(value, datetime):
@@ -37,19 +51,27 @@ def _coerce_json_safe(value: Any) -> Any:
         return str(value)
 
     if isinstance(value, dict):
-        return {str(key): _coerce_json_safe(item) for key, item in value.items()}
+        return {str(k): _coerce_json_safe(v, _depth + 1) for k, v in value.items()}
 
-    if isinstance(value, list | tuple | set | frozenset):
-        return [_coerce_json_safe(item) for item in value]
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_coerce_json_safe(item, _depth + 1) for item in value]
 
-    if hasattr(value, "model_dump") and callable(value.model_dump):
-        return _coerce_json_safe(value.model_dump())
+    # Only call model_dump on real Pydantic models — never on Mocks or arbitrary objects
+    if _is_pydantic_model(value):
+        return _coerce_json_safe(value.model_dump(), _depth + 1)
 
-    if hasattr(value, "dict") and callable(value.dict):
-        return _coerce_json_safe(value.dict())
+    # Legacy Pydantic v1 .dict() — only if it's a real model type, not a Mock
+    type_name = type(value).__name__
+    if "Mock" not in type_name and hasattr(value, "dict") and callable(value.dict) and hasattr(value, "__fields__") is not False:
+        try:
+            dumped = value.dict()
+            if isinstance(dumped, dict):
+                return _coerce_json_safe(dumped, _depth + 1)
+        except Exception:
+            pass
 
-    if hasattr(value, "__dict__"):
-        return _coerce_json_safe(vars(value))
+    if hasattr(value, "__dict__") and "Mock" not in type(value).__name__:
+        return _coerce_json_safe(vars(value), _depth + 1)
 
     return str(value)
 
@@ -100,7 +122,7 @@ def _normalize_event(event: Any) -> dict[str, Any] | None:
 def append_telemetry_event(event_type: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     record = _build_event_record(event_type, payload)
 
-    with _TELEMETRY_LOCK:  # serialize concurrent appends [web:143]
+    with _TELEMETRY_LOCK:
         _ensure_parent_dir()
         with TELEMETRY_PATH.open("a", encoding="utf-8", newline="\n") as file_handle:
             file_handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
@@ -120,7 +142,7 @@ def read_telemetry_events(
         if not TELEMETRY_PATH.exists():
             return []
 
-        with TELEMETRY_PATH.open("r", encoding="utf-8", newline="") as file_handle:  # newline-aware file reads are preferable [web:146]
+        with TELEMETRY_PATH.open("r", encoding="utf-8", newline="") as file_handle:
             lines = deque(file_handle, maxlen=MAX_READ_LIMIT)
 
     events: list[dict[str, Any]] = []

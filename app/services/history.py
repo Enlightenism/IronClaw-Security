@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from threading import RLock
@@ -138,11 +139,15 @@ def _coerce_record(result: Any) -> dict[str, Any]:
 def _normalize_record(record: Mapping[str, Any]) -> dict[str, Any]:
     normalized = dict(record)
 
+    # Generate scan_id if missing
+    if not normalized.get("scan_id"):
+        if normalized.get("scanid"):
+            normalized["scan_id"] = normalized["scanid"]
+        else:
+            normalized["scan_id"] = f"scan_{uuid.uuid4().hex}"
+
     if normalized.get("timestamp") is None:
         normalized["timestamp"] = _utc_now_iso()
-
-    if normalized.get("scan_id") is None and normalized.get("scanid") is not None:
-        normalized["scan_id"] = normalized.get("scanid")
 
     if normalized.get("risk_score") is None and normalized.get("riskscore") is not None:
         normalized["risk_score"] = normalized.get("riskscore")
@@ -152,6 +157,10 @@ def _normalize_record(record: Mapping[str, Any]) -> dict[str, Any]:
     normalized["checks_loaded"] = _normalize_list_field(normalized.get("checks_loaded"))
     normalized["failed_checks"] = _normalize_list_field(normalized.get("failed_checks"))
     normalized.setdefault("quarantine_reason", None)
+
+    # Preserve pass-through fields — do not strip unknown keys
+    # max_severity and primary_category are set by scan.py and must survive normalization
+    # (no action needed — dict(record) already carries them)
 
     verdict = str(normalized.get("verdict") or "").strip().lower()
     if normalized.get("review_status") is None:
@@ -216,7 +225,7 @@ def reset_scan_history() -> None:
     _get_repository().reset()
 
 
-# Backward-compatible aliases for older imports/tests if any still reference them.
+# Backward-compatible aliases
 appendscanresult = append_scan_result
 readscanhistory = read_scan_history
 getscanbyid = get_scan_by_id

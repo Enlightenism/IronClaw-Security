@@ -7,6 +7,10 @@ from app.main import app
 client = TestClient(app)
 
 
+def setup_function() -> None:
+    app.openapi_schema = None
+
+
 def test_docs_endpoint_is_available():
     response = client.get("/docs")
     assert response.status_code == 200

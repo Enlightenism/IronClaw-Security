@@ -16,12 +16,12 @@ def _assert_client_input_failure(response) -> None:
 
 
 def test_scan_rejects_empty_body():
-    response = client.post("/scan/", json={})
+    response = client.post("/api/scan/", json={})
     _assert_validation_failure(response)
 
 
 def test_scan_batch_rejects_empty_body():
-    response = client.post("/scan/batch", json={})
+    response = client.post("/api/scan/batch", json={})
     _assert_validation_failure(response)
 
 
@@ -37,7 +37,7 @@ def test_policy_guard_bundle_rejects_empty_body():
 
 def test_scan_rejects_wrong_types():
     response = client.post(
-        "/scan/",
+        "/api/scan/",
         json={
             "target": ["not", "a", "string"],
             "content": {"unexpected": "object"},
@@ -49,7 +49,7 @@ def test_scan_rejects_wrong_types():
 
 def test_scan_batch_rejects_wrong_types():
     response = client.post(
-        "/scan/batch",
+        "/api/scan/batch",
         json={
             "items": "not-a-list",
         },

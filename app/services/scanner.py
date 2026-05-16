@@ -112,6 +112,8 @@ def scan_text(text: str) -> list[str]:
     for group in ALL_RULE_GROUPS:
         for rule in group:
             pattern = rule["pattern"].lower()
+            if not pattern:
+                continue
             if pattern in normalized and rule["id"] not in matches:
                 matches.append(rule["id"])
 
@@ -242,6 +244,29 @@ def _build_rule_details(matched_patterns: list[str]) -> list[dict[str, Any]]:
     return details
 
 
+_SEVERITY_ORDER = ["low", "medium", "high", "critical"]
+
+
+def _max_severity(matched_patterns: list[str]) -> str | None:
+    severities = get_rule_severities(matched_patterns)
+    if not severities:
+        return None
+    return max(severities, key=lambda s: _SEVERITY_ORDER.index(s) if s in _SEVERITY_ORDER else -1)
+
+
+def _primary_category(matched_patterns: list[str]) -> str | None:
+    for rule_id in matched_patterns:
+        meta = RULE_INDEX.get(rule_id)
+        if meta and meta.get("category"):
+            return meta["category"]
+    return None
+
+
+def _build_explanation(matched_patterns: list[str], verdict: str) -> str:
+    count = len(matched_patterns)
+    return f"Matched {count} pattern(s); final verdict: {verdict}."
+
+
 def perform_scan(target_type: str, target_value: str) -> dict[str, Any]:
     normalized = _normalize_text(target_value)
     heuristic_score = heuristic_prompt_injection_score(normalized)
@@ -257,6 +282,9 @@ def perform_scan(target_type: str, target_value: str) -> dict[str, Any]:
     untrusted = verdict == "quarantine"
 
     rule_details = _build_rule_details(matched_patterns)
+    max_sev = _max_severity(matched_patterns)
+    primary_cat = _primary_category(matched_patterns)
+    explanation = _build_explanation(matched_patterns, verdict)
 
     append_telemetry_event(
         "scan_performed",
@@ -301,4 +329,7 @@ def perform_scan(target_type: str, target_value: str) -> dict[str, Any]:
         "untrusted": untrusted,
         "sandbox_lane": sandbox_lane,
         "rule_details": rule_details,
+        "max_severity": max_sev,
+        "primary_category": primary_cat,
+        "explanation": explanation,
     }

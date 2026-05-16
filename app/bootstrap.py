@@ -107,11 +107,12 @@ def add_security_middleware(app: FastAPI) -> FastAPI:
         response = await call_next(request)
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers["Referrer-Policy"] = "no-referrer"
         response.headers.setdefault("X-XSS-Protection", "1; mode=block")
         response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
         response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+        response.headers.setdefault("Cache-Control", "no-store")
         if request.url.scheme == "https":
             response.headers.setdefault(
                 "Strict-Transport-Security",

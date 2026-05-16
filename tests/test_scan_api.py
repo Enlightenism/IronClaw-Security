@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.api.scan import _rate_limit_buckets
 from app.dependencies.action_execute import reset_action_execute_pipeline
 from app.main import app
 from app.services.audit_log_service import reset_audit_log
@@ -16,6 +17,7 @@ def setup_function() -> None:
     reset_action_execute_pipeline()
     reset_audit_log()
     reset_scan_history()
+    _rate_limit_buckets.clear()
 
 
 def test_scan_endpoint_basic_ok():
@@ -26,7 +28,7 @@ def test_scan_endpoint_basic_ok():
     }
 
     response = client.post(
-        "/scan/",
+        "/api/scan/",
         headers={"x-api-key": "test-api-key"},
         json=payload,
     )
@@ -57,7 +59,7 @@ def test_scan_endpoint_accepts_local_path_target():
     }
 
     response = client.post(
-        "/scan/",
+        "/api/scan/",
         headers={"x-api-key": "test-api-key"},
         json=payload,
     )
@@ -77,7 +79,7 @@ def test_scan_requires_valid_payload_shape():
     }
 
     response = client.post(
-        "/scan/",
+        "/api/scan/",
         headers={"x-api-key": "test-api-key"},
         json=payload,
     )
@@ -91,7 +93,7 @@ def test_scan_rejects_invalid_payload():
     }
 
     response = client.post(
-        "/scan/",
+        "/api/scan/",
         headers={"x-api-key": "test-api-key"},
         json=payload,
     )

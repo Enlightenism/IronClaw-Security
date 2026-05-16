@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
+
 from app.billingsummary import build_billing_summary
 
 

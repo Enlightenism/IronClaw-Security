@@ -12,7 +12,7 @@ SandboxLane = Literal[
 
 
 class ScanRequest(BaseModel):
-    target_type: Literal["github_repo", "skill", "archive", "url", "text", "local_path"]
+    target_type: Literal["prompt", "github_repo", "skill", "archive", "url", "text", "local_path"]
     target_value: str = Field(min_length=1, max_length=5000)
     client_id: str | None = None
 

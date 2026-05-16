@@ -250,7 +250,7 @@ def _coerce_roles(record: APIKeyRecord | None) -> tuple[str, ...]:
 
     for attr_name in ("roles", "role_names", "grants"):
         value = getattr(record, attr_name, None)
-        if isinstance(value, list | tuple | set):
+        if isinstance(value, (list, tuple, set)):
             return tuple(str(item).strip() for item in value if str(item).strip())
 
     role = getattr(record, "role", None)
@@ -264,7 +264,7 @@ def _coerce_permissions(record: APIKeyRecord | None) -> tuple[str, ...]:
 
     for attr_name in ("permissions", "scopes", "allowed_actions"):
         value = getattr(record, attr_name, None)
-        if isinstance(value, list | tuple | set):
+        if isinstance(value, (list, tuple, set)):
             return tuple(str(item).strip() for item in value if str(item).strip())
 
     return ()
@@ -358,7 +358,6 @@ def get_auth_context(
     normalized_session_id = _clean_optional_string(session_id)
     normalized_api_key = _clean_optional_string(api_key)
 
-    # If a key is present, always authenticate regardless of enforcement mode.
     if normalized_api_key:
         registry_record = _resolve_registry_api_key(normalized_api_key)
         principal_type = "platform"
@@ -386,7 +385,6 @@ def get_auth_context(
             metadata={"header": API_KEY_HEADER_NAME},
         )
 
-    # No key present — enforce if required, otherwise anonymous.
     if _is_auth_required(request):
         raise AppError(
             error="missing_api_key",
@@ -411,17 +409,6 @@ def require_api_key(
     request: Request,
     api_key: str | None = Depends(get_api_key),
 ) -> str | None:
-    if not _is_auth_required(request):
-        return api_key
-
-    if not api_key:
-        raise AppError(
-            error="missing_api_key",
-            message="Missing API key",
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            details={"header": API_KEY_HEADER_NAME},
-        )
-
     return api_key
 
 

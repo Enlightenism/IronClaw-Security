@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
+
 from app.packagepurchaseenforcement import build_package_purchase_enforcement
 
 

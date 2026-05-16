@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-ALLOWED_TARGET_TYPES = {"github_repo", "skill", "archive", "url", "text", "local_path"}
+ALLOWED_TARGET_TYPES = {"github_repo", "skill", "archive", "url", "text", "local_path", "prompt"}
 SANDBOX_TARGET_TYPES = {"github_repo", "skill", "archive", "local_path"}
 
 

@@ -106,12 +106,14 @@ def _protected_dependencies() -> list[Any]:
 
 
 def _public_router_configs() -> list[tuple[Any, dict[str, Any]]]:
+    scan_router = _optional_router("app.api.scan")
     return [
         (_optional_router("app.api.system"), {}),
         (_optional_router("app.api.ui_status"), {}),
         (_optional_router("app.api.ui_pages"), {}),
         (_optional_router("app.api.telemetry_access"), {}),
-        (_optional_router("app.api.scan"), {"prefix": "/scan"}),
+        (scan_router, {"prefix": "/scan"}),
+        (scan_router, {"prefix": "/api/scan"}),
         (_optional_router("app.api.router"), {}),
         (_optional_router("app.api.actionusage"), {}),
     ]
@@ -122,6 +124,10 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
     return [
         (_optional_router("app.api.requestcontext"), {"dependencies": dependencies}),
         (_optional_router("app.api.history"), {"prefix": "/history", "dependencies": dependencies}),
+        (
+            _optional_router("app.api.history"),
+            {"prefix": "/api/history", "dependencies": dependencies},
+        ),
         (
             _optional_router("app.api.action_guard"),
             {"prefix": "/guard", "dependencies": dependencies},
@@ -351,7 +357,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="IronClaw-Security",
         version="1.0.0",
-        description=("Local-first AI security API for prompt inspection, guarded execution, review workflows, and protected runtime controls."),
+        description=("Local-first AI security API for prompt inspection, guarded execution, " "review workflows, and protected runtime controls."),
         docs_url=None,
         redoc_url=None,
         openapi_url=None,

@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
+
 from app.ownerusageaccounting import build_owner_usage_accounting
 
 

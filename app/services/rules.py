@@ -374,10 +374,43 @@ PROMPT_INJECTION_RULES: list[Rule] = [
 ]
 
 
+SYNTHETIC_RULES: list[Rule] = [
+    {
+        "id": "heuristic_prompt_injection_score",
+        "pattern": "",
+        "severity": "high",
+        "category": "prompt_injection",
+        "description": "Heuristic scoring detected a high-confidence prompt injection attempt.",
+    },
+    {
+        "id": "shell_download_execute_combo",
+        "pattern": "",
+        "severity": "critical",
+        "category": "shell",
+        "description": "Combined shell download-and-execute pattern detected (curl/wget piped to shell).",
+    },
+    {
+        "id": "powershell_download_execute_combo",
+        "pattern": "",
+        "severity": "critical",
+        "category": "powershell",
+        "description": "Combined PowerShell download-and-execute pattern detected (DownloadString + IEX or IWR + IEX).",
+    },
+    {
+        "id": "download and execute",
+        "pattern": "",
+        "severity": "critical",
+        "category": "shell",
+        "description": "Explicit download-and-execute instruction detected.",
+    },
+]
+
+
 ALL_RULE_GROUPS: list[list[Rule]] = [
     POWERSHELL_RULES,
     SHELL_DOWNLOAD_EXEC_RULES,
     YAML_RULES,
     EXFILTRATION_RULES,
     PROMPT_INJECTION_RULES,
+    SYNTHETIC_RULES,
 ]
