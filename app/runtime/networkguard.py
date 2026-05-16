@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import ipaddress
-import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+import ipaddress
+import re
 from typing import Any
 from urllib.parse import parse_qsl, urlparse
 

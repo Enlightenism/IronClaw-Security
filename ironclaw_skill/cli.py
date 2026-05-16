@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict, dataclass
 import json
 import os
-import sys
-from dataclasses import asdict, dataclass
 from pathlib import Path
+import sys
 from typing import Any, Final
 
 from ironclaw_installer import InstallConfig, build_install_config, run_install

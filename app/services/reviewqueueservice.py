@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
-import threading
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+import threading
 from typing import Any
 
 REVIEW_QUEUE_PATH = Path("review_queue.json")

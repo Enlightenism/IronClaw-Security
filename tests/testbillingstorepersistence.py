@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import importlib
 from decimal import Decimal, InvalidOperation
+import importlib
 from typing import Any, Final
 
 import pytest

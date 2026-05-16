@@ -1,6 +1,6 @@
 import re
-import unicodedata
 from typing import Any
+import unicodedata
 
 from app.services.heuristics import heuristic_prompt_injection_score
 from app.services.rules import ALL_RULE_GROUPS

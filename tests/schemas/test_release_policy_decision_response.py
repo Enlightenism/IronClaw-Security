@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import pytest
 from pydantic import ValidationError
+import pytest
 
 from models.release_policy_decision import ReleasePolicyDecision
 

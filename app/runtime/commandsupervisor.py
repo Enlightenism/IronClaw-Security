@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import re
-import shlex
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+import re
+import shlex
 from typing import Any
 
 SHELL_LIKE_TARGETS = {

@@ -7,11 +7,11 @@ from typing import Any
 
 import pytest
 
-import app.services.review_queue_service as _rqs
 from app.orchestrator.review_queue import (
     create_review_item,
     get_review_item,
 )
+import app.services.review_queue_service as _rqs
 
 
 def _utc_now() -> datetime:

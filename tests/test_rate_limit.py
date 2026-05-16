@@ -3,8 +3,8 @@ from __future__ import annotations
 import time
 from unittest.mock import patch
 
-import pytest
 from fastapi.testclient import TestClient
+import pytest
 
 from app.api.scan import (
     _RATE_LIMIT_MAX_REQUESTS,

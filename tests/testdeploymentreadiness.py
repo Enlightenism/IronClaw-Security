@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
-from collections.abc import Iterator
-from pathlib import Path
 from typing import Any, Final
 
 import pytest

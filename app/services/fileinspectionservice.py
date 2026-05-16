@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import base64
 import binascii
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 import hashlib
 import io
 import re
-import zipfile
-from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
 from typing import Any
+import zipfile
 
 from app.services.secretservice import build_secret_service
 

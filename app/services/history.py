@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from threading import RLock
 from typing import Any, Protocol, cast
+import uuid
 
 
 class ScanHistoryRepository(Protocol):

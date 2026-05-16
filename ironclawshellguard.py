@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass
 import json
 import os
+from pathlib import Path
 import re
 import shlex
 import subprocess
 import time
-from collections.abc import Sequence
-from dataclasses import asdict, dataclass
-from pathlib import Path
 from typing import Any, Final
 
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 10.0

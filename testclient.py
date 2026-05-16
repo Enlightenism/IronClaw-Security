@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import json
-import sys
 from dataclasses import asdict, dataclass
+import json
 from pathlib import Path
+import sys
 from typing import Any, Final
 
 from fastapi.testclient import TestClient

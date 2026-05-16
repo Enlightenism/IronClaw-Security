@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
+import re
 from typing import Any
 
 SECRET_PATTERNS: dict[str, str] = {

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import logging
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
+import logging
+import os
 from typing import Any, Protocol, runtime_checkable
 
 from app.supabaseclient import (

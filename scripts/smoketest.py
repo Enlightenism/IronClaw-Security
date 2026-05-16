@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict, dataclass
 import json
 import os
-import time
-from dataclasses import asdict, dataclass
 from pathlib import Path
+import time
 from typing import Any, Final
 
 import httpx

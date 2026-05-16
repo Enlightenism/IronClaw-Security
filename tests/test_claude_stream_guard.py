@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import httpx
 
 from app.api.claude_stream_guard import router as claude_stream_guard_router
 

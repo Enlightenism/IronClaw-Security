@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import base64
 import binascii
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 import hashlib
 import json
 import math
 import re
-from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
 from typing import Any
 
 

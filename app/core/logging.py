@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, MutableMapping
 import contextvars
+from datetime import UTC, datetime
 import json
 import logging
 import sys
 import time
-from collections.abc import Mapping, MutableMapping
-from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import FastAPI, Request

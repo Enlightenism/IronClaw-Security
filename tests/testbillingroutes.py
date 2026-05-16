@@ -3,9 +3,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 from app.api.routes.billing import router as billing_router
 from app.core.auth import API_KEY_HEADER_NAME

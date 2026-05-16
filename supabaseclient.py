@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, MutableMapping
+from dataclasses import dataclass
 import json
 import logging
 import os
-from collections.abc import Mapping, MutableMapping
-from dataclasses import dataclass
 from typing import Any, Union
 from urllib.parse import urljoin
 

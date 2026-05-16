@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+import re
 from typing import Any
 
 SECRET_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [

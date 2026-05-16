@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import gzip
 import json
-import tarfile
-from datetime import UTC, datetime
 from pathlib import Path
+import tarfile
 
 from app.services.restoreservice import (
     RestoreService,

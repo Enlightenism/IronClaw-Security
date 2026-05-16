@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
+import pytest
 
 from app.core.apikeys import get_api_key_registry
 from app.core.auth import API_KEY_HEADER_NAME, get_api_key, require_api_key

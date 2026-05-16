@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 import json
 import os
+from pathlib import Path
 import platform
 import socket
 import sys
-from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 _ALLOWED_ENVIRONMENTS = {"local", "dev", "preview", "staging", "prod", "production"}

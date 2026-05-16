@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 import hashlib
 import ipaddress
 import re
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 

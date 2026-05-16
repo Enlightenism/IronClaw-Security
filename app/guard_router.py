@@ -4,9 +4,9 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
+import httpx
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/claude-guard-router", tags=["claude-guard-router"])

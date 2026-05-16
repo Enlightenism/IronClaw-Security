@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import hashlib
-import secrets
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import hashlib
+import secrets
 from typing import Literal
 
 KeyScope = Literal["internal", "customer", "service"]
