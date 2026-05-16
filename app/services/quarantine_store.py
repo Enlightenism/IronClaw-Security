@@ -25,6 +25,7 @@ class QuarantineRecord:
     risk_level: RiskLevel
     created_at: datetime
     updated_at: datetime
+    principal_id: str | None = None
     request_id: str | None = None
     trace_id: str | None = None
     incident_id: str | None = None
@@ -96,6 +97,7 @@ class QuarantineStore:
         status: QuarantineStatus | None = None,
         source: QuarantineSource | None = None,
         risk_level: RiskLevel | None = None,
+        principal_id: str | None = None,
     ) -> list[QuarantineRecord]:
         with self._lock:
             items = list(self._items)
@@ -106,6 +108,8 @@ class QuarantineStore:
             items = [item for item in items if item.source == source]
         if risk_level is not None:
             items = [item for item in items if item.risk_level == risk_level]
+        if principal_id is not None:
+            items = [item for item in items if item.principal_id == principal_id]
 
         return items
 
@@ -124,6 +128,7 @@ class QuarantineStore:
         summary: str,
         risk_level: RiskLevel,
         status: QuarantineStatus = "isolated",
+        principal_id: str | None = None,
         request_id: str | None = None,
         trace_id: str | None = None,
         incident_id: str | None = None,
@@ -143,6 +148,7 @@ class QuarantineStore:
             risk_level=risk_level,
             created_at=now,
             updated_at=now,
+            principal_id=principal_id,
             request_id=request_id,
             trace_id=trace_id,
             incident_id=incident_id,
@@ -181,6 +187,7 @@ class QuarantineStore:
                     risk_level=item.risk_level,
                     created_at=item.created_at,
                     updated_at=_utcnow(),
+                    principal_id=item.principal_id,
                     request_id=item.request_id,
                     trace_id=item.trace_id,
                     incident_id=item.incident_id,

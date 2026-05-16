@@ -159,6 +159,7 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
 def _include_optional_protected_routers(app: FastAPI) -> None:
     dependencies = _protected_dependencies()
     optional_modules = [
+        "app.api.routes.quarantine",
         "app.api.routes.reviewqueue",
         "app.api.routes.unitledger",
         "app.api.routes.unitwallet",
@@ -357,7 +358,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="IronClaw-Security",
         version="1.0.0",
-        description=("Local-first AI security API for prompt inspection, guarded execution, " "review workflows, and protected runtime controls."),
+        description=("Local-first AI security API for prompt inspection, guarded execution, " "and protected runtime controls."),
         docs_url=None,
         redoc_url=None,
         openapi_url=None,

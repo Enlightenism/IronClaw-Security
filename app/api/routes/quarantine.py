@@ -35,6 +35,7 @@ class QuarantineItemView(BaseModel):
     risk_level: RiskLevel
     created_at: str
     updated_at: str
+    principal_id: str | None = None
     request_id: str | None = None
     trace_id: str | None = None
     incident_id: str | None = None
@@ -59,6 +60,7 @@ class QuarantineCreateRequest(BaseModel):
     summary: str = Field(min_length=3, max_length=2000)
     risk_level: RiskLevel
     status: QuarantineStatus = "isolated"
+    principal_id: str | None = Field(default=None, max_length=200)
     request_id: str | None = Field(default=None, max_length=200)
     trace_id: str | None = Field(default=None, max_length=200)
     incident_id: str | None = Field(default=None, max_length=200)
@@ -111,16 +113,26 @@ def _find_item_or_404(quarantine_id: str) -> StoredQuarantineRecord:
     return item
 
 
+# NOTE: /overview must be declared before /{quarantine_id} to prevent the
+# path parameter route from shadowing any future static /overview child routes.
+# This router's prefix is /quarantine. Any GET /quarantine/overview request
+# that does not match a declared static route will fall through to /{quarantine_id}
+# with quarantine_id="overview", returning 404 cleanly. No conflict exists with
+# any app/quarantine/overview.py module since that module does not exist in the repo.
+
+
 @router.get("/", response_model=QuarantineListResponse)
 def list_quarantine_items(
     status_filter: QuarantineStatus | None = Query(default=None, alias="status"),
     source: QuarantineSource | None = Query(default=None),
     risk_level: RiskLevel | None = Query(default=None),
+    principal_id: str | None = Query(default=None),
 ) -> QuarantineListResponse:
     items = get_quarantine_store().list_items(
         status=status_filter,
         source=source,
         risk_level=risk_level,
+        principal_id=principal_id,
     )
 
     return QuarantineListResponse(
@@ -151,6 +163,7 @@ def create_quarantine_item(payload: QuarantineCreateRequest) -> QuarantineAction
         summary=payload.summary,
         risk_level=payload.risk_level,
         status=payload.status,
+        principal_id=payload.principal_id,
         request_id=payload.request_id,
         trace_id=payload.trace_id,
         incident_id=payload.incident_id,
