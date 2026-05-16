@@ -160,6 +160,7 @@ def _include_optional_protected_routers(app: FastAPI) -> None:
     dependencies = _protected_dependencies()
     optional_modules = [
         "app.api.routes.quarantine",
+        "app.api.routes.llamafirewall",
         "app.api.routes.reviewqueue",
         "app.api.routes.unitledger",
         "app.api.routes.unitwallet",

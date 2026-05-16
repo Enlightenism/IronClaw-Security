@@ -11,7 +11,6 @@ PolicyVerdict = Literal["allow", "warn", "quarantine", "block"]
 PolicyMode = Literal["enforce", "monitor"]
 RiskLevel = Literal["low", "medium", "high", "critical"]
 
-
 TOOL_GUARDED_ACTIONS = {
     "tool_call",
     "shell_command",
@@ -120,7 +119,6 @@ VERDICT_ORDER: dict[PolicyVerdict, int] = {
     "block": 3,
 }
 
-
 RISK_LEVEL_ORDER: dict[RiskLevel, int] = {
     "low": 0,
     "medium": 1,
@@ -134,6 +132,12 @@ def initialize_policy_engine(mode: PolicyMode = "enforce") -> PolicyEngine:
         mode=mode,
         rules=default_policy_rules(),
     )
+
+
+# Alias so both names resolve — tests import build_policy_engine,
+# existing callers use initialize_policy_engine. Both are canonical.
+def build_policy_engine(mode: PolicyMode = "enforce") -> PolicyEngine:
+    return initialize_policy_engine(mode)
 
 
 def default_policy_rules() -> list[PolicyRule]:
@@ -394,9 +398,7 @@ def _rule_matches(
         return False
 
     action_match = not rule.action_types or normalized_action in {item.strip().lower() for item in rule.action_types}
-
     target_match = not rule.target_prefixes or any(normalized_target.startswith(prefix.strip().lower()) for prefix in rule.target_prefixes)
-
     content_match = not rule.content_patterns or any(pattern.strip().lower() in normalized_content for pattern in rule.content_patterns)
 
     has_target_rules = bool(rule.target_prefixes)
@@ -404,13 +406,10 @@ def _rule_matches(
 
     if has_target_rules and has_content_rules:
         return action_match and (target_match or content_match)
-
     if has_target_rules:
         return action_match and target_match
-
     if has_content_rules:
         return action_match and content_match
-
     return action_match
 
 
@@ -421,7 +420,7 @@ def _build_match_reason(
     normalized_content: str,
     risk_score: int,
 ) -> str:
-    return f"Matched policy rule '{rule.rule_id}' for action '{normalized_action}' with risk score {risk_score}. Target='{normalized_target}' Content length={len(normalized_content)}."
+    return f"Matched policy rule '{rule.rule_id}' for action '{normalized_action}' " f"with risk score {risk_score}. Target='{normalized_target}' " f"Content length={len(normalized_content)}."
 
 
 def _build_summary(
@@ -517,7 +516,7 @@ def _build_tool_guard_matches(
             name="Tool Guard Execution Decision",
             verdict=tool_verdict,
             risk_level=_risk_level_from_verdict(tool_verdict),
-            reason=(f"Tool guard escalated action via {tool_decision.get('decision_source', 'unknown')} with verdict '{tool_verdict}' and risk score {tool_decision.get('risk_score', 0)}."),
+            reason=(f"Tool guard escalated action via {tool_decision.get('decision_source', 'unknown')} " f"with verdict '{tool_verdict}' and risk score {tool_decision.get('risk_score', 0)}."),
             tags=tuple(tags),
         ),
     ]
