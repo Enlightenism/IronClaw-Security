@@ -38,12 +38,7 @@ def _normalize_text(value: str | None) -> str:
 
 @dataclass(slots=True)
 class CapeAdapterRequest:
-    """High-level request wrapper for CAPE sandbox analysis actions.
-
-    Represents a file, URL, or process submission to the CAPE malware analysis
-    sandbox that will be evaluated by the IronClaw policy engine before
-    dispatching to the CAPE API.
-    """
+    """High-level request wrapper for CAPE sandbox analysis actions."""
 
     action_type: str
     target: str
@@ -254,7 +249,7 @@ def summarize_cape_adapter_response(
 # ---------- Integration-facing CAPE adapter class ----------
 
 
-@dataclass(slots=True)
+@dataclass
 class CapeAdapter(BaseIntegrationAdapter):
     """Integration adapter for the CAPE malware analysis sandbox."""
 
@@ -279,8 +274,6 @@ class CapeAdapter(BaseIntegrationAdapter):
     def execute(self, request: AdapterExecutionRequest) -> AdapterExecutionResult:
         result = super().execute(request)
 
-        # Only overlay "guarded" when the adapter is online and base succeeded.
-        # Preserve "offline" / "failed" status set by the base class as-is.
         if not result.success:
             return result
 
