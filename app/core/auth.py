@@ -226,7 +226,7 @@ def _has_registry_keys() -> bool:
 def _is_auth_required(request: Request) -> bool:
     settings = _get_settings(request)
     if settings is None:
-        return False
+        return _has_registry_keys()
 
     explicit_flag = getattr(settings, "auth_required", None)
     if explicit_flag is not None:

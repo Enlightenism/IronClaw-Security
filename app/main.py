@@ -153,6 +153,7 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (_optional_router("app.api.access_control"), {"dependencies": dependencies}),
         (_optional_router("app.api.org_context"), {"dependencies": dependencies}),
         (_optional_router("app.api.ui_admin_operators"), {}),
+        (_optional_router("app.api.ui_data_retention"), {"dependencies": dependencies}),
     ]
 
 

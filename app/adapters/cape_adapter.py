@@ -249,18 +249,31 @@ def summarize_cape_adapter_response(
 # ---------- Integration-facing CAPE adapter class ----------
 
 
-@dataclass
 class CapeAdapter(BaseIntegrationAdapter):
     """Integration adapter for the CAPE malware analysis sandbox."""
 
-    runtime: str = "cape"
-    analysis_mode: str = "sandbox-guard"
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        self.metadata.setdefault("integration_id", self.record.integration_id)
-        self.metadata.setdefault("runtime", self.runtime)
-        self.metadata.setdefault("analysis_mode", self.analysis_mode)
+    def __init__(
+        self,
+        *,
+        record: Any,
+        protocol_version: str = "1.0.0",
+        health: str = "ready",
+        runtime: str = "cape",
+        analysis_mode: str = "sandbox-guard",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        merged: dict[str, Any] = dict(metadata or {})
+        merged.setdefault("runtime", runtime)
+        merged.setdefault("analysis_mode", analysis_mode)
+        # BaseIntegrationAdapter uses slots=True so we must init via object.__setattr__
+        object.__setattr__(self, "record", record)
+        object.__setattr__(self, "protocol_version", protocol_version)
+        object.__setattr__(self, "health", health)
+        object.__setattr__(self, "metadata", merged)
+        self.runtime = runtime
+        self.analysis_mode = analysis_mode
+        # call base __post_init__ to normalize protocol_version and metadata
+        super().__post_init__()
 
     def supported_action_types(self) -> list[str]:
         return [
@@ -272,7 +285,7 @@ class CapeAdapter(BaseIntegrationAdapter):
         ]
 
     def execute(self, request: AdapterExecutionRequest) -> AdapterExecutionResult:
-        result = super().execute(request)
+        result = BaseIntegrationAdapter.execute(self, request)
 
         if not result.success:
             return result

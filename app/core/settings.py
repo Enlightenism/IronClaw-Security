@@ -81,7 +81,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
-        env_file_override=False,  # os.environ always wins over .env
+        env_file_override=False,
     )
 
     app_name: str = Field(default="IronClaw-Security", alias="APP_NAME")
@@ -128,6 +128,7 @@ class Settings(BaseSettings):
         default=None,
         alias="INTERNAL_PLATFORM_API_KEY",
     )
+    ironclaw_api_key: str | None = Field(default=None, alias="IRONCLAW_API_KEY")
 
     max_text_chars: int = Field(default=100_000, alias="MAX_TEXT_CHARS")
     max_url_length: int = Field(default=2_048, alias="MAX_URL_LENGTH")
@@ -158,6 +159,7 @@ class Settings(BaseSettings):
         "admin_api_key",
         "platform_api_key",
         "internal_platform_api_key",
+        "ironclaw_api_key",
     )
     @classmethod
     def empty_secret_to_none(cls, value: str | None) -> str | None:
@@ -211,7 +213,7 @@ class Settings(BaseSettings):
 
     @property
     def effective_platform_api_key(self) -> str | None:
-        return self.internal_platform_api_key or self.platform_api_key or self.admin_api_key or self.api_key
+        return self.internal_platform_api_key or self.platform_api_key or self.admin_api_key or self.api_key or self.ironclaw_api_key
 
     def validate_runtime(self) -> None:
         if self.risk_threshold_allow_max >= self.risk_threshold_quarantine_min:
@@ -228,9 +230,9 @@ class Settings(BaseSettings):
             raise ValueError("DEFAULT_SCAN_VERDICT is invalid")
         if self.default_review_status not in {"not_required", "pending", "approved", "rejected"}:
             raise ValueError("DEFAULT_REVIEW_STATUS is invalid")
-        if self.auth_required and not (self.api_key or self.admin_api_key or self.platform_api_key or self.internal_platform_api_key):
+        if self.auth_required and not (self.api_key or self.admin_api_key or self.platform_api_key or self.internal_platform_api_key or self.ironclaw_api_key):
             raise ValueError(
-                "AUTH_REQUIRED is true but no API key is configured (API_KEY, ADMIN_API_KEY, PLATFORM_API_KEY, or INTERNAL_PLATFORM_API_KEY)",
+                "AUTH_REQUIRED is true but no API key is configured (API_KEY, ADMIN_API_KEY, PLATFORM_API_KEY, INTERNAL_PLATFORM_API_KEY, or IRONCLAW_API_KEY)",
             )
 
 

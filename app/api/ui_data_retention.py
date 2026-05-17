@@ -6,12 +6,12 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from app.dependencies.auth import require_api_key
+from app.core.auth import require_auth_context
 
 router = APIRouter(
     prefix="/ui",
     tags=["ui-data-retention"],
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(require_auth_context)],
 )
 
 

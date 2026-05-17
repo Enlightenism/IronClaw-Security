@@ -5,6 +5,9 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from app.services.organizationstore import (
+    OrganizationRecord as CanonicalOrganizationRecord,
+)
+from app.services.organizationstore import (
     OrganizationStore as CanonicalOrganizationStore,
 )
 from app.services.organizationstore import (
@@ -14,6 +17,11 @@ from app.services.organizationstore import (
 OrgRole = Literal["owner", "admin", "analyst", "viewer"]
 OrgMemberStatus = Literal["active", "invited", "suspended"]
 OrgStatus = Literal["active", "trialing", "suspended"]
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
 def _parse_datetime(value: Any) -> datetime:
@@ -40,15 +48,42 @@ def _text(value: Any, default: str = "") -> str:
 def _member_status(value: Any) -> OrgMemberStatus:
     normalized = _text(value, "active").lower()
     if normalized in {"active", "invited", "suspended"}:
-        return normalized
+        return normalized  # type: ignore[return-value]
     return "active"
 
 
 def _org_status(value: Any) -> OrgStatus:
     normalized = _text(value, "active").lower()
     if normalized in {"active", "trialing", "suspended"}:
-        return normalized
+        return normalized  # type: ignore[return-value]
     return "active"
+
+
+def _canonical_to_payload(record: CanonicalOrganizationRecord) -> dict[str, Any]:
+    d = record.to_dict()
+    return {
+        "org_id": d.get("organizationid") or d.get("org_id") or d.get("id") or "",
+        "organization_id": d.get("organizationid") or "",
+        "id": d.get("organizationid") or "",
+        "name": d.get("name", ""),
+        "slug": d.get("slug", ""),
+        "status": d.get("status", "active"),
+        "tier": d.get("tier", "standard"),
+        "plan": d.get("plan", "standard"),
+        "plan_name": d.get("tier") or d.get("plan") or "standard",
+        "owner_user_id": d.get("owner_id") or d.get("owner_email") or "",
+        "owner_id": d.get("owner_id") or d.get("owner_email") or "",
+        "owner_email": d.get("owneremail") or d.get("owner_email") or "",
+        "created_at": d.get("createdat") or d.get("created_at") or "",
+        "updated_at": d.get("updatedat") or d.get("updated_at") or "",
+        "members": [],
+        "metadata": d.get("metadata") or {},
+    }
+
+
+# ---------------------------------------------------------------------------
+# Dataclasses
+# ---------------------------------------------------------------------------
 
 
 @dataclass(slots=True)
@@ -103,6 +138,11 @@ class OrganizationRecord:
         }
 
 
+# ---------------------------------------------------------------------------
+# Private builders
+# ---------------------------------------------------------------------------
+
+
 def _member_from_canonical(payload: dict[str, Any]) -> OrgMemberRecord:
     user_id = _text(payload.get("user_id")) or _text(payload.get("owner_user_id")) or _text(payload.get("owner_id")) or f"user-{_text(payload.get('member_id'), 'unknown')}"
     return OrgMemberRecord(
@@ -119,14 +159,7 @@ def _member_from_canonical(payload: dict[str, Any]) -> OrgMemberRecord:
 
 def _organization_from_canonical(payload: dict[str, Any]) -> OrganizationRecord:
     owner_user_id = _text(payload.get("owner_user_id")) or _text(payload.get("owner_id")) or _text(payload.get("owner_email")) or "unknown-owner"
-    plan_name = (
-        _text(payload.get("plan_name"))
-        or _text(payload.get("tier"))
-        or _text(
-            payload.get("plan"),
-            "standard",
-        )
-    )
+    plan_name = _text(payload.get("plan_name")) or _text(payload.get("tier")) or _text(payload.get("plan"), "standard")
     members = [_member_from_canonical(dict(member)) for member in list(payload.get("members") or [])]
     return OrganizationRecord(
         org_id=(_text(payload.get("org_id")) or _text(payload.get("organization_id")) or _text(payload.get("id"))),
@@ -142,22 +175,44 @@ def _organization_from_canonical(payload: dict[str, Any]) -> OrganizationRecord:
     )
 
 
+# ---------------------------------------------------------------------------
+# OrgStore
+# ---------------------------------------------------------------------------
+
+
 class OrgStore:
     def __init__(self, canonical_store: CanonicalOrganizationStore | None = None) -> None:
-        self._canonical_store = canonical_store or get_organization_store()
+        self._canonical_store = canonical_store if canonical_store is not None else get_organization_store()
+        # Members are not persisted by the canonical store; maintain them here.
+        self._members: dict[str, list[dict[str, Any]]] = {}
 
     def seed_defaults(self) -> None:
         return None
 
+    def _get_members(self, org_id: str) -> list[dict[str, Any]]:
+        return list(self._members.get(org_id) or [])
+
+    def _set_members(self, org_id: str, members: list[dict[str, Any]]) -> None:
+        self._members[org_id] = list(members)
+
+    def _build_record(
+        self,
+        canonical: CanonicalOrganizationRecord,
+        members: list[dict[str, Any]] | None = None,
+    ) -> OrganizationRecord:
+        payload = _canonical_to_payload(canonical)
+        payload["members"] = members if members is not None else self._get_members(payload["org_id"])
+        return _organization_from_canonical(payload)
+
     def list_orgs(self, *, status: OrgStatus | None = None) -> list[OrganizationRecord]:
         items = self._canonical_store.list_organizations(status=status)
-        return [_organization_from_canonical(dict(item)) for item in items]
+        return [self._build_record(item) for item in items]
 
     def get_org(self, org_id: str) -> OrganizationRecord | None:
         item = self._canonical_store.get_organization(org_id)
         if item is None:
             return None
-        return _organization_from_canonical(dict(item))
+        return self._build_record(item)
 
     def create_org(
         self,
@@ -182,25 +237,28 @@ class OrgStore:
                 "tier": plan_name,
                 "plan": plan_name,
                 "metadata": dict(metadata or {}),
-                "members": [
-                    {
-                        "member_id": "",
-                        "user_id": owner_user_id,
-                        "email": owner_email,
-                        "display_name": owner_display_name,
-                        "role": "owner",
-                        "status": "active",
-                        "joined_at": datetime.now(UTC).isoformat(),
-                        "metadata": {
-                            "seeded": False,
-                            "provisioned_as": "owner",
-                        },
-                    },
-                ],
                 "member_count": 1,
             },
         )
-        return _organization_from_canonical(dict(created))
+        payload = _canonical_to_payload(created)
+        org_id = payload["org_id"]
+
+        owner_member: dict[str, Any] = {
+            "member_id": f"mbr-{owner_user_id}",
+            "user_id": owner_user_id,
+            "email": owner_email,
+            "display_name": owner_display_name,
+            "role": "owner",
+            "status": "active",
+            "joined_at": datetime.now(UTC).isoformat(),
+            "metadata": {"seeded": False, "provisioned_as": "owner"},
+        }
+        self._set_members(org_id, [owner_member])
+
+        if not payload["owner_user_id"]:
+            payload["owner_user_id"] = owner_user_id
+        payload["members"] = [owner_member]
+        return _organization_from_canonical(payload)
 
     def add_member(
         self,
@@ -217,7 +275,7 @@ class OrgStore:
         if existing is None:
             return None
 
-        members = list(existing.get("members") or [])
+        members = self._get_members(org_id)
         members.append(
             {
                 "member_id": f"mbr-{_text(user_id) or _text(email)}",
@@ -230,17 +288,15 @@ class OrgStore:
                 "metadata": dict(metadata or {}),
             },
         )
+        self._set_members(org_id, members)
 
         updated = self._canonical_store.update_organization(
             org_id,
-            {
-                "members": members,
-                "member_count": len(members),
-            },
+            {"member_count": len(members)},
         )
         if updated is None:
             return None
-        return _organization_from_canonical(dict(updated))
+        return self._build_record(updated, members)
 
     def update_member_role(
         self,
@@ -255,14 +311,13 @@ class OrgStore:
         if existing is None:
             return None
 
-        members = list(existing.get("members") or [])
+        members = self._get_members(org_id)
         updated_any = False
         new_members: list[dict[str, Any]] = []
 
         for member in members:
             member_dict = dict(member)
-            current_member_id = _text(member_dict.get("member_id"))
-            if current_member_id != member_id:
+            if _text(member_dict.get("member_id")) != member_id:
                 new_members.append(member_dict)
                 continue
 
@@ -278,16 +333,15 @@ class OrgStore:
         if not updated_any:
             return None
 
+        self._set_members(org_id, new_members)
+
         updated = self._canonical_store.update_organization(
             org_id,
-            {
-                "members": new_members,
-                "member_count": len(new_members),
-            },
+            {"member_count": len(new_members)},
         )
         if updated is None:
             return None
-        return _organization_from_canonical(dict(updated))
+        return self._build_record(updated, new_members)
 
     def update_org_status(
         self,
@@ -297,24 +351,25 @@ class OrgStore:
         plan_name: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> OrganizationRecord | None:
-        updates: dict[str, Any] = {
-            "status": status,
-            "metadata": metadata if metadata is not None else None,
-        }
+        updates: dict[str, Any] = {"status": status}
+        if metadata is not None:
+            updates["metadata"] = metadata
         if plan_name is not None:
             updates["tier"] = plan_name
             updates["plan"] = plan_name
 
-        updated = self._canonical_store.update_organization(
-            org_id,
-            {key: value for key, value in updates.items() if value is not None},
-        )
+        updated = self._canonical_store.update_organization(org_id, updates)
         if updated is None:
             return None
-        return _organization_from_canonical(dict(updated))
+        return self._build_record(updated)
 
     def reset(self) -> None:
-        return None
+        self._members.clear()
+
+
+# ---------------------------------------------------------------------------
+# Module-level OrgStore singleton
+# ---------------------------------------------------------------------------
 
 
 _ORG_STORE = OrgStore()

@@ -37,7 +37,7 @@ def _bool(value: Any, default: bool = False) -> bool:
         return default
     if isinstance(value, bool):
         return value
-    if isinstance(value, int | float):
+    if isinstance(value, (int, float)):
         return bool(value)
     lowered = str(value).strip().lower()
     if lowered in {"1", "true", "yes", "y", "on", "enabled", "active"}:
@@ -134,11 +134,8 @@ def _normalize_organization_payload(
     resolved_name = _text(name) or _text(display_name) or _text(legal_name) or _text(source.get("name")) or _text(source.get("display_name")) or _text(source.get("legal_name")) or f"Organization {resolved_org_id[:8]}"
 
     resolved_slug = _text(slug) or _text(source.get("slug")) or _slugify(resolved_name)
-
     resolved_owner_id = _text(owner_id) or _text(source.get("owner_id")) or None
-
     resolved_status = _text(status) or _text(source.get("status")) or "active"
-
     resolved_tier = _text(tier) or _text(plan) or _text(source.get("tier")) or _text(source.get("plan")) or "standard"
 
     resolved_created_at = _normalize_timestamp(created_at or source.get("created_at"))
@@ -167,27 +164,11 @@ def _normalize_organization_payload(
         "region": _text(region) or _text(source.get("region")),
         "country": _text(country) or _text(source.get("country")),
         "timezone": _text(timezone) or _text(source.get("timezone")) or "UTC",
-        "seat_limit": int(
-            seat_limit if seat_limit is not None else source.get("seat_limit", 0),
-        ),
-        "member_count": int(
-            member_count if member_count is not None else source.get("member_count", 0),
-        ),
+        "seat_limit": int(seat_limit if seat_limit is not None else source.get("seat_limit", 0)),
+        "member_count": int(member_count if member_count is not None else source.get("member_count", 0)),
         "tags": _as_list(tags if tags is not None else source.get("tags")),
-        "metadata": (
-            metadata
-            if isinstance(metadata, dict)
-            else _as_dict(
-                source.get("metadata"),
-            )
-        ),
-        "settings": (
-            settings
-            if isinstance(settings, dict)
-            else _as_dict(
-                source.get("settings"),
-            )
-        ),
+        "metadata": (metadata if isinstance(metadata, dict) else _as_dict(source.get("metadata"))),
+        "settings": (settings if isinstance(settings, dict) else _as_dict(source.get("settings"))),
         "enabled": _bool(
             enabled if enabled is not None else source.get("enabled"),
             default=resolved_status.lower() == "active",
@@ -487,10 +468,19 @@ def create_organization_store(
     return build_organization_store(backend=backend, table_name=table_name, **store_kwargs)
 
 
-def get_organization_store(
-    *,
-    backend: Any | None = None,
-    table_name: str = DEFAULT_ORGANIZATION_TABLE,
-    **store_kwargs: Any,
-) -> OrganizationStore:
-    return build_organization_store(backend=backend, table_name=table_name, **store_kwargs)
+# ---------------------------------------------------------------------------
+# Module-level singleton — get_organization_store() always returns the same
+# instance so that OrgStore and direct callers share one backend.
+# reset_organization_store() is provided for test isolation.
+# ---------------------------------------------------------------------------
+
+_ORGANIZATION_STORE: OrganizationStore = build_organization_store()
+
+
+def get_organization_store() -> OrganizationStore:
+    return _ORGANIZATION_STORE
+
+
+def reset_organization_store() -> None:
+    global _ORGANIZATION_STORE
+    _ORGANIZATION_STORE = build_organization_store()
