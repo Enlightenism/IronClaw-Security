@@ -10,16 +10,17 @@ from app.main import app
 UI_DATA_RETENTION_PATH: Final[str] = "/ui/data-retention"
 API_KEY_HEADER: Final[dict[str, str]] = {"X-API-Key": "test-api-key"}
 
+
 EXPECTED_RULE_IDS: Final[frozenset[str]] = frozenset({"requests", "telemetry", "review-queue", "audit-log"})
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="function")
 def client() -> TestClient:
     with TestClient(app, raise_server_exceptions=True) as c:
         yield c
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="function")
 def retention_payload(client: TestClient) -> dict[str, Any]:
     response = client.get(UI_DATA_RETENTION_PATH, headers=API_KEY_HEADER)
     assert response.status_code == 200, response.text

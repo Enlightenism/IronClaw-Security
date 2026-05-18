@@ -9,6 +9,7 @@ from fastapi.security import APIKeyHeader
 
 from app.core.apikeys import APIKeyRecord, get_api_key_registry
 from app.core.errors import AppError
+from app.core.settings import get_settings
 
 API_KEY_HEADER_NAME = "X-API-Key"
 SESSION_ID_HEADER_NAME = "X-Session-Id"
@@ -35,7 +36,13 @@ class AuthContext:
 
 
 def _get_settings(request: Request) -> Any | None:
-    return getattr(request.app.state, "settings", None)
+    settings = getattr(request.app.state, "settings", None)
+    if settings is not None:
+        return settings
+    try:
+        return get_settings()
+    except Exception:
+        return None
 
 
 def _clean_optional_string(value: object) -> str | None:
@@ -54,6 +61,7 @@ def _extract_configured_api_key(request: Request) -> str | None:
         "internal_platform_api_key",
         "platform_api_key",
         "admin_api_key",
+        "ironclaw_api_key",
         "api_key",
     ):
         value = _clean_optional_string(getattr(settings, attr_name, None))
