@@ -51,6 +51,8 @@ jobs:
         env:
           IRONCLAW_PERSISTENCE_MODE: memory
           ENVIRONMENT: test
+          AUTH_REQUIRED: "true"
+          IRONCLAW_API_KEY: "test-api-key"
           SUPABASE_URL: ""
           SUPABASE_SERVICE_ROLE_KEY: ""
           SUPABASE_KEY: ""
@@ -77,6 +79,8 @@ jobs:
         env:
           IRONCLAW_PERSISTENCE_MODE: memory
           ENVIRONMENT: test
+          AUTH_REQUIRED: "true"
+          IRONCLAW_API_KEY: "test-api-key"
           SUPABASE_URL: ""
           SUPABASE_SERVICE_ROLE_KEY: ""
           SUPABASE_KEY: ""
