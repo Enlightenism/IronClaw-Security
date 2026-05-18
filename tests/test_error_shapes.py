@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 client = TestClient(app)
+authed_client = TestClient(app, headers={"X-API-Key": "test-api-key"})
 
 
 def test_missing_route_returns_json_error_shape():
@@ -17,7 +18,7 @@ def test_missing_route_returns_json_error_shape():
 
 
 def test_guard_execute_validation_error_shape():
-    response = client.post("/guard/execute", json={})
+    response = authed_client.post("/guard/execute", json={})
     assert response.status_code == 422
 
     body = response.json()
@@ -32,7 +33,7 @@ def test_guard_execute_validation_error_shape():
 
 
 def test_history_lookup_missing_resource_error_shape():
-    response = client.get("/history/does-not-exist")
+    response = authed_client.get("/history/does-not-exist")
     assert response.status_code in {404, 422}
 
     body = response.json()

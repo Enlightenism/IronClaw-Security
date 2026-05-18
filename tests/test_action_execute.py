@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from app.dependencies.action_execute import get_action_execute_pipeline
 from app.main import app
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-API-Key": "test-api-key"})
 
 
 def test_guard_execute_allows_safe_dry_run_request():

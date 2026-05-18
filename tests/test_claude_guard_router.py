@@ -7,11 +7,13 @@ from fastapi.testclient import TestClient
 import httpx
 
 from app.api.claude_guard_router import router as claude_guard_router
+from app.core.auth import require_api_key
 
 
 def _build_test_app() -> FastAPI:
     app = FastAPI()
     app.include_router(claude_guard_router)
+    app.dependency_overrides[require_api_key] = lambda: "test-key"
     return app
 
 

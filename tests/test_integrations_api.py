@@ -17,7 +17,7 @@ def _auth_headers() -> dict[str, str]:
 def test_integrations_list_returns_registry_items():
     client = _client()
 
-    response = client.get("/integrations")
+    response = client.get("/integrations", headers=_auth_headers())
 
     assert response.status_code == 200
     payload = response.json()

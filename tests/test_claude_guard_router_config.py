@@ -1,23 +1,46 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+import os
+
+os.environ.setdefault("IRONCLAW_PERSISTENCE_MODE", "memory")
+os.environ.setdefault("ENVIRONMENT", "test")
+os.environ.setdefault("AUTH_REQUIRED", "true")
+os.environ.setdefault("IRONCLAW_API_KEY", "test-key")
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from app.api.claude_guard_router import router as claude_guard_router
+from app.core.auth import get_api_key
+from app.core.errors import AppError
+
+_TEST_API_KEY = "test-key"
 
 
-def _build_test_app() -> FastAPI:
+def _build_test_app(*, bypass_auth: bool = False) -> FastAPI:
     app = FastAPI()
+
+    @app.exception_handler(AppError)
+    async def _apperror_handler(request: Request, exc: AppError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": exc.error, "message": exc.message},
+        )
+
+    if bypass_auth:
+        app.dependency_overrides[get_api_key] = lambda: _TEST_API_KEY
+
     app.include_router(claude_guard_router)
     return app
 
 
 def _headers() -> dict[str, str]:
-    return {"X-API-Key": "test-key"}
+    return {"X-API-Key": _TEST_API_KEY}
 
 
 def test_guard_router_rejects_invalid_guard_mode_by_falling_back_to_enforce() -> None:
-    app = _build_test_app()
+    app = _build_test_app(bypass_auth=True)
     client = TestClient(app)
 
     response = client.post(
@@ -34,7 +57,7 @@ def test_guard_router_rejects_invalid_guard_mode_by_falling_back_to_enforce() ->
 
 
 def test_guard_router_requires_api_key() -> None:
-    app = _build_test_app()
+    app = _build_test_app(bypass_auth=False)
     client = TestClient(app)
 
     response = client.post(
@@ -49,7 +72,7 @@ def test_guard_router_requires_api_key() -> None:
 
 
 def test_guard_router_defaults_guard_mode_to_enforce_when_missing() -> None:
-    app = _build_test_app()
+    app = _build_test_app(bypass_auth=True)
     client = TestClient(app)
 
     response = client.post(

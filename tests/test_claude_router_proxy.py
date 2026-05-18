@@ -1,22 +1,43 @@
 from __future__ import annotations
 
+import os
+
+os.environ.setdefault("IRONCLAW_PERSISTENCE_MODE", "memory")
+os.environ.setdefault("ENVIRONMENT", "test")
+os.environ.setdefault("AUTH_REQUIRED", "true")
+os.environ.setdefault("IRONCLAW_API_KEY", "test-key")
+
 from collections.abc import AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 import httpx
 
 from app.api.claude_router_proxy import router as claude_router_proxy_router
+from app.core.auth import require_api_key
+from app.core.errors import AppError
+
+_TEST_API_KEY = "test-key"
 
 
 def _build_test_app() -> FastAPI:
     app = FastAPI()
+
+    @app.exception_handler(AppError)
+    async def _apperror_handler(request: Request, exc: AppError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": exc.error, "message": exc.message},
+        )
+
+    app.dependency_overrides[require_api_key] = lambda: _TEST_API_KEY
     app.include_router(claude_router_proxy_router)
     return app
 
 
 def _headers() -> dict[str, str]:
-    return {"X-API-Key": "test-key"}
+    return {"X-API-Key": _TEST_API_KEY}
 
 
 class _UpstreamStream(httpx.AsyncByteStream):

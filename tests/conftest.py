@@ -12,17 +12,25 @@ os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
 os.environ["SUPABASE_KEY"] = ""
 os.environ["SUPABASE_ANON_KEY"] = ""
 
+
 import pytest
 
 from app.core.settings import get_settings
 from app.main import app as _app
 from app.services.audit_log_service import reset_audit_log
 
-# Clear cached settings so ENVIRONMENT=test and IRONCLAW_API_KEY are picked up fresh
-get_settings.cache_clear()
 
-# Re-apply fresh settings onto app.state so auth sees the correct api key
-_app.state.settings = get_settings()
+@pytest.fixture(scope="session", autouse=True)
+def _configure_settings() -> None:
+    get_settings.cache_clear()
+    settings = get_settings()
+    _app.state.settings = settings
+
+
+@pytest.fixture(scope="function", autouse=True)
+def _refresh_app_settings() -> None:
+    get_settings.cache_clear()
+    _app.state.settings = get_settings()
 
 
 @pytest.fixture(autouse=True)

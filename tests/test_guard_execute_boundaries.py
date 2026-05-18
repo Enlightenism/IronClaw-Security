@@ -5,7 +5,7 @@ import pytest
 
 from app.main import app
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-API-Key": "test-api-key"})
 
 
 def _base_payload(risk_score: int) -> dict:

@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 client = TestClient(app)
+authed_client = TestClient(app, headers={"X-API-Key": "test-api-key"})
 
 
 def _assert_validation_failure(response) -> None:
@@ -26,12 +27,12 @@ def test_scan_batch_rejects_empty_body():
 
 
 def test_history_review_rejects_empty_body():
-    response = client.post("/history/test-scan-id/review", json={})
+    response = authed_client.post("/history/test-scan-id/review", json={})
     _assert_validation_failure(response)
 
 
 def test_policy_guard_bundle_rejects_empty_body():
-    response = client.post("/policy/guard-bundle", json={})
+    response = authed_client.post("/policy/guard-bundle", json={})
     _assert_client_input_failure(response)
 
 
@@ -58,7 +59,7 @@ def test_scan_batch_rejects_wrong_types():
 
 
 def test_history_review_rejects_wrong_types():
-    response = client.post(
+    response = authed_client.post(
         "/history/test-scan-id/review",
         json={
             "approved": "yes",
@@ -70,7 +71,7 @@ def test_history_review_rejects_wrong_types():
 
 
 def test_policy_guard_bundle_rejects_wrong_types():
-    response = client.post(
+    response = authed_client.post(
         "/policy/guard-bundle",
         json={
             "version": 123,

@@ -8,10 +8,14 @@ import pytest
 
 from app.core.auth import API_KEY_HEADER_NAME, get_api_key, require_api_key
 from app.core.errors import AppError
+from app.core.settings import get_settings
 
 
 def test_get_api_key_allows_when_auth_not_required_no_settings() -> None:
+    get_settings.cache_clear()
+
     app = FastAPI()
+    app.state.settings = SimpleNamespace(auth_required=False)
 
     @app.get("/open")
     def open_route(value: str | None = Depends(get_api_key)) -> dict[str, str | None]:
@@ -51,7 +55,7 @@ def test_require_api_key_raises_for_missing_key_when_required() -> None:
     ) -> dict[str, str]:
         return {"api_key": value}
 
-    client = TestClient(app)
+    client = TestClient(app, raise_server_exceptions=True)
 
     with pytest.raises(AppError) as exc_info:
         client.get("/protected")
@@ -70,7 +74,7 @@ def test_require_api_key_raises_for_invalid_key_when_required() -> None:
     ) -> dict[str, str]:
         return {"api_key": value}
 
-    client = TestClient(app)
+    client = TestClient(app, raise_server_exceptions=True)
 
     with pytest.raises(AppError) as exc_info:
         client.get("/protected", headers={API_KEY_HEADER_NAME: "wrong-key"})

@@ -54,8 +54,6 @@ def _env_int(name: str, default: int) -> int:
 
 @dataclass(frozen=True, slots=True)
 class BackupRotationPolicy:
-    """Simple rotation policy expressed as max counts per tier."""
-
     max_hourly: int = 24
     max_daily: int = 7
     max_weekly: int = 4
@@ -67,8 +65,6 @@ class BackupRotationPolicy:
 
 @dataclass(frozen=True, slots=True)
 class BackupTarget:
-    """Logical store that can be snapshotted or exported."""
-
     name: str
     kind: BackupKind
     format: BackupFormat
@@ -102,19 +98,11 @@ class BackupManifest:
 
 @runtime_checkable
 class SnapshotProvider(Protocol):
-    """Abstraction for persistence stores to produce snapshot/export artifacts."""
-
     def snapshot(self, target: BackupTarget, destination: Path) -> Path: ...
     def export(self, target: BackupTarget, destination: Path) -> Path: ...
 
 
 class FilesystemSnapshotProvider:
-    """Default provider that copies or compresses directories/files.
-
-    This is primarily for local development and CI artifacts; production
-    integrations should provide a more robust implementation.
-    """
-
     def snapshot(self, target: BackupTarget, destination: Path) -> Path:
         _ensure_dir(destination.parent)
         source = target.base_path
@@ -160,13 +148,6 @@ class FilesystemSnapshotProvider:
 
 
 class BackupService:
-    """Orchestrates IronClaw backup creation, rotation, and verification.
-
-    This service is intentionally filesystem-focused; callers are expected
-    to provide the concrete SnapshotProvider that knows how to talk to
-    databases, object stores, or other persistence layers.
-    """
-
     def __init__(
         self,
         root_backup_dir: Path,
@@ -211,11 +192,10 @@ class BackupService:
             if not tier_dir.exists():
                 continue
             backups = sorted(
-                (p for p in tier_dir.glob("*") if p.is_file() and not p.name.endswith(".manifest.json")),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True,
+                (p for p in tier_dir.iterdir() if p.is_file() and not p.name.endswith(".manifest.json")),
+                key=lambda p: p.name,
             )
-            for old in backups[max_count:]:
+            for old in backups[:-max_count] if max_count > 0 else backups:
                 old.unlink(missing_ok=True)
                 sidecar = self._manifest_sidecar_path(old)
                 sidecar.unlink(missing_ok=True)
@@ -301,11 +281,6 @@ class BackupService:
 
 
 def default_backup_targets_from_env() -> list[BackupTarget]:
-    """Construct a default set of backup targets from environment variables.
-
-    This keeps orchestration logic centralized while allowing deployment
-    configuration to drive which stores are actually backed up.
-    """
     root = Path(os.getenv("IRONCLAW_BACKUP_ROOT", "backups")).resolve()
 
     db_url = os.getenv("SUPABASE_DB_URL") or os.getenv("DATABASE_URL") or ""

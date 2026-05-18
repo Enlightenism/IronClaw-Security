@@ -4,11 +4,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.claude_bootstrap import router as claude_bootstrap_router
+from app.core.auth import require_api_key
 
 
 def _build_test_app() -> FastAPI:
     app = FastAPI()
     app.include_router(claude_bootstrap_router)
+    app.dependency_overrides[require_api_key] = lambda: "test-key"
     return app
 
 

@@ -21,7 +21,7 @@ except ModuleNotFoundError:  # pragma: no cover
             merged = {}
             for field_name, model_field in self.__class__.model_fields.items():
                 alias = model_field.alias or field_name
-                env_value = os.getenv(alias)
+                env_value = os.getenv(alias) or os.getenv(alias.upper()) or os.getenv(alias.lower())
                 if env_value is not None and field_name not in data:
                     merged[field_name] = _coerce_env_value(env_value, model_field.annotation)
             merged.update(data)
@@ -81,7 +81,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
-        env_file_override=False,
+        env_file_override=True,
     )
 
     app_name: str = Field(default="IronClaw-Security", alias="APP_NAME")
@@ -232,7 +232,7 @@ class Settings(BaseSettings):
             raise ValueError("DEFAULT_REVIEW_STATUS is invalid")
         if self.auth_required and not (self.api_key or self.admin_api_key or self.platform_api_key or self.internal_platform_api_key or self.ironclaw_api_key):
             raise ValueError(
-                "AUTH_REQUIRED is true but no API key is configured (API_KEY, ADMIN_API_KEY, PLATFORM_API_KEY, INTERNAL_PLATFORM_API_KEY, or IRONCLAW_API_KEY)",
+                "AUTH_REQUIRED is true but no API key is configured " "(API_KEY, ADMIN_API_KEY, PLATFORM_API_KEY, INTERNAL_PLATFORM_API_KEY, or IRONCLAW_API_KEY)",
             )
 
 

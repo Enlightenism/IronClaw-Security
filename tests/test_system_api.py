@@ -22,7 +22,7 @@ def test_health_returns_ok() -> None:
 
 
 def test_docs_route_is_available() -> None:
-    with TestClient(app) as client:
+    with TestClient(app, headers={"X-API-Key": "test-api-key"}) as client:
         response = client.get("/docs")
 
     assert response.status_code == 200
@@ -37,7 +37,7 @@ def test_redoc_route_is_disabled() -> None:
 
 
 def test_openapi_route_is_available() -> None:
-    with TestClient(app) as client:
+    with TestClient(app, headers={"X-API-Key": "test-api-key"}) as client:
         response = client.get("/openapi.json")
 
     assert response.status_code == 200
