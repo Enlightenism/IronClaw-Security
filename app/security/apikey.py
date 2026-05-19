@@ -1,4 +1,3 @@
-# app/security/apikey.py
 from __future__ import annotations
 
 import logging
@@ -159,12 +158,13 @@ async def api_key_header_auth(
         )
         return settings_record
 
-    # ---- Test environment fallback — accept any non-empty key ----
-    # In ENVIRONMENT=test, no real keys are provisioned. Allow any key so
-    # integration/e2e tests pass without needing a seeded registry or env vars.
-    if settings.is_test:
+    # ---- Test environment fallback — only when auth is NOT required ----
+    # When auth_required=True, an unrecognised key must be rejected even in
+    # test mode. The passthrough is exclusively for test suites that run with
+    # auth_required=False and no seeded registry/env-var keys.
+    if settings.is_test and not settings.auth_required:
         logger.debug(
-            "api_key_header_auth: test-env passthrough key prefix=%s",
+            "api_key_header_auth: test-env passthrough (auth_required=False) key prefix=%s",
             raw_key[:6] if len(raw_key) >= 6 else "???",
         )
         return _make_synthetic_record(
