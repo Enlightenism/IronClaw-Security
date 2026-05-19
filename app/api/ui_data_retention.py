@@ -6,7 +6,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from app.dependencies.auth import require_api_key
+from app.core.auth import require_api_key
+from app.core.errors import AppError
 
 router = APIRouter(
     prefix="/ui",
@@ -85,10 +86,17 @@ def _build_retention_rules() -> list[RetentionRuleView]:
 
 
 @router.get("/data-retention", response_model=UIDataRetentionResponse)
-def get_data_retention(
+async def get_data_retention(
     requested_by: str = Query("ui-data-retention", min_length=1),
-    _: str | None = Depends(require_api_key),
+    api_key: str = Depends(require_api_key),
 ) -> UIDataRetentionResponse:
+    if not api_key:
+        raise AppError(
+            status_code=401,
+            error="missing_api_key",
+            message="X-API-Key header is required",
+        )
+
     rules = _build_retention_rules()
     return UIDataRetentionResponse(
         status="ok",
