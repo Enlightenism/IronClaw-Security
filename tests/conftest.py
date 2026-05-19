@@ -12,7 +12,6 @@ os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
 os.environ["SUPABASE_KEY"] = ""
 os.environ["SUPABASE_ANON_KEY"] = ""
 
-
 import pytest
 
 from app.core.settings import get_settings
@@ -30,7 +29,8 @@ def _configure_settings() -> None:
 @pytest.fixture(scope="function", autouse=True)
 def _refresh_app_settings() -> None:
     get_settings.cache_clear()
-    _app.state.settings = get_settings()
+    settings = get_settings()
+    _app.state.settings = settings
 
 
 @pytest.fixture(autouse=True)
