@@ -6,12 +6,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from app.core.auth import require_auth_context
+from app.dependencies.auth import require_api_key
 
 router = APIRouter(
     prefix="/ui",
     tags=["ui-data-retention"],
-    dependencies=[Depends(require_auth_context)],
 )
 
 
@@ -88,6 +87,7 @@ def _build_retention_rules() -> list[RetentionRuleView]:
 @router.get("/data-retention", response_model=UIDataRetentionResponse)
 def get_data_retention(
     requested_by: str = Query("ui-data-retention", min_length=1),
+    _: str | None = Depends(require_api_key),
 ) -> UIDataRetentionResponse:
     rules = _build_retention_rules()
     return UIDataRetentionResponse(
