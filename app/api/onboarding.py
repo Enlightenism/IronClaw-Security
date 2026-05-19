@@ -486,13 +486,23 @@ def _service() -> OnboardingService:
     return get_onboarding_service()
 
 
-def _org_id(request: Request, ctx: AuthContext = Depends(get_auth_context)) -> str | None:
+def _auth_context(ctx: AuthContext = Depends(get_auth_context)) -> AuthContext:
+    """Dependency that ensures authentication is required for onboarding endpoints."""
+    if not ctx.authenticated:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+        )
+    return ctx
+
+
+def _org_id(request: Request, ctx: AuthContext = Depends(_auth_context)) -> str | None:
     if ctx.org_id:
         return ctx.org_id
     return request.headers.get("X-Organization-Id") or None
 
 
-def _principal_id(request: Request, ctx: AuthContext = Depends(get_auth_context)) -> str:
+def _principal_id(request: Request, ctx: AuthContext = Depends(_auth_context)) -> str:
     # Prefer explicit principal_id from the auth context (registry key path).
     if ctx.principal_id:
         return ctx.principal_id
@@ -562,7 +572,9 @@ def get_my_onboarding(
     status_code=status.HTTP_200_OK,
     summary="List all available onboarding step definitions",
 )
-def list_step_definitions() -> list[dict[str, Any]]:
+def list_step_definitions(
+    ctx: AuthContext = Depends(_auth_context),
+) -> list[dict[str, Any]]:
     return [
         {
             "key": s["key"].value,
