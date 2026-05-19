@@ -84,6 +84,29 @@ def _request_id_from_request(request: Request) -> str | None:
     return None
 
 
+def _sanitize_validation_errors(errors: list[Any]) -> list[dict[str, Any]]:
+    """
+    Pydantic v2 includes raw Exception objects inside the 'ctx' dict of
+    value_error entries.  Serialize them to strings so json.dumps never
+    encounters a non-serializable type.
+    """
+    sanitized: list[dict[str, Any]] = []
+    for err in errors:
+        if not isinstance(err, dict):
+            sanitized.append({"msg": str(err)})
+            continue
+        clean: dict[str, Any] = {}
+        for k, v in err.items():
+            if k == "ctx" and isinstance(v, dict):
+                clean[k] = {ck: str(cv) if isinstance(cv, Exception) else cv for ck, cv in v.items()}
+            elif isinstance(v, Exception):
+                clean[k] = str(v)
+            else:
+                clean[k] = v
+        sanitized.append(clean)
+    return sanitized
+
+
 def build_error_response(
     *,
     error: str,
@@ -185,7 +208,8 @@ async def validation_exception_handler(
     exc: RequestValidationError,
 ) -> JSONResponse:
     logger = get_logger("ironclaw.errors")
-    details = {"errors": exc.errors()}
+    sanitized_errors = _sanitize_validation_errors(exc.errors())
+    details: dict[str, Any] = {"errors": sanitized_errors}
     _log_exception(
         logger,
         level=logging.WARNING,

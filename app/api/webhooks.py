@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from app.core.auth import get_current_organization_id
+from app.core.auth import AuthContext, get_auth_context
 from app.models.webhook import (
     WebhookCreateRequest,
     WebhookDeliveryAttempt,
@@ -26,7 +26,7 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 
 # ---------------------------------------------------------------------------
-# Dependency
+# Dependencies
 # ---------------------------------------------------------------------------
 
 
@@ -34,8 +34,17 @@ def _dispatcher() -> WebhookDispatcher:
     return get_webhook_dispatcher()
 
 
+def _org_id(request: Request, ctx: AuthContext = Depends(get_auth_context)) -> str:
+    # Prefer the resolved org_id from auth context (populated from X-Org-Id).
+    # Fall back to X-Organization-Id header so tests and external callers
+    # that use the longer header name are also respected.
+    if ctx.org_id:
+        return ctx.org_id
+    return request.headers.get("X-Organization-Id", "")
+
+
 # ---------------------------------------------------------------------------
-# Registration CRUD
+# Registration CRUD — collection routes (must precede /{webhook_id})
 # ---------------------------------------------------------------------------
 
 
@@ -47,11 +56,11 @@ def _dispatcher() -> WebhookDispatcher:
 )
 def register_webhook(
     payload: WebhookCreateRequest,
-    organization_id: str = Depends(get_current_organization_id),
+    organization_id: str = Depends(_org_id),
     dispatcher: WebhookDispatcher = Depends(_dispatcher),
 ) -> WebhookResponse:
     if payload.org_id is None:
-        payload = payload.model_copy(update={"org_id": organization_id})
+        payload = payload.model_copy(update={"org_id": organization_id or None})
     return dispatcher.register(payload)
 
 
@@ -62,17 +71,98 @@ def register_webhook(
     summary="List registered webhooks",
 )
 def list_webhooks(
-    organization_id: str = Depends(get_current_organization_id),
+    organization_id: str = Depends(_org_id),
     active: bool | None = Query(default=None),
     event_type: str | None = Query(default=None, min_length=1, max_length=120),
     dispatcher: WebhookDispatcher = Depends(_dispatcher),
 ) -> list[WebhookSummaryResponse]:
     filter_req = WebhookFilterRequest(
-        org_id=organization_id,
+        org_id=organization_id if organization_id else None,
         active=active,
         event_type=WebhookEventType(event_type) if event_type is not None else None,
     )
     return dispatcher.list_webhooks(filter_req)
+
+
+# ---------------------------------------------------------------------------
+# Dead-letter queue — static routes BEFORE /{webhook_id} dynamic routes
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/dead-letter",
+    response_model=list[dict[str, Any]],
+    status_code=status.HTTP_200_OK,
+    summary="List dead-letter queue entries",
+)
+def list_dead_letter(
+    limit: int = Query(default=100, ge=1, le=500),
+    organization_id: str = Depends(_org_id),
+    dispatcher: WebhookDispatcher = Depends(_dispatcher),
+) -> list[dict[str, Any]]:
+    return dispatcher.list_dead_letter(limit=limit)
+
+
+@router.post(
+    "/dead-letter/{delivery_id}/replay",
+    response_model=WebhookDeliveryAttempt,
+    status_code=status.HTTP_200_OK,
+    summary="Replay a single dead-letter delivery",
+)
+def replay_dead_letter(
+    delivery_id: str,
+    organization_id: str = Depends(_org_id),
+    dispatcher: WebhookDispatcher = Depends(_dispatcher),
+) -> WebhookDeliveryAttempt:
+    result = dispatcher.replay_dead_letter(delivery_id)
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Dead-letter entry '{delivery_id}' not found",
+        )
+    return result
+
+
+@router.delete(
+    "/dead-letter",
+    status_code=status.HTTP_200_OK,
+    summary="Purge all dead-letter queue entries",
+)
+def purge_dead_letter(
+    organization_id: str = Depends(_org_id),
+    dispatcher: WebhookDispatcher = Depends(_dispatcher),
+) -> dict[str, int]:
+    count = dispatcher.purge_dead_letter()
+    return {"purged": count}
+
+
+# ---------------------------------------------------------------------------
+# Dispatch — static route BEFORE /{webhook_id} dynamic routes
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/dispatch",
+    response_model=list[WebhookDeliveryAttempt],
+    status_code=status.HTTP_200_OK,
+    summary="Dispatch an event to all matching webhook subscriptions",
+)
+def dispatch_event(
+    event_type: str = Query(min_length=1, max_length=120),
+    organization_id: str = Depends(_org_id),
+    dispatcher: WebhookDispatcher = Depends(_dispatcher),
+    data: dict[str, Any] | None = None,
+) -> list[WebhookDeliveryAttempt]:
+    return dispatcher.dispatch_event(
+        event_type,
+        data or {},
+        org_id=organization_id if organization_id else None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Per-webhook routes — dynamic /{webhook_id} routes AFTER all static routes
+# ---------------------------------------------------------------------------
 
 
 @router.get(
@@ -83,7 +173,7 @@ def list_webhooks(
 )
 def get_webhook(
     webhook_id: str,
-    organization_id: str = Depends(get_current_organization_id),
+    organization_id: str = Depends(_org_id),
     dispatcher: WebhookDispatcher = Depends(_dispatcher),
 ) -> WebhookResponse:
     record = dispatcher.get(webhook_id)
@@ -105,7 +195,7 @@ def get_webhook(
 def update_webhook(
     webhook_id: str,
     payload: WebhookUpdateRequest,
-    organization_id: str = Depends(get_current_organization_id),
+    organization_id: str = Depends(_org_id),
     dispatcher: WebhookDispatcher = Depends(_dispatcher),
 ) -> WebhookResponse:
     existing = dispatcher.get(webhook_id)
@@ -131,7 +221,7 @@ def update_webhook(
 )
 def delete_webhook(
     webhook_id: str,
-    organization_id: str = Depends(get_current_organization_id),
+    organization_id: str = Depends(_org_id),
     dispatcher: WebhookDispatcher = Depends(_dispatcher),
 ) -> None:
     existing = dispatcher.get(webhook_id)
@@ -157,7 +247,7 @@ def delete_webhook(
 )
 def enable_webhook(
     webhook_id: str,
-    organization_id: str = Depends(get_current_organization_id),
+    organization_id: str = Depends(_org_id),
     dispatcher: WebhookDispatcher = Depends(_dispatcher),
 ) -> WebhookStatusUpdateResponse:
     existing = dispatcher.get(webhook_id)
@@ -184,7 +274,7 @@ def enable_webhook(
 )
 def disable_webhook(
     webhook_id: str,
-    organization_id: str = Depends(get_current_organization_id),
+    organization_id: str = Depends(_org_id),
     dispatcher: WebhookDispatcher = Depends(_dispatcher),
 ) -> WebhookStatusUpdateResponse:
     existing = dispatcher.get(webhook_id)
@@ -216,7 +306,7 @@ def disable_webhook(
 )
 def rotate_webhook_secret(
     webhook_id: str,
-    organization_id: str = Depends(get_current_organization_id),
+    organization_id: str = Depends(_org_id),
     dispatcher: WebhookDispatcher = Depends(_dispatcher),
 ) -> WebhookRotateSecretResponse:
     existing = dispatcher.get(webhook_id)
@@ -257,7 +347,7 @@ def test_webhook(
         min_length=1,
         max_length=120,
     ),
-    organization_id: str = Depends(get_current_organization_id),
+    organization_id: str = Depends(_org_id),
     dispatcher: WebhookDispatcher = Depends(_dispatcher),
 ) -> WebhookTestResponse:
     existing = dispatcher.get(webhook_id)
@@ -284,7 +374,7 @@ def test_webhook(
 def get_delivery_log(
     webhook_id: str,
     limit: int = Query(default=50, ge=1, le=200),
-    organization_id: str = Depends(get_current_organization_id),
+    organization_id: str = Depends(_org_id),
     dispatcher: WebhookDispatcher = Depends(_dispatcher),
 ) -> list[WebhookDeliveryAttempt]:
     existing = dispatcher.get(webhook_id)
@@ -298,82 +388,6 @@ def get_delivery_log(
 
 
 # ---------------------------------------------------------------------------
-# Dead-letter queue
-# ---------------------------------------------------------------------------
-
-
-@router.get(
-    "/dead-letter",
-    response_model=list[dict[str, Any]],
-    status_code=status.HTTP_200_OK,
-    summary="List dead-letter queue entries",
-)
-def list_dead_letter(
-    limit: int = Query(default=100, ge=1, le=500),
-    organization_id: str = Depends(get_current_organization_id),
-    dispatcher: WebhookDispatcher = Depends(_dispatcher),
-) -> list[dict[str, Any]]:
-    return dispatcher.list_dead_letter(limit=limit)
-
-
-@router.post(
-    "/dead-letter/{delivery_id}/replay",
-    response_model=WebhookDeliveryAttempt,
-    status_code=status.HTTP_200_OK,
-    summary="Replay a single dead-letter delivery",
-)
-def replay_dead_letter(
-    delivery_id: str,
-    organization_id: str = Depends(get_current_organization_id),
-    dispatcher: WebhookDispatcher = Depends(_dispatcher),
-) -> WebhookDeliveryAttempt:
-    result = dispatcher.replay_dead_letter(delivery_id)
-    if result is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Dead-letter entry '{delivery_id}' not found",
-        )
-    return result
-
-
-@router.delete(
-    "/dead-letter",
-    status_code=status.HTTP_200_OK,
-    summary="Purge all dead-letter queue entries",
-)
-def purge_dead_letter(
-    organization_id: str = Depends(get_current_organization_id),
-    dispatcher: WebhookDispatcher = Depends(_dispatcher),
-) -> dict[str, int]:
-    count = dispatcher.purge_dead_letter()
-    return {"purged": count}
-
-
-# ---------------------------------------------------------------------------
-# Dispatch (internal / platform use)
-# ---------------------------------------------------------------------------
-
-
-@router.post(
-    "/dispatch",
-    response_model=list[WebhookDeliveryAttempt],
-    status_code=status.HTTP_200_OK,
-    summary="Dispatch an event to all matching webhook subscriptions",
-)
-def dispatch_event(
-    event_type: str = Query(min_length=1, max_length=120),
-    organization_id: str = Depends(get_current_organization_id),
-    dispatcher: WebhookDispatcher = Depends(_dispatcher),
-    data: dict[str, Any] | None = None,
-) -> list[WebhookDeliveryAttempt]:
-    return dispatcher.dispatch_event(
-        event_type,
-        data or {},
-        org_id=organization_id,
-    )
-
-
-# ---------------------------------------------------------------------------
 # Internal org-scope guard
 # ---------------------------------------------------------------------------
 
@@ -383,7 +397,7 @@ def _assert_org_scope(
     caller_org_id: str,
     webhook_id: str,
 ) -> None:
-    if record_org_id is not None and record_org_id != caller_org_id:
+    if record_org_id is not None and caller_org_id and record_org_id != caller_org_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Webhook '{webhook_id}' does not belong to your organization",
