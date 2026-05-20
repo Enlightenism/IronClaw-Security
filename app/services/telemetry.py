@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import json
 from pathlib import Path
 from threading import Lock
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 TELEMETRY_DIR: Final[Path] = Path.home() / ".ironclaw"
 TELEMETRY_PATH: Final[Path] = TELEMETRY_DIR / "telemetry_events.jsonl"
@@ -17,6 +17,51 @@ TELEMETRY_DIR.mkdir(parents=True, exist_ok=True)
 
 _TELEMETRY_LOCK = Lock()
 _COERCE_MAX_DEPTH = 32
+
+# ---------------------------------------------------------------------------
+# Canonical event type registry
+# Any service that emits telemetry must register its event types here.
+# External consumers and tests use KNOWN_EVENT_TYPES for contract validation.
+# ---------------------------------------------------------------------------
+
+KnownEventType = Literal[
+    # Core scan / action guard
+    "scan_completed",
+    "action_guard_decision",
+    "prompt_injection_detected",
+    # Quarantine / incidents
+    "quarantine_created",
+    "quarantine_released",
+    "incident_created",
+    "incident_updated",
+    # Policy
+    "policy_changed",
+    "policy_violation",
+    # Alerts
+    "alert_dispatched",
+    "alert_failed",
+    # Audit
+    "audit_entry_created",
+    # Trust
+    "trust_score_updated",
+    "trust_collapse_detected",
+    # Phase 9 — Behavioral Baseline & Agent Profiling
+    "behavioral_drift_detected",
+    "behavioral_baseline_updated",
+    "behavioral_baseline_suspended",
+    "agent_observation_recorded",
+    # System
+    "system_startup",
+    "system_shutdown",
+    "telemetry_cleared",
+]
+
+KNOWN_EVENT_TYPES: Final[frozenset[str]] = frozenset(KnownEventType.__args__)  # type: ignore[attr-defined]
+
+
+def is_known_event_type(event_type: str) -> bool:
+    """Return True if event_type is in the canonical registry."""
+    return event_type in KNOWN_EVENT_TYPES
 
 
 def _utc_now() -> datetime:
@@ -56,11 +101,9 @@ def _coerce_json_safe(value: Any, _depth: int = 0) -> Any:
     if isinstance(value, (list, tuple, set, frozenset)):
         return [_coerce_json_safe(item, _depth + 1) for item in value]
 
-    # Only call model_dump on real Pydantic models — never on Mocks or arbitrary objects
     if _is_pydantic_model(value):
         return _coerce_json_safe(value.model_dump(), _depth + 1)
 
-    # Legacy Pydantic v1 .dict() — only if it's a real model type, not a Mock
     type_name = type(value).__name__
     if "Mock" not in type_name and hasattr(value, "dict") and callable(value.dict) and hasattr(value, "__fields__") is not False:
         try:
@@ -119,7 +162,19 @@ def _normalize_event(event: Any) -> dict[str, Any] | None:
     return normalized
 
 
-def append_telemetry_event(event_type: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def _parse_iso_timestamp(ts: str | None) -> datetime | None:
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+
+
+def append_telemetry_event(
+    event_type: str,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     record = _build_event_record(event_type, payload)
 
     with _TELEMETRY_LOCK:
@@ -134,9 +189,30 @@ def read_telemetry_events(
     limit: int = DEFAULT_READ_LIMIT,
     *,
     event_type: str | None = None,
+    since: str | datetime | None = None,
+    until: str | datetime | None = None,
+    agent_id: str | None = None,
 ) -> list[dict[str, Any]]:
+    """Read telemetry events in reverse-chronological order.
+
+    Args:
+        limit:      Maximum number of matching events to return.
+        event_type: Optional exact-match filter on event_type field.
+        since:      Optional ISO timestamp or datetime lower bound (inclusive).
+        until:      Optional ISO timestamp or datetime upper bound (inclusive).
+        agent_id:   Optional filter on payload.agent_id for behavioral events.
+    """
     safe_limit = _safe_limit(limit)
     expected_type = str(event_type).strip() if event_type is not None else None
+    expected_agent = str(agent_id).strip() if agent_id is not None else None
+
+    since_dt: datetime | None = None
+    until_dt: datetime | None = None
+
+    if since is not None:
+        since_dt = since if isinstance(since, datetime) else _parse_iso_timestamp(str(since))
+    if until is not None:
+        until_dt = until if isinstance(until, datetime) else _parse_iso_timestamp(str(until))
 
     with _TELEMETRY_LOCK:
         if not TELEMETRY_PATH.exists():
@@ -164,11 +240,44 @@ def read_telemetry_events(
         if expected_type is not None and event.get("event_type") != expected_type:
             continue
 
+        if since_dt is not None or until_dt is not None:
+            event_ts = _parse_iso_timestamp(event.get("timestamp"))
+            if event_ts is not None:
+                if since_dt is not None and event_ts < since_dt:
+                    continue
+                if until_dt is not None and event_ts > until_dt:
+                    continue
+
+        if expected_agent is not None:
+            event_payload = event.get("payload") or {}
+            if isinstance(event_payload, dict):
+                if str(event_payload.get("agent_id") or "").strip() != expected_agent:
+                    continue
+
         events.append(event)
         if len(events) >= safe_limit:
             break
 
     return events
+
+
+def get_events_by_agent(
+    agent_id: str,
+    *,
+    limit: int = DEFAULT_READ_LIMIT,
+    event_type: str | None = None,
+    since: str | datetime | None = None,
+) -> list[dict[str, Any]]:
+    """Return telemetry events scoped to a specific agent_id.
+
+    Convenience wrapper for the behavioral baseline router and drift audit queries.
+    """
+    return read_telemetry_events(
+        limit=limit,
+        event_type=event_type,
+        since=since,
+        agent_id=agent_id,
+    )
 
 
 def summarize_telemetry_events(limit: int = 500) -> dict[str, Any]:
@@ -179,11 +288,14 @@ def summarize_telemetry_events(limit: int = 500) -> dict[str, Any]:
         event_type = str(event.get("event_type") or "unknown")
         counts[event_type] = counts.get(event_type, 0) + 1
 
+    unknown_types = [et for et in counts if et not in KNOWN_EVENT_TYPES]
+
     return {
         "path": str(TELEMETRY_PATH),
         "schema_version": TELEMETRY_SCHEMA_VERSION,
         "event_count": len(events),
         "event_type_counts": dict(sorted(counts.items())),
+        "unknown_event_types": sorted(unknown_types),
         "latest_timestamp": events[0].get("timestamp") if events else None,
     }
 

@@ -21,6 +21,7 @@ from app.services.action_policy import (
     ActionPolicyDecision,
     evaluate_action_policy,
 )
+from app.services.behavioral_baseline import get_behavioral_baseline_store
 from app.services.telemetry import append_telemetry_event
 
 router = APIRouter(dependencies=[Depends(limit_guard_routes)])
@@ -81,6 +82,33 @@ def _request_context(payload: ActionGuardRequest, request: Request) -> dict[str,
     }
 
 
+def _record_baseline_observation(
+    payload: ActionGuardRequest,
+    risk_score: int,
+    matched_patterns: list[str],
+) -> None:
+    """Passively feed each analyzed action into the behavioral baseline store.
+
+    Failures are intentionally swallowed so that baseline instrumentation
+    never disrupts the guard response contract.
+    """
+    agent_id = getattr(payload, "agent_id", None) or payload.client_id
+    if not agent_id:
+        return
+    try:
+        get_behavioral_baseline_store().record_observation(
+            agent_id=str(agent_id),
+            action_type=payload.action_type,
+            target=payload.target or "",
+            risk_score=risk_score,
+            session_id=payload.session_id,
+            client_id=payload.client_id,
+            matched_patterns=matched_patterns,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 @router.post("/action", response_model=ActionGuardResponse)
 def guard_action(payload: ActionGuardRequest, request: Request) -> ActionGuardResponse:
     append_telemetry_event(
@@ -98,6 +126,12 @@ def guard_action(payload: ActionGuardRequest, request: Request) -> ActionGuardRe
     result["reasons"] = _normalize_reasons(result.get("reasons", []))
 
     response = ActionGuardResponse(**result)
+
+    _record_baseline_observation(
+        payload,
+        risk_score=int(getattr(response, "risk_score", 0) or 0),
+        matched_patterns=[str(r.get("label", "")) for r in result.get("reasons", []) if isinstance(r, dict) and r.get("label")],
+    )
 
     append_telemetry_event(
         "guard_action_completed",
@@ -129,6 +163,12 @@ def guard_action_policy(payload: ActionGuardRequest, request: Request) -> Action
 
     response = ActionPolicyResponse(**result)
 
+    _record_baseline_observation(
+        payload,
+        risk_score=int(getattr(response, "risk_score", 0) or 0),
+        matched_patterns=[str(r.get("label", "")) for r in result.get("reasons", []) if isinstance(r, dict) and r.get("label")],
+    )
+
     append_telemetry_event(
         "guard_action_policy_completed",
         {
@@ -158,6 +198,12 @@ def guard_action_decision(payload: ActionGuardRequest, request: Request) -> Acti
     result["reasons"] = _normalize_reasons(result.get("reasons", []))
 
     response = ActionDecisionResponse(**result)
+
+    _record_baseline_observation(
+        payload,
+        risk_score=int(getattr(response, "risk_score", 0) or 0),
+        matched_patterns=[str(r.get("label", "")) for r in result.get("reasons", []) if isinstance(r, dict) and r.get("label")],
+    )
 
     append_telemetry_event(
         "guard_action_decision_completed",

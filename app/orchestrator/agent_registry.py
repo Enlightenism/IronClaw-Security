@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass, field
 import hashlib
 import json
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 AgentLanguage = Literal[
     "python",
@@ -83,6 +83,7 @@ class AgentDescriptor:
     file_hash: str | None = None
     last_modified_ts: float | None = None
     tags: list[str] = field(default_factory=list)
+    baseline_status: str = "unknown"
 
 
 @dataclass
@@ -91,7 +92,7 @@ class AgentRegistry:
     count: int
     items: list[AgentDescriptor] = field(default_factory=list)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "project_root": self.project_root,
             "count": self.count,
@@ -190,7 +191,18 @@ def _threat_profile_for(path: Path, language: AgentLanguage, content: str) -> Th
     lowered_path = str(path).lower()
     lowered = content.lower()
 
-    if any(part in lowered_path for part in ["security", "guard", "scanner", "policy", "telemetry", "orchestrator"]):
+    if any(
+        part in lowered_path
+        for part in [
+            "security",
+            "guard",
+            "scanner",
+            "policy",
+            "telemetry",
+            "orchestrator",
+            "behavioral_baseline",
+        ]
+    ):
         return "security_critical"
 
     if any(
@@ -236,6 +248,7 @@ def _tags_for(path: Path, language: AgentLanguage, content: str) -> list[str]:
         "telemetry": ["telemetry", "event"],
         "orchestrator": ["orchestrator", "agent_registry", "agent"],
         "api": ["apirouter", "fastapi", "router"],
+        "behavioral_baseline": ["behavioral_baseline", "drift", "baseline"],
     }
 
     for tag, needles in keyword_map.items():
@@ -243,6 +256,23 @@ def _tags_for(path: Path, language: AgentLanguage, content: str) -> list[str]:
             tags.add(tag)
 
     return sorted(tags)
+
+
+def _fetch_baseline_status(agent_id: str) -> str:
+    """Return the current baseline status string for an agent.
+
+    Falls back to 'unknown' on any failure so descriptor construction
+    is never blocked by baseline availability.
+    """
+    try:
+        from app.services.behavioral_baseline import get_behavioral_baseline_store
+
+        baseline = get_behavioral_baseline_store().get_baseline(agent_id)
+        if baseline is None:
+            return "learning"
+        return baseline.status
+    except Exception:  # noqa: BLE001
+        return "unknown"
 
 
 def _iter_candidate_files(
@@ -274,6 +304,7 @@ def build_agent_descriptor(project_root: str | Path, file_path: str | Path) -> A
     relative_path = path.relative_to(root).as_posix()
     language = _infer_language(path)
     content = _read_text_safe(path)
+    agent_id = _stable_agent_id(relative_path)
 
     try:
         stat = path.stat()
@@ -286,7 +317,7 @@ def build_agent_descriptor(project_root: str | Path, file_path: str | Path) -> A
         exists = False
 
     return AgentDescriptor(
-        agent_id=_stable_agent_id(relative_path),
+        agent_id=agent_id,
         relative_path=relative_path,
         absolute_path=str(path),
         language=language,
@@ -297,6 +328,7 @@ def build_agent_descriptor(project_root: str | Path, file_path: str | Path) -> A
         file_hash=_hash_file(path) if exists else None,
         last_modified_ts=last_modified_ts,
         tags=_tags_for(path, language, content),
+        baseline_status=_fetch_baseline_status(agent_id),
     )
 
 

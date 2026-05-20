@@ -7,6 +7,7 @@ from app.routes.alerts import router as alerts_router
 from app.routes.audit import router as audit_router
 from app.routes.auditexplorer import router as auditexplorer_router
 from app.routes.auditlog import router as auditlog_router
+from app.routes.behavioral_baseline import router as behavioral_baseline_router
 from app.routes.billing import router as billing_router
 from app.routes.dashboard import router as dashboard_router
 from app.routes.deployment import router as deployment_router
@@ -28,12 +29,14 @@ from app.ui.reviewqueue import router as ui_reviewqueue_router
 
 router = APIRouter()
 
+
 _INCLUDED_ROUTERS = (
     actionhistorytest_router,
     alerts_router,
     audit_router,
     auditexplorer_router,
     auditlog_router,
+    behavioral_baseline_router,
     billing_router,
     dashboard_router,
     deployment_router,
@@ -53,6 +56,7 @@ _INCLUDED_ROUTERS = (
     ui_review_router,
     ui_reviewqueue_router,
 )
+
 
 for included_router in _INCLUDED_ROUTERS:
     router.include_router(included_router)

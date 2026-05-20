@@ -141,6 +141,10 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
             {"prefix": "/guard", "dependencies": dependencies},
         ),
         (_optional_router("app.api.audit_log"), {"prefix": "/guard", "dependencies": dependencies}),
+        (
+            _optional_router("app.api.behavioral_baseline"),
+            {"prefix": "/guard", "dependencies": dependencies},
+        ),
         (_optional_router("app.api.policy"), {"prefix": "/policy", "dependencies": dependencies}),
         (_optional_router("app.api.release_policy_routes"), {"dependencies": dependencies}),
         (_optional_router("app.api.integrations"), {"dependencies": dependencies}),

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 from app.security.promptinjection import scanpromptinjectiondict
 from app.services.scanner import perform_scan
@@ -36,7 +36,9 @@ class ActionGuardDecision(TypedDict):
     should_warn: bool
     client_id: str | None
     session_id: str | None
+    agent_id: str | None
     reasons: list[ActionGuardReason]
+    drift_report: dict[str, Any] | None
 
 
 def _verdict_rank(verdict: VerdictType) -> int:
@@ -229,12 +231,47 @@ def _build_reasons(
     return reasons
 
 
+def _record_and_drift(
+    *,
+    agent_id: str,
+    action_type: str,
+    target: str,
+    risk_score: int,
+    session_id: str | None,
+    client_id: str | None,
+    matched_patterns: list[str],
+) -> dict[str, Any] | None:
+    """Record one observation and return a drift report dict, or None on failure."""
+    try:
+        from app.services.behavioral_baseline import get_behavioral_baseline_store
+
+        store = get_behavioral_baseline_store()
+        store.record_observation(
+            agent_id=agent_id,
+            action_type=action_type,
+            target=target,
+            risk_score=risk_score,
+            session_id=session_id,
+            client_id=client_id,
+            matched_patterns=matched_patterns,
+        )
+        report = store.compute_drift(
+            agent_id,
+            session_id=session_id,
+            client_id=client_id,
+        )
+        return report.to_dict()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def analyze_action(
     action_type: ActionType,
     target: str,
     content: str = "",
     client_id: str | None = None,
     session_id: str | None = None,
+    agent_id: str | None = None,
 ) -> ActionGuardDecision:
     combined_text = f"{action_type}\nTARGET:\n{target}\nCONTENT:\n{content}".strip()
     result = perform_scan("text", combined_text)
@@ -279,6 +316,21 @@ def analyze_action(
     elif promptinjection.get("shouldreview") is True:
         final_verdict = _max_verdict(final_verdict, "warn")
 
+    # Behavioral baseline: record observation + compute drift
+    drift_report: dict[str, Any] | None = None
+    if agent_id:
+        drift_report = _record_and_drift(
+            agent_id=agent_id,
+            action_type=action_type,
+            target=target,
+            risk_score=risk_score,
+            session_id=session_id,
+            client_id=client_id,
+            matched_patterns=matched_patterns,
+        )
+        if drift_report and drift_report.get("should_suspend"):
+            final_verdict = _max_verdict(final_verdict, "block")
+
     should_halt = final_verdict in ("block", "quarantine")
     should_warn = final_verdict in ("warn", "quarantine")
 
@@ -309,5 +361,7 @@ def analyze_action(
         "should_warn": should_warn,
         "client_id": client_id,
         "session_id": session_id,
+        "agent_id": agent_id,
         "reasons": reasons,
+        "drift_report": drift_report,
     }
