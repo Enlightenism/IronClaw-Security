@@ -12,6 +12,8 @@ begin
 end;
 $$;
 
+-- ─── Migration tracking ────────────────────────────────────────────────────────
+
 create table if not exists public.persistence_migrations (
     id uuid primary key default gen_random_uuid(),
     migration_key text not null unique,
@@ -21,6 +23,8 @@ create table if not exists public.persistence_migrations (
     checksum text not null default '',
     metadata jsonb not null default '{}'::jsonb
 );
+
+-- ─── Persistence infrastructure ───────────────────────────────────────────────
 
 create table if not exists public.persistence_backends (
     id uuid primary key default gen_random_uuid(),
@@ -61,6 +65,8 @@ create table if not exists public.persistence_failover_events (
     constraint persistence_failover_events_status_check
         check (status in ('detected', 'in_progress', 'completed', 'failed', 'rolled_back'))
 );
+
+-- ─── Backup / restore ─────────────────────────────────────────────────────────
 
 create table if not exists public.backup_policies (
     id uuid primary key default gen_random_uuid(),
@@ -142,6 +148,8 @@ create table if not exists public.restore_runs (
         check (records_restored >= 0)
 );
 
+-- ─── Retention ────────────────────────────────────────────────────────────────
+
 create table if not exists public.retention_policies (
     id uuid primary key default gen_random_uuid(),
     policy_key text not null unique,
@@ -203,6 +211,56 @@ create table if not exists public.legal_holds (
     constraint legal_holds_target_scope_check
         check (target_scope in ('platform', 'audit', 'review', 'quarantine', 'incidents', 'billing', 'runtime', 'telemetry'))
 );
+
+-- ─── Security events / analysis ───────────────────────────────────────────────
+
+create table if not exists public.analysis_reports (
+    id uuid primary key default gen_random_uuid(),
+    sha256 text not null unique,
+    source_filename text not null,
+    verdict text not null,
+    risk_score integer not null default 0,
+    summary text not null default '',
+    indicators jsonb not null default '[]'::jsonb,
+    metadata jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default timezone('utc', now()),
+    updated_at timestamptz not null default timezone('utc', now()),
+    constraint analysis_reports_verdict_check
+        check (verdict in ('clean', 'suspicious', 'malicious', 'unknown')),
+    constraint analysis_reports_risk_score_check
+        check (risk_score >= 0 and risk_score <= 100)
+);
+
+create table if not exists public.quarantine_events (
+    id uuid primary key default gen_random_uuid(),
+    analysis_report_id uuid not null references public.analysis_reports(id) on delete cascade,
+    sha256 text not null,
+    original_filename text not null,
+    original_path text,
+    quarantine_path text not null,
+    reason text not null,
+    status text not null default 'quarantined',
+    metadata jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default timezone('utc', now()),
+    released_at timestamptz,
+    constraint quarantine_events_status_check
+        check (status in ('quarantined', 'released', 'deleted'))
+);
+
+create table if not exists public.release_policy_decisions (
+    id uuid primary key default gen_random_uuid(),
+    quarantine_event_id uuid not null references public.quarantine_events(id) on delete cascade,
+    action text not null,
+    approved boolean not null default false,
+    reason text not null default '',
+    decided_by text,
+    metadata jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default timezone('utc', now()),
+    constraint release_policy_decisions_action_check
+        check (action in ('keep_quarantined', 'release', 'delete', 'escalate'))
+);
+
+-- ─── Audit / review / quarantine / incidents ──────────────────────────────────
 
 create table if not exists public.audit_events (
     id uuid primary key default gen_random_uuid(),
@@ -310,6 +368,8 @@ create table if not exists public.incidents (
         check (severity in ('low', 'medium', 'high', 'critical'))
 );
 
+-- ─── History / telemetry / runtime ────────────────────────────────────────────
+
 create table if not exists public.history_events (
     id uuid primary key default gen_random_uuid(),
     event_key text not null unique,
@@ -388,6 +448,8 @@ create table if not exists public.persistence_validation_runs (
         check (status in ('scheduled', 'running', 'passed', 'failed', 'cancelled'))
 );
 
+-- ─── updated_at triggers ──────────────────────────────────────────────────────
+
 create trigger set_persistence_backends_updated_at
 before update on public.persistence_backends
 for each row execute function public.set_updated_at();
@@ -418,6 +480,10 @@ for each row execute function public.set_updated_at();
 
 create trigger set_legal_holds_updated_at
 before update on public.legal_holds
+for each row execute function public.set_updated_at();
+
+create trigger set_analysis_reports_updated_at
+before update on public.analysis_reports
 for each row execute function public.set_updated_at();
 
 create trigger set_audit_events_updated_at
@@ -452,6 +518,37 @@ create trigger set_persistence_validation_runs_updated_at
 before update on public.persistence_validation_runs
 for each row execute function public.set_updated_at();
 
+-- ─── Indexes absorbed from 001_initial_persistence_schema.sql ────────────────
+
+create index if not exists idx_analysis_reports_verdict
+    on public.analysis_reports (verdict);
+
+create index if not exists idx_analysis_reports_created_at
+    on public.analysis_reports (created_at desc);
+
+create index if not exists idx_quarantine_events_analysis_report_id
+    on public.quarantine_events (analysis_report_id);
+
+create index if not exists idx_quarantine_events_sha256
+    on public.quarantine_events (sha256);
+
+create index if not exists idx_quarantine_events_status
+    on public.quarantine_events (status);
+
+create index if not exists idx_quarantine_events_created_at
+    on public.quarantine_events (created_at desc);
+
+create index if not exists idx_release_policy_decisions_quarantine_event_id
+    on public.release_policy_decisions (quarantine_event_id);
+
+create index if not exists idx_release_policy_decisions_action
+    on public.release_policy_decisions (action);
+
+create index if not exists idx_release_policy_decisions_created_at
+    on public.release_policy_decisions (created_at desc);
+
+-- ─── Migration record ─────────────────────────────────────────────────────────
+
 insert into public.persistence_migrations (
     migration_key,
     description,
@@ -461,7 +558,7 @@ insert into public.persistence_migrations (
 )
 values (
     '001_initial_persistence_schema',
-    'Initial IronClaw persistence, backup, restore, retention, audit, queue, quarantine, incident, history, telemetry, and checkpoint schema.',
+    'Initial IronClaw persistence, backup, restore, retention, audit, queue, quarantine, incident, history, telemetry, and checkpoint schema. Absorbs analysis_reports, quarantine_events, and release_policy_decisions from duplicate underscore migration.',
     'system',
     '',
     jsonb_build_object('section', 'data_lifecycle_and_resilience')

@@ -1,5 +1,7 @@
 begin;
 
+-- ─── Runtime state snapshots ──────────────────────────────────────────────────
+
 create table if not exists public.runtime_state_snapshots (
     id uuid primary key default gen_random_uuid(),
     snapshot_key text not null unique,
@@ -27,6 +29,8 @@ create table if not exists public.runtime_state_snapshots (
         check (sequence_no >= 0)
 );
 
+-- ─── Runtime sessions ─────────────────────────────────────────────────────────
+
 create table if not exists public.runtime_sessions (
     id uuid primary key default gen_random_uuid(),
     session_key text not null unique,
@@ -53,6 +57,8 @@ create table if not exists public.runtime_sessions (
         check (status in ('active', 'idle', 'paused', 'restoring', 'completed', 'failed', 'expired'))
 );
 
+-- ─── Runtime session events ───────────────────────────────────────────────────
+
 create table if not exists public.runtime_session_events (
     id uuid primary key default gen_random_uuid(),
     event_key text not null unique,
@@ -75,6 +81,8 @@ create table if not exists public.runtime_session_events (
     constraint runtime_session_events_session_sequence_unique
         unique (session_id, sequence_no)
 );
+
+-- ─── Review state snapshots ───────────────────────────────────────────────────
 
 create table if not exists public.review_state_snapshots (
     id uuid primary key default gen_random_uuid(),
@@ -99,6 +107,8 @@ create table if not exists public.review_state_snapshots (
         check (version_no > 0)
 );
 
+-- ─── Queue runtime leases ─────────────────────────────────────────────────────
+
 create table if not exists public.queue_runtime_leases (
     id uuid primary key default gen_random_uuid(),
     lease_key text not null unique,
@@ -116,6 +126,8 @@ create table if not exists public.queue_runtime_leases (
     constraint queue_runtime_leases_status_check
         check (status in ('held', 'released', 'expired', 'stolen'))
 );
+
+-- ─── Runtime replay runs ──────────────────────────────────────────────────────
 
 create table if not exists public.runtime_replay_runs (
     id uuid primary key default gen_random_uuid(),
@@ -138,6 +150,8 @@ create table if not exists public.runtime_replay_runs (
         check (events_replayed >= 0)
 );
 
+-- ─── Supervisor state snapshots ───────────────────────────────────────────────
+
 create table if not exists public.supervisor_state_snapshots (
     id uuid primary key default gen_random_uuid(),
     snapshot_key text not null unique,
@@ -154,6 +168,8 @@ create table if not exists public.supervisor_state_snapshots (
     constraint supervisor_state_snapshots_status_check
         check (status in ('active', 'superseded', 'restored', 'failed'))
 );
+
+-- ─── Pipeline runtime states ──────────────────────────────────────────────────
 
 create table if not exists public.pipeline_runtime_states (
     id uuid primary key default gen_random_uuid(),
@@ -178,6 +194,8 @@ create table if not exists public.pipeline_runtime_states (
         check (status in ('pending', 'running', 'completed', 'failed', 'skipped', 'restored'))
 );
 
+-- ─── Orchestration checkpoints ────────────────────────────────────────────────
+
 create table if not exists public.orchestration_checkpoints (
     id uuid primary key default gen_random_uuid(),
     checkpoint_key text not null unique,
@@ -197,6 +215,59 @@ create table if not exists public.orchestration_checkpoints (
     constraint orchestration_checkpoints_step_order_check
         check (step_order >= 0)
 );
+
+-- ─── Absorbed from 002_runtime_state_schema.sql ───────────────────────────────
+
+create table if not exists public.runtime_state_checkpoints (
+    id uuid primary key default gen_random_uuid(),
+    runtime_session_id uuid not null references public.runtime_sessions(id) on delete cascade,
+    checkpoint_type text not null,
+    stage text not null,
+    state jsonb not null default '{}'::jsonb,
+    notes text not null default '',
+    created_at timestamptz not null default timezone('utc', now()),
+    constraint runtime_state_checkpoints_stage_check
+        check (stage in ('intake', 'analysis', 'policy', 'review', 'response', 'closed'))
+);
+
+create table if not exists public.runtime_review_queue (
+    id uuid primary key default gen_random_uuid(),
+    runtime_session_id uuid not null references public.runtime_sessions(id) on delete cascade,
+    analysis_report_id uuid references public.analysis_reports(id) on delete set null,
+    quarantine_event_id uuid references public.quarantine_events(id) on delete set null,
+    priority text not null default 'normal',
+    status text not null default 'pending',
+    assigned_to text,
+    queue_reason text not null,
+    payload jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default timezone('utc', now()),
+    updated_at timestamptz not null default timezone('utc', now()),
+    resolved_at timestamptz,
+    constraint runtime_review_queue_priority_check
+        check (priority in ('low', 'normal', 'high', 'urgent')),
+    constraint runtime_review_queue_status_check
+        check (status in ('pending', 'in_review', 'approved', 'rejected', 'resolved'))
+);
+
+create table if not exists public.runtime_incidents (
+    id uuid primary key default gen_random_uuid(),
+    runtime_session_id uuid not null references public.runtime_sessions(id) on delete cascade,
+    review_queue_id uuid references public.runtime_review_queue(id) on delete set null,
+    severity text not null,
+    status text not null default 'open',
+    title text not null,
+    description text not null default '',
+    evidence jsonb not null default '{}'::jsonb,
+    opened_at timestamptz not null default timezone('utc', now()),
+    updated_at timestamptz not null default timezone('utc', now()),
+    closed_at timestamptz,
+    constraint runtime_incidents_severity_check
+        check (severity in ('low', 'medium', 'high', 'critical')),
+    constraint runtime_incidents_status_check
+        check (status in ('open', 'investigating', 'contained', 'resolved', 'closed'))
+);
+
+-- ─── updated_at triggers ──────────────────────────────────────────────────────
 
 create trigger set_runtime_state_snapshots_updated_at
 before update on public.runtime_state_snapshots
@@ -234,6 +305,54 @@ create trigger set_orchestration_checkpoints_updated_at
 before update on public.orchestration_checkpoints
 for each row execute function public.set_updated_at();
 
+create trigger set_runtime_review_queue_updated_at
+before update on public.runtime_review_queue
+for each row execute function public.set_updated_at();
+
+create trigger set_runtime_incidents_updated_at
+before update on public.runtime_incidents
+for each row execute function public.set_updated_at();
+
+-- ─── Indexes absorbed from 002_runtime_state_schema.sql ──────────────────────
+
+create index if not exists idx_runtime_sessions_status
+    on public.runtime_sessions (status);
+
+create index if not exists idx_runtime_sessions_started_at
+    on public.runtime_sessions (started_at desc);
+
+create index if not exists idx_runtime_state_checkpoints_runtime_session_id
+    on public.runtime_state_checkpoints (runtime_session_id);
+
+create index if not exists idx_runtime_state_checkpoints_created_at
+    on public.runtime_state_checkpoints (created_at desc);
+
+create index if not exists idx_runtime_review_queue_runtime_session_id
+    on public.runtime_review_queue (runtime_session_id);
+
+create index if not exists idx_runtime_review_queue_status
+    on public.runtime_review_queue (status);
+
+create index if not exists idx_runtime_review_queue_priority
+    on public.runtime_review_queue (priority);
+
+create index if not exists idx_runtime_review_queue_created_at
+    on public.runtime_review_queue (created_at desc);
+
+create index if not exists idx_runtime_incidents_runtime_session_id
+    on public.runtime_incidents (runtime_session_id);
+
+create index if not exists idx_runtime_incidents_status
+    on public.runtime_incidents (status);
+
+create index if not exists idx_runtime_incidents_severity
+    on public.runtime_incidents (severity);
+
+create index if not exists idx_runtime_incidents_opened_at
+    on public.runtime_incidents (opened_at desc);
+
+-- ─── Migration record ─────────────────────────────────────────────────────────
+
 insert into public.persistence_migrations (
     migration_key,
     description,
@@ -243,7 +362,7 @@ insert into public.persistence_migrations (
 )
 values (
     '002_runtime_state_schema',
-    'Runtime session, snapshot, replay, queue lease, supervisor, pipeline, and orchestration persistence schema for IronClaw.',
+    'Runtime session, snapshot, replay, queue lease, supervisor, pipeline, and orchestration persistence schema. Absorbs runtime_state_checkpoints, runtime_review_queue, and runtime_incidents from duplicate underscore migration.',
     'system',
     '',
     jsonb_build_object('section', 'data_lifecycle_and_resilience')

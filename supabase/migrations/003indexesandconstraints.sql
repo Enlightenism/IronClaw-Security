@@ -1,5 +1,7 @@
 begin;
 
+-- ─── audit_events ─────────────────────────────────────────────────────────────
+
 create index if not exists idx_audit_events_org_created_at
     on public.audit_events (org_id, created_at desc);
 
@@ -12,14 +14,18 @@ create index if not exists idx_audit_events_request_id
 create index if not exists idx_audit_events_event_type_created_at
     on public.audit_events (event_type, created_at desc);
 
-create index if not exists idx_security_incidents_org_status_detected_at
-    on public.security_incidents (org_id, status, detected_at desc);
+-- ─── incidents (was: security_incidents) ─────────────────────────────────────
 
-create index if not exists idx_security_incidents_severity_detected_at
-    on public.security_incidents (severity, detected_at desc);
+create index if not exists idx_incidents_org_status_detected_at
+    on public.incidents (org_id, status, detected_at desc);
 
-create index if not exists idx_security_incidents_verdict_detected_at
-    on public.security_incidents (verdict, detected_at desc);
+create index if not exists idx_incidents_severity_detected_at
+    on public.incidents (severity, detected_at desc);
+
+create index if not exists idx_incidents_verdict_detected_at
+    on public.incidents (verdict, detected_at desc);
+
+-- ─── review_queue_items ───────────────────────────────────────────────────────
 
 create index if not exists idx_review_queue_items_status_priority_created_at
     on public.review_queue_items (status, priority, created_at asc);
@@ -34,23 +40,18 @@ create unique index if not exists idx_review_queue_items_open_incident_unique
     on public.review_queue_items (incident_id)
     where incident_id is not null and status in ('pending', 'assigned', 'escalated');
 
-create index if not exists idx_quarantine_records_org_status_created_at
-    on public.quarantine_records (org_id, status, created_at desc);
+-- ─── quarantine_items (was: quarantine_records) ───────────────────────────────
 
-create index if not exists idx_quarantine_records_sha256
-    on public.quarantine_records (artifact_sha256);
+create index if not exists idx_quarantine_items_org_status_created_at
+    on public.quarantine_items (org_id, status, created_at desc);
 
-create index if not exists idx_quarantine_records_incident_id
-    on public.quarantine_records (incident_id);
+create index if not exists idx_quarantine_items_sha256
+    on public.quarantine_items (artifact_sha256);
 
-create index if not exists idx_usage_events_org_occurred_at
-    on public.usage_events (org_id, occurred_at desc);
+create index if not exists idx_quarantine_items_incident_id
+    on public.quarantine_items (incident_id);
 
-create index if not exists idx_usage_events_event_type_occurred_at
-    on public.usage_events (event_type, occurred_at desc);
-
-create index if not exists idx_usage_events_request_id
-    on public.usage_events (request_id);
+-- ─── telemetry_events ────────────────────────────────────────────────────────
 
 create index if not exists idx_telemetry_events_category_recorded_at
     on public.telemetry_events (category, recorded_at desc);
@@ -61,6 +62,8 @@ create index if not exists idx_telemetry_events_severity_recorded_at
 create index if not exists idx_telemetry_events_incident_id
     on public.telemetry_events (incident_id);
 
+-- ─── runtime_checkpoints ─────────────────────────────────────────────────────
+
 create index if not exists idx_runtime_checkpoints_runtime_name_captured_at
     on public.runtime_checkpoints (runtime_name, captured_at desc);
 
@@ -69,6 +72,8 @@ create index if not exists idx_runtime_checkpoints_session_key_captured_at
 
 create index if not exists idx_runtime_checkpoints_status_captured_at
     on public.runtime_checkpoints (status, captured_at desc);
+
+-- ─── runtime_state_snapshots ─────────────────────────────────────────────────
 
 create index if not exists idx_runtime_state_snapshots_session_key_captured_at
     on public.runtime_state_snapshots (session_key, captured_at desc);
@@ -82,6 +87,8 @@ create index if not exists idx_runtime_state_snapshots_status_captured_at
 create index if not exists idx_runtime_state_snapshots_checkpoint_id
     on public.runtime_state_snapshots (checkpoint_id);
 
+-- ─── runtime_sessions ────────────────────────────────────────────────────────
+
 create index if not exists idx_runtime_sessions_runtime_status_last_seen_at
     on public.runtime_sessions (runtime_name, status, last_seen_at desc);
 
@@ -90,6 +97,11 @@ create index if not exists idx_runtime_sessions_actor_status_last_seen_at
 
 create index if not exists idx_runtime_sessions_org_status_last_seen_at
     on public.runtime_sessions (org_id, status, last_seen_at desc);
+
+-- absorbed from underscore: references last_heartbeat_at (column present in underscore runtime_sessions)
+-- SKIPPED — nospaces runtime_sessions uses last_seen_at, not last_heartbeat_at; covered above
+
+-- ─── runtime_session_events ──────────────────────────────────────────────────
 
 create index if not exists idx_runtime_session_events_session_sequence_no
     on public.runtime_session_events (session_id, sequence_no asc);
@@ -100,6 +112,8 @@ create index if not exists idx_runtime_session_events_event_type_occurred_at
 create index if not exists idx_runtime_session_events_correlation_id
     on public.runtime_session_events (correlation_id);
 
+-- ─── review_state_snapshots ───────────────────────────────────────────────────
+
 create index if not exists idx_review_state_snapshots_review_item_version_no
     on public.review_state_snapshots (review_item_id, version_no desc);
 
@@ -108,6 +122,8 @@ create index if not exists idx_review_state_snapshots_session_captured_at
 
 create index if not exists idx_review_state_snapshots_status_captured_at
     on public.review_state_snapshots (status, captured_at desc);
+
+-- ─── queue_runtime_leases ────────────────────────────────────────────────────
 
 create index if not exists idx_queue_runtime_leases_queue_status_renew_by
     on public.queue_runtime_leases (queue_name, status, renew_by asc);
@@ -122,17 +138,23 @@ create unique index if not exists idx_queue_runtime_leases_active_review_item_un
     on public.queue_runtime_leases (review_item_id)
     where review_item_id is not null and status = 'held';
 
+-- ─── runtime_replay_runs ─────────────────────────────────────────────────────
+
 create index if not exists idx_runtime_replay_runs_session_status_created_at
     on public.runtime_replay_runs (session_id, status, created_at desc);
 
 create index if not exists idx_runtime_replay_runs_source_snapshot_id
     on public.runtime_replay_runs (source_snapshot_id);
 
+-- ─── supervisor_state_snapshots ───────────────────────────────────────────────
+
 create index if not exists idx_supervisor_state_snapshots_supervisor_captured_at
     on public.supervisor_state_snapshots (supervisor_name, captured_at desc);
 
 create index if not exists idx_supervisor_state_snapshots_status_captured_at
     on public.supervisor_state_snapshots (status, captured_at desc);
+
+-- ─── pipeline_runtime_states ─────────────────────────────────────────────────
 
 create index if not exists idx_pipeline_runtime_states_session_stage_order
     on public.pipeline_runtime_states (session_id, stage_order asc);
@@ -143,11 +165,47 @@ create index if not exists idx_pipeline_runtime_states_pipeline_status_entered_a
 create index if not exists idx_pipeline_runtime_states_checkpoint_id
     on public.pipeline_runtime_states (checkpoint_id);
 
+-- ─── orchestration_checkpoints ───────────────────────────────────────────────
+
 create index if not exists idx_orchestration_checkpoints_session_step_order
     on public.orchestration_checkpoints (session_id, step_order asc);
 
 create index if not exists idx_orchestration_checkpoints_orchestration_status_captured_at
     on public.orchestration_checkpoints (orchestration_name, status, captured_at desc);
+
+-- ─── analysis_reports (absorbed from underscore) ─────────────────────────────
+
+create index if not exists idx_analysis_reports_created_verdict
+    on public.analysis_reports (created_at desc, verdict);
+
+create index if not exists idx_analysis_reports_malicious_created
+    on public.analysis_reports (created_at desc)
+    where verdict in ('suspicious', 'malicious');
+
+-- ─── quarantine_events (absorbed from underscore) ────────────────────────────
+
+create index if not exists idx_quarantine_events_active_created
+    on public.quarantine_events (created_at desc)
+    where status = 'quarantined';
+
+-- ─── release_policy_decisions (absorbed from underscore) ─────────────────────
+
+create index if not exists idx_release_policy_decisions_created_action
+    on public.release_policy_decisions (created_at desc, action);
+
+-- ─── runtime_review_queue (absorbed from underscore) ─────────────────────────
+
+create index if not exists idx_runtime_review_queue_pending_priority
+    on public.runtime_review_queue (priority, created_at desc)
+    where status in ('pending', 'in_review');
+
+-- ─── runtime_incidents (absorbed from underscore) ────────────────────────────
+
+create index if not exists idx_runtime_incidents_open_severity
+    on public.runtime_incidents (severity, opened_at desc)
+    where status in ('open', 'investigating', 'contained');
+
+-- ─── Constraints ─────────────────────────────────────────────────────────────
 
 alter table public.review_queue_items
     add constraint review_queue_items_assigned_requires_reviewer_check
@@ -163,15 +221,15 @@ alter table public.review_queue_items
         or resolved_at is not null
     );
 
-alter table public.security_incidents
-    add constraint security_incidents_resolved_requires_time_check
+alter table public.incidents
+    add constraint incidents_resolved_requires_time_check
     check (
         status <> 'resolved'
         or resolved_at is not null
     );
 
-alter table public.quarantine_records
-    add constraint quarantine_records_released_requires_time_check
+alter table public.quarantine_items
+    add constraint quarantine_items_released_requires_time_check
     check (
         status <> 'released'
         or released_at is not null
@@ -244,6 +302,42 @@ alter table public.orchestration_checkpoints
         restored_at is null
         or restored_at >= captured_at
     );
+
+-- absorbed from underscore
+
+alter table public.quarantine_events
+    add constraint quarantine_events_sha256_matches_report_check
+    check (
+        analysis_report_id is null
+        or sha256 is not null
+    );
+
+alter table public.release_policy_decisions
+    add constraint release_policy_decisions_reason_nonempty_check
+    check (length(btrim(reason)) > 0);
+
+alter table public.runtime_review_queue
+    add constraint runtime_review_queue_resolution_check
+    check (
+        (status in ('approved', 'rejected', 'resolved') and resolved_at is not null)
+        or (status in ('pending', 'in_review') and resolved_at is null)
+    );
+
+alter table public.runtime_incidents
+    add constraint runtime_incidents_closed_at_check
+    check (
+        (status = 'closed' and closed_at is not null)
+        or (status <> 'closed')
+    );
+
+alter table public.runtime_sessions
+    add constraint runtime_sessions_ended_at_check
+    check (
+        (status in ('completed', 'failed', 'terminated') and ended_at is not null)
+        or (status in ('active', 'paused') and ended_at is null)
+    );
+
+-- ─── Migration record ────────────────────────────────────────────────────────
 
 insert into public.persistence_migrations (
     migration_key,
