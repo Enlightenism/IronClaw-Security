@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
+import logging
 import math
 import statistics
 from threading import Lock
@@ -138,6 +139,101 @@ def _emit_telemetry(event_name: str, payload: dict[str, Any]) -> None:
         pass
 
 
+def _get_logger() -> logging.Logger:
+    try:
+        from app.core.logging import get_logger  # noqa: PLC0415
+
+        return get_logger("ironclaw.behavioral_baseline")
+    except Exception:  # noqa: BLE001
+        return logging.getLogger("ironclaw.behavioral_baseline")
+
+
+_logger: logging.Logger = _get_logger()
+
+
+# ---------------------------------------------------------------------------
+# Supabase persistence helpers
+# ---------------------------------------------------------------------------
+
+
+def _supabase_persist_observation(obs: AgentObservation) -> None:
+    try:
+        from app.services.supabase_adapter import get_supabase_adapter  # noqa: PLC0415
+
+        adapter = get_supabase_adapter()
+        if adapter is None or not adapter.available:
+            return
+        result = adapter.persist_observation(obs.to_dict())
+        if not result.success:
+            _logger.warning(
+                "supabase_observation_persist_failed",
+                extra={
+                    "event": "supabase_observation_persist_failed",
+                    "observation_id": obs.observation_id,
+                    "agent_id": obs.agent_id,
+                    "error": result.error,
+                },
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _supabase_persist_baseline(baseline: AgentBaseline) -> None:
+    try:
+        from app.services.supabase_adapter import get_supabase_adapter  # noqa: PLC0415
+
+        adapter = get_supabase_adapter()
+        if adapter is None or not adapter.available:
+            return
+        result = adapter.persist_baseline(baseline.to_dict())
+        if not result.success:
+            _logger.warning(
+                "supabase_baseline_persist_failed",
+                extra={
+                    "event": "supabase_baseline_persist_failed",
+                    "baseline_id": baseline.baseline_id,
+                    "agent_id": baseline.agent_id,
+                    "error": result.error,
+                },
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _supabase_persist_drift_report(report: DriftReport) -> None:
+    try:
+        from app.services.supabase_adapter import get_supabase_adapter  # noqa: PLC0415
+
+        adapter = get_supabase_adapter()
+        if adapter is None or not adapter.available:
+            return
+        result = adapter.persist_drift_report(report.to_dict())
+        if not result.success:
+            _logger.warning(
+                "supabase_drift_report_persist_failed",
+                extra={
+                    "event": "supabase_drift_report_persist_failed",
+                    "report_id": report.report_id,
+                    "agent_id": report.agent_id,
+                    "error": result.error,
+                },
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _supabase_delete_agent(agent_id: str, client_id: str | None) -> None:
+    try:
+        from app.services.supabase_adapter import get_supabase_adapter  # noqa: PLC0415
+
+        adapter = get_supabase_adapter()
+        if adapter is None or not adapter.available:
+            return
+        adapter.delete_agent_data(agent_id, client_id=client_id)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Data models
 # ---------------------------------------------------------------------------
@@ -181,9 +277,6 @@ class AgentBaseline:
     stdev_target_breadth: float
     mean_tool_call_rate: float
     stdev_tool_call_rate: float
-    # Frozen distribution snapshot taken at last active-baseline rebuild.
-    # Used as the reference for JSD drift detection so anomalous bursts
-    # in the current window cannot contaminate the comparison distribution.
     frozen_action_type_distribution: dict[str, float] = field(default_factory=dict)
     baseline_obs_count: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -346,8 +439,6 @@ def _build_baseline_from_observations(
         new_sample_count = e.sample_count + 1
         baseline_id = e.baseline_id
         created_at = e.created_at
-        # Preserve the frozen snapshot — it must not be updated during an active EMA cycle
-        # so that drift detection always compares against a clean pre-anomaly reference.
         frozen_dist = dict(e.frozen_action_type_distribution) if e.frozen_action_type_distribution else dict(e.action_type_distribution)
     else:
         new_mean_rate = action_rate
@@ -362,7 +453,6 @@ def _build_baseline_from_observations(
         new_sample_count = n
         baseline_id = f"baseline-{uuid4().hex[:12]}"
         created_at = now
-        # Freeze a clean snapshot at initial baseline creation.
         frozen_dist = dict(action_dist)
 
     status: BaselineStatus = "learning" if new_sample_count < MIN_SAMPLES_FOR_BASELINE else "active"
@@ -599,6 +689,11 @@ class BehavioralBaselineStore:
                 self._observations[validated_agent_id] = bucket[-self._max_observations_per_agent :]
             self._obs_since_last_update[validated_agent_id] += 1
             self._recompute_baseline_locked(validated_agent_id, client_id)
+            updated_baseline = self._baselines.get(validated_agent_id)
+
+        _supabase_persist_observation(obs)
+        if updated_baseline is not None:
+            _supabase_persist_baseline(updated_baseline)
 
         return obs
 
@@ -652,7 +747,7 @@ class BehavioralBaselineStore:
             baseline = self._baselines.get(normalized)
             if baseline is None:
                 return False
-            self._baselines[normalized] = AgentBaseline(
+            updated = AgentBaseline(
                 baseline_id=baseline.baseline_id,
                 agent_id=baseline.agent_id,
                 client_id=baseline.client_id,
@@ -674,6 +769,9 @@ class BehavioralBaselineStore:
                 baseline_obs_count=baseline.baseline_obs_count,
                 metadata=dict(baseline.metadata),
             )
+            self._baselines[normalized] = updated
+
+        _supabase_persist_baseline(updated)
         return True
 
     def suspend_baseline(self, agent_id: str) -> bool:
@@ -682,7 +780,7 @@ class BehavioralBaselineStore:
             baseline = self._baselines.get(normalized)
             if baseline is None:
                 return False
-            self._baselines[normalized] = AgentBaseline(
+            updated = AgentBaseline(
                 baseline_id=baseline.baseline_id,
                 agent_id=baseline.agent_id,
                 client_id=baseline.client_id,
@@ -704,6 +802,9 @@ class BehavioralBaselineStore:
                 baseline_obs_count=baseline.baseline_obs_count,
                 metadata=dict(baseline.metadata),
             )
+            self._baselines[normalized] = updated
+
+        _supabase_persist_baseline(updated)
         return True
 
     # ------------------------------------------------------------------
@@ -728,7 +829,7 @@ class BehavioralBaselineStore:
         window_obs = _window_observations(all_obs, effective_window)
 
         if baseline is None:
-            return DriftReport(
+            report = DriftReport(
                 report_id=f"drift-{uuid4().hex[:12]}",
                 agent_id=normalized,
                 client_id=client_id,
@@ -745,9 +846,11 @@ class BehavioralBaselineStore:
                 should_alert=False,
                 should_suspend=False,
             )
+            _supabase_persist_drift_report(report)
+            return report
 
         if baseline.status == "suspended":
-            return DriftReport(
+            report = DriftReport(
                 report_id=f"drift-{uuid4().hex[:12]}",
                 agent_id=normalized,
                 client_id=client_id,
@@ -764,6 +867,8 @@ class BehavioralBaselineStore:
                 should_alert=True,
                 should_suspend=True,
             )
+            _supabase_persist_drift_report(report)
+            return report
 
         signals = _build_drift_signals(baseline, window_obs, effective_window)
         overall_score = _compute_overall_drift_score(signals)
@@ -812,6 +917,7 @@ class BehavioralBaselineStore:
                 },
             )
 
+        _supabase_persist_drift_report(report)
         return report
 
     def get_observations(
@@ -832,11 +938,19 @@ class BehavioralBaselineStore:
 
     def purge_agent(self, agent_id: str) -> bool:
         normalized = _require_str(agent_id, "agent_id")
+        client_id: str | None = None
         with self._lock:
+            baseline = self._baselines.get(normalized)
+            if baseline is not None:
+                client_id = baseline.client_id
             found = normalized in self._observations or normalized in self._baselines
             self._observations.pop(normalized, None)
             self._baselines.pop(normalized, None)
             self._obs_since_last_update.pop(normalized, None)
+
+        if found:
+            _supabase_delete_agent(normalized, client_id)
+
         return found
 
     def reset(self) -> None:
@@ -881,6 +995,7 @@ class BehavioralBaselineStore:
 # ---------------------------------------------------------------------------
 # Module-level singleton
 # ---------------------------------------------------------------------------
+
 
 _BEHAVIORAL_BASELINE_STORE = BehavioralBaselineStore()
 
