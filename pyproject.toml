@@ -21,7 +21,9 @@ keywords = [
   "openclaw",
   "ai-security",
   "backup",
-  "restore"
+  "restore",
+  "sdk",
+  "cli"
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -44,7 +46,9 @@ dependencies = [
   "httpx>=0.27,<0.28",
   "pydantic>=2.7,<3.0",
   "python-dotenv>=1.0,<2.0",
-  "requests>=2.32,<3.0"
+  "requests>=2.32,<3.0",
+  "typer[all]>=0.12,<0.16",
+  "rich>=13.7,<15.0"
 ]
 
 [project.optional-dependencies]
@@ -58,6 +62,7 @@ dev = [
   "pytest>=8.2,<10.0",
   "pytest-asyncio>=0.23,<1.0",
   "pytest-cov>=5.0,<6.0",
+  "respx>=0.21,<1.0",
   "ruff==0.12.11"
 ]
 docker = [
@@ -67,6 +72,11 @@ skill = [
   "httpx>=0.27,<0.28",
   "python-dotenv>=1.0,<2.0"
 ]
+sdk = [
+  "httpx>=0.27,<0.28",
+  "typer[all]>=0.12,<0.16",
+  "rich>=13.7,<15.0"
+]
 
 [project.urls]
 Homepage = "https://github.com/Enlightenism/IronClaw-Security"
@@ -74,6 +84,7 @@ Repository = "https://github.com/Enlightenism/IronClaw-Security.git"
 Documentation = "https://github.com/Enlightenism/IronClaw-Security#readme"
 
 [project.scripts]
+ironclaw = "app.cli.main:app"
 ironclaw-skill = "ironclawskill.cli:main"
 ironclaw-smoketest = "smoketestclient:main"
 ironclaw-testclient = "testclient:main"
@@ -92,7 +103,8 @@ py-modules = [
 where = ["."]
 include = [
   "app*",
-  "ironclawskill*"
+  "ironclawskill*",
+  "ironclaw_sdk*"
 ]
 exclude = [
   "tests*",
@@ -112,7 +124,9 @@ filterwarnings = [
   "ignore::PendingDeprecationWarning"
 ]
 markers = [
-  "integration: marks integration tests that touch live services or scripts"
+  "integration: marks integration tests that touch live services or scripts",
+  "sdk: marks SDK-layer tests",
+  "cli: marks CLI-layer tests"
 ]
 
 [tool.ruff]
@@ -137,7 +151,8 @@ known-first-party = [
   "orchestrator",
   "review",
   "routes",
-  "ironclawskill"
+  "ironclawskill",
+  "ironclaw_sdk"
 ]
 
 [tool.ruff.format]
