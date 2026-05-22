@@ -1,0 +1,571 @@
+from __future__ import annotations
+
+from datetime import datetime
+from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+# ---------------------------------------------------------------------------
+# Enumerations — single source of truth for all threat detection contracts
+# ---------------------------------------------------------------------------
+
+
+class DetectionVerdict(str, Enum):
+    ALLOW = "allow"
+    MONITOR = "monitor"
+    REVIEW = "review"
+    BLOCK = "block"
+
+
+class ThreatSeverityLevel(str, Enum):
+    INFO = "info"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class IOCTypeEnum(str, Enum):
+    IPV4 = "ipv4"
+    IPV6 = "ipv6"
+    DOMAIN = "domain"
+    URL = "url"
+    SHA256 = "sha256"
+    SHA1 = "sha1"
+    MD5 = "md5"
+    CVE = "cve"
+    MITRE_TECHNIQUE = "mitre_technique"
+    MITRE_TACTIC = "mitre_tactic"
+    EMAIL = "email"
+    UNKNOWN = "unknown"
+
+
+class ThreatFeedSourceEnum(str, Enum):
+    MITRE_ATTACK = "mitre_attack"
+    CISA_KEV = "cisa_kev"
+    CUSTOM_IOC = "custom_ioc"
+    STIX_TAXII = "stix_taxii"
+    INTERNAL = "internal"
+
+
+class IngestStatusEnum(str, Enum):
+    SUCCESS = "success"
+    PARTIAL = "partial"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class AlertSeverityEnum(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class HuntStatusEnum(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+# ---------------------------------------------------------------------------
+# DetectionRequest — POST /threat/detect
+# ---------------------------------------------------------------------------
+
+
+class DetectionRequest(BaseModel):
+    """Unified detection request accepted by the threat detection engine."""
+
+    event_id: str | None = Field(
+        default=None,
+        description="Caller-supplied event identifier for correlation. Generated if omitted.",
+    )
+    org_id: str | None = Field(
+        default=None,
+        description="Organization scope for IOC and policy resolution.",
+    )
+    agent_id: str | None = Field(
+        default=None,
+        description="Originating agentic system identifier.",
+    )
+    session_id: str | None = Field(
+        default=None,
+        description="Session context for multi-event correlation.",
+    )
+    text: str | None = Field(
+        default=None,
+        description="Raw text payload to scan for IOC matches and keyword patterns.",
+    )
+    url: str | None = Field(
+        default=None,
+        description="URL artifact to assess.",
+    )
+    domain: str | None = Field(
+        default=None,
+        description="Domain artifact to assess.",
+    )
+    hashes: list[str] | None = Field(
+        default=None,
+        description="File hash artifacts to assess (MD5, SHA1, SHA256).",
+    )
+    ioc_values: list[str] | None = Field(
+        default=None,
+        description="Explicit IOC values to match directly against the store.",
+    )
+    context: str | None = Field(
+        default=None,
+        description="Human-readable label for the detection context (e.g. 'tool_call', 'prompt_input').",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Caller-supplied key/value metadata attached to the detection event.",
+    )
+    minimum_confidence: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Minimum IOC confidence threshold. Matches below this floor are ignored.",
+    )
+
+    @model_validator(mode="after")
+    def require_at_least_one_observable(self) -> DetectionRequest:
+        has_payload = any(
+            [
+                self.text,
+                self.url,
+                self.domain,
+                self.hashes,
+                self.ioc_values,
+            ]
+        )
+        if not has_payload:
+            raise ValueError("DetectionRequest requires at least one of: text, url, domain, hashes, ioc_values.")
+        return self
+
+
+# ---------------------------------------------------------------------------
+# IOCMatch — embedded in DetectionResult
+# ---------------------------------------------------------------------------
+
+
+class IOCMatch(BaseModel):
+    """A single IOC that matched during detection."""
+
+    ioc_id: str | None = Field(default=None, description="Store-assigned IOC identifier.")
+    value: str
+    ioc_type: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    severity: str
+    source: str
+    tags: list[str] = Field(default_factory=list)
+    matched_on: str | None = Field(
+        default=None,
+        description="Field or context in which this IOC was matched.",
+    )
+    mitre_technique_id: str | None = None
+    mitre_tactic: str | None = None
+    cve_id: str | None = None
+    reference: str | None = None
+    first_seen: str | None = None
+    last_seen: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# CorrelationSignal — embedded in DetectionResult
+# ---------------------------------------------------------------------------
+
+
+class CorrelationSignal(BaseModel):
+    """Represents a pattern or event chain surfaced by the correlation engine."""
+
+    signal_id: str
+    pattern_type: str = Field(
+        description="e.g. 'multi_ioc_cooccurrence', 'attack_chain', 'temporal_cluster'",
+    )
+    matched_event_ids: list[str] = Field(default_factory=list)
+    contributing_ioc_ids: list[str] = Field(default_factory=list)
+    mitre_technique_ids: list[str] = Field(default_factory=list)
+    confidence: float = Field(ge=0.0, le=1.0)
+    score_contribution: float = Field(ge=0.0, le=1.0)
+    description: str = ""
+
+
+# ---------------------------------------------------------------------------
+# DetectionResult — response from POST /threat/detect
+# ---------------------------------------------------------------------------
+
+
+class DetectionResult(BaseModel):
+    """
+    Structured result returned by the threat detection engine.
+    Consumed by: threat_alerts, action_guard, actionguard, incidents.
+    """
+
+    event_id: str
+    org_id: str | None = None
+    agent_id: str | None = None
+    session_id: str | None = None
+    verdict: DetectionVerdict
+    score: float = Field(ge=0.0, le=1.0, description="Normalized 0.0–1.0 composite threat score.")
+    severity: ThreatSeverityLevel
+    scanned_text: str | None = Field(
+        default=None,
+        description="The raw text payload that was scanned. Echoed back for traceability.",
+    )
+    ioc_matches: list[IOCMatch] = Field(default_factory=list)
+    correlation_signals: list[CorrelationSignal] = Field(default_factory=list)
+    risk_families: list[str] = Field(default_factory=list)
+    extracted_indicators: list[str] = Field(default_factory=list)
+    rationale: list[str] = Field(default_factory=list)
+    mitre_techniques: list[str] = Field(default_factory=list)
+    context: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    assessed_at: str = Field(description="ISO 8601 UTC timestamp of detection.")
+    detection_engine_version: str = Field(default="1.0.0")
+
+    @property
+    def is_threat(self) -> bool:
+        return self.verdict in (DetectionVerdict.REVIEW, DetectionVerdict.BLOCK)
+
+    @property
+    def requires_block(self) -> bool:
+        return self.verdict == DetectionVerdict.BLOCK
+
+
+# ---------------------------------------------------------------------------
+# ThreatAlert — emitted by threat_alerts router / escalation bridge
+# ---------------------------------------------------------------------------
+
+
+class ThreatAlert(BaseModel):
+    """
+    Structured alert emitted when a DetectionResult verdict is REVIEW or BLOCK.
+    Bridges into incidents.py and notifications.py.
+    """
+
+    alert_id: str
+    event_id: str
+    org_id: str | None = None
+    agent_id: str | None = None
+    session_id: str | None = None
+    verdict: DetectionVerdict
+    severity: AlertSeverityEnum
+    score: float = Field(ge=0.0, le=1.0)
+    title: str
+    description: str = ""
+    ioc_matches: list[IOCMatch] = Field(default_factory=list)
+    correlation_signals: list[CorrelationSignal] = Field(default_factory=list)
+    mitre_techniques: list[str] = Field(default_factory=list)
+    risk_families: list[str] = Field(default_factory=list)
+    suppressed: bool = Field(
+        default=False,
+        description="True if this alert was deduplicated within the suppression window.",
+    )
+    suppression_reason: str | None = None
+    incident_id: str | None = Field(
+        default=None,
+        description="Set after escalation to incidents.py.",
+    )
+    created_at: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# HuntQuery — POST /threat/hunt
+# ---------------------------------------------------------------------------
+
+
+class HuntQuery(BaseModel):
+    """
+    Retrospective threat hunt query submitted to threat_hunt_service.
+    Supports IOC sweep, MITRE technique sweep, and temporal cluster queries.
+    """
+
+    hunt_id: str | None = Field(
+        default=None,
+        description="Caller-supplied hunt identifier. Generated if omitted.",
+    )
+    org_id: str | None = None
+    ioc_value: str | None = Field(
+        default=None,
+        description="Exact IOC value to sweep across stored detection history.",
+    )
+    ioc_type: IOCTypeEnum | None = None
+    mitre_technique_id: str | None = Field(
+        default=None,
+        description="MITRE ATT&CK technique ID (e.g. T1059) to hunt for.",
+    )
+    cve_id: str | None = Field(
+        default=None,
+        description="CVE identifier to hunt for across detection and IOC records.",
+    )
+    risk_family: str | None = Field(
+        default=None,
+        description="Risk family tag to sweep (e.g. 'command_and_control').",
+    )
+    start_time: datetime | None = Field(
+        default=None,
+        description="Inclusive start of the hunt time window (UTC).",
+    )
+    end_time: datetime | None = Field(
+        default=None,
+        description="Inclusive end of the hunt time window (UTC).",
+    )
+    minimum_score: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Minimum DetectionResult score to include in hunt results.",
+    )
+    limit: int = Field(default=100, ge=1, le=1000)
+    offset: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def require_at_least_one_hunt_dimension(self) -> HuntQuery:
+        has_dimension = any(
+            [
+                self.ioc_value,
+                self.mitre_technique_id,
+                self.cve_id,
+                self.risk_family,
+            ]
+        )
+        if not has_dimension:
+            raise ValueError("HuntQuery requires at least one of: ioc_value, mitre_technique_id, cve_id, risk_family.")
+        return self
+
+
+# ---------------------------------------------------------------------------
+# HuntMatch — individual match inside HuntResult
+# ---------------------------------------------------------------------------
+
+
+class HuntMatch(BaseModel):
+    event_id: str
+    org_id: str | None = None
+    agent_id: str | None = None
+    session_id: str | None = None
+    verdict: DetectionVerdict
+    score: float = Field(ge=0.0, le=1.0)
+    severity: ThreatSeverityLevel
+    matched_ioc_value: str | None = None
+    matched_ioc_type: str | None = None
+    matched_mitre_technique: str | None = None
+    risk_families: list[str] = Field(default_factory=list)
+    context: str | None = None
+    assessed_at: str
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+# ---------------------------------------------------------------------------
+# HuntResult — response from POST /threat/hunt
+# ---------------------------------------------------------------------------
+
+
+class HuntResult(BaseModel):
+    hunt_id: str
+    org_id: str | None = None
+    status: HuntStatusEnum
+    total_matches: int = Field(ge=0)
+    matches: list[HuntMatch] = Field(default_factory=list)
+    query_summary: dict[str, Any] = Field(default_factory=dict)
+    executed_at: str
+    duration_ms: int | None = None
+    errors: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# IOCImportRequest — POST /threat/iocs (bulk import)
+# ---------------------------------------------------------------------------
+
+
+class IOCImportEntry(BaseModel):
+    """Single IOC entry in a bulk import request."""
+
+    value: str = Field(min_length=1)
+    ioc_type: IOCTypeEnum | None = None
+    severity: ThreatSeverityLevel = ThreatSeverityLevel.MEDIUM
+    confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+    tags: list[str] = Field(default_factory=list)
+    description: str = ""
+    mitre_technique_id: str | None = None
+    mitre_tactic: str | None = None
+    cve_id: str | None = None
+    expiry: str | None = None
+    reference: str | None = None
+    extra: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def coerce_tags(cls, v: Any) -> list[str]:
+        if isinstance(v, str):
+            return [t.strip() for t in v.split(",") if t.strip()]
+        return v
+
+
+class IOCImportRequest(BaseModel):
+    """Bulk IOC import payload for POST /threat/iocs."""
+
+    org_id: str | None = None
+    entries: list[IOCImportEntry] = Field(min_length=1)
+    source_label: str | None = Field(
+        default=None,
+        description="Optional human label for this import batch (e.g. 'pentest-2026-05').",
+    )
+    overwrite_existing: bool = Field(
+        default=False,
+        description="If True, existing IOCs with the same fingerprint are updated. If False, they are skipped.",
+    )
+
+
+class IOCImportResult(BaseModel):
+    ingest_id: str
+    org_id: str | None = None
+    iocs_submitted: int
+    iocs_inserted: int
+    iocs_updated: int
+    iocs_skipped: int
+    errors: list[str] = Field(default_factory=list)
+    status: IngestStatusEnum
+    completed_at: str
+
+
+# ---------------------------------------------------------------------------
+# FeedRefreshRequest — POST /threat/feeds/refresh
+# ---------------------------------------------------------------------------
+
+
+class FeedRefreshRequest(BaseModel):
+    """Manually trigger a feed refresh for one or more sources."""
+
+    sources: list[ThreatFeedSourceEnum] = Field(
+        min_length=1,
+        description="List of feed sources to refresh.",
+    )
+    org_id: str | None = None
+    force: bool = Field(
+        default=False,
+        description="If True, bypasses the minimum refresh interval guard.",
+    )
+    custom_url: str | None = Field(
+        default=None,
+        description="Override the default source URL (single-source requests only).",
+    )
+
+    @model_validator(mode="after")
+    def custom_url_requires_single_source(self) -> FeedRefreshRequest:
+        if self.custom_url and len(self.sources) > 1:
+            raise ValueError("custom_url may only be set when refreshing a single source.")
+        return self
+
+
+class FeedRefreshResult(BaseModel):
+    """Aggregated result of a feed refresh operation."""
+
+    request_id: str
+    org_id: str | None = None
+    results: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Per-source FeedIngestResult dicts.",
+    )
+    total_iocs_inserted: int = 0
+    total_iocs_updated: int = 0
+    total_errors: int = 0
+    started_at: str
+    completed_at: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# IOCFilterParams — query params for GET /threat/iocs
+# ---------------------------------------------------------------------------
+
+
+class IOCFilterParams(BaseModel):
+    source: ThreatFeedSourceEnum | None = None
+    ioc_type: IOCTypeEnum | None = None
+    severity: ThreatSeverityLevel | None = None
+    org_id: str | None = None
+    active: bool | None = None
+    tag: str | None = None
+    mitre_technique_id: str | None = None
+    cve_id: str | None = None
+    value_contains: str | None = None
+    limit: int = Field(default=100, ge=1, le=1000)
+    offset: int = Field(default=0, ge=0)
+
+
+# ---------------------------------------------------------------------------
+# IOCResponse — GET /threat/iocs response shape
+# ---------------------------------------------------------------------------
+
+
+class IOCResponse(BaseModel):
+    ioc_id: str
+    ioc_type: str
+    value: str
+    source: str
+    severity: str
+    confidence: float
+    tags: list[str]
+    description: str
+    org_id: str | None
+    mitre_technique_id: str | None
+    mitre_tactic: str | None
+    cve_id: str | None
+    first_seen: str
+    last_seen: str
+    expiry: str | None
+    active: bool
+    feed_ingest_id: str
+    extra: dict[str, Any]
+
+
+# ---------------------------------------------------------------------------
+# DetectionSummary — lightweight shape for listing stored detections
+# ---------------------------------------------------------------------------
+
+
+class DetectionSummary(BaseModel):
+    event_id: str
+    org_id: str | None = None
+    agent_id: str | None = None
+    verdict: DetectionVerdict
+    score: float
+    severity: ThreatSeverityLevel
+    ioc_match_count: int
+    correlation_signal_count: int
+    assessed_at: str
+
+
+# ---------------------------------------------------------------------------
+# __all__
+# ---------------------------------------------------------------------------
+
+
+__all__ = [
+    "AlertSeverityEnum",
+    "CorrelationSignal",
+    "DetectionRequest",
+    "DetectionResult",
+    "DetectionSummary",
+    "DetectionVerdict",
+    "FeedRefreshRequest",
+    "FeedRefreshResult",
+    "HuntMatch",
+    "HuntQuery",
+    "HuntResult",
+    "HuntStatusEnum",
+    "IOCFilterParams",
+    "IOCImportEntry",
+    "IOCImportRequest",
+    "IOCImportResult",
+    "IOCMatch",
+    "IOCResponse",
+    "IOCTypeEnum",
+    "IngestStatusEnum",
+    "ThreatAlert",
+    "ThreatFeedSourceEnum",
+    "ThreatSeverityLevel",
+]

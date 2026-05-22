@@ -2,10 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+import uuid
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.schemas.threat_detection import (
+    DetectionRequest,
+    DetectionResult,
+    DetectionVerdict,
+    IOCMatch,
+    ThreatSeverityLevel,
+)
 from app.services.threat_intel import (
     ThreatIntelFeed,
     ThreatIntelMatch,
@@ -18,6 +26,11 @@ from app.services.threat_intel import (
 router = APIRouter(prefix="/threat-intel", tags=["threat-intel"])
 
 
+# ---------------------------------------------------------------------------
+# Module state
+# ---------------------------------------------------------------------------
+
+
 @dataclass(slots=True)
 class _ThreatIntelState:
     feed: ThreatIntelFeed
@@ -27,37 +40,9 @@ class _ThreatIntelState:
 _STATE = _ThreatIntelState(feed=initialize_default_threat_feed())
 
 
-class ThreatIntelScanRequest(BaseModel):
-    text: str = Field(
-        ...,
-        min_length=1,
-        description="Text to scan against the threat intel feed.",
-    )
-
-
-class ThreatIntelMatchResponse(BaseModel):
-    indicator_id: str
-    indicator_type: str
-    value: str
-    severity: str
-    matched_on: str
-    reason: str
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class ThreatIntelScanResponse(BaseModel):
-    scanned_text: str
-    checked_at: str
-    matches: list[ThreatIntelMatchResponse] = Field(default_factory=list)
-    highest_severity: str
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class ThreatIntelScanSummaryResponse(BaseModel):
-    checked_at: str
-    match_count: int
-    highest_severity: str
-    severity_counts: dict[str, int] = Field(default_factory=dict)
+# ---------------------------------------------------------------------------
+# Local response models with no schema counterpart
+# ---------------------------------------------------------------------------
 
 
 class ThreatIntelFeedResponse(BaseModel):
@@ -70,32 +55,119 @@ class ThreatIntelFeedResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-def _build_match_response(match: ThreatIntelMatch) -> ThreatIntelMatchResponse:
-    return ThreatIntelMatchResponse(
-        indicator_id=match.indicator_id,
-        indicator_type=match.indicator_type,
+class ThreatIntelScanSummaryResponse(BaseModel):
+    checked_at: str
+    match_count: int
+    highest_severity: str
+    severity_counts: dict[str, int] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Severity mapping — ThreatIntelMatch.severity (str) → ThreatSeverityLevel
+# ---------------------------------------------------------------------------
+
+_SEVERITY_MAP: dict[str, ThreatSeverityLevel] = {
+    "critical": ThreatSeverityLevel.CRITICAL,
+    "high": ThreatSeverityLevel.HIGH,
+    "medium": ThreatSeverityLevel.MEDIUM,
+    "low": ThreatSeverityLevel.LOW,
+}
+
+_SEVERITY_ORDER: dict[str, int] = {
+    "low": 0,
+    "medium": 1,
+    "high": 2,
+    "critical": 3,
+}
+
+
+def _severity_to_enum(value: str) -> ThreatSeverityLevel:
+    return _SEVERITY_MAP.get(value.lower(), ThreatSeverityLevel.LOW)
+
+
+# ---------------------------------------------------------------------------
+# Mappers — internal dataclasses → canonical schema shapes
+# ---------------------------------------------------------------------------
+
+
+def _build_ioc_match(match: ThreatIntelMatch) -> IOCMatch:
+    return IOCMatch(
+        ioc_id=match.indicator_id,
         value=match.value,
-        severity=match.severity,
+        ioc_type=match.indicator_type,
+        confidence=round(match.metadata.get("confidence", 50) / 100, 4),
+        severity=_severity_to_enum(match.severity).value,
+        source=match.metadata.get("source", "internal"),
+        tags=match.metadata.get("tags", []),
         matched_on=match.matched_on,
-        reason=match.reason,
-        metadata=dict(match.metadata),
+        mitre_technique_id=None,
+        mitre_tactic=None,
+        cve_id=None,
+        reference=None,
+        first_seen=None,
+        last_seen=None,
     )
 
 
-def _build_scan_response(result: ThreatIntelScanResult) -> ThreatIntelScanResponse:
-    return ThreatIntelScanResponse(
-        scanned_text=result.scanned_text,
-        checked_at=result.checked_at,
-        matches=[_build_match_response(match) for match in result.matches],
-        highest_severity=result.highest_severity,
+def _build_detection_result(
+    result: ThreatIntelScanResult,
+    event_id: str,
+    org_id: str | None,
+    agent_id: str | None,
+    scanned_text: str | None,
+) -> DetectionResult:
+    ioc_matches = [_build_ioc_match(m) for m in result.matches]
+
+    severity = _severity_to_enum(result.highest_severity)
+
+    if not ioc_matches:
+        verdict = DetectionVerdict.ALLOW
+    elif severity in (ThreatSeverityLevel.CRITICAL, ThreatSeverityLevel.HIGH):
+        verdict = DetectionVerdict.BLOCK
+    elif severity == ThreatSeverityLevel.MEDIUM:
+        verdict = DetectionVerdict.REVIEW
+    else:
+        verdict = DetectionVerdict.MONITOR
+
+    score_map = {
+        ThreatSeverityLevel.CRITICAL: 1.0,
+        ThreatSeverityLevel.HIGH: 0.75,
+        ThreatSeverityLevel.MEDIUM: 0.5,
+        ThreatSeverityLevel.LOW: 0.25,
+        ThreatSeverityLevel.INFO: 0.1,
+    }
+    score = score_map.get(severity, 0.0) if ioc_matches else 0.0
+
+    return DetectionResult(
+        event_id=event_id,
+        org_id=org_id,
+        agent_id=agent_id,
+        session_id=None,
+        verdict=verdict,
+        score=score,
+        severity=severity,
+        scanned_text=scanned_text,
+        ioc_matches=ioc_matches,
+        correlation_signals=[],
+        risk_families=list({tag for m in result.matches for tag in m.metadata.get("tags", [])}),
+        extracted_indicators=[m.value for m in result.matches],
+        rationale=[m.reason for m in result.matches],
+        mitre_techniques=[],
+        context=result.metadata.get("feed_id"),
         metadata=dict(result.metadata),
+        assessed_at=result.checked_at,
+        detection_engine_version="1.0.0",
     )
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
 
 
 @router.get("/feed", response_model=ThreatIntelFeedResponse)
 def get_threat_intel_feed() -> ThreatIntelFeedResponse:
-    feed = _STATE.feed
-    data = feed.to_dict()
+    data = _STATE.feed.to_dict()
     return ThreatIntelFeedResponse(
         feed_id=data["feed_id"],
         name=data["name"],
@@ -107,11 +179,30 @@ def get_threat_intel_feed() -> ThreatIntelFeedResponse:
     )
 
 
-@router.post("/scan", response_model=ThreatIntelScanResponse)
-def scan_threat_intel(request: ThreatIntelScanRequest) -> ThreatIntelScanResponse:
-    result = scan_text_against_threat_feed(request.text, _STATE.feed)
+@router.post("/scan", response_model=DetectionResult)
+def scan_threat_intel(request: DetectionRequest) -> DetectionResult:
+    text = " ".join(
+        filter(
+            None,
+            [
+                request.text,
+                request.url,
+                request.domain,
+                " ".join(request.hashes or []),
+                " ".join(request.ioc_values or []),
+            ],
+        )
+    )
+    result = scan_text_against_threat_feed(text, _STATE.feed)
     _STATE.last_scan_result = result
-    return _build_scan_response(result)
+    event_id = request.event_id or f"evt-{uuid.uuid4().hex}"
+    return _build_detection_result(
+        result,
+        event_id,
+        request.org_id,
+        request.agent_id,
+        scanned_text=request.text,
+    )
 
 
 @router.get("/scan/summary", response_model=ThreatIntelScanSummaryResponse)
@@ -121,10 +212,9 @@ def get_last_threat_intel_scan_summary() -> ThreatIntelScanSummaryResponse:
         return ThreatIntelScanSummaryResponse(
             checked_at="",
             match_count=0,
-            highest_severity="low",
+            highest_severity=ThreatSeverityLevel.LOW.value,
             severity_counts={},
         )
-
     summary = summarize_threat_scan_result(result)
     return ThreatIntelScanSummaryResponse(
         checked_at=summary["checked_at"],

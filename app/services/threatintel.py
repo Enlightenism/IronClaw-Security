@@ -9,28 +9,44 @@ from pathlib import Path
 import re
 from typing import Any
 from urllib.parse import urlparse
+from uuid import uuid4
+
+from app.schemas.threat_detection import (
+    DetectionResult,
+    DetectionVerdict,
+    IOCMatch,
+    ThreatSeverityLevel,
+)
+
+# ---------------------------------------------------------------------------
+# IOC extraction pattern
+# ---------------------------------------------------------------------------
 
 IOC_PATTERN = re.compile(
     r"(?P<ipv4>\b(?:\d{1,3}\.){3}\d{1,3}\b)|" r"(?P<sha256>\b[a-fA-F0-9]{64}\b)|" r"(?P<sha1>\b[a-fA-F0-9]{40}\b)|" r"(?P<md5>\b[a-fA-F0-9]{32}\b)|" r"(?P<domain>\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b)|" r"(?P<url>https?://[^\s\"'<>]+)",
 )
 
-SUSPICIOUS_KEYWORDS = {
+SUSPICIOUS_KEYWORDS: dict[str, set[str]] = {
     "credential_harvest": {"login", "password", "verify account", "mfa reset", "session cookie"},
     "malware_delivery": {"payload", "dropper", "loader", "macro", "powershell -enc", "rundll32"},
     "command_and_control": {"beacon", "c2", "callback", "exfil", "reverse shell", "dns tunnel"},
     "evasion": {"obfuscation", "packer", "sandbox evade", "sleep mask", "disable defender"},
 }
 
-DEFAULT_SOURCE_WEIGHTS = {
+DEFAULT_SOURCE_WEIGHTS: dict[str, float] = {
     "internal": 1.0,
     "curated": 0.85,
     "community": 0.65,
     "external": 0.55,
 }
 
+# ---------------------------------------------------------------------------
+# Internal-only dataclasses — never exposed outside this module
+# ---------------------------------------------------------------------------
+
 
 @dataclass(slots=True)
-class ThreatIndicator:
+class _ThreatIndicator:
     value: str
     indicator_type: str
     confidence: float
@@ -44,7 +60,7 @@ class ThreatIndicator:
 
 
 @dataclass(slots=True)
-class ThreatMatch:
+class _ThreatMatch:
     value: str
     indicator_type: str
     confidence: float
@@ -56,15 +72,25 @@ class ThreatMatch:
 
 
 @dataclass(slots=True)
-class ThreatAssessment:
+class _ThreatAssessment:
     verdict: str
     score: float
     severity: str
     risk_families: list[str]
-    matches: list[ThreatMatch]
+    matches: list[_ThreatMatch]
     extracted_indicators: list[str]
     rationale: list[str]
     assessed_at: str
+
+
+# Public alias kept for any internal test that imports ThreatIndicator directly
+# from this module (e.g. build_default_threatintel_service seed builders).
+# No upstream API caller should ever reference ThreatAssessment or ThreatMatch.
+ThreatIndicator = _ThreatIndicator
+
+# ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
 
 
 def _utcnow() -> str:
@@ -92,37 +118,30 @@ def _indicator_fingerprint(value: str, indicator_type: str) -> str:
 def _infer_indicator_type(value: str) -> str:
     candidate = value.strip()
     lowered = candidate.lower()
-
     if lowered.startswith(("http://", "https://")):
         return "url"
-
     if re.fullmatch(r"[a-fA-F0-9]{64}", candidate):
         return "sha256"
-
     if re.fullmatch(r"[a-fA-F0-9]{40}", candidate):
         return "sha1"
-
     if re.fullmatch(r"[a-fA-F0-9]{32}", candidate):
         return "md5"
-
     try:
         ipaddress.ip_address(candidate)
         return "ipv4"
     except ValueError:
         pass
-
     return "domain"
 
 
-def _parse_indicator(raw: dict[str, Any]) -> ThreatIndicator:
+def _parse_indicator(raw: dict[str, Any]) -> _ThreatIndicator:
     value = str(raw.get("value", "")).strip()
     indicator_type = str(raw.get("indicator_type") or _infer_indicator_type(value)).strip().lower()
     confidence = float(raw.get("confidence", 0.5))
     severity = str(raw.get("severity", "medium")).strip().lower()
     tags = [str(tag).strip().lower() for tag in raw.get("tags", []) if str(tag).strip()]
     source = str(raw.get("source", "internal")).strip().lower()
-
-    return ThreatIndicator(
+    return _ThreatIndicator(
         value=_normalize_indicator(value, indicator_type),
         indicator_type=indicator_type,
         confidence=max(0.0, min(confidence, 1.0)),
@@ -137,17 +156,86 @@ def _parse_indicator(raw: dict[str, Any]) -> ThreatIndicator:
 
 
 def _severity_weight(severity: str) -> float:
-    return {
-        "low": 0.25,
-        "medium": 0.5,
-        "high": 0.8,
-        "critical": 1.0,
-    }.get(severity, 0.5)
+    return {"low": 0.25, "medium": 0.5, "high": 0.8, "critical": 1.0}.get(severity, 0.5)
+
+
+# ---------------------------------------------------------------------------
+# Schema mappers — _ThreatAssessment → DetectionResult (canonical contract)
+# ---------------------------------------------------------------------------
+
+_VERDICT_MAP: dict[str, DetectionVerdict] = {
+    "block": DetectionVerdict.BLOCK,
+    "review": DetectionVerdict.REVIEW,
+    "monitor": DetectionVerdict.MONITOR,
+    "allow": DetectionVerdict.ALLOW,
+}
+
+_SEVERITY_ENUM_MAP: dict[str, ThreatSeverityLevel] = {
+    "critical": ThreatSeverityLevel.CRITICAL,
+    "high": ThreatSeverityLevel.HIGH,
+    "medium": ThreatSeverityLevel.MEDIUM,
+    "low": ThreatSeverityLevel.LOW,
+    "info": ThreatSeverityLevel.INFO,
+}
+
+
+def _match_to_ioc_match(match: _ThreatMatch) -> IOCMatch:
+    return IOCMatch(
+        ioc_id=None,
+        value=match.value,
+        ioc_type=match.indicator_type,
+        confidence=match.confidence,
+        severity=_SEVERITY_ENUM_MAP.get(match.severity, ThreatSeverityLevel.MEDIUM).value,
+        source=match.source,
+        tags=list(match.tags),
+        matched_on=match.matched_on,
+        mitre_technique_id=None,
+        mitre_tactic=None,
+        cve_id=None,
+        reference=match.reference,
+        first_seen=None,
+        last_seen=None,
+    )
+
+
+def _assessment_to_detection_result(
+    assessment: _ThreatAssessment,
+    *,
+    event_id: str,
+    org_id: str | None,
+    agent_id: str | None,
+    session_id: str | None,
+    context: str | None,
+) -> DetectionResult:
+    return DetectionResult(
+        event_id=event_id,
+        org_id=org_id,
+        agent_id=agent_id,
+        session_id=session_id,
+        verdict=_VERDICT_MAP.get(assessment.verdict, DetectionVerdict.ALLOW),
+        score=assessment.score,
+        severity=_SEVERITY_ENUM_MAP.get(assessment.severity, ThreatSeverityLevel.LOW),
+        ioc_matches=[_match_to_ioc_match(m) for m in assessment.matches],
+        correlation_signals=[],
+        risk_families=list(assessment.risk_families),
+        extracted_indicators=list(assessment.extracted_indicators),
+        rationale=list(assessment.rationale),
+        mitre_techniques=[],
+        context=context,
+        metadata={},
+        assessed_at=assessment.assessed_at,
+        detection_engine_version="1.0.0",
+    )
+
+
+# ---------------------------------------------------------------------------
+# ThreatIntelService
+# ---------------------------------------------------------------------------
 
 
 class ThreatIntelService:
-    def __init__(self, seed_indicators: list[ThreatIndicator] | None = None) -> None:
-        self._indicators: dict[str, ThreatIndicator] = {}
+    def __init__(self, seed_indicators: list[_ThreatIndicator] | None = None) -> None:
+        self._indicators: dict[str, _ThreatIndicator] = {}
         self._updated_at = _utcnow()
         for indicator in seed_indicators or []:
             self.upsert_indicator(indicator)
@@ -156,9 +244,9 @@ class ThreatIntelService:
     def updated_at(self) -> str:
         return self._updated_at
 
-    def upsert_indicator(self, indicator: ThreatIndicator) -> ThreatIndicator:
+    def upsert_indicator(self, indicator: _ThreatIndicator) -> _ThreatIndicator:
         normalized = _normalize_indicator(indicator.value, indicator.indicator_type)
-        normalized_indicator = ThreatIndicator(
+        normalized_indicator = _ThreatIndicator(
             value=normalized,
             indicator_type=indicator.indicator_type,
             confidence=max(0.0, min(indicator.confidence, 1.0)),
@@ -191,18 +279,18 @@ class ThreatIntelService:
     def export_json(self) -> str:
         indicators = [
             {
-                "value": indicator.value,
-                "indicator_type": indicator.indicator_type,
-                "confidence": indicator.confidence,
-                "severity": indicator.severity,
-                "tags": indicator.tags,
-                "source": indicator.source,
-                "first_seen": indicator.first_seen,
-                "last_seen": indicator.last_seen,
-                "reference": indicator.reference,
-                "attributes": indicator.attributes,
+                "value": i.value,
+                "indicator_type": i.indicator_type,
+                "confidence": i.confidence,
+                "severity": i.severity,
+                "tags": i.tags,
+                "source": i.source,
+                "first_seen": i.first_seen,
+                "last_seen": i.last_seen,
+                "reference": i.reference,
+                "attributes": i.attributes,
             }
-            for indicator in self._indicators.values()
+            for i in self._indicators.values()
         ]
         return json.dumps(indicators, indent=2, ensure_ascii=False)
 
@@ -211,52 +299,48 @@ class ThreatIntelService:
 
     def has_indicator(self, value: str, indicator_type: str | None = None) -> bool:
         resolved_type = indicator_type or _infer_indicator_type(value)
-        fingerprint = _indicator_fingerprint(value, resolved_type)
-        return fingerprint in self._indicators
+        return _indicator_fingerprint(value, resolved_type) in self._indicators
 
-    def lookup_indicator(self, value: str, indicator_type: str | None = None) -> ThreatIndicator | None:
+    def lookup_indicator(self, value: str, indicator_type: str | None = None) -> _ThreatIndicator | None:
         resolved_type = indicator_type or _infer_indicator_type(value)
-        fingerprint = _indicator_fingerprint(value, resolved_type)
-        return self._indicators.get(fingerprint)
+        return self._indicators.get(_indicator_fingerprint(value, resolved_type))
 
     def extract_indicators(self, text: str) -> list[tuple[str, str]]:
         extracted: list[tuple[str, str]] = []
         seen: set[str] = set()
-
         for match in IOC_PATTERN.finditer(text):
             group_name = next((name for name, value in match.groupdict().items() if value), None)
             if group_name is None:
                 continue
-
             raw_value = match.group(group_name)
             indicator_type = "url" if group_name == "url" else group_name
             normalized_value = _normalize_indicator(raw_value, indicator_type)
-
             if indicator_type == "ipv4":
                 try:
                     ipaddress.ip_address(normalized_value)
                 except ValueError:
                     continue
-
             key = f"{indicator_type}:{normalized_value}"
             if key in seen:
                 continue
-
             seen.add(key)
             extracted.append((normalized_value, indicator_type))
-
         return extracted
 
-    def assess_text(
+    # ------------------------------------------------------------------
+    # Internal assessment — private, returns raw _ThreatAssessment
+    # ------------------------------------------------------------------
+
+    def _run_assessment(
         self,
         text: str,
         *,
         context: str | None = None,
         minimum_confidence: float = 0.0,
-    ) -> ThreatAssessment:
+    ) -> _ThreatAssessment:
         normalized_text = _normalize_text(text)
         extracted = self.extract_indicators(text)
-        matches: list[ThreatMatch] = []
+        matches: list[_ThreatMatch] = []
         risk_families: set[str] = set()
         rationale: list[str] = []
 
@@ -264,9 +348,8 @@ class ThreatIntelService:
             indicator = self.lookup_indicator(value, indicator_type)
             if indicator is None or indicator.confidence < minimum_confidence:
                 continue
-
             matches.append(
-                ThreatMatch(
+                _ThreatMatch(
                     value=indicator.value,
                     indicator_type=indicator.indicator_type,
                     confidence=indicator.confidence,
@@ -288,7 +371,6 @@ class ThreatIntelService:
 
         if matches:
             rationale.append(f"Matched {len(matches)} known threat indicator(s).")
-
         for family, hits in sorted(keyword_hits.items()):
             rationale.append(f"Detected {hits} suspicious keyword pattern(s) for {family}.")
 
@@ -301,22 +383,18 @@ class ThreatIntelService:
         score = min(source_score + keyword_score, 1.0)
 
         if score >= 0.85:
-            verdict = "block"
-            severity = "critical"
+            verdict, severity = "block", "critical"
         elif score >= 0.6:
-            verdict = "review"
-            severity = "high"
+            verdict, severity = "review", "high"
         elif score >= 0.3:
-            verdict = "monitor"
-            severity = "medium"
+            verdict, severity = "monitor", "medium"
         else:
-            verdict = "allow"
-            severity = "low"
+            verdict, severity = "allow", "low"
 
         if not rationale:
             rationale.append("No known threat indicators or suspicious keyword clusters were detected.")
 
-        return ThreatAssessment(
+        return _ThreatAssessment(
             verdict=verdict,
             score=round(score, 4),
             severity=severity,
@@ -327,6 +405,31 @@ class ThreatIntelService:
             assessed_at=_utcnow(),
         )
 
+    # ------------------------------------------------------------------
+    # Public API — always returns DetectionResult (canonical schema shape)
+    # ------------------------------------------------------------------
+
+    def assess_text(
+        self,
+        text: str,
+        *,
+        event_id: str | None = None,
+        org_id: str | None = None,
+        agent_id: str | None = None,
+        session_id: str | None = None,
+        context: str | None = None,
+        minimum_confidence: float = 0.0,
+    ) -> DetectionResult:
+        assessment = self._run_assessment(text, context=context, minimum_confidence=minimum_confidence)
+        return _assessment_to_detection_result(
+            assessment,
+            event_id=event_id or f"evt-{uuid4().hex}",
+            org_id=org_id,
+            agent_id=agent_id,
+            session_id=session_id,
+            context=context,
+        )
+
     def assess_artifact(
         self,
         *,
@@ -334,10 +437,13 @@ class ThreatIntelService:
         domain: str | None = None,
         hashes: list[str] | None = None,
         text: str | None = None,
+        event_id: str | None = None,
+        org_id: str | None = None,
+        agent_id: str | None = None,
+        session_id: str | None = None,
         context: str | None = None,
-    ) -> ThreatAssessment:
+    ) -> DetectionResult:
         fragments: list[str] = []
-
         if url:
             fragments.append(url)
             try:
@@ -346,23 +452,31 @@ class ThreatIntelService:
                     fragments.append(parsed.hostname)
             except Exception:
                 pass
-
         if domain:
             fragments.append(domain)
-
         if hashes:
             fragments.extend(hashes)
-
         if text:
             fragments.append(text)
-
         combined = "\n".join(fragment for fragment in fragments if fragment)
-        return self.assess_text(combined, context=context or "artifact")
+        return self.assess_text(
+            combined,
+            event_id=event_id,
+            org_id=org_id,
+            agent_id=agent_id,
+            session_id=session_id,
+            context=context or "artifact",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Default service factory
+# ---------------------------------------------------------------------------
 
 
 def build_default_threatintel_service() -> ThreatIntelService:
     seed = [
-        ThreatIndicator(
+        _ThreatIndicator(
             value="198.51.100.42",
             indicator_type="ipv4",
             confidence=0.94,
@@ -371,7 +485,7 @@ def build_default_threatintel_service() -> ThreatIntelService:
             source="internal",
             reference="ironclaw://intel/default/198.51.100.42",
         ),
-        ThreatIndicator(
+        _ThreatIndicator(
             value="malicious-control.example",
             indicator_type="domain",
             confidence=0.92,
@@ -380,7 +494,7 @@ def build_default_threatintel_service() -> ThreatIntelService:
             source="curated",
             reference="ironclaw://intel/default/malicious-control.example",
         ),
-        ThreatIndicator(
+        _ThreatIndicator(
             value="44d88612fea8a8f36de82e1278abb02f",
             indicator_type="md5",
             confidence=0.88,
@@ -397,9 +511,7 @@ __all__ = [
     "DEFAULT_SOURCE_WEIGHTS",
     "IOC_PATTERN",
     "SUSPICIOUS_KEYWORDS",
-    "ThreatAssessment",
     "ThreatIndicator",
     "ThreatIntelService",
-    "ThreatMatch",
     "build_default_threatintel_service",
 ]

@@ -4,7 +4,6 @@ from collections import deque
 import csv
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
 import hashlib
 import io
 import ipaddress
@@ -17,13 +16,19 @@ import urllib.error
 import urllib.request
 from uuid import uuid4
 
+from app.schemas.threat_detection import (
+    IngestStatusEnum,
+    IOCTypeEnum,
+    ThreatFeedSourceEnum,
+    ThreatSeverityLevel,
+)
+
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
 
 _MITRE_ATTACK_ENTERPRISE_URL = "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json"
 _CISA_KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
@@ -33,46 +38,14 @@ _MAX_FEED_HISTORY_SIZE = 200
 _IOC_ID_PREFIX = "ioc-"
 _INGEST_ID_PREFIX = "ingest-"
 
-
 # ---------------------------------------------------------------------------
-# Enumerations
+# Backwards-compatible aliases — keep existing callers working
 # ---------------------------------------------------------------------------
 
-
-class ThreatFeedSource(str, Enum):
-    MITRE_ATTACK = "mitre_attack"
-    CISA_KEV = "cisa_kev"
-    CUSTOM_IOC = "custom_ioc"
-
-
-class IOCType(str, Enum):
-    IPV4 = "ipv4"
-    IPV6 = "ipv6"
-    DOMAIN = "domain"
-    URL = "url"
-    SHA256 = "sha256"
-    SHA1 = "sha1"
-    MD5 = "md5"
-    CVE = "cve"
-    MITRE_TECHNIQUE = "mitre_technique"
-    MITRE_TACTIC = "mitre_tactic"
-    EMAIL = "email"
-    UNKNOWN = "unknown"
-
-
-class ThreatSeverity(str, Enum):
-    CRITICAL = "critical"
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-    INFO = "info"
-
-
-class IngestStatus(str, Enum):
-    SUCCESS = "success"
-    PARTIAL = "partial"
-    FAILED = "failed"
-    SKIPPED = "skipped"
+ThreatFeedSource = ThreatFeedSourceEnum
+IOCType = IOCTypeEnum
+ThreatSeverity = ThreatSeverityLevel
+IngestStatus = IngestStatusEnum
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +163,7 @@ class IOCFilterRequest:
 class CustomIOCEntry:
     value: str
     ioc_type: str | None = None
-    severity: str = ThreatSeverity.MEDIUM
+    severity: str = ThreatSeverityLevel.MEDIUM
     confidence: float = 0.8
     tags: list[str] = field(default_factory=list)
     description: str = ""
@@ -231,36 +204,36 @@ _RE_URL = re.compile(r"^https?://", re.IGNORECASE)
 def _detect_ioc_type(value: str) -> str:
     v = value.strip()
     if _RE_CVE.match(v):
-        return IOCType.CVE
+        return IOCTypeEnum.CVE
     if _RE_MITRE_TECHNIQUE.match(v):
-        return IOCType.MITRE_TECHNIQUE
+        return IOCTypeEnum.MITRE_TECHNIQUE
     if _RE_SHA256.match(v):
-        return IOCType.SHA256
+        return IOCTypeEnum.SHA256
     if _RE_SHA1.match(v):
-        return IOCType.SHA1
+        return IOCTypeEnum.SHA1
     if _RE_MD5.match(v):
-        return IOCType.MD5
+        return IOCTypeEnum.MD5
     if _RE_URL.match(v):
-        return IOCType.URL
+        return IOCTypeEnum.URL
     if _RE_EMAIL.match(v):
-        return IOCType.EMAIL
+        return IOCTypeEnum.EMAIL
     try:
         addr = ipaddress.ip_address(v)
-        return IOCType.IPV4 if addr.version == 4 else IOCType.IPV6
+        return IOCTypeEnum.IPV4 if addr.version == 4 else IOCTypeEnum.IPV6
     except ValueError:
         pass
     if _RE_DOMAIN.match(v):
-        return IOCType.DOMAIN
-    return IOCType.UNKNOWN
+        return IOCTypeEnum.DOMAIN
+    return IOCTypeEnum.UNKNOWN
 
 
 def _normalize_value(value: str, ioc_type: str) -> str:
     v = value.strip()
-    if ioc_type in (IOCType.DOMAIN,):
+    if ioc_type in (IOCTypeEnum.DOMAIN,):
         return v.lower()
-    if ioc_type in (IOCType.SHA256, IOCType.SHA1, IOCType.MD5):
+    if ioc_type in (IOCTypeEnum.SHA256, IOCTypeEnum.SHA1, IOCTypeEnum.MD5):
         return v.lower()
-    if ioc_type in (IOCType.CVE, IOCType.MITRE_TECHNIQUE):
+    if ioc_type in (IOCTypeEnum.CVE, IOCTypeEnum.MITRE_TECHNIQUE):
         return v.upper()
     return v
 
@@ -312,7 +285,7 @@ def _parse_mitre_attack(
                 continue
 
             if obj_type == "attack-pattern":
-                ioc_type = IOCType.MITRE_TECHNIQUE
+                ioc_type = IOCTypeEnum.MITRE_TECHNIQUE
                 tactics: list[str] = [phase.get("phase_name", "") for phase in obj.get("kill_chain_phases", []) if phase.get("kill_chain_name", "").startswith("mitre")]
                 tactic_str = tactics[0] if tactics else None
                 platforms: list[str] = obj.get("x_mitre_platforms", [])
@@ -323,13 +296,13 @@ def _parse_mitre_attack(
                     "detection": obj.get("x_mitre_detection", ""),
                     "permissions_required": obj.get("x_mitre_permissions_required", []),
                 }
-                severity = ThreatSeverity.HIGH
+                severity = ThreatSeverityLevel.HIGH
                 tags = ["mitre-attack", "technique"] + [t for t in tactics if t]
             else:
-                ioc_type = IOCType.MITRE_TACTIC
+                ioc_type = IOCTypeEnum.MITRE_TACTIC
                 tactic_str = obj.get("x_mitre_shortname", name.lower().replace(" ", "-"))
                 extra = {"stix_id": stix_id}
-                severity = ThreatSeverity.MEDIUM
+                severity = ThreatSeverityLevel.MEDIUM
                 tags = ["mitre-attack", "tactic"]
 
             ioc_id = f"{_IOC_ID_PREFIX}{_sha256_hex('mitre:' + mitre_id)[:16]}"
@@ -340,13 +313,13 @@ def _parse_mitre_attack(
                     ioc_id=ioc_id,
                     ioc_type=ioc_type,
                     value=value,
-                    source=ThreatFeedSource.MITRE_ATTACK,
+                    source=ThreatFeedSourceEnum.MITRE_ATTACK,
                     severity=severity,
                     confidence=1.0,
                     tags=tags,
                     description=description_raw[:1024],
                     org_id=org_id,
-                    mitre_technique_id=mitre_id if ioc_type == IOCType.MITRE_TECHNIQUE else None,
+                    mitre_technique_id=mitre_id if ioc_type == IOCTypeEnum.MITRE_TECHNIQUE else None,
                     mitre_tactic=tactic_str,
                     cve_id=None,
                     first_seen=now,
@@ -393,21 +366,21 @@ def _parse_cisa_kev(
             due_date: str = vuln.get("dueDate", "")
             known_ransomware: str = vuln.get("knownRansomwareCampaignUse", "Unknown")
 
-            severity = ThreatSeverity.CRITICAL if known_ransomware.lower() == "known" else ThreatSeverity.HIGH
+            severity = ThreatSeverityLevel.CRITICAL if known_ransomware.lower() == "known" else ThreatSeverityLevel.HIGH
 
             tags = ["cisa-kev", "cve", "exploited-in-wild"]
             if known_ransomware.lower() == "known":
                 tags.append("ransomware")
 
             ioc_id = f"{_IOC_ID_PREFIX}{_sha256_hex('kev:' + cve_id)[:16]}"
-            value = _normalize_value(cve_id, IOCType.CVE)
+            value = _normalize_value(cve_id, IOCTypeEnum.CVE)
 
             records.append(
                 IOCRecord(
                     ioc_id=ioc_id,
-                    ioc_type=IOCType.CVE,
+                    ioc_type=IOCTypeEnum.CVE,
                     value=value,
-                    source=ThreatFeedSource.CISA_KEV,
+                    source=ThreatFeedSourceEnum.CISA_KEV,
                     severity=severity,
                     confidence=1.0,
                     tags=tags,
@@ -500,11 +473,11 @@ def _dict_to_custom_ioc_entry(item: dict[str, Any]) -> CustomIOCEntry:
     raw_type = item.get("ioc_type", item.get("type", ""))
     ioc_type = str(raw_type).strip() if raw_type else None
 
-    severity_raw = str(item.get("severity", ThreatSeverity.MEDIUM)).strip().lower()
+    severity_raw = str(item.get("severity", ThreatSeverityLevel.MEDIUM)).strip().lower()
     try:
-        severity = ThreatSeverity(severity_raw)
+        severity = ThreatSeverityLevel(severity_raw)
     except ValueError:
-        severity = ThreatSeverity.MEDIUM
+        severity = ThreatSeverityLevel.MEDIUM
 
     confidence_raw = item.get("confidence", 0.8)
     try:
@@ -556,9 +529,9 @@ def _custom_ioc_entry_to_record(
 
     ioc_type = entry.ioc_type or _detect_ioc_type(entry.value)
     try:
-        ioc_type = IOCType(ioc_type)
+        ioc_type = IOCTypeEnum(ioc_type)
     except ValueError:
-        ioc_type = IOCType.UNKNOWN
+        ioc_type = IOCTypeEnum.UNKNOWN
 
     value = _normalize_value(entry.value, ioc_type)
     scope = org_id if org_id is not None else "global"
@@ -574,7 +547,7 @@ def _custom_ioc_entry_to_record(
         ioc_id=ioc_id,
         ioc_type=ioc_type,
         value=value,
-        source=ThreatFeedSource.CUSTOM_IOC,
+        source=ThreatFeedSourceEnum.CUSTOM_IOC,
         severity=entry.severity,
         confidence=entry.confidence,
         tags=tags,
@@ -582,7 +555,7 @@ def _custom_ioc_entry_to_record(
         org_id=org_id,
         mitre_technique_id=entry.mitre_technique_id,
         mitre_tactic=entry.mitre_tactic,
-        cve_id=entry.cve_id or (value if ioc_type == IOCType.CVE else None),
+        cve_id=entry.cve_id or (value if ioc_type == IOCTypeEnum.CVE else None),
         first_seen=now,
         last_seen=now,
         expiry=entry.expiry,
@@ -599,7 +572,7 @@ def _custom_ioc_entry_to_record(
 
 class ThreatFeedIngestionService:
     """
-    Ingestion engine for IronClaw Phase 8 — Threat Intelligence.
+    Ingestion engine for IronClaw Threat Intelligence.
 
     Responsibilities:
     - Fetch and parse MITRE ATT&CK STIX bundle (enterprise attack patterns + tactics).
@@ -609,6 +582,8 @@ class ThreatFeedIngestionService:
     - Store IOCs in a bounded in-memory store (thread-safe, LRU-eviction when full).
     - Maintain per-ingest result history.
     - Provide lookup, filtering, enrichment query, and deactivation APIs.
+
+    Enum contracts are owned by app.schemas.threat_detection.
     """
 
     def __init__(
@@ -648,20 +623,20 @@ class ThreatFeedIngestionService:
         try:
             raw = _fetch_json(target_url, timeout=self._fetch_timeout)
         except urllib.error.URLError as exc:
-            return self._fail_result(ingest_id, ThreatFeedSource.MITRE_ATTACK, org_id, started_at, f"fetch_error: {exc}")
+            return self._fail_result(ingest_id, ThreatFeedSourceEnum.MITRE_ATTACK, org_id, started_at, f"fetch_error: {exc}")
         except Exception as exc:  # noqa: BLE001
-            return self._fail_result(ingest_id, ThreatFeedSource.MITRE_ATTACK, org_id, started_at, f"unexpected: {exc}")
+            return self._fail_result(ingest_id, ThreatFeedSourceEnum.MITRE_ATTACK, org_id, started_at, f"unexpected: {exc}")
 
         if not isinstance(raw, dict):
-            return self._fail_result(ingest_id, ThreatFeedSource.MITRE_ATTACK, org_id, started_at, "unexpected_response_type: not a JSON object")
+            return self._fail_result(ingest_id, ThreatFeedSourceEnum.MITRE_ATTACK, org_id, started_at, "unexpected_response_type: not a JSON object")
 
         records, errors = _parse_mitre_attack(raw, ingest_id, org_id)
         inserted, updated, skipped = self._upsert_iocs(records)
 
         result = FeedIngestResult(
             ingest_id=ingest_id,
-            source=ThreatFeedSource.MITRE_ATTACK,
-            status=IngestStatus.SUCCESS if not errors else IngestStatus.PARTIAL,
+            source=ThreatFeedSourceEnum.MITRE_ATTACK,
+            status=IngestStatusEnum.SUCCESS if not errors else IngestStatusEnum.PARTIAL,
             iocs_parsed=len(records) + len(errors),
             iocs_inserted=inserted,
             iocs_updated=updated,
@@ -701,12 +676,12 @@ class ThreatFeedIngestionService:
         try:
             raw = _fetch_json(target_url, timeout=self._fetch_timeout)
         except urllib.error.URLError as exc:
-            return self._fail_result(ingest_id, ThreatFeedSource.CISA_KEV, org_id, started_at, f"fetch_error: {exc}")
+            return self._fail_result(ingest_id, ThreatFeedSourceEnum.CISA_KEV, org_id, started_at, f"fetch_error: {exc}")
         except Exception as exc:  # noqa: BLE001
-            return self._fail_result(ingest_id, ThreatFeedSource.CISA_KEV, org_id, started_at, f"unexpected: {exc}")
+            return self._fail_result(ingest_id, ThreatFeedSourceEnum.CISA_KEV, org_id, started_at, f"unexpected: {exc}")
 
         if not isinstance(raw, dict):
-            return self._fail_result(ingest_id, ThreatFeedSource.CISA_KEV, org_id, started_at, "unexpected_response_type: not a JSON object")
+            return self._fail_result(ingest_id, ThreatFeedSourceEnum.CISA_KEV, org_id, started_at, "unexpected_response_type: not a JSON object")
 
         records, errors = _parse_cisa_kev(raw, ingest_id, org_id)
         inserted, updated, skipped = self._upsert_iocs(records)
@@ -717,8 +692,8 @@ class ThreatFeedIngestionService:
 
         result = FeedIngestResult(
             ingest_id=ingest_id,
-            source=ThreatFeedSource.CISA_KEV,
-            status=IngestStatus.SUCCESS if not errors else IngestStatus.PARTIAL,
+            source=ThreatFeedSourceEnum.CISA_KEV,
+            status=IngestStatusEnum.SUCCESS if not errors else IngestStatusEnum.PARTIAL,
             iocs_parsed=len(records) + len(errors),
             iocs_inserted=inserted,
             iocs_updated=updated,
@@ -758,15 +733,15 @@ class ThreatFeedIngestionService:
         started_at = _utcnow_iso()
 
         if not isinstance(entries, list):
-            return self._fail_result(ingest_id, ThreatFeedSource.CUSTOM_IOC, org_id, started_at, "input must be a JSON array")
+            return self._fail_result(ingest_id, ThreatFeedSourceEnum.CUSTOM_IOC, org_id, started_at, "input must be a JSON array")
 
         records, errors = _parse_custom_ioc_json(entries, ingest_id, org_id)
         inserted, updated, skipped = self._upsert_iocs(records)
 
         result = FeedIngestResult(
             ingest_id=ingest_id,
-            source=ThreatFeedSource.CUSTOM_IOC,
-            status=IngestStatus.SUCCESS if not errors else IngestStatus.PARTIAL,
+            source=ThreatFeedSourceEnum.CUSTOM_IOC,
+            status=IngestStatusEnum.SUCCESS if not errors else IngestStatusEnum.PARTIAL,
             iocs_parsed=len(entries),
             iocs_inserted=inserted,
             iocs_updated=updated,
@@ -800,8 +775,8 @@ class ThreatFeedIngestionService:
 
         result = FeedIngestResult(
             ingest_id=ingest_id,
-            source=ThreatFeedSource.CUSTOM_IOC,
-            status=IngestStatus.SUCCESS if not errors else IngestStatus.PARTIAL,
+            source=ThreatFeedSourceEnum.CUSTOM_IOC,
+            status=IngestStatusEnum.SUCCESS if not errors else IngestStatusEnum.PARTIAL,
             iocs_parsed=len(records) + len(errors),
             iocs_inserted=inserted,
             iocs_updated=updated,
@@ -1012,7 +987,7 @@ class ThreatFeedIngestionService:
         result = FeedIngestResult(
             ingest_id=ingest_id,
             source=source,
-            status=IngestStatus.FAILED,
+            status=IngestStatusEnum.FAILED,
             iocs_parsed=0,
             iocs_inserted=0,
             iocs_updated=0,
@@ -1053,3 +1028,22 @@ def get_threat_feed_service() -> ThreatFeedIngestionService:
 def reset_threat_feed_service() -> None:
     """Clear all threat feed state. Intended for use in tests."""
     _THREAT_FEED_SERVICE.reset()
+
+
+__all__ = [
+    "CustomIOCEntry",
+    "FeedIngestResult",
+    "IOCFilterRequest",
+    "IOCRecord",
+    "IngestStatus",
+    "IngestStatusEnum",
+    "IOCType",
+    "IOCTypeEnum",
+    "ThreatFeedIngestionService",
+    "ThreatFeedSource",
+    "ThreatFeedSourceEnum",
+    "ThreatSeverity",
+    "ThreatSeverityLevel",
+    "get_threat_feed_service",
+    "reset_threat_feed_service",
+]
