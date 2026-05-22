@@ -84,7 +84,7 @@ Repository = "https://github.com/Enlightenism/IronClaw-Security.git"
 Documentation = "https://github.com/Enlightenism/IronClaw-Security#readme"
 
 [project.scripts]
-ironclaw = "app.cli.main:app"
+ironclaw = "app.cli.main:main"
 ironclaw-skill = "ironclawskill.cli:main"
 ironclaw-smoketest = "smoketestclient:main"
 ironclaw-testclient = "testclient:main"
