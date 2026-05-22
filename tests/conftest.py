@@ -12,11 +12,17 @@ os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
 os.environ["SUPABASE_KEY"] = ""
 os.environ["SUPABASE_ANON_KEY"] = ""
 
+from fastapi.testclient import TestClient
 import pytest
 
 from app.core.settings import get_settings
 from app.main import app as _app
 from app.services.audit_log_service import reset_audit_log
+from ironclaw_sdk.client import IronclawClient
+from ironclaw_sdk.models import ScanRequest as SDKScanRequest
+from ironclaw_sdk.models import ScanResponse as SDKScanResponse
+
+_TEST_API_KEY = "ironclaw-test-key-00000000"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -38,3 +44,53 @@ def reset_audit_state() -> None:
     reset_audit_log()
     yield
     reset_audit_log()
+
+
+@pytest.fixture(scope="session")
+def mock_api_key() -> str:
+    return _TEST_API_KEY
+
+
+@pytest.fixture(scope="function")
+def test_client() -> TestClient:
+    with TestClient(_app, raise_server_exceptions=True) as client:
+        yield client
+
+
+@pytest.fixture(scope="function")
+def sdk_client():
+    tc = TestClient(_app, raise_server_exceptions=False)
+    client = IronclawClient(
+        api_key=os.environ["IRONCLAW_API_KEY"],
+        base_url="http://testserver",
+        connect_timeout=5.0,
+        read_timeout=10.0,
+    )
+
+    def _patched_scan(request: SDKScanRequest) -> SDKScanResponse:
+        resp = tc.post(
+            "/scan/",
+            content=request.model_dump_json(),
+            headers={
+                "X-API-Key": os.environ["IRONCLAW_API_KEY"],
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+        )
+        if resp.status_code in (401, 403):
+            from ironclaw_sdk.exceptions import IronclawAuthError
+
+            raise IronclawAuthError(status_code=resp.status_code, body=resp.text)
+        if resp.status_code >= 400:
+            from ironclaw_sdk.exceptions import IronclawAPIError
+
+            raise IronclawAPIError(status_code=resp.status_code, body=resp.text)
+        try:
+            return SDKScanResponse.model_validate(resp.json())
+        except Exception as exc:
+            from ironclaw_sdk.exceptions import IronclawAPIError
+
+            raise IronclawAPIError(status_code=resp.status_code, body=resp.text) from exc
+
+    client.scan = _patched_scan
+    yield client

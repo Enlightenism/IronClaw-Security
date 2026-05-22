@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 import hashlib
 import json
+import logging
 from pathlib import Path
 from typing import Any, Literal
 
@@ -21,6 +22,7 @@ AgentLanguage = Literal[
     "unknown",
 ]
 
+
 ThreatProfile = Literal[
     "low_risk",
     "standard",
@@ -28,6 +30,7 @@ ThreatProfile = Literal[
     "execution_capable",
     "security_critical",
 ]
+
 
 ProtectedAction = Literal[
     "file_write",
@@ -37,6 +40,7 @@ ProtectedAction = Literal[
     "git_operation",
     "tool_call",
 ]
+
 
 DEFAULT_INCLUDE_EXTENSIONS = {
     ".py",
@@ -54,6 +58,7 @@ DEFAULT_INCLUDE_EXTENSIONS = {
     ".ps1",
 }
 
+
 DEFAULT_EXCLUDED_DIRS = {
     ".git",
     ".pytest_cache",
@@ -68,6 +73,32 @@ DEFAULT_EXCLUDED_DIRS = {
     ".idea",
     ".vscode",
 }
+
+
+def _get_logger() -> logging.Logger:
+    try:
+        from app.core.logging import get_logger  # noqa: PLC0415
+
+        return get_logger("ironclaw.agent_registry")
+    except Exception:  # noqa: BLE001
+        return logging.getLogger("ironclaw.agent_registry")
+
+
+_logger: logging.Logger = _get_logger()
+
+
+# ---------------------------------------------------------------------------
+# Module-level re-export so tests can patch
+# 'app.orchestrator.agent_registry.get_behavioral_baseline_store'
+# ---------------------------------------------------------------------------
+try:
+    from app.services.behavioral_baseline import (  # noqa: PLC0415
+        get_behavioral_baseline_store,
+    )
+except Exception:  # noqa: BLE001
+
+    def get_behavioral_baseline_store():  # type: ignore[misc]
+        raise RuntimeError("behavioral_baseline service is not available")
 
 
 @dataclass
@@ -265,13 +296,19 @@ def _fetch_baseline_status(agent_id: str) -> str:
     is never blocked by baseline availability.
     """
     try:
-        from app.services.behavioral_baseline import get_behavioral_baseline_store
-
         baseline = get_behavioral_baseline_store().get_baseline(agent_id)
         if baseline is None:
             return "learning"
         return baseline.status
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning(
+            "agent_registry_baseline_fetch_failed",
+            extra={
+                "event": "agent_registry_baseline_fetch_failed",
+                "agent_id": agent_id,
+                "error": str(exc),
+            },
+        )
         return "unknown"
 
 

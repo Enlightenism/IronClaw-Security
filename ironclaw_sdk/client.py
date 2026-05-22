@@ -35,7 +35,8 @@ class IronclawClient:
         connect_timeout: float = _DEFAULT_CONNECT_TIMEOUT,
         read_timeout: float = _DEFAULT_READ_TIMEOUT,
     ) -> None:
-        resolved_key = api_key or os.environ.get("IRONCLAW_API_KEY", "")
+        raw_key = api_key if api_key is not None else os.environ.get("IRONCLAW_API_KEY", "")
+        resolved_key = raw_key.strip()
         if not resolved_key:
             raise IronclawAuthError(
                 status_code=401,

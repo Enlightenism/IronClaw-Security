@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import logging
 from typing import Any, Literal
 
 from app.orchestrator.agent_registry import AgentDescriptor, ProtectedAction
@@ -13,12 +14,14 @@ AgentRole = Literal[
     "documentation_observer",
 ]
 
+
 AutonomyLevel = Literal[
     "observe_only",
     "review_before_action",
     "restricted_execution",
     "isolated_quarantine_only",
 ]
+
 
 EscalationMode = Literal[
     "none",
@@ -27,6 +30,7 @@ EscalationMode = Literal[
     "automatic_quarantine",
 ]
 
+
 ProfileFocus = Literal[
     "code_integrity",
     "execution_safety",
@@ -34,6 +38,32 @@ ProfileFocus = Literal[
     "integration_control",
     "documentation_integrity",
 ]
+
+
+def _get_logger() -> logging.Logger:
+    try:
+        from app.core.logging import get_logger  # noqa: PLC0415
+
+        return get_logger("ironclaw.agent_profile")
+    except Exception:  # noqa: BLE001
+        return logging.getLogger("ironclaw.agent_profile")
+
+
+_logger: logging.Logger = _get_logger()
+
+
+# ---------------------------------------------------------------------------
+# Module-level re-export so tests can patch
+# 'app.orchestrator.agent_profile.get_behavioral_baseline_store'
+# ---------------------------------------------------------------------------
+try:
+    from app.services.behavioral_baseline import (  # noqa: PLC0415
+        get_behavioral_baseline_store,
+    )
+except Exception:  # noqa: BLE001
+
+    def get_behavioral_baseline_store():  # type: ignore[misc]
+        raise RuntimeError("behavioral_baseline service is not available")
 
 
 @dataclass
@@ -132,17 +162,22 @@ def _fetch_baseline_state(agent_id: str) -> tuple[str, str]:
     is never blocked by baseline availability.
     """
     try:
-        from app.services.behavioral_baseline import get_behavioral_baseline_store
-
         store = get_behavioral_baseline_store()
         baseline = store.get_baseline(agent_id)
         if baseline is None:
             return ("learning", "none")
 
-        # Compute a lightweight drift check without a full window scan
         report = store.compute_drift(agent_id)
         return (baseline.status, report.overall_severity)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning(
+            "agent_profile_baseline_fetch_failed",
+            extra={
+                "event": "agent_profile_baseline_fetch_failed",
+                "agent_id": agent_id,
+                "error": str(exc),
+            },
+        )
         return ("unknown", "none")
 
 
