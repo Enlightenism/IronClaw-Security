@@ -25,9 +25,11 @@ from app.schemas.threat_detection import (
 
 logger = logging.getLogger(__name__)
 
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+
 
 _MITRE_ATTACK_ENTERPRISE_URL = "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json"
 _CISA_KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
@@ -37,14 +39,17 @@ _MAX_FEED_HISTORY_SIZE = 200
 _IOC_ID_PREFIX = "ioc-"
 _INGEST_ID_PREFIX = "ingest-"
 
+
 # ---------------------------------------------------------------------------
 # Backwards-compatible aliases — keep existing callers working
 # ---------------------------------------------------------------------------
+
 
 ThreatFeedSource = ThreatFeedSourceEnum
 IOCType = IOCTypeEnum
 ThreatSeverity = ThreatSeverityLevel
 IngestStatus = IngestStatusEnum
+
 
 # ---------------------------------------------------------------------------
 # IOC record
@@ -947,6 +952,10 @@ class ThreatFeedIngestionService:
             self._ingest_history.clear()
 
 
+# ---------------------------------------------------------------------------
+# Module-level singleton
+# ---------------------------------------------------------------------------
+
 _THREAT_FEED_SERVICE = ThreatFeedIngestionService()
 
 
@@ -958,6 +967,82 @@ def get_threat_feed_service() -> ThreatFeedIngestionService:
 def reset_threat_feed_service() -> None:
     """Clear all threat feed state. Intended for use in tests."""
     _THREAT_FEED_SERVICE.reset()
+
+
+# ---------------------------------------------------------------------------
+# run_feed_ingestion — dispatch adapter called by POST /threat/feeds/refresh
+# Signature: (source, org_id, force, custom_url) -> FeedIngestResult
+# ---------------------------------------------------------------------------
+
+_SUPPORTED_SOURCES = {
+    ThreatFeedSourceEnum.MITRE_ATTACK,
+    ThreatFeedSourceEnum.CISA_KEV,
+}
+
+
+def run_feed_ingestion(
+    source: ThreatFeedSourceEnum,
+    org_id: str | None,
+    force: bool,
+    custom_url: str | None,
+) -> FeedIngestResult:
+    """
+    Dispatch a single feed ingestion run for the given source.
+
+    Called exclusively by POST /threat/feeds/refresh.
+    Delegates to the singleton ThreatFeedIngestionService methods — no
+    duplicate ingestion logic lives here.
+
+    Args:
+        source:     Feed source enum value to ingest.
+        org_id:     Scoping org ID; None for global ingest.
+        force:      Reserved for future cache-bypass logic; accepted and
+                    logged but does not alter current ingestion behaviour
+                    (all runs are unconditional at this layer).
+        custom_url: Optional override URL for the feed endpoint.
+
+    Returns:
+        FeedIngestResult dataclass with counts and status.
+
+    Raises:
+        ValueError: If the source is not supported by this dispatcher.
+    """
+    svc = get_threat_feed_service()
+
+    logger.info(
+        "run_feed_ingestion source=%s org_id=%s force=%s custom_url=%s",
+        source,
+        org_id,
+        force,
+        custom_url,
+    )
+
+    if source == ThreatFeedSourceEnum.MITRE_ATTACK:
+        return svc.ingest_mitre_attack(org_id=org_id, url=custom_url or None)
+
+    if source == ThreatFeedSourceEnum.CISA_KEV:
+        return svc.ingest_cisa_kev(org_id=org_id, url=custom_url or None)
+
+    # Unsupported source — return a typed FAILED result rather than raising
+    # so the router's per-source loop can continue with remaining sources.
+    ingest_id = f"{_INGEST_ID_PREFIX}{uuid4().hex[:20]}"
+    now = _utcnow_iso()
+    source_val = source.value if hasattr(source, "value") else str(source)
+    logger.warning("run_feed_ingestion: unsupported source=%s", source_val)
+    return FeedIngestResult(
+        ingest_id=ingest_id,
+        source=source_val,
+        status=IngestStatusEnum.FAILED,
+        iocs_parsed=0,
+        iocs_inserted=0,
+        iocs_updated=0,
+        iocs_skipped=0,
+        errors=[f"Unsupported feed source: {source_val}"],
+        started_at=now,
+        completed_at=now,
+        org_id=org_id,
+        metadata={"force": force, "custom_url": custom_url},
+    )
 
 
 __all__ = [
@@ -976,4 +1061,5 @@ __all__ = [
     "ThreatSeverityLevel",
     "get_threat_feed_service",
     "reset_threat_feed_service",
+    "run_feed_ingestion",
 ]
