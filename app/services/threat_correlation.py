@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-# Pattern type labels
 _PATTERN_MULTI_IOC_COOCCURRENCE = "multi_ioc_cooccurrence"
 _PATTERN_ATTACK_CHAIN = "attack_chain"
 _PATTERN_TEMPORAL_CLUSTER = "temporal_cluster"
@@ -27,11 +26,8 @@ _PATTERN_MITRE_CHAIN = "mitre_chain"
 _PATTERN_HASH_CLUSTER = "hash_cluster"
 _PATTERN_C2_CLUSTER = "c2_cluster"
 
-# Minimum IOC matches to fire a cooccurrence signal
 _MIN_COOCCURRENCE_MATCHES = 2
 
-# Score contribution for each pattern — must stay within CorrelationSignal.score_contribution [0.0, 1.0]
-# Combined across all signals is capped at 0.20 by ThreatScoringEngine._score_signals()
 _PATTERN_SCORE: dict[str, float] = {
     _PATTERN_MULTI_IOC_COOCCURRENCE: 0.08,
     _PATTERN_ATTACK_CHAIN: 0.12,
@@ -42,10 +38,8 @@ _PATTERN_SCORE: dict[str, float] = {
     _PATTERN_C2_CLUSTER: 0.11,
 }
 
-# Tags that identify C2 activity
 _C2_TAGS: frozenset[str] = frozenset({"c2", "command-and-control"})
 
-# IOC types classified as file hashes
 _HASH_TYPES: frozenset[str] = frozenset(
     {
         IOCTypeEnum.SHA256,
@@ -54,7 +48,6 @@ _HASH_TYPES: frozenset[str] = frozenset(
     }
 )
 
-# Severity ordering for confidence derivation
 _SEV_ORDER: list[str] = [
     ThreatSeverityLevel.CRITICAL,
     ThreatSeverityLevel.HIGH,
@@ -117,7 +110,7 @@ def _mitre_ids(matches: list[IOCMatch]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Signal detectors — each returns a CorrelationSignal or None
+# Signal detectors
 # ---------------------------------------------------------------------------
 
 
@@ -133,7 +126,6 @@ def _detect_multi_ioc_cooccurrence(
     if len(distinct_types) < 2:
         return None
 
-    sev = _max_severity(matches)
     conf = min(_mean_confidence(matches) + 0.05, 1.0)
     score = _PATTERN_SCORE[_PATTERN_MULTI_IOC_COOCCURRENCE]
 
