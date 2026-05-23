@@ -160,6 +160,10 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (_optional_router("app.api.ui_data_retention"), {"dependencies": dependencies}),
         (_optional_router("app.api.webhooks"), {"dependencies": dependencies}),
         (_optional_router("app.api.onboarding"), {"dependencies": dependencies}),
+        (
+            _optional_router("app.routers.threat_detection"),
+            {"dependencies": dependencies},
+        ),
     ]
 
 
