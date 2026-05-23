@@ -14,6 +14,7 @@ from .backupservice import (
     default_backup_targets_from_env,
 )
 from .threat_detection_engine import ThreatDetectionEngine, get_detection_engine
+from .threat_hunt_service import ThreatHuntService, get_threat_hunt_service
 from .threat_scoring import ScoreResult, ThreatScoringEngine, get_scoring_engine
 
 __all__ = [
@@ -33,4 +34,6 @@ __all__ = [
     "get_scoring_engine",
     "ThreatDetectionEngine",
     "get_detection_engine",
+    "ThreatHuntService",
+    "get_threat_hunt_service",
 ]

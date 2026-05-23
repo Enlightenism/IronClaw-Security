@@ -78,6 +78,8 @@ class HuntStatusEnum(str, Enum):
 class DetectionRequest(BaseModel):
     """Unified detection request accepted by the threat detection engine."""
 
+    model_config = {"extra": "forbid"}
+
     event_id: str | None = Field(
         default=None,
         description="Caller-supplied event identifier for correlation. Generated if omitted.",
@@ -153,6 +155,8 @@ class DetectionRequest(BaseModel):
 class IOCMatch(BaseModel):
     """A single IOC that matched during detection."""
 
+    model_config = {"extra": "ignore"}
+
     ioc_id: str | None = Field(default=None, description="Store-assigned IOC identifier.")
     value: str
     ioc_type: str
@@ -180,6 +184,8 @@ class IOCMatch(BaseModel):
 class CorrelationSignal(BaseModel):
     """Represents a pattern or event chain surfaced by the correlation engine."""
 
+    model_config = {"extra": "ignore"}
+
     signal_id: str
     pattern_type: str = Field(
         description="e.g. 'multi_ioc_cooccurrence', 'attack_chain', 'temporal_cluster'",
@@ -202,6 +208,8 @@ class DetectionResult(BaseModel):
     Structured result returned by the threat detection engine.
     Consumed by: threat_alerts, action_guard, actionguard, incidents.
     """
+
+    model_config = {"extra": "ignore"}
 
     event_id: str
     org_id: str | None = None
@@ -233,6 +241,21 @@ class DetectionResult(BaseModel):
     def requires_block(self) -> bool:
         return self.verdict == DetectionVerdict.BLOCK
 
+    @property
+    def top_ioc(self) -> IOCMatch | None:
+        """Returns the highest-confidence IOC match, or None if no matches."""
+        if not self.ioc_matches:
+            return None
+        return max(self.ioc_matches, key=lambda m: m.confidence)
+
+    @property
+    def ioc_match_count(self) -> int:
+        return len(self.ioc_matches)
+
+    @property
+    def correlation_signal_count(self) -> int:
+        return len(self.correlation_signals)
+
 
 # ---------------------------------------------------------------------------
 # ThreatAlert — emitted by threat_alerts router / escalation bridge
@@ -244,6 +267,8 @@ class ThreatAlert(BaseModel):
     Structured alert emitted when a DetectionResult verdict is REVIEW or BLOCK.
     Bridges into incidents.py and notifications.py.
     """
+
+    model_config = {"extra": "ignore"}
 
     alert_id: str
     event_id: str
@@ -282,6 +307,8 @@ class HuntQuery(BaseModel):
     Retrospective threat hunt query submitted to threat_hunt_service.
     Supports IOC sweep, MITRE technique sweep, and temporal cluster queries.
     """
+
+    model_config = {"extra": "forbid"}
 
     hunt_id: str | None = Field(
         default=None,
@@ -343,6 +370,8 @@ class HuntQuery(BaseModel):
 
 
 class HuntMatch(BaseModel):
+    model_config = {"extra": "ignore"}
+
     event_id: str
     org_id: str | None = None
     agent_id: str | None = None
@@ -365,6 +394,8 @@ class HuntMatch(BaseModel):
 
 
 class HuntResult(BaseModel):
+    model_config = {"extra": "ignore"}
+
     hunt_id: str
     org_id: str | None = None
     status: HuntStatusEnum
@@ -383,6 +414,8 @@ class HuntResult(BaseModel):
 
 class IOCImportEntry(BaseModel):
     """Single IOC entry in a bulk import request."""
+
+    model_config = {"extra": "forbid"}
 
     value: str = Field(min_length=1)
     ioc_type: IOCTypeEnum | None = None
@@ -408,6 +441,8 @@ class IOCImportEntry(BaseModel):
 class IOCImportRequest(BaseModel):
     """Bulk IOC import payload for POST /threat/iocs."""
 
+    model_config = {"extra": "forbid"}
+
     org_id: str | None = None
     entries: list[IOCImportEntry] = Field(min_length=1)
     source_label: str | None = Field(
@@ -421,6 +456,8 @@ class IOCImportRequest(BaseModel):
 
 
 class IOCImportResult(BaseModel):
+    model_config = {"extra": "ignore"}
+
     ingest_id: str
     org_id: str | None = None
     iocs_submitted: int
@@ -439,6 +476,8 @@ class IOCImportResult(BaseModel):
 
 class FeedRefreshRequest(BaseModel):
     """Manually trigger a feed refresh for one or more sources."""
+
+    model_config = {"extra": "forbid"}
 
     sources: list[ThreatFeedSourceEnum] = Field(
         min_length=1,
@@ -464,6 +503,8 @@ class FeedRefreshRequest(BaseModel):
 class FeedRefreshResult(BaseModel):
     """Aggregated result of a feed refresh operation."""
 
+    model_config = {"extra": "ignore"}
+
     request_id: str
     org_id: str | None = None
     results: list[dict[str, Any]] = Field(
@@ -483,6 +524,8 @@ class FeedRefreshResult(BaseModel):
 
 
 class IOCFilterParams(BaseModel):
+    model_config = {"extra": "ignore"}
+
     source: ThreatFeedSourceEnum | None = None
     ioc_type: IOCTypeEnum | None = None
     severity: ThreatSeverityLevel | None = None
@@ -502,6 +545,8 @@ class IOCFilterParams(BaseModel):
 
 
 class IOCResponse(BaseModel):
+    model_config = {"extra": "ignore"}
+
     ioc_id: str
     ioc_type: str
     value: str
@@ -528,9 +573,12 @@ class IOCResponse(BaseModel):
 
 
 class DetectionSummary(BaseModel):
+    model_config = {"extra": "ignore"}
+
     event_id: str
     org_id: str | None = None
     agent_id: str | None = None
+    session_id: str | None = None
     verdict: DetectionVerdict
     score: float
     severity: ThreatSeverityLevel
