@@ -11,9 +11,6 @@ from app.schemas.threat_detection import (
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Re-export contracts so callers can import IOCRecord from here
-# ---------------------------------------------------------------------------
 from app.services.threat_feed_ingestion import (  # noqa: E402
     FeedIngestResult,
     IOCFilterRequest,
@@ -23,40 +20,22 @@ from app.services.threat_feed_ingestion import (  # noqa: E402
     _utcnow_iso,
 )
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 _MAX_BULK_UPSERT_BATCH = 500
 _TTL_PRUNE_BATCH = 1000
-
-# ---------------------------------------------------------------------------
-# Supabase table names — single source of truth
-# ---------------------------------------------------------------------------
 
 _TABLE_IOCS = "ioc_records"
 _TABLE_INGEST_LOG = "feed_ingest_log"
 
-# ---------------------------------------------------------------------------
-# Supabase client resolution
-# ---------------------------------------------------------------------------
 
-
-def _get_client():  # type: ignore[return]
-    """Return the project Supabase client.
-
-    Deferred import to avoid circular imports and allow the client module
-    to be located at app.clients.supabase or app.core.supabase depending on
-    the project layout actually present at runtime.
-    """
+def _get_client():
     try:
-        from app.clients.supabase import get_supabase_client  # type: ignore[import]
+        from app.clients.supabase import get_supabase_client
 
         return get_supabase_client()
     except ImportError:
         pass
     try:
-        from app.core.supabase import get_supabase_client  # type: ignore[import]
+        from app.core.supabase import get_supabase_client
 
         return get_supabase_client()
     except ImportError:
@@ -64,13 +43,7 @@ def _get_client():  # type: ignore[return]
     raise RuntimeError("ioc_store: cannot resolve Supabase client — " "expected get_supabase_client() at app.clients.supabase or app.core.supabase")
 
 
-# ---------------------------------------------------------------------------
-# Row ↔ IOCRecord conversion
-# ---------------------------------------------------------------------------
-
-
 def _record_to_row(record: IOCRecord) -> dict[str, Any]:
-    """Serialize IOCRecord to a Supabase-compatible row dict."""
     return {
         "ioc_id": record.ioc_id,
         "ioc_type": record.ioc_type,
@@ -94,14 +67,13 @@ def _record_to_row(record: IOCRecord) -> dict[str, Any]:
 
 
 def _row_to_record(row: dict[str, Any]) -> IOCRecord:
-    """Deserialize a Supabase row dict into an IOCRecord."""
     tags = row.get("tags") or []
     if isinstance(tags, str):
         import json as _json
 
         try:
             tags = _json.loads(tags)
-        except Exception:  # noqa: BLE001
+        except Exception:
             tags = [t.strip() for t in tags.split(",") if t.strip()]
 
     extra = row.get("extra") or {}
@@ -110,7 +82,7 @@ def _row_to_record(row: dict[str, Any]) -> IOCRecord:
 
         try:
             extra = _json.loads(extra)
-        except Exception:  # noqa: BLE001
+        except Exception:
             extra = {}
 
     return IOCRecord(
@@ -152,86 +124,72 @@ def _ingest_result_to_row(result: FeedIngestResult) -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------
-# IOCStore — Supabase-backed persistent IOC store
-# ---------------------------------------------------------------------------
+def _parse_tags(raw: Any) -> list[str]:
+    if isinstance(raw, list):
+        return [str(t) for t in raw]
+    if isinstance(raw, str):
+        import json as _j
+
+        try:
+            parsed = _j.loads(raw)
+            if isinstance(parsed, list):
+                return [str(t) for t in parsed]
+        except Exception:
+            pass
+        return [t.strip() for t in raw.split(",") if t.strip()]
+    return []
+
+
+def _parse_extra(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        import json as _j
+
+        try:
+            parsed = _j.loads(raw)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+    return {}
+
+
+def _merge_record_update(existing: dict[str, Any], record: IOCRecord) -> dict[str, Any]:
+    merged_confidence = max(float(existing.get("confidence", 0.0)), record.confidence)
+    merged_tags = list(set(_parse_tags(existing.get("tags"))) | set(record.tags))
+    merged_description = record.description if record.description else existing.get("description", "")
+    merged_extra = {**_parse_extra(existing.get("extra")), **record.extra}
+    return {
+        "severity": record.severity,
+        "confidence": merged_confidence,
+        "tags": merged_tags,
+        "description": merged_description,
+        "last_seen": record.last_seen,
+        "expiry": record.expiry or existing.get("expiry"),
+        "active": True,
+        "feed_ingest_id": record.feed_ingest_id,
+        "extra": merged_extra,
+    }
 
 
 class IOCStore:
-    """
-    Supabase-backed persistent IOC store for IronClaw.
-
-    Replaces the bounded in-memory deque in ThreatFeedIngestionService.
-    Provides full CRUD, bulk upsert with deduplication by ioc_id fingerprint,
-    TTL expiry pruning, ingest log persistence, and rich filtering.
-
-    All upper services (threat_detection_engine, threat_correlation,
-    threat_hunt_service, stix_adapter, threat_feed_scheduler) depend on this
-    class as their single IOC persistence interface.
-
-    This store does NOT own parsing logic — it only persists and queries records
-    produced by ThreatFeedIngestionService parsers and the STIX adapter.
-    """
-
-    # ------------------------------------------------------------------
-    # Upsert — single record
-    # ------------------------------------------------------------------
-
     def upsert_ioc(self, record: IOCRecord) -> bool:
-        """
-        Upsert a single IOCRecord.
-
-        On conflict (ioc_id): updates severity, confidence (max), tags (union),
-        description (if non-empty), last_seen, expiry, feed_ingest_id, extra (merge).
-
-        Returns True on success, False on error.
-        """
         try:
             client = _get_client()
-            existing_resp = client.table(_TABLE_IOCS).select("ioc_id,confidence,tags,description,extra").eq("ioc_id", record.ioc_id).maybe_single().execute()
+            table = client.table(_TABLE_IOCS)
+            existing_resp = table.select("ioc_id,confidence,tags,description,extra,expiry").eq("ioc_id", record.ioc_id).maybe_single().execute()
             existing = existing_resp.data if existing_resp else None
 
             if existing:
-                merged_confidence = max(float(existing.get("confidence", 0.0)), record.confidence)
-                existing_tags: list[str] = existing.get("tags") or []
-                if isinstance(existing_tags, str):
-                    existing_tags = [t.strip() for t in existing_tags.split(",") if t.strip()]
-                merged_tags = list(set(existing_tags) | set(record.tags))
-                merged_description = record.description if record.description else existing.get("description", "")
-                existing_extra: dict[str, Any] = existing.get("extra") or {}
-                if isinstance(existing_extra, str):
-                    import json as _j
-
-                    try:
-                        existing_extra = _j.loads(existing_extra)
-                    except Exception:  # noqa: BLE001
-                        existing_extra = {}
-                merged_extra = {**existing_extra, **record.extra}
-
-                client.table(_TABLE_IOCS).update(
-                    {
-                        "severity": record.severity,
-                        "confidence": merged_confidence,
-                        "tags": merged_tags,
-                        "description": merged_description,
-                        "last_seen": record.last_seen,
-                        "expiry": record.expiry or existing.get("expiry"),
-                        "active": True,
-                        "feed_ingest_id": record.feed_ingest_id,
-                        "extra": merged_extra,
-                    }
-                ).eq("ioc_id", record.ioc_id).execute()
+                table.update(_merge_record_update(existing, record)).eq("ioc_id", record.ioc_id).execute()
             else:
-                client.table(_TABLE_IOCS).insert(_record_to_row(record)).execute()
+                table.insert(_record_to_row(record)).execute()
 
             return True
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("ioc_store.upsert_ioc.error ioc_id=%s: %s", record.ioc_id, exc)
             return False
-
-    # ------------------------------------------------------------------
-    # Bulk upsert — batched for feed ingestion
-    # ------------------------------------------------------------------
 
     def bulk_upsert(
         self,
@@ -239,19 +197,9 @@ class IOCStore:
         *,
         overwrite: bool = False,
     ) -> tuple[int, int, int]:
-        """
-        Bulk upsert a list of IOCRecords in batches.
-
-        Deduplicates by ioc_id before hitting the database.
-        When overwrite=False, existing records are updated with merge semantics.
-        When overwrite=True, the incoming record fully replaces the existing row.
-
-        Returns (inserted, updated, skipped) counts.
-        """
         if not records:
             return 0, 0, 0
 
-        # Deduplicate within the incoming batch — keep last occurrence per ioc_id
         deduped: dict[str, IOCRecord] = {}
         for r in records:
             deduped[r.ioc_id] = r
@@ -265,7 +213,8 @@ class IOCStore:
 
             try:
                 client = _get_client()
-                existing_resp = client.table(_TABLE_IOCS).select("ioc_id,confidence,tags,description,extra,expiry").in_("ioc_id", ioc_ids).execute()
+                table = client.table(_TABLE_IOCS)
+                existing_resp = table.select("ioc_id,confidence,tags,description,extra,expiry").in_("ioc_id", ioc_ids).execute()
                 existing_map: dict[str, dict[str, Any]] = {}
                 if existing_resp and existing_resp.data:
                     for row in existing_resp.data:
@@ -279,55 +228,24 @@ class IOCStore:
                         if overwrite:
                             rows_to_update.append((record.ioc_id, _record_to_row(record)))
                         else:
-                            ex = existing_map[record.ioc_id]
-                            merged_confidence = max(float(ex.get("confidence", 0.0)), record.confidence)
-                            ex_tags: list[str] = ex.get("tags") or []
-                            if isinstance(ex_tags, str):
-                                ex_tags = [t.strip() for t in ex_tags.split(",") if t.strip()]
-                            merged_tags = list(set(ex_tags) | set(record.tags))
-                            merged_desc = record.description if record.description else ex.get("description", "")
-                            ex_extra: dict[str, Any] = ex.get("extra") or {}
-                            if isinstance(ex_extra, str):
-                                import json as _j
-
-                                try:
-                                    ex_extra = _j.loads(ex_extra)
-                                except Exception:  # noqa: BLE001
-                                    ex_extra = {}
-                            merged_extra = {**ex_extra, **record.extra}
-                            rows_to_update.append(
-                                (
-                                    record.ioc_id,
-                                    {
-                                        "severity": record.severity,
-                                        "confidence": merged_confidence,
-                                        "tags": merged_tags,
-                                        "description": merged_desc,
-                                        "last_seen": record.last_seen,
-                                        "expiry": record.expiry or ex.get("expiry"),
-                                        "active": True,
-                                        "feed_ingest_id": record.feed_ingest_id,
-                                        "extra": merged_extra,
-                                    },
-                                )
-                            )
+                            rows_to_update.append((record.ioc_id, _merge_record_update(existing_map[record.ioc_id], record)))
                         updated += 1
                     else:
                         rows_to_insert.append(_record_to_row(record))
                         inserted += 1
 
                 if rows_to_insert:
-                    client.table(_TABLE_IOCS).insert(rows_to_insert).execute()
+                    table.insert(rows_to_insert).execute()
 
                 for ioc_id, update_payload in rows_to_update:
                     try:
-                        client.table(_TABLE_IOCS).update(update_payload).eq("ioc_id", ioc_id).execute()
-                    except Exception as exc:  # noqa: BLE001
+                        table.update(update_payload).eq("ioc_id", ioc_id).execute()
+                    except Exception as exc:
                         logger.error("ioc_store.bulk_upsert.update_error ioc_id=%s: %s", ioc_id, exc)
                         updated -= 1
                         skipped += 1
 
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.error("ioc_store.bulk_upsert.batch_error batch_start=%d: %s", batch_start, exc)
                 skipped += len(batch)
                 inserted -= sum(1 for r in batch if r.ioc_id not in existing_map)
@@ -341,10 +259,6 @@ class IOCStore:
         )
         return inserted, updated, skipped
 
-    # ------------------------------------------------------------------
-    # Fetch single
-    # ------------------------------------------------------------------
-
     def get_ioc(self, ioc_id: str) -> IOCRecord | None:
         try:
             client = _get_client()
@@ -352,13 +266,9 @@ class IOCStore:
             if resp and resp.data:
                 return _row_to_record(resp.data)
             return None
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("ioc_store.get_ioc.error ioc_id=%s: %s", ioc_id, exc)
             return None
-
-    # ------------------------------------------------------------------
-    # Lookup by value — primary hot path for detection engine
-    # ------------------------------------------------------------------
 
     def lookup_by_value(
         self,
@@ -380,13 +290,9 @@ class IOCStore:
             if resp and resp.data:
                 return [_row_to_record(r) for r in resp.data]
             return []
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("ioc_store.lookup_by_value.error value=%s: %s", normalized, exc)
             return []
-
-    # ------------------------------------------------------------------
-    # Lookup by CVE
-    # ------------------------------------------------------------------
 
     def lookup_by_cve(
         self,
@@ -407,13 +313,9 @@ class IOCStore:
             if resp and resp.data:
                 return [_row_to_record(r) for r in resp.data]
             return []
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("ioc_store.lookup_by_cve.error cve_id=%s: %s", normalized, exc)
             return []
-
-    # ------------------------------------------------------------------
-    # Lookup by MITRE technique
-    # ------------------------------------------------------------------
 
     def lookup_by_mitre_technique(
         self,
@@ -434,13 +336,9 @@ class IOCStore:
             if resp and resp.data:
                 return [_row_to_record(r) for r in resp.data]
             return []
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("ioc_store.lookup_by_mitre_technique.error technique=%s: %s", normalized, exc)
             return []
-
-    # ------------------------------------------------------------------
-    # Lookup by multiple values — batch detection hot path
-    # ------------------------------------------------------------------
 
     def lookup_by_values(
         self,
@@ -466,13 +364,9 @@ class IOCStore:
             if resp and resp.data:
                 return [_row_to_record(r) for r in resp.data]
             return []
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("ioc_store.lookup_by_values.error count=%d: %s", len(values), exc)
             return []
-
-    # ------------------------------------------------------------------
-    # Filter — structured query matching IOCFilterRequest contract
-    # ------------------------------------------------------------------
 
     def filter_iocs(self, req: IOCFilterRequest) -> list[IOCRecord]:
         try:
@@ -504,13 +398,9 @@ class IOCStore:
             if resp and resp.data:
                 return [_row_to_record(r) for r in resp.data]
             return []
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("ioc_store.filter_iocs.error: %s", exc)
             return []
-
-    # ------------------------------------------------------------------
-    # Deactivate — soft-disable without deleting
-    # ------------------------------------------------------------------
 
     def deactivate_ioc(self, ioc_id: str) -> bool:
         try:
@@ -520,13 +410,9 @@ class IOCStore:
                 logger.info("ioc_store.deactivate_ioc ioc_id=%s", ioc_id)
                 return True
             return False
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("ioc_store.deactivate_ioc.error ioc_id=%s: %s", ioc_id, exc)
             return False
-
-    # ------------------------------------------------------------------
-    # Hard delete
-    # ------------------------------------------------------------------
 
     def delete_ioc(self, ioc_id: str) -> bool:
         try:
@@ -536,13 +422,9 @@ class IOCStore:
                 logger.info("ioc_store.delete_ioc ioc_id=%s", ioc_id)
                 return True
             return False
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("ioc_store.delete_ioc.error ioc_id=%s: %s", ioc_id, exc)
             return False
-
-    # ------------------------------------------------------------------
-    # Bulk delete by ingest_id — used to purge a bad feed batch
-    # ------------------------------------------------------------------
 
     def delete_by_ingest_id(self, feed_ingest_id: str) -> int:
         try:
@@ -551,20 +433,11 @@ class IOCStore:
             count = len(resp.data) if resp and resp.data else 0
             logger.info("ioc_store.delete_by_ingest_id ingest_id=%s deleted=%d", feed_ingest_id, count)
             return count
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("ioc_store.delete_by_ingest_id.error ingest_id=%s: %s", feed_ingest_id, exc)
             return 0
 
-    # ------------------------------------------------------------------
-    # TTL expiry pruning — callable by scheduler
-    # ------------------------------------------------------------------
-
     def prune_expired(self) -> int:
-        """
-        Deactivate all IOCs whose expiry timestamp is in the past.
-        Called by threat_feed_scheduler on its maintenance cycle.
-        Returns count of records deactivated.
-        """
         now_iso = _utcnow_iso()
         try:
             client = _get_client()
@@ -573,13 +446,9 @@ class IOCStore:
             if count:
                 logger.info("ioc_store.prune_expired deactivated=%d", count)
             return count
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("ioc_store.prune_expired.error: %s", exc)
             return 0
-
-    # ------------------------------------------------------------------
-    # Count helpers
-    # ------------------------------------------------------------------
 
     def count_iocs(
         self,
@@ -599,20 +468,16 @@ class IOCStore:
                 q = q.or_(f"org_id.eq.{org_id},org_id.is.null")
             resp = q.execute()
             return resp.count if resp and resp.count is not None else 0
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("ioc_store.count_iocs.error: %s", exc)
             return 0
-
-    # ------------------------------------------------------------------
-    # Ingest log persistence — persists FeedIngestResult to Supabase
-    # ------------------------------------------------------------------
 
     def persist_ingest_result(self, result: FeedIngestResult) -> bool:
         try:
             client = _get_client()
             client.table(_TABLE_INGEST_LOG).insert(_ingest_result_to_row(result)).execute()
             return True
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("ioc_store.persist_ingest_result.error ingest_id=%s: %s", result.ingest_id, exc)
             return False
 
@@ -621,7 +486,7 @@ class IOCStore:
             client = _get_client()
             resp = client.table(_TABLE_INGEST_LOG).select("*").eq("ingest_id", ingest_id).maybe_single().execute()
             return resp.data if resp and resp.data else None
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("ioc_store.get_ingest_result.error ingest_id=%s: %s", ingest_id, exc)
             return None
 
@@ -643,7 +508,7 @@ class IOCStore:
             q = q.range(offset, offset + limit - 1)
             resp = q.execute()
             return resp.data if resp and resp.data else []
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("ioc_store.list_ingest_history.error: %s", exc)
             return []
 
@@ -652,42 +517,28 @@ class IOCStore:
             client = _get_client()
             client.table(_TABLE_INGEST_LOG).delete().eq("ingest_id", ingest_id).execute()
             return True
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("ioc_store.delete_ingest_log.error ingest_id=%s: %s", ingest_id, exc)
             return False
-
-    # ------------------------------------------------------------------
-    # Health check
-    # ------------------------------------------------------------------
 
     def health_check(self) -> dict[str, Any]:
         try:
             client = _get_client()
             resp = client.table(_TABLE_IOCS).select("ioc_id", count="exact").limit(1).execute()
             return {"status": "ok", "ioc_count": resp.count if resp else 0}
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return {"status": "error", "detail": str(exc)}
 
-
-# ---------------------------------------------------------------------------
-# Module-level singleton
-# ---------------------------------------------------------------------------
 
 _IOC_STORE: IOCStore | None = None
 
 
 def get_ioc_store() -> IOCStore:
-    """Return the module-level IOCStore singleton."""
     global _IOC_STORE  # noqa: PLW0603
     if _IOC_STORE is None:
         _IOC_STORE = IOCStore()
     return _IOC_STORE
 
-
-# ---------------------------------------------------------------------------
-# SQL migration helper — emits the DDL for the two required tables.
-# Apply via Supabase dashboard or apply_migration tool.
-# ---------------------------------------------------------------------------
 
 IOC_STORE_MIGRATION_SQL = """
 -- ============================================================
