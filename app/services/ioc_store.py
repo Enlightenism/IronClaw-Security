@@ -211,6 +211,8 @@ class IOCStore:
             batch = unique_records[batch_start : batch_start + _MAX_BULK_UPSERT_BATCH]
             ioc_ids = [r.ioc_id for r in batch]
             existing_map: dict[str, dict[str, Any]] = {}
+            batch_inserted = 0
+            batch_updated = 0
 
             try:
                 client = _get_client()
@@ -230,9 +232,11 @@ class IOCStore:
                         else:
                             rows_to_update.append((record.ioc_id, _merge_record_update(existing_map[record.ioc_id], record)))
                         updated += 1
+                        batch_updated += 1
                     else:
                         rows_to_insert.append(_record_to_row(record))
                         inserted += 1
+                        batch_inserted += 1
 
                 if rows_to_insert:
                     table.insert(rows_to_insert).execute()
@@ -247,6 +251,8 @@ class IOCStore:
 
             except Exception as exc:
                 logger.error("ioc_store.bulk_upsert.batch_error batch_start=%d: %s", batch_start, exc)
+                inserted -= batch_inserted
+                updated -= batch_updated
                 skipped += len(batch)
 
         logger.info(
@@ -539,7 +545,10 @@ class IOCStore:
             client = _get_client()
             table = client.table(_TABLE_IOCS)
             resp = table.select("ioc_id", count="exact").limit(1).execute()
-            return {"status": "ok", "ioc_count": resp.count if resp and resp.count is not None else 0}
+            return {
+                "status": "ok",
+                "ioc_count": resp.count if resp and resp.count is not None else 0,
+            }
         except Exception as exc:
             return {"status": "error", "detail": str(exc)}
 
