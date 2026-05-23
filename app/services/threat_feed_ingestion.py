@@ -38,6 +38,7 @@ _MAX_FEED_HISTORY_SIZE = 200
 _IOC_ID_PREFIX = "ioc-"
 _INGEST_ID_PREFIX = "ingest-"
 
+
 # ---------------------------------------------------------------------------
 # Backwards-compatible aliases — keep existing callers working
 # ---------------------------------------------------------------------------
@@ -579,9 +580,11 @@ class ThreatFeedIngestionService:
     - Fetch and parse CISA Known Exploited Vulnerabilities (KEV) catalog.
     - Ingest custom IOC lists via JSON array or CSV upload.
     - Deduplicate IOCs by deterministic ioc_id (sha256 of source:value).
-    - Store IOCs in a bounded in-memory store (thread-safe, LRU-eviction when full).
-    - Maintain per-ingest result history.
-    - Provide lookup, filtering, enrichment query, and deactivation APIs.
+    - Persist IOCs to Supabase via IOCStore (source of truth).
+    - Maintain an optional bounded in-memory hot-cache for sub-millisecond lookups.
+    - Maintain per-ingest result history in-memory and persist to Supabase.
+    - Provide lookup, filtering, enrichment query, and deactivation APIs
+      delegated to IOCStore as the authoritative backing store.
 
     Enum contracts are owned by app.schemas.threat_detection.
     """
@@ -596,13 +599,25 @@ class ThreatFeedIngestionService:
         cisa_kev_url: str = _CISA_KEV_URL,
     ) -> None:
         self._lock = threading.Lock()
+        # Hot-cache layer — optional, Supabase is source of truth
         self._iocs: dict[str, IOCRecord] = {}
         self._ioc_order: deque[str] = deque()
         self._max_ioc_store = max_ioc_store
+        # In-memory ingest history — also persisted to Supabase
         self._ingest_history: deque[FeedIngestResult] = deque(maxlen=max_feed_history)
         self._fetch_timeout = fetch_timeout
         self._mitre_url = mitre_url
         self._cisa_kev_url = cisa_kev_url
+
+    # ------------------------------------------------------------------
+    # IOCStore accessor — deferred import to avoid circular dependency
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _store():
+        from app.services.ioc_store import get_ioc_store  # noqa: PLC0415
+
+        return get_ioc_store()
 
     # ------------------------------------------------------------------
     # MITRE ATT&CK ingestion
@@ -797,20 +812,20 @@ class ThreatFeedIngestionService:
         return result
 
     # ------------------------------------------------------------------
-    # IOC upsert
+    # IOC upsert — Supabase is source of truth; hot-cache is secondary
     # ------------------------------------------------------------------
 
     def _upsert_iocs(self, records: list[IOCRecord]) -> tuple[int, int, int]:
-        inserted = 0
-        updated = 0
-        skipped = 0
+        # Persist to Supabase via IOCStore (source of truth)
+        inserted, updated, skipped = self._store().bulk_upsert(records)
 
+        # Populate hot-cache with the same records
         with self._lock:
             for record in records:
                 ioc_id = record.ioc_id
                 if ioc_id in self._iocs:
                     existing = self._iocs[ioc_id]
-                    updated_record = IOCRecord(
+                    self._iocs[ioc_id] = IOCRecord(
                         ioc_id=existing.ioc_id,
                         ioc_type=existing.ioc_type,
                         value=existing.value,
@@ -830,128 +845,89 @@ class ThreatFeedIngestionService:
                         feed_ingest_id=record.feed_ingest_id,
                         extra={**existing.extra, **record.extra},
                     )
-                    self._iocs[ioc_id] = updated_record
-                    updated += 1
                 else:
                     if len(self._iocs) >= self._max_ioc_store:
                         oldest_id = self._ioc_order.popleft()
                         self._iocs.pop(oldest_id, None)
-
-                    self._iocs[ioc_id] = record
-                    self._ioc_order.append(ioc_id)
-                    inserted += 1
+                    self._iocs[record.ioc_id] = record
+                    self._ioc_order.append(record.ioc_id)
 
         return inserted, updated, skipped
 
     # ------------------------------------------------------------------
-    # Query API
+    # Query API — delegates to IOCStore (Supabase source of truth)
+    # Hot-cache is checked first for get_ioc and lookup_by_value to
+    # reduce Supabase round-trips on the detection hot path.
     # ------------------------------------------------------------------
 
     def get_ioc(self, ioc_id: str) -> IOCRecord | None:
+        # Check hot-cache first
         with self._lock:
-            return self._iocs.get(ioc_id)
+            cached = self._iocs.get(ioc_id)
+        if cached is not None:
+            return cached
+        # Fall through to Supabase
+        return self._store().get_ioc(ioc_id)
 
     def lookup_by_value(self, value: str, *, org_id: str | None = None) -> list[IOCRecord]:
-        ioc_type = _detect_ioc_type(value)
-        normalized = _normalize_value(value, ioc_type)
-        with self._lock:
-            results = [r for r in self._iocs.values() if r.value == normalized and r.active and (org_id is None or r.org_id is None or r.org_id == org_id)]
-        return results
+        return self._store().lookup_by_value(value, org_id=org_id, active_only=True)
 
     def lookup_by_cve(self, cve_id: str, *, org_id: str | None = None) -> list[IOCRecord]:
-        normalized = cve_id.strip().upper()
-        with self._lock:
-            results = [r for r in self._iocs.values() if r.cve_id == normalized and r.active and (org_id is None or r.org_id is None or r.org_id == org_id)]
-        return results
+        return self._store().lookup_by_cve(cve_id, org_id=org_id, active_only=True)
 
     def lookup_by_mitre_technique(self, technique_id: str, *, org_id: str | None = None) -> list[IOCRecord]:
-        normalized = technique_id.strip().upper()
-        with self._lock:
-            results = [r for r in self._iocs.values() if r.mitre_technique_id == normalized and r.active and (org_id is None or r.org_id is None or r.org_id == org_id)]
-        return results
+        return self._store().lookup_by_mitre_technique(technique_id, org_id=org_id, active_only=True)
 
     def filter_iocs(self, req: IOCFilterRequest) -> list[IOCRecord]:
-        with self._lock:
-            records = list(self._iocs.values())
-
-        if req.source is not None:
-            records = [r for r in records if r.source == req.source]
-        if req.ioc_type is not None:
-            records = [r for r in records if r.ioc_type == req.ioc_type]
-        if req.severity is not None:
-            records = [r for r in records if r.severity == req.severity]
-        if req.org_id is not None:
-            records = [r for r in records if r.org_id is None or r.org_id == req.org_id]
-        if req.active is not None:
-            records = [r for r in records if r.active == req.active]
-        if req.tag is not None:
-            records = [r for r in records if req.tag in r.tags]
-        if req.mitre_technique_id is not None:
-            records = [r for r in records if r.mitre_technique_id == req.mitre_technique_id]
-        if req.cve_id is not None:
-            records = [r for r in records if r.cve_id == req.cve_id]
-        if req.value_contains is not None:
-            needle = req.value_contains.lower()
-            records = [r for r in records if needle in r.value.lower()]
-
-        return records[req.offset : req.offset + req.limit]
+        return self._store().filter_iocs(req)
 
     def deactivate_ioc(self, ioc_id: str) -> bool:
+        # Evict from hot-cache
         with self._lock:
-            record = self._iocs.get(ioc_id)
-            if record is None:
-                return False
-            self._iocs[ioc_id] = IOCRecord(
-                ioc_id=record.ioc_id,
-                ioc_type=record.ioc_type,
-                value=record.value,
-                source=record.source,
-                severity=record.severity,
-                confidence=record.confidence,
-                tags=record.tags,
-                description=record.description,
-                org_id=record.org_id,
-                mitre_technique_id=record.mitre_technique_id,
-                mitre_tactic=record.mitre_tactic,
-                cve_id=record.cve_id,
-                first_seen=record.first_seen,
-                last_seen=_utcnow_iso(),
-                expiry=record.expiry,
-                active=False,
-                feed_ingest_id=record.feed_ingest_id,
-                extra=record.extra,
-            )
-        logger.info("threat_feed.ioc.deactivated ioc_id=%s", ioc_id)
-        return True
+            if ioc_id in self._iocs:
+                try:
+                    self._ioc_order.remove(ioc_id)
+                except ValueError:
+                    pass
+                del self._iocs[ioc_id]
+        result = self._store().deactivate_ioc(ioc_id)
+        if result:
+            logger.info("threat_feed.ioc.deactivated ioc_id=%s", ioc_id)
+        return result
 
     def delete_ioc(self, ioc_id: str) -> bool:
+        # Evict from hot-cache
         with self._lock:
-            if ioc_id not in self._iocs:
-                return False
-            del self._iocs[ioc_id]
-            try:
-                self._ioc_order.remove(ioc_id)
-            except ValueError:
-                pass
-        logger.info("threat_feed.ioc.deleted ioc_id=%s", ioc_id)
-        return True
+            if ioc_id in self._iocs:
+                try:
+                    self._ioc_order.remove(ioc_id)
+                except ValueError:
+                    pass
+                del self._iocs[ioc_id]
+        result = self._store().delete_ioc(ioc_id)
+        if result:
+            logger.info("threat_feed.ioc.deleted ioc_id=%s", ioc_id)
+        return result
 
     def count_iocs(self, *, source: str | None = None, active: bool | None = None) -> int:
-        with self._lock:
-            records = list(self._iocs.values())
-        if source is not None:
-            records = [r for r in records if r.source == source]
-        if active is not None:
-            records = [r for r in records if r.active == active]
-        return len(records)
+        return self._store().count_iocs(source=source, active=active)
 
     # ------------------------------------------------------------------
-    # Ingest history
+    # Ingest history — persisted to Supabase, mirrored in-memory
     # ------------------------------------------------------------------
 
     def _record_ingest(self, result: FeedIngestResult) -> None:
         with self._lock:
             self._ingest_history.append(result)
+        # Persist to Supabase feed_ingest_log table
+        try:
+            self._store().persist_ingest_result(result)
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "threat_feed._record_ingest.persist_error ingest_id=%s: %s",
+                result.ingest_id,
+                exc,
+            )
 
     def list_ingest_history(
         self,
@@ -959,6 +935,9 @@ class ThreatFeedIngestionService:
         source: str | None = None,
         limit: int = 50,
     ) -> list[FeedIngestResult]:
+        # Serve from in-memory history — authoritative for current process lifetime.
+        # For cross-process or persistent history, callers should use
+        # get_ioc_store().list_ingest_history() directly.
         with self._lock:
             items = list(self._ingest_history)
         if source is not None:
@@ -999,7 +978,12 @@ class ThreatFeedIngestionService:
             metadata={},
         )
         self._record_ingest(result)
-        logger.error("threat_feed.ingest.failed source=%s ingest_id=%s error=%s", source, ingest_id, error)
+        logger.error(
+            "threat_feed.ingest.failed source=%s ingest_id=%s error=%s",
+            source,
+            ingest_id,
+            error,
+        )
         return result
 
     # ------------------------------------------------------------------
