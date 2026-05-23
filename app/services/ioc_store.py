@@ -210,12 +210,12 @@ class IOCStore:
         for batch_start in range(0, len(unique_records), _MAX_BULK_UPSERT_BATCH):
             batch = unique_records[batch_start : batch_start + _MAX_BULK_UPSERT_BATCH]
             ioc_ids = [r.ioc_id for r in batch]
+            existing_map: dict[str, dict[str, Any]] = {}
 
             try:
                 client = _get_client()
                 table = client.table(_TABLE_IOCS)
                 existing_resp = table.select("ioc_id,confidence,tags,description,extra,expiry").in_("ioc_id", ioc_ids).execute()
-                existing_map: dict[str, dict[str, Any]] = {}
                 if existing_resp and existing_resp.data:
                     for row in existing_resp.data:
                         existing_map[row["ioc_id"]] = row
@@ -248,8 +248,6 @@ class IOCStore:
             except Exception as exc:
                 logger.error("ioc_store.bulk_upsert.batch_error batch_start=%d: %s", batch_start, exc)
                 skipped += len(batch)
-                inserted -= sum(1 for r in batch if r.ioc_id not in existing_map)
-                updated -= sum(1 for r in batch if r.ioc_id in existing_map)
 
         logger.info(
             "ioc_store.bulk_upsert.done inserted=%d updated=%d skipped=%d",
@@ -262,7 +260,8 @@ class IOCStore:
     def get_ioc(self, ioc_id: str) -> IOCRecord | None:
         try:
             client = _get_client()
-            resp = client.table(_TABLE_IOCS).select("*").eq("ioc_id", ioc_id).maybe_single().execute()
+            table = client.table(_TABLE_IOCS)
+            resp = table.select("*").eq("ioc_id", ioc_id).maybe_single().execute()
             if resp and resp.data:
                 return _row_to_record(resp.data)
             return None
@@ -281,7 +280,8 @@ class IOCStore:
         normalized = _normalize_value(value, ioc_type)
         try:
             client = _get_client()
-            q = client.table(_TABLE_IOCS).select("*").eq("value", normalized)
+            table = client.table(_TABLE_IOCS)
+            q = table.select("*").eq("value", normalized)
             if active_only:
                 q = q.eq("active", True)
             if org_id is not None:
@@ -304,7 +304,8 @@ class IOCStore:
         normalized = cve_id.strip().upper()
         try:
             client = _get_client()
-            q = client.table(_TABLE_IOCS).select("*").eq("cve_id", normalized)
+            table = client.table(_TABLE_IOCS)
+            q = table.select("*").eq("cve_id", normalized)
             if active_only:
                 q = q.eq("active", True)
             if org_id is not None:
@@ -327,7 +328,8 @@ class IOCStore:
         normalized = technique_id.strip().upper()
         try:
             client = _get_client()
-            q = client.table(_TABLE_IOCS).select("*").eq("mitre_technique_id", normalized)
+            table = client.table(_TABLE_IOCS)
+            q = table.select("*").eq("mitre_technique_id", normalized)
             if active_only:
                 q = q.eq("active", True)
             if org_id is not None:
@@ -355,7 +357,8 @@ class IOCStore:
             normalized_values.append(_normalize_value(v, ioc_type))
         try:
             client = _get_client()
-            q = client.table(_TABLE_IOCS).select("*").in_("value", normalized_values)
+            table = client.table(_TABLE_IOCS)
+            q = table.select("*").in_("value", normalized_values)
             if active_only:
                 q = q.eq("active", True)
             if org_id is not None:
@@ -371,7 +374,8 @@ class IOCStore:
     def filter_iocs(self, req: IOCFilterRequest) -> list[IOCRecord]:
         try:
             client = _get_client()
-            q = client.table(_TABLE_IOCS).select("*")
+            table = client.table(_TABLE_IOCS)
+            q = table.select("*")
 
             if req.source is not None:
                 q = q.eq("source", req.source)
@@ -405,7 +409,8 @@ class IOCStore:
     def deactivate_ioc(self, ioc_id: str) -> bool:
         try:
             client = _get_client()
-            resp = client.table(_TABLE_IOCS).update({"active": False, "last_seen": _utcnow_iso()}).eq("ioc_id", ioc_id).execute()
+            table = client.table(_TABLE_IOCS)
+            resp = table.update({"active": False, "last_seen": _utcnow_iso()}).eq("ioc_id", ioc_id).execute()
             if resp and resp.data:
                 logger.info("ioc_store.deactivate_ioc ioc_id=%s", ioc_id)
                 return True
@@ -417,7 +422,8 @@ class IOCStore:
     def delete_ioc(self, ioc_id: str) -> bool:
         try:
             client = _get_client()
-            resp = client.table(_TABLE_IOCS).delete().eq("ioc_id", ioc_id).execute()
+            table = client.table(_TABLE_IOCS)
+            resp = table.delete().eq("ioc_id", ioc_id).execute()
             if resp and resp.data:
                 logger.info("ioc_store.delete_ioc ioc_id=%s", ioc_id)
                 return True
@@ -429,7 +435,8 @@ class IOCStore:
     def delete_by_ingest_id(self, feed_ingest_id: str) -> int:
         try:
             client = _get_client()
-            resp = client.table(_TABLE_IOCS).delete().eq("feed_ingest_id", feed_ingest_id).execute()
+            table = client.table(_TABLE_IOCS)
+            resp = table.delete().eq("feed_ingest_id", feed_ingest_id).execute()
             count = len(resp.data) if resp and resp.data else 0
             logger.info("ioc_store.delete_by_ingest_id ingest_id=%s deleted=%d", feed_ingest_id, count)
             return count
@@ -441,7 +448,8 @@ class IOCStore:
         now_iso = _utcnow_iso()
         try:
             client = _get_client()
-            resp = client.table(_TABLE_IOCS).update({"active": False, "last_seen": now_iso}).eq("active", True).lt("expiry", now_iso).not_.is_("expiry", "null").execute()
+            table = client.table(_TABLE_IOCS)
+            resp = table.update({"active": False, "last_seen": now_iso}).eq("active", True).lt("expiry", now_iso).not_.is_("expiry", "null").execute()
             count = len(resp.data) if resp and resp.data else 0
             if count:
                 logger.info("ioc_store.prune_expired deactivated=%d", count)
@@ -459,7 +467,8 @@ class IOCStore:
     ) -> int:
         try:
             client = _get_client()
-            q = client.table(_TABLE_IOCS).select("ioc_id", count="exact")
+            table = client.table(_TABLE_IOCS)
+            q = table.select("ioc_id", count="exact")
             if source is not None:
                 q = q.eq("source", source)
             if active is not None:
@@ -475,7 +484,8 @@ class IOCStore:
     def persist_ingest_result(self, result: FeedIngestResult) -> bool:
         try:
             client = _get_client()
-            client.table(_TABLE_INGEST_LOG).insert(_ingest_result_to_row(result)).execute()
+            table = client.table(_TABLE_INGEST_LOG)
+            table.insert(_ingest_result_to_row(result)).execute()
             return True
         except Exception as exc:
             logger.error("ioc_store.persist_ingest_result.error ingest_id=%s: %s", result.ingest_id, exc)
@@ -484,7 +494,8 @@ class IOCStore:
     def get_ingest_result(self, ingest_id: str) -> dict[str, Any] | None:
         try:
             client = _get_client()
-            resp = client.table(_TABLE_INGEST_LOG).select("*").eq("ingest_id", ingest_id).maybe_single().execute()
+            table = client.table(_TABLE_INGEST_LOG)
+            resp = table.select("*").eq("ingest_id", ingest_id).maybe_single().execute()
             return resp.data if resp and resp.data else None
         except Exception as exc:
             logger.error("ioc_store.get_ingest_result.error ingest_id=%s: %s", ingest_id, exc)
@@ -500,7 +511,8 @@ class IOCStore:
     ) -> list[dict[str, Any]]:
         try:
             client = _get_client()
-            q = client.table(_TABLE_INGEST_LOG).select("*").order("started_at", desc=True)
+            table = client.table(_TABLE_INGEST_LOG)
+            q = table.select("*").order("started_at", desc=True)
             if source is not None:
                 q = q.eq("source", source)
             if org_id is not None:
@@ -515,7 +527,8 @@ class IOCStore:
     def delete_ingest_log(self, ingest_id: str) -> bool:
         try:
             client = _get_client()
-            client.table(_TABLE_INGEST_LOG).delete().eq("ingest_id", ingest_id).execute()
+            table = client.table(_TABLE_INGEST_LOG)
+            table.delete().eq("ingest_id", ingest_id).execute()
             return True
         except Exception as exc:
             logger.error("ioc_store.delete_ingest_log.error ingest_id=%s: %s", ingest_id, exc)
@@ -524,8 +537,9 @@ class IOCStore:
     def health_check(self) -> dict[str, Any]:
         try:
             client = _get_client()
-            resp = client.table(_TABLE_IOCS).select("ioc_id", count="exact").limit(1).execute()
-            return {"status": "ok", "ioc_count": resp.count if resp else 0}
+            table = client.table(_TABLE_IOCS)
+            resp = table.select("ioc_id", count="exact").limit(1).execute()
+            return {"status": "ok", "ioc_count": resp.count if resp and resp.count is not None else 0}
         except Exception as exc:
             return {"status": "error", "detail": str(exc)}
 
@@ -600,7 +614,6 @@ CREATE INDEX IF NOT EXISTS idx_feed_ingest_log_status     ON feed_ingest_log (st
 CREATE INDEX IF NOT EXISTS idx_feed_ingest_log_started_at ON feed_ingest_log (started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_feed_ingest_log_org_id     ON feed_ingest_log (org_id);
 """
-
 
 __all__ = [
     "IOC_STORE_MIGRATION_SQL",
