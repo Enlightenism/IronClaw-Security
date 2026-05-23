@@ -25,7 +25,6 @@ from app.schemas.threat_detection import (
 
 logger = logging.getLogger(__name__)
 
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -38,7 +37,6 @@ _MAX_FEED_HISTORY_SIZE = 200
 _IOC_ID_PREFIX = "ioc-"
 _INGEST_ID_PREFIX = "ingest-"
 
-
 # ---------------------------------------------------------------------------
 # Backwards-compatible aliases — keep existing callers working
 # ---------------------------------------------------------------------------
@@ -47,7 +45,6 @@ ThreatFeedSource = ThreatFeedSourceEnum
 IOCType = IOCTypeEnum
 ThreatSeverity = ThreatSeverityLevel
 IngestStatus = IngestStatusEnum
-
 
 # ---------------------------------------------------------------------------
 # IOC record
@@ -599,29 +596,19 @@ class ThreatFeedIngestionService:
         cisa_kev_url: str = _CISA_KEV_URL,
     ) -> None:
         self._lock = threading.Lock()
-        # Hot-cache layer — optional, Supabase is source of truth
         self._iocs: dict[str, IOCRecord] = {}
         self._ioc_order: deque[str] = deque()
         self._max_ioc_store = max_ioc_store
-        # In-memory ingest history — also persisted to Supabase
         self._ingest_history: deque[FeedIngestResult] = deque(maxlen=max_feed_history)
         self._fetch_timeout = fetch_timeout
         self._mitre_url = mitre_url
         self._cisa_kev_url = cisa_kev_url
-
-    # ------------------------------------------------------------------
-    # IOCStore accessor — deferred import to avoid circular dependency
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _store():
         from app.services.ioc_store import get_ioc_store  # noqa: PLC0415
 
         return get_ioc_store()
-
-    # ------------------------------------------------------------------
-    # MITRE ATT&CK ingestion
-    # ------------------------------------------------------------------
 
     def ingest_mitre_attack(
         self,
@@ -671,10 +658,6 @@ class ThreatFeedIngestionService:
             len(errors),
         )
         return result
-
-    # ------------------------------------------------------------------
-    # CISA KEV ingestion
-    # ------------------------------------------------------------------
 
     def ingest_cisa_kev(
         self,
@@ -733,10 +716,6 @@ class ThreatFeedIngestionService:
             len(errors),
         )
         return result
-
-    # ------------------------------------------------------------------
-    # Custom IOC upload
-    # ------------------------------------------------------------------
 
     def ingest_custom_ioc_json(
         self,
@@ -811,15 +790,12 @@ class ThreatFeedIngestionService:
         )
         return result
 
-    # ------------------------------------------------------------------
-    # IOC upsert — Supabase is source of truth; hot-cache is secondary
-    # ------------------------------------------------------------------
-
     def _upsert_iocs(self, records: list[IOCRecord]) -> tuple[int, int, int]:
-        # Persist to Supabase via IOCStore (source of truth)
+        if not records:
+            return 0, 0, 0
+
         inserted, updated, skipped = self._store().bulk_upsert(records)
 
-        # Populate hot-cache with the same records
         with self._lock:
             for record in records:
                 ioc_id = record.ioc_id
@@ -854,19 +830,11 @@ class ThreatFeedIngestionService:
 
         return inserted, updated, skipped
 
-    # ------------------------------------------------------------------
-    # Query API — delegates to IOCStore (Supabase source of truth)
-    # Hot-cache is checked first for get_ioc and lookup_by_value to
-    # reduce Supabase round-trips on the detection hot path.
-    # ------------------------------------------------------------------
-
     def get_ioc(self, ioc_id: str) -> IOCRecord | None:
-        # Check hot-cache first
         with self._lock:
             cached = self._iocs.get(ioc_id)
         if cached is not None:
             return cached
-        # Fall through to Supabase
         return self._store().get_ioc(ioc_id)
 
     def lookup_by_value(self, value: str, *, org_id: str | None = None) -> list[IOCRecord]:
@@ -882,7 +850,6 @@ class ThreatFeedIngestionService:
         return self._store().filter_iocs(req)
 
     def deactivate_ioc(self, ioc_id: str) -> bool:
-        # Evict from hot-cache
         with self._lock:
             if ioc_id in self._iocs:
                 try:
@@ -896,7 +863,6 @@ class ThreatFeedIngestionService:
         return result
 
     def delete_ioc(self, ioc_id: str) -> bool:
-        # Evict from hot-cache
         with self._lock:
             if ioc_id in self._iocs:
                 try:
@@ -912,14 +878,9 @@ class ThreatFeedIngestionService:
     def count_iocs(self, *, source: str | None = None, active: bool | None = None) -> int:
         return self._store().count_iocs(source=source, active=active)
 
-    # ------------------------------------------------------------------
-    # Ingest history — persisted to Supabase, mirrored in-memory
-    # ------------------------------------------------------------------
-
     def _record_ingest(self, result: FeedIngestResult) -> None:
         with self._lock:
             self._ingest_history.append(result)
-        # Persist to Supabase feed_ingest_log table
         try:
             self._store().persist_ingest_result(result)
         except Exception as exc:  # noqa: BLE001
@@ -935,9 +896,6 @@ class ThreatFeedIngestionService:
         source: str | None = None,
         limit: int = 50,
     ) -> list[FeedIngestResult]:
-        # Serve from in-memory history — authoritative for current process lifetime.
-        # For cross-process or persistent history, callers should use
-        # get_ioc_store().list_ingest_history() directly.
         with self._lock:
             items = list(self._ingest_history)
         if source is not None:
@@ -950,10 +908,6 @@ class ThreatFeedIngestionService:
                 if item.ingest_id == ingest_id:
                     return item
         return None
-
-    # ------------------------------------------------------------------
-    # Internal failure helper
-    # ------------------------------------------------------------------
 
     def _fail_result(
         self,
@@ -986,20 +940,12 @@ class ThreatFeedIngestionService:
         )
         return result
 
-    # ------------------------------------------------------------------
-    # Reset (test isolation)
-    # ------------------------------------------------------------------
-
     def reset(self) -> None:
         with self._lock:
             self._iocs.clear()
             self._ioc_order.clear()
             self._ingest_history.clear()
 
-
-# ---------------------------------------------------------------------------
-# Module-level singleton
-# ---------------------------------------------------------------------------
 
 _THREAT_FEED_SERVICE = ThreatFeedIngestionService()
 
