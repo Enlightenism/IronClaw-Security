@@ -13,6 +13,8 @@ from .backupservice import (
     build_default_backup_service,
     default_backup_targets_from_env,
 )
+from .threat_detection_engine import ThreatDetectionEngine, get_detection_engine
+from .threat_scoring import ScoreResult, ThreatScoringEngine, get_scoring_engine
 
 __all__ = [
     "BackupFormat",
@@ -26,4 +28,9 @@ __all__ = [
     "SnapshotProvider",
     "build_default_backup_service",
     "default_backup_targets_from_env",
+    "ScoreResult",
+    "ThreatScoringEngine",
+    "get_scoring_engine",
+    "ThreatDetectionEngine",
+    "get_detection_engine",
 ]

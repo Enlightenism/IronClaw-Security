@@ -22,12 +22,10 @@ logger = logging.getLogger(__name__)
 
 _ENGINE_VERSION = "1.0.0"
 
-# Score thresholds → verdict
 _THRESHOLD_BLOCK = 0.75
 _THRESHOLD_REVIEW = 0.50
 _THRESHOLD_MONITOR = 0.20
 
-# Severity → base weight contribution
 _SEVERITY_WEIGHT: dict[str, float] = {
     ThreatSeverityLevel.CRITICAL: 1.0,
     ThreatSeverityLevel.HIGH: 0.75,
@@ -36,7 +34,6 @@ _SEVERITY_WEIGHT: dict[str, float] = {
     ThreatSeverityLevel.INFO: 0.05,
 }
 
-# Regex patterns for IOC extraction from free text
 _RE_IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 _RE_DOMAIN = re.compile(r"\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b")
 _RE_SHA256 = re.compile(r"\b[0-9a-fA-F]{64}\b")
@@ -102,10 +99,6 @@ class ThreatScoringEngine:
     No I/O, no Supabase calls — deterministic given the same inputs.
     """
 
-    # ------------------------------------------------------------------
-    # Public entry point
-    # ------------------------------------------------------------------
-
     def compute(
         self,
         ioc_matches: list[IOCMatch],
@@ -135,10 +128,6 @@ class ThreatScoringEngine:
             rationale=rationale,
         )
 
-    # ------------------------------------------------------------------
-    # Scoring helpers
-    # ------------------------------------------------------------------
-
     def _score_iocs(self, ioc_matches: list[IOCMatch]) -> float:
         if not ioc_matches:
             return 0.0
@@ -147,7 +136,6 @@ class ThreatScoringEngine:
             sev_str = match.severity if isinstance(match.severity, str) else str(match.severity)
             weight = _SEVERITY_WEIGHT.get(sev_str.lower(), 0.25)
             total += weight * float(match.confidence)
-        # Normalize to 0–0.80 ceiling from IOC contribution alone
         return min(total / max(len(ioc_matches), 1) + (0.05 * len(ioc_matches)), 0.80)
 
     def _score_signals(self, signals: list[CorrelationSignal]) -> float:
@@ -155,10 +143,6 @@ class ThreatScoringEngine:
             return 0.0
         total = sum(s.score_contribution * s.confidence for s in signals)
         return min(total, 0.20)
-
-    # ------------------------------------------------------------------
-    # Derivation helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _verdict_from_score(score: float) -> DetectionVerdict:
@@ -175,7 +159,6 @@ class ThreatScoringEngine:
         score: float,
         ioc_matches: list[IOCMatch],
     ) -> ThreatSeverityLevel:
-        # Promote to highest IOC severity if score is elevated
         if score >= 0.75:
             return ThreatSeverityLevel.CRITICAL
         if score >= 0.50:
@@ -251,9 +234,10 @@ class ThreatDetectionEngine:
     Orchestrates full detection pipeline:
       1. Extract observable values from the DetectionRequest payload.
       2. Resolve IOC matches via ioc_store.
-      3. Accept pre-built CorrelationSignal list (from caller or empty).
-      4. Delegate scoring to ThreatScoringEngine.compute().
-      5. Return a fully populated DetectionResult.
+      3. Run ThreatCorrelationEngine on resolved IOC matches to produce signals.
+      4. Merge caller-injected CorrelationSignals with engine-derived signals.
+      5. Delegate scoring to ThreatScoringEngine.compute().
+      6. Return a fully populated DetectionResult.
 
     This class owns no persistence — all store access is delegated.
     """
@@ -274,10 +258,11 @@ class ThreatDetectionEngine:
         """
         Full detection pipeline.  Returns a DetectionResult.
         correlation_signals may be injected by the caller (e.g. from a
-        correlation service) or left as None for a signal-free run.
+        session context or upstream router); the engine also auto-derives
+        signals from resolved IOC matches via ThreatCorrelationEngine.
         """
         event_id = request.event_id or str(uuid.uuid4())
-        signals: list[CorrelationSignal] = correlation_signals or []
+        caller_signals: list[CorrelationSignal] = correlation_signals or []
 
         # Step 1: gather observable values
         observables = self._extract_observables(request)
@@ -289,10 +274,16 @@ class ThreatDetectionEngine:
             minimum_confidence=request.minimum_confidence,
         )
 
-        # Step 3: score
-        score_result: ScoreResult = self._scoring_engine.compute(ioc_matches, signals)
+        # Step 3: run correlation engine on resolved matches
+        engine_signals = self._run_correlation(ioc_matches, event_id=event_id)
 
-        # Step 4: assemble DetectionResult
+        # Step 4: merge caller-injected + engine-derived signals (engine first)
+        all_signals: list[CorrelationSignal] = engine_signals + caller_signals
+
+        # Step 5: score
+        score_result: ScoreResult = self._scoring_engine.compute(ioc_matches, all_signals)
+
+        # Step 6: assemble DetectionResult
         return DetectionResult(
             event_id=event_id,
             org_id=request.org_id,
@@ -303,7 +294,7 @@ class ThreatDetectionEngine:
             severity=score_result.severity,
             scanned_text=request.text,
             ioc_matches=ioc_matches,
-            correlation_signals=signals,
+            correlation_signals=all_signals,
             risk_families=score_result.risk_families,
             extracted_indicators=observables,
             rationale=score_result.rationale,
@@ -315,13 +306,32 @@ class ThreatDetectionEngine:
         )
 
     # ------------------------------------------------------------------
+    # Correlation delegation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _run_correlation(
+        ioc_matches: list[IOCMatch],
+        event_id: str,
+    ) -> list[CorrelationSignal]:
+        if not ioc_matches:
+            return []
+        try:
+            from app.services.threat_correlation import get_correlation_engine
+
+            corr_engine = get_correlation_engine()
+            return corr_engine.correlate(ioc_matches, event_ids=[event_id])
+        except Exception as exc:
+            logger.error("threat_detection_engine.run_correlation.error: %s", exc)
+            return []
+
+    # ------------------------------------------------------------------
     # Observable extraction
     # ------------------------------------------------------------------
 
     def _extract_observables(self, request: DetectionRequest) -> list[str]:
         observables: set[str] = set()
 
-        # Explicit values take priority
         for v in request.ioc_values or []:
             if v:
                 observables.add(v.strip())
@@ -336,7 +346,6 @@ class ThreatDetectionEngine:
         if request.domain:
             observables.add(request.domain.strip().lower())
 
-        # Extract indicators from free text
         if request.text:
             observables.update(self._extract_from_text(request.text))
 
@@ -351,7 +360,6 @@ class ThreatDetectionEngine:
         found.update(_RE_SHA256.findall(text))
         found.update(_RE_SHA1.findall(text))
         found.update(_RE_MD5.findall(text))
-        # Domains — exclude already-captured IPs
         for dom in _RE_DOMAIN.findall(text):
             if not _RE_IPV4.fullmatch(dom):
                 found.add(dom.lower())
