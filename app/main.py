@@ -4,6 +4,7 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from importlib import import_module
 from inspect import isawaitable
+import logging
 from typing import Any, cast
 
 from fastapi import Depends, FastAPI
@@ -11,6 +12,8 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.routing import APIRoute
 
 ProtectedDependencyFactory = Callable[[], Any]
+
+_log = logging.getLogger(__name__)
 
 
 def _optional_module(module_path: str) -> Any | None:
@@ -162,6 +165,10 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (_optional_router("app.api.onboarding"), {"dependencies": dependencies}),
         (
             _optional_router("app.routers.threat_detection"),
+            {"dependencies": dependencies},
+        ),
+        (
+            _optional_router("app.api.ioc_management"),
             {"dependencies": dependencies},
         ),
     ]
@@ -316,8 +323,8 @@ def _initialize_scan_history_repository() -> None:
         try:
             repository = build_scan_history_repository()
             set_scan_history_repository(repository)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.warning("main: scan_history_repository init failed: %s", exc)
 
 
 def _start_threat_feed_scheduler() -> None:
@@ -325,10 +332,9 @@ def _start_threat_feed_scheduler() -> None:
         from app.services.threat_feed_scheduler import start_scheduler  # noqa: PLC0415
 
         start_scheduler()
+        _log.info("main.lifespan: threat_feed_scheduler started")
     except Exception as exc:  # noqa: BLE001
-        import logging
-
-        logging.getLogger(__name__).error("main.lifespan: threat_feed_scheduler failed to start: %s", exc)
+        _log.error("main.lifespan: threat_feed_scheduler failed to start: %s", exc)
 
 
 def _stop_threat_feed_scheduler() -> None:
@@ -336,10 +342,9 @@ def _stop_threat_feed_scheduler() -> None:
         from app.services.threat_feed_scheduler import stop_scheduler  # noqa: PLC0415
 
         stop_scheduler()
+        _log.info("main.lifespan: threat_feed_scheduler stopped")
     except Exception as exc:  # noqa: BLE001
-        import logging
-
-        logging.getLogger(__name__).error("main.lifespan: threat_feed_scheduler failed to stop: %s", exc)
+        _log.error("main.lifespan: threat_feed_scheduler failed to stop: %s", exc)
 
 
 @asynccontextmanager
@@ -362,10 +367,20 @@ async def lifespan(app: FastAPI):
         "reset_scan_history_repository",
     )
 
+    _log.info("main.lifespan: startup begin")
+
     _initialize_scan_history_repository()
 
     if callable(initialize_secure_runtime_pipeline):
-        pipeline = initialize_secure_runtime_pipeline()
+        try:
+            result = initialize_secure_runtime_pipeline()
+            if isawaitable(result):
+                pipeline = await result
+            else:
+                pipeline = result
+            _log.info("main.lifespan: secure_runtime_pipeline initialized")
+        except Exception as exc:  # noqa: BLE001
+            _log.error("main.lifespan: secure_runtime_pipeline init failed: %s", exc)
 
     app.state.action_execute_pipeline = pipeline
     if pipeline is not None and callable(set_action_execute_pipeline):
@@ -373,9 +388,12 @@ async def lifespan(app: FastAPI):
 
     _start_threat_feed_scheduler()
 
+    _log.info("main.lifespan: startup complete")
+
     try:
         yield
     finally:
+        _log.info("main.lifespan: shutdown begin")
         _stop_threat_feed_scheduler()
         try:
             close = getattr(pipeline, "close", None)
@@ -383,12 +401,15 @@ async def lifespan(app: FastAPI):
                 result = close()
                 if isawaitable(result):
                     await result
+        except Exception as exc:  # noqa: BLE001
+            _log.error("main.lifespan: pipeline close failed: %s", exc)
         finally:
             app.state.action_execute_pipeline = None
             if callable(reset_action_execute_pipeline):
                 reset_action_execute_pipeline()
             if callable(reset_scan_history_repository):
                 reset_scan_history_repository()
+            _log.info("main.lifespan: shutdown complete")
 
 
 def create_app() -> FastAPI:

@@ -13,6 +13,7 @@ OPTIONAL_API_MODULES: Final[tuple[str, ...]] = (
     "app.api.routes.incidents",
     "app.api.routes.integrations",
     "app.api.routes.reviewqueue",
+    "app.api.ioc_management",
 )
 
 CORE_API_MODULES: Final[tuple[str, ...]] = (
@@ -118,6 +119,11 @@ def api_unit_ledger_inventory() -> dict[str, str]:
 @inventory_router.get("/unit-wallet", summary="Api Unit Wallet Inventory")
 def api_unit_wallet_inventory() -> dict[str, str]:
     return {"resource": "unit-wallet", "path": "/api/unit-wallet"}
+
+
+@inventory_router.get("/threat/iocs", summary="Api IOC Management Inventory")
+def api_ioc_management_inventory() -> dict[str, str]:
+    return {"resource": "ioc-management", "path": "/threat/iocs"}
 
 
 def include_api_routers() -> None:
