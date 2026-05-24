@@ -167,6 +167,12 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
             _optional_router("app.routers.threat_detection"),
             {"dependencies": dependencies},
         ),
+        # app.api.threat_detection — single entry point for all detection calls
+        # (action_guard, action_execute, etc.). Router carries /threat prefix.
+        (
+            _optional_router("app.api.threat_detection"),
+            {"dependencies": dependencies},
+        ),
         (
             _optional_router("app.api.ioc_management"),
             {"dependencies": dependencies},
