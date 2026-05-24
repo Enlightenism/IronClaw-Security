@@ -11,7 +11,7 @@ import json
 import logging
 import re
 import threading
-from typing import Any
+from typing import TYPE_CHECKING, Any
 import urllib.error
 import urllib.request
 from uuid import uuid4
@@ -23,13 +23,15 @@ from app.schemas.threat_detection import (
     ThreatSeverityLevel,
 )
 
+if TYPE_CHECKING:
+    from app.services.stix_adapter import TAXIIConfig
+
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
 
 _MITRE_ATTACK_ENTERPRISE_URL = "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json"
 _CISA_KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
@@ -43,7 +45,6 @@ _INGEST_ID_PREFIX = "ingest-"
 # ---------------------------------------------------------------------------
 # Backwards-compatible aliases — keep existing callers working
 # ---------------------------------------------------------------------------
-
 
 ThreatFeedSource = ThreatFeedSourceEnum
 IOCType = IOCTypeEnum
@@ -977,6 +978,7 @@ def reset_threat_feed_service() -> None:
 _SUPPORTED_SOURCES = {
     ThreatFeedSourceEnum.MITRE_ATTACK,
     ThreatFeedSourceEnum.CISA_KEV,
+    ThreatFeedSourceEnum.STIX_TAXII,
 }
 
 
@@ -985,6 +987,7 @@ def run_feed_ingestion(
     org_id: str | None,
     force: bool,
     custom_url: str | None,
+    taxii_config: TAXIIConfig | None = None,
 ) -> FeedIngestResult:
     """
     Dispatch a single feed ingestion run for the given source.
@@ -993,20 +996,30 @@ def run_feed_ingestion(
     Delegates to the singleton ThreatFeedIngestionService methods — no
     duplicate ingestion logic lives here.
 
+    For STIX_TAXII: delegates to get_stix_adapter().ingest_bundle() if a
+    pre-fetched bundle dict is supplied via taxii_config context, or to
+    get_stix_adapter().ingest_from_taxii() if a TAXIIConfig is provided.
+    If neither is available, returns a typed FAILED result explaining that
+    TAXII ingestion requires a TAXIIConfig.
+
     Args:
-        source:     Feed source enum value to ingest.
-        org_id:     Scoping org ID; None for global ingest.
-        force:      Reserved for future cache-bypass logic; accepted and
-                    logged but does not alter current ingestion behaviour
-                    (all runs are unconditional at this layer).
-        custom_url: Optional override URL for the feed endpoint.
+        source:       Feed source enum value to ingest.
+        org_id:       Scoping org ID; None for global ingest.
+        force:        Reserved for future cache-bypass logic; accepted and
+                      logged but does not alter current ingestion behaviour
+                      (all runs are unconditional at this layer).
+        custom_url:   Optional override URL for the feed endpoint.
+        taxii_config: Optional TAXIIConfig for STIX_TAXII source. When
+                      provided, delegates to STIXAdapter.ingest_from_taxii().
+                      When None and source is STIX_TAXII, returns FAILED with
+                      a clear explanation.
 
     Returns:
         FeedIngestResult dataclass with counts and status.
-
-    Raises:
-        ValueError: If the source is not supported by this dispatcher.
     """
+    from app.services.stix_adapter import TAXIIConfig as _TAXIIConfig  # noqa: PLC0415
+    from app.services.stix_adapter import get_stix_adapter
+
     svc = get_threat_feed_service()
 
     logger.info(
@@ -1023,8 +1036,66 @@ def run_feed_ingestion(
     if source == ThreatFeedSourceEnum.CISA_KEV:
         return svc.ingest_cisa_kev(org_id=org_id, url=custom_url or None)
 
-    # Unsupported source — return a typed FAILED result rather than raising
-    # so the router's per-source loop can continue with remaining sources.
+    if source == ThreatFeedSourceEnum.STIX_TAXII:
+        if taxii_config is None:
+            ingest_id = f"{_INGEST_ID_PREFIX}{uuid4().hex[:20]}"
+            now = _utcnow_iso()
+            logger.warning(
+                "run_feed_ingestion: STIX_TAXII requires a TAXIIConfig; none provided org_id=%s",
+                org_id,
+            )
+            result = FeedIngestResult(
+                ingest_id=ingest_id,
+                source=ThreatFeedSourceEnum.STIX_TAXII,
+                status=IngestStatusEnum.FAILED,
+                iocs_parsed=0,
+                iocs_inserted=0,
+                iocs_updated=0,
+                iocs_skipped=0,
+                errors=["STIX_TAXII ingestion requires a TAXIIConfig (discovery_url, collection_id, " "credentials). Pass taxii_config= to run_feed_ingestion() or supply connection " "parameters via the feed refresh request body."],
+                started_at=now,
+                completed_at=now,
+                org_id=org_id,
+                metadata={"force": force, "custom_url": custom_url},
+            )
+            try:
+                from app.services.ioc_store import get_ioc_store  # noqa: PLC0415
+
+                get_ioc_store().persist_ingest_result(result)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("run_feed_ingestion.persist_failed_result error: %s", exc)
+            return result
+
+        if not isinstance(taxii_config, _TAXIIConfig):
+            ingest_id = f"{_INGEST_ID_PREFIX}{uuid4().hex[:20]}"
+            now = _utcnow_iso()
+            return FeedIngestResult(
+                ingest_id=ingest_id,
+                source=ThreatFeedSourceEnum.STIX_TAXII,
+                status=IngestStatusEnum.FAILED,
+                iocs_parsed=0,
+                iocs_inserted=0,
+                iocs_updated=0,
+                iocs_skipped=0,
+                errors=[f"taxii_config must be a TAXIIConfig instance, got {type(taxii_config).__name__}"],
+                started_at=now,
+                completed_at=now,
+                org_id=org_id,
+                metadata={"force": force, "custom_url": custom_url},
+            )
+
+        logger.info(
+            "run_feed_ingestion.stix_taxii discovery_url=%s collection_id=%s org_id=%s",
+            taxii_config.discovery_url,
+            taxii_config.collection_id,
+            org_id,
+        )
+        return get_stix_adapter().ingest_from_taxii(
+            taxii_config,
+            org_id=org_id,
+        )
+
+    # Unsupported source
     ingest_id = f"{_INGEST_ID_PREFIX}{uuid4().hex[:20]}"
     now = _utcnow_iso()
     source_val = source.value if hasattr(source, "value") else str(source)

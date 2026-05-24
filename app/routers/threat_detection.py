@@ -7,6 +7,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from app.core.auth import AuthContext, get_auth_context
 from app.schemas.threat_detection import (
@@ -31,9 +32,33 @@ from app.services.threat_detection_engine import get_detection_engine
 
 logger = logging.getLogger(__name__)
 
+
 router = APIRouter(prefix="/threat", tags=["threat-detection"])
 
+
 _TABLE_DETECTIONS = "threat_detections"
+
+
+# ---------------------------------------------------------------------------
+# TAXII config payload — used by POST /threat/feeds/refresh for STIX_TAXII
+# ---------------------------------------------------------------------------
+
+
+class TAXIIConfig(BaseModel):
+    taxii_url: str
+    collection_id: str
+    username: str | None = None
+    password: str | None = None
+    api_root: str | None = None
+    verify_ssl: bool = True
+    extra: dict[str, Any] = {}
+
+
+class FeedRefreshRequestWithTAXII(FeedRefreshRequest):
+    taxii_config: TAXIIConfig | None = None
+
+
+# ---------------------------------------------------------------------------
 
 
 def _utcnow_iso() -> str:
@@ -603,9 +628,10 @@ def delete_ioc(
     description="Manually trigger ingestion for one or more threat intelligence feed sources.",
 )
 def refresh_feeds(
-    payload: FeedRefreshRequest,
+    payload: FeedRefreshRequestWithTAXII,
     auth: AuthContext = Depends(get_auth_context),
 ) -> FeedRefreshResult:
+    from app.services.threat_feed_ingestion import ThreatFeedSourceEnum as _SourceEnum
     from app.services.threat_feed_ingestion import run_feed_ingestion
 
     request_id = str(uuid.uuid4())
@@ -614,14 +640,26 @@ def refresh_feeds(
     per_source_results: list[dict[str, Any]] = []
     total_inserted = total_updated = total_errors = 0
 
+    taxii_cfg_dict: dict[str, Any] | None = payload.taxii_config.model_dump() if payload.taxii_config is not None else None
+
     for source in payload.sources:
         try:
-            result = run_feed_ingestion(
-                source=source,
-                org_id=effective_org_id,
-                force=payload.force,
-                custom_url=payload.custom_url,
-            )
+            is_taxii = hasattr(_SourceEnum, "STIX_TAXII") and source == _SourceEnum.STIX_TAXII
+            if is_taxii:
+                result = run_feed_ingestion(
+                    source=source,
+                    org_id=effective_org_id,
+                    force=payload.force,
+                    custom_url=payload.custom_url,
+                    taxii_config=taxii_cfg_dict,
+                )
+            else:
+                result = run_feed_ingestion(
+                    source=source,
+                    org_id=effective_org_id,
+                    force=payload.force,
+                    custom_url=payload.custom_url,
+                )
             per_source_results.append(result if isinstance(result, dict) else result.dict() if hasattr(result, "dict") else vars(result))
             total_inserted += getattr(result, "iocs_inserted", 0)
             total_updated += getattr(result, "iocs_updated", 0)

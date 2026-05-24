@@ -470,6 +470,73 @@ class IOCImportResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# TAXIIIngestRequest — POST /threat/feeds/taxii/ingest
+# ---------------------------------------------------------------------------
+
+
+class TAXIIIngestRequest(BaseModel):
+    """
+    API-layer schema for triggering a STIX/TAXII 2.1 ingest via the STIXAdapter.
+    Maps directly to TAXIIConfig in stix_adapter.py — callers supply connection
+    parameters here; the router constructs the TAXIIConfig dataclass from this model.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    discovery_url: str = Field(
+        description="TAXII 2.1 discovery endpoint URL.",
+    )
+    collection_id: str | None = Field(
+        default=None,
+        description="Target collection ID. If omitted, the first readable collection is used.",
+    )
+    api_root: str | None = Field(
+        default=None,
+        description="Override the TAXII API root URL. If omitted, discovered from the server.",
+    )
+    username: str | None = Field(
+        default=None,
+        description="Basic-auth username for the TAXII server.",
+    )
+    password: str | None = Field(
+        default=None,
+        description="Basic-auth password for the TAXII server.",
+    )
+    verify_ssl: bool = Field(
+        default=True,
+        description="Whether to verify the TAXII server's TLS certificate.",
+    )
+    timeout: int = Field(
+        default=30,
+        ge=5,
+        le=300,
+        description="HTTP request timeout in seconds.",
+    )
+    page_size: int = Field(
+        default=500,
+        ge=1,
+        le=5000,
+        description="Number of objects to fetch per TAXII page.",
+    )
+    extra_headers: dict[str, str] = Field(
+        default_factory=dict,
+        description="Additional HTTP headers to include in TAXII requests.",
+    )
+    org_id: str | None = Field(
+        default=None,
+        description="Organization scope for ingested IOCs.",
+    )
+    added_after: str | None = Field(
+        default=None,
+        description="ISO 8601 UTC timestamp — only fetch objects added after this time.",
+    )
+    source_label: str | None = Field(
+        default=None,
+        description="Human-readable label embedded in IOC tags for this ingest batch.",
+    )
+
+
+# ---------------------------------------------------------------------------
 # FeedRefreshRequest — POST /threat/feeds/refresh
 # ---------------------------------------------------------------------------
 
@@ -492,11 +559,21 @@ class FeedRefreshRequest(BaseModel):
         default=None,
         description="Override the default source URL (single-source requests only).",
     )
+    taxii_ingest: TAXIIIngestRequest | None = Field(
+        default=None,
+        description=("STIX/TAXII connection parameters. Required when sources contains " "STIX_TAXII and the caller needs to specify a non-default server."),
+    )
 
     @model_validator(mode="after")
     def custom_url_requires_single_source(self) -> FeedRefreshRequest:
         if self.custom_url and len(self.sources) > 1:
             raise ValueError("custom_url may only be set when refreshing a single source.")
+        return self
+
+    @model_validator(mode="after")
+    def taxii_ingest_requires_stix_taxii_source(self) -> FeedRefreshRequest:
+        if self.taxii_ingest and ThreatFeedSourceEnum.STIX_TAXII not in self.sources:
+            raise ValueError("taxii_ingest may only be set when STIX_TAXII is included in sources.")
         return self
 
 
@@ -613,6 +690,7 @@ __all__ = [
     "IOCResponse",
     "IOCTypeEnum",
     "IngestStatusEnum",
+    "TAXIIIngestRequest",
     "ThreatAlert",
     "ThreatFeedSourceEnum",
     "ThreatSeverityLevel",
