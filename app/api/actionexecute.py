@@ -3,10 +3,11 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.api.audit import createauditevent
-from app.security.promptinjection import scanpromptinjectiondict
+from app.services.action_guard import ActionGuardDecision, analyze_action
 from app.services.actionexecuteservice import (
     ActionExecutionRequest,
     get_action_execute_service,
@@ -22,6 +23,15 @@ AllowedActionType = Literal[
     "fileread",
     "command",
 ]
+
+_ACTION_TYPE_MAP: dict[str, str] = {
+    "httpfetch": "network_request",
+    "browseropen": "network_request",
+    "toolcall": "tool_call",
+    "filewrite": "file_write",
+    "fileread": "file_read",
+    "command": "shell_command",
+}
 
 
 class ActionExecuteRequestModel(BaseModel):
@@ -50,7 +60,7 @@ class ActionExecuteRequestModel(BaseModel):
     riskscore: int = Field(
         default=0,
         ge=0,
-        description="Base risk score assigned before prompt-injection analysis.",
+        description="Base risk score assigned before detection analysis.",
     )
     metadata: dict[str, Any] = Field(
         default_factory=dict,
@@ -113,22 +123,88 @@ def _usage_to_dict(receipt: Any) -> dict[str, Any]:
     }
 
 
+def _run_detection(request: ActionExecuteRequestModel) -> ActionGuardDecision | None:
+    """Run live threat detection via analyze_action (same pattern as action_guard).
+
+    Maps the camelCase actiontype to the guard's snake_case ActionType enum before
+    calling analyze_action so the pattern tables and floor-verdict logic resolve
+    correctly.  Returns None on any failure so detection never hard-blocks execution
+    when the guard service is unavailable.
+    """
+    guard_action_type = _ACTION_TYPE_MAP.get(request.actiontype, "tool_call")
+    try:
+        result: ActionGuardDecision = analyze_action(
+            action_type=guard_action_type,  # type: ignore[arg-type]
+            target=request.target,
+            content=request.content or "",
+            client_id=request.clientid,
+            session_id=request.sessionid,
+        )
+        return result
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _detection_to_promptinjection(detection: ActionGuardDecision | None) -> dict[str, Any]:
+    """Serialize the detection result into the legacy promptinjection dict shape
+    so downstream callers (audit, response) receive a stable contract."""
+    if detection is None:
+        return {
+            "flagged": False,
+            "riskdelta": 0,
+            "shouldquarantine": False,
+            "shouldreview": False,
+            "matchedpatterns": [],
+            "reasons": [],
+        }
+
+    verdict = detection.get("verdict", "allow")
+    risk_score = int(detection.get("risk_score", 0) or 0)
+    matched_patterns = list(detection.get("matched_patterns", []))
+    reasons = list(detection.get("reasons", []))
+
+    flagged = verdict != "allow"
+    shouldquarantine = verdict in ("quarantine", "block")
+    shouldreview = verdict == "warn"
+
+    return {
+        "flagged": flagged,
+        "riskdelta": risk_score,
+        "shouldquarantine": shouldquarantine,
+        "shouldreview": shouldreview,
+        "matchedpatterns": matched_patterns,
+        "reasons": reasons,
+        "verdict": verdict,
+        "scan_id": detection.get("scan_id"),
+        "summary": detection.get("summary", ""),
+        "drift_report": detection.get("drift_report"),
+    }
+
+
 @router.post("/execute", response_model=ActionExecuteResponse)
-def executeaction(request: ActionExecuteRequestModel) -> ActionExecuteResponse:
+def executeaction(request: ActionExecuteRequestModel) -> ActionExecuteResponse | JSONResponse:
     normalized_target = request.target.strip()
     if not normalized_target:
         raise HTTPException(status_code=400, detail="target must not be empty")
 
-    # 1. Prompt injection and risk
-    promptinjection = scanpromptinjectiondict(
-        actiontype=request.actiontype,
-        target=normalized_target,
-        content=request.content,
-        filepath=request.filepath,
-        metadata=request.metadata,
-    )
+    # 1. Live detection screen — replaces inline scanpromptinjectiondict call
+    detection = _run_detection(request)
+    promptinjection = _detection_to_promptinjection(detection)
 
-    finalriskscore = request.riskscore + int(promptinjection["riskdelta"])
+    detection_risk_delta = int(promptinjection.get("riskdelta", 0) or 0)
+    finalriskscore = request.riskscore + detection_risk_delta
+
+    # Hard-block before audit when detection verdict is block
+    if detection is not None and detection.get("verdict") == "block":
+        return JSONResponse(
+            status_code=403,
+            content={
+                "detail": "Action blocked by IronClaw detection layer.",
+                "verdict": "block",
+                "risk_score": finalriskscore,
+                "reasons": promptinjection.get("reasons", []),
+            },
+        )
 
     mergedmetadata = dict(request.metadata)
     mergedmetadata["promptinjection"] = promptinjection
@@ -149,7 +225,6 @@ def executeaction(request: ActionExecuteRequestModel) -> ActionExecuteResponse:
 
     status = _map_audit_event_to_status(audit["eventtype"])
 
-    # If security does not allow, we never try to consume usage
     if status != "allowed":
         if status == "review":
             message = "Action requires manual review before execution."
@@ -172,7 +247,7 @@ def executeaction(request: ActionExecuteRequestModel) -> ActionExecuteResponse:
             message=message,
         )
 
-    # 3. Security says allowed; we *attempt* usage metering but do not downgrade status
+    # 3. Security says allowed; attempt usage metering (non-fatal)
     service = get_action_execute_service()
 
     try:
@@ -189,8 +264,7 @@ def executeaction(request: ActionExecuteRequestModel) -> ActionExecuteResponse:
             ),
         )
         usage = _usage_to_dict(receipt)
-    except Exception:
-        # Treat metering failures as non-fatal for this boundary
+    except Exception:  # noqa: BLE001
         return ActionExecuteResponse(
             status="allowed",
             actiontype=request.actiontype,
@@ -205,7 +279,6 @@ def executeaction(request: ActionExecuteRequestModel) -> ActionExecuteResponse:
             message="Action approved for execution.",
         )
 
-    # We do not override the audit-driven status; if audit said allowed, we stay allowed
     return ActionExecuteResponse(
         status="allowed",
         actiontype=request.actiontype,
