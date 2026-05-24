@@ -69,17 +69,17 @@ def _record_baseline_observation(
     risk_score: int,
     matched_patterns: list[str],
 ) -> None:
-    agent_id = getattr(payload, "agent_id", None) or getattr(payload, "client_id", None)
+    agent_id = payload.agent_id or payload.client_id
     if not agent_id:
         return
     try:
         get_behavioral_baseline_store().record_observation(
             agent_id=str(agent_id),
-            action_type=getattr(payload, "action_type", "execute"),
-            target=getattr(payload, "target", "") or "",
+            action_type=payload.action_type,
+            target=payload.target or "",
             risk_score=risk_score,
-            session_id=getattr(payload, "session_id", None),
-            client_id=getattr(payload, "client_id", None),
+            session_id=payload.session_id,
+            client_id=payload.client_id,
             matched_patterns=matched_patterns,
         )
     except Exception:  # noqa: BLE001
@@ -94,16 +94,16 @@ def _run_detection(payload: ExecuteRequest) -> ActionGuardDecision | None:
     swallowed so detection never blocks execution when the service is
     unavailable — a telemetry event is emitted instead.
     """
-    action_type = getattr(payload, "action_type", None)
-    if not action_type:
+    if not payload.action_type:
         return None
     try:
         result: ActionGuardDecision = analyze_action(
-            action_type=action_type,
-            target=getattr(payload, "target", None),
-            content=getattr(payload, "content", None),
-            client_id=getattr(payload, "client_id", None),
-            session_id=getattr(payload, "session_id", None),
+            action_type=payload.action_type,
+            target=payload.target,
+            content=payload.content or "",
+            client_id=payload.client_id,
+            session_id=payload.session_id,
+            agent_id=payload.agent_id,
         )
         result["reasons"] = _normalize_reasons(result.get("reasons", []))
         return result
@@ -119,7 +119,7 @@ def guarded_execute(
 ) -> ExecuteResponse | JSONResponse:
     meta = _request_meta(request)
 
-    append_telemetry_event("execute_requested", {**meta, "action_type": getattr(payload, "action_type", None)})
+    append_telemetry_event("execute_requested", {**meta, "action_type": payload.action_type})
 
     # --- live detection screen (mirrors action_guard pattern) ---
     detection = _run_detection(payload)
@@ -134,7 +134,7 @@ def guarded_execute(
             "execute_detection_completed",
             {
                 **meta,
-                "action_type": getattr(payload, "action_type", None),
+                "action_type": payload.action_type,
                 "verdict": verdict,
                 "risk_score": risk_score,
                 "reason_count": len(detection.get("reasons", [])),
@@ -173,7 +173,7 @@ def guarded_execute(
         {
             **meta,
             "verdict": getattr(response, "verdict", None),
-            "action_type": getattr(payload, "action_type", None),
+            "action_type": payload.action_type,
         },
     )
 
