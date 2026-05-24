@@ -8,13 +8,17 @@ from app.orchestrator.secure_runtime_pipeline import SecureRuntimePipeline
 
 def guardandexecuteaction(
     request: ExecuteRequest,
-    *,
     pipeline: SecureRuntimePipeline | None = None,
 ) -> ActionExecuteResult:
     """High-level facade to guard and execute an action in one step.
 
     This is the primary entrypoint used by HTTP handlers and other callers
     that already have an ExecuteRequest payload.
+
+    ``pipeline`` is intentionally positional-or-keyword so call sites may
+    pass it either way:
+        guardandexecuteaction(payload, pipeline)          # positional
+        guardandexecuteaction(payload, pipeline=pipeline) # keyword
     """
     return executeguardedaction(
         action_type=request.action_type,
