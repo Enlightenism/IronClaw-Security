@@ -199,10 +199,9 @@ async def detect_threat(
     auth: AuthContext = Depends(get_auth_context),
 ) -> DetectionResult:
     engine = get_detection_engine()
-    result = engine.detect(
-        payload,
-        org_id=payload.org_id or auth.org_id,
-    )
+    effective_org_id = payload.org_id or auth.org_id
+    effective_request = payload.model_copy(update={"org_id": effective_org_id}) if effective_org_id != payload.org_id else payload
+    result = engine.run(effective_request)
     _persist_detection_result(result)
     return result
 
@@ -240,7 +239,6 @@ async def refresh_feeds(
     per_source_results: list[dict[str, Any]] = []
     total_inserted = total_updated = total_errors = 0
 
-    # Sources eligible for scheduler-tracked forced runs
     _SCHEDULER_SOURCES = {
         ThreatFeedSourceEnum.MITRE_ATTACK,
         ThreatFeedSourceEnum.CISA_KEV,
@@ -249,7 +247,6 @@ async def refresh_feeds(
     for source in payload.sources:
         if source == ThreatFeedSourceEnum.STIX_TAXII:
             if payload.taxii_ingest is not None:
-                # Direct TAXII dispatch — construct TAXIIConfig from request block
                 try:
                     taxii_config = _taxii_config_from_ingest_request(payload.taxii_ingest)
                     adapter = get_stix_adapter()
@@ -281,8 +278,6 @@ async def refresh_feeds(
                     )
                     total_errors += 1
             else:
-                # STIX_TAXII without a taxii_ingest block — fall through to
-                # standard ingestion service (may handle a configured default server).
                 result_dict = _run_standard_feed(
                     source,
                     org_id=effective_org_id,
@@ -294,7 +289,6 @@ async def refresh_feeds(
                 total_updated += int(result_dict.get("iocs_updated", 0))
                 total_errors += len(result_dict.get("errors", []))
         elif use_scheduler and source in _SCHEDULER_SOURCES:
-            # Scheduler-tracked forced run — full audit persistence via SchedulerRunRecord
             result_dict = _run_scheduler_forced_feed(source, org_id=effective_org_id)
             per_source_results.append(result_dict)
             total_inserted += int(result_dict.get("iocs_inserted", 0))
@@ -547,12 +541,19 @@ async def list_correlations(
     limit: int = Query(default=50, ge=1, le=500),
     auth: AuthContext = Depends(get_auth_context),
 ) -> list[CorrelationSignal]:
-    from app.services.threat_detection_engine import get_detection_engine
-
-    engine = get_detection_engine()
     effective_org_id = org_id or auth.org_id
-    return engine.list_correlation_signals(
-        org_id=effective_org_id,
-        pattern_type=pattern_type,
-        limit=limit,
-    )
+    try:
+        from app.services.threat_correlation import get_correlation_engine
+
+        corr_engine = get_correlation_engine()
+        list_signals = getattr(corr_engine, "list_signals", None)
+        if callable(list_signals):
+            return list_signals(
+                org_id=effective_org_id,
+                pattern_type=pattern_type,
+                limit=limit,
+            )
+        return []
+    except Exception as exc:
+        logger.error("threat_detection.list_correlations error: %s", exc)
+        return []
