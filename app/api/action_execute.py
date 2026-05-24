@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse
 
 from app.dependencies.action_execute import get_action_execute_pipeline
 from app.dependencies.rate_limit import limit_guard_routes
@@ -13,7 +12,6 @@ from app.services.behavioral_baseline import get_behavioral_baseline_store
 from app.services.telemetry import append_telemetry_event
 
 router = APIRouter(dependencies=[Depends(limit_guard_routes)])
-
 
 _ALLOWED_REASON_SOURCES = {"policy", "scan", "ai"}
 _REASON_SOURCE_MAP = {
@@ -89,10 +87,10 @@ def _record_baseline_observation(
 def _run_detection(payload: ExecuteRequest) -> ActionGuardDecision | None:
     """Run live threat detection on the incoming execute payload.
 
-    Returns the detection result if the action carries a detectable surface
-    (action_type + target/content), otherwise returns None.  Failures are
-    swallowed so detection never blocks execution when the service is
-    unavailable — a telemetry event is emitted instead.
+    Returns the detection result for telemetry and baseline observation.
+    Never short-circuits execution — the pipeline owns all verdict responses.
+    Failures are swallowed so detection never blocks execution when the
+    service is unavailable.
     """
     if not payload.action_type:
         return None
@@ -116,12 +114,12 @@ def guarded_execute(
     payload: ExecuteRequest,
     request: Request,
     pipeline: SecureRuntimePipeline = Depends(get_action_execute_pipeline),
-) -> ExecuteResponse | JSONResponse:
+) -> ExecuteResponse:
     meta = _request_meta(request)
 
     append_telemetry_event("execute_requested", {**meta, "action_type": payload.action_type})
 
-    # --- live detection screen (mirrors action_guard pattern) ---
+    # --- live detection: telemetry + baseline only; pipeline owns all verdicts ---
     detection = _run_detection(payload)
     if detection is not None:
         verdict = str(detection.get("verdict", "allow")).lower()
@@ -141,31 +139,7 @@ def guarded_execute(
             },
         )
 
-        if verdict == "block":
-            append_telemetry_event("execute_blocked_by_detection", {**meta, "risk_score": risk_score})
-            return JSONResponse(
-                status_code=403,
-                content={
-                    "detail": "Action blocked by IronClaw detection layer.",
-                    "verdict": verdict,
-                    "risk_score": risk_score,
-                    "reasons": detection.get("reasons", []),
-                },
-            )
-
-        if verdict == "quarantine":
-            append_telemetry_event("execute_quarantined_by_detection", {**meta, "risk_score": risk_score})
-            return JSONResponse(
-                status_code=202,
-                content={
-                    "detail": "Action quarantined for review.",
-                    "verdict": verdict,
-                    "risk_score": risk_score,
-                    "reasons": detection.get("reasons", []),
-                },
-            )
-
-    # --- guarded execution ---
+    # --- guarded execution: pipeline owns block/quarantine/allow response shape ---
     response: ExecuteResponse = guardandexecuteaction(payload, pipeline)
 
     append_telemetry_event(

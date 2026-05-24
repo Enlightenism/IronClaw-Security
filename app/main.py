@@ -124,9 +124,13 @@ def _public_router_configs() -> list[tuple[Any, dict[str, Any]]]:
 
 def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
     dependencies = _protected_dependencies()
+    action_execute_router = _optional_router("app.api.action_execute")
     return [
         (_optional_router("app.api.requestcontext"), {"dependencies": dependencies}),
-        (_optional_router("app.api.history"), {"prefix": "/history", "dependencies": dependencies}),
+        (
+            _optional_router("app.api.history"),
+            {"prefix": "/history", "dependencies": dependencies},
+        ),
         (
             _optional_router("app.api.history"),
             {"prefix": "/api/history", "dependencies": dependencies},
@@ -135,20 +139,32 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
             _optional_router("app.api.action_guard"),
             {"prefix": "/guard", "dependencies": dependencies},
         ),
+        # /guard/execute — legacy mount retained for backward compatibility
         (
-            _optional_router("app.api.action_execute"),
+            action_execute_router,
             {"prefix": "/guard", "dependencies": dependencies},
+        ),
+        # /execute/execute — canonical mount; activates behavioral baseline drift tracking
+        (
+            action_execute_router,
+            {"prefix": "/execute", "dependencies": dependencies},
         ),
         (
             _optional_router("app.api.review_queue"),
             {"prefix": "/guard", "dependencies": dependencies},
         ),
-        (_optional_router("app.api.audit_log"), {"prefix": "/guard", "dependencies": dependencies}),
+        (
+            _optional_router("app.api.audit_log"),
+            {"prefix": "/guard", "dependencies": dependencies},
+        ),
         (
             _optional_router("app.api.behavioral_baseline"),
             {"prefix": "/guard", "dependencies": dependencies},
         ),
-        (_optional_router("app.api.policy"), {"prefix": "/policy", "dependencies": dependencies}),
+        (
+            _optional_router("app.api.policy"),
+            {"prefix": "/policy", "dependencies": dependencies},
+        ),
         (_optional_router("app.api.release_policy_routes"), {"dependencies": dependencies}),
         (_optional_router("app.api.integrations"), {"dependencies": dependencies}),
         (_optional_router("app.api.customer_keys"), {}),

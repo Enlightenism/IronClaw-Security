@@ -30,6 +30,7 @@ class ActionGuardDecision(TypedDict):
     summary: str
     risk_score: int
     matched_patterns: list[str]
+    categories: list[str]
     target: str
     content: str
     should_halt: bool
@@ -132,13 +133,10 @@ def _build_action_summary(
     risk_score: int,
 ) -> str:
     parts: list[str] = [base_summary.strip()]
-
     parts.append(f"Action type: {action_type}.")
     parts.append(f"Risk score: {risk_score}.")
-
     if matched_patterns:
         parts.append(f"Matched patterns: {', '.join(matched_patterns)}.")
-
     if final_verdict == "block":
         parts.append("Execution should be blocked.")
     elif final_verdict == "quarantine":
@@ -147,7 +145,6 @@ def _build_action_summary(
         parts.append("Execution requires operator review.")
     else:
         parts.append("Execution is currently allowed.")
-
     return " ".join(part for part in parts if part)
 
 
@@ -208,7 +205,6 @@ def _build_reasons(
                     score = min(float(score_raw) / 100.0, 1.0)
                 except (TypeError, ValueError):
                     score = None
-
             reasons.append(
                 {
                     "source": "promptinjection",
@@ -241,7 +237,6 @@ def _record_and_drift(
     client_id: str | None,
     matched_patterns: list[str],
 ) -> dict[str, Any] | None:
-    """Record one observation and return a drift report dict, or None on failure."""
     try:
         from app.services.behavioral_baseline import get_behavioral_baseline_store
 
@@ -272,19 +267,24 @@ def analyze_action(
     client_id: str | None = None,
     session_id: str | None = None,
     agent_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> ActionGuardDecision:
     combined_text = f"{action_type}\nTARGET:\n{target}\nCONTENT:\n{content}".strip()
     result = perform_scan("text", combined_text)
+
+    merged_metadata: dict[str, Any] = {
+        "source": "action_guard",
+        "clientid": client_id,
+        "sessionid": session_id,
+    }
+    if metadata:
+        merged_metadata.update(metadata)
 
     promptinjection = scanpromptinjectiondict(
         actiontype=action_type,
         target=target,
         content=content,
-        metadata={
-            "source": "action_guard",
-            "clientid": client_id,
-            "sessionid": session_id,
-        },
+        metadata=merged_metadata,
     )
 
     scan_verdict = result["verdict"]
@@ -296,6 +296,8 @@ def analyze_action(
     for pattern in promptinjection.get("matchedpatterns", []):
         if isinstance(pattern, str) and pattern not in matched_patterns:
             matched_patterns.append(pattern)
+
+    categories: list[str] = list(promptinjection.get("categories", []))
 
     score_verdict = _score_based_verdict(risk_score)
     pattern_verdict = _pattern_based_verdict(matched_patterns)
@@ -316,7 +318,6 @@ def analyze_action(
     elif promptinjection.get("shouldreview") is True:
         final_verdict = _max_verdict(final_verdict, "warn")
 
-    # Behavioral baseline: record observation + compute drift
     drift_report: dict[str, Any] | None = None
     if agent_id:
         drift_report = _record_and_drift(
@@ -355,6 +356,7 @@ def analyze_action(
         "summary": summary,
         "risk_score": risk_score,
         "matched_patterns": matched_patterns,
+        "categories": categories,
         "target": target,
         "content": content,
         "should_halt": should_halt,

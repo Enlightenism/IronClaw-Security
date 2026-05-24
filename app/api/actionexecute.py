@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.api.audit import createauditevent
@@ -124,13 +123,6 @@ def _usage_to_dict(receipt: Any) -> dict[str, Any]:
 
 
 def _run_detection(request: ActionExecuteRequestModel) -> ActionGuardDecision | None:
-    """Run live threat detection via analyze_action (same pattern as action_guard).
-
-    Maps the camelCase actiontype to the guard's snake_case ActionType enum before
-    calling analyze_action so the pattern tables and floor-verdict logic resolve
-    correctly.  Returns None on any failure so detection never hard-blocks execution
-    when the guard service is unavailable.
-    """
     guard_action_type = _ACTION_TYPE_MAP.get(request.actiontype, "tool_call")
     try:
         result: ActionGuardDecision = analyze_action(
@@ -139,6 +131,7 @@ def _run_detection(request: ActionExecuteRequestModel) -> ActionGuardDecision | 
             content=request.content or "",
             client_id=request.clientid,
             session_id=request.sessionid,
+            metadata=request.metadata,
         )
         return result
     except Exception:  # noqa: BLE001
@@ -146,8 +139,6 @@ def _run_detection(request: ActionExecuteRequestModel) -> ActionGuardDecision | 
 
 
 def _detection_to_promptinjection(detection: ActionGuardDecision | None) -> dict[str, Any]:
-    """Serialize the detection result into the legacy promptinjection dict shape
-    so downstream callers (audit, response) receive a stable contract."""
     if detection is None:
         return {
             "flagged": False,
@@ -167,6 +158,18 @@ def _detection_to_promptinjection(detection: ActionGuardDecision | None) -> dict
     shouldquarantine = verdict in ("quarantine", "block")
     shouldreview = verdict == "warn"
 
+    severity = "none"
+    if risk_score >= 70:
+        severity = "critical"
+    elif risk_score >= 40:
+        severity = "high"
+    elif risk_score >= 20:
+        severity = "medium"
+    elif risk_score > 0:
+        severity = "low"
+
+    categories: list[str] = list(detection.get("categories", []))
+
     return {
         "flagged": flagged,
         "riskdelta": risk_score,
@@ -175,6 +178,8 @@ def _detection_to_promptinjection(detection: ActionGuardDecision | None) -> dict
         "matchedpatterns": matched_patterns,
         "reasons": reasons,
         "verdict": verdict,
+        "severity": severity,
+        "categories": categories,
         "scan_id": detection.get("scan_id"),
         "summary": detection.get("summary", ""),
         "drift_report": detection.get("drift_report"),
@@ -182,29 +187,17 @@ def _detection_to_promptinjection(detection: ActionGuardDecision | None) -> dict
 
 
 @router.post("/execute", response_model=ActionExecuteResponse)
-def executeaction(request: ActionExecuteRequestModel) -> ActionExecuteResponse | JSONResponse:
+def executeaction(request: ActionExecuteRequestModel) -> ActionExecuteResponse:
     normalized_target = request.target.strip()
     if not normalized_target:
         raise HTTPException(status_code=400, detail="target must not be empty")
 
-    # 1. Live detection screen — replaces inline scanpromptinjectiondict call
+    # 1. Live detection screen — metadata forwarded so documenttext/tooloutput reach scanner
     detection = _run_detection(request)
     promptinjection = _detection_to_promptinjection(detection)
 
     detection_risk_delta = int(promptinjection.get("riskdelta", 0) or 0)
     finalriskscore = request.riskscore + detection_risk_delta
-
-    # Hard-block before audit when detection verdict is block
-    if detection is not None and detection.get("verdict") == "block":
-        return JSONResponse(
-            status_code=403,
-            content={
-                "detail": "Action blocked by IronClaw detection layer.",
-                "verdict": "block",
-                "risk_score": finalriskscore,
-                "reasons": promptinjection.get("reasons", []),
-            },
-        )
 
     mergedmetadata = dict(request.metadata)
     mergedmetadata["promptinjection"] = promptinjection
