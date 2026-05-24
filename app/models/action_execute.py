@@ -22,9 +22,10 @@ class ExecuteRequest(BaseModel):
     action_type: str = Field(..., min_length=1)
     target: str = Field(..., min_length=1)
     content: str = Field(default="")
-    risk_score: int = Field(ge=0, le=100)
+    risk_score: int = Field(default=0, ge=0, le=100)
     client_id: str | None = None
     session_id: str | None = None
+    agent_id: str | None = None
     file_path: str | None = None
 
 
