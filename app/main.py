@@ -320,6 +320,28 @@ def _initialize_scan_history_repository() -> None:
             pass
 
 
+def _start_threat_feed_scheduler() -> None:
+    try:
+        from app.services.threat_feed_scheduler import start_scheduler  # noqa: PLC0415
+
+        start_scheduler()
+    except Exception as exc:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).error("main.lifespan: threat_feed_scheduler failed to start: %s", exc)
+
+
+def _stop_threat_feed_scheduler() -> None:
+    try:
+        from app.services.threat_feed_scheduler import stop_scheduler  # noqa: PLC0415
+
+        stop_scheduler()
+    except Exception as exc:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).error("main.lifespan: threat_feed_scheduler failed to stop: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     pipeline = None
@@ -349,9 +371,12 @@ async def lifespan(app: FastAPI):
     if pipeline is not None and callable(set_action_execute_pipeline):
         set_action_execute_pipeline(pipeline)
 
+    _start_threat_feed_scheduler()
+
     try:
         yield
     finally:
+        _stop_threat_feed_scheduler()
         try:
             close = getattr(pipeline, "close", None)
             if callable(close):

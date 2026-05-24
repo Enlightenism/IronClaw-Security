@@ -158,6 +158,33 @@ def _run_standard_feed(
 
 
 # ---------------------------------------------------------------------------
+# Internal: dispatch to scheduler force_feed_run (audit-persisted forced run)
+# ---------------------------------------------------------------------------
+
+
+def _run_scheduler_forced_feed(
+    source: ThreatFeedSourceEnum,
+    *,
+    org_id: str | None,
+) -> dict[str, Any]:
+    try:
+        from app.services.threat_feed_scheduler import force_feed_run
+
+        record = force_feed_run(source, org_id=org_id)
+        return record.to_dict()
+    except Exception as exc:
+        logger.error("threat_detection._run_scheduler_forced_feed source=%s error=%s", source, exc)
+        return {
+            "source": str(source),
+            "status": IngestStatusEnum.FAILED,
+            "error": str(exc),
+            "iocs_inserted": 0,
+            "iocs_updated": 0,
+            "errors": [str(exc)],
+        }
+
+
+# ---------------------------------------------------------------------------
 # POST /threat/detect
 # ---------------------------------------------------------------------------
 
@@ -195,11 +222,17 @@ async def detect_threat(
         "Manually trigger ingestion for one or more threat intelligence feed sources. "
         "When STIX_TAXII is included in sources and taxii_ingest is supplied, "
         "constructs a TAXIIConfig and dispatches directly to STIXAdapter.ingest_from_taxii(). "
-        "All other sources are dispatched to the standard feed ingestion service."
+        "All other sources are dispatched to the standard feed ingestion service. "
+        "When use_scheduler=true and the source is registered in the scheduler, "
+        "delegates to force_feed_run() for a fully audit-persisted, scheduler-tracked forced run."
     ),
 )
 async def refresh_feeds(
     payload: FeedRefreshRequest,
+    use_scheduler: bool = Query(
+        default=False,
+        description=("When true, delegate to the scheduler's force_feed_run() for sources registered " "in the scheduler (MITRE_ATTACK, CISA_KEV). Produces a full SchedulerRunRecord " "persisted to feed_ingest_log. Has no effect on STIX_TAXII sources."),
+    ),
     auth: AuthContext = Depends(get_auth_context),
 ) -> FeedRefreshResult:
     request_id = str(uuid.uuid4())
@@ -207,6 +240,12 @@ async def refresh_feeds(
     started_at = _utcnow_iso()
     per_source_results: list[dict[str, Any]] = []
     total_inserted = total_updated = total_errors = 0
+
+    # Sources eligible for scheduler-tracked forced runs
+    _SCHEDULER_SOURCES = {
+        ThreatFeedSourceEnum.MITRE_ATTACK,
+        ThreatFeedSourceEnum.CISA_KEV,
+    }
 
     for source in payload.sources:
         if source == ThreatFeedSourceEnum.STIX_TAXII:
@@ -255,6 +294,13 @@ async def refresh_feeds(
                 total_inserted += int(result_dict.get("iocs_inserted", 0))
                 total_updated += int(result_dict.get("iocs_updated", 0))
                 total_errors += len(result_dict.get("errors", []))
+        elif use_scheduler and source in _SCHEDULER_SOURCES:
+            # Scheduler-tracked forced run — full audit persistence via SchedulerRunRecord
+            result_dict = _run_scheduler_forced_feed(source, org_id=effective_org_id)
+            per_source_results.append(result_dict)
+            total_inserted += int(result_dict.get("iocs_inserted", 0))
+            total_updated += int(result_dict.get("iocs_updated", 0))
+            total_errors += len(result_dict.get("errors", []))
         else:
             result_dict = _run_standard_feed(
                 source,
@@ -268,9 +314,10 @@ async def refresh_feeds(
             total_errors += len(result_dict.get("errors", []))
 
     logger.info(
-        "threat_detection.refresh_feeds request_id=%s sources=%s inserted=%d updated=%d errors=%d",
+        "threat_detection.refresh_feeds request_id=%s sources=%s use_scheduler=%s " "inserted=%d updated=%d errors=%d",
         request_id,
         [s.value for s in payload.sources],
+        use_scheduler,
         total_inserted,
         total_updated,
         total_errors,
@@ -286,6 +333,36 @@ async def refresh_feeds(
         started_at=started_at,
         completed_at=_utcnow_iso(),
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /threat/feeds/scheduler/status
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/feeds/scheduler/status",
+    status_code=status.HTTP_200_OK,
+    summary="Get threat feed scheduler status",
+    description=("Returns the current status of the background threat feed scheduler, " "including per-source schedule entries, recent run history, " "total run/failure counts, and prune configuration."),
+)
+async def get_scheduler_status(
+    auth: AuthContext = Depends(get_auth_context),
+) -> JSONResponse:
+    try:
+        from app.services.threat_feed_scheduler import get_threat_feed_scheduler
+
+        scheduler_status = get_threat_feed_scheduler().get_status()
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=scheduler_status.to_dict(),
+        )
+    except Exception as exc:
+        logger.error("threat_detection.get_scheduler_status error: %s", exc)
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"error": "scheduler_unavailable", "message": str(exc)},
+        )
 
 
 # ---------------------------------------------------------------------------
