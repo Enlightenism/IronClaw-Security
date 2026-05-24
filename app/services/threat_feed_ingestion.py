@@ -881,8 +881,14 @@ class ThreatFeedIngestionService:
             logger.info("threat_feed.ioc.deleted ioc_id=%s", ioc_id)
         return result
 
-    def count_iocs(self, *, source: str | None = None, active: bool | None = None) -> int:
-        return self._store().count_iocs(source=source, active=active)
+    def count_iocs(
+        self,
+        *,
+        source: str | None = None,
+        active: bool | None = None,
+        org_id: str | None = None,
+    ) -> int:
+        return self._store().count_iocs(source=source, active=active, org_id=org_id)
 
     def _record_ingest(self, result: FeedIngestResult) -> None:
         with self._lock:
