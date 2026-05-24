@@ -13,7 +13,6 @@ OPTIONAL_API_MODULES: Final[tuple[str, ...]] = (
     "app.api.routes.incidents",
     "app.api.routes.integrations",
     "app.api.routes.reviewqueue",
-    "app.api.ioc_management",
 )
 
 CORE_API_MODULES: Final[tuple[str, ...]] = (
