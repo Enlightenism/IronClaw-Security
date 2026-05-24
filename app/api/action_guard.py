@@ -33,6 +33,27 @@ _REASON_SOURCE_MAP = {
     "prompt_injection": "scan",
 }
 
+# Verdict severity order — maps action_guard/action_policy verdicts to a
+# comparable rank so we can escalate based on threat detection results.
+_VERDICT_RANK: dict[str, int] = {
+    "allow": 1,
+    "warn": 2,
+    "quarantine": 3,
+    "block": 4,
+}
+
+# Map DetectionVerdict values → action_guard VerdictType equivalents
+_DETECTION_VERDICT_MAP: dict[str, str] = {
+    "allow": "allow",
+    "monitor": "warn",
+    "review": "quarantine",
+    "block": "block",
+}
+
+
+def _max_verdict(a: str, b: str) -> str:
+    return a if _VERDICT_RANK.get(a, 0) >= _VERDICT_RANK.get(b, 0) else b
+
 
 def _normalize_reason_source(source: object) -> str:
     value = str(source or "scan").strip().lower()
@@ -109,6 +130,65 @@ def _record_baseline_observation(
         pass
 
 
+def _run_threat_screen(
+    payload: ActionGuardRequest,
+    current_verdict: str,
+    caller_context: str,
+) -> tuple[str, list[dict[str, object]]]:
+    """
+    Call run_detection() from app.api.threat_detection as the single threat
+    detection entry point. Returns an (escalated_verdict, extra_reasons) tuple.
+
+    Failures are fail-open: if run_detection is unavailable or raises,
+    the original verdict is returned unchanged and no reasons are added.
+    """
+    try:
+        from app.api.threat_detection import run_detection  # noqa: PLC0415
+        from app.schemas.threat_detection import DetectionRequest  # noqa: PLC0415
+
+        text_parts = [payload.action_type]
+        if payload.target:
+            text_parts.append(f"TARGET: {payload.target}")
+        if getattr(payload, "content", None):
+            text_parts.append(f"CONTENT: {payload.content}")
+
+        detection_payload = DetectionRequest(
+            text="\n".join(text_parts),
+            agent_id=getattr(payload, "agent_id", None) or payload.client_id,
+            session_id=payload.session_id,
+            org_id=None,
+            metadata={
+                "caller": caller_context,
+                "action_type": payload.action_type,
+                "client_id": payload.client_id,
+            },
+        )
+
+        result = run_detection(
+            detection_payload,
+            caller_context=caller_context,
+        )
+
+        mapped = _DETECTION_VERDICT_MAP.get(result.verdict.value, "allow")
+        escalated = _max_verdict(current_verdict, mapped)
+
+        extra_reasons: list[dict[str, object]] = []
+        if mapped != "allow":
+            extra_reasons.append(
+                {
+                    "source": "scan",
+                    "label": "Threat detection signal",
+                    "details": (f"ThreatDetectionEngine verdict={result.verdict.value} " f"score={result.score:.3f} severity={result.severity.value} " f"ioc_matches={result.ioc_match_count} " f"correlation_signals={result.correlation_signal_count}"),
+                    "score": result.score,
+                },
+            )
+
+        return escalated, extra_reasons
+
+    except Exception:  # noqa: BLE001
+        return current_verdict, []
+
+
 @router.post("/action", response_model=ActionGuardResponse)
 def guard_action(payload: ActionGuardRequest, request: Request) -> ActionGuardResponse:
     append_telemetry_event(
@@ -124,6 +204,18 @@ def guard_action(payload: ActionGuardRequest, request: Request) -> ActionGuardRe
         session_id=payload.session_id,
     )
     result["reasons"] = _normalize_reasons(result.get("reasons", []))
+
+    # Threat detection screen — escalate verdict via single entry point
+    escalated_verdict, threat_reasons = _run_threat_screen(
+        payload,
+        current_verdict=result.get("verdict", "allow"),
+        caller_context="action_guard",
+    )
+    if threat_reasons:
+        result["reasons"] = list(result["reasons"]) + threat_reasons
+    result["verdict"] = escalated_verdict
+    result["should_halt"] = escalated_verdict in ("block", "quarantine")
+    result["should_warn"] = escalated_verdict in ("warn", "quarantine")
 
     response = ActionGuardResponse(**result)
 
@@ -161,6 +253,18 @@ def guard_action_policy(payload: ActionGuardRequest, request: Request) -> Action
     )
     result["reasons"] = _normalize_reasons(result.get("reasons", []))
 
+    # Threat detection screen — escalate verdict via single entry point
+    escalated_verdict, threat_reasons = _run_threat_screen(
+        payload,
+        current_verdict=result.get("verdict", "allow"),
+        caller_context="action_guard_policy",
+    )
+    if threat_reasons:
+        result["reasons"] = list(result["reasons"]) + threat_reasons
+    result["verdict"] = escalated_verdict
+    result["should_halt"] = escalated_verdict in ("block", "quarantine")
+    result["should_warn"] = escalated_verdict in ("warn", "quarantine")
+
     response = ActionPolicyResponse(**result)
 
     _record_baseline_observation(
@@ -196,6 +300,18 @@ def guard_action_decision(payload: ActionGuardRequest, request: Request) -> Acti
         session_id=payload.session_id,
     )
     result["reasons"] = _normalize_reasons(result.get("reasons", []))
+
+    # Threat detection screen — escalate verdict via single entry point
+    escalated_verdict, threat_reasons = _run_threat_screen(
+        payload,
+        current_verdict=result.get("verdict", "allow"),
+        caller_context="action_guard_decision",
+    )
+    if threat_reasons:
+        result["reasons"] = list(result["reasons"]) + threat_reasons
+    result["verdict"] = escalated_verdict
+    result["should_halt"] = escalated_verdict in ("block", "quarantine")
+    result["should_warn"] = escalated_verdict in ("warn", "quarantine")
 
     response = ActionDecisionResponse(**result)
 

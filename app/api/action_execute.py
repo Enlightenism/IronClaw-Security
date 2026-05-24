@@ -1,14 +1,58 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
 
 from app.dependencies.action_execute import get_action_execute_pipeline
+from app.dependencies.rate_limit import limit_guard_routes
 from app.facade import guardandexecuteaction
 from app.models.action_execute import ExecuteRequest, ExecuteResponse
 from app.orchestrator.secure_runtime_pipeline import SecureRuntimePipeline
+from app.services.action_guard import ActionGuardDecision, analyze_action
+from app.services.behavioral_baseline import get_behavioral_baseline_store
 from app.services.telemetry import append_telemetry_event
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(limit_guard_routes)])
+
+
+_ALLOWED_REASON_SOURCES = {"policy", "scan", "ai"}
+_REASON_SOURCE_MAP = {
+    "promptinjection": "scan",
+    "prompt_injection": "scan",
+}
+
+
+def _normalize_reason_source(source: object) -> str:
+    value = str(source or "scan").strip().lower()
+    if value in _ALLOWED_REASON_SOURCES:
+        return value
+    return _REASON_SOURCE_MAP.get(value, "scan")
+
+
+def _normalize_reasons(reasons: list[object]) -> list[dict[str, object]]:
+    normalized: list[dict[str, object]] = []
+    for item in reasons:
+        if isinstance(item, dict):
+            normalized.append(
+                {
+                    "source": _normalize_reason_source(item.get("source")),
+                    "label": str(item.get("label") or item.get("code") or "Explanation"),
+                    "details": str(
+                        item.get("details") or item.get("message") or item.get("summary") or "",
+                    ),
+                    "score": (float(item["score"]) if item.get("score") is not None else None),
+                },
+            )
+        else:
+            normalized.append(
+                {
+                    "source": "scan",
+                    "label": "Explanation",
+                    "details": str(item),
+                    "score": None,
+                },
+            )
+    return normalized
 
 
 def _request_meta(request: Request) -> dict[str, str | None]:
@@ -20,51 +64,117 @@ def _request_meta(request: Request) -> dict[str, str | None]:
     }
 
 
+def _record_baseline_observation(
+    payload: ExecuteRequest,
+    risk_score: int,
+    matched_patterns: list[str],
+) -> None:
+    agent_id = getattr(payload, "agent_id", None) or getattr(payload, "client_id", None)
+    if not agent_id:
+        return
+    try:
+        get_behavioral_baseline_store().record_observation(
+            agent_id=str(agent_id),
+            action_type=getattr(payload, "action_type", "execute"),
+            target=getattr(payload, "target", "") or "",
+            risk_score=risk_score,
+            session_id=getattr(payload, "session_id", None),
+            client_id=getattr(payload, "client_id", None),
+            matched_patterns=matched_patterns,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _run_detection(payload: ExecuteRequest) -> ActionGuardDecision | None:
+    """Run live threat detection on the incoming execute payload.
+
+    Returns the detection result if the action carries a detectable surface
+    (action_type + target/content), otherwise returns None.  Failures are
+    swallowed so detection never blocks execution when the service is
+    unavailable — a telemetry event is emitted instead.
+    """
+    action_type = getattr(payload, "action_type", None)
+    if not action_type:
+        return None
+    try:
+        result: ActionGuardDecision = analyze_action(
+            action_type=action_type,
+            target=getattr(payload, "target", None),
+            content=getattr(payload, "content", None),
+            client_id=getattr(payload, "client_id", None),
+            session_id=getattr(payload, "session_id", None),
+        )
+        result["reasons"] = _normalize_reasons(result.get("reasons", []))
+        return result
+    except Exception:  # noqa: BLE001
+        return None
+
+
 @router.post("/execute", response_model=ExecuteResponse)
 def guarded_execute(
     payload: ExecuteRequest,
     request: Request,
     pipeline: SecureRuntimePipeline = Depends(get_action_execute_pipeline),
-) -> ExecuteResponse:
-    try:
+) -> ExecuteResponse | JSONResponse:
+    meta = _request_meta(request)
+
+    append_telemetry_event("execute_requested", {**meta, "action_type": getattr(payload, "action_type", None)})
+
+    # --- live detection screen (mirrors action_guard pattern) ---
+    detection = _run_detection(payload)
+    if detection is not None:
+        verdict = str(detection.get("verdict", "allow")).lower()
+        risk_score = int(detection.get("risk_score", 0) or 0)
+        matched_patterns = [str(r.get("label", "")) for r in detection.get("reasons", []) if isinstance(r, dict) and r.get("label")]
+
+        _record_baseline_observation(payload, risk_score=risk_score, matched_patterns=matched_patterns)
+
         append_telemetry_event(
-            "guard_execute_requested",
+            "execute_detection_completed",
             {
-                **_request_meta(request),
-                "action_type": payload.action_type,
-                "target": payload.target,
-                "client_id": payload.client_id,
-                "session_id": payload.session_id,
+                **meta,
+                "action_type": getattr(payload, "action_type", None),
+                "verdict": verdict,
+                "risk_score": risk_score,
+                "reason_count": len(detection.get("reasons", [])),
             },
         )
-    except Exception:
-        pass
 
-    response_payload = guardandexecuteaction(
-        payload,
-        pipeline=pipeline,
+        if verdict == "block":
+            append_telemetry_event("execute_blocked_by_detection", {**meta, "risk_score": risk_score})
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "detail": "Action blocked by IronClaw detection layer.",
+                    "verdict": verdict,
+                    "risk_score": risk_score,
+                    "reasons": detection.get("reasons", []),
+                },
+            )
+
+        if verdict == "quarantine":
+            append_telemetry_event("execute_quarantined_by_detection", {**meta, "risk_score": risk_score})
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "detail": "Action quarantined for review.",
+                    "verdict": verdict,
+                    "risk_score": risk_score,
+                    "reasons": detection.get("reasons", []),
+                },
+            )
+
+    # --- guarded execution ---
+    response: ExecuteResponse = guardandexecuteaction(payload, pipeline)
+
+    append_telemetry_event(
+        "execute_completed",
+        {
+            **meta,
+            "verdict": getattr(response, "verdict", None),
+            "action_type": getattr(payload, "action_type", None),
+        },
     )
-
-    response = ExecuteResponse(**response_payload)
-
-    try:
-        append_telemetry_event(
-            "guard_execute_completed",
-            {
-                **_request_meta(request),
-                "action_type": payload.action_type,
-                "target": payload.target,
-                "client_id": payload.client_id,
-                "session_id": payload.session_id,
-                "execution_id": getattr(response, "execution_id", None),
-                "execution_state": getattr(response, "execution_state", None),
-                "response_action": getattr(response, "response_action", None),
-                "response_status": getattr(response, "response_status", None),
-                "trace_id_response": getattr(response, "trace_id", None),
-                "request_id_response": getattr(response, "request_id", None),
-            },
-        )
-    except Exception:
-        pass
 
     return response
