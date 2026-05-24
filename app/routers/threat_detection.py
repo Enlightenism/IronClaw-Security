@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import logging
+import time
 from typing import Any
 import uuid
 
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 
 from app.core.auth import AuthContext, get_auth_context
 from app.schemas.threat_detection import (
@@ -32,32 +32,27 @@ from app.services.threat_detection_engine import get_detection_engine
 
 logger = logging.getLogger(__name__)
 
-
 router = APIRouter(prefix="/threat", tags=["threat-detection"])
-
 
 _TABLE_DETECTIONS = "threat_detections"
 
 
 # ---------------------------------------------------------------------------
-# TAXII config payload — used by POST /threat/feeds/refresh for STIX_TAXII
+# Supabase client accessor — single canonical path
 # ---------------------------------------------------------------------------
 
 
-class TAXIIConfig(BaseModel):
-    taxii_url: str
-    collection_id: str
-    username: str | None = None
-    password: str | None = None
-    api_root: str | None = None
-    verify_ssl: bool = True
-    extra: dict[str, Any] = {}
+def _get_supabase_client():
+    try:
+        from app.clients.supabase import get_supabase_client as _get
+
+        return _get()
+    except Exception:
+        return None
 
 
-class FeedRefreshRequestWithTAXII(FeedRefreshRequest):
-    taxii_config: TAXIIConfig | None = None
-
-
+# ---------------------------------------------------------------------------
+# UTC helpers
 # ---------------------------------------------------------------------------
 
 
@@ -65,20 +60,13 @@ def _utcnow_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _get_supabase_client():
-    try:
-        from app.clients.supabase import get_supabase_client
+def _utcnow_ms() -> int:
+    return int(time.monotonic() * 1000)
 
-        return get_supabase_client()
-    except ImportError:
-        pass
-    try:
-        from app.core.supabase import get_supabase_client
 
-        return get_supabase_client()
-    except ImportError:
-        pass
-    return None
+# ---------------------------------------------------------------------------
+# Persistence
+# ---------------------------------------------------------------------------
 
 
 def _persist_detection_result(result: DetectionResult) -> None:
@@ -109,7 +97,16 @@ def _persist_detection_result(result: DetectionResult) -> None:
         }
         client.table(_TABLE_DETECTIONS).insert(row).execute()
     except Exception as exc:
-        logger.error("threat_detection.persist.error event_id=%s: %s", result.event_id, exc)
+        logger.error(
+            "threat_detection.persist.error event_id=%s: %s",
+            result.event_id,
+            exc,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Correlation signal bootstrap from auth context
+# ---------------------------------------------------------------------------
 
 
 def _build_correlation_signals_from_context(
@@ -134,6 +131,28 @@ def _build_correlation_signals_from_context(
 
 
 # ---------------------------------------------------------------------------
+# DetectionRequest scoping helper
+# ---------------------------------------------------------------------------
+
+
+def _scope_request(req: DetectionRequest, auth: AuthContext) -> DetectionRequest:
+    return DetectionRequest(
+        event_id=req.event_id or str(uuid.uuid4()),
+        org_id=req.org_id or auth.org_id,
+        agent_id=req.agent_id,
+        session_id=req.session_id or auth.session_id,
+        text=req.text,
+        url=req.url,
+        domain=req.domain,
+        hashes=req.hashes,
+        ioc_values=req.ioc_values,
+        context=req.context,
+        metadata=req.metadata,
+        minimum_confidence=req.minimum_confidence,
+    )
+
+
+# ---------------------------------------------------------------------------
 # POST /threat/detect
 # ---------------------------------------------------------------------------
 
@@ -145,32 +164,15 @@ def _build_correlation_signals_from_context(
     summary="Run threat detection pipeline",
     description=("Submits a detection request through the full IronClaw threat detection pipeline. " "Extracts observables, resolves IOC matches, applies correlation signals, and returns " "a structured verdict with score, severity, MITRE techniques, and rationale."),
 )
-def detect_threat(
+async def detect_threat(
     request: DetectionRequest,
     auth: AuthContext = Depends(get_auth_context),
 ) -> DetectionResult:
-    effective_org_id = request.org_id or auth.org_id
-    effective_session_id = request.session_id or auth.session_id
-
-    scoped_request = DetectionRequest(
-        event_id=request.event_id or str(uuid.uuid4()),
-        org_id=effective_org_id,
-        agent_id=request.agent_id,
-        session_id=effective_session_id,
-        text=request.text,
-        url=request.url,
-        domain=request.domain,
-        hashes=request.hashes,
-        ioc_values=request.ioc_values,
-        context=request.context,
-        metadata=request.metadata,
-        minimum_confidence=request.minimum_confidence,
-    )
-
-    correlation_signals = _build_correlation_signals_from_context(auth, scoped_request)
+    scoped = _scope_request(request, auth)
+    correlation_signals = _build_correlation_signals_from_context(auth, scoped)
 
     engine = get_detection_engine()
-    result = engine.run(scoped_request, correlation_signals=correlation_signals)
+    result = engine.run(scoped, correlation_signals=correlation_signals)
 
     _persist_detection_result(result)
 
@@ -198,7 +200,7 @@ def detect_threat(
     summary="Run batch threat detection",
     description=("Submits multiple detection requests in a single call. Each request is processed " "independently through the full pipeline. Returns results in submission order."),
 )
-def detect_threat_batch(
+async def detect_threat_batch(
     requests: list[DetectionRequest],
     auth: AuthContext = Depends(get_auth_context),
 ) -> list[DetectionResult]:
@@ -209,26 +211,9 @@ def detect_threat_batch(
     results: list[DetectionResult] = []
 
     for req in requests:
-        effective_org_id = req.org_id or auth.org_id
-        effective_session_id = req.session_id or auth.session_id
-
-        scoped_request = DetectionRequest(
-            event_id=req.event_id or str(uuid.uuid4()),
-            org_id=effective_org_id,
-            agent_id=req.agent_id,
-            session_id=effective_session_id,
-            text=req.text,
-            url=req.url,
-            domain=req.domain,
-            hashes=req.hashes,
-            ioc_values=req.ioc_values,
-            context=req.context,
-            metadata=req.metadata,
-            minimum_confidence=req.minimum_confidence,
-        )
-
-        correlation_signals = _build_correlation_signals_from_context(auth, scoped_request)
-        result = engine.run(scoped_request, correlation_signals=correlation_signals)
+        scoped = _scope_request(req, auth)
+        correlation_signals = _build_correlation_signals_from_context(auth, scoped)
+        result = engine.run(scoped, correlation_signals=correlation_signals)
         _persist_detection_result(result)
         results.append(result)
 
@@ -253,7 +238,7 @@ def detect_threat_batch(
     summary="List stored detection events",
     description="Returns paginated detection summaries. Scoped by org_id if present on the auth context.",
 )
-def list_detections(
+async def list_detections(
     org_id: str | None = Query(default=None, description="Filter by organization ID."),
     verdict: DetectionVerdict | None = Query(default=None, description="Filter by verdict."),
     severity: ThreatSeverityLevel | None = Query(default=None, description="Filter by severity."),
@@ -271,7 +256,7 @@ def list_detections(
         return []
 
     try:
-        q = client.table(_TABLE_DETECTIONS).select("event_id,org_id,agent_id,verdict,score,severity,ioc_match_count,correlation_signal_count,assessed_at,session_id")
+        q = client.table(_TABLE_DETECTIONS).select("event_id,org_id,agent_id,session_id,verdict,score,severity," "ioc_match_count,correlation_signal_count,assessed_at")
         if effective_org_id is not None:
             q = q.eq("org_id", effective_org_id)
         if verdict is not None:
@@ -292,6 +277,7 @@ def list_detections(
                 event_id=row["event_id"],
                 org_id=row.get("org_id"),
                 agent_id=row.get("agent_id"),
+                session_id=row.get("session_id"),
                 verdict=DetectionVerdict(row["verdict"]),
                 score=float(row["score"]),
                 severity=ThreatSeverityLevel(row["severity"]),
@@ -313,13 +299,14 @@ def list_detections(
 
 @router.get(
     "/detections/{event_id}",
+    response_model=None,
     status_code=status.HTTP_200_OK,
     summary="Get a stored detection event by ID",
 )
-def get_detection(
+async def get_detection(
     event_id: str,
     auth: AuthContext = Depends(get_auth_context),
-) -> dict[str, Any]:
+) -> JSONResponse | dict[str, Any]:
     client = _get_supabase_client()
     if client is None:
         return JSONResponse(
@@ -363,7 +350,7 @@ def get_detection(
     summary="Run a retrospective threat hunt",
     description=("Sweeps stored detection history for matching IOC values, MITRE techniques, CVEs, " "or risk families within an optional time window."),
 )
-def run_threat_hunt(
+async def run_threat_hunt(
     query: HuntQuery,
     auth: AuthContext = Depends(get_auth_context),
 ) -> HuntResult:
@@ -373,25 +360,24 @@ def run_threat_hunt(
     effective_org_id = query.org_id or auth.org_id
     started_at = _utcnow_iso()
 
+    scoped_query = HuntQuery(
+        hunt_id=hunt_id,
+        org_id=effective_org_id,
+        ioc_value=query.ioc_value,
+        ioc_type=query.ioc_type,
+        mitre_technique_id=query.mitre_technique_id,
+        cve_id=query.cve_id,
+        risk_family=query.risk_family,
+        start_time=query.start_time,
+        end_time=query.end_time,
+        minimum_score=query.minimum_score,
+        limit=query.limit,
+        offset=query.offset,
+    )
+
     try:
         service = get_threat_hunt_service()
-        result = service.run_hunt(
-            HuntQuery(
-                hunt_id=hunt_id,
-                org_id=effective_org_id,
-                ioc_value=query.ioc_value,
-                ioc_type=query.ioc_type,
-                mitre_technique_id=query.mitre_technique_id,
-                cve_id=query.cve_id,
-                risk_family=query.risk_family,
-                start_time=query.start_time,
-                end_time=query.end_time,
-                minimum_score=query.minimum_score,
-                limit=query.limit,
-                offset=query.offset,
-            )
-        )
-        return result
+        return service.run_hunt(scoped_query)
     except ImportError:
         logger.warning("threat_detection.hunt: threat_hunt_service unavailable — returning empty result")
         return HuntResult(
@@ -429,17 +415,23 @@ def run_threat_hunt(
     status_code=status.HTTP_200_OK,
     summary="Bulk import IOCs into the threat store",
 )
-def import_iocs(
+async def import_iocs(
     payload: IOCImportRequest,
     auth: AuthContext = Depends(get_auth_context),
 ) -> IOCImportResult:
     from app.services.ioc_store import get_ioc_store
-    from app.services.threat_feed_ingestion import IOCRecord, _detect_ioc_type, _normalize_value
-    from app.services.threat_feed_ingestion import _utcnow_iso as _now
+    from app.services.threat_feed_ingestion import (
+        IOCRecord,
+        _detect_ioc_type,
+        _normalize_value,
+    )
+    from app.services.threat_feed_ingestion import (
+        _utcnow_iso as _svc_now,
+    )
 
     ingest_id = str(uuid.uuid4())
     effective_org_id = payload.org_id or auth.org_id
-    now = _now()
+    now = _svc_now()
     errors: list[str] = []
 
     records: list[IOCRecord] = []
@@ -447,7 +439,12 @@ def import_iocs(
         try:
             ioc_type = entry.ioc_type or _detect_ioc_type(entry.value)
             normalized_value = _normalize_value(entry.value, ioc_type)
-            ioc_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{normalized_value}:{ioc_type}:{effective_org_id or ''}"))
+            ioc_id = str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_DNS,
+                    f"{normalized_value}:{ioc_type}:{effective_org_id or ''}",
+                )
+            )
             records.append(
                 IOCRecord(
                     ioc_id=ioc_id,
@@ -482,11 +479,12 @@ def import_iocs(
         except Exception as exc:
             errors.append(f"bulk_upsert failed: {exc}")
 
-    status_val = IngestStatusEnum.SUCCESS
     if errors and (inserted + updated) == 0:
         status_val = IngestStatusEnum.FAILED
     elif errors:
         status_val = IngestStatusEnum.PARTIAL
+    else:
+        status_val = IngestStatusEnum.SUCCESS
 
     logger.info(
         "threat_detection.import_iocs ingest_id=%s inserted=%d updated=%d skipped=%d errors=%d",
@@ -521,7 +519,7 @@ def import_iocs(
     status_code=status.HTTP_200_OK,
     summary="List IOCs from the threat store",
 )
-def list_iocs(
+async def list_iocs(
     source: ThreatFeedSourceEnum | None = Query(default=None),
     ioc_type: str | None = Query(default=None),
     severity: ThreatSeverityLevel | None = Query(default=None),
@@ -593,13 +591,14 @@ def list_iocs(
 
 @router.delete(
     "/iocs/{ioc_id}",
+    response_model=None,
     status_code=status.HTTP_200_OK,
     summary="Delete a single IOC from the threat store",
 )
-def delete_ioc(
+async def delete_ioc(
     ioc_id: str,
     auth: AuthContext = Depends(get_auth_context),
-) -> dict[str, Any]:
+) -> JSONResponse | dict[str, Any]:
     from app.services.ioc_store import get_ioc_store
 
     store = get_ioc_store()
@@ -611,7 +610,11 @@ def delete_ioc(
             content={"error": "not_found", "message": f"IOC {ioc_id!r} not found or already deleted."},
         )
 
-    logger.info("threat_detection.delete_ioc ioc_id=%s principal=%s", ioc_id, auth.principal_id)
+    logger.info(
+        "threat_detection.delete_ioc ioc_id=%s principal=%s",
+        ioc_id,
+        auth.principal_id,
+    )
     return {"deleted": True, "ioc_id": ioc_id}
 
 
@@ -627,12 +630,16 @@ def delete_ioc(
     summary="Trigger a threat feed refresh",
     description="Manually trigger ingestion for one or more threat intelligence feed sources.",
 )
-def refresh_feeds(
-    payload: FeedRefreshRequestWithTAXII,
+async def refresh_feeds(
+    payload: FeedRefreshRequest,
     auth: AuthContext = Depends(get_auth_context),
 ) -> FeedRefreshResult:
-    from app.services.threat_feed_ingestion import ThreatFeedSourceEnum as _SourceEnum
-    from app.services.threat_feed_ingestion import run_feed_ingestion
+    from app.services.threat_feed_ingestion import (
+        ThreatFeedSourceEnum as _SourceEnum,
+    )
+    from app.services.threat_feed_ingestion import (
+        run_feed_ingestion,
+    )
 
     request_id = str(uuid.uuid4())
     effective_org_id = payload.org_id or auth.org_id
@@ -640,7 +647,7 @@ def refresh_feeds(
     per_source_results: list[dict[str, Any]] = []
     total_inserted = total_updated = total_errors = 0
 
-    taxii_cfg_dict: dict[str, Any] | None = payload.taxii_config.model_dump() if payload.taxii_config is not None else None
+    taxii_cfg_dict: dict[str, Any] | None = payload.taxii_ingest.model_dump() if payload.taxii_ingest is not None else None
 
     for source in payload.sources:
         try:
@@ -660,13 +667,14 @@ def refresh_feeds(
                     force=payload.force,
                     custom_url=payload.custom_url,
                 )
-            per_source_results.append(result if isinstance(result, dict) else result.dict() if hasattr(result, "dict") else vars(result))
+            result_dict = result if isinstance(result, dict) else result.model_dump() if hasattr(result, "model_dump") else vars(result)
+            per_source_results.append(result_dict)
             total_inserted += getattr(result, "iocs_inserted", 0)
             total_updated += getattr(result, "iocs_updated", 0)
             total_errors += len(getattr(result, "errors", []))
         except Exception as exc:
             logger.error("threat_detection.refresh_feeds.error source=%s: %s", source, exc)
-            per_source_results.append({"source": source, "status": "failed", "error": str(exc)})
+            per_source_results.append({"source": str(source), "status": "failed", "error": str(exc)})
             total_errors += 1
 
     logger.info(
@@ -701,7 +709,7 @@ def refresh_feeds(
     summary="Threat detection subsystem health check",
     tags=["threat-detection", "system"],
 )
-def threat_health(
+async def threat_health(
     auth: AuthContext = Depends(get_auth_context),
 ) -> dict[str, Any]:
     from app.services.ioc_store import get_ioc_store
