@@ -21,9 +21,6 @@ from app.schemas.threat_detection import (
     HuntQuery,
     HuntResult,
     IngestStatusEnum,
-    IOCImportRequest,
-    IOCImportResult,
-    IOCResponse,
     TAXIIIngestRequest,
     ThreatFeedSourceEnum,
     ThreatSeverityLevel,
@@ -33,7 +30,9 @@ from app.services.threat_detection_engine import get_detection_engine
 
 logger = logging.getLogger(__name__)
 
+
 router = APIRouter(prefix="/threat", tags=["threat-detection"])
+
 
 _TABLE_DETECTIONS = "threat_detections"
 
@@ -420,71 +419,6 @@ async def taxii_ingest(
     return JSONResponse(
         status_code=response_status,
         content=result.to_dict(),
-    )
-
-
-# ---------------------------------------------------------------------------
-# POST /threat/iocs  — bulk IOC import
-# ---------------------------------------------------------------------------
-
-
-@router.post(
-    "/iocs",
-    response_model=IOCImportResult,
-    status_code=status.HTTP_200_OK,
-    summary="Bulk import IOCs",
-)
-async def import_iocs(
-    payload: IOCImportRequest,
-    auth: AuthContext = Depends(get_auth_context),
-) -> IOCImportResult:
-    from app.services.threat_feed_ingestion import import_iocs as _import_iocs
-
-    effective_org_id = payload.org_id or auth.org_id
-    return _import_iocs(payload, org_id=effective_org_id)
-
-
-# ---------------------------------------------------------------------------
-# GET /threat/iocs
-# ---------------------------------------------------------------------------
-
-
-@router.get(
-    "/iocs",
-    response_model=list[IOCResponse],
-    status_code=status.HTTP_200_OK,
-    summary="List IOCs",
-)
-async def list_iocs(
-    org_id: str | None = Query(default=None),
-    source: ThreatFeedSourceEnum | None = Query(default=None),
-    ioc_type: str | None = Query(default=None),
-    severity: ThreatSeverityLevel | None = Query(default=None),
-    active: bool | None = Query(default=None),
-    tag: str | None = Query(default=None),
-    mitre_technique_id: str | None = Query(default=None),
-    cve_id: str | None = Query(default=None),
-    value_contains: str | None = Query(default=None),
-    limit: int = Query(default=100, ge=1, le=1000),
-    offset: int = Query(default=0, ge=0),
-    auth: AuthContext = Depends(get_auth_context),
-) -> list[IOCResponse]:
-    from app.services.ioc_store import get_ioc_store
-
-    store = get_ioc_store()
-    effective_org_id = org_id or auth.org_id
-    return store.list_iocs(
-        org_id=effective_org_id,
-        source=source,
-        ioc_type=ioc_type,
-        severity=severity,
-        active=active,
-        tag=tag,
-        mitre_technique_id=mitre_technique_id,
-        cve_id=cve_id,
-        value_contains=value_contains,
-        limit=limit,
-        offset=offset,
     )
 
 

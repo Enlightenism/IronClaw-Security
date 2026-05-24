@@ -198,7 +198,7 @@ def _row_to_ingest_log_response(row: dict[str, Any]) -> IngestLogListResponse:
 # ---------------------------------------------------------------------------
 
 
-@router.post("", response_model=IOCResponse, status_code=201)
+@router.post("", response_model=IOCResponse, status_code=201, operation_id="iocmgmt_create_ioc")
 def create_ioc(req: IOCCreateRequest) -> IOCResponse:
     record = _create_request_to_record(req)
     store = get_ioc_store()
@@ -211,7 +211,7 @@ def create_ioc(req: IOCCreateRequest) -> IOCResponse:
     return _ioc_record_to_response(persisted)
 
 
-@router.get("/{ioc_id}", response_model=IOCResponse)
+@router.get("/{ioc_id}", response_model=IOCResponse, operation_id="iocmgmt_get_ioc")
 def get_ioc(ioc_id: str) -> IOCResponse:
     store = get_ioc_store()
     record = store.get_ioc(ioc_id)
@@ -220,7 +220,7 @@ def get_ioc(ioc_id: str) -> IOCResponse:
     return _ioc_record_to_response(record)
 
 
-@router.patch("/{ioc_id}", response_model=IOCResponse)
+@router.patch("/{ioc_id}", response_model=IOCResponse, operation_id="iocmgmt_update_ioc")
 def update_ioc(ioc_id: str, req: IOCUpdateRequest) -> IOCResponse:
     store = get_ioc_store()
     existing = store.get_ioc(ioc_id)
@@ -258,7 +258,7 @@ def update_ioc(ioc_id: str, req: IOCUpdateRequest) -> IOCResponse:
     return _ioc_record_to_response(refreshed)
 
 
-@router.delete("/{ioc_id}", response_model=IOCDeleteResponse)
+@router.delete("/{ioc_id}", response_model=IOCDeleteResponse, operation_id="iocmgmt_delete_ioc")
 def delete_ioc(ioc_id: str) -> IOCDeleteResponse:
     store = get_ioc_store()
     existing = store.get_ioc(ioc_id)
@@ -268,7 +268,7 @@ def delete_ioc(ioc_id: str) -> IOCDeleteResponse:
     return IOCDeleteResponse(ioc_id=ioc_id, deleted=deleted)
 
 
-@router.post("/{ioc_id}/deactivate", response_model=IOCDeactivateResponse)
+@router.post("/{ioc_id}/deactivate", response_model=IOCDeactivateResponse, operation_id="iocmgmt_deactivate_ioc")
 def deactivate_ioc(ioc_id: str) -> IOCDeactivateResponse:
     store = get_ioc_store()
     existing = store.get_ioc(ioc_id)
@@ -283,7 +283,7 @@ def deactivate_ioc(ioc_id: str) -> IOCDeactivateResponse:
 # ---------------------------------------------------------------------------
 
 
-@router.post("/bulk", response_model=IOCBulkCreateResponse, status_code=201)
+@router.post("/bulk", response_model=IOCBulkCreateResponse, status_code=201, operation_id="iocmgmt_bulk_create_iocs")
 def bulk_create_iocs(req: IOCBulkCreateRequest) -> IOCBulkCreateResponse:
     batch_ingest_id = f"manual-bulk-{uuid.uuid4().hex}"
     records = [_create_request_to_record(r, feed_ingest_id=batch_ingest_id) for r in req.records]
@@ -292,7 +292,7 @@ def bulk_create_iocs(req: IOCBulkCreateRequest) -> IOCBulkCreateResponse:
     return IOCBulkCreateResponse(inserted=inserted, updated=updated, skipped=skipped)
 
 
-@router.delete("/ingest/{feed_ingest_id}", response_model=IOCDeleteByIngestResponse)
+@router.delete("/ingest/{feed_ingest_id}", response_model=IOCDeleteByIngestResponse, operation_id="iocmgmt_delete_iocs_by_ingest")
 def delete_iocs_by_ingest(feed_ingest_id: str) -> IOCDeleteByIngestResponse:
     store = get_ioc_store()
     deleted = store.delete_by_ingest_id(feed_ingest_id)
@@ -304,7 +304,7 @@ def delete_iocs_by_ingest(feed_ingest_id: str) -> IOCDeleteByIngestResponse:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/filter", response_model=list[IOCResponse], operation_id="filter_iocs")
+@router.get("/filter", response_model=list[IOCResponse], operation_id="iocmgmt_filter_iocs")
 def filter_iocs(
     source: str | None = Query(default=None),
     ioc_type: str | None = Query(default=None),
@@ -341,7 +341,7 @@ def filter_iocs(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/lookup/value", response_model=list[IOCResponse])
+@router.get("/lookup/value", response_model=list[IOCResponse], operation_id="iocmgmt_lookup_ioc_by_value")
 def lookup_by_value(
     value: str = Query(..., description="Exact IOC value to look up"),
     org_id: str | None = Query(default=None),
@@ -352,14 +352,14 @@ def lookup_by_value(
     return [_ioc_record_to_response(r) for r in records]
 
 
-@router.post("/lookup/bulk", response_model=list[IOCResponse])
+@router.post("/lookup/bulk", response_model=list[IOCResponse], operation_id="iocmgmt_lookup_iocs_bulk")
 def lookup_by_values_bulk(req: IOCLookupBulkRequest) -> list[IOCResponse]:
     store = get_ioc_store()
     records = store.lookup_by_values(req.values, org_id=req.org_id, active_only=req.active_only)
     return [_ioc_record_to_response(r) for r in records]
 
 
-@router.get("/lookup/cve/{cve_id}", response_model=list[IOCResponse])
+@router.get("/lookup/cve/{cve_id}", response_model=list[IOCResponse], operation_id="iocmgmt_lookup_iocs_by_cve")
 def lookup_by_cve(
     cve_id: str,
     org_id: str | None = Query(default=None),
@@ -370,7 +370,7 @@ def lookup_by_cve(
     return [_ioc_record_to_response(r) for r in records]
 
 
-@router.get("/lookup/mitre/{technique_id}", response_model=list[IOCResponse])
+@router.get("/lookup/mitre/{technique_id}", response_model=list[IOCResponse], operation_id="iocmgmt_lookup_iocs_by_mitre")
 def lookup_by_mitre_technique(
     technique_id: str,
     org_id: str | None = Query(default=None),
@@ -386,7 +386,7 @@ def lookup_by_mitre_technique(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/admin/prune", response_model=IOCPruneResponse)
+@router.post("/admin/prune", response_model=IOCPruneResponse, operation_id="iocmgmt_prune_expired_iocs")
 def prune_expired_iocs() -> IOCPruneResponse:
     store = get_ioc_store()
     pruned = store.prune_expired()
@@ -394,7 +394,7 @@ def prune_expired_iocs() -> IOCPruneResponse:
     return IOCPruneResponse(pruned=pruned)
 
 
-@router.get("/admin/count", response_model=IOCCountResponse)
+@router.get("/admin/count", response_model=IOCCountResponse, operation_id="iocmgmt_count_iocs")
 def count_iocs(
     source: str | None = Query(default=None),
     active: bool | None = Query(default=None),
@@ -405,7 +405,7 @@ def count_iocs(
     return IOCCountResponse(count=count, source=source, active=active, org_id=org_id)
 
 
-@router.get("/admin/health", response_model=IOCHealthResponse)
+@router.get("/admin/health", response_model=IOCHealthResponse, operation_id="iocmgmt_ioc_store_health")
 def ioc_store_health() -> IOCHealthResponse:
     store = get_ioc_store()
     result = store.health_check()
@@ -421,7 +421,7 @@ def ioc_store_health() -> IOCHealthResponse:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/ingest/{ingest_id}", response_model=IngestLogListResponse)
+@router.get("/ingest/{ingest_id}", response_model=IngestLogListResponse, operation_id="iocmgmt_get_ingest_result")
 def get_ingest_result(ingest_id: str) -> IngestLogListResponse:
     store = get_ioc_store()
     row = store.get_ingest_result(ingest_id)
@@ -430,7 +430,7 @@ def get_ingest_result(ingest_id: str) -> IngestLogListResponse:
     return _row_to_ingest_log_response(row)
 
 
-@router.get("/ingest", response_model=list[IngestLogListResponse])
+@router.get("/ingest", response_model=list[IngestLogListResponse], operation_id="iocmgmt_list_ingest_history")
 def list_ingest_history(
     source: str | None = Query(default=None),
     org_id: str | None = Query(default=None),
@@ -442,7 +442,7 @@ def list_ingest_history(
     return [_row_to_ingest_log_response(r) for r in rows]
 
 
-@router.delete("/ingest/log/{ingest_id}", response_model=dict)
+@router.delete("/ingest/log/{ingest_id}", response_model=dict, operation_id="iocmgmt_delete_ingest_log")
 def delete_ingest_log(ingest_id: str) -> dict:
     store = get_ioc_store()
     ok = store.delete_ingest_log(ingest_id)
