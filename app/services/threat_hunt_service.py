@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 import logging
 import time
 from typing import Any
+import uuid
 
 from app.schemas.threat_detection import (
     DetectionVerdict,
@@ -50,9 +51,9 @@ class ThreatHuntService:
     duplicating logic owned by ThreatDetectionEngine or IOCStore.
     """
 
-    def run_hunt(self, query: HuntQuery) -> HuntResult:
-        hunt_id = query.hunt_id or ""
-        org_id = query.org_id
+    def run_hunt(self, query: HuntQuery, *, org_id: str | None = None) -> HuntResult:
+        hunt_id = query.hunt_id or str(uuid.uuid4())
+        effective_org_id = org_id if org_id is not None else query.org_id
         started_at = _utcnow_iso()
         t0 = time.monotonic()
         errors: list[str] = []
@@ -62,7 +63,7 @@ class ThreatHuntService:
             logger.warning("threat_hunt_service.run_hunt: supabase client unavailable hunt_id=%s", hunt_id)
             return HuntResult(
                 hunt_id=hunt_id,
-                org_id=org_id,
+                org_id=effective_org_id,
                 status=HuntStatusEnum.FAILED,
                 total_matches=0,
                 matches=[],
@@ -73,13 +74,13 @@ class ThreatHuntService:
             )
 
         try:
-            rows = self._query_detections(client, query, org_id)
+            rows = self._query_detections(client, query, effective_org_id)
         except Exception as exc:
             logger.error("threat_hunt_service.run_hunt.error hunt_id=%s: %s", hunt_id, exc)
             duration_ms = int((time.monotonic() - t0) * 1000)
             return HuntResult(
                 hunt_id=hunt_id,
-                org_id=org_id,
+                org_id=effective_org_id,
                 status=HuntStatusEnum.FAILED,
                 total_matches=0,
                 matches=[],
@@ -100,14 +101,14 @@ class ThreatHuntService:
         logger.info(
             "threat_hunt_service.run_hunt hunt_id=%s org_id=%s matches=%d duration_ms=%d",
             hunt_id,
-            org_id,
+            effective_org_id,
             len(matches),
             duration_ms,
         )
 
         return HuntResult(
             hunt_id=hunt_id,
-            org_id=org_id,
+            org_id=effective_org_id,
             status=HuntStatusEnum.COMPLETED,
             total_matches=len(matches),
             matches=matches,
@@ -240,11 +241,15 @@ class ThreatHuntService:
 _hunt_service_instance: ThreatHuntService | None = None
 
 
-def get_threat_hunt_service() -> ThreatHuntService:
+def get_hunt_service() -> ThreatHuntService:
     global _hunt_service_instance
     if _hunt_service_instance is None:
         _hunt_service_instance = ThreatHuntService()
     return _hunt_service_instance
 
 
-__all__ = ["ThreatHuntService", "get_threat_hunt_service"]
+# Alias for callers that import by the full name
+get_threat_hunt_service = get_hunt_service
+
+
+__all__ = ["ThreatHuntService", "get_hunt_service", "get_threat_hunt_service"]

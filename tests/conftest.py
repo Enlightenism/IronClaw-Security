@@ -12,6 +12,9 @@ os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
 os.environ["SUPABASE_KEY"] = ""
 os.environ["SUPABASE_ANON_KEY"] = ""
 
+
+from unittest.mock import MagicMock
+
 from fastapi.testclient import TestClient
 import pytest
 
@@ -94,3 +97,29 @@ def sdk_client():
 
     client.scan = _patched_scan
     yield client
+
+
+@pytest.fixture(scope="function")
+def mock_hunt_client():
+    """
+    Reusable Supabase client mock for ThreatHuntService tests.
+    Returns a MagicMock pre-configured with a chainable query builder
+    that yields an empty result by default. Tests override .execute.return_value
+    to inject specific row payloads.
+    """
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.data = []
+
+    query_builder = MagicMock()
+    query_builder.select.return_value = query_builder
+    query_builder.eq.return_value = query_builder
+    query_builder.gte.return_value = query_builder
+    query_builder.lte.return_value = query_builder
+    query_builder.order.return_value = query_builder
+    query_builder.range.return_value = query_builder
+    query_builder.execute.return_value = mock_response
+
+    mock_client.table.return_value = query_builder
+
+    return mock_client
