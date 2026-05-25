@@ -23,6 +23,11 @@ from .stix_adapter import (
     ingest_stix_bundle_bytes,
     parse_stix_bundle,
 )
+from .threat_alerts import (
+    emit_detection_alert,
+    emit_hunt_alert,
+    get_threat_alert_store,
+)
 from .threat_detection_engine import ThreatDetectionEngine, get_detection_engine
 from .threat_hunt_service import ThreatHuntService, get_threat_hunt_service
 from .threat_scoring import ScoreResult, ThreatScoringEngine, get_scoring_engine
@@ -46,6 +51,9 @@ __all__ = [
     "get_detection_engine",
     "ThreatHuntService",
     "get_threat_hunt_service",
+    "emit_detection_alert",
+    "emit_hunt_alert",
+    "get_threat_alert_store",
     "STIXAdapter",
     "STIXParseResult",
     "TAXIIConfig",

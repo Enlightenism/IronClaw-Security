@@ -13,6 +13,7 @@ from fastapi.routing import APIRoute
 
 ProtectedDependencyFactory = Callable[[], Any]
 
+
 _log = logging.getLogger(__name__)
 
 
@@ -187,6 +188,11 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         # (action_guard, action_execute, etc.). Router carries /threat prefix.
         (
             _optional_router("app.api.threat_detection"),
+            {"dependencies": dependencies},
+        ),
+        # app.api.threat_hunt — hunt session lifecycle and match result endpoints.
+        (
+            _optional_router("app.api.threat_hunt"),
             {"dependencies": dependencies},
         ),
         (

@@ -435,7 +435,14 @@ async def threat_hunt(
 
     effective_org_id = payload.org_id or auth.org_id
     service = get_hunt_service()
-    return service.run_hunt(payload, org_id=effective_org_id)
+    result = service.run_hunt(payload, org_id=effective_org_id)
+    try:
+        from app.services.threat_alerts import emit_hunt_alert
+
+        emit_hunt_alert(result)
+    except Exception:
+        pass
+    return result
 
 
 # ---------------------------------------------------------------------------
