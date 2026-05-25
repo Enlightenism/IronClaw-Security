@@ -22,6 +22,7 @@ from app.core.settings import get_settings
 from app.main import app as _app
 from app.services.audit_log_service import reset_audit_log
 from ironclaw_sdk.client import IronclawClient
+from ironclaw_sdk.exceptions import IronclawAPIError, IronclawAuthError
 from ironclaw_sdk.models import ScanRequest as SDKScanRequest
 from ironclaw_sdk.models import ScanResponse as SDKScanResponse
 
@@ -81,18 +82,12 @@ def sdk_client():
             },
         )
         if resp.status_code in (401, 403):
-            from ironclaw_sdk.exceptions import IronclawAuthError
-
-            raise IronclawAuthError(status_code=resp.status_code, body=resp.text)
+            raise IronclawAuthError(status_code=resp.status_code, message=resp.text)
         if resp.status_code >= 400:
-            from ironclaw_sdk.exceptions import IronclawAPIError
-
             raise IronclawAPIError(status_code=resp.status_code, body=resp.text)
         try:
             return SDKScanResponse.model_validate(resp.json())
         except Exception as exc:
-            from ironclaw_sdk.exceptions import IronclawAPIError
-
             raise IronclawAPIError(status_code=resp.status_code, body=resp.text) from exc
 
     client.scan = _patched_scan
