@@ -9,3 +9,28 @@ data/
 !.env.example
 *.bak
 openapi.json.bak
+
+# Runtime-generated data — never commit
+telemetry_events.jsonl
+scan_history.json
+*.jsonl
+
+# Test fixture data — move to tests/fixtures/
+benign.json
+malicious.json
+
+# Coverage and reports
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.reports/
+
+# Snapshot artifacts — too large for version control
+_project_snapshot.txt
+project_snapshot.txt
+app_snapshot.txt
+*.zip
+
+# Temp upload artifacts
+.tmp.driveupload/
