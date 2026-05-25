@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Final
+from typing import Any, Final
 
 import httpx
 
@@ -9,6 +9,8 @@ from ironclaw_sdk.exceptions import IronclawAPIError, IronclawAuthError, Ironcla
 from ironclaw_sdk.models import (
     BatchScanRequest,
     BatchScanResponse,
+    GuardBundleRequest,
+    GuardBundleResponse,
     ScanRequest,
     ScanResponse,
 )
@@ -72,6 +74,10 @@ class IronclawClient:
             raise IronclawAPIError(status_code=response.status_code, body=body)
         return response
 
+    # ------------------------------------------------------------------
+    # Scan
+    # ------------------------------------------------------------------
+
     def scan(self, request: ScanRequest) -> ScanResponse:
         url = f"{self.base_url}/scan/"
 
@@ -102,6 +108,10 @@ class IronclawClient:
     def scan_prompt(self, prompt: str, client_id: str | None = None) -> ScanResponse:
         return self.scan(ScanRequest(target_type="prompt", target_value=prompt, client_id=client_id))
 
+    # ------------------------------------------------------------------
+    # Batch scan
+    # ------------------------------------------------------------------
+
     def batch_scan(self, request: BatchScanRequest) -> BatchScanResponse:
         url = f"{self.base_url}/scan/batch"
 
@@ -126,7 +136,49 @@ class IronclawClient:
                 body=f"Batch response validation failed: {exc}",
             ) from exc
 
-    def health(self) -> dict:
+    # ------------------------------------------------------------------
+    # Guard bundle  (POST /policy/guard-bundle)
+    # ------------------------------------------------------------------
+
+    def guard_bundle(self, request: GuardBundleRequest) -> GuardBundleResponse:
+        """Submit a multi-slot prompt bundle for policy evaluation.
+
+        Raises IronclawAPIError if the server returns a non-2xx that is not
+        retryable; raises IronclawAuthError on 401/403; raises
+        IronclawTimeoutError on connect/read timeout.
+
+        Does NOT raise on a block verdict — callers must inspect
+        ``response.should_halt`` themselves. This is intentional: the SDK
+        enforces trust but never silently halts caller execution.
+        """
+        url = f"{self.base_url}/policy/guard-bundle"
+
+        def _call() -> httpx.Response:
+            with httpx.Client(timeout=self._timeout, headers=self._headers()) as client:
+                return client.post(url, content=request.model_dump_json(exclude_none=True))
+
+        try:
+            response = execute_with_retry(_call)
+        except IronclawTimeoutError:
+            raise
+        except IronclawAuthError:
+            raise
+
+        self._handle_response(response)
+
+        try:
+            return GuardBundleResponse.model_validate(response.json())
+        except Exception as exc:
+            raise IronclawAPIError(
+                status_code=response.status_code,
+                body=f"GuardBundle response validation failed: {exc}",
+            ) from exc
+
+    # ------------------------------------------------------------------
+    # Health
+    # ------------------------------------------------------------------
+
+    def health(self) -> dict[str, Any]:
         url = f"{self.base_url}/health"
 
         def _call() -> httpx.Response:

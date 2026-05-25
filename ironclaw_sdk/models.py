@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -69,6 +69,52 @@ class BatchScanResponse(BaseModel):
     items: list[ScanResponse]
 
 
+# ------------------------------------------------------------------
+# Guard bundle models  (mirrors POST /policy/guard-bundle contract)
+# ------------------------------------------------------------------
+
+
+class GuardBundleRequest(BaseModel):
+    """Input for the /policy/guard-bundle endpoint.
+
+    Every slot is optional; pass only the slots relevant to the current
+    agentic step. At least one slot must be non-None.
+    """
+
+    user_prompt: str | None = None
+    retrieved_doc: str | None = None
+    tool_output: str | None = None
+    model_output: str | None = None
+
+
+class GuardBundleSlotResult(BaseModel):
+    """Per-slot verdict returned by the guard-bundle endpoint."""
+
+    verdict: ScanVerdict
+    summary: str
+    risk_score: int = Field(ge=0, le=100)
+    matched_patterns: list[str] = Field(default_factory=list)
+    scan_id: str | None = None
+    explanation: str | None = None
+
+
+class GuardBundleResponse(BaseModel):
+    """Structured response from POST /policy/guard-bundle."""
+
+    highest_verdict: ScanVerdict
+    should_halt: bool
+    should_warn: bool
+    user_prompt: GuardBundleSlotResult | dict[str, Any] | None = None
+    retrieved_doc: GuardBundleSlotResult | dict[str, Any] | None = None
+    tool_output: GuardBundleSlotResult | dict[str, Any] | None = None
+    model_output: GuardBundleSlotResult | dict[str, Any] | None = None
+
+
+# ------------------------------------------------------------------
+# API error envelope models
+# ------------------------------------------------------------------
+
+
 class AuthError(BaseModel):
     status_code: int
     detail: str
@@ -90,6 +136,9 @@ __all__ = [
     "ScanResponse",
     "BatchScanRequest",
     "BatchScanResponse",
+    "GuardBundleRequest",
+    "GuardBundleResponse",
+    "GuardBundleSlotResult",
     "AuthError",
     "APIError",
 ]
