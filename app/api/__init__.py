@@ -11,6 +11,7 @@ from app.api.root import router as root_router
 from app.api.scan import router as scan_router
 from app.api.system import router as system_router
 from app.api.telemetry_access import router as telemetry_access_router
+from app.api.threat_alerts import router as threat_alerts_router
 from app.api.threat_hunt import router as threat_hunt_router
 from app.api.ui_status import router as ui_status_router
 
@@ -28,6 +29,7 @@ __all__ = [
     "scan_router",
     "system_router",
     "telemetry_access_router",
+    "threat_alerts_router",
     "threat_hunt_router",
     "ui_status_router",
 ]

@@ -195,6 +195,12 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
             _optional_router("app.api.threat_hunt"),
             {"dependencies": dependencies},
         ),
+        # app.api.threat_alerts — escalation bridge; wired last because it
+        # touches threat_detection_engine, incidents, and notifications.
+        (
+            _optional_router("app.api.threat_alerts"),
+            {"dependencies": dependencies},
+        ),
         (
             _optional_router("app.api.ioc_management"),
             {"dependencies": dependencies},

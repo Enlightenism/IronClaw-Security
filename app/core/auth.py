@@ -15,6 +15,7 @@ API_KEY_HEADER_NAME = "X-API-Key"
 SESSION_ID_HEADER_NAME = "X-Session-Id"
 ORG_ID_HEADER_NAME = "X-Org-Id"
 
+
 api_key_header = APIKeyHeader(name=API_KEY_HEADER_NAME, auto_error=False)
 session_id_header = APIKeyHeader(name=SESSION_ID_HEADER_NAME, auto_error=False)
 org_id_header = APIKeyHeader(name=ORG_ID_HEADER_NAME, auto_error=False)
@@ -431,3 +432,12 @@ def require_auth_context(
             details={"header": API_KEY_HEADER_NAME},
         )
     return context
+
+
+def get_current_organization_id(
+    context: AuthContext = Depends(get_auth_context),
+) -> str:
+    org_id = context.org_id
+    if org_id:
+        return org_id
+    return "default"
