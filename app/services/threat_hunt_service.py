@@ -16,6 +16,7 @@ from app.schemas.threat_detection import (
 
 logger = logging.getLogger(__name__)
 
+
 _TABLE_DETECTIONS = "threat_detections"
 
 
@@ -194,8 +195,7 @@ class ThreatHuntService:
         except (KeyError, ValueError):
             severity = ThreatSeverityLevel.LOW
 
-        score = float(row.get("score", 0.0))
-        confidence = min(1.0, max(0.0, score))
+        confidence = min(1.0, max(0.0, float(row.get("score", 0.0))))
 
         return HuntMatch(
             event_id=row["event_id"],
@@ -203,7 +203,7 @@ class ThreatHuntService:
             agent_id=row.get("agent_id"),
             session_id=row.get("session_id"),
             verdict=verdict,
-            score=score,
+            score=confidence,
             severity=severity,
             matched_ioc_value=matched_ioc_value,
             matched_ioc_type=matched_ioc_type,
