@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+import uuid
+
 from app.schemas.threat_detection import (
     CorrelationSignal,
     IOCMatch,
@@ -46,6 +49,19 @@ def _make_ioc(
     )
 
 
+def _make_signal(
+    pattern_type: str = "attack_chain",
+    confidence: float = 0.80,
+    score_contribution: float = 0.10,
+) -> CorrelationSignal:
+    return CorrelationSignal(
+        signal_id=str(uuid.uuid4()),
+        pattern_type=pattern_type,
+        confidence=confidence,
+        score_contribution=score_contribution,
+    )
+
+
 EVENT_IDS = ["evt-001", "evt-002"]
 
 
@@ -84,6 +100,17 @@ class TestCorrelateEmptyInputs:
         engine = ThreatCorrelationEngine()
         result = engine.correlate(iocs)
         assert isinstance(result, list)
+
+    def test_explicit_none_event_ids_treated_as_empty(self) -> None:
+        iocs = [
+            _make_ioc("1.1.1.1", IOCTypeEnum.IPV4),
+            _make_ioc("evil.com", IOCTypeEnum.DOMAIN),
+        ]
+        engine = ThreatCorrelationEngine()
+        result = engine.correlate(iocs, event_ids=None)
+        assert isinstance(result, list)
+        for sig in result:
+            assert isinstance(sig.matched_event_ids, list)
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +168,15 @@ class TestDetectMultiIOCCooccurrence:
         assert result is not None
         assert result.matched_event_ids == EVENT_IDS
 
+    def test_empty_event_ids_attached(self) -> None:
+        matches = [
+            _make_ioc("1.1.1.1", IOCTypeEnum.IPV4),
+            _make_ioc("evil.com", IOCTypeEnum.DOMAIN),
+        ]
+        result = _detect_multi_ioc_cooccurrence(matches, [])
+        assert result is not None
+        assert result.matched_event_ids == []
+
 
 # ---------------------------------------------------------------------------
 # _detect_attack_chain
@@ -188,6 +224,16 @@ class TestDetectAttackChain:
         result = _detect_attack_chain(matches, EVENT_IDS)
         assert result is not None
         assert all(t == t.upper() for t in result.mitre_technique_ids)
+
+    def test_signal_id_is_nonempty_string(self) -> None:
+        matches = [
+            _make_ioc("a.com", IOCTypeEnum.DOMAIN, mitre_tactic="initial-access"),
+            _make_ioc("b.com", IOCTypeEnum.DOMAIN, mitre_tactic="execution"),
+        ]
+        result = _detect_attack_chain(matches, EVENT_IDS)
+        assert result is not None
+        assert isinstance(result.signal_id, str)
+        assert len(result.signal_id) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -243,6 +289,18 @@ class TestDetectHighSeverityCluster:
         result = _detect_high_severity_cluster(matches, EVENT_IDS)
         assert result is None
 
+    def test_contributing_ioc_ids_only_high_crit(self) -> None:
+        matches = [
+            _make_ioc("a.com", IOCTypeEnum.DOMAIN, severity=ThreatSeverityLevel.HIGH, ioc_id="ioc-high"),
+            _make_ioc("b.com", IOCTypeEnum.DOMAIN, severity=ThreatSeverityLevel.CRITICAL, ioc_id="ioc-crit"),
+            _make_ioc("c.com", IOCTypeEnum.DOMAIN, severity=ThreatSeverityLevel.LOW, ioc_id="ioc-low"),
+        ]
+        result = _detect_high_severity_cluster(matches, EVENT_IDS)
+        assert result is not None
+        assert "ioc-low" not in result.contributing_ioc_ids
+        assert "ioc-high" in result.contributing_ioc_ids
+        assert "ioc-crit" in result.contributing_ioc_ids
+
 
 # ---------------------------------------------------------------------------
 # _detect_mitre_chain
@@ -289,6 +347,16 @@ class TestDetectMitreChain:
         assert result.mitre_technique_ids == sorted(result.mitre_technique_ids)
         assert all(t == t.upper() for t in result.mitre_technique_ids)
 
+    def test_confidence_boosted_above_base_severity(self) -> None:
+        matches = [
+            _make_ioc("a.com", IOCTypeEnum.DOMAIN, mitre_technique_id="T1059", severity=ThreatSeverityLevel.HIGH),
+            _make_ioc("b.com", IOCTypeEnum.DOMAIN, mitre_technique_id="T1190", severity=ThreatSeverityLevel.HIGH),
+            _make_ioc("c.com", IOCTypeEnum.DOMAIN, mitre_technique_id="T1078", severity=ThreatSeverityLevel.HIGH),
+        ]
+        result = _detect_mitre_chain(matches, EVENT_IDS)
+        assert result is not None
+        assert result.confidence >= 0.85
+
 
 # ---------------------------------------------------------------------------
 # _detect_hash_cluster
@@ -328,6 +396,18 @@ class TestDetectHashCluster:
         ]
         result = _detect_hash_cluster(matches, EVENT_IDS)
         assert result is None
+
+    def test_contributing_ioc_ids_hash_only(self) -> None:
+        matches = [
+            _make_ioc("a" * 64, IOCTypeEnum.SHA256, ioc_id="ioc-sha256"),
+            _make_ioc("b" * 40, IOCTypeEnum.SHA1, ioc_id="ioc-sha1"),
+            _make_ioc("evil.com", IOCTypeEnum.DOMAIN, ioc_id="ioc-domain"),
+        ]
+        result = _detect_hash_cluster(matches, EVENT_IDS)
+        assert result is not None
+        assert "ioc-domain" not in result.contributing_ioc_ids
+        assert "ioc-sha256" in result.contributing_ioc_ids
+        assert "ioc-sha1" in result.contributing_ioc_ids
 
 
 # ---------------------------------------------------------------------------
@@ -385,6 +465,23 @@ class TestDetectC2Cluster:
         result = _detect_c2_cluster(matches, EVENT_IDS)
         assert result is not None
 
+    def test_ipv6_qualifies_as_network_type(self) -> None:
+        matches = [
+            _make_ioc("::1", IOCTypeEnum.IPV6, tags=["c2"]),
+            _make_ioc("evil.com", IOCTypeEnum.DOMAIN),
+        ]
+        result = _detect_c2_cluster(matches, EVENT_IDS)
+        assert result is not None
+
+    def test_deduplicates_contributing_ioc_ids(self) -> None:
+        matches = [
+            _make_ioc("1.1.1.1", IOCTypeEnum.IPV4, tags=["c2"], ioc_id="ioc-overlap"),
+            _make_ioc("evil.com", IOCTypeEnum.DOMAIN, ioc_id="ioc-domain"),
+        ]
+        result = _detect_c2_cluster(matches, EVENT_IDS)
+        assert result is not None
+        assert len(result.contributing_ioc_ids) == len(set(result.contributing_ioc_ids))
+
 
 # ---------------------------------------------------------------------------
 # ThreatCorrelationEngine.correlate — integration coverage
@@ -436,6 +533,40 @@ class TestCorrelateIntegration:
         for sig in signals:
             assert sig.matched_event_ids == EVENT_IDS
 
+    def test_detector_exception_is_suppressed(self) -> None:
+        """A detector that raises must not propagate out of correlate."""
+        engine = ThreatCorrelationEngine()
+        matches = [
+            _make_ioc("1.1.1.1", IOCTypeEnum.IPV4),
+            _make_ioc("evil.com", IOCTypeEnum.DOMAIN),
+        ]
+
+        boom = MagicMock(side_effect=RuntimeError("injected detector failure"))
+        boom.__name__ = "_detect_boom"
+
+        import app.services.threat_correlation as _mod
+
+        original = _mod._detect_multi_ioc_cooccurrence
+        _mod._detect_multi_ioc_cooccurrence = boom
+        try:
+            result = engine.correlate(matches, event_ids=EVENT_IDS)
+        finally:
+            _mod._detect_multi_ioc_cooccurrence = original
+
+        assert isinstance(result, list)
+
+    def test_all_signal_ids_are_unique(self) -> None:
+        matches = [
+            _make_ioc("1.1.1.1", IOCTypeEnum.IPV4, severity=ThreatSeverityLevel.HIGH, tags=["c2"], mitre_technique_id="T1059"),
+            _make_ioc("evil.com", IOCTypeEnum.DOMAIN, severity=ThreatSeverityLevel.HIGH, tags=["c2"], mitre_technique_id="T1190"),
+            _make_ioc("a" * 64, IOCTypeEnum.SHA256, severity=ThreatSeverityLevel.CRITICAL, mitre_technique_id="T1078"),
+            _make_ioc("b" * 40, IOCTypeEnum.SHA1, severity=ThreatSeverityLevel.HIGH),
+        ]
+        engine = ThreatCorrelationEngine()
+        signals = engine.correlate(matches, event_ids=EVENT_IDS)
+        ids = [s.signal_id for s in signals]
+        assert len(ids) == len(set(ids))
+
 
 # ---------------------------------------------------------------------------
 # ThreatCorrelationEngine.summarize
@@ -475,76 +606,38 @@ class TestCorrelationEngineSummarize:
         assert summary["signal_count"] == len(signals)
 
     def test_pattern_types_deduplicated_and_sorted(self) -> None:
-        import uuid
-
-        from app.schemas.threat_detection import CorrelationSignal
-
         signals = [
-            CorrelationSignal(
-                signal_id=str(uuid.uuid4()),
-                pattern_type="attack_chain",
-                confidence=0.80,
-                score_contribution=0.10,
-            ),
-            CorrelationSignal(
-                signal_id=str(uuid.uuid4()),
-                pattern_type="attack_chain",
-                confidence=0.70,
-                score_contribution=0.08,
-            ),
-            CorrelationSignal(
-                signal_id=str(uuid.uuid4()),
-                pattern_type="multi_ioc_cooccurrence",
-                confidence=0.60,
-                score_contribution=0.06,
-            ),
+            _make_signal("attack_chain", 0.80, 0.10),
+            _make_signal("attack_chain", 0.70, 0.08),
+            _make_signal("multi_ioc_cooccurrence", 0.60, 0.06),
         ]
         engine = ThreatCorrelationEngine()
         summary = engine.summarize(signals)
-        assert summary["pattern_types"] == sorted(set(s.pattern_type for s in signals))
+        assert summary["pattern_types"] == sorted({s.pattern_type for s in signals})
 
     def test_total_score_contribution_is_sum(self) -> None:
-        import uuid
-
-        from app.schemas.threat_detection import CorrelationSignal
-
         signals = [
-            CorrelationSignal(
-                signal_id=str(uuid.uuid4()),
-                pattern_type="attack_chain",
-                confidence=0.80,
-                score_contribution=0.12,
-            ),
-            CorrelationSignal(
-                signal_id=str(uuid.uuid4()),
-                pattern_type="hash_cluster",
-                confidence=0.70,
-                score_contribution=0.09,
-            ),
+            _make_signal("attack_chain", 0.80, 0.12),
+            _make_signal("hash_cluster", 0.70, 0.09),
         ]
         engine = ThreatCorrelationEngine()
         summary = engine.summarize(signals)
         assert abs(summary["total_score_contribution"] - 0.21) < 0.0001
 
     def test_max_confidence_is_highest(self) -> None:
-        import uuid
-
-        from app.schemas.threat_detection import CorrelationSignal
-
         signals = [
-            CorrelationSignal(
-                signal_id=str(uuid.uuid4()),
-                pattern_type="attack_chain",
-                confidence=0.85,
-                score_contribution=0.12,
-            ),
-            CorrelationSignal(
-                signal_id=str(uuid.uuid4()),
-                pattern_type="hash_cluster",
-                confidence=0.50,
-                score_contribution=0.09,
-            ),
+            _make_signal("attack_chain", 0.85, 0.12),
+            _make_signal("hash_cluster", 0.50, 0.09),
         ]
         engine = ThreatCorrelationEngine()
         summary = engine.summarize(signals)
         assert summary["max_confidence"] == 0.85
+
+    def test_single_signal_summary(self) -> None:
+        signals = [_make_signal("c2_cluster", 0.90, 0.11)]
+        engine = ThreatCorrelationEngine()
+        summary = engine.summarize(signals)
+        assert summary["signal_count"] == 1
+        assert summary["pattern_types"] == ["c2_cluster"]
+        assert abs(summary["total_score_contribution"] - 0.11) < 0.0001
+        assert summary["max_confidence"] == 0.90
