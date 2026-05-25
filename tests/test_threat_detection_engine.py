@@ -677,7 +677,7 @@ class TestThreatDetectionEngineRun:
 
 class TestDetectionRequestValidation:
     def test_requires_at_least_one_observable(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             DetectionRequest(org_id="x")
 
     def test_text_alone_is_valid(self) -> None:
@@ -701,11 +701,11 @@ class TestDetectionRequestValidation:
         assert req.minimum_confidence == 0.0
 
     def test_minimum_confidence_clamped(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             DetectionRequest(text="x", minimum_confidence=1.5)
 
     def test_extra_fields_forbidden(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises((ValueError, TypeError)):
             DetectionRequest(text="x", unknown_field="oops")
 
 

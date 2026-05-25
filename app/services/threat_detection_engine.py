@@ -120,12 +120,18 @@ class ThreatScoringEngine:
         total = 0.0
         for match in ioc_matches:
             sev = match.severity
-            if not isinstance(sev, ThreatSeverityLevel):
+            if isinstance(sev, ThreatSeverityLevel):
+                resolved = sev
+            else:
+                sev_str = str(sev)
+                # Handle "ThreatSeverityLevel.CRITICAL" style strings from enum repr
+                if "." in sev_str:
+                    sev_str = sev_str.split(".")[-1]
                 try:
-                    sev = ThreatSeverityLevel(str(sev).lower())
+                    resolved = ThreatSeverityLevel(sev_str.lower())
                 except ValueError:
-                    sev = ThreatSeverityLevel.LOW
-            weight = _SEVERITY_WEIGHT.get(sev, 0.25)
+                    resolved = ThreatSeverityLevel.LOW
+            weight = _SEVERITY_WEIGHT.get(resolved, 0.25)
             total += weight * float(match.confidence)
         return min(total / max(len(ioc_matches), 1) + (0.05 * len(ioc_matches)), 0.80)
 
@@ -344,13 +350,23 @@ class ThreatDetectionEngine:
         for rec in records:
             if float(rec.confidence) < minimum_confidence:
                 continue
+            # Normalize severity: handle both enum instances and string representations
+            sev = rec.severity
+            if isinstance(sev, ThreatSeverityLevel):
+                sev_str = sev.value
+            else:
+                sev_str = str(sev)
+                if "." in sev_str:
+                    sev_str = sev_str.split(".")[-1].lower()
+                else:
+                    sev_str = sev_str.lower()
             matches.append(
                 IOCMatch(
                     ioc_id=rec.ioc_id,
                     value=rec.value,
                     ioc_type=str(rec.ioc_type),
                     confidence=float(rec.confidence),
-                    severity=str(rec.severity),
+                    severity=sev_str,
                     source=str(rec.source),
                     tags=list(rec.tags),
                     matched_on="ioc_store",
