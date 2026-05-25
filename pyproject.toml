@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ironclaw-security"
-version = "0.1.0"
+version = "1.0.0"
 description = "IronClaw Security local-first FastAPI defense layer with skill-style install and guarded runtime tooling."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -92,6 +92,7 @@ ironclaw-testclient = "testclient:main"
 [tool.setuptools]
 include-package-data = true
 py-modules = [
+  "ironclaw_client",
   "ironclawclient",
   "ironclawshellguard",
   "ironclawtoolrunner",
