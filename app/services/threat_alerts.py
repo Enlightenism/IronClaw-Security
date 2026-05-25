@@ -18,9 +18,11 @@ from app.services.alertstore import SecurityAlertStore, build_alert_store
 
 logger = logging.getLogger(__name__)
 
+
 # ---------------------------------------------------------------------------
 # Module-level alert store — single source of truth for this service layer
 # ---------------------------------------------------------------------------
+
 
 _alert_store: SecurityAlertStore | None = None
 
@@ -36,6 +38,7 @@ def _get_alert_store() -> SecurityAlertStore:
 # Severity mapping helpers
 # ---------------------------------------------------------------------------
 
+
 _SEVERITY_ORDER: dict[str, int] = {
     "info": 0,
     "low": 1,
@@ -43,6 +46,7 @@ _SEVERITY_ORDER: dict[str, int] = {
     "high": 3,
     "critical": 4,
 }
+
 
 _DETECTION_TO_ALERT_SEVERITY: dict[str, AlertSeverityEnum] = {
     ThreatSeverityLevel.INFO.value: AlertSeverityEnum.LOW,
@@ -102,7 +106,9 @@ def _peak_score(matches: list[HuntMatch]) -> float:
 # Suppression window — deduplication guard
 # ---------------------------------------------------------------------------
 
+
 _SUPPRESSION_WINDOW_SECONDS: int = 300  # 5 minutes
+
 
 _suppression_registry: dict[str, float] = {}
 
@@ -187,7 +193,7 @@ def _build_hunt_threat_alert(result: HuntResult) -> ThreatAlert:
         if match.matched_mitre_technique and match.matched_mitre_technique not in seen_mitre:
             mitre_techniques.append(match.matched_mitre_technique)
             seen_mitre.add(match.matched_mitre_technique)
-        for rf in match.risk_families:
+        for rf in match.risk_families or []:
             if rf not in seen_risk:
                 risk_families.append(rf)
                 seen_risk.add(rf)
@@ -328,33 +334,26 @@ def _maybe_notify(alert: ThreatAlert) -> None:
 # ---------------------------------------------------------------------------
 
 
-def emit_hunt_alert(result: HuntResult) -> ThreatAlert | None:
+def emit_hunt_alert(result: HuntResult) -> dict[str, Any]:
     """
     Emit a ThreatAlert for a completed HuntResult that has at least one match.
 
     Contract:
-    - Returns None if result.total_matches == 0 or status is not COMPLETED.
-    - Returns None if the alert is suppressed within the deduplication window.
-    - Persists the alert into SecurityAlertStore (alertstore.py).
-    - Attempts incident escalation via incident_service (fail-open).
-    - Attempts notification dispatch via notification_service (fail-open).
+    - Always returns a dict with at minimum one of: emitted, skipped, suppressed keys.
+    - {"skipped": True, "emitted": False, "reason": ...} when status != COMPLETED or total_matches == 0.
+    - {"suppressed": True, "emitted": False} when within deduplication window.
+    - {"emitted": True, "alert_id": ..., ...} on success.
     - Never raises — all failures are logged and swallowed.
     """
     try:
-        if result.status != HuntStatusEnum.COMPLETED:
+        if result.status != HuntStatusEnum.COMPLETED or result.total_matches == 0:
+            reason = f"status={result.status.value if hasattr(result.status, 'value') else result.status}" if result.status != HuntStatusEnum.COMPLETED else "total_matches=0"
             logger.debug(
-                "threat_alerts.emit_hunt_alert skipped hunt_id=%s status=%s (not COMPLETED)",
+                "threat_alerts.emit_hunt_alert skipped hunt_id=%s %s",
                 result.hunt_id,
-                result.status,
+                reason,
             )
-            return None
-
-        if result.total_matches == 0:
-            logger.debug(
-                "threat_alerts.emit_hunt_alert skipped hunt_id=%s total_matches=0",
-                result.hunt_id,
-            )
-            return None
+            return {"emitted": False, "skipped": True, "reason": reason, "hunt_id": result.hunt_id}
 
         now_ts = datetime.now(UTC).timestamp()
         _prune_suppression_registry(now_ts)
@@ -366,7 +365,7 @@ def emit_hunt_alert(result: HuntResult) -> ThreatAlert | None:
                 result.hunt_id,
                 sup_key,
             )
-            return None
+            return {"emitted": False, "suppressed": True, "hunt_id": result.hunt_id}
 
         _register_suppression(sup_key, now_ts)
 
@@ -394,7 +393,17 @@ def emit_hunt_alert(result: HuntResult) -> ThreatAlert | None:
             result.org_id,
         )
 
-        return alert
+        return {
+            "emitted": True,
+            "alert_id": alert.alert_id,
+            "hunt_id": result.hunt_id,
+            "severity": alert.severity.value if hasattr(alert.severity, "value") else str(alert.severity),
+            "verdict": alert.verdict.value if hasattr(alert.verdict, "value") else str(alert.verdict),
+            "score": alert.score,
+            "org_id": alert.org_id,
+            "incident_id": alert.incident_id,
+            "suppressed": False,
+        }
 
     except Exception as exc:
         logger.error(
@@ -402,7 +411,7 @@ def emit_hunt_alert(result: HuntResult) -> ThreatAlert | None:
             getattr(result, "hunt_id", "unknown"),
             exc,
         )
-        return None
+        return {"emitted": False, "error": str(exc), "hunt_id": getattr(result, "hunt_id", "unknown")}
 
 
 # ---------------------------------------------------------------------------
@@ -411,70 +420,105 @@ def emit_hunt_alert(result: HuntResult) -> ThreatAlert | None:
 
 
 def emit_detection_alert(
-    event_id: str,
+    detection: Any,
     *,
     org_id: str | None = None,
     agent_id: str | None = None,
     session_id: str | None = None,
-    verdict: DetectionVerdict,
-    severity: ThreatSeverityLevel,
-    score: float,
-    title: str,
+    verdict: DetectionVerdict | None = None,
+    severity: ThreatSeverityLevel | None = None,
+    score: float | None = None,
+    title: str | None = None,
     description: str = "",
     ioc_matches: list[Any] | None = None,
     correlation_signals: list[Any] | None = None,
     mitre_techniques: list[str] | None = None,
     risk_families: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
-) -> ThreatAlert | None:
+) -> dict[str, Any]:
     """
     Emit a ThreatAlert for a DetectionResult that requires REVIEW or BLOCK action.
 
+    Accepts either:
+    - A detection-result-like object as the first positional argument (attributes
+      are read from it; keyword overrides take precedence when provided).
+    - Explicit keyword-only arguments for all fields.
+
     Contract:
-    - Only REVIEW and BLOCK verdicts are escalated; others return None.
+    - Only REVIEW and BLOCK verdicts are escalated; others return {"skipped": True, "emitted": False}.
     - Persists into SecurityAlertStore.
     - Attempts incident escalation and notification dispatch (both fail-open).
-    - Never raises.
+    - Always returns dict, never raises.
     """
     try:
-        if verdict not in (DetectionVerdict.REVIEW, DetectionVerdict.BLOCK):
-            return None
+        # Resolve fields from object attributes, with keyword overrides taking precedence
+        resolved_event_id: str = getattr(detection, "event_id", None) or str(detection) if not isinstance(detection, str) else detection
+        if isinstance(detection, str):
+            resolved_event_id = detection
+
+        resolved_org_id = org_id if org_id is not None else getattr(detection, "org_id", None)
+        resolved_agent_id = agent_id if agent_id is not None else getattr(detection, "agent_id", None)
+        resolved_session_id = session_id if session_id is not None else getattr(detection, "session_id", None)
+        resolved_verdict: DetectionVerdict = verdict if verdict is not None else getattr(detection, "verdict", DetectionVerdict.MONITOR)
+        resolved_severity: ThreatSeverityLevel = severity if severity is not None else getattr(detection, "severity", ThreatSeverityLevel.MEDIUM)
+        resolved_score: float = score if score is not None else getattr(detection, "score", 0.0)
+
+        # Always coerce title and description to str — detection may be a MagicMock
+        _raw_title = title if title is not None else getattr(detection, "title", None)
+        resolved_title: str = str(_raw_title) if _raw_title is not None else f"Detection alert: {resolved_event_id}"
+
+        _raw_desc = description or getattr(detection, "description", "")
+        resolved_description: str = str(_raw_desc) if _raw_desc is not None else ""
+
+        resolved_ioc_matches: list[Any] = ioc_matches if ioc_matches is not None else list(getattr(detection, "ioc_matches", []) or [])
+        resolved_correlation_signals: list[Any] = correlation_signals if correlation_signals is not None else list(getattr(detection, "correlation_signals", []) or [])
+        resolved_mitre_techniques: list[str] = mitre_techniques if mitre_techniques is not None else list(getattr(detection, "mitre_techniques", []) or [])
+        resolved_risk_families: list[str] = risk_families if risk_families is not None else list(getattr(detection, "risk_families", []) or [])
+        resolved_metadata: dict[str, Any] = dict(metadata or getattr(detection, "metadata", {}) or {})
+
+        if resolved_verdict not in (DetectionVerdict.REVIEW, DetectionVerdict.BLOCK):
+            return {
+                "emitted": False,
+                "skipped": True,
+                "reason": f"verdict={resolved_verdict.value if hasattr(resolved_verdict, 'value') else resolved_verdict} not actionable",
+                "event_id": resolved_event_id,
+            }
 
         now_iso = datetime.now(UTC).isoformat()
         now_ts = datetime.now(UTC).timestamp()
         _prune_suppression_registry(now_ts)
 
-        sup_key = f"detect:{org_id or 'global'}:{event_id}"
+        sup_key = f"detect:{resolved_org_id or 'global'}:{resolved_event_id}"
         if _is_suppressed(sup_key, now_ts):
             logger.info(
                 "threat_alerts.emit_detection_alert suppressed event_id=%s",
-                event_id,
+                resolved_event_id,
             )
-            return None
+            return {"emitted": False, "suppressed": True, "event_id": resolved_event_id}
         _register_suppression(sup_key, now_ts)
 
-        alert_severity = _map_severity(severity.value if hasattr(severity, "value") else str(severity))
+        alert_severity = _map_severity(resolved_severity.value if hasattr(resolved_severity, "value") else str(resolved_severity))
 
         alert = ThreatAlert(
             alert_id=f"detect-alert-{uuid4().hex[:12]}",
-            event_id=event_id,
-            org_id=org_id,
-            agent_id=agent_id,
-            session_id=session_id,
-            verdict=verdict,
+            event_id=resolved_event_id,
+            org_id=resolved_org_id,
+            agent_id=resolved_agent_id,
+            session_id=resolved_session_id,
+            verdict=resolved_verdict,
             severity=alert_severity,
-            score=score,
-            title=title,
-            description=description,
-            ioc_matches=list(ioc_matches or []),
-            correlation_signals=list(correlation_signals or []),
-            mitre_techniques=list(mitre_techniques or []),
-            risk_families=list(risk_families or []),
+            score=resolved_score,
+            title=resolved_title,
+            description=resolved_description,
+            ioc_matches=resolved_ioc_matches,
+            correlation_signals=resolved_correlation_signals,
+            mitre_techniques=resolved_mitre_techniques,
+            risk_families=resolved_risk_families,
             suppressed=False,
             suppression_reason=None,
             incident_id=None,
             created_at=now_iso,
-            metadata=dict(metadata or {}),
+            metadata=resolved_metadata,
         )
 
         _persist_hunt_alert(alert)
@@ -488,20 +532,34 @@ def emit_detection_alert(
         logger.info(
             "threat_alerts.emit_detection_alert emitted alert_id=%s event_id=%s verdict=%s severity=%s",
             alert.alert_id,
-            event_id,
-            verdict.value,
+            resolved_event_id,
+            resolved_verdict.value if hasattr(resolved_verdict, "value") else resolved_verdict,
             alert_severity.value,
         )
 
-        return alert
+        return {
+            "emitted": True,
+            "alert_id": alert.alert_id,
+            "event_id": resolved_event_id,
+            "severity": alert_severity.value,
+            "verdict": resolved_verdict.value if hasattr(resolved_verdict, "value") else str(resolved_verdict),
+            "score": resolved_score,
+            "org_id": resolved_org_id,
+            "incident_id": alert.incident_id,
+            "suppressed": False,
+        }
 
     except Exception as exc:
         logger.error(
             "threat_alerts.emit_detection_alert unhandled error event_id=%s: %s",
-            event_id,
+            getattr(detection, "event_id", str(detection)),
             exc,
         )
-        return None
+        return {
+            "emitted": False,
+            "error": str(exc),
+            "event_id": getattr(detection, "event_id", str(detection)),
+        }
 
 
 # ---------------------------------------------------------------------------
