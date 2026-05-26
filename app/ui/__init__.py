@@ -18,6 +18,13 @@ from app.ui.billing_summary import router as billing_summary_router
 from app.ui.billing_wallet import router as billing_wallet_router
 from app.ui.customer_key_detail import router as customer_key_detail_router
 from app.ui.customer_keys import router as customer_keys_router
+from app.ui.docs.api_reference import router as docs_api_reference_router
+from app.ui.docs.authentication import router as docs_authentication_router
+from app.ui.docs.changelog import router as docs_changelog_router
+from app.ui.docs.policy_guide import router as docs_policy_guide_router
+from app.ui.docs.quickstart import router as docs_quickstart_router
+from app.ui.docs.telemetry_guide import router as docs_telemetry_guide_router
+from app.ui.docs.webhooks import router as docs_webhooks_router
 from app.ui.executions.dashboard import router as execution_dashboard_router
 from app.ui.executions.detail import router as execution_detail_router
 from app.ui.executions.explorer import router as execution_explorer_router
@@ -85,6 +92,13 @@ UI_ROUTERS: tuple[APIRouter, ...] = (
     customer_keys_router,
     customer_key_detail_router,
     request_context_router,
+    docs_quickstart_router,
+    docs_api_reference_router,
+    docs_authentication_router,
+    docs_policy_guide_router,
+    docs_telemetry_guide_router,
+    docs_webhooks_router,
+    docs_changelog_router,
 )
 
 
