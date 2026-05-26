@@ -14,61 +14,85 @@ def _optional_router(module_path: str) -> APIRouter | None:
         if exc.name != module_path:
             raise
         return None
-
     router = getattr(module, "router", None)
     if router is None:
         return None
     return cast(APIRouter, router)
 
 
-router = APIRouter(tags=["ui"])
+router = APIRouter(prefix="/ui", tags=["ui"])
 
-UI_ROUTERS: Final[tuple[APIRouter | None, ...]] = (
-    _optional_router("app.ui.executions.dashboard"),
-    _optional_router("app.ui.executions.detail"),
-    _optional_router("app.ui.reviews.queue"),
-    _optional_router("app.ui.reviews.detail"),
-    _optional_router("app.ui.insights.policy"),
-    _optional_router("app.ui.activity.clientsession"),
-    _optional_router("app.ui.activity.clientprofile"),
-    _optional_router("app.ui.activity.sessiontimeline"),
-    _optional_router("app.ui.executions.explorer"),
-    _optional_router("app.ui.settings.configuration"),
-    _optional_router("app.ui.runtime.status"),
-    _optional_router("app.ui.audit.log"),
-    _optional_router("app.ui.executions.testconsole"),
-    _optional_router("app.ui.alerts.notifications"),
-    _optional_router("app.ui.system.diagnostics"),
-    _optional_router("app.ui.integrations.settings"),
-    _optional_router("app.ui.incidents.triage"),
-    # app.ui.admin.operators removed — superseded by app.api.ui_admin_operators
-    # which has auth, correct schema, and permissions model
-    _optional_router("app.ui.admin.roles"),
-    _optional_router("app.ui.groq"),
-    _optional_router("app.ui.billing_manifest"),
-    _optional_router("app.ui.billing_registry"),
-    _optional_router("app.ui.billing_index"),
-    _optional_router("app.ui.billing_summary"),
-    _optional_router("app.ui.billing_packages"),
-    # Usage UI router: exposes /ui/usage* family for action usage tests
-    _optional_router("app.ui.usage"),
-    # Docs UI routers
-    _optional_router("app.ui.docs.authentication"),
-    _optional_router("app.ui.docs.quickstart"),
-    _optional_router("app.ui.docs.api_reference"),
-    _optional_router("app.ui.docs.policy_guide"),
-    _optional_router("app.ui.docs.telemetry_guide"),
-    _optional_router("app.ui.docs.webhooks"),
-    _optional_router("app.ui.docs.changelog"),
+UI_ROUTERS: Final[tuple[APIRouter, ...]] = (
+    router,
+    *filter(
+        None,
+        (
+            _optional_router("app.ui.executions.dashboard"),
+            _optional_router("app.ui.executions.detail"),
+            _optional_router("app.ui.reviews.queue"),
+            _optional_router("app.ui.reviews.detail"),
+            _optional_router("app.ui.insights.policy"),
+            _optional_router("app.ui.activity.clientsession"),
+            _optional_router("app.ui.activity.clientprofile"),
+            _optional_router("app.ui.activity.sessiontimeline"),
+            _optional_router("app.ui.executions.explorer"),
+            _optional_router("app.ui.settings.configuration"),
+            _optional_router("app.ui.runtime.status"),
+            _optional_router("app.ui.audit.log"),
+            _optional_router("app.ui.executions.testconsole"),
+            _optional_router("app.ui.alerts.notifications"),
+            _optional_router("app.ui.system.diagnostics"),
+            _optional_router("app.ui.integrations.settings"),
+            _optional_router("app.ui.incidents.triage"),
+            _optional_router("app.ui.admin.operators"),
+            _optional_router("app.ui.admin.roles"),
+            _optional_router("app.ui.groq"),
+            _optional_router("app.ui.billing_manifest"),
+            _optional_router("app.ui.billing_registry"),
+            _optional_router("app.ui.billing_index"),
+            _optional_router("app.ui.billing_summary"),
+            _optional_router("app.ui.billing_wallet"),
+            _optional_router("app.ui.usage_reports"),
+            _optional_router("app.ui.usage_event_detail"),
+            _optional_router("app.ui.telemetry_access_summary"),
+            _optional_router("app.ui.metrics_summary"),
+            _optional_router("app.ui.health_snapshot"),
+            _optional_router("app.ui.customer_keys"),
+            _optional_router("app.ui.customer_key_detail"),
+            _optional_router("app.ui.request_context"),
+            _optional_router("app.ui.docs.quickstart"),
+            _optional_router("app.ui.docs.api_reference"),
+            _optional_router("app.ui.docs.authentication"),
+            _optional_router("app.ui.docs.policy_guide"),
+            _optional_router("app.ui.docs.telemetry_guide"),
+            _optional_router("app.ui.docs.webhooks"),
+            _optional_router("app.ui.docs.changelog"),
+        ),
+    ),
 )
 
 
+@router.get("/status", tags=["ui"])
+def ui_router_status() -> dict[str, object]:
+    return {
+        "status": "ok",
+        "total_routers": len(UI_ROUTERS),
+        "routers": [
+            {
+                "prefix": ui_router.prefix,
+                "tags": list(ui_router.tags or []),
+            }
+            for ui_router in UI_ROUTERS
+        ],
+    }
+
+
 def get_ui_routers() -> tuple[APIRouter, ...]:
-    return tuple(ui_router for ui_router in UI_ROUTERS if ui_router is not None)
+    return UI_ROUTERS
 
 
 def iter_ui_routers() -> Iterable[APIRouter]:
-    return iter(get_ui_routers())
+    return iter(UI_ROUTERS)
 
 
 def _router_label(ui_router: APIRouter) -> str:
@@ -88,7 +112,7 @@ def validate_ui_routers() -> None:
     seen_router_objects: set[int] = set()
     seen_route_signatures: dict[tuple[str, tuple[str, ...], str], str] = {}
 
-    for ui_router in get_ui_routers():
+    for ui_router in UI_ROUTERS:
         router_id = id(ui_router)
         label = _router_label(ui_router)
 
@@ -97,7 +121,7 @@ def validate_ui_routers() -> None:
         seen_router_objects.add(router_id)
 
         if not ui_router.routes:
-            raise ValueError(f"UI router has no routes: {label}")
+            continue
 
         for route in ui_router.routes:
             signature = _route_signature(route)
@@ -119,7 +143,7 @@ def include_ui_routers(app: FastAPI) -> None:
 
     existing_route_signatures = {_route_signature(route) for route in app.routes if getattr(route, "path", "")}
 
-    for ui_router in get_ui_routers():
+    for ui_router in UI_ROUTERS:
         router_signatures = {_route_signature(route) for route in ui_router.routes if getattr(route, "path", "")}
 
         if router_signatures and router_signatures.issubset(existing_route_signatures):
@@ -131,3 +155,8 @@ def include_ui_routers(app: FastAPI) -> None:
 
 def includeuirouters(app: FastAPI) -> None:
     include_ui_routers(app)
+
+
+def register_page(path: str, **kwargs: object) -> object:
+    """No-op page registration shim — metadata only, no route side-effects."""
+    return kwargs

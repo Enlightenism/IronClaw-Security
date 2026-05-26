@@ -118,7 +118,7 @@ def _build_links() -> list[TelemetrySummaryLinkView]:
     ]
 
 
-@router.get("", response_model=TelemetryAccessSummaryResponse)
+@router.get("", response_model=TelemetryAccessSummaryResponse, operation_id="ui_get_telemetry_access_summary")
 def get_telemetry_access_summary(
     summary_limit: int = Query(default=500, ge=1, le=5000),
     events_limit: int = Query(default=50, ge=1, le=500),

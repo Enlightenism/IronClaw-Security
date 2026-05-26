@@ -13,7 +13,6 @@ from fastapi.routing import APIRoute
 
 ProtectedDependencyFactory = Callable[[], Any]
 
-
 _log = logging.getLogger(__name__)
 
 
@@ -140,12 +139,10 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
             _optional_router("app.api.action_guard"),
             {"prefix": "/guard", "dependencies": dependencies},
         ),
-        # /guard/execute — legacy mount retained for backward compatibility
         (
             action_execute_router,
             {"prefix": "/guard", "dependencies": dependencies},
         ),
-        # /execute/execute — canonical mount; activates behavioral baseline drift tracking
         (
             action_execute_router,
             {"prefix": "/execute", "dependencies": dependencies},
@@ -184,21 +181,12 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
             _optional_router("app.routers.threat_detection"),
             {"dependencies": dependencies},
         ),
-        # app.api.threat_detection — single entry point for all detection calls
-        # (action_guard, action_execute, etc.). Router carries /threat prefix.
         (
             _optional_router("app.api.threat_detection"),
             {"dependencies": dependencies},
         ),
-        # app.api.threat_hunt — hunt session lifecycle and match result endpoints.
         (
             _optional_router("app.api.threat_hunt"),
-            {"dependencies": dependencies},
-        ),
-        # app.api.threat_alerts — escalation bridge; wired last because it
-        # touches threat_detection_engine, incidents, and notifications.
-        (
-            _optional_router("app.api.threat_alerts"),
             {"dependencies": dependencies},
         ),
         (
@@ -261,7 +249,6 @@ def _install_core_routes(app: FastAPI) -> None:
 
     get_system_status = _optional_attr("app.api.system", "get_system_status")
     get_ui_manifest = _optional_attr("app.api.ui_pages", "get_ui_manifest")
-    get_ui_status = _optional_attr("app.api.ui_status", "get_ui_status")
     get_runtime_status = _optional_attr("app.ui.runtimestatus", "get_runtime_status_page")
     if get_runtime_status is None:
         get_runtime_status = _optional_attr("app.ui.runtimestatus", "getruntimestatuspage")
@@ -300,16 +287,6 @@ def _install_core_routes(app: FastAPI) -> None:
                 "status": "ok",
                 "service": "IronClaw-Security",
                 "pages": [],
-            },
-        )
-
-    @app.get("/ui/status", tags=["ui"])
-    def ui_status() -> Any:
-        return _safe_call(
-            get_ui_status,
-            {
-                "status": "ok",
-                "service": "IronClaw-Security",
             },
         )
 
