@@ -32,7 +32,7 @@ class FakeUsageMeteringService:
                 "remaining_units_before": self.remaining_before,
                 "reason": self.reason,
                 "plan": "pro",
-                "subscription_id": "sub_test",
+                "package_id": "sub_test",
                 "wallet_balance_before": self.wallet_balance,
             },
         )()
@@ -48,7 +48,7 @@ class FakeUsageMeteringService:
                 "remaining_units": self.remaining_after if self.allowed else self.remaining_before,
                 "reason": self.reason,
                 "plan": "pro",
-                "subscription_id": "sub_test",
+                "package_id": "sub_test",
                 "wallet_balance": self.wallet_balance,
                 "metadata": metadata,
             },
@@ -57,7 +57,7 @@ class FakeUsageMeteringService:
     def get_usage_snapshot(self, *, owner_key: str) -> dict[str, object]:
         return {
             "plan": "pro",
-            "subscription_id": "sub_test",
+            "package_id": "sub_test",
             "remaining_units": self.remaining_after,
             "wallet_balance": self.wallet_balance,
             "allowed": self.allowed,
@@ -153,7 +153,7 @@ def test_get_usage_snapshot_returns_underlying_snapshot() -> None:
     snapshot = service.get_usage_snapshot(owner_key="owner-304")
 
     assert snapshot["plan"] == "pro"
-    assert snapshot["subscription_id"] == "sub_test"
+    assert snapshot["package_id"] == "sub_test"
     assert snapshot["remaining_units"] == 8
     assert snapshot["wallet_balance"] == 3
     assert snapshot["allowed"] is True

@@ -91,7 +91,6 @@ def usage_event_detail_page(
             detail="Usage event not found",
         )
 
-    # Expect `event` to be a dict-like structure; keep access defensive.
     def g(key: str, default: Any = None) -> Any:
         return event.get(key, default)
 
@@ -215,7 +214,7 @@ def usage_event_detail_page(
                 name="plan",
                 label="Plan",
                 value=g("plan"),
-                help_text="Billing or subscription plan associated with this usage.",
+                help_text="Billing or package plan associated with this usage.",
             ),
             _field(
                 name="billing_account_id",
@@ -283,7 +282,7 @@ def usage_event_detail_page(
             title="View related events",
             method="GET",
             path="/ui/usagereports",
-            description=("Open usage reports filtered to the same principal, session, or request for broader investigation."),
+            description="Open usage reports filtered to the same principal, session, or request for broader investigation.",
             payload={
                 "principal_id": g("principal_id"),
                 "session_id": g("session_id"),

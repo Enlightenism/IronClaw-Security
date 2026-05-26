@@ -10,7 +10,7 @@ def test_build_action_usage_view_creates_expected_stats() -> None:
         ownerkey="owner-001",
         snapshot={
             "plan": "pro",
-            "subscription_id": "sub_123",
+            "package_id": "sub_123",
             "remaining_units": 12,
             "wallet_balance": 7,
             "allowed": True,

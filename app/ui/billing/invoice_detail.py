@@ -34,15 +34,14 @@ class BillingUsageBucketView(BaseModel):
 
 
 class BillingPackageSnapshotView(BaseModel):
-    subscriptionid: str
+    packageid: str
     organizationid: str
     organizationname: str
     plan: str
     status: str
-    billinginterval: str
     startedat: str
-    renewsat: str
-    monthlybaseprice: BillingCurrencyAmountView
+    purchasedat: str
+    packageprice: BillingCurrencyAmountView
     usage: list[BillingUsageBucketView] = Field(default_factory=list)
 
 
@@ -113,15 +112,14 @@ def _status_color(status: str) -> str:
 
 def _package_alpha() -> BillingPackageSnapshotView:
     return BillingPackageSnapshotView(
-        subscriptionid="sub-001",
+        packageid="pkg-001",
         organizationid="org-001",
         organizationname="Alpha Security Lab",
         plan="pro",
         status="active",
-        billinginterval="monthly",
         startedat=_utc_iso(2026, 4, 10, 9, 0),
-        renewsat=_utc_iso(2026, 5, 10, 9, 0),
-        monthlybaseprice=_usd(29900),
+        purchasedat=_utc_iso(2026, 4, 10, 9, 0),
+        packageprice=_usd(29900),
         usage=[
             BillingUsageBucketView(
                 metric="guardedexecutions",
@@ -153,15 +151,14 @@ def _package_alpha() -> BillingPackageSnapshotView:
 
 def _package_beta() -> BillingPackageSnapshotView:
     return BillingPackageSnapshotView(
-        subscriptionid="sub-002",
+        packageid="pkg-002",
         organizationid="org-002",
         organizationname="Beta Runtime Defense",
         plan="starter",
         status="trialing",
-        billinginterval="monthly",
         startedat=_utc_iso(2026, 4, 12, 14, 20),
-        renewsat=_utc_iso(2026, 4, 26, 14, 20),
-        monthlybaseprice=_usd(9900),
+        purchasedat=_utc_iso(2026, 4, 12, 14, 20),
+        packageprice=_usd(9900),
         usage=[
             BillingUsageBucketView(
                 metric="guardedexecutions",
@@ -193,15 +190,14 @@ def _package_beta() -> BillingPackageSnapshotView:
 
 def _package_gamma() -> BillingPackageSnapshotView:
     return BillingPackageSnapshotView(
-        subscriptionid="sub-003",
+        packageid="pkg-003",
         organizationid="org-003",
         organizationname="Gamma Internal QA",
         plan="enterprise",
         status="past_due",
-        billinginterval="monthly",
         startedat=_utc_iso(2026, 4, 8, 8, 45),
-        renewsat=_utc_iso(2026, 5, 8, 8, 45),
-        monthlybaseprice=_usd(149900),
+        purchasedat=_utc_iso(2026, 4, 8, 8, 45),
+        packageprice=_usd(149900),
         usage=[
             BillingUsageBucketView(
                 metric="guardedexecutions",

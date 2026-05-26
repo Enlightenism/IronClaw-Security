@@ -8,7 +8,7 @@ class FakeUsageSnapshotService:
         return {
             "owner_key": owner_key,
             "plan": "starter",
-            "subscription_id": "sub_snapshot",
+            "package_id": "sub_snapshot",
             "remaining_units": 6,
             "wallet_balance": 4,
             "allowed": True,
@@ -23,7 +23,7 @@ def test_action_usage_snapshot_returns_expected_fields() -> None:
 
     assert snapshot["owner_key"] == "owner-401"
     assert snapshot["plan"] == "starter"
-    assert snapshot["subscription_id"] == "sub_snapshot"
+    assert snapshot["package_id"] == "sub_snapshot"
     assert snapshot["remaining_units"] == 6
     assert snapshot["wallet_balance"] == 4
     assert snapshot["allowed"] is True
@@ -38,4 +38,4 @@ def test_action_usage_snapshot_ownerkey_changes_per_request() -> None:
 
     assert first["owner_key"] == "owner-402"
     assert second["owner_key"] == "owner-403"
-    assert first["subscription_id"] == second["subscription_id"]
+    assert first["package_id"] == second["package_id"]

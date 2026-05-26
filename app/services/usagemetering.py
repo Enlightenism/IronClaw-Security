@@ -22,7 +22,7 @@ class UsageAuthorization:
     remaining_units_after: int
     reason: str
     plan: str | None = None
-    subscription_id: str | None = None
+    package_id: str | None = None
     wallet_balance_before: int | None = None
     wallet_balance_after: int | None = None
     checked_at: datetime = field(default_factory=_utc_now)
@@ -37,7 +37,7 @@ class UsageConsumptionResult:
     remaining_units: int
     reason: str
     plan: str | None = None
-    subscription_id: str | None = None
+    package_id: str | None = None
     wallet_balance: int | None = None
     consumed_at: datetime = field(default_factory=_utc_now)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -112,7 +112,7 @@ class UsageMeteringService:
                     remaining_units_after=remaining_before,
                     reason="insufficient_plan_units",
                     plan=subscription.plan,
-                    subscription_id=subscription.subscription_id,
+                    package_id=subscription.subscription_id,
                     wallet_balance_before=wallet_balance_before,
                     wallet_balance_after=wallet_balance_before,
                     metadata=metadata,
@@ -126,7 +126,7 @@ class UsageMeteringService:
                 remaining_units_after=max(remaining_before - units, 0),
                 reason="authorized",
                 plan=subscription.plan,
-                subscription_id=subscription.subscription_id,
+                package_id=subscription.subscription_id,
                 wallet_balance_before=wallet_balance_before,
                 wallet_balance_after=wallet_balance_before,
                 metadata=metadata,
@@ -159,7 +159,7 @@ class UsageMeteringService:
                     remaining_units=authorization.remaining_units_before,
                     reason=authorization.reason,
                     plan=authorization.plan,
-                    subscription_id=authorization.subscription_id,
+                    package_id=authorization.package_id,
                     wallet_balance=authorization.wallet_balance_before,
                     metadata=metadata,
                 )
@@ -174,7 +174,7 @@ class UsageMeteringService:
                 units=units,
                 metadata={
                     "source": "usage_metering",
-                    "subscription_id": subscription.subscription_id,
+                    "package_id": subscription.subscription_id,
                     "plan": subscription.plan,
                     **metadata,
                 },
@@ -187,7 +187,7 @@ class UsageMeteringService:
                 remaining_units=subscription.remaining_units,
                 reason="consumed",
                 plan=subscription.plan,
-                subscription_id=subscription.subscription_id,
+                package_id=subscription.subscription_id,
                 wallet_balance=wallet.balance_units,
                 metadata=metadata,
             )
@@ -206,7 +206,7 @@ class UsageMeteringService:
                     "owner_key": normalized_owner_key,
                     "has_active_subscription": False,
                     "plan": None,
-                    "subscription_id": None,
+                    "package_id": None,
                     "unit_limit": 0,
                     "units_consumed": 0,
                     "remaining_units": 0,
@@ -218,7 +218,7 @@ class UsageMeteringService:
                 "owner_key": normalized_owner_key,
                 "has_active_subscription": True,
                 "plan": subscription.plan,
-                "subscription_id": subscription.subscription_id,
+                "package_id": subscription.subscription_id,
                 "unit_limit": subscription.unit_limit,
                 "units_consumed": subscription.units_consumed,
                 "remaining_units": subscription.remaining_units,

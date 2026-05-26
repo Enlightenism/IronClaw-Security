@@ -206,7 +206,7 @@ def ui_organizations_page(
                     label="Plan Management",
                     value="tracked",
                     tone="neutral",
-                    help_text="Subscription and entitlement plan context is visible to operators.",
+                    help_text="Package and entitlement plan context is visible to operators.",
                 ),
                 _item(
                     label="Administrative Coverage",

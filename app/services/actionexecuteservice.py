@@ -129,7 +129,7 @@ class ActionExecuteService:
                     remaining_units=decision.authorization.remaining_units_before,
                     reason=decision.reason,
                     plan=decision.authorization.plan,
-                    subscription_id=decision.authorization.subscription_id,
+                    package_id=decision.authorization.package_id,
                     wallet_balance=decision.authorization.wallet_balance_before,
                     metadata=request.metadata,
                 ),
