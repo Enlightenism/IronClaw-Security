@@ -172,6 +172,63 @@ def _build_ui_manifest_routes() -> list[UIManifestRoute]:
             category="tenant",
             metadata={"surface": "tenant", "kind": "telemetry"},
         ),
+        # Docs
+        UIManifestRoute(
+            prefix="/ui/docs/authentication",
+            tags=["docs", "authentication"],
+            slug="docs-authentication",
+            label="Authentication",
+            category="docs",
+            metadata={"surface": "docs", "kind": "guide"},
+        ),
+        UIManifestRoute(
+            prefix="/ui/docs/quickstart",
+            tags=["docs", "quickstart"],
+            slug="docs-quickstart",
+            label="Quickstart",
+            category="docs",
+            metadata={"surface": "docs", "kind": "guide"},
+        ),
+        UIManifestRoute(
+            prefix="/ui/docs/api-reference",
+            tags=["docs", "api-reference"],
+            slug="docs-api-reference",
+            label="API Reference",
+            category="docs",
+            metadata={"surface": "docs", "kind": "reference"},
+        ),
+        UIManifestRoute(
+            prefix="/ui/docs/policy-guide",
+            tags=["docs", "policy-guide"],
+            slug="docs-policy-guide",
+            label="Policy Guide",
+            category="docs",
+            metadata={"surface": "docs", "kind": "guide"},
+        ),
+        UIManifestRoute(
+            prefix="/ui/docs/telemetry",
+            tags=["docs", "telemetry-guide"],
+            slug="docs-telemetry-guide",
+            label="Telemetry Guide",
+            category="docs",
+            metadata={"surface": "docs", "kind": "guide"},
+        ),
+        UIManifestRoute(
+            prefix="/ui/docs/webhooks",
+            tags=["docs", "webhooks"],
+            slug="docs-webhooks",
+            label="Webhooks",
+            category="docs",
+            metadata={"surface": "docs", "kind": "guide"},
+        ),
+        UIManifestRoute(
+            prefix="/ui/docs/changelog",
+            tags=["docs", "changelog"],
+            slug="docs-changelog",
+            label="Changelog",
+            category="docs",
+            metadata={"surface": "docs", "kind": "changelog"},
+        ),
     ]
 
 
