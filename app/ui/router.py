@@ -52,6 +52,14 @@ UI_ROUTERS: Final[tuple[APIRouter | None, ...]] = (
     _optional_router("app.ui.billing_packages"),
     # Usage UI router: exposes /ui/usage* family for action usage tests
     _optional_router("app.ui.usage"),
+    # Docs UI routers
+    _optional_router("app.ui.docs.authentication"),
+    _optional_router("app.ui.docs.quickstart"),
+    _optional_router("app.ui.docs.api_reference"),
+    _optional_router("app.ui.docs.policy_guide"),
+    _optional_router("app.ui.docs.telemetry_guide"),
+    _optional_router("app.ui.docs.webhooks"),
+    _optional_router("app.ui.docs.changelog"),
 )
 
 

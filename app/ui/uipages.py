@@ -202,6 +202,70 @@ def _build_ui_pages() -> list[UIPageItem]:
             tags=["usage-reports", "billing"],
             metadata={"surface": "billing", "kind": "reporting"},
         ),
+        # Docs
+        UIPageItem(
+            slug="docs-authentication",
+            label="Authentication",
+            route="/ui/docs/authentication",
+            category="docs",
+            summary="API key and bearer token authentication guide for IronClaw integrations.",
+            tags=["docs", "authentication"],
+            metadata={"surface": "docs", "kind": "guide"},
+        ),
+        UIPageItem(
+            slug="docs-quickstart",
+            label="Quickstart",
+            route="/ui/docs/quickstart",
+            category="docs",
+            summary="End-to-end quickstart guide for connecting an agent to IronClaw.",
+            tags=["docs", "quickstart"],
+            metadata={"surface": "docs", "kind": "guide"},
+        ),
+        UIPageItem(
+            slug="docs-api-reference",
+            label="API Reference",
+            route="/ui/docs/api-reference",
+            category="docs",
+            summary="Full REST API reference for all IronClaw endpoints and schemas.",
+            tags=["docs", "api-reference"],
+            metadata={"surface": "docs", "kind": "reference"},
+        ),
+        UIPageItem(
+            slug="docs-policy-guide",
+            label="Policy Guide",
+            route="/ui/docs/policy-guide",
+            category="docs",
+            summary="Policy authoring, rule syntax, and enforcement behavior reference.",
+            tags=["docs", "policy-guide"],
+            metadata={"surface": "docs", "kind": "guide"},
+        ),
+        UIPageItem(
+            slug="docs-telemetry-guide",
+            label="Telemetry Guide",
+            route="/ui/docs/telemetry",
+            category="docs",
+            summary="Telemetry event schema, pipeline configuration, and retention reference.",
+            tags=["docs", "telemetry-guide"],
+            metadata={"surface": "docs", "kind": "guide"},
+        ),
+        UIPageItem(
+            slug="docs-webhooks",
+            label="Webhooks",
+            route="/ui/docs/webhooks",
+            category="docs",
+            summary="Webhook event types, payload schemas, and delivery configuration.",
+            tags=["docs", "webhooks"],
+            metadata={"surface": "docs", "kind": "guide"},
+        ),
+        UIPageItem(
+            slug="docs-changelog",
+            label="Changelog",
+            route="/ui/docs/changelog",
+            category="docs",
+            summary="Release history, breaking changes, and version notes for IronClaw.",
+            tags=["docs", "changelog"],
+            metadata={"surface": "docs", "kind": "changelog"},
+        ),
     ]
 
 
@@ -212,6 +276,7 @@ def _build_sections(items: list[UIPageItem]) -> list[UIPageSection]:
         "integrations": "Integrations",
         "tenant": "Tenant",
         "billing": "Billing",
+        "docs": "Docs",
     }
 
     ordered_categories = [
@@ -220,6 +285,7 @@ def _build_sections(items: list[UIPageItem]) -> list[UIPageSection]:
         "integrations",
         "tenant",
         "billing",
+        "docs",
     ]
 
     sections: list[UIPageSection] = []
