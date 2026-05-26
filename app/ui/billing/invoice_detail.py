@@ -33,7 +33,7 @@ class BillingUsageBucketView(BaseModel):
     status: str
 
 
-class BillingSubscriptionSnapshotView(BaseModel):
+class BillingPackageSnapshotView(BaseModel):
     subscriptionid: str
     organizationid: str
     organizationname: str
@@ -80,7 +80,7 @@ class BillingInvoiceDetailResponse(BaseModel):
     lineitems: list[BillingInvoiceLineItem] = Field(default_factory=list)
     paymentmethod: BillingPaymentMethodSnapshotView | None = None
     downloadurl: str | None = None
-    subscription: BillingSubscriptionSnapshotView | None = None
+    package: BillingPackageSnapshotView | None = None
     generatedat: str = ""
     environment: str = "local"
     notes: list[str] = Field(default_factory=list)
@@ -111,8 +111,8 @@ def _status_color(status: str) -> str:
     return _STATUS_COLOR.get(status, "neutral")
 
 
-def _subscription_alpha() -> BillingSubscriptionSnapshotView:
-    return BillingSubscriptionSnapshotView(
+def _package_alpha() -> BillingPackageSnapshotView:
+    return BillingPackageSnapshotView(
         subscriptionid="sub-001",
         organizationid="org-001",
         organizationname="Alpha Security Lab",
@@ -151,8 +151,8 @@ def _subscription_alpha() -> BillingSubscriptionSnapshotView:
     )
 
 
-def _subscription_beta() -> BillingSubscriptionSnapshotView:
-    return BillingSubscriptionSnapshotView(
+def _package_beta() -> BillingPackageSnapshotView:
+    return BillingPackageSnapshotView(
         subscriptionid="sub-002",
         organizationid="org-002",
         organizationname="Beta Runtime Defense",
@@ -191,8 +191,8 @@ def _subscription_beta() -> BillingSubscriptionSnapshotView:
     )
 
 
-def _subscription_gamma() -> BillingSubscriptionSnapshotView:
-    return BillingSubscriptionSnapshotView(
+def _package_gamma() -> BillingPackageSnapshotView:
+    return BillingPackageSnapshotView(
         subscriptionid="sub-003",
         organizationid="org-003",
         organizationname="Gamma Internal QA",
@@ -264,7 +264,7 @@ _INVOICE_CATALOG: dict[str, BillingInvoiceDetailResponse] = {
             expyear=2027,
         ),
         downloadurl="/ui/billing/invoices/inv-001/download",
-        subscription=_subscription_alpha(),
+        package=_package_alpha(),
         generatedat=datetime.now(UTC).isoformat(),
         environment="local",
         notes=[
@@ -305,7 +305,7 @@ _INVOICE_CATALOG: dict[str, BillingInvoiceDetailResponse] = {
             expyear=2026,
         ),
         downloadurl=None,
-        subscription=_subscription_beta(),
+        package=_package_beta(),
         generatedat=datetime.now(UTC).isoformat(),
         environment="local",
         notes=[
@@ -361,7 +361,7 @@ _INVOICE_CATALOG: dict[str, BillingInvoiceDetailResponse] = {
             expyear=2027,
         ),
         downloadurl="/ui/billing/invoices/inv-003/download",
-        subscription=_subscription_gamma(),
+        package=_package_gamma(),
         generatedat=datetime.now(UTC).isoformat(),
         environment="local",
         notes=[
@@ -369,24 +369,27 @@ _INVOICE_CATALOG: dict[str, BillingInvoiceDetailResponse] = {
             "Gamma Internal QA exceeded guarded execution and manual review limits in April 2026.",
             "Overage charges: 21,400 excess guarded executions at $0.01 each ($214.00) and 1,110 excess manual reviews at $0.12 each ($133.20).",
             "Total invoice reflects base plan plus both overage line items.",
-            "Payment method on file is Amex ending in 0005, expiring 11/2027.",
+            "Payment method on file is Amex ending in 0005.",
         ],
     ),
 }
 
 
-@router.get("/invoices/{invoice_id}", response_model=BillingInvoiceDetailResponse | BillingInvoiceNotFoundResponse)
+@router.get(
+    "/invoices/{invoice_id}",
+    response_model=BillingInvoiceDetailResponse,
+    responses={404: {"model": BillingInvoiceNotFoundResponse}},
+    summary="Get invoice detail",
+    description="Returns full invoice detail including line items, payment method, and package snapshot.",
+)
 def get_invoice_detail(invoice_id: str) -> BillingInvoiceDetailResponse | BillingInvoiceNotFoundResponse:
-    record = _INVOICE_CATALOG.get(invoice_id)
-
-    if record is None:
+    invoice = _INVOICE_CATALOG.get(invoice_id)
+    if invoice is None:
         return BillingInvoiceNotFoundResponse(
             status="not_found",
             invoiceid=invoice_id,
-            message=f"Invoice '{invoice_id}' was not found. Valid sample IDs are: inv-001, inv-002, inv-003.",
+            message=f"Invoice '{invoice_id}' not found.",
             generatedat=datetime.now(UTC).isoformat(),
             environment="local",
         )
-
-    record.generatedat = datetime.now(UTC).isoformat()
-    return record
+    return invoice

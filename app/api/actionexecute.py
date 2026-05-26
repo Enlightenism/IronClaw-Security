@@ -102,7 +102,7 @@ def _empty_usage(reason: str) -> dict[str, Any]:
         "reason": reason,
         "applied": False,
         "plan": None,
-        "subscriptionid": None,
+        "packageid": None,
         "walletbalance": None,
     }
 
@@ -117,7 +117,7 @@ def _usage_to_dict(receipt: Any) -> dict[str, Any]:
         "reason": getattr(receipt, "reason", ""),
         "applied": bool(getattr(consumption, "applied", False)) if consumption else False,
         "plan": getattr(consumption, "plan", None) if consumption else None,
-        "subscriptionid": getattr(consumption, "subscription_id", None) if consumption else None,
+        "packageid": getattr(consumption, "package_id", None) if consumption else None,
         "walletbalance": getattr(consumption, "wallet_balance", None) if consumption else None,
     }
 

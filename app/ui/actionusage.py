@@ -56,7 +56,7 @@ def build_action_usage_view(
 
     preferred_order = [
         "plan",
-        "subscription_id",
+        "package_id",
         "remaining_units",
         "wallet_balance",
         "allowed",

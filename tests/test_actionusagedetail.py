@@ -11,7 +11,7 @@ def test_build_action_usage_detail_view_orders_preferred_fields_first() -> None:
             "wallet_balance": 50,
             "plan": "pro",
             "remaining_units": 8,
-            "subscription_id": "sub_100",
+            "package_id": "sub_100",
             "custom_flag": "enabled",
         },
         requested_by="tester",
@@ -20,7 +20,7 @@ def test_build_action_usage_detail_view_orders_preferred_fields_first() -> None:
     ordered_keys = [row.key for row in view.rows[:5]]
     assert ordered_keys == [
         "plan",
-        "subscription_id",
+        "package_id",
         "remaining_units",
         "wallet_balance",
         "status",

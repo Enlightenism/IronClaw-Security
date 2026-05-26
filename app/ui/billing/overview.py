@@ -48,16 +48,15 @@ class BillingInvoiceView(BaseModel):
     total: BillingCurrencyAmountView
 
 
-class BillingSubscriptionView(BaseModel):
-    subscriptionid: str
+class BillingPackageView(BaseModel):
+    packageid: str
     organizationid: str
     organizationname: str
     plan: str
     status: str
-    billinginterval: str
-    startedat: str
-    renewsat: str
-    monthlybaseprice: BillingCurrencyAmountView
+    purchasedat: str
+    expiresat: str | None = None
+    packageprice: BillingCurrencyAmountView
     usage: list[BillingUsageBucketView] = Field(default_factory=list)
 
 
@@ -78,7 +77,7 @@ class BillingOverviewResponse(BaseModel):
     kpis: list[BillingKpiView] = Field(default_factory=list)
     plancounts: list[BillingPlanCount] = Field(default_factory=list)
     invoicestatuscounts: list[BillingInvoiceStatusCount] = Field(default_factory=list)
-    subscriptions: list[BillingSubscriptionView] = Field(default_factory=list)
+    packages: list[BillingPackageView] = Field(default_factory=list)
     invoices: list[BillingInvoiceView] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
 
@@ -96,115 +95,112 @@ def _usd(amountcents: int) -> BillingCurrencyAmountView:
     )
 
 
-def _sample_subscriptions() -> list[BillingSubscriptionView]:
+def _sample_packages() -> list[BillingPackageView]:
     return [
-        BillingSubscriptionView(
-            subscriptionid="sub-001",
+        BillingPackageView(
+            packageid="pkg-001",
             organizationid="org-001",
             organizationname="Alpha Security Lab",
-            plan="pro",
+            plan="team-security",
             status="active",
-            billinginterval="monthly",
-            startedat=_utc_iso(2026, 4, 10, 9, 0),
-            renewsat=_utc_iso(2026, 5, 10, 9, 0),
-            monthlybaseprice=_usd(29900),
+            purchasedat=_utc_iso(2026, 4, 10, 9, 0),
+            expiresat=None,
+            packageprice=_usd(9000),
             usage=[
                 BillingUsageBucketView(
                     metric="guardedexecutions",
                     used=18340,
-                    included=50000,
+                    included=100000,
                     overage=0,
-                    unit="requests",
+                    unit="units",
                     status="healthy",
                 ),
                 BillingUsageBucketView(
                     metric="manualreviews",
                     used=1220,
-                    included=5000,
+                    included=100000,
                     overage=0,
-                    unit="items",
+                    unit="units",
                     status="healthy",
                 ),
                 BillingUsageBucketView(
                     metric="securityalerts",
                     used=3870,
-                    included=10000,
+                    included=100000,
                     overage=0,
-                    unit="alerts",
+                    unit="units",
                     status="healthy",
                 ),
             ],
         ),
-        BillingSubscriptionView(
-            subscriptionid="sub-002",
+        BillingPackageView(
+            packageid="pkg-002",
             organizationid="org-002",
             organizationname="Beta Runtime Defense",
-            plan="starter",
-            status="trialing",
-            billinginterval="monthly",
-            startedat=_utc_iso(2026, 4, 12, 14, 20),
-            renewsat=_utc_iso(2026, 4, 26, 14, 20),
-            monthlybaseprice=_usd(9900),
+            plan="single-user",
+            status="active",
+            purchasedat=_utc_iso(2026, 4, 12, 14, 20),
+            expiresat=None,
+            packageprice=_usd(2000),
             usage=[
                 BillingUsageBucketView(
                     metric="guardedexecutions",
                     used=4120,
-                    included=10000,
+                    included=20000,
                     overage=0,
-                    unit="requests",
+                    unit="units",
                     status="healthy",
                 ),
                 BillingUsageBucketView(
                     metric="manualreviews",
                     used=620,
-                    included=1000,
+                    included=20000,
                     overage=0,
-                    unit="items",
-                    status="warning",
+                    unit="units",
+                    status="healthy",
                 ),
                 BillingUsageBucketView(
                     metric="securityalerts",
                     used=2010,
-                    included=2500,
+                    included=20000,
                     overage=0,
-                    unit="alerts",
+                    unit="units",
                     status="warning",
                 ),
             ],
         ),
-        BillingSubscriptionView(
-            subscriptionid="sub-003",
+        BillingPackageView(
+            packageid="pkg-003",
             organizationid="org-003",
             organizationname="Gamma Internal QA",
-            plan="enterprise",
-            status="past_due",
-            billinginterval="monthly",
-            startedat=_utc_iso(2026, 4, 8, 8, 45),
-            renewsat=_utc_iso(2026, 5, 8, 8, 45),
-            monthlybaseprice=_usd(149900),
+            plan="enterprise-security",
+            status="units_exhausted",
+            purchasedat=_utc_iso(2026, 4, 8, 8, 45),
+            expiresat=None,
+            packageprice=_usd(15000),
             usage=[
                 BillingUsageBucketView(
                     metric="guardedexecutions",
-                    used=271400,
-                    included=250000,
-                    overage=21400,
-                    unit="requests",
+                    used=200000,
+                    included=200000,
+                    overage=0,
+                    unit="units",
                     status="critical",
                 ),
                 BillingUsageBucketView(
                     metric="manualreviews",
-                    used=26110,
-                    included=25000,
-                    overage=1110,
-                    unit="items",
+                    used=200000,
+                    included=200000,
+                    overage=0,
+                    unit="units",
                     status="critical",
                 ),
                 BillingUsageBucketView(
                     metric="securityalerts",
-                    used=41200,
-                    included=50000,
+                    used=180000,
+                    included=200000,
                     overage=0,
-                    unit="alerts",
+                    unit="units",
                     status="healthy",
                 ),
             ],
@@ -223,41 +219,41 @@ def _sample_invoices() -> list[BillingInvoiceView]:
             dueat=_utc_iso(2026, 4, 17, 9, 5),
             periodstart=_utc_iso(2026, 4, 10, 0, 0),
             periodend=_utc_iso(2026, 5, 9, 23, 59),
-            subtotal=_usd(29900),
+            subtotal=_usd(9000),
             tax=_usd(0),
-            total=_usd(29900),
+            total=_usd(9000),
         ),
         BillingInvoiceView(
             invoiceid="inv-002",
             organizationid="org-002",
             organizationname="Beta Runtime Defense",
-            status="draft",
+            status="paid",
             issuedat=_utc_iso(2026, 4, 12, 14, 25),
-            dueat=_utc_iso(2026, 4, 26, 14, 25),
+            dueat=_utc_iso(2026, 4, 19, 14, 25),
             periodstart=_utc_iso(2026, 4, 12, 0, 0),
-            periodend=_utc_iso(2026, 5, 11, 23, 59),
-            subtotal=_usd(9900),
+            periodend=_utc_iso(2026, 4, 12, 23, 59),
+            subtotal=_usd(2000),
             tax=_usd(0),
-            total=_usd(9900),
+            total=_usd(2000),
         ),
         BillingInvoiceView(
             invoiceid="inv-003",
             organizationid="org-003",
             organizationname="Gamma Internal QA",
-            status="past_due",
+            status="paid",
             issuedat=_utc_iso(2026, 4, 8, 9, 0),
             dueat=_utc_iso(2026, 4, 15, 9, 0),
             periodstart=_utc_iso(2026, 4, 8, 0, 0),
-            periodend=_utc_iso(2026, 5, 7, 23, 59),
-            subtotal=_usd(149900),
+            periodend=_utc_iso(2026, 4, 8, 23, 59),
+            subtotal=_usd(15000),
             tax=_usd(0),
-            total=_usd(149900),
+            total=_usd(15000),
         ),
     ]
 
 
-def _build_plan_counts(subscriptions: list[BillingSubscriptionView]) -> list[BillingPlanCount]:
-    counts = Counter(subscription.plan for subscription in subscriptions)
+def _build_plan_counts(packages: list[BillingPackageView]) -> list[BillingPlanCount]:
+    counts = Counter(package.plan for package in packages)
     return [BillingPlanCount(plan=plan, count=count) for plan, count in sorted(counts.items())]
 
 
@@ -270,44 +266,43 @@ def _build_invoice_status_counts(
 
 @router.get("/overview", response_model=BillingOverviewResponse)
 def get_billing_overview() -> BillingOverviewResponse:
-    subscriptions = _sample_subscriptions()
+    packages = _sample_packages()
     invoices = _sample_invoices()
 
-    totalsubscriptions = len(subscriptions)
-    activepaid = sum(1 for subscription in subscriptions if subscription.status == "active")
-    trialing = sum(1 for subscription in subscriptions if subscription.status == "trialing")
-    pastdue = sum(1 for subscription in subscriptions if subscription.status == "past_due")
-    monthlyrevenuecents = sum(subscription.monthlybaseprice.amountcents for subscription in subscriptions if subscription.status in {"active", "past_due"})
+    totalpackages = len(packages)
+    activepackages = sum(1 for package in packages if package.status == "active")
+    exhaustedpackages = sum(1 for package in packages if package.status == "units_exhausted")
+    totalrevenuecents = sum(invoice.total.amountcents for invoice in invoices)
 
     kpis = [
         BillingKpiView(
-            label="totalsubscriptions",
-            value=totalsubscriptions,
-            trendlabel="Current subscription records",
-            status="healthy" if totalsubscriptions > 0 else "warning",
+            label="totalpackages",
+            value=totalpackages,
+            trendlabel="Total package purchase records",
+            status="healthy" if totalpackages > 0 else "warning",
         ),
         BillingKpiView(
-            label="activepaid",
-            value=activepaid,
-            trendlabel="Paying organizations on active plans",
-            status="healthy" if activepaid > 0 else "warning",
+            label="activepackages",
+            value=activepackages,
+            trendlabel="Organizations with units remaining",
+            status="healthy" if activepackages > 0 else "warning",
         ),
         BillingKpiView(
-            label="trialing",
-            value=trialing,
-            trendlabel="Trials available for revenue conversion",
-            status="warning" if trialing > 0 else "healthy",
+            label="exhaustedpackages",
+            value=exhaustedpackages,
+            trendlabel="Packages fully consumed — repurchase opportunities",
+            status="warning" if exhaustedpackages > 0 else "healthy",
         ),
         BillingKpiView(
-            label="monthlyrecurringrevenuecents",
-            value=monthlyrevenuecents,
-            trendlabel="Base recurring revenue in cents",
-            status="warning" if pastdue > 0 else "healthy",
+            label="totalrevenuecents",
+            value=totalrevenuecents,
+            trendlabel="Total package purchase revenue in cents",
+            status="healthy" if totalrevenuecents > 0 else "warning",
         ),
     ]
 
     overallstatus = "healthy"
-    if pastdue > 0:
+    if exhaustedpackages > 0:
         overallstatus = "attention"
 
     return BillingOverviewResponse(
@@ -315,13 +310,14 @@ def get_billing_overview() -> BillingOverviewResponse:
         environment="local",
         overallstatus=overallstatus,
         kpis=kpis,
-        plancounts=_build_plan_counts(subscriptions),
+        plancounts=_build_plan_counts(packages),
         invoicestatuscounts=_build_invoice_status_counts(invoices),
-        subscriptions=subscriptions,
+        packages=packages,
         invoices=invoices,
         notes=[
-            "Billing overview exposes subscription state, usage against plan limits, and invoice lifecycle visibility.",
+            "Billing overview exposes package state, usage against purchased unit limits, and invoice lifecycle visibility.",
             "All values are placeholder UI contract data for the current local-first Gen1 build.",
-            "This page is ready to be wired to live billing providers, metering pipelines, and plan enforcement services.",
+            "This page is ready to be wired to live billing providers, metering pipelines, and package enforcement services.",
+            "Dedicated invoice list surface available at /ui/billing/invoices.",
         ],
     )
