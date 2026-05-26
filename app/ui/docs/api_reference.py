@@ -425,6 +425,18 @@ def _build_groups() -> list[ApiRouteGroupView]:
 
     docs_routes = [
         ApiRouteEntryView(
+            routeid="docs-authentication",
+            method="GET",
+            path="/ui/docs/authentication",
+            description="Return the structured authentication guide page payload covering API key and bearer token usage.",
+            authrequired=False,
+            requestfields=[],
+            responsefields=[
+                ApiRouteFieldView(name="sections", location="body", required=True, description="Ordered authentication guide sections with code examples."),
+                ApiRouteFieldView(name="methods", location="body", required=True, description="Supported authentication methods and header formats."),
+            ],
+        ),
+        ApiRouteEntryView(
             routeid="docs-quickstart",
             method="GET",
             path="/ui/docs/quickstart",
@@ -449,6 +461,58 @@ def _build_groups() -> list[ApiRouteGroupView]:
                 ApiRouteFieldView(name="groups", location="body", required=True, description="Tag-grouped route entries covering guard, policy, audit, telemetry, admin, and docs."),
                 ApiRouteFieldView(name="totalgroupcount", location="body", required=True, description="Number of tag groups."),
                 ApiRouteFieldView(name="totalroutecount", location="body", required=True, description="Total route entries across all groups."),
+            ],
+        ),
+        ApiRouteEntryView(
+            routeid="docs-policy-guide",
+            method="GET",
+            path="/ui/docs/policy-guide",
+            description="Return the structured policy guide page payload covering rule authoring, enforcement modes, and threshold configuration.",
+            authrequired=False,
+            requestfields=[],
+            responsefields=[
+                ApiRouteFieldView(name="sections", location="body", required=True, description="Ordered policy guide sections with rule syntax examples."),
+                ApiRouteFieldView(name="enforcementmodes", location="body", required=True, description="Available enforcement modes and their behavioural differences."),
+                ApiRouteFieldView(name="thresholds", location="body", required=True, description="Threshold configuration reference for review, quarantine, and block."),
+            ],
+        ),
+        ApiRouteEntryView(
+            routeid="docs-telemetry-guide",
+            method="GET",
+            path="/ui/docs/telemetry",
+            description="Return the structured telemetry guide page payload covering event schema, pipeline configuration, and retention.",
+            authrequired=False,
+            requestfields=[],
+            responsefields=[
+                ApiRouteFieldView(name="sections", location="body", required=True, description="Ordered telemetry guide sections with schema references and pipeline diagrams."),
+                ApiRouteFieldView(name="eventschema", location="body", required=True, description="Canonical telemetry event field definitions."),
+                ApiRouteFieldView(name="retentionpolicy", location="body", required=True, description="Default and configurable retention window settings."),
+            ],
+        ),
+        ApiRouteEntryView(
+            routeid="docs-webhooks",
+            method="GET",
+            path="/ui/docs/webhooks",
+            description="Return the structured webhooks guide page payload covering event types, payload schemas, and delivery configuration.",
+            authrequired=False,
+            requestfields=[],
+            responsefields=[
+                ApiRouteFieldView(name="sections", location="body", required=True, description="Ordered webhook guide sections with payload examples."),
+                ApiRouteFieldView(name="eventtypes", location="body", required=True, description="Supported webhook event type catalog."),
+                ApiRouteFieldView(name="deliveryconfig", location="body", required=True, description="Endpoint registration and retry configuration reference."),
+            ],
+        ),
+        ApiRouteEntryView(
+            routeid="docs-changelog",
+            method="GET",
+            path="/ui/docs/changelog",
+            description="Return the structured changelog page payload covering release history, breaking changes, and version notes.",
+            authrequired=False,
+            requestfields=[],
+            responsefields=[
+                ApiRouteFieldView(name="releases", location="body", required=True, description="Ordered list of release entries with version, date, and change summary."),
+                ApiRouteFieldView(name="latestversion", location="body", required=True, description="Most recent release version string."),
+                ApiRouteFieldView(name="breakingchanges", location="body", required=False, description="Subset of releases that contain breaking changes."),
             ],
         ),
     ]
@@ -487,7 +551,7 @@ def _build_groups() -> list[ApiRouteGroupView]:
         ApiRouteGroupView(
             groupid="docs",
             label="Docs",
-            description="Hosted documentation surfaces: quickstart and API reference index pages.",
+            description="Hosted documentation surfaces: authentication, quickstart, API reference, policy guide, telemetry guide, webhooks, and changelog.",
             routes=docs_routes,
         ),
     ]
