@@ -7,7 +7,7 @@ import os
 class _SecretsVault:
     """Single source of truth for all env-sourced secrets and config values.
     Centralises os.getenv() access so callers never touch os directly.
-    Thread-safe; values are read once per key and cached.
+    Thread-safe; values are read once at call time — no instance state.
     """
 
     # ------------------------------------------------------------------
@@ -18,6 +18,10 @@ class _SecretsVault:
         return os.getenv("APP_NAME", "IronClaw-Security")
 
     @staticmethod
+    def app_version() -> str:
+        return os.getenv("APP_VERSION", "0.1.0")
+
+    @staticmethod
     def app_host() -> str:
         return os.getenv("APP_HOST", "127.0.0.1")
 
@@ -25,33 +29,77 @@ class _SecretsVault:
     def app_port() -> int:
         return int(os.getenv("APP_PORT", "8000"))
 
-    # ------------------------------------------------------------------
-    # Supabase
-    # ------------------------------------------------------------------
     @staticmethod
-    def supabase_url() -> str:
-        value = os.getenv("SUPABASE_URL", "")
-        return value
+    def app_base_url() -> str:
+        return os.getenv(
+            "APP_BASE_URL",
+            f"http://{os.getenv('APP_HOST', '127.0.0.1')}:{os.getenv('APP_PORT', '8000')}",
+        )
 
     @staticmethod
-    def supabase_key() -> str:
-        value = os.getenv("SUPABASE_KEY", "")
-        return value
+    def api_prefix() -> str:
+        return os.getenv("API_PREFIX", "")
 
     @staticmethod
-    def supabase_service_role_key() -> str | None:
-        return os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    def debug() -> bool:
+        return os.getenv("DEBUG", "false").lower() in ("1", "true", "yes")
+
+    @staticmethod
+    def reload() -> bool:
+        return os.getenv("RELOAD", "false").lower() in ("1", "true", "yes")
 
     # ------------------------------------------------------------------
-    # Groq / AI
+    # Engine (IronClawClient target — single source of truth)
     # ------------------------------------------------------------------
     @staticmethod
-    def groq_api_key() -> str:
-        return os.getenv("GROQ_API_KEY", "")
+    def engine_base_url() -> str:
+        return os.getenv("ENGINE_BASE_URL", "http://127.0.0.1:8010")
+
+    # ------------------------------------------------------------------
+    # Environment / logging
+    # ------------------------------------------------------------------
+    @staticmethod
+    def environment() -> str:
+        return os.getenv("ENVIRONMENT", "development")
 
     @staticmethod
-    def groq_model() -> str:
-        return os.getenv("GROQ_MODEL", "llama3-8b-8192")
+    def log_level() -> str:
+        return os.getenv("LOG_LEVEL", "INFO").upper()
+
+    @staticmethod
+    def structured_logging_enabled() -> bool:
+        return os.getenv("STRUCTURED_LOGGING_ENABLED", "true").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+
+    # ------------------------------------------------------------------
+    # Authentication
+    # ------------------------------------------------------------------
+    @staticmethod
+    def auth_required() -> bool:
+        return os.getenv("AUTH_REQUIRED", "false").lower() in ("1", "true", "yes")
+
+    @staticmethod
+    def api_key() -> str:
+        return os.getenv("API_KEY", "")
+
+    @staticmethod
+    def admin_api_key() -> str:
+        return os.getenv("ADMIN_API_KEY", "")
+
+    @staticmethod
+    def platform_api_key() -> str:
+        return os.getenv("PLATFORM_API_KEY", "")
+
+    @staticmethod
+    def internal_platform_api_key() -> str:
+        return os.getenv("INTERNAL_PLATFORM_API_KEY", "")
+
+    @staticmethod
+    def ironclaw_api_key() -> str:
+        return os.getenv("IRONCLAW_API_KEY", "")
 
     # ------------------------------------------------------------------
     # Auth / JWT
@@ -69,6 +117,96 @@ class _SecretsVault:
         return int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
     # ------------------------------------------------------------------
+    # Supabase
+    # ------------------------------------------------------------------
+    @staticmethod
+    def supabase_url() -> str:
+        return os.getenv("SUPABASE_URL", "")
+
+    @staticmethod
+    def supabase_key() -> str:
+        return os.getenv("SUPABASE_KEY", "")
+
+    @staticmethod
+    def supabase_anon_key() -> str:
+        return os.getenv("SUPABASE_ANON_KEY", "")
+
+    @staticmethod
+    def supabase_service_role_key() -> str | None:
+        return os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+
+    # ------------------------------------------------------------------
+    # Groq / AI
+    # ------------------------------------------------------------------
+    @staticmethod
+    def groq_enabled() -> bool:
+        return os.getenv("GROQ_ENABLED", "false").lower() in ("1", "true", "yes")
+
+    @staticmethod
+    def groq_api_key() -> str:
+        return os.getenv("GROQ_API_KEY", "")
+
+    @staticmethod
+    def groq_model() -> str:
+        return os.getenv("GROQ_MODEL", "llama3-8b-8192")
+
+    @staticmethod
+    def groq_timeout_seconds() -> float:
+        return float(os.getenv("GROQ_TIMEOUT_SECONDS", "60.0"))
+
+    # ------------------------------------------------------------------
+    # OpenAI
+    # ------------------------------------------------------------------
+    @staticmethod
+    def openai_api_key() -> str:
+        return os.getenv("OPENAI_API_KEY", "")
+
+    # ------------------------------------------------------------------
+    # Policy / verdict defaults
+    # ------------------------------------------------------------------
+    @staticmethod
+    def default_scan_verdict() -> str:
+        return os.getenv("DEFAULT_SCAN_VERDICT", "allow")
+
+    @staticmethod
+    def default_review_status() -> str:
+        return os.getenv("DEFAULT_REVIEW_STATUS", "not_required")
+
+    # ------------------------------------------------------------------
+    # Risk thresholds
+    # ------------------------------------------------------------------
+    @staticmethod
+    def risk_threshold_allow_max() -> int:
+        return int(os.getenv("RISK_THRESHOLD_ALLOW_MAX", "29"))
+
+    @staticmethod
+    def risk_threshold_quarantine_min() -> int:
+        return int(os.getenv("RISK_THRESHOLD_QUARANTINE_MIN", "30"))
+
+    @staticmethod
+    def risk_threshold_block_min() -> int:
+        return int(os.getenv("RISK_THRESHOLD_BLOCK_MIN", "70"))
+
+    # ------------------------------------------------------------------
+    # Input size limits
+    # ------------------------------------------------------------------
+    @staticmethod
+    def max_text_chars() -> int:
+        return int(os.getenv("MAX_TEXT_CHARS", "100000"))
+
+    @staticmethod
+    def max_url_length() -> int:
+        return int(os.getenv("MAX_URL_LENGTH", "2048"))
+
+    @staticmethod
+    def max_archive_name_length() -> int:
+        return int(os.getenv("MAX_ARCHIVE_NAME_LENGTH", "512"))
+
+    @staticmethod
+    def max_repo_url_length() -> int:
+        return int(os.getenv("MAX_REPO_URL_LENGTH", "2048"))
+
+    # ------------------------------------------------------------------
     # Filesystem paths
     # ------------------------------------------------------------------
     @staticmethod
@@ -77,15 +215,19 @@ class _SecretsVault:
 
     @staticmethod
     def reports_dir() -> str | None:
-        return os.getenv("REPORTS_DIR") or os.getenv("IRONCLAW_REPORTS_DIR")
+        return os.getenv("REPORTS_DIR") or os.getenv("IRONCLAW_REPORTS_DIR") or None
 
     @staticmethod
     def uploads_dir() -> str | None:
-        return os.getenv("UPLOADS_DIR") or os.getenv("IRONCLAW_UPLOADS_DIR")
+        return os.getenv("UPLOADS_DIR") or os.getenv("IRONCLAW_UPLOADS_DIR") or None
 
     @staticmethod
     def quarantine_dir() -> str | None:
-        return os.getenv("QUARANTINE_DIR") or os.getenv("IRONCLAW_QUARANTINE_DIR")
+        return os.getenv("QUARANTINE_DIR") or os.getenv("IRONCLAW_QUARANTINE_DIR") or None
+
+    @staticmethod
+    def backup_dir() -> str:
+        return os.getenv("BACKUP_DIR", "./data/backups")
 
     # ------------------------------------------------------------------
     # Optional integrations
@@ -98,12 +240,8 @@ class _SecretsVault:
     def sentry_dsn() -> str | None:
         return os.getenv("SENTRY_DSN")
 
-    @staticmethod
-    def environment() -> str:
-        return os.getenv("ENVIRONMENT", "development")
-
     # ------------------------------------------------------------------
-    # Generic escape hatch — use only when adding a new key not yet listed
+    # Generic escape hatch — use only for a new key not yet listed above
     # ------------------------------------------------------------------
     @staticmethod
     def get(key: str, default: str | None = None) -> str | None:

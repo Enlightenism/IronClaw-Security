@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import os
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
@@ -28,8 +29,15 @@ ScanMode = Literal["enforce", "monitor", "strict"]
 
 app = FastAPI(title="IronClaw-Security API")
 
-# NOTE: keep this aligned with the real local engine port for IronClaw-Security.
-engine_client = IronClawClient(base_url="http://127.0.0.1:8010")
+# Engine base URL is resolved from ENGINE_BASE_URL env key at boot.
+# Falls back to APP_HOST + APP_PORT when ENGINE_BASE_URL is not set,
+# so single-process local setups work without extra configuration.
+_host = os.getenv("APP_HOST", "127.0.0.1")
+_port = os.getenv("APP_PORT", "8000")
+_default_engine_url = f"http://{_host}:{_port}"
+_engine_base_url: str = os.getenv("ENGINE_BASE_URL", _default_engine_url).rstrip("/")
+
+engine_client = IronClawClient(base_url=_engine_base_url)
 
 
 class ScanRequest(BaseModel):
@@ -161,10 +169,8 @@ def _get_supabase_client() -> SupabaseClient | None:
     try:
         return createsupabaseclient()
     except SupabaseConfigurationError:
-        # Supabase not configured; history disabled.
         return None
     except Exception:
-        # Any other bootstrap failure should not break the service path.
         return None
 
 
@@ -175,7 +181,6 @@ def _insert_scan_history_row(row: dict[str, Any]) -> None:
     try:
         client.insert("scanhistory", row)
     except (SupabaseConnectionError, SupabaseAPIError):
-        # History is non-critical; logging is handled inside the client.
         return
     except Exception:
         return
@@ -212,7 +217,6 @@ def _list_scan_history_rows(
     except Exception:
         return []
 
-    # Ensure dict[str, Any] shape
     return [dict(r) for r in rows]
 
 
@@ -437,13 +441,13 @@ def _compute_brain_decision(
 
     count = len(prior_high_risk)
     boosted_confidence = min(1.0, base.confidence + 0.05)
-    extra_reason = f" There are {count} prior high-risk events for this session or user, indicating potential ongoing prompt abuse or malicious behavior."
+    extra_reason = f" There are {count} prior high-risk events for this session or user," " indicating potential ongoing prompt abuse or malicious behavior."
 
     if base.final_action == "warn" and count >= 2:
         return BrainDecision(
             final_action="quarantine",
             confidence=min(1.0, boosted_confidence + 0.05),
-            reason=("Repeated suspicious activity was observed across related history. The current event should be quarantined pending further review." + extra_reason),
+            reason=("Repeated suspicious activity was observed across related history." " The current event should be quarantined pending further review." + extra_reason),
             recommended_mode="enforce",
         )
 
@@ -451,7 +455,7 @@ def _compute_brain_decision(
         return BrainDecision(
             final_action="warn",
             confidence=0.85,
-            reason=("The current content appears safe on its own, but related history shows repeated high-risk activity. Proceed with caution." + extra_reason),
+            reason=("The current content appears safe on its own, but related history" " shows repeated high-risk activity. Proceed with caution." + extra_reason),
             recommended_mode="enforce",
         )
 
