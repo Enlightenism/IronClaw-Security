@@ -18,6 +18,7 @@ from app.ui.billing.payment_methods import router as billing_payment_methods_rou
 from app.ui.billing.plan_change import router as billing_plan_change_router
 from app.ui.billing_index import router as billing_index_router
 from app.ui.billing_manifest import router as billing_manifest_router
+from app.ui.billing_purchase import router as billing_purchase_router
 from app.ui.billing_registry import router as billing_registry_router
 from app.ui.billing_summary import router as billing_summary_router
 from app.ui.billing_wallet import router as billing_wallet_router
@@ -78,6 +79,7 @@ _EXPECTED_ROUTERS: tuple[APIRouter, ...] = (
     billing_index_router,
     billing_summary_router,
     billing_wallet_router,
+    billing_purchase_router,
     billing_invoices_router,
     billing_invoice_detail_router,
     billing_payment_methods_router,
@@ -268,6 +270,10 @@ def test_ui_routers_contains_billing_summary_router() -> None:
 
 def test_ui_routers_contains_billing_wallet_router() -> None:
     assert billing_wallet_router in UI_ROUTERS
+
+
+def test_ui_routers_contains_billing_purchase_router() -> None:
+    assert billing_purchase_router in UI_ROUTERS
 
 
 def test_ui_routers_contains_billing_invoices_router() -> None:
