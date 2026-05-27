@@ -110,6 +110,7 @@ def _build_summary(packages: list[BillingRegistryPackageView]) -> BillingRegistr
 
 def _build_routes() -> list[BillingRegistryRouteView]:
     return [
+        # --- API routes (authenticated) ---
         BillingRegistryRouteView(
             name="List billing packages",
             method="GET",
@@ -134,11 +135,19 @@ def _build_routes() -> list[BillingRegistryRouteView]:
             path="/billing/ledger",
             purpose="Returns wallet ledger activity with optional owner filtering.",
         ),
+        # --- UI billing routes (no API key required) ---
         BillingRegistryRouteView(
-            name="UI billing overview",
+            name="UI billing index",
             method="GET",
-            path="/ui/billing/overview",
-            purpose="Returns UI-facing package state summary including active package, unit consumption, and wallet balance.",
+            path="/ui/billing-index",
+            purpose="Top-level billing index with package catalog and links to all billing surfaces.",
+            requires_api_key=False,
+        ),
+        BillingRegistryRouteView(
+            name="UI billing registry",
+            method="GET",
+            path="/ui/billing-registry",
+            purpose="Registry view of billing packages, pricing summary, and full route inventory.",
             requires_api_key=False,
         ),
         BillingRegistryRouteView(
@@ -148,12 +157,69 @@ def _build_routes() -> list[BillingRegistryRouteView]:
             purpose="Provides UI-facing billing catalog and actions metadata.",
             requires_api_key=False,
         ),
+        BillingRegistryRouteView(
+            name="UI billing summary",
+            method="GET",
+            path="/ui/billing-summary",
+            purpose="High-level billing totals, package metrics, and pricing rollups.",
+            requires_api_key=False,
+        ),
+        BillingRegistryRouteView(
+            name="UI billing wallet",
+            method="GET",
+            path="/ui/billing-wallet",
+            purpose="Wallet balance and recent prepaid protection-unit ledger activity.",
+            requires_api_key=False,
+        ),
+        BillingRegistryRouteView(
+            name="UI billing overview",
+            method="GET",
+            path="/ui/billing/overview",
+            purpose="Full billing overview with KPIs, recent invoices, and package summaries.",
+            requires_api_key=False,
+        ),
+        BillingRegistryRouteView(
+            name="UI billing packages",
+            method="GET",
+            path="/ui/billing/packages",
+            purpose="Dedicated package list page with filtering, pagination, and per-org package management.",
+            requires_api_key=False,
+        ),
+        BillingRegistryRouteView(
+            name="UI billing invoices",
+            method="GET",
+            path="/ui/billing/invoices",
+            purpose="Full invoice list with filtering, pagination, and status breakdown.",
+            requires_api_key=False,
+        ),
+        BillingRegistryRouteView(
+            name="UI billing invoice detail",
+            method="GET",
+            path="/ui/billing/invoices/{invoice_id}",
+            purpose="Per-invoice detail view with line items, package snapshot, and payment method snapshot.",
+            requires_api_key=False,
+        ),
+        BillingRegistryRouteView(
+            name="UI billing payment methods",
+            method="GET",
+            path="/ui/billing/payment-methods",
+            purpose="Saved payment methods list with card details and default method designation.",
+            requires_api_key=False,
+        ),
+        BillingRegistryRouteView(
+            name="UI billing plan change",
+            method="GET",
+            path="/ui/billing/plan-change",
+            purpose="Plan change preview and upgrade/downgrade options for the current organization.",
+            requires_api_key=False,
+        ),
     ]
 
 
 @router.get("", response_model=BillingRegistryResponse)
 def get_billing_registry() -> BillingRegistryResponse:
     packages = _build_packages()
+    routes = _build_routes()
 
     return BillingRegistryResponse(
         status="ok",
@@ -161,15 +227,17 @@ def get_billing_registry() -> BillingRegistryResponse:
         timestamp=_utc_now_iso(),
         summary=_build_summary(packages),
         packages=packages,
-        routes=_build_routes(),
+        routes=routes,
         notes=[
             "Billing is modeled as prepaid protection-unit bundles.",
             "Available package pricing is $20 for 20,000 units, $90 for 100,000 units, and $150 for 200,000 units.",
             "Team Security is the featured package for balanced ongoing usage.",
+            "All active billing API and UI routes are enumerated here for full system discoverability.",
+            "requires_api_key=False denotes UI-layer routes served without an API key requirement.",
         ],
         metadata={
             "source_catalog": "app.api.routes.billing.PACKAGE_CATALOG",
             "featured_package_id": "team-security",
-            "route_count": 6,
+            "route_count": len(routes),
         },
     )

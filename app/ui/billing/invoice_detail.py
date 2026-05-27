@@ -227,8 +227,11 @@ def _package_gamma() -> BillingPackageSnapshotView:
     )
 
 
-_INVOICE_CATALOG: dict[str, BillingInvoiceDetailResponse] = {
-    "inv-001": BillingInvoiceDetailResponse(
+# Invoice definitions are factories so generatedat is always request-time, never module-load-time.
+
+
+def _invoice_001() -> BillingInvoiceDetailResponse:
+    return BillingInvoiceDetailResponse(
         status="ok",
         invoiceid="inv-001",
         organizationid="org-001",
@@ -265,11 +268,14 @@ _INVOICE_CATALOG: dict[str, BillingInvoiceDetailResponse] = {
         environment="local",
         notes=[
             "inv-001 is a fully paid Pro plan invoice with no overage charges.",
-            "Payment was collected via Visa card ending in 4242.",
+            "Payment was collected via Visa card ending in 4242 (pm-001, active).",
             "Line items reflect a single base plan fee for the April 2026 billing period.",
         ],
-    ),
-    "inv-002": BillingInvoiceDetailResponse(
+    )
+
+
+def _invoice_002() -> BillingInvoiceDetailResponse:
+    return BillingInvoiceDetailResponse(
         status="ok",
         invoiceid="inv-002",
         organizationid="org-002",
@@ -305,27 +311,30 @@ _INVOICE_CATALOG: dict[str, BillingInvoiceDetailResponse] = {
         generatedat=datetime.now(UTC).isoformat(),
         environment="local",
         notes=[
-            "inv-002 is a draft invoice for Beta Runtime Defense on the Starter trial plan.",
-            "Invoice has not been paid. Payment method on file is expired (03/2026).",
-            "No overage charges apply for this billing period.",
-            "Draft invoices are not available for download until finalized.",
+            "inv-002 is a draft Starter plan invoice; no payment has been collected yet.",
+            "Payment method pm-002 (Mastercard 5555) has status 'expired' in the payment catalog — update required before this invoice can be collected.",
+            "manualreviews and securityalerts usage buckets are at warning level for org-002.",
+            "Line items reflect a single base plan fee for the April–May 2026 billing period.",
         ],
-    ),
-    "inv-003": BillingInvoiceDetailResponse(
+    )
+
+
+def _invoice_003() -> BillingInvoiceDetailResponse:
+    return BillingInvoiceDetailResponse(
         status="ok",
         invoiceid="inv-003",
         organizationid="org-003",
         organizationname="Gamma Internal QA",
         invoicestatus="past_due",
         statuscolor=_status_color("past_due"),
-        issuedat=_utc_iso(2026, 4, 8, 9, 0),
-        dueat=_utc_iso(2026, 4, 15, 9, 0),
+        issuedat=_utc_iso(2026, 4, 8, 8, 50),
+        dueat=_utc_iso(2026, 4, 15, 8, 50),
         periodstart=_utc_iso(2026, 4, 1, 0, 0),
         periodend=_utc_iso(2026, 4, 30, 23, 59),
         paidat=None,
-        subtotal=_usd(185280),
+        subtotal=_usd(149900),
         tax=_usd(0),
-        total=_usd(185280),
+        total=_usd(149900),
         lineitems=[
             BillingInvoiceLineItem(
                 description="Enterprise Plan — Monthly Base Fee (April 2026)",
@@ -335,17 +344,17 @@ _INVOICE_CATALOG: dict[str, BillingInvoiceDetailResponse] = {
                 type="base_plan",
             ),
             BillingInvoiceLineItem(
-                description="Guarded Executions Overage — 21,400 requests above 250,000 included",
+                description="Guarded Executions Overage — 21,400 requests @ $0.002",
                 quantity=21400,
-                unitprice=_usd(1),
-                linetotal=_usd(21400),
+                unitprice=_usd(0),
+                linetotal=_usd(4280),
                 type="overage",
             ),
             BillingInvoiceLineItem(
-                description="Manual Reviews Overage — 1,110 items above 25,000 included",
+                description="Manual Reviews Overage — 1,110 items @ $0.05",
                 quantity=1110,
-                unitprice=_usd(12),
-                linetotal=_usd(13320),
+                unitprice=_usd(5),
+                linetotal=_usd(555),
                 type="overage",
             ),
         ],
@@ -361,31 +370,37 @@ _INVOICE_CATALOG: dict[str, BillingInvoiceDetailResponse] = {
         generatedat=datetime.now(UTC).isoformat(),
         environment="local",
         notes=[
-            "inv-003 is past due. Payment has not been collected.",
-            "Gamma Internal QA exceeded guarded execution and manual review limits in April 2026.",
-            "Overage charges: 21,400 excess guarded executions at $0.01 each ($214.00) and 1,110 excess manual reviews at $0.12 each ($133.20).",
-            "Total invoice reflects base plan plus both overage line items.",
-            "Payment method on file is Amex ending in 0005.",
+            "inv-003 is a past-due Enterprise invoice with overage charges on guardedexecutions and manualreviews.",
+            "Payment method pm-003 (Amex 0005, active) is the default method for org-003.",
+            "guardedexecutions and manualreviews usage buckets are at critical level for org-003.",
+            "Total due includes base plan fee plus overage line items.",
         ],
-    ),
+    )
+
+
+_VALID_INVOICE_IDS: frozenset[str] = frozenset({"inv-001", "inv-002", "inv-003"})
+
+_INVOICE_FACTORIES: dict[str, object] = {
+    "inv-001": _invoice_001,
+    "inv-002": _invoice_002,
+    "inv-003": _invoice_003,
 }
 
 
 @router.get(
-    "/invoices/{invoice_id}",
-    response_model=BillingInvoiceDetailResponse,
-    responses={404: {"model": BillingInvoiceNotFoundResponse}},
-    summary="Get invoice detail",
-    description="Returns full invoice detail including line items, payment method, and package snapshot.",
+    "/invoices/{invoiceid}",
+    response_model=BillingInvoiceDetailResponse | BillingInvoiceNotFoundResponse,
 )
-def get_invoice_detail(invoice_id: str) -> BillingInvoiceDetailResponse | BillingInvoiceNotFoundResponse:
-    invoice = _INVOICE_CATALOG.get(invoice_id)
-    if invoice is None:
+def get_invoice_detail(
+    invoiceid: str,
+) -> BillingInvoiceDetailResponse | BillingInvoiceNotFoundResponse:
+    if invoiceid not in _VALID_INVOICE_IDS:
         return BillingInvoiceNotFoundResponse(
             status="not_found",
-            invoiceid=invoice_id,
-            message=f"Invoice '{invoice_id}' not found.",
+            invoiceid=invoiceid,
+            message=f"Invoice '{invoiceid}' was not found. Valid sample IDs are: inv-001, inv-002, inv-003.",
             generatedat=datetime.now(UTC).isoformat(),
             environment="local",
         )
-    return invoice
+    factory = _INVOICE_FACTORIES[invoiceid]
+    return factory()  # type: ignore[operator]

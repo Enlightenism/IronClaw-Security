@@ -106,6 +106,36 @@ def _build_links() -> list[BillingIndexLinkView]:
             description="Wallet balance and recent prepaid protection-unit ledger activity.",
         ),
         BillingIndexLinkView(
+            label="Billing overview",
+            path="/ui/billing/overview",
+            description="Full billing overview with KPIs, recent invoices, and package summaries.",
+        ),
+        BillingIndexLinkView(
+            label="Billing packages",
+            path="/ui/billing/packages",
+            description="Dedicated package list page with filtering, pagination, and per-org package management.",
+        ),
+        BillingIndexLinkView(
+            label="Billing invoices",
+            path="/ui/billing/invoices",
+            description="Full invoice list with filtering, pagination, and status breakdown.",
+        ),
+        BillingIndexLinkView(
+            label="Billing invoice detail",
+            path="/ui/billing/invoices/{invoice_id}",
+            description="Per-invoice detail view with line items, package snapshot, and payment method snapshot.",
+        ),
+        BillingIndexLinkView(
+            label="Billing payment methods",
+            path="/ui/billing/payment-methods",
+            description="Saved payment methods list with card details and default method designation.",
+        ),
+        BillingIndexLinkView(
+            label="Billing plan change",
+            path="/ui/billing/plan-change",
+            description="Plan change preview and upgrade/downgrade options for the current organization.",
+        ),
+        BillingIndexLinkView(
             label="Billing packages API",
             path="/billing/packages",
             description="Authenticated prepaid protection-unit package catalog.",
@@ -147,5 +177,7 @@ def get_billing_index() -> BillingIndexResponse:
             "Billing is sold as prepaid protection-unit bundles.",
             "Current package pricing is $20 for 20,000 units, $90 for 100,000 units, and $150 for 200,000 units.",
             "Team Security is the featured package for balanced usage growth.",
+            "All active UI billing surfaces are enumerated in the links list for full discoverability.",
+            "invoice_id in /ui/billing/invoices/{invoice_id} must be a valid invoice ID from the invoice list.",
         ],
     )
