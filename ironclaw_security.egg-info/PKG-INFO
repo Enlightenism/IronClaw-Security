@@ -1,13 +1,13 @@
 Metadata-Version: 2.4
 Name: ironclaw-security
-Version: 0.1.0
+Version: 1.0.0
 Summary: IronClaw Security local-first FastAPI defense layer with skill-style install and guarded runtime tooling.
 Author: IronClaw Security
 License: Proprietary
 Project-URL: Homepage, https://github.com/Enlightenism/IronClaw-Security
 Project-URL: Repository, https://github.com/Enlightenism/IronClaw-Security.git
 Project-URL: Documentation, https://github.com/Enlightenism/IronClaw-Security#readme
-Keywords: security,fastapi,guardrails,prompt-injection,claude,openclaw,ai-security,backup,restore
+Keywords: security,fastapi,guardrails,prompt-injection,claude,openclaw,ai-security,backup,restore,sdk,cli
 Classifier: Development Status :: 3 - Alpha
 Classifier: Environment :: Console
 Classifier: Framework :: FastAPI
@@ -25,10 +25,12 @@ Requires-Python: >=3.11
 Description-Content-Type: text/markdown
 Requires-Dist: fastapi<0.136,>=0.115
 Requires-Dist: uvicorn[standard]<0.45,>=0.30
-Requires-Dist: httpx<0.28,>=0.27
+Requires-Dist: httpx<1.0,>=0.27
 Requires-Dist: pydantic<3.0,>=2.7
 Requires-Dist: python-dotenv<2.0,>=1.0
 Requires-Dist: requests<3.0,>=2.32
+Requires-Dist: typer[all]<0.16,>=0.12
+Requires-Dist: rich<15.0,>=13.7
 Provides-Extra: supabase
 Requires-Dist: requests<3.0,>=2.32; extra == "supabase"
 Provides-Extra: dev
@@ -38,12 +40,17 @@ Requires-Dist: mypy<2.0,>=1.10; extra == "dev"
 Requires-Dist: pytest<10.0,>=8.2; extra == "dev"
 Requires-Dist: pytest-asyncio<1.0,>=0.23; extra == "dev"
 Requires-Dist: pytest-cov<6.0,>=5.0; extra == "dev"
-Requires-Dist: ruff<1.0,>=0.5; extra == "dev"
+Requires-Dist: respx<1.0,>=0.21; extra == "dev"
+Requires-Dist: ruff<1.0,>=0.11; extra == "dev"
 Provides-Extra: docker
 Requires-Dist: uvicorn[standard]<0.45,>=0.30; extra == "docker"
 Provides-Extra: skill
-Requires-Dist: httpx<0.28,>=0.27; extra == "skill"
+Requires-Dist: httpx<1.0,>=0.27; extra == "skill"
 Requires-Dist: python-dotenv<2.0,>=1.0; extra == "skill"
+Provides-Extra: sdk
+Requires-Dist: httpx<1.0,>=0.27; extra == "sdk"
+Requires-Dist: typer[all]<0.16,>=0.12; extra == "sdk"
+Requires-Dist: rich<15.0,>=13.7; extra == "sdk"
 
 # IronClaw-Security
 

@@ -1,4 +1,6 @@
 [console_scripts]
+ironclaw = app.cli.main:main
+ironclaw-brain = cli_brain:main
 ironclaw-skill = ironclawskill.cli:main
 ironclaw-smoketest = smoketestclient:main
 ironclaw-testclient = testclient:main

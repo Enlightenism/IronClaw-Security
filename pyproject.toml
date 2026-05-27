@@ -85,6 +85,7 @@ Documentation = "https://github.com/Enlightenism/IronClaw-Security#readme"
 
 [project.scripts]
 ironclaw = "app.cli.main:main"
+ironclaw-brain = "cli_brain:main"
 ironclaw-skill = "ironclawskill.cli:main"
 ironclaw-smoketest = "smoketestclient:main"
 ironclaw-testclient = "testclient:main"
@@ -92,6 +93,7 @@ ironclaw-testclient = "testclient:main"
 [tool.setuptools]
 include-package-data = true
 py-modules = [
+  "cli_brain",
   "ironclawclient",
   "ironclawshellguard",
   "ironclawtoolrunner",
@@ -148,6 +150,7 @@ select = [
 force-sort-within-sections = true
 known-first-party = [
   "app",
+  "cli_brain",
   "core",
   "orchestrator",
   "review",
