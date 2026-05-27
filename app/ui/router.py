@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from importlib import import_module
+import logging
 from typing import Final, cast
 
 from fastapi import APIRouter, FastAPI
+
+_log = logging.getLogger(__name__)
 
 
 def _optional_router(module_path: str) -> APIRouter | None:
@@ -13,14 +16,17 @@ def _optional_router(module_path: str) -> APIRouter | None:
     except ModuleNotFoundError as exc:
         if exc.name != module_path:
             raise
+        _log.debug("ui.router: optional module not found, skipping: %s", module_path)
         return None
     router = getattr(module, "router", None)
     if router is None:
+        _log.debug("ui.router: module has no 'router' attribute, skipping: %s", module_path)
         return None
     return cast(APIRouter, router)
 
 
 router = APIRouter(prefix="/ui", tags=["ui"])
+
 
 UI_ROUTERS: Final[tuple[APIRouter, ...]] = (
     router,
@@ -122,16 +128,17 @@ def _router_label(ui_router: APIRouter) -> str:
     return f"{prefix} ({route_count} routes)"
 
 
-def _route_signature(route: object) -> tuple[str, tuple[str, ...], str]:
+def _route_key(route: object) -> tuple[str, tuple[str, ...]]:
+    """Collision key: (path, sorted_methods). Handler name is intentionally excluded
+    so two handlers at the same path+methods are always caught as duplicates."""
     path = str(getattr(route, "path", ""))
     methods = tuple(sorted(cast("set[str]", getattr(route, "methods", set()) or set())))
-    name = str(getattr(route, "name", ""))
-    return (path, methods, name)
+    return (path, methods)
 
 
 def validate_ui_routers() -> None:
     seen_router_objects: set[int] = set()
-    seen_route_signatures: dict[tuple[str, tuple[str, ...], str], str] = {}
+    seen_route_keys: dict[tuple[str, tuple[str, ...]], str] = {}
 
     for ui_router in UI_ROUTERS:
         router_id = id(ui_router)
@@ -145,39 +152,48 @@ def validate_ui_routers() -> None:
             continue
 
         for route in ui_router.routes:
-            signature = _route_signature(route)
-            path, methods, _ = signature
-
+            path = str(getattr(route, "path", ""))
             if not path:
                 raise ValueError(f"UI router contains a route with an empty path: {label}")
 
-            if signature in seen_route_signatures:
-                raise ValueError(
-                    f"duplicate UI route registration detected: {path} {methods} already registered under {seen_route_signatures[signature]}",
-                )
+            key = _route_key(route)
+            if key in seen_route_keys:
+                path_str, methods_tuple = key
+                raise ValueError(f"duplicate UI route registration detected: " f"{path_str} {list(methods_tuple)} " f"already registered under {seen_route_keys[key]}")
 
-            seen_route_signatures[signature] = label
+            seen_route_keys[key] = label
 
 
 def include_ui_routers(app: FastAPI) -> None:
     validate_ui_routers()
 
-    existing_route_signatures = {_route_signature(route) for route in app.routes if getattr(route, "path", "")}
+    existing_route_keys = {_route_key(route) for route in app.routes if getattr(route, "path", "")}
+
+    registered = 0
+    skipped = 0
 
     for ui_router in UI_ROUTERS:
-        router_signatures = {_route_signature(route) for route in ui_router.routes if getattr(route, "path", "")}
+        router_keys = {_route_key(route) for route in ui_router.routes if getattr(route, "path", "")}
 
-        if router_signatures and router_signatures.issubset(existing_route_signatures):
+        if router_keys and router_keys.issubset(existing_route_keys):
+            skipped += 1
             continue
 
         app.include_router(ui_router)
-        existing_route_signatures.update(router_signatures)
+        existing_route_keys.update(router_keys)
+        registered += 1
+
+    _log.debug(
+        "ui.router: include_ui_routers complete — registered=%d skipped=%d",
+        registered,
+        skipped,
+    )
 
 
-def includeuirouters(app: FastAPI) -> None:
+def includeuirouters(app: FastAPI) -> None:  # noqa: N802
     include_ui_routers(app)
 
 
-def register_page(path: str, **kwargs: object) -> object:
+def register_page(path: str, **kwargs: object) -> object:  # noqa: ARG001
     """No-op page registration shim — metadata only, no route side-effects."""
     return kwargs
