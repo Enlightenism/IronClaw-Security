@@ -20,6 +20,7 @@ DEFAULT_BACKUP_TARGET: Final[str] = "primary"
 DEFAULT_RESTORE_TARGET: Final[str] = "primary"
 DEFAULT_RETENTION_DAYS: Final[int] = 30
 DEFAULT_PROVIDER_TARGETS: Final[tuple[str, str]] = ("claude", "openclaw")
+_SUBPROCESS_TIMEOUT: Final[int] = 300
 
 
 class IronClawInstallerError(RuntimeError):
@@ -199,7 +200,11 @@ def _build_runtime_config(config: InstallConfig) -> dict[str, Any]:
 
 def _build_env_contents(config: InstallConfig) -> str:
     values = {
+        "ENVIRONMENT": "production",
         "IRONCLAW_BASE_URL": config.base_url,
+        "IRONCLAW_PERSISTENCE_MODE": "supabase",
+        "IRONCLAW_API_KEY": _strong_secret(24),
+        "AUTH_REQUIRED": "true",
         "IRONCLAW_BACKUP_TARGET_NAME": config.backup_target,
         "IRONCLAW_RESTORE_TARGET_NAME": config.restore_target,
         "IRONCLAW_BACKUP_RETENTION_DAYS": str(config.retention_days),
@@ -209,11 +214,16 @@ def _build_env_contents(config: InstallConfig) -> str:
         "SECRET_KEY": _strong_secret(),
         "JWT_SECRET": _strong_secret(),
         "API_SECRET": _strong_secret(),
+        "SUPABASE_URL": "",
+        "SUPABASE_SERVICE_ROLE_KEY": "",
+        "SUPABASE_KEY": "",
+        "SUPABASE_ANON_KEY": "",
     }
 
     lines = [
         "# IronClaw-Security local installer environment",
-        "# Review and replace values as needed before production use.",
+        "# Review and replace placeholder values before production use.",
+        "# IRONCLAW_API_KEY is auto-generated — save it before sharing with clients.",
         "",
     ]
     lines.extend(f"{key}={value}" for key, value in values.items())
@@ -230,7 +240,7 @@ def _build_vscode_settings() -> dict[str, Any]:
         "python.analysis.typeCheckingMode": "basic",
         "python.testing.pytestEnabled": True,
         "python.testing.unittestEnabled": False,
-        "python.testing.pytestArgs": ["."],
+        "python.testing.pytestArgs": ["tests"],
         "python.envFile": "${workspaceFolder}\\.env",
         "python.terminal.activateEnvironment": True,
         "[python]": {
@@ -254,6 +264,7 @@ def _build_vscode_settings() -> dict[str, Any]:
 
 def _build_skill_config(config: InstallConfig) -> dict[str, Any]:
     return {
+        "schema_version": 1,
         "enabled": True,
         "product": "IronClaw-Security",
         "provider_targets": list(config.provider_targets),
@@ -289,6 +300,7 @@ def _create_virtualenv(project_root: Path) -> None:
         check=True,
         capture_output=True,
         text=True,
+        timeout=_SUBPROCESS_TIMEOUT,
     )
 
 
@@ -303,6 +315,7 @@ def _install_project_editable(project_root: Path) -> None:
         check=True,
         capture_output=True,
         text=True,
+        timeout=_SUBPROCESS_TIMEOUT,
     )
     subprocess.run(
         [str(venv_python), "-m", "pip", "install", "-e", ".[dev]"],
@@ -310,6 +323,7 @@ def _install_project_editable(project_root: Path) -> None:
         check=True,
         capture_output=True,
         text=True,
+        timeout=_SUBPROCESS_TIMEOUT,
     )
 
 
@@ -514,7 +528,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config = build_install_config(args)
         result = run_install(config)
-    except (IronClawInstallerError, subprocess.CalledProcessError) as exc:
+    except (IronClawInstallerError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         print(f"[ironclaw-installer] failed: {exc}", file=sys.stderr)
         return 1
 

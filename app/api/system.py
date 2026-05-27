@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from functools import lru_cache
+import os
 from typing import Any
 
 from fastapi import APIRouter, Response, status
@@ -15,7 +16,6 @@ from app.services.telemetry import (
 )
 
 router = APIRouter(prefix="/system", tags=["system"])
-
 
 SERVICE_NAME = "IronClaw-Security"
 SERVICE_VERSION = "1.0.0"
@@ -136,6 +136,94 @@ def _build_component_status(
     )
 
 
+def _probe_groq_enabled() -> ComponentStatus:
+    """
+    Check whether Groq is configured and the client can be instantiated.
+    Reads GROQ_API_KEY from the environment — no network call is made.
+    """
+    api_key_present = bool(os.environ.get("GROQ_API_KEY", "").strip())
+    client_ok = False
+    client_error: str | None = None
+
+    if api_key_present:
+        try:
+            from app.services.groq_client import GroqClient
+
+            instance = GroqClient()
+            client_ok = instance is not None
+        except Exception as exc:
+            client_error = str(exc)
+
+    return _build_component_status(
+        name="groq_client",
+        ok=api_key_present and client_ok,
+        details={
+            "api_key_configured": api_key_present,
+            "client_initialized": client_ok,
+            **({"error": client_error} if client_error else {}),
+        },
+    )
+
+
+def _probe_scanner_service() -> ComponentStatus:
+    """
+    Verify the scanner service can be imported and its scan callable is present.
+    """
+    scanner_ok = False
+    scanner_error: str | None = None
+    has_scan_callable = False
+
+    try:
+        from app.services.scanner import Scanner
+
+        instance = Scanner()
+        has_scan_callable = callable(getattr(instance, "scan", None))
+        scanner_ok = has_scan_callable
+    except Exception as exc:
+        scanner_error = str(exc)
+
+    return _build_component_status(
+        name="scanner_service",
+        ok=scanner_ok,
+        details={
+            "initialized": scanner_ok,
+            "scan_callable": has_scan_callable,
+            **({"error": scanner_error} if scanner_error else {}),
+        },
+    )
+
+
+def _probe_history_service() -> ComponentStatus:
+    """
+    Verify the history service can be imported and its append/read callables are present.
+    """
+    history_ok = False
+    history_error: str | None = None
+    has_append = False
+    has_read = False
+
+    try:
+        from app.services.history import HistoryService
+
+        instance = HistoryService()
+        has_append = callable(getattr(instance, "append", None))
+        has_read = callable(getattr(instance, "read", None))
+        history_ok = has_append and has_read
+    except Exception as exc:
+        history_error = str(exc)
+
+    return _build_component_status(
+        name="history_service",
+        ok=history_ok,
+        details={
+            "initialized": history_ok,
+            "append_callable": has_append,
+            "read_callable": has_read,
+            **({"error": history_error} if history_error else {}),
+        },
+    )
+
+
 def _build_readiness_checks() -> list[ComponentStatus]:
     checks: list[ComponentStatus] = []
 
@@ -205,6 +293,11 @@ def _build_readiness_checks() -> list[ComponentStatus]:
             },
         ),
     )
+
+    # ── production-quality signals absorbed from app_init.py ──────────────
+    checks.append(_probe_groq_enabled())
+    checks.append(_probe_scanner_service())
+    checks.append(_probe_history_service())
 
     return checks
 
@@ -360,7 +453,7 @@ def get_metrics_summary() -> MetricsSummaryResponse:
 def get_diagnostics() -> DiagnosticsResponse:
     global _diagnostics_cache, _diagnostics_cache_key
 
-    cache_key = _iso(_utc_now())[:19]  # truncate to second precision
+    cache_key = _iso(_utc_now())[:19]
 
     if _diagnostics_cache is not None and _diagnostics_cache_key == cache_key:
         return DiagnosticsResponse(**_diagnostics_cache)
