@@ -21,10 +21,12 @@ from app.ui.billing.invoices import (
     BillingCurrencyAmountView as InvoicesCurrencyAmountView,
 )
 from app.ui.billing.invoices import (
+    BillingInvoiceDownloadResponse,
     BillingInvoiceListFilters,
     BillingInvoiceListItem,
     BillingInvoiceListResponse,
     get_billing_invoices,
+    get_invoice_download,
 )
 from app.ui.billing.invoices import (
     BillingInvoiceStatusCount as InvoicesStatusCount,
@@ -124,9 +126,11 @@ __all__ = [
     "BillingInvoiceListItem",
     "BillingInvoiceListFilters",
     "BillingInvoiceListResponse",
+    "BillingInvoiceDownloadResponse",
     "InvoicesStatusCount",
     "InvoicesCurrencyAmountView",
     "get_billing_invoices",
+    "get_invoice_download",
     # invoice detail
     "BillingInvoiceDetailResponse",
     "BillingInvoiceNotFoundResponse",

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import math
 
 from fastapi import APIRouter
@@ -83,8 +83,11 @@ def _usd(amountcents: int) -> BillingCurrencyAmountView:
     )
 
 
-def _utc_iso(year: int, month: int, day: int, hour: int, minute: int = 0) -> str:
-    return datetime(year, month, day, hour, minute, 0, tzinfo=UTC).isoformat()
+def _next_day_iso(current_day: int) -> str:
+    now = datetime.now(UTC)
+    base = now.replace(day=current_day, hour=0, minute=0, second=0, microsecond=0)
+    next_day = base + timedelta(days=1)
+    return next_day.isoformat()
 
 
 def _days_remaining_in_period(current_day: int) -> int:
@@ -218,7 +221,9 @@ _SAMPLE_CURRENT_USAGE: dict[str, int] = {
     "policies": 34,
 }
 
-_SAMPLE_CURRENT_DAY = 22
+
+def _sample_current_day() -> int:
+    return datetime.now(UTC).day
 
 
 def _build_preview(
@@ -239,9 +244,7 @@ def _build_preview(
 
     direction = _change_direction(from_tier, to_tier)
 
-    effective_year = 2026
-    effective_month = 5
-    effective_day = current_day + 1
+    effective_date = _next_day_iso(current_day)
 
     flags: list[str] = []
     if direction == "downgrade":
@@ -264,7 +267,7 @@ def _build_preview(
         proratedcreditcents=_usd(credit_cents),
         proratedchargecents=_usd(charge_cents),
         netchangecents=_usd(net_cents),
-        effectivedate=_utc_iso(effective_year, effective_month, effective_day, 0, 0),
+        effectivedate=effective_date,
         warningflags=flags,
     )
 
@@ -288,6 +291,7 @@ def get_plan_change(
             environment="local",
         )
 
+    current_day = _sample_current_day()
     catalog = _build_plan_catalog()
 
     current_plan_view = catalog[currentplan].model_copy(update={"iscurrent": True})
@@ -315,13 +319,13 @@ def get_plan_change(
             to_tier=tier,
             catalog=catalog,
             current_usage=_SAMPLE_CURRENT_USAGE,
-            current_day=_SAMPLE_CURRENT_DAY,
+            current_day=current_day,
         )
         previews.append(preview)
 
     previews.sort(key=lambda p: _PLAN_TIER_ORDER[p.toplan], reverse=(tier_order == 2))
 
-    days_remaining = _days_remaining_in_period(_SAMPLE_CURRENT_DAY)
+    days_remaining = _days_remaining_in_period(current_day)
 
     return BillingPlanChangeResponse(
         generatedat=datetime.now(UTC).isoformat(),

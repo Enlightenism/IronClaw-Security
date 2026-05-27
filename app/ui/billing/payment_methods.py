@@ -43,15 +43,23 @@ class BillingPaymentMethodView(BaseModel):
     organizationid: str
 
 
+class BillingPaymentMethodStatusCount(BaseModel):
+    status: str
+    count: int
+    statuscolor: str
+
+
 class BillingPaymentMethodsResponse(BaseModel):
     generatedat: str
     environment: str
     organizationid: str
+    organizationname: str
     defaultmethodid: str | None
     methods: list[BillingPaymentMethodView] = Field(default_factory=list)
     methodcount: int
     canaddnew: bool
     maxmethods: int
+    statuscounts: list[BillingPaymentMethodStatusCount] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
 
 
@@ -108,6 +116,14 @@ def _build_method(
     )
 
 
+_ORG_NAMES: dict[str, str] = {
+    "org-001": "Alpha Security Lab",
+    "org-002": "Beta Runtime Defense",
+    "org-003": "Gamma Internal QA",
+    "org-004": "Delta Threat Ops",
+    "org-005": "Epsilon Red Team",
+}
+
 _ORG_METHODS: dict[str, list[BillingPaymentMethodView]] = {
     "org-001": [
         _build_method(
@@ -123,7 +139,7 @@ _ORG_METHODS: dict[str, list[BillingPaymentMethodView]] = {
             organizationid="org-001",
         ),
         _build_method(
-            methodid="pm-004",
+            methodid="pm-009",
             type="card",
             brand="mastercard",
             last4="1234",
@@ -135,7 +151,7 @@ _ORG_METHODS: dict[str, list[BillingPaymentMethodView]] = {
             organizationid="org-001",
         ),
         _build_method(
-            methodid="pm-005",
+            methodid="pm-010",
             type="card",
             brand="amex",
             last4="7890",
@@ -211,6 +227,34 @@ _ORG_METHODS: dict[str, list[BillingPaymentMethodView]] = {
             organizationid="org-003",
         ),
     ],
+    "org-004": [
+        _build_method(
+            methodid="pm-004",
+            type="card",
+            brand="visa",
+            last4="1234",
+            expmonth=6,
+            expyear=2028,
+            isdefault=True,
+            status="active",
+            createdat=_utc_iso(2026, 2, 15, 10, 0),
+            organizationid="org-004",
+        ),
+    ],
+    "org-005": [
+        _build_method(
+            methodid="pm-005",
+            type="card",
+            brand="mastercard",
+            last4="9876",
+            expmonth=1,
+            expyear=2027,
+            isdefault=True,
+            status="active",
+            createdat=_utc_iso(2026, 3, 1, 9, 0),
+            organizationid="org-005",
+        ),
+    ],
 }
 
 _VALID_ORG_IDS: frozenset[str] = frozenset(_ORG_METHODS.keys())
@@ -221,6 +265,20 @@ def _resolve_default_method_id(methods: list[BillingPaymentMethodView]) -> str |
         if method.isdefault:
             return method.methodid
     return None
+
+
+def _build_status_counts(methods: list[BillingPaymentMethodView]) -> list[BillingPaymentMethodStatusCount]:
+    counts: dict[str, int] = {}
+    for m in methods:
+        counts[m.status] = counts.get(m.status, 0) + 1
+    return [
+        BillingPaymentMethodStatusCount(
+            status=status,
+            count=count,
+            statuscolor=_status_color(status),
+        )
+        for status, count in sorted(counts.items())
+    ]
 
 
 @router.get(
@@ -234,7 +292,7 @@ def get_payment_methods(
         return BillingPaymentMethodsNotFoundResponse(
             status="not_found",
             organizationid=organizationid,
-            message=f"Organization '{organizationid}' was not found. Valid sample IDs are: org-001, org-002, org-003.",
+            message=(f"Organization '{organizationid}' was not found. " "Valid sample IDs are: org-001, org-002, org-003, org-004, org-005."),
             generatedat=datetime.now(UTC).isoformat(),
             environment="local",
         )
@@ -243,6 +301,7 @@ def get_payment_methods(
     methodcount = len(methods)
     defaultmethodid = _resolve_default_method_id(methods)
     canaddnew = methodcount < _MAX_METHODS
+    statuscounts = _build_status_counts(methods)
 
     active_count = sum(1 for m in methods if m.status == "active")
     expired_count = sum(1 for m in methods if m.status == "expired")
@@ -267,10 +326,12 @@ def get_payment_methods(
         generatedat=datetime.now(UTC).isoformat(),
         environment="local",
         organizationid=organizationid,
+        organizationname=_ORG_NAMES.get(organizationid, organizationid),
         defaultmethodid=defaultmethodid,
         methods=methods,
         methodcount=methodcount,
         canaddnew=canaddnew,
         maxmethods=_MAX_METHODS,
+        statuscounts=statuscounts,
         notes=notes,
     )
