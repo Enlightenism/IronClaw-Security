@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Generator
 import os
 
 # MUST be set before any app module is imported
@@ -11,7 +12,6 @@ os.environ["SUPABASE_URL"] = ""
 os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
 os.environ["SUPABASE_KEY"] = ""
 os.environ["SUPABASE_ANON_KEY"] = ""
-
 
 from unittest.mock import MagicMock
 
@@ -26,15 +26,6 @@ from ironclaw_sdk.exceptions import IronclawAPIError, IronclawAuthError
 from ironclaw_sdk.models import ScanRequest as SDKScanRequest
 from ironclaw_sdk.models import ScanResponse as SDKScanResponse
 
-_TEST_API_KEY = "ironclaw-test-key-00000000"
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _configure_settings() -> None:
-    get_settings.cache_clear()
-    settings = get_settings()
-    _app.state.settings = settings
-
 
 @pytest.fixture(scope="function", autouse=True)
 def _refresh_app_settings() -> None:
@@ -44,15 +35,10 @@ def _refresh_app_settings() -> None:
 
 
 @pytest.fixture(autouse=True)
-def reset_audit_state() -> None:
+def reset_audit_state() -> Generator[None, None, None]:
     reset_audit_log()
     yield
     reset_audit_log()
-
-
-@pytest.fixture(scope="session")
-def mock_api_key() -> str:
-    return _TEST_API_KEY
 
 
 @pytest.fixture(scope="function")
@@ -62,7 +48,7 @@ def test_client() -> TestClient:
 
 
 @pytest.fixture(scope="function")
-def sdk_client():
+def sdk_client() -> Generator[IronclawClient, None, None]:
     tc = TestClient(_app, raise_server_exceptions=False)
     client = IronclawClient(
         api_key=os.environ["IRONCLAW_API_KEY"],
@@ -95,7 +81,7 @@ def sdk_client():
 
 
 @pytest.fixture(scope="function")
-def mock_hunt_client():
+def mock_hunt_client() -> MagicMock:
     """
     Reusable Supabase client mock for ThreatHuntService tests.
     Returns a MagicMock pre-configured with a chainable query builder

@@ -1,9 +1,18 @@
-fastapi==0.135.3
-uvicorn[standard]==0.44.0
-httpx==0.28.1
-pytest==9.0.3
-PyYAML==6.0.3
-ruff==0.12.11
-mypy==1.17.1
-bandit==1.8.6
-semgrep==1.130.0
+# ============================================================
+# IronClaw-Security — requirements.txt
+# ============================================================
+# This file is NOT the source of truth for dependencies.
+# All dependencies, version constraints, and optional extras
+# are declared in pyproject.toml.
+#
+# Install commands:
+#   Full dev environment:  pip install -e ".[dev]"
+#   Core only:             pip install -e .
+#   With SDK extras:       pip install -e ".[sdk]"
+#   With skill extras:     pip install -e ".[skill]"
+#   With Supabase extras:  pip install -e ".[supabase]"
+#   Docker layer:          pip install -e ".[docker]"
+#
+# Do NOT add version pins here. Edit pyproject.toml only.
+# ============================================================
+# Use: pip install -e ".[dev]"
