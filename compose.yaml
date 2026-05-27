@@ -1,5 +1,18 @@
 # compose.yaml — IronClaw-Security
 # Service name: ironclaw | Container: ironclaw-security | Port: 8000
+#
+# USAGE
+#   cp .env.example .env          # fill in all REQUIRED values first
+#   docker compose up --build     # build and start
+#   docker compose up -d          # detached
+#   docker compose down           # stop and remove containers
+#
+# The env_file block loads every key from .env into the container.
+# The environment block below pins runtime-critical values that must
+# never be sourced from an absent .env — these are safe, non-secret
+# defaults that prevent silent failure on a fresh install.
+# Secret keys (SUPABASE_*, GROQ_API_KEY, *_API_KEY) are loaded
+# exclusively from .env and are intentionally absent here.
 
 services:
   ironclaw:
@@ -15,9 +28,98 @@ services:
 
     env_file:
       - .env
+
     environment:
+      # -----------------------------------------------------------------------
+      # Python / runtime
+      # -----------------------------------------------------------------------
       PYTHONUNBUFFERED: "1"
-      PORT: "8000"
+
+      # -----------------------------------------------------------------------
+      # Application identity
+      # -----------------------------------------------------------------------
+      APP_NAME: "IronClaw-Security"
+      APP_VERSION: "0.1.0"
+      ENVIRONMENT: "production"
+      DEBUG: "false"
+      RELOAD: "false"
+      API_PREFIX: ""
+
+      # -----------------------------------------------------------------------
+      # Server binding
+      # -----------------------------------------------------------------------
+      APP_HOST: "0.0.0.0"
+      APP_PORT: "8000"
+      APP_BASE_URL: "http://127.0.0.1:8000"
+      IRONCLAW_ENV: "production"
+      IRONCLAW_BASE_URL: "http://127.0.0.1:8000"
+
+      # -----------------------------------------------------------------------
+      # Logging
+      # -----------------------------------------------------------------------
+      LOG_LEVEL: "INFO"
+      STRUCTURED_LOGGING_ENABLED: "true"
+
+      # -----------------------------------------------------------------------
+      # Policy and verdict defaults
+      # -----------------------------------------------------------------------
+      DEFAULT_SCAN_VERDICT: "allow"
+      DEFAULT_REVIEW_STATUS: "not_required"
+
+      # -----------------------------------------------------------------------
+      # Risk thresholds  (allow_max < quarantine_min <= block_min)
+      # -----------------------------------------------------------------------
+      RISK_THRESHOLD_ALLOW_MAX: "29"
+      RISK_THRESHOLD_QUARANTINE_MIN: "30"
+      RISK_THRESHOLD_BLOCK_MIN: "70"
+
+      # -----------------------------------------------------------------------
+      # Scan feature flags
+      # -----------------------------------------------------------------------
+      ENABLE_TEXT_SCANNING: "true"
+      ENABLE_URL_SCANNING: "true"
+      ENABLE_GITHUB_REPO_SCANNING: "true"
+      ENABLE_ARCHIVE_SCANNING: "true"
+
+      # -----------------------------------------------------------------------
+      # Guard / execution control feature flags
+      # -----------------------------------------------------------------------
+      ENABLE_GUARD_ACTIONS: "true"
+      ENABLE_GUARD_ACTION_POLICY: "true"
+      ENABLE_GUARD_ACTION_DECISION: "true"
+      ENABLE_QUARANTINE_REVIEW: "true"
+
+      # -----------------------------------------------------------------------
+      # Input size limits
+      # -----------------------------------------------------------------------
+      MAX_TEXT_CHARS: "100000"
+      MAX_URL_LENGTH: "2048"
+      MAX_ARCHIVE_NAME_LENGTH: "512"
+      MAX_REPO_URL_LENGTH: "2048"
+
+      # -----------------------------------------------------------------------
+      # Authentication
+      # IMPORTANT: Set AUTH_REQUIRED=true in production.
+      # All *_API_KEY values must be set in .env — never hardcoded here.
+      # -----------------------------------------------------------------------
+      AUTH_REQUIRED: "false"
+
+      # -----------------------------------------------------------------------
+      # Groq
+      # IMPORTANT: Set GROQ_ENABLED=true only after setting GROQ_API_KEY in .env.
+      # GROQ_API_KEY must be set in .env — never hardcoded here.
+      # -----------------------------------------------------------------------
+      GROQ_ENABLED: "false"
+      GROQ_MODEL: "llama-3.3-70b-versatile"
+      GROQ_TIMEOUT_SECONDS: "60.0"
+
+      # -----------------------------------------------------------------------
+      # File storage paths (mapped to the ./data volume mount)
+      # -----------------------------------------------------------------------
+      REPORTS_DIR: "/app/data/reports"
+      UPLOADS_DIR: "/app/data/uploads"
+      QUARANTINE_DIR: "/app/data/quarantine"
+      BACKUP_DIR: "/app/data/backups"
 
     volumes:
       - ./data:/app/data
@@ -34,7 +136,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "curl --fail --silent http://127.0.0.1:8000/api/health || curl --fail --silent http://127.0.0.1:8000/api/health/liveness || exit 1",
+          "curl --fail --silent http://127.0.0.1:8000/health || curl --fail --silent http://127.0.0.1:8000/api/health || exit 1",
         ]
       interval: 30s
       timeout: 5s
