@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.core.apikeys import (
@@ -63,19 +63,28 @@ def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
-def _to_iso(value: datetime | None) -> str | None:
+def _normalize_iso(value: str | None) -> str | None:
+    """Normalise an ISO string from APIKeyRecord (already a str) to Z-suffix form."""
     if value is None:
         return None
-    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    return value.replace("+00:00", "Z")
 
 
-def _to_view(record: APIKeyRecord, masked_value: str | None = None) -> CustomerKeyView:
+def _to_view(record: APIKeyRecord, *, raw_key: str | None = None) -> CustomerKeyView:
+    """
+    Build a CustomerKeyView from an APIKeyRecord.
+
+    When raw_key is provided (create path) we mask it directly so the
+    masked preview matches the just-issued key.  On the list/revoke path
+    we fall back to record.masked_key which is set at creation time.
+    """
+    masked = mask_api_key(raw_key) if raw_key else record.masked_key
     return CustomerKeyView(
         key_id=record.key_id,
         display_name=record.display_name,
-        masked_key=masked_value or mask_api_key(record.hashed_secret),
-        created_at=_to_iso(record.created_at) or _utc_now_iso(),
-        last_used_at=_to_iso(record.last_used_at),
+        masked_key=masked,
+        created_at=_normalize_iso(record.created_at) or _utc_now_iso(),
+        last_used_at=_normalize_iso(record.last_used_at),
         active=record.active,
         metadata=record.metadata or {},
     )
@@ -84,8 +93,7 @@ def _to_view(record: APIKeyRecord, masked_value: str | None = None) -> CustomerK
 @router.get("", response_model=CustomerKeyListResponse)
 def list_customer_keys() -> CustomerKeyListResponse:
     registry = get_api_key_registry()
-    records = list(getattr(registry, "_keys_by_id", {}).values())
-    records = sorted(records, key=lambda record: record.created_at, reverse=True)
+    records = registry.list_keys(active_only=False)
 
     return CustomerKeyListResponse(
         status="ok",
@@ -104,9 +112,9 @@ def list_customer_keys() -> CustomerKeyListResponse:
 def create_customer_key(payload: CustomerKeyCreateRequest) -> CustomerKeyCreateResponse:
     registry = get_api_key_registry()
     raw_api_key = generate_api_key()
-    record = registry.register_key(
+    record = registry.create_key(
         display_name=payload.display_name.strip(),
-        raw_secret=raw_api_key,
+        api_key=raw_api_key,
         metadata=payload.metadata,
     )
 
@@ -115,14 +123,19 @@ def create_customer_key(payload: CustomerKeyCreateRequest) -> CustomerKeyCreateR
         service="IronClaw-Security",
         timestamp=_utc_now_iso(),
         api_key=raw_api_key,
-        key=_to_view(record, masked_value=mask_api_key(raw_api_key)),
+        key=_to_view(record, raw_key=raw_api_key),
     )
 
 
 @router.post("/{key_id}/revoke", response_model=CustomerKeyRevokeResponse)
 def revoke_customer_key(key_id: str) -> CustomerKeyRevokeResponse:
     registry = get_api_key_registry()
-    registry.deactivate_key(key_id)
+    result = registry.revoke_key(key_id)
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Key '{key_id}' not found.",
+        )
 
     return CustomerKeyRevokeResponse(
         status="ok",
