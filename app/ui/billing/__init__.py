@@ -52,6 +52,23 @@ from app.ui.billing.overview import (
 from app.ui.billing.overview import (
     router as overview_router,
 )
+from app.ui.billing.package import (
+    BillingCurrencyAmountView as PackageCurrencyAmountView,
+)
+from app.ui.billing.package import (
+    BillingPackageListFilters,
+    BillingPackageListItem,
+    BillingPackageListResponse,
+    BillingPackagePlanCount,
+    BillingPackageStatusCount,
+    get_billing_packages,
+)
+from app.ui.billing.package import (
+    BillingUsageBucketView as PackageUsageBucketView,
+)
+from app.ui.billing.package import (
+    router as package_router,
+)
 from app.ui.billing.payment_methods import (
     BillingPaymentMethodsNotFoundResponse,
     BillingPaymentMethodsResponse,
@@ -81,6 +98,7 @@ BILLING_ROUTERS = [
     invoice_detail_router,
     payment_methods_router,
     plan_change_router,
+    package_router,
 ]
 
 __all__ = [
@@ -91,6 +109,7 @@ __all__ = [
     "invoice_detail_router",
     "payment_methods_router",
     "plan_change_router",
+    "package_router",
     # overview
     "BillingKpiView",
     "BillingPlanCount",
@@ -129,4 +148,13 @@ __all__ = [
     "BillingPlanChangeNotFoundResponse",
     "PlanChangeCurrencyAmountView",
     "get_plan_change",
+    # packages
+    "BillingPackageListItem",
+    "BillingPackageListFilters",
+    "BillingPackageListResponse",
+    "BillingPackageStatusCount",
+    "BillingPackagePlanCount",
+    "PackageUsageBucketView",
+    "PackageCurrencyAmountView",
+    "get_billing_packages",
 ]

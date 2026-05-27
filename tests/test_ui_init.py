@@ -11,6 +11,10 @@ from app.ui.admin.operators import router as operator_management_router
 from app.ui.admin.roles import router as access_control_roles_router
 from app.ui.alerts.notifications import router as alert_notifications_router
 from app.ui.audit.log import router as audit_log_router
+from app.ui.billing.invoice_detail import router as billing_invoice_detail_router
+from app.ui.billing.invoices import router as billing_invoices_router
+from app.ui.billing.payment_methods import router as billing_payment_methods_router
+from app.ui.billing.plan_change import router as billing_plan_change_router
 from app.ui.billing_index import router as billing_index_router
 from app.ui.billing_manifest import router as billing_manifest_router
 from app.ui.billing_registry import router as billing_registry_router
@@ -71,6 +75,10 @@ _EXPECTED_ROUTERS: tuple[APIRouter, ...] = (
     billing_index_router,
     billing_summary_router,
     billing_wallet_router,
+    billing_invoices_router,
+    billing_invoice_detail_router,
+    billing_payment_methods_router,
+    billing_plan_change_router,
     usage_reports_router,
     usage_event_detail_router,
     telemetry_access_summary_router,
@@ -256,6 +264,22 @@ def test_ui_routers_contains_billing_summary_router() -> None:
 
 def test_ui_routers_contains_billing_wallet_router() -> None:
     assert billing_wallet_router in UI_ROUTERS
+
+
+def test_ui_routers_contains_billing_invoices_router() -> None:
+    assert billing_invoices_router in UI_ROUTERS
+
+
+def test_ui_routers_contains_billing_invoice_detail_router() -> None:
+    assert billing_invoice_detail_router in UI_ROUTERS
+
+
+def test_ui_routers_contains_billing_payment_methods_router() -> None:
+    assert billing_payment_methods_router in UI_ROUTERS
+
+
+def test_ui_routers_contains_billing_plan_change_router() -> None:
+    assert billing_plan_change_router in UI_ROUTERS
 
 
 # ---------------------------------------------------------------------------
