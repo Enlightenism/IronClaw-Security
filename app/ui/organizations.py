@@ -4,9 +4,10 @@ from collections import Counter
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field, field_validator
 
-from app.services.organization_store import OrganizationStore
+from app.services.organization_store import OrganizationStore, get_store
 
 router = APIRouter(tags=["ui-organizations"])
 
@@ -82,18 +83,37 @@ def _empty_response(timestamp: str) -> dict[str, Any]:
     }
 
 
+class CreateOrganizationRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=256)
+    slug: str = Field(..., min_length=1, max_length=128)
+    owner_email: str = Field(..., min_length=3, max_length=254)
+    owner_display_name: str = Field(..., min_length=1, max_length=256)
+    metadata: dict[str, Any] | None = None
+
+    @field_validator("owner_email")
+    @classmethod
+    def _normalize_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if "@" not in v:
+            raise ValueError("Invalid email address")
+        return v
+
+
 @router.get("/ui/organizations")
-def get_ui_organizations() -> dict[str, Any]:
+def get_ui_organizations(
+    store: OrganizationStore = Depends(get_store),
+) -> dict[str, Any]:
     timestamp = _utcnow_iso()
 
     try:
-        records = OrganizationStore().list_organizations()
+        raw_records = store.list_all()
     except Exception:
-        records = []
+        raw_records = []
 
-    if not isinstance(records, list):
-        records = []
+    if not isinstance(raw_records, list):
+        raw_records = []
 
+    records = [r.to_dict() if hasattr(r, "to_dict") else r for r in raw_records]
     items = [_organization_item(record, timestamp) for record in records if isinstance(record, dict)]
 
     if not items:
@@ -112,9 +132,66 @@ def get_ui_organizations() -> dict[str, Any]:
             "suspended": status_counts.get("suspended", 0),
             "member_total": member_total,
         },
-        "items": sorted(items, key=lambda item: (item["name"].lower(), item["organization_id"])),
+        "items": sorted(
+            items,
+            key=lambda item: (item["name"].lower(), item["organization_id"]),
+        ),
         "actions": {
             "list_route": "/organizations",
             "create_route": "/organizations",
         },
+    }
+
+
+@router.post("/ui/organizations", status_code=201)
+def create_ui_organization(
+    payload: CreateOrganizationRequest,
+    store: OrganizationStore = Depends(get_store),
+) -> dict[str, Any]:
+    timestamp = _utcnow_iso()
+
+    result = store.create(
+        name=payload.name,
+        slug=payload.slug,
+        owner_email=payload.owner_email,
+        owner_display_name=payload.owner_display_name,
+        metadata=payload.metadata,
+    )
+
+    if isinstance(result, tuple):
+        error_code, detail = result
+        if error_code == "slug_exists":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Organization slug already exists: {detail}",
+            )
+        raise HTTPException(status_code=400, detail=f"Create failed: {error_code}")
+
+    return {
+        "status": "ok",
+        "service": "ironclaw-security",
+        "timestamp": timestamp,
+        "organization": result.as_response_dict(),
+    }
+
+
+@router.get("/ui/organizations/{organization_id}")
+def get_ui_organization_by_id(
+    organization_id: str,
+    store: OrganizationStore = Depends(get_store),
+) -> dict[str, Any]:
+    timestamp = _utcnow_iso()
+
+    record = store.get_by_id(organization_id)
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Organization not found: {organization_id}",
+        )
+
+    return {
+        "status": "ok",
+        "service": "ironclaw-security",
+        "timestamp": timestamp,
+        "organization": record.as_response_dict(),
     }

@@ -14,7 +14,8 @@ from app.services.organization_store import (
     OrganizationRecord as StoredOrganizationRecord,
 )
 from app.services.organization_store import (
-    get_organization_store,
+    OrganizationStore,
+    get_store,
 )
 
 router = APIRouter(
@@ -104,21 +105,12 @@ def _organization_to_view(organization: StoredOrganizationRecord) -> Organizatio
     )
 
 
-def _find_organization_or_404(organization_id: str) -> StoredOrganizationRecord:
-    organization = get_organization_store().get_organization(organization_id)
-    if organization is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Unknown organization: {organization_id}",
-        )
-    return organization
-
-
 @router.get("", response_model=OrganizationListResponse)
 def list_organizations(
     status_filter: Literal["active", "suspended"] | None = Query(default=None, alias="status"),
+    store: OrganizationStore = Depends(get_store),
 ) -> OrganizationListResponse:
-    items = get_organization_store().list_organizations(status=status_filter)
+    items = store.list_all() if status_filter is None else store.list_by_status(status_filter)
     return OrganizationListResponse(
         status="ok",
         service="IronClaw-Security",
@@ -129,8 +121,11 @@ def list_organizations(
 
 
 @router.post("", response_model=OrganizationResponse, status_code=status.HTTP_201_CREATED)
-def create_organization(payload: OrganizationCreateRequest) -> OrganizationResponse:
-    result = get_organization_store().create_organization(
+def create_organization(
+    payload: OrganizationCreateRequest,
+    store: OrganizationStore = Depends(get_store),
+) -> OrganizationResponse:
+    result = store.create(
         name=payload.name,
         slug=payload.slug,
         owner_email=payload.owner_email,
@@ -154,8 +149,16 @@ def create_organization(payload: OrganizationCreateRequest) -> OrganizationRespo
 
 
 @router.get("/{organization_id}", response_model=OrganizationResponse)
-def get_organization(organization_id: str) -> OrganizationResponse:
-    organization = _find_organization_or_404(organization_id)
+def get_organization(
+    organization_id: str,
+    store: OrganizationStore = Depends(get_store),
+) -> OrganizationResponse:
+    organization = store.get_by_id(organization_id)
+    if organization is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown organization: {organization_id}",
+        )
     return OrganizationResponse(
         status="ok",
         service="IronClaw-Security",
@@ -172,8 +175,9 @@ def get_organization(organization_id: str) -> OrganizationResponse:
 def add_organization_member(
     organization_id: str,
     payload: OrganizationMemberCreateRequest,
+    store: OrganizationStore = Depends(get_store),
 ) -> OrganizationResponse:
-    result = get_organization_store().add_member(
+    result = store.add_member(
         organization_id,
         email=payload.email,
         display_name=payload.display_name,

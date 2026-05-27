@@ -27,6 +27,7 @@ UI_ROUTERS: Final[tuple[APIRouter, ...]] = (
     *filter(
         None,
         (
+            _optional_router("app.ui.organizations"),
             _optional_router("app.ui.executions.dashboard"),
             _optional_router("app.ui.executions.detail"),
             _optional_router("app.ui.reviews.queue"),

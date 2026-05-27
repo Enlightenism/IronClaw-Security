@@ -40,6 +40,7 @@ from app.ui.incidents.triage import router as incident_triage_router
 from app.ui.insights.policy import router as policy_insights_router
 from app.ui.integrations.settings import router as integration_settings_router
 from app.ui.metrics_summary import router as metrics_summary_router
+from app.ui.organizations import router as organizations_router
 from app.ui.request_context import router as request_context_router
 from app.ui.reviews.detail import router as review_detail_router
 from app.ui.reviews.queue import router as review_queue_router
@@ -51,6 +52,7 @@ from app.ui.usage_event_detail import router as usage_event_detail_router
 from app.ui.usage_reports import router as usage_reports_router
 
 _EXPECTED_ROUTERS: tuple[APIRouter, ...] = (
+    organizations_router,
     execution_dashboard_router,
     execution_detail_router,
     review_queue_router,
@@ -355,6 +357,10 @@ def test_ui_routers_contains_session_timeline_router() -> None:
 # ---------------------------------------------------------------------------
 # remaining sub-routers present
 # ---------------------------------------------------------------------------
+
+
+def test_ui_routers_contains_organizations_router() -> None:
+    assert organizations_router in UI_ROUTERS
 
 
 def test_ui_routers_contains_policy_insights_router() -> None:
