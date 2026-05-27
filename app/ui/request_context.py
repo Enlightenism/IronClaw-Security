@@ -1,3 +1,4 @@
+# app/ui/request_context.py
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -6,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-router = APIRouter(prefix="/request-context", tags=["request-context"])
+router = APIRouter(prefix="/ui/request-context", tags=["request-context"])
 
 
 def _utc_now_iso() -> str:

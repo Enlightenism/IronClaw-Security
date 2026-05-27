@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.review.reviewqueueservice import ReviewQueueItem, ReviewStatus
+from app.review.reviewqueueservice import ReviewQueueService
 from app.routes.reviewqueue import get_review_queue_service
 
 router = APIRouter(prefix="/api/ui/reviews", tags=["ui-review-detail"])
@@ -49,94 +49,126 @@ class ReviewDetailResponse(BaseModel):
     actions: list[ReviewDetailAction] = Field(default_factory=list)
 
 
-def _build_actions(item: ReviewQueueItem) -> list[ReviewDetailAction]:
-    actions: list[ReviewDetailAction] = []
+def _s(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
-    if item.status == ReviewStatus.PENDING:
+
+def _build_actions(item: dict[str, Any]) -> list[ReviewDetailAction]:
+    actions: list[ReviewDetailAction] = []
+    status = _s(item.get("status")) or "pending"
+    review_id = _s(item.get("review_id")) or _s(item.get("id")) or ""
+
+    if status == "pending":
         actions.append(
             ReviewDetailAction(
                 key="assign",
                 label="Assign to analyst",
-                api_path=f"/api/review-queue/{item.review_id}/assign",
+                api_path=f"/api/review-queue/{review_id}/assign",
                 body={"reviewer_id": "analyst-1"},
                 style="primary",
-            ),
+            )
         )
 
-    if item.status == ReviewStatus.IN_PROGRESS:
+    if status == "in_review":
         actions.append(
             ReviewDetailAction(
                 key="complete",
                 label="Complete review",
-                api_path=f"/api/review-queue/{item.review_id}/complete",
+                api_path=f"/api/review-queue/{review_id}/complete",
                 body={},
                 style="success",
-            ),
+            )
         )
         actions.append(
             ReviewDetailAction(
                 key="dismiss",
                 label="Dismiss review",
-                api_path=f"/api/review-queue/{item.review_id}/dismiss",
+                api_path=f"/api/review-queue/{review_id}/dismiss",
                 body={"reason": "dismissed-by-analyst"},
                 style="danger",
-            ),
+            )
         )
 
-    if item.status in {ReviewStatus.COMPLETED, ReviewStatus.DISMISSED}:
+    if status in {"completed", "dismissed", "rejected"}:
         actions.append(
             ReviewDetailAction(
                 key="reopen",
                 label="Reopen review",
-                api_path=f"/api/review-queue/{item.review_id}/reopen",
+                api_path=f"/api/review-queue/{review_id}/reopen",
                 body={},
                 style="default",
-            ),
+            )
         )
 
     return actions
 
 
-def _build_fields(item: ReviewQueueItem) -> list[ReviewDetailField]:
+def _build_fields(item: dict[str, Any]) -> list[ReviewDetailField]:
+    def _f(key: str, label: str) -> ReviewDetailField:
+        return ReviewDetailField(key=key, label=label, value=_s(item.get(key)))
+
     return [
-        ReviewDetailField(key="review_id", label="Review ID", value=item.review_id),
-        ReviewDetailField(key="source", label="Source", value=item.source.value),
-        ReviewDetailField(key="source_id", label="Source ID", value=item.source_id),
-        ReviewDetailField(key="priority", label="Priority", value=item.priority.value),
-        ReviewDetailField(key="status", label="Status", value=item.status.value),
-        ReviewDetailField(key="assigned_to", label="Assigned To", value=item.assigned_to),
-        ReviewDetailField(key="created_at", label="Created At", value=item.created_at),
-        ReviewDetailField(key="updated_at", label="Updated At", value=item.updated_at),
-        ReviewDetailField(key="completed_at", label="Completed At", value=item.completed_at),
+        _f("review_id", "Review ID"),
+        _f("source", "Source"),
+        _f("incident_id", "Incident ID"),
+        _f("quarantine_id", "Quarantine ID"),
+        _f("priority", "Priority"),
+        _f("status", "Status"),
+        _f("assigned_to", "Assigned To"),
+        _f("created_at", "Created At"),
+        _f("updated_at", "Updated At"),
+        _f("verdict", "Verdict"),
     ]
 
 
-@router.get("/{review_id}", response_model=ReviewDetailResponse, summary="Get review detail")
+@router.get(
+    "/{review_id}",
+    response_model=ReviewDetailResponse,
+    summary="Get review detail",
+)
 def get_review_detail(review_id: str) -> ReviewDetailResponse:
-    normalized_review_id = review_id.strip()
-    if not normalized_review_id:
+    normalized = review_id.strip()
+    if not normalized:
         raise HTTPException(status_code=404, detail="review item not found")
 
-    service = get_review_queue_service()
-    item = service.get(normalized_review_id)
+    service: ReviewQueueService = get_review_queue_service()
+    item = service.get(normalized)
 
     if item is None:
-        raise HTTPException(status_code=404, detail=f"review item not found: {normalized_review_id}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"review item not found: {normalized}",
+        )
+
+    evidence_raw = item.get("evidence") or []
+    evidence_items = [
+        ReviewEvidenceItem(
+            index=idx + 1,
+            data=ev if isinstance(ev, dict) else {"value": ev},
+        )
+        for idx, ev in enumerate(evidence_raw)
+    ]
+
+    reasons_raw = item.get("reasons") or item.get("tags") or []
+    reasons = [str(r) for r in reasons_raw if r is not None]
 
     return ReviewDetailResponse(
-        review_id=item.review_id,
-        title=item.title,
-        summary=item.summary,
-        status=item.status.value,
-        priority=item.priority.value,
-        source=item.source.value,
-        source_id=item.source_id,
-        assigned_to=item.assigned_to,
-        created_at=item.created_at,
-        updated_at=item.updated_at,
-        completed_at=item.completed_at,
+        review_id=_s(item.get("review_id")) or _s(item.get("id")) or normalized,
+        title=_s(item.get("title")) or "Review",
+        summary=_s(item.get("summary")) or "",
+        status=_s(item.get("status")) or "pending",
+        priority=_s(item.get("priority")) or "medium",
+        source=_s(item.get("source")) or "ironclaw",
+        source_id=_s(item.get("incident_id")) or _s(item.get("quarantine_id")) or _s(item.get("review_id")) or normalized,
+        assigned_to=_s(item.get("assigned_to")),
+        created_at=_s(item.get("created_at")) or "",
+        updated_at=_s(item.get("updated_at")) or "",
+        completed_at=_s(item.get("completed_at")),
         fields=_build_fields(item),
-        reasons=list(item.reasons),
-        evidence=[ReviewEvidenceItem(index=index + 1, data=dict(evidence)) for index, evidence in enumerate(item.evidence)],
+        reasons=reasons,
+        evidence=evidence_items,
         actions=_build_actions(item),
     )

@@ -1,3 +1,6 @@
+# tests/test_ui_organizations.py
+# Tests GET /ui/organizations, POST /ui/organizations, GET /ui/organizations/{id}
+# Verdicts: 200 / 201 / 404 / 409, response shape, field contracts
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
@@ -9,7 +12,7 @@ from app.ui.organizations import get_store
 
 _BASE = "/ui/organizations"
 
-_VALID_PAYLOAD = {
+_VALID_PAYLOAD: dict[str, object] = {
     "name": "Acme Corp",
     "slug": "acme-corp",
     "owner_email": "owner@acme.com",
@@ -18,7 +21,7 @@ _VALID_PAYLOAD = {
 
 
 @pytest.fixture(autouse=True)
-def _isolated_store():
+def _isolated_store() -> OrganizationStore:
     store = OrganizationStore()
     _app.dependency_overrides[get_store] = lambda: store
     yield store
@@ -27,7 +30,7 @@ def _isolated_store():
 
 
 @pytest.fixture()
-def client(_isolated_store) -> TestClient:  # noqa: F811
+def client(_isolated_store: OrganizationStore) -> TestClient:
     with TestClient(_app, raise_server_exceptions=True) as tc:
         yield tc
 
@@ -37,12 +40,12 @@ def client(_isolated_store) -> TestClient:  # noqa: F811
 # ---------------------------------------------------------------------------
 
 
-def test_list_organizations_empty_returns_200(client):
+def test_list_organizations_empty_returns_200(client: TestClient) -> None:
     response = client.get(_BASE)
     assert response.status_code == 200
 
 
-def test_list_organizations_empty_shape(client):
+def test_list_organizations_empty_shape(client: TestClient) -> None:
     body = client.get(_BASE).json()
     assert "status" in body
     assert "items" in body
@@ -50,13 +53,13 @@ def test_list_organizations_empty_shape(client):
     assert "total" in body["summary"]
 
 
-def test_list_organizations_after_create(client):
+def test_list_organizations_after_create(client: TestClient) -> None:
     client.post(_BASE, json=_VALID_PAYLOAD)
     body = client.get(_BASE).json()
     assert body["summary"]["total"] >= 1
 
 
-def test_list_organizations_item_shape(client):
+def test_list_organizations_item_shape(client: TestClient) -> None:
     client.post(_BASE, json=_VALID_PAYLOAD)
     items = client.get(_BASE).json()["items"]
     assert len(items) >= 1
@@ -69,7 +72,7 @@ def test_list_organizations_item_shape(client):
     assert "created_at" in item
 
 
-def test_list_organizations_summary_keys(client):
+def test_list_organizations_summary_keys(client: TestClient) -> None:
     summary = client.get(_BASE).json()["summary"]
     assert "total" in summary
     assert "active" in summary
@@ -77,13 +80,13 @@ def test_list_organizations_summary_keys(client):
     assert "member_total" in summary
 
 
-def test_list_organizations_actions_keys(client):
+def test_list_organizations_actions_keys(client: TestClient) -> None:
     actions = client.get(_BASE).json()["actions"]
     assert "list_route" in actions
     assert "create_route" in actions
 
 
-def test_list_organizations_status_is_ok(client):
+def test_list_organizations_status_is_ok(client: TestClient) -> None:
     assert client.get(_BASE).json()["status"] == "ok"
 
 
@@ -92,12 +95,12 @@ def test_list_organizations_status_is_ok(client):
 # ---------------------------------------------------------------------------
 
 
-def test_create_organization_returns_201(client):
+def test_create_organization_returns_201(client: TestClient) -> None:
     response = client.post(_BASE, json=_VALID_PAYLOAD)
     assert response.status_code == 201
 
 
-def test_create_organization_response_shape(client):
+def test_create_organization_response_shape(client: TestClient) -> None:
     response = client.post(_BASE, json=_VALID_PAYLOAD)
     assert response.status_code == 201
     body = response.json()
@@ -105,7 +108,7 @@ def test_create_organization_response_shape(client):
     assert "organization" in body
 
 
-def test_create_organization_organization_shape(client):
+def test_create_organization_organization_shape(client: TestClient) -> None:
     response = client.post(_BASE, json=_VALID_PAYLOAD)
     assert response.status_code == 201
     org = response.json()["organization"]
@@ -118,19 +121,19 @@ def test_create_organization_organization_shape(client):
     assert "created_at" in org
 
 
-def test_create_organization_persists_name(client):
+def test_create_organization_persists_name(client: TestClient) -> None:
     response = client.post(_BASE, json=_VALID_PAYLOAD)
     assert response.status_code == 201
     assert response.json()["organization"]["name"] == _VALID_PAYLOAD["name"]
 
 
-def test_create_organization_persists_owneremail(client):
+def test_create_organization_persists_owneremail(client: TestClient) -> None:
     response = client.post(_BASE, json=_VALID_PAYLOAD)
     assert response.status_code == 201
-    assert response.json()["organization"]["owner_email"] == _VALID_PAYLOAD["owner_email"].lower()
+    assert response.json()["organization"]["owner_email"] == str(_VALID_PAYLOAD["owner_email"]).lower()
 
 
-def test_create_organization_has_organizationid(client):
+def test_create_organization_has_organizationid(client: TestClient) -> None:
     response = client.post(_BASE, json=_VALID_PAYLOAD)
     assert response.status_code == 201
     org_id = response.json()["organization"]["organizationid"]
@@ -138,25 +141,25 @@ def test_create_organization_has_organizationid(client):
     assert len(org_id) > 0
 
 
-def test_create_organization_default_status_active(client):
+def test_create_organization_default_status_active(client: TestClient) -> None:
     response = client.post(_BASE, json=_VALID_PAYLOAD)
     assert response.status_code == 201
     assert response.json()["organization"]["status"] == "active"
 
 
-def test_create_organization_members_is_list(client):
+def test_create_organization_members_is_list(client: TestClient) -> None:
     response = client.post(_BASE, json=_VALID_PAYLOAD)
     assert response.status_code == 201
     assert isinstance(response.json()["organization"]["members"], list)
 
 
-def test_create_organization_duplicate_slug_returns_409(client):
+def test_create_organization_duplicate_slug_returns_409(client: TestClient) -> None:
     client.post(_BASE, json=_VALID_PAYLOAD)
     response = client.post(_BASE, json=_VALID_PAYLOAD)
     assert response.status_code == 409
 
 
-def test_create_organization_with_metadata(client):
+def test_create_organization_with_metadata(client: TestClient) -> None:
     payload = {**_VALID_PAYLOAD, "slug": "acme-meta", "metadata": {"tier": "pro"}}
     response = client.post(_BASE, json=payload)
     assert response.status_code == 201
@@ -168,14 +171,14 @@ def test_create_organization_with_metadata(client):
 # ---------------------------------------------------------------------------
 
 
-def test_get_organization_by_id_returns_200(client):
+def test_get_organization_by_id_returns_200(client: TestClient) -> None:
     create_resp = client.post(_BASE, json=_VALID_PAYLOAD)
     assert create_resp.status_code == 201
     org_id = create_resp.json()["organization"]["organizationid"]
     assert client.get(f"{_BASE}/{org_id}").status_code == 200
 
 
-def test_get_organization_by_id_response_shape(client):
+def test_get_organization_by_id_response_shape(client: TestClient) -> None:
     create_resp = client.post(_BASE, json=_VALID_PAYLOAD)
     assert create_resp.status_code == 201
     org_id = create_resp.json()["organization"]["organizationid"]
@@ -184,7 +187,7 @@ def test_get_organization_by_id_response_shape(client):
     assert "organization" in body
 
 
-def test_get_organization_by_id_organization_shape(client):
+def test_get_organization_by_id_organization_shape(client: TestClient) -> None:
     create_resp = client.post(_BASE, json=_VALID_PAYLOAD)
     assert create_resp.status_code == 201
     org_id = create_resp.json()["organization"]["organizationid"]
@@ -198,7 +201,7 @@ def test_get_organization_by_id_organization_shape(client):
     assert "created_at" in org
 
 
-def test_get_organization_by_id_matches_created(client):
+def test_get_organization_by_id_matches_created(client: TestClient) -> None:
     create_resp = client.post(_BASE, json=_VALID_PAYLOAD)
     assert create_resp.status_code == 201
     created_org = create_resp.json()["organization"]
@@ -208,11 +211,11 @@ def test_get_organization_by_id_matches_created(client):
     assert fetched_org["name"] == created_org["name"]
 
 
-def test_get_organization_by_id_not_found_returns_404(client):
+def test_get_organization_by_id_not_found_returns_404(client: TestClient) -> None:
     assert client.get(f"{_BASE}/org-doesnotexist999").status_code == 404
 
 
-def test_get_organization_timestamp_is_string(client):
+def test_get_organization_timestamp_is_string(client: TestClient) -> None:
     create_resp = client.post(_BASE, json=_VALID_PAYLOAD)
     assert create_resp.status_code == 201
     org_id = create_resp.json()["organization"]["organizationid"]

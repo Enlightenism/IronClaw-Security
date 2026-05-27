@@ -27,27 +27,39 @@ UI_ROUTERS: Final[tuple[APIRouter, ...]] = (
     *filter(
         None,
         (
+            # ── core domain ──────────────────────────────────────────────────
             _optional_router("app.ui.organizations"),
+            _optional_router("app.ui.request_context"),
+            # ── executions ───────────────────────────────────────────────────
             _optional_router("app.ui.executions.dashboard"),
             _optional_router("app.ui.executions.detail"),
+            _optional_router("app.ui.executions.explorer"),
+            _optional_router("app.ui.executions.testconsole"),
+            # ── reviews ──────────────────────────────────────────────────────
             _optional_router("app.ui.reviews.queue"),
             _optional_router("app.ui.reviews.detail"),
+            # ── insights / policy ────────────────────────────────────────────
             _optional_router("app.ui.insights.policy"),
+            # ── activity ─────────────────────────────────────────────────────
             _optional_router("app.ui.activity.clientsession"),
             _optional_router("app.ui.activity.clientprofile"),
             _optional_router("app.ui.activity.sessiontimeline"),
-            _optional_router("app.ui.executions.explorer"),
+            # ── settings / runtime / audit ───────────────────────────────────
             _optional_router("app.ui.settings.configuration"),
             _optional_router("app.ui.runtime.status"),
             _optional_router("app.ui.audit.log"),
-            _optional_router("app.ui.executions.testconsole"),
+            # ── alerts / system / incidents ──────────────────────────────────
             _optional_router("app.ui.alerts.notifications"),
             _optional_router("app.ui.system.diagnostics"),
-            _optional_router("app.ui.integrations.settings"),
             _optional_router("app.ui.incidents.triage"),
+            # ── integrations ─────────────────────────────────────────────────
+            _optional_router("app.ui.integrations.settings"),
+            # ── admin ────────────────────────────────────────────────────────
             _optional_router("app.ui.admin.operators"),
             _optional_router("app.ui.admin.roles"),
+            # ── groq ─────────────────────────────────────────────────────────
             _optional_router("app.ui.groq"),
+            # ── billing ──────────────────────────────────────────────────────
             _optional_router("app.ui.billing_manifest"),
             _optional_router("app.ui.billing_registry"),
             _optional_router("app.ui.billing_index"),
@@ -59,14 +71,16 @@ UI_ROUTERS: Final[tuple[APIRouter, ...]] = (
             _optional_router("app.ui.billing.payment_methods"),
             _optional_router("app.ui.billing.plan_change"),
             _optional_router("app.ui.billing.package"),
+            # ── usage / telemetry / metrics / health ─────────────────────────
             _optional_router("app.ui.usage_reports"),
             _optional_router("app.ui.usage_event_detail"),
             _optional_router("app.ui.telemetry_access_summary"),
             _optional_router("app.ui.metrics_summary"),
             _optional_router("app.ui.health_snapshot"),
+            # ── customer keys ─────────────────────────────────────────────────
             _optional_router("app.ui.customer_keys"),
             _optional_router("app.ui.customer_key_detail"),
-            _optional_router("app.ui.request_context"),
+            # ── docs ──────────────────────────────────────────────────────────
             _optional_router("app.ui.docs.quickstart"),
             _optional_router("app.ui.docs.api_reference"),
             _optional_router("app.ui.docs.authentication"),

@@ -1,49 +1,53 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Annotated, Any
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field, field_validator
 
-from app.review.reviewqueueservice import (
-    ReviewPriority,
-    ReviewQueueItem,
-    ReviewQueueService,
-    ReviewSource,
-    ReviewStatus,
-)
+from app.review.reviewqueueservice import ReviewQueueService, build_review_queue_service
 
 router = APIRouter(prefix="/api/review-queue", tags=["review-queue"])
 
+_VALID_STATUSES = {"pending", "in_review", "completed", "rejected", "cancelled"}
+_VALID_PRIORITIES = {"critical", "high", "medium", "low"}
+
 
 class ReviewQueueListResponse(BaseModel):
-    items: list[ReviewQueueItem] = Field(default_factory=list)
+    items: list[dict[str, Any]] = Field(default_factory=list)
     counts: dict[str, int] = Field(default_factory=dict)
 
 
 class ReviewQueueCreateRequest(BaseModel):
-    source: ReviewSource
+    source: str = Field(..., min_length=1)
     source_id: str = Field(..., min_length=1)
-    priority: ReviewPriority = ReviewPriority.MEDIUM
+    priority: str = "medium"
     title: str = Field(..., min_length=1)
     summary: str = Field(..., min_length=1)
     reasons: list[str] = Field(default_factory=list)
     evidence: list[dict[str, Any]] = Field(default_factory=list)
 
-    @field_validator("source_id", "title", "summary")
+    @field_validator("source_id", "title", "summary", "source")
     @classmethod
-    def _validate_non_blank_text(cls, value: str) -> str:
+    def _non_blank(cls, value: str) -> str:
         normalized = value.strip()
         if not normalized:
             raise ValueError("must not be blank")
         return normalized
 
+    @field_validator("priority")
+    @classmethod
+    def _valid_priority(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in _VALID_PRIORITIES:
+            raise ValueError(f"priority must be one of {sorted(_VALID_PRIORITIES)}")
+        return normalized
+
     @field_validator("reasons")
     @classmethod
-    def _validate_reasons(cls, value: list[str]) -> list[str]:
-        normalized = [reason.strip() for reason in value if reason.strip()]
-        return normalized
+    def _clean_reasons(cls, value: list[str]) -> list[str]:
+        return [r.strip() for r in value if r.strip()]
 
 
 class ReviewQueueAssignRequest(BaseModel):
@@ -51,7 +55,7 @@ class ReviewQueueAssignRequest(BaseModel):
 
     @field_validator("reviewer_id")
     @classmethod
-    def _validate_reviewer_id(cls, value: str) -> str:
+    def _non_blank(cls, value: str) -> str:
         normalized = value.strip()
         if not normalized:
             raise ValueError("must not be blank")
@@ -63,19 +67,25 @@ class ReviewQueueDismissRequest(BaseModel):
 
     @field_validator("reason")
     @classmethod
-    def _validate_reason(cls, value: str | None) -> str | None:
+    def _clean_reason(cls, value: str | None) -> str | None:
         if value is None:
             return None
         normalized = value.strip()
         return normalized or None
 
 
+class ReviewQueueCompleteRequest(BaseModel):
+    verdict: str = "completed"
+    notes: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 @lru_cache(maxsize=1)
 def get_review_queue_service() -> ReviewQueueService:
-    return ReviewQueueService()
+    return build_review_queue_service()
 
 
-def _get_item_or_404(review_id: str) -> ReviewQueueItem:
+def _get_item_or_404(review_id: str) -> dict[str, Any]:
     item = get_review_queue_service().get(review_id)
     if item is None:
         raise HTTPException(
@@ -85,110 +95,159 @@ def _get_item_or_404(review_id: str) -> ReviewQueueItem:
     return item
 
 
-def _parse_review_status(status_filter: str | None) -> ReviewStatus | None:
+def _parse_status(status_filter: str | None) -> str | None:
     if status_filter is None:
         return None
     normalized = status_filter.strip().lower()
     if not normalized:
         return None
-    try:
-        return ReviewStatus(normalized)
-    except ValueError as exc:
+    if normalized not in _VALID_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"invalid status filter: {status_filter}",
-        ) from exc
+        )
+    return normalized
 
 
 @router.get("", response_model=ReviewQueueListResponse)
 def list_review_queue(
-    status_filter: Annotated[str | None, Query(default=None, alias="status")] = None,
+    status_filter: str | None = Query(default=None, alias="status"),
     assigned_to: str | None = Query(default=None),
 ) -> ReviewQueueListResponse:
     service = get_review_queue_service()
-    normalized_assigned_to = assigned_to.strip() if assigned_to is not None else None
-    if normalized_assigned_to == "":
-        normalized_assigned_to = None
-    items = service.list_items(
-        status=_parse_review_status(status_filter),
-        assigned_to=normalized_assigned_to,
+    normalized_assigned_to = assigned_to.strip() if assigned_to else None
+    items = service.list_reviews(
+        status=_parse_status(status_filter),
+        assigned_to=normalized_assigned_to or None,
     )
+    summary = service.summarize()
     return ReviewQueueListResponse(
         items=items,
-        counts=service.counts(),
+        counts={
+            "total": summary.get("total", 0),
+            "pending": summary.get("pending", 0),
+            "in_review": summary.get("in_review", 0),
+            "completed": summary.get("completed", 0),
+            "rejected": summary.get("rejected", 0),
+            "cancelled": summary.get("cancelled", 0),
+        },
     )
 
 
-@router.post(
-    "",
-    response_model=ReviewQueueItem,
-    status_code=status.HTTP_201_CREATED,
-)
-def create_review_item(payload: ReviewQueueCreateRequest) -> ReviewQueueItem:
-    return get_review_queue_service().enqueue(
-        source=payload.source,
-        source_id=payload.source_id,
-        priority=payload.priority,
-        title=payload.title,
-        summary=payload.summary,
-        reasons=payload.reasons,
-        evidence=payload.evidence,
+@router.post("", status_code=status.HTTP_201_CREATED)
+def create_review_item(payload: ReviewQueueCreateRequest) -> dict[str, Any]:
+    return get_review_queue_service().submit(
+        {
+            "source": payload.source,
+            "incident_id": payload.source_id,
+            "item_type": payload.source,
+            "priority": payload.priority,
+            "title": payload.title,
+            "summary": payload.summary,
+            "tags": payload.reasons,
+            "evidence": payload.evidence,
+        }
     )
 
 
-@router.get("/{review_id}", response_model=ReviewQueueItem)
-def get_review_item(review_id: str) -> ReviewQueueItem:
+@router.get("/{review_id}")
+def get_review_item(review_id: str) -> dict[str, Any]:
     return _get_item_or_404(review_id)
 
 
-@router.post("/{review_id}/assign", response_model=ReviewQueueItem)
+@router.post("/{review_id}/assign")
 def assign_review_item(
     review_id: str,
     payload: ReviewQueueAssignRequest,
-) -> ReviewQueueItem:
+) -> dict[str, Any]:
     _get_item_or_404(review_id)
-    return get_review_queue_service().assign(review_id, payload.reviewer_id)
+    result = get_review_queue_service().assign_review(review_id, payload.reviewer_id)
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"review item not found: {review_id}",
+        )
+    return result
 
 
-@router.post("/{review_id}/complete", response_model=ReviewQueueItem)
-def complete_review_item(review_id: str) -> ReviewQueueItem:
+@router.post("/{review_id}/complete")
+def complete_review_item(
+    review_id: str,
+    payload: ReviewQueueCompleteRequest = ReviewQueueCompleteRequest(),
+) -> dict[str, Any]:
     _get_item_or_404(review_id)
-    return get_review_queue_service().complete(review_id)
+    result = get_review_queue_service().complete_review(
+        review_id,
+        verdict=payload.verdict,
+        notes=payload.notes,
+        metadata=payload.metadata,
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"review item not found: {review_id}",
+        )
+    return result
 
 
-@router.post("/{review_id}/dismiss", response_model=ReviewQueueItem)
+@router.post("/{review_id}/dismiss")
 def dismiss_review_item(
     review_id: str,
     payload: ReviewQueueDismissRequest,
-) -> ReviewQueueItem:
+) -> dict[str, Any]:
     _get_item_or_404(review_id)
-    return get_review_queue_service().dismiss(review_id, payload.reason)
+    result = get_review_queue_service().reject_review(
+        review_id,
+        notes=payload.reason,
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"review item not found: {review_id}",
+        )
+    return result
 
 
-@router.post("/{review_id}/reopen", response_model=ReviewQueueItem)
-def reopen_review_item(review_id: str) -> ReviewQueueItem:
-    _get_item_or_404(review_id)
-    return get_review_queue_service().reopen(review_id)
+@router.post("/{review_id}/reopen")
+def reopen_review_item(review_id: str) -> dict[str, Any]:
+    item = _get_item_or_404(review_id)
+    item = dict(item)
+    item["status"] = "pending"
+    return get_review_queue_service().submit(item)
 
 
-@router.post("/{review_id}/claim", response_model=ReviewQueueItem, include_in_schema=False)
+@router.post("/{review_id}/claim", include_in_schema=False)
 def claim_review_item(
     review_id: str,
     payload: ReviewQueueAssignRequest,
-) -> ReviewQueueItem:
+) -> dict[str, Any]:
     _get_item_or_404(review_id)
-    return get_review_queue_service().assign(review_id, payload.reviewer_id)
+    result = get_review_queue_service().assign_review(review_id, payload.reviewer_id)
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"review item not found: {review_id}",
+        )
+    return result
 
 
-@router.post("/claim-next", response_model=ReviewQueueItem)
-def claim_next_review_item(payload: ReviewQueueAssignRequest) -> ReviewQueueItem:
-    item = get_review_queue_service().claim_next(payload.reviewer_id)
-    if item is None:
+@router.post("/claim-next")
+def claim_next_review_item(payload: ReviewQueueAssignRequest) -> dict[str, Any]:
+    service = get_review_queue_service()
+    pending = service.list_reviews(status="pending", limit=1)
+    if not pending:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="no pending review items available",
         )
-    return item
+    review_id = pending[0].get("review_id") or pending[0].get("id", "")
+    result = service.assign_review(review_id, payload.reviewer_id)
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="no pending review items available",
+        )
+    return result
 
 
 @router.delete(

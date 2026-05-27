@@ -8,7 +8,6 @@ from app.ui.integrations.settings import (
     IntegrationSettingsSummary,
     get_integration_settings,
     read_ui_integration_settings,
-    router,
 )
 
 __all__ = [
@@ -19,5 +18,4 @@ __all__ = [
     "IntegrationSettingsSummary",
     "get_integration_settings",
     "read_ui_integration_settings",
-    "router",
 ]

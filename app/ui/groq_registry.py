@@ -6,8 +6,6 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from app.ui.router import get_ui_routers
-
 router = APIRouter(prefix="/groq-registry", tags=["groq-registry"])
 
 
@@ -42,22 +40,23 @@ def _route_name_from_prefix(prefix: str) -> str:
 
 @router.get("", response_model=GroqRegistryResponse)
 def read_groq_registry() -> GroqRegistryResponse:
+    from app.ui.router import get_ui_routers  # local import breaks circular
+
     ui_routers = get_ui_routers()
 
-    routes = [
-        GroqRegistryEntry(
-            name=_route_name_from_prefix(str(ui_router.prefix or "")),
-            prefix=str(ui_router.prefix or ""),
-            tags=[str(tag) for tag in (ui_router.tags or [])],
-            enabled=True,
-            metadata={
-                "source": "app.ui.router",
-            },
-        )
-        for ui_router in ui_routers
-    ]
-
-    routes = sorted(routes, key=lambda route: route.prefix)
+    routes = sorted(
+        [
+            GroqRegistryEntry(
+                name=_route_name_from_prefix(str(ui_router.prefix or "")),
+                prefix=str(ui_router.prefix or ""),
+                tags=[str(tag) for tag in (ui_router.tags or [])],
+                enabled=True,
+                metadata={"source": "app.ui.router"},
+            )
+            for ui_router in ui_routers
+        ],
+        key=lambda r: r.prefix,
+    )
 
     return GroqRegistryResponse(
         status="ok",
