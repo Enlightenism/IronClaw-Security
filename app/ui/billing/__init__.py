@@ -74,6 +74,7 @@ from app.ui.billing.package import (
 from app.ui.billing.payment_methods import (
     BillingPaymentMethodsNotFoundResponse,
     BillingPaymentMethodsResponse,
+    BillingPaymentMethodStatusCount,
     BillingPaymentMethodView,
     get_payment_methods,
 )
@@ -142,6 +143,7 @@ __all__ = [
     "get_invoice_detail",
     # payment methods
     "BillingPaymentMethodView",
+    "BillingPaymentMethodStatusCount",
     "BillingPaymentMethodsResponse",
     "BillingPaymentMethodsNotFoundResponse",
     "get_payment_methods",
