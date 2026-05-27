@@ -135,6 +135,13 @@ def _build_routes() -> list[BillingRegistryRouteView]:
             purpose="Returns wallet ledger activity with optional owner filtering.",
         ),
         BillingRegistryRouteView(
+            name="UI billing overview",
+            method="GET",
+            path="/ui/billing/overview",
+            purpose="Returns UI-facing package state summary including active package, unit consumption, and wallet balance.",
+            requires_api_key=False,
+        ),
+        BillingRegistryRouteView(
             name="UI billing manifest",
             method="GET",
             path="/ui/billing-manifest",
@@ -163,6 +170,6 @@ def get_billing_registry() -> BillingRegistryResponse:
         metadata={
             "source_catalog": "app.api.routes.billing.PACKAGE_CATALOG",
             "featured_package_id": "team-security",
-            "route_count": 5,
+            "route_count": 6,
         },
     )

@@ -18,6 +18,7 @@ def _utc_now_iso() -> str:
 class BillingIndexPackageView(BaseModel):
     package_id: str
     name: str
+    description: str
     price_usd: float
     included_units: int
     featured: bool = False
@@ -35,6 +36,7 @@ class BillingIndexSummaryView(BaseModel):
     subtitle: str
     featured_package_id: str
     package_count: int
+    links_count: int
     currency: str
     pricing_model: str
 
@@ -66,6 +68,7 @@ def _build_packages() -> list[BillingIndexPackageView]:
             BillingIndexPackageView(
                 package_id=package_id,
                 name=str(package["name"]),
+                description=str(package["description"]),
                 price_usd=price_usd,
                 included_units=included_units,
                 featured=package_id == featured_package_id,
@@ -123,6 +126,7 @@ def _build_links() -> list[BillingIndexLinkView]:
 @router.get("", response_model=BillingIndexResponse)
 def get_billing_index() -> BillingIndexResponse:
     packages = _build_packages()
+    links = _build_links()
 
     return BillingIndexResponse(
         status="ok",
@@ -133,15 +137,15 @@ def get_billing_index() -> BillingIndexResponse:
             subtitle="Prepaid protection-unit pricing and related billing surfaces.",
             featured_package_id="team-security",
             package_count=len(packages),
+            links_count=len(links),
             currency="USD",
             pricing_model="prepaid-protection-units",
         ),
         packages=packages,
-        links=_build_links(),
+        links=links,
         notes=[
             "Billing is sold as prepaid protection-unit bundles.",
             "Current package pricing is $20 for 20,000 units, $90 for 100,000 units, and $150 for 200,000 units.",
             "Team Security is the featured package for balanced usage growth.",
-            "Billing wallet access is now part of the linked billing surface set.",
         ],
     )
