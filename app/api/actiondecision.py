@@ -6,6 +6,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from app.api.actionguard import guardaction
+from app.services.verdict_enforcer import EnforcedVerdict, enforce_verdict
 
 router = APIRouter(prefix="/decision", tags=["action-decision"])
 
@@ -49,6 +50,26 @@ class ActionDecisionResponse(BaseModel):
     reason: str
     reasons: list[DecisionReasonView] = Field(default_factory=list)
     promptinjection: dict[str, Any] = Field(default_factory=dict)
+    # Groq telemetry — propagated from enforce_verdict to review records
+    groq_verdict: str | None = None
+    groq_risk_score: int | None = None
+    groq_confidence: float | None = None
+    groq_latency_ms: float | None = None
+    groq_model_name: str | None = None
+    groq_signals: list[str] = Field(default_factory=list)
+    groq_summary: str | None = None
+    groq_decided_at: str | None = None
+    enforced_at: str | None = None
+
+
+def _guard_verdict_to_enforcer_verdict(verdict: str) -> str:
+    """Map actionguard verdicts to verdict_enforcer VerdictType."""
+    return {
+        "allow": "allow",
+        "review": "warn",
+        "quarantine": "quarantine",
+        "deny": "block",
+    }.get(verdict, "block")
 
 
 def decideaction(
@@ -73,22 +94,48 @@ def decideaction(
         metadata=metadata,
     )
 
-    verdict = guard["verdict"]
-    if verdict == "allow":
+    raw_verdict = guard["verdict"]
+    enforcer_verdict = _guard_verdict_to_enforcer_verdict(raw_verdict)
+
+    # Build matched_patterns and categories from guard reasons for enforcer audit trail
+    reasons_list: list[dict[str, Any]] = [dict(r) if hasattr(r, "__iter__") and not isinstance(r, str) else {"source": "scan", "label": str(r), "details": "", "score": 0} for r in guard.get("reasons", [])]
+    matched_patterns: list[str] = [str(r.get("label", "")) for r in reasons_list if isinstance(r, dict) and r.get("label")]
+    categories: list[str] = list({str(r.get("source", "")) for r in reasons_list if isinstance(r, dict) and r.get("source")})
+
+    enforced: EnforcedVerdict = enforce_verdict(
+        action_type=actiontype,
+        target=target,
+        content=content,
+        verdict=enforcer_verdict,  # type: ignore[arg-type]
+        summary=guard.get("reason", ""),
+        risk_score=int(guard.get("adjustedriskscore", riskscore)),
+        should_halt=not guard.get("allowed", True),
+        should_warn=bool(guard.get("requiresreview")),
+        matched_patterns=matched_patterns,
+        categories=categories,
+        decision_source="actiondecision",
+        client_id=clientid,
+        session_id=sessionid,
+        reasons=[{str(k): v for k, v in r.items()} for r in reasons_list if isinstance(r, dict)],
+    )
+
+    # Map enforced verdict back to decision chain outcome/state
+    final_verdict = enforced["verdict"]
+    if final_verdict == "allow":
         outcome: DecisionOutcome = "allow"
         state: DecisionState = "approved"
         shouldexecute = True
         haltedbyboundary = False
         requiresreview = False
         reason = "Decision engine approved execution."
-    elif verdict == "review":
+    elif final_verdict == "warn":
         outcome = "review"
         state = "queuedforreview"
         shouldexecute = True
         haltedbyboundary = False
         requiresreview = True
         reason = "Decision engine queued the action for review."
-    elif verdict == "quarantine":
+    elif final_verdict == "quarantine":
         outcome = "quarantine"
         state = "quarantined"
         shouldexecute = False
@@ -113,10 +160,20 @@ def decideaction(
         "requiresreview": requiresreview,
         "filepath": guard["filepath"],
         "baseriskscore": guard["baseriskscore"],
-        "adjustedriskscore": guard["adjustedriskscore"],
+        "adjustedriskscore": enforced["risk_score"],
         "reason": reason,
-        "reasons": guard["reasons"],
+        "reasons": enforced["reasons"],
         "promptinjection": guard["promptinjection"],
+        # Groq telemetry — now populated via enforce_verdict, flows to review.py
+        "groq_verdict": enforced["groq_verdict"],
+        "groq_risk_score": enforced["groq_risk_score"],
+        "groq_confidence": enforced["groq_confidence"],
+        "groq_latency_ms": enforced["groq_latency_ms"],
+        "groq_model_name": enforced["groq_model_name"],
+        "groq_signals": enforced["groq_signals"],
+        "groq_summary": enforced["groq_summary"],
+        "groq_decided_at": enforced["groq_decided_at"],
+        "enforced_at": enforced["enforced_at"],
     }
 
 

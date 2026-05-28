@@ -48,6 +48,12 @@ class ActionGuardResponse(BaseModel):
     reason: str
     reasons: list[GuardReasonView] = Field(default_factory=list)
     promptinjection: dict[str, Any] = Field(default_factory=dict)
+    # Groq AI enrichment fields — propagated upstream to decide_action and review records
+    groq_verdict: str | None = Field(None, description="Verdict returned by Groq AI analysis layer.")
+    groq_reasoning: str | None = Field(None, description="Reasoning text from Groq AI analysis.")
+    groq_confidence: float | None = Field(None, description="Confidence score from Groq AI analysis.")
+    groq_model: str | None = Field(None, description="Groq model identifier used for analysis.")
+    enforced_at: str | None = Field(None, description="ISO timestamp when the enforcement decision was recorded.")
 
 
 def guardaction(
@@ -116,6 +122,12 @@ def guardaction(
         "reason": reason,
         "reasons": policy["reasons"],
         "promptinjection": policy["promptinjection"],
+        # Propagate Groq enrichment fields from policy layer if present
+        "groq_verdict": policy.get("groq_verdict"),
+        "groq_reasoning": policy.get("groq_reasoning"),
+        "groq_confidence": policy.get("groq_confidence"),
+        "groq_model": policy.get("groq_model"),
+        "enforced_at": policy.get("enforced_at"),
     }
 
 

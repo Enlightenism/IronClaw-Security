@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter
@@ -54,6 +55,12 @@ class ActionPolicyResponse(BaseModel):
     summary: str
     reasons: list[PolicyReasonView] = Field(default_factory=list)
     promptinjection: dict[str, Any] = Field(default_factory=dict)
+    # Groq AI enrichment passthrough — populated by upstream enrichment callers
+    groq_verdict: str | None = Field(None, description="Verdict returned by Groq AI analysis layer.")
+    groq_reasoning: str | None = Field(None, description="Reasoning text from Groq AI analysis.")
+    groq_confidence: float | None = Field(None, description="Confidence score from Groq AI analysis.")
+    groq_model: str | None = Field(None, description="Groq model identifier used for analysis.")
+    enforced_at: str | None = Field(None, description="ISO timestamp when the enforcement decision was recorded.")
 
 
 def _build_policy_reason(source: str, label: str, details: str, score: int) -> dict[str, Any]:
@@ -75,6 +82,11 @@ def evaluateactionpolicy(
     sessionid: str | None = None,
     filepath: str | None = None,
     metadata: dict[str, Any] | None = None,
+    # Groq enrichment passthrough — callers may inject these after external AI analysis
+    groq_verdict: str | None = None,
+    groq_reasoning: str | None = None,
+    groq_confidence: float | None = None,
+    groq_model: str | None = None,
 ) -> dict[str, Any]:
     effective_filepath = filepath or "app/api/actionexecute.py"
     effectivemetadata = dict(metadata or {})
@@ -98,6 +110,11 @@ def evaluateactionpolicy(
     shouldquarantine = bool(promptscan.get("shouldquarantine"))
     shouldblock = adjustedriskscore >= 85 and not shouldquarantine
     shouldreview = bool(promptscan.get("shouldreview")) or adjustedriskscore >= 50
+
+    # Escalate verdict if Groq AI signals a stronger enforcement action
+    if groq_verdict in ("quarantine", "block") and not shouldquarantine:
+        shouldquarantine = groq_verdict == "quarantine"
+        shouldblock = groq_verdict == "block" and not shouldquarantine
 
     if shouldquarantine:
         verdict: PolicyVerdict = "quarantine"
@@ -124,6 +141,16 @@ def evaluateactionpolicy(
             score=adjustedriskscore,
         ),
     ]
+
+    if groq_reasoning:
+        reasons.append(
+            _build_policy_reason(
+                source="groq",
+                label="Groq AI policy signal",
+                details=groq_reasoning,
+                score=int((groq_confidence or 0.0) * 100),
+            ),
+        )
 
     for item in promptscan.get("reasons", []):
         if isinstance(item, dict):
@@ -161,6 +188,11 @@ def evaluateactionpolicy(
         "summary": summary,
         "reasons": reasons,
         "promptinjection": promptscan,
+        "groq_verdict": groq_verdict,
+        "groq_reasoning": groq_reasoning,
+        "groq_confidence": groq_confidence,
+        "groq_model": groq_model,
+        "enforced_at": datetime.now(UTC).isoformat(),
     }
 
 

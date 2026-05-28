@@ -91,6 +91,7 @@ def _request_context(payload: ActionGuardRequest, request: Request) -> dict[str,
         "target": payload.target,
         "client_id": payload.client_id,
         "session_id": payload.session_id,
+        "agent_id": getattr(payload, "agent_id", None),
         "request_id": getattr(request.state, "request_id", None),
         "trace_id": getattr(request.state, "trace_id", None),
         "path": request.url.path,
@@ -279,6 +280,7 @@ def guard_action_decision(payload: ActionGuardRequest, request: Request) -> Acti
         content=payload.content,
         client_id=payload.client_id,
         session_id=payload.session_id,
+        agent_id=getattr(payload, "agent_id", None),
     )
     result["reasons"] = _normalize_reasons(result.get("reasons", []))
 
@@ -308,6 +310,15 @@ def guard_action_decision(payload: ActionGuardRequest, request: Request) -> Acti
             "risk_score": getattr(response, "risk_score", None),
             "verdict": getattr(response, "verdict", None),
             "reason_count": len(getattr(response, "reasons", [])),
+            "categories": getattr(response, "categories", []),
+            "agent_id": getattr(response, "agent_id", None),
+            "groq_verdict": getattr(response, "groq_verdict", None),
+            "groq_risk_score": getattr(response, "groq_risk_score", None),
+            "groq_confidence": getattr(response, "groq_confidence", None),
+            "groq_latency_ms": getattr(response, "groq_latency_ms", None),
+            "groq_model_name": getattr(response, "groq_model_name", None),
+            "enforced_at": getattr(response, "enforced_at", None),
+            "drift_detected": getattr(response, "drift_report", None) is not None,
         },
     )
 

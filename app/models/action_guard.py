@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -68,15 +68,28 @@ class ActionDecisionResponse(BaseModel):
     action_type: ActionType
     target: str
     content: str
-    policy_mode: Literal["allow", "review", "block"]
+    policy_mode: Literal["allow", "review", "block"] | None = None
     verdict: Literal["allow", "warn", "quarantine", "block"]
     summary: str
     risk_score: int
     matched_patterns: list[str]
-    scan_id: str | None
+    scan_id: str | None = None
     should_halt: bool
     should_warn: bool
     decision_source: Literal["policy", "scan", "policy_and_scan"]
     client_id: str | None = None
     session_id: str | None = None
+    agent_id: str | None = None
+    categories: list[str] = Field(default_factory=list)
+    drift_report: dict[str, Any] | None = None
     reasons: list[ActionReason] = Field(default_factory=list)
+    # Groq telemetry — full EnforcedVerdict surface
+    groq_verdict: str | None = None
+    groq_risk_score: int | None = None
+    groq_confidence: float | None = None
+    groq_latency_ms: float | None = None
+    groq_model_name: str | None = None
+    groq_signals: list[str] = Field(default_factory=list)
+    groq_summary: str | None = None
+    groq_decided_at: str | None = None
+    enforced_at: str | None = None
