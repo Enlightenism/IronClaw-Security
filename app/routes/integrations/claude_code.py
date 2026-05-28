@@ -18,6 +18,7 @@ from app.orchestrator.policy_enforcer import (
     build_policy_engine,
 )
 from app.services.integration_registry import build_integration_registry
+from app.services.secret_scanner import evaluate_secret_scanner_request, scan_for_secrets
 
 router = APIRouter(
     prefix="/integrations/claude-code",
@@ -46,7 +47,6 @@ def _build_adapter() -> ClaudeCodeAdapter:
         registry = build_integration_registry()
         return build_claude_code_adapter(registry)
     except KeyError:
-        # Registry record not present — return a headless adapter for policy-only path
         return ClaudeCodeAdapter(
             protocol_version=_ADAPTER_VERSION,
             health="ready",
@@ -112,6 +112,7 @@ class ClaudeCodeEvaluateResponse(BaseModel):
     decision_id: str | None
     reviewed_at: str
     audit_trail: dict[str, Any]
+    secret_scan: dict[str, Any]
 
 
 class ClaudeCodeHandshakeRequest(BaseModel):
@@ -162,13 +163,98 @@ class ClaudeCodeManifestResponse(BaseModel):
     response_model=ClaudeCodeEvaluateResponse,
     status_code=status.HTTP_200_OK,
     summary="Evaluate a Claude Code tool call or prompt payload",
-    description=("Accepts a Claude Code tool call or prompt payload, routes it through " "ClaudeCodeAdapter.execute() backed by the IronClaw policy engine, and " "returns a verdict (allow/warn/quarantine/block) with full reasoning and " "an auditable decision trail."),
+    description=(
+        "Accepts a Claude Code tool call or prompt payload. Runs secret scanning "
+        "on the incoming content before routing through ClaudeCodeAdapter.execute() "
+        "backed by the IronClaw policy engine. Returns a verdict (allow/warn/quarantine/block) "
+        "with full reasoning, secret scan results, and an auditable decision trail."
+    ),
 )
 async def evaluate_claude_code(
     body: ClaudeCodeEvaluateRequest,
 ) -> ClaudeCodeEvaluateResponse:
     trace_id = _trace_id()
 
+    # ------------------------------------------------------------------
+    # Secret scanning — runs before ANY adapter or policy dispatch.
+    # Combines target + content as the full inspection surface.
+    # ------------------------------------------------------------------
+    scan_payload = f"{body.target}\n{body.content}".strip()
+    secret_scan_result: dict[str, Any] = {}
+    try:
+        scan_result = evaluate_secret_scanner_request(
+            content=scan_payload,
+            context={
+                "trace_id": trace_id,
+                "platform": _PLATFORM,
+                "action_type": body.action_type,
+                "client_id": body.client_id,
+                "session_id": body.session_id,
+            },
+        )
+        secret_scan_result = scan_result if isinstance(scan_result, dict) else scan_result.model_dump()
+    except Exception:
+        # Fallback to raw scan so we never silently skip secret detection
+        try:
+            raw_findings = scan_for_secrets(scan_payload)
+            secret_scan_result = {
+                "findings": raw_findings,
+                "scanned": True,
+                "source": "fallback",
+            }
+        except Exception:
+            secret_scan_result = {"scanned": False, "findings": [], "source": "error"}
+
+    # Hard-block if secrets detected — no policy dispatch needed
+    secrets_found: list[Any] = secret_scan_result.get("findings", [])
+    if secrets_found:
+        return ClaudeCodeEvaluateResponse(
+            trace_id=trace_id,
+            adapter_name=_ADAPTER_NAME,
+            platform=_PLATFORM,
+            mode="enforce",
+            verdict="block",
+            should_allow=False,
+            should_warn=False,
+            should_quarantine=True,
+            should_block=True,
+            risk_score=100,
+            risk_level="critical",
+            summary="Secret scan detected sensitive data in payload. Request blocked before policy evaluation.",
+            matched_rules=["secret-scan-pre-flight"],
+            reasons=[
+                {
+                    "rule": "secret-scan-pre-flight",
+                    "detail": f"{len(secrets_found)} secret(s) detected in payload.",
+                    "findings_count": len(secrets_found),
+                }
+            ],
+            decision_id=None,
+            reviewed_at=_utc_now(),
+            audit_trail={
+                "trace_id": trace_id,
+                "decision_id": None,
+                "platform": _PLATFORM,
+                "adapter_name": _ADAPTER_NAME,
+                "action_type": body.action_type,
+                "target": body.target,
+                "client_id": body.client_id,
+                "session_id": body.session_id,
+                "risk_score_input": body.risk_score,
+                "risk_score_final": 100,
+                "risk_level": "critical",
+                "verdict": "block",
+                "matched_rule_count": 1,
+                "evaluated_at": _utc_now(),
+                "metadata": body.metadata,
+                "secret_scan_triggered": True,
+            },
+            secret_scan=secret_scan_result,
+        )
+
+    # ------------------------------------------------------------------
+    # Build adapter request
+    # ------------------------------------------------------------------
     try:
         adapter_request = build_claude_code_adapter_request(
             action_type=body.action_type,
@@ -221,6 +307,7 @@ async def evaluate_claude_code(
         "matched_rule_count": len(response.matched_rules),
         "evaluated_at": response.reviewed_at,
         "metadata": body.metadata,
+        "secret_scan_triggered": False,
     }
 
     return ClaudeCodeEvaluateResponse(
@@ -241,6 +328,7 @@ async def evaluate_claude_code(
         decision_id=response.decision_id,
         reviewed_at=response.reviewed_at,
         audit_trail=audit_trail,
+        secret_scan=secret_scan_result,
     )
 
 
@@ -272,7 +360,6 @@ async def claude_code_handshake(
     engine = build_policy_engine()
     policy_mode = engine.mode
 
-    # Normalise capabilities — AdapterHandshake.capabilities is list[dict]
     raw_caps: list[dict[str, Any]] = []
     if hasattr(handshake, "capabilities") and handshake.capabilities:
         for cap in handshake.capabilities:
@@ -325,7 +412,6 @@ async def claude_code_manifest() -> ClaudeCodeManifestResponse:
 
     engine = build_policy_engine()
 
-    # Derive policy bindings from live engine rules
     policy_bindings: dict[str, Any] = {
         "mode": engine.mode,
         "total_rules": len(engine.rules),
@@ -338,7 +424,6 @@ async def claude_code_manifest() -> ClaudeCodeManifestResponse:
         "tags": sorted({tag for rule in engine.rules for tag in rule.tags}),
     }
 
-    # Supported action types: guarded set + claude-code specific
     claude_code_action_types = sorted(
         TOOL_GUARDED_ACTIONS
         | {
@@ -351,10 +436,8 @@ async def claude_code_manifest() -> ClaudeCodeManifestResponse:
         }
     )
 
-    # Guarded categories — union of all rule action_types registered in engine
     guarded_categories = sorted({action for rule in engine.rules for action in rule.action_types} | TOOL_GUARDED_ACTIONS)
 
-    # Capabilities from manifest_data if available
     raw_caps: list[dict[str, Any]] = []
     if manifest_data is not None:
         caps_attr = getattr(manifest_data, "capabilities", None)

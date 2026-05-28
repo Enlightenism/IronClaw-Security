@@ -38,7 +38,7 @@ _REDACT_MIN_LENGTH = 12
 _SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     # AWS
     ("aws_access_key_id", re.compile(r"(?<![A-Z0-9])(AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}(?![A-Z0-9])")),
-    ("aws_secret_access_key", re.compile(r"(?i)aws[_\-\s]?secret[_\-\s]?access[_\-\s]?key[\s:='\"]+([\w/+]{40})")),
+    ("aws_secret_access_key", re.compile(r"(?i)aws[_\-\s]?secret[_\-\s]?access[_\-\s]?key[\s:='\"]+([\\w/+]{40})")),
     # GitHub
     ("github_pat_classic", re.compile(r"\bghp_[A-Za-z0-9]{36}\b")),
     ("github_pat_fine_grained", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{82}\b")),
@@ -52,7 +52,7 @@ _SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("anthropic_api_key", re.compile(r"\bsk-ant-(?:api03-)?[A-Za-z0-9\-_]{40,200}\b")),
     # Google
     ("google_api_key", re.compile(r"\bAIza[0-9A-Za-z\-_]{35}\b")),
-    ("google_oauth_client_secret", re.compile(r"(?i)client[_\-\s]?secret[\s:='\"]+([\w\-]{24,})")),
+    ("google_oauth_client_secret", re.compile(r"(?i)client[_\-\s]?secret[\s:='\"]+([\\w\-]{24,})")),
     # Stripe
     ("stripe_live_secret", re.compile(r"\bsk_live_[0-9a-zA-Z]{24,99}\b")),
     ("stripe_test_secret", re.compile(r"\bsk_test_[0-9a-zA-Z]{24,99}\b")),
@@ -64,7 +64,7 @@ _SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("slack_webhook_url", re.compile(r"https://hooks\.slack\.com/services/T[A-Z0-9]{8,}/B[A-Z0-9]{8,}/[A-Za-z0-9]{24}")),
     # Twilio
     ("twilio_account_sid", re.compile(r"\bAC[a-z0-9]{32}\b")),
-    ("twilio_auth_token", re.compile(r"(?i)twilio[_\-\s]?auth[_\-\s]?token[\s:='\"]+([\w]{32})")),
+    ("twilio_auth_token", re.compile(r"(?i)twilio[_\-\s]?auth[_\-\s]?token[\s:='\"]+([\\w]{32})")),
     # SendGrid
     ("sendgrid_api_key", re.compile(r"\bSG\.[A-Za-z0-9\-_]{22}\.[A-Za-z0-9\-_]{43}\b")),
     # HuggingFace
@@ -182,6 +182,9 @@ class SecretMatch:
             "context_snippet": self.context_snippet,
         }
 
+    def model_dump(self) -> dict[str, Any]:
+        return self.to_dict()
+
 
 @dataclass(slots=True)
 class SecretScanResult:
@@ -203,6 +206,9 @@ class SecretScanResult:
             "matches": [m.to_dict() for m in self.matches],
             "scanned_locations": list(self.scanned_locations),
         }
+
+    def model_dump(self) -> dict[str, Any]:
+        return self.to_dict()
 
 
 # ---------------------------------------------------------------------------
@@ -320,10 +326,13 @@ class SecretScannerAdapterRequest:
     file_content: str | None = None
     agent_id: str | None = None
     session_id: str | None = None
+    context: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_policy_input(self) -> PolicyInput:
         merged: dict[str, Any] = dict(self.metadata)
+        if self.context:
+            merged.update(self.context)
         if self.prompt_text:
             merged["prompt_text"] = self.prompt_text
         if self.tool_call_arguments:
@@ -349,8 +358,12 @@ class SecretScannerAdapterRequest:
             "file_content_present": self.file_content is not None,
             "agent_id": self.agent_id,
             "session_id": self.session_id,
+            "context": dict(self.context),
             "metadata": dict(self.metadata),
         }
+
+    def model_dump(self) -> dict[str, Any]:
+        return self.to_dict()
 
 
 @dataclass(slots=True)
@@ -406,6 +419,9 @@ class SecretScannerAdapterResponse:
             "metadata": dict(self.metadata),
         }
 
+    def model_dump(self) -> dict[str, Any]:
+        return self.to_dict()
+
 
 # ---------------------------------------------------------------------------
 # Builder helpers
@@ -422,6 +438,7 @@ def build_secret_scanner_adapter_request(
     file_content: str | None = None,
     agent_id: str | None = None,
     session_id: str | None = None,
+    context: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> SecretScannerAdapterRequest:
     normalized_action_type = _normalize_text(action_type)
@@ -441,6 +458,7 @@ def build_secret_scanner_adapter_request(
         file_content=file_content or None,
         agent_id=_normalize_text(agent_id) or None,
         session_id=_normalize_text(session_id) or None,
+        context=dict(context or {}),
         metadata=dict(metadata or {}),
     )
 
@@ -511,16 +529,27 @@ def evaluate_secret_scanner_request(
     engine: PolicyEngine,
     request: SecretScannerAdapterRequest,
     *,
+    context: dict[str, Any] | None = None,
     risk_score: int = 0,
     mode: AdapterExecutionMode = "enforce",
     trace_id: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> SecretScannerAdapterResponse:
+    # Merge caller-supplied context into extra_fields so it is scanned
+    merged_extra: dict[str, Any] | None = None
+    if request.content or context or request.context:
+        merged_extra = {}
+        if request.content:
+            merged_extra["content"] = request.content
+        if request.context:
+            merged_extra.update(request.context)
+        if context:
+            merged_extra.update(context)
     scan_result = scan_for_secrets(
         prompt_text=request.prompt_text,
         tool_call_arguments=request.tool_call_arguments,
         file_content=request.file_content,
-        extra_fields={"content": request.content} if request.content else None,
+        extra_fields=merged_extra or None,
     )
 
     adjusted_risk = max(

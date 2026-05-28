@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.routes.integrations.claude_code import router as claude_code_router
 from app.routes.integrations.compatibility import router as compatibility_router
 from app.routes.integrations.health import router as health_router
 from app.routes.integrations.installer import router as installer_router
@@ -25,3 +26,4 @@ router.include_router(health_router)
 router.include_router(lifecycle_router)
 router.include_router(readiness_router)
 router.include_router(observability_router)
+router.include_router(claude_code_router)
