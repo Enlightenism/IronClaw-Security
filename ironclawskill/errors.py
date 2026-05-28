@@ -175,6 +175,10 @@ def builderrorcontext(
     )
 
 
+# snake_case alias — matches _EXPORT_NAMES in ironclawskill/__init__.py
+build_error_context = builderrorcontext
+
+
 __all__ = [
     "ErrorContext",
     "IronClawConfigurationError",
@@ -194,5 +198,6 @@ __all__ = [
     "SkillReviewRequiredError",
     "SkillTimeoutError",
     "SkillValidationError",
+    "build_error_context",
     "builderrorcontext",
 ]

@@ -469,6 +469,99 @@ def builderrorresult(
     )
 
 
+# snake_case aliases — thin delegating wrappers for __init__.py export resolution
+def build_blocked_result(
+    request: SkillExecutionRequest,
+    message: str,
+    risk: RiskLevel = RiskLevel.HIGH,
+    detections: tuple[SkillDetection, ...] = (),
+    metadata: Mapping[str, JsonValue] | None = None,
+    outputtext: str | None = None,
+    rawresponse: Mapping[str, JsonValue] | None = None,
+    reasons: tuple[SkillReason, ...] | None = None,
+) -> SkillExecutionResult:
+    return buildblockedresult(
+        request,
+        message,
+        risk=risk,
+        detections=detections,
+        metadata=metadata,
+        outputtext=outputtext,
+        rawresponse=rawresponse,
+        reasons=reasons,
+    )
+
+
+def build_review_result(
+    request: SkillExecutionRequest,
+    message: str,
+    risk: RiskLevel = RiskLevel.MEDIUM,
+    detections: tuple[SkillDetection, ...] = (),
+    metadata: Mapping[str, JsonValue] | None = None,
+    outputtext: str | None = None,
+    rawresponse: Mapping[str, JsonValue] | None = None,
+    reasons: tuple[SkillReason, ...] | None = None,
+) -> SkillExecutionResult:
+    return buildreviewresult(
+        request,
+        message,
+        risk=risk,
+        detections=detections,
+        metadata=metadata,
+        outputtext=outputtext,
+        rawresponse=rawresponse,
+        reasons=reasons,
+    )
+
+
+def build_allowed_result(
+    request: SkillExecutionRequest,
+    outputtext: str | None = None,
+    outputartifacts: tuple[SkillOutputArtifact, ...] = (),
+    usage: SkillUsage | None = None,
+    metadata: Mapping[str, JsonValue] | None = None,
+    summary: str | None = None,
+    rawresponse: Mapping[str, JsonValue] | None = None,
+    reasons: tuple[SkillReason, ...] | None = None,
+    risk: RiskLevel = RiskLevel.LOW,
+) -> SkillExecutionResult:
+    return buildallowedresult(
+        request,
+        outputtext=outputtext,
+        outputartifacts=outputartifacts,
+        usage=usage,
+        metadata=metadata,
+        summary=summary,
+        rawresponse=rawresponse,
+        reasons=reasons,
+        risk=risk,
+    )
+
+
+def build_error_result(
+    request: SkillExecutionRequest,
+    message: str,
+    risk: RiskLevel = RiskLevel.HIGH,
+    metadata: Mapping[str, JsonValue] | None = None,
+    outputtext: str | None = None,
+    rawresponse: Mapping[str, JsonValue] | None = None,
+    reasons: tuple[SkillReason, ...] | None = None,
+    traceid: str | None = None,
+    error: Mapping[str, JsonValue] | None = None,
+) -> SkillExecutionResult:
+    return builderrorresult(
+        request,
+        message,
+        risk=risk,
+        metadata=metadata,
+        outputtext=outputtext,
+        rawresponse=rawresponse,
+        reasons=reasons,
+        traceid=traceid,
+        error=error,
+    )
+
+
 class SkillBaseModel(BaseModel):
     model_config = {"extra": "forbid", "populate_by_name": True}
 
@@ -1016,6 +1109,10 @@ __all__ = [
     "buildreviewresult",
     "buildskillerrorresponse",
     "buildskillsuccessresponse",
+    "build_allowed_result",
+    "build_blocked_result",
+    "build_error_result",
+    "build_review_result",
     "createrequestcontext",
     "createruntimecontext",
     "newid",
