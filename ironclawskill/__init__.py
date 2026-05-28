@@ -110,11 +110,30 @@ _EXPORT_NAMES: Final[dict[str, str]] = {
     "ProviderConfig": "config",
     "load_config": "config",
     "loadconfig": "config",
+    # adapterclaude
+    "ClaudeAdapter": "adapterclaude",
+    "ClaudeSkillAdapter": "adapterclaude",
+    "adaptclauderequest": "adapterclaude",
+    "adaptclauderesponse": "adapterclaude",
     # adaptergroq
     "GroqAdapter": "adaptergroq",
     "GroqSkillAdapter": "adaptergroq",
     "adaptgroqrequest": "adaptergroq",
     "adaptgroqresponse": "adaptergroq",
+    # adapteropenclaw
+    "OPENCLAW_PLATFORM": "adapteropenclaw",
+    "OpenClawAdapterError": "adapteropenclaw",
+    "OpenClawSkillAdapter": "adapteropenclaw",
+    "adapt_openclaw_request": "adapteropenclaw",
+    "adapt_openclaw_response": "adapteropenclaw",
+    "adaptopenclawrequest": "adapteropenclaw",
+    "adaptopenclawresponse": "adapteropenclaw",
+    "build_openclaw_error_response": "adapteropenclaw",
+    "build_openclaw_success_response": "adapteropenclaw",
+    "buildopenclawerrorresponse": "adapteropenclaw",
+    "buildopenclawsuccessresponse": "adapteropenclaw",
+    "openclaw_tool_input_schema": "adapteropenclaw",
+    "openclawtoolinputschema": "adapteropenclaw",
 }
 
 __all__ = [
