@@ -11,6 +11,13 @@ import requests
 
 _DEFAULT_API_BASE = "http://127.0.0.1:8011"
 
+_VERDICT_EXIT_CODES: dict[str, int] = {
+    "allow": 0,
+    "warn": 2,
+    "quarantine": 3,
+    "block": 4,
+}
+
 
 def _api_base(override: str | None = None) -> str:
     return (override or os.environ.get("IRONCLAW_API_BASE") or _DEFAULT_API_BASE).rstrip("/")
@@ -79,6 +86,12 @@ def main() -> None:
         help="Policy mode for the scan.",
     )
     parser.add_argument(
+        "--source",
+        type=str,
+        default="cli",
+        help="Source identifier passed to the brain (default: cli).",
+    )
+    parser.add_argument(
         "--session-id",
         type=str,
         default=None,
@@ -130,6 +143,12 @@ def main() -> None:
         dest="emit_json",
         help="Print full JSON response instead of a one-line summary.",
     )
+    parser.add_argument(
+        "--exit-on-verdict",
+        action="store_true",
+        dest="exit_on_verdict",
+        help=("Exit with a non-zero code based on verdict: " "allow=0, warn=2, quarantine=3, block=4."),
+    )
 
     args = parser.parse_args()
 
@@ -145,24 +164,27 @@ def main() -> None:
 
     session_id = args.session_id or f"cli-{uuid.uuid4()}"
     user_id = args.user_id or "cli-user"
-    base_url = _api_base(args.base_url)
+    resolved_base_url = _api_base(args.base_url)
 
     if args.verbose:
-        print(f"[ironclaw-brain] POST {base_url}/brain/decision  session={session_id}  chars={len(target_value)}", file=sys.stderr)
+        print(
+            f"[ironclaw-brain] POST {resolved_base_url}/brain/decision" f"  session={session_id}  chars={len(target_value)}",
+            file=sys.stderr,
+        )
 
     try:
         data = call_brain_decision(
             target_type=args.target_type,
             target_value=target_value,
             mode=args.mode,
-            source="cli",
+            source=args.source,
             session_id=session_id,
             user_id=user_id,
             context=args.context,
             use_history=not args.no_history,
             max_history=args.max_history,
             timeout=args.timeout,
-            base_url=args.base_url,
+            base_url=resolved_base_url,
         )
     except requests.HTTPError as exc:
         print(f"HTTP error from IronClaw API: {exc}", file=sys.stderr)
@@ -173,14 +195,18 @@ def main() -> None:
                 pass
         sys.exit(1)
     except requests.RequestException as exc:
-        print(f"Error connecting to IronClaw API at {base_url}: {exc}", file=sys.stderr)
+        print(f"Error connecting to IronClaw API at {resolved_base_url}: {exc}", file=sys.stderr)
         sys.exit(1)
 
     if args.emit_json:
         print(json.dumps(data, indent=2))
+        if args.exit_on_verdict:
+            decision: dict[str, Any] = data.get("decision") or {}
+            final_action = decision.get("final_action") or ""
+            sys.exit(_VERDICT_EXIT_CODES.get(final_action, 1))
         return
 
-    decision: dict[str, Any] = data.get("decision") or {}
+    decision = data.get("decision") or {}
     scan: dict[str, Any] = data.get("scan") or {}
 
     final_action = decision.get("final_action")
@@ -194,10 +220,13 @@ def main() -> None:
     patterns_str = ",".join(matched_patterns) if matched_patterns else "none"
 
     print(
-        f"ACTION={final_action} CONFIDENCE={confidence_str} RISK_SCORE={risk_score} LANE={sandbox_lane} PATTERNS={patterns_str}",
+        f"ACTION={final_action} CONFIDENCE={confidence_str} RISK_SCORE={risk_score}" f" LANE={sandbox_lane} PATTERNS={patterns_str}",
     )
     if reason:
         print(f"REASON: {reason}")
+
+    if args.exit_on_verdict:
+        sys.exit(_VERDICT_EXIT_CODES.get(final_action or "", 1))
 
 
 if __name__ == "__main__":

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-import os
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from app.services.secrets_vault import vault
 from client import IronClawClient, ScanResult
 from supabaseclient import (
     SupabaseAPIError,
@@ -29,15 +29,7 @@ ScanMode = Literal["enforce", "monitor", "strict"]
 
 app = FastAPI(title="IronClaw-Security API")
 
-# Engine base URL is resolved from ENGINE_BASE_URL env key at boot.
-# Falls back to APP_HOST + APP_PORT when ENGINE_BASE_URL is not set,
-# so single-process local setups work without extra configuration.
-_host = os.getenv("APP_HOST", "127.0.0.1")
-_port = os.getenv("APP_PORT", "8000")
-_default_engine_url = f"http://{_host}:{_port}"
-_engine_base_url: str = os.getenv("ENGINE_BASE_URL", _default_engine_url).rstrip("/")
-
-engine_client = IronClawClient(base_url=_engine_base_url)
+engine_client = IronClawClient(base_url=vault.engine_base_url())
 
 
 class ScanRequest(BaseModel):
