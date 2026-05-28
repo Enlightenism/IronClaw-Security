@@ -53,7 +53,7 @@ class ClaudeCodeAdapterRequest:
             action_type=self.action_type,
             target=self.target,
             content=self.content,
-            client_id=self.client_id,
+            agent_id=self.client_id,
             session_id=self.session_id,
             metadata=dict(self.metadata),
         )
@@ -149,8 +149,8 @@ def adapt_policy_decision_to_claude_code(
     metadata: dict[str, Any] | None = None,
 ) -> ClaudeCodeAdapterResponse:
     verdict: AdapterVerdict = decision.verdict
-    matched_rules = [match.rule_id for match in decision.matches]
-    reasons = [match.to_dict() for match in decision.matches]
+    matched_rules = [match.rule_id for match in decision.matched_rules]
+    reasons = [match.to_dict() for match in decision.matched_rules]
 
     return ClaudeCodeAdapterResponse(
         adapter_name="ironclaw-claude-code",
@@ -256,8 +256,6 @@ class ClaudeCodeAdapter:
         }
 
     def handshake(self) -> Any:
-        from datetime import datetime
-
         from app.adapters.base import AdapterHandshake
 
         return AdapterHandshake(
@@ -265,7 +263,7 @@ class ClaudeCodeAdapter:
             platform=self.platform,
             protocol_version=self.protocol_version,
             status=self.health,
-            connected_at=datetime.now(UTC).isoformat(),
+            connected_at=_utc_now(),
             capabilities=[c.to_dict() for c in self.record.capabilities] if self.record else [],
             metadata=self.base_metadata(),
         )
@@ -288,7 +286,6 @@ class ClaudeCodeAdapter:
             return self._execute_with_enforcer(**kwargs)
         # registry path
         request: AdapterExecutionRequest = args[0] if args else kwargs.get("request")
-        from app.adapters.base import _utc_now as _base_utc_now
 
         self.from_base_validate(request)
 
@@ -299,7 +296,7 @@ class ClaudeCodeAdapter:
                 success=False,
                 status="offline",
                 summary=f"{self.record.name} is offline and cannot execute '{request.action_type}'.",
-                completed_at=_base_utc_now(),
+                completed_at=_utc_now(),
             )
 
         result = AdapterExecutionResult(
@@ -308,7 +305,7 @@ class ClaudeCodeAdapter:
             success=True,
             status="guarded",
             summary=f"{self.record.name} guarded action '{request.action_type}' for target '{request.target}'.",
-            completed_at=_base_utc_now(),
+            completed_at=_utc_now(),
             output={
                 "request": request.to_dict(),
                 "integration_id": self.record.integration_id,

@@ -7,7 +7,14 @@ from app.adapters.mcp_tool_adapter import McpToolAdapter
 from app.adapters.openclaw_adapter import OpenClawAdapter
 from app.adapters.rebuff_adapter import RebuffAdapter
 from app.adapters.sandboxruntimeadapter import SandboxRuntimeAdapter
-from app.adapters.secret_scanner_adapter import SecretScannerAdapter
+from app.adapters.secret_scanner_adapter import (
+    SecretScannerAdapter,
+    SecretScannerAdapterRequest,
+    SecretScannerAdapterResponse,
+    build_secret_scanner_adapter,
+    build_secret_scanner_adapter_request,
+    scan_for_secrets,
+)
 
 __all__ = [
     "CapeAdapter",
@@ -20,4 +27,9 @@ __all__ = [
     "RebuffAdapter",
     "SandboxRuntimeAdapter",
     "SecretScannerAdapter",
+    "SecretScannerAdapterRequest",
+    "SecretScannerAdapterResponse",
+    "build_secret_scanner_adapter",
+    "build_secret_scanner_adapter_request",
+    "scan_for_secrets",
 ]

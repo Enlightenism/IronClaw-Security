@@ -72,6 +72,9 @@ class AdapterHandshake:
             "metadata": dict(self.metadata),
         }
 
+    def model_dump(self) -> dict[str, Any]:
+        return self.to_dict()
+
 
 @dataclass(slots=True)
 class AdapterExecutionRequest:
@@ -96,6 +99,9 @@ class AdapterExecutionRequest:
             "requested_at": self.requested_at,
             "metadata": dict(self.metadata),
         }
+
+    def model_dump(self) -> dict[str, Any]:
+        return self.to_dict()
 
 
 @dataclass(slots=True)
@@ -128,6 +134,9 @@ class AdapterExecutionResult:
             "output": dict(self.output),
             "metadata": dict(self.metadata),
         }
+
+    def model_dump(self) -> dict[str, Any]:
+        return self.to_dict()
 
 
 class SupportsAdapter(Protocol):
@@ -199,6 +208,10 @@ class BaseIntegrationAdapter:
             raise ValueError(
                 f"unsupported action_type '{request.action_type}' for adapter '{self.adapter_slug}'",
             )
+
+    # Alias used by registry-wired adapter subclasses (e.g. ClaudeCodeAdapter)
+    def from_base_validate(self, request: AdapterExecutionRequest) -> None:
+        return self.validate_request(request)
 
     def build_result(
         self,
