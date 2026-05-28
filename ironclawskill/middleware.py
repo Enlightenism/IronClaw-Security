@@ -33,7 +33,7 @@ from .errors import (
     SkillPolicyBlockedError,
     SkillValidationError,
 )
-from .runtime import IronClawSkillRuntime
+from .runtime import IronClawRuntime
 
 SkillHandler = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
 
@@ -48,6 +48,8 @@ def _provider_value(value: Any) -> SkillProvider:
     normalized = str(value or "").strip().lower()
     if normalized == SkillProvider.CLAUDE.value:
         return SkillProvider.CLAUDE
+    if normalized == SkillProvider.GROQ.value:
+        return SkillProvider.GROQ
     if normalized == SkillProvider.OPENCLAW.value:
         return SkillProvider.OPENCLAW
     return SkillProvider.OPENCLAW
@@ -685,11 +687,11 @@ def _result_from_payload(
 class IronClawSkillMiddleware:
     def __init__(
         self,
-        runtime: IronClawSkillRuntime | None = None,
+        runtime: IronClawRuntime | None = None,
         *,
         config: IronClawSkillConfig | None = None,
     ) -> None:
-        self.runtime = runtime or IronClawSkillRuntime(config=config)
+        self.runtime = runtime or IronClawRuntime(config=config)
         self.config = config or self.runtime.config
 
     async def dispatch(
@@ -831,7 +833,7 @@ class IronClawSkillMiddleware:
         )
         if providername not in {item.value for item in SkillProvider}:
             raise SkillValidationError(
-                "provider must be one of: claude, openclaw.",
+                f"provider must be one of: {', '.join(item.value for item in SkillProvider)}.",
                 details={"provider": providername},
             )
 
@@ -1303,7 +1305,7 @@ class IronClawSkillMiddleware:
 
 
 def buildmiddleware(
-    runtime: IronClawSkillRuntime | None = None,
+    runtime: IronClawRuntime | None = None,
     *,
     config: IronClawSkillConfig | None = None,
 ) -> IronClawSkillMiddleware:

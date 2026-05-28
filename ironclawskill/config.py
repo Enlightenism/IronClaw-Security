@@ -74,7 +74,6 @@ def _load_structured_config(path: Path) -> dict[str, Any]:
         try:
             return tomllib.loads(text)
         except Exception:
-            # Fall through to JSON for legacy configs written as JSON.
             pass
 
     try:
@@ -146,6 +145,12 @@ class PathsConfig:
             quarantine_dir=root / "quarantine",
             output_dir=root / "output",
         )
+
+
+# Providers that receive first-class env-var override support.
+# Adding a name here is the single change required to wire a new provider
+# into the IRONCLAWSKILL_<PROVIDER>_* environment variable block.
+_ENV_OVERRIDE_PROVIDERS: tuple[str, ...] = ("openclaw", "claude", "groq")
 
 
 @dataclass(slots=True, frozen=True)
@@ -348,7 +353,7 @@ class IronClawSkillConfig:
     def with_env_overrides(self) -> IronClawSkillConfig:
         providers = {name: provider for name, provider in self.providers.items()}
 
-        for provider_name in ("openclaw", "claude"):
+        for provider_name in _ENV_OVERRIDE_PROVIDERS:
             prefix = f"IRONCLAWSKILL_{provider_name.upper()}_"
             existing = providers.get(provider_name, ProviderConfig(name=provider_name, enabled=False))
             providers[provider_name] = ProviderConfig(

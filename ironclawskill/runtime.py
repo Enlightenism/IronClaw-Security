@@ -7,6 +7,7 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from .adapterclaude import ClaudeSkillAdapter
+from .adaptergroq import GroqSkillAdapter
 from .adapteropenclaw import OpenClawSkillAdapter
 from .config import IronClawSkillConfig, load_config
 from .contracts import (
@@ -45,6 +46,8 @@ def _coerce_provider(value: Any, default: SkillProvider) -> SkillProvider:
         return SkillProvider.CLAUDE
     if normalized == SkillProvider.OPENCLAW.value:
         return SkillProvider.OPENCLAW
+    if normalized == SkillProvider.GROQ.value:
+        return SkillProvider.GROQ
     return default
 
 
@@ -129,8 +132,6 @@ class IronClawRuntime:
     _adapters: dict[str, RuntimeAdapter] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        # Do not eagerly build adapters; defer to first execute/health to
-        # avoid raising configuration errors at import time during tests.
         if self._adapters is None:
             self._adapters = {}
 
@@ -222,9 +223,9 @@ class IronClawRuntime:
         claude_cfg = self.config.providers.get("claude")
         if claude_cfg and claude_cfg.enabled:
             adapters["claude"] = ClaudeSkillAdapter(config=self.config)
-        # For import-time health checks and tests, do not raise if there are no
-        # enabled adapters; an empty mapping is acceptable and will cause
-        # a clear configuration error only when execute() is called.
+        groq_cfg = self.config.providers.get("groq")
+        if groq_cfg and groq_cfg.enabled:
+            adapters["groq"] = GroqSkillAdapter(config=self.config)
         return adapters
 
     def _require_adapter(self, provider_name: str) -> RuntimeAdapter:
@@ -235,18 +236,22 @@ class IronClawRuntime:
 
     def _resolve_provider_name(self, request: SkillExecutionRequest) -> str:
         provider = getattr(request, "provider", None)
-        if isinstance(provider, SkillProvider):
-            return provider.value
-        normalized = _normalize_text(provider)
+        coerced = _coerce_provider(provider, SkillProvider.OPENCLAW)
+        if coerced is not SkillProvider.OPENCLAW or (isinstance(provider, SkillProvider) and provider is SkillProvider.OPENCLAW):
+            return coerced.value
+        normalized = _normalize_text(getattr(provider, "value", provider)).lower()
         if normalized:
-            return normalized.lower()
-        default_provider = _normalize_text(self.config.default_provider).lower()
-        return default_provider or SkillProvider.OPENCLAW.value
+            return normalized
+        default = _normalize_text(self.config.default_provider).lower()
+        return default or SkillProvider.OPENCLAW.value
 
     def _resolve_trace_id(self, request: SkillExecutionRequest) -> str:
-        context = getattr(request, "context", None)
-        trace_id = _normalize_text(getattr(context, "traceid", None))
-        return trace_id or f"trace_{uuid4().hex}"
+        ctx = getattr(request, "context", None)
+        if ctx is not None:
+            tid = getattr(ctx, "traceid", None)
+            if tid:
+                return str(tid)
+        return str(uuid4())
 
     def _build_result(
         self,
@@ -258,114 +263,61 @@ class IronClawRuntime:
         started_clock: float,
     ) -> SkillExecutionResult:
         finished_at = _utc_now()
-        duration_ms = max(0, int((perf_counter() - started_clock) * 1000))
-        explicit_decision = self._decision_field(decision, "decision")
-        allowed = self._decision_bool(
-            decision,
-            "allowed",
-            default=explicit_decision == SkillDecision.ALLOW,
+        elapsed_ms = int((perf_counter() - started_clock) * 1000)
+        coerced_decision = _coerce_skill_decision(
+            allowed=decision.decision is SkillDecision.ALLOW,
+            blocked=decision.decision is SkillDecision.BLOCK,
+            requires_review=decision.decision is SkillDecision.REVIEW,
+            explicit=decision.decision,
         )
-        blocked = self._decision_bool(
-            decision,
-            "blocked",
-            default=explicit_decision == SkillDecision.BLOCK,
+        coerced_risk = _coerce_risk_level(decision.risk)
+        usage = decision.usage if isinstance(decision.usage, SkillUsage) else SkillUsage()
+        updated_usage = SkillUsage(
+            inputtokens=usage.inputtokens,
+            outputtokens=usage.outputtokens,
+            totaltokens=usage.totaltokens,
+            computeunits=usage.computeunits,
+            billableunits=usage.billableunits,
+            estimatedcostusd=usage.estimatedcostusd,
+            latencyms=elapsed_ms,
         )
-        requires_review = self._decision_bool(
-            decision,
-            "requires_review",
-            default=explicit_decision == SkillDecision.REVIEW,
-        )
-        resolved_decision = _coerce_skill_decision(
-            allowed=allowed,
-            blocked=blocked,
-            requires_review=requires_review,
-            explicit=explicit_decision,
-        )
-        risk = _coerce_risk_level(self._decision_field(decision, "risk"), default=RiskLevel.LOW)
-        usage = self._coerce_usage(self._decision_field(decision, "usage"), duration_ms=duration_ms)
-        metadata = _clean_mapping(self._decision_field(decision, "metadata"))
-        metadata.update(
-            {
-                "trace_id": self._resolve_trace_id(request),
-                "runtime_provider": provider_name,
-                "runtime_environment": self.config.environment,
-                "policy_hits": self._coerce_str_list(self._decision_field(decision, "policy_hits")),
-                "warnings": self._coerce_str_list(self._decision_field(decision, "warnings")),
-                "raw_response": self._decision_field(decision, "raw_response"),
-            },
-        )
-        status = "completed"
-        if resolved_decision is SkillDecision.BLOCK:
-            status = "blocked"
-        elif resolved_decision is SkillDecision.REVIEW:
-            status = "review"
-        elif resolved_decision is SkillDecision.ERROR:
-            status = "failed"
-        message = _normalize_text(self._decision_field(decision, "message")) or None
-        output_text = _normalize_text(self._decision_field(decision, "output_text")) or None
+        metadata = _clean_mapping(dict(decision.metadata))
+        metadata.setdefault("trace_id", self._resolve_trace_id(request))
+        if decision.reasons:
+            metadata["policy_hits"] = [r.label for r in decision.reasons if r.label]
+        provider = _coerce_provider(provider_name, SkillProvider.OPENCLAW)
+        status_map = {
+            SkillDecision.ALLOW: "completed",
+            SkillDecision.BLOCK: "blocked",
+            SkillDecision.REVIEW: "review",
+            SkillDecision.ERROR: "failed",
+        }
         return SkillExecutionResult(
             requestid=request.requestid,
-            provider=_coerce_provider(provider_name, default=request.provider),
-            decision=resolved_decision,
-            risk=risk,
-            status=status,
-            message=message,
-            outputtext=output_text,
-            usage=usage,
+            provider=provider,
+            decision=coerced_decision,
+            risk=coerced_risk,
+            status=status_map.get(coerced_decision, "completed"),
+            usage=updated_usage,
             metadata=metadata,
             startedat=started_at,
             finishedat=finished_at,
         )
 
     def _enforce_fail_closed(self, result: SkillExecutionResult) -> None:
-        if not self.config.fail_closed:
-            return
-        if result.decision is SkillDecision.ERROR:
-            raise IronClawRuntimeError("Runtime decision resolved to error under fail-closed mode")
-
-    @staticmethod
-    def _decision_field(decision: Any, name: str) -> Any:
-        if hasattr(decision, name):
-            return getattr(decision, name)
-        if isinstance(decision, dict):
-            return decision.get(name)
-        return None
-
-    @staticmethod
-    def _decision_bool(decision: Any, name: str, default: bool = False) -> bool:
-        value = IronClawRuntime._decision_field(decision, name)
-        if value is None:
-            return default
-        return bool(value)
+        if self.config.fail_closed and result.decision is SkillDecision.ERROR:
+            raise IronClawRuntimeError(f"Fail-closed policy triggered: execution returned ERROR for request '{result.requestid}'")
 
     @staticmethod
     def _coerce_str_list(value: Any) -> list[str]:
         if value is None:
             return []
-        if isinstance(value, list | tuple | set):
-            return [str(item).strip() for item in value if str(item).strip()]
-        text = str(value).strip()
-        return [text] if text else []
-
-    @staticmethod
-    def _coerce_usage(value: Any, *, duration_ms: int) -> SkillUsage:
-        if isinstance(value, SkillUsage):
-            return value
-        if isinstance(value, dict):
-            return SkillUsage(
-                inputtokens=int(value.get("inputtokens", value.get("input_tokens", 0)) or 0),
-                outputtokens=int(value.get("outputtokens", value.get("output_tokens", 0)) or 0),
-                totaltokens=int(value.get("totaltokens", value.get("total_tokens", 0)) or 0),
-                computeunits=int(value.get("computeunits", value.get("compute_units", 0)) or 0),
-                billableunits=int(value.get("billableunits", value.get("billable_units", 0)) or 0),
-                estimatedcostusd=float(
-                    value.get("estimatedcostusd", value.get("estimated_cost_usd", 0.0)) or 0.0,
-                ),
-                latencyms=int(value.get("latencyms", duration_ms) or duration_ms),
-            )
-        return SkillUsage(latencyms=duration_ms)
+        if isinstance(value, (list, tuple)):
+            return [str(v) for v in value]
+        return [str(value)]
 
 
+# Alias — test and middleware imports use IronClawSkillRuntime
 IronClawSkillRuntime = IronClawRuntime
 
 
@@ -386,9 +338,6 @@ def runtimesnapshot(
     config: IronClawSkillConfig | None = None,
     config_path: str | None = None,
 ) -> JsonDict:
-    """Backwards-compatible helper for CLI: return a lightweight runtime
-    health snapshot without forcing callers to construct a runtime directly.
-    """
     runtime = IronClawRuntime.create(config=config, config_path=config_path)
     return runtime.health()
 
