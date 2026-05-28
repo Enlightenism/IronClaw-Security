@@ -38,7 +38,8 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Topic :: Internet :: WWW/HTTP :: WSGI :: Application",
   "Topic :: Security",
-  "Topic :: Software Development :: Libraries :: Python Modules"
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed"
 ]
 dependencies = [
   "fastapi>=0.115,<0.136",
@@ -125,6 +126,11 @@ exclude = [
   "output*"
 ]
 namespaces = false
+
+[tool.setuptools.package-data]
+ironclawskill = ["py.typed"]
+ironclaw_sdk = ["py.typed"]
+app = ["py.typed"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
