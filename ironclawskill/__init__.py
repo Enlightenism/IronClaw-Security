@@ -110,6 +110,11 @@ _EXPORT_NAMES: Final[dict[str, str]] = {
     "ProviderConfig": "config",
     "load_config": "config",
     "loadconfig": "config",
+    # adaptergroq
+    "GroqAdapter": "adaptergroq",
+    "GroqSkillAdapter": "adaptergroq",
+    "adaptgroqrequest": "adaptergroq",
+    "adaptgroqresponse": "adaptergroq",
 }
 
 __all__ = [
