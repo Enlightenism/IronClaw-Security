@@ -199,11 +199,13 @@ Copy the environment template and fill in your values before starting:
 cp .env.example .env
 ```
 
-Install dependencies:
+Install dependencies (editable install — do not run `pip install -r requirements.txt` directly):
 
 ```powershell
 pip install -e ".[dev]"
 ```
+
+The editable install (`-e`) wires all CLI entry points and package imports from source. Running `pip install -r requirements.txt` instead will produce a stale install that does not register the CLI scripts and will break `ironclaw`, `ironclaw-brain`, and related entry points.
 
 ---
 
@@ -290,6 +292,7 @@ Copy `.env.example` to `.env`. All keys listed below. Keys marked **REQUIRED** w
 | `APP_HOST` | `127.0.0.1` | Bind address |
 | `APP_PORT` | `8000` | Bind port |
 | `APP_BASE_URL` | `http://127.0.0.1:8000` | Base URL used in generated links |
+| `ENGINE_BASE_URL` | `http://{APP_HOST}:{APP_PORT}` | Target URL for the IronClaw engine — consumed by `service.py` and `IronClawClient` callers. Defaults to `http://127.0.0.1:8000`. Override when the engine runs on a different host or port than the default binding. |
 | `IRONCLAW_ENV` | `development` | Legacy alias — kept for backward compatibility |
 | `IRONCLAW_BASE_URL` | `http://127.0.0.1:8000` | Legacy alias — kept for backward compatibility |
 
@@ -365,7 +368,7 @@ All values are integers 0–100. Constraint: `RISK_THRESHOLD_ALLOW_MAX` < `RISK_
 |---|---|---|
 | `GROQ_ENABLED` | `false` | Enable Groq-powered analysis passes |
 | `GROQ_API_KEY` | *(empty)* | **REQUIRED when `GROQ_ENABLED=true`** |
-| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq model identifier |
+| `GROQ_MODEL` | `llama3-8b-8192` | Groq model identifier |
 | `GROQ_TIMEOUT_SECONDS` | `60.0` | Per-request timeout in seconds |
 
 ### OpenAI
@@ -421,21 +424,6 @@ V1 focus areas:
 - Incident and quarantine routes required to support protected decisions.
 
 If a route does not directly support install, integration, interception, sandbox verification, verdicting, or minimal protected status visibility, it is not part of the core v1 shipping path.
-
----
-
-## Development method
-
-1. Update one page at a time.
-2. Replace the full page when needed.
-3. Run:
-
-```powershell
-python -m pytest -q
-```
-
-4. Fix the next failing or incomplete page.
-5. Repeat until the v1 mission path is complete.
 
 ---
 

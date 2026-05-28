@@ -79,6 +79,7 @@ class ReviewResponse(BaseModel):
     groq_risk_score: int | None = None
     groq_confidence: float | None = None
     groq_latency_ms: float | None = None
+    groq_model_name: str | None = None
     groq_signals: list[str] = Field(default_factory=list)
     groq_summary: str | None = None
     groq_decided_at: str | None = None
@@ -145,6 +146,7 @@ def createreviewitem(
         "groq_risk_score": decision.get("groq_risk_score"),
         "groq_confidence": decision.get("groq_confidence"),
         "groq_latency_ms": decision.get("groq_latency_ms"),
+        "groq_model_name": decision.get("groq_model_name"),
         "groq_signals": decision.get("groq_signals") or [],
         "groq_summary": decision.get("groq_summary"),
         "groq_decided_at": decision.get("groq_decided_at"),

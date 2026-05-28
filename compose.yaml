@@ -43,7 +43,7 @@ services:
       ENVIRONMENT: "production"
       DEBUG: "false"
       RELOAD: "false"
-      API_PREFIX: ""
+      API_PREFIX: "/api"
 
       # -----------------------------------------------------------------------
       # Server binding
@@ -136,7 +136,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "curl --fail --silent http://127.0.0.1:8000/health || curl --fail --silent http://127.0.0.1:8000/api/health || exit 1",
+          "curl --fail --silent http://127.0.0.1:8000/api/health || curl --fail --silent http://127.0.0.1:8000/api/health/liveness || exit 1",
         ]
       interval: 30s
       timeout: 5s

@@ -11,6 +11,8 @@ from fastapi import Depends, FastAPI
 from fastapi.openapi.utils import get_openapi
 from fastapi.routing import APIRoute
 
+from app.core.settings import get_settings
+
 ProtectedDependencyFactory = Callable[[], Any]
 
 _log = logging.getLogger(__name__)
@@ -247,6 +249,8 @@ def _install_core_routes(app: FastAPI) -> None:
     if getattr(app.state, "_core_routes_installed", False):
         return
 
+    settings = get_settings()
+
     get_system_status = _optional_attr("app.api.system", "get_system_status")
     get_ui_manifest = _optional_attr("app.api.ui_pages", "get_ui_manifest")
     get_runtime_status = _optional_attr("app.ui.runtimestatus", "get_runtime_status_page")
@@ -275,7 +279,7 @@ def _install_core_routes(app: FastAPI) -> None:
             get_system_status,
             {
                 "status": "ok",
-                "service": "IronClaw-Security",
+                "service": settings.app_name,
             },
         )
 
@@ -285,7 +289,7 @@ def _install_core_routes(app: FastAPI) -> None:
             get_ui_manifest,
             {
                 "status": "ok",
-                "service": "IronClaw-Security",
+                "service": settings.app_name,
                 "pages": [],
             },
         )
@@ -424,9 +428,11 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    settings = get_settings()
+
     app = FastAPI(
-        title="IronClaw-Security",
-        version="1.0.0",
+        title=settings.app_name,
+        version=settings.app_version,
         description=("Local-first AI security API for prompt inspection, guarded execution, " "and protected runtime controls."),
         docs_url=None,
         redoc_url=None,

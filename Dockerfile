@@ -45,8 +45,8 @@ USER ironclaw
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl --fail --silent http://127.0.0.1:8000/health \
-    || curl --fail --silent http://127.0.0.1:8000/health/liveness \
+    CMD curl --fail --silent http://127.0.0.1:8000/api/health \
+    || curl --fail --silent http://127.0.0.1:8000/api/health/liveness \
     || exit 1
 
 # No secrets are accepted here. All runtime configuration is injected
