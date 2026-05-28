@@ -9,6 +9,7 @@ __package_name__: Final[str] = "ironclawskill"
 
 _MODULE_NAMES: Final[tuple[str, ...]] = (
     "adapterclaude",
+    "adaptergroq",
     "adapteropenclaw",
     "billing",
     "cli",
@@ -22,6 +23,7 @@ _MODULE_NAMES: Final[tuple[str, ...]] = (
 )
 
 _EXPORT_NAMES: Final[dict[str, str]] = {
+    # contracts
     "SkillProvider": "contracts",
     "SkillMode": "contracts",
     "SkillDecision": "contracts",
@@ -43,6 +45,8 @@ _EXPORT_NAMES: Final[dict[str, str]] = {
     "SkillProviderDecision": "contracts",
     "SkillExecutionRequest": "contracts",
     "SkillResponseEnvelopeRuntime": "contracts",
+    "JsonValue": "contracts",  # canonical definition — NOT config
+    "JsonPrimitive": "contracts",
     "build_allowed_result": "contracts",
     "build_blocked_result": "contracts",
     "build_error_result": "contracts",
@@ -51,12 +55,14 @@ _EXPORT_NAMES: Final[dict[str, str]] = {
     "buildblockedresult": "contracts",
     "builderrorresult": "contracts",
     "buildreviewresult": "contracts",
+    # context
     "SkillRequestContext": "context",
     "SkillRuntimeContext": "context",
     "create_request_context": "context",
     "create_runtime_context": "context",
     "createrequestcontext": "context",
     "createruntimecontext": "context",
+    # errors
     "ErrorContext": "errors",
     "IronClawSkillError": "errors",
     "SkillConfigurationError": "errors",
@@ -77,13 +83,19 @@ _EXPORT_NAMES: Final[dict[str, str]] = {
     "IronClawRuntimeError": "errors",
     "build_error_context": "errors",
     "builderrorcontext": "errors",
+    # middleware
     "IronClawSkillMiddleware": "middleware",
     "SkillHandler": "middleware",
     "buildmiddleware": "middleware",
+    # runtime
     "IronClawSkillRuntime": "runtime",
     "IronClawRuntime": "runtime",
+    "RuntimeAdapter": "runtime",
     "RuntimeExecutionTrace": "runtime",
+    "create_runtime": "runtime",
     "createruntime": "runtime",
+    "runtimesnapshot": "runtime",
+    # router
     "build_router": "router",
     "create_router": "router",
     "get_router": "router",
@@ -91,11 +103,12 @@ _EXPORT_NAMES: Final[dict[str, str]] = {
     "getrouter": "router",
     "router": "router",
     "IronClawSkillRouter": "router",
+    # config
     "IronClawSkillConfig": "config",
     "PathsConfig": "config",
     "SecurityConfig": "config",
     "ProviderConfig": "config",
-    "JsonValue": "config",
+    "load_config": "config",
     "loadconfig": "config",
 }
 
