@@ -16,6 +16,7 @@ SEVERITY_RANK = {
     "critical": 4,
 }
 
+
 VERDICT_RANK = {
     "allow": 1,
     "monitor": 2,
@@ -349,9 +350,36 @@ def build_artifact_analyzer(
     )
 
 
+def analyze_artifact_dict(
+    artifact: dict[str, Any],
+    *,
+    analyzer: ArtifactAnalyzer | None = None,
+    context: str | None = None,
+    sandbox_profile: str = "windows-office-user",
+) -> ArtifactAnalysisResult:
+    _analyzer = analyzer or build_artifact_analyzer()
+    raw_content = artifact.get("content") or artifact.get("data") or ""
+    file_name: str | None = artifact.get("file_name") or artifact.get("filename") or None
+    source_url: str | None = artifact.get("source_url") or artifact.get("url") or None
+
+    if isinstance(raw_content, bytes):
+        payload = raw_content
+    else:
+        payload = str(raw_content).encode("utf-8", errors="ignore")
+
+    return _analyzer.analyze_bytes(
+        payload,
+        file_name=file_name,
+        source_url=source_url,
+        context=context,
+        sandbox_profile=sandbox_profile,
+    )
+
+
 __all__ = [
     "ArtifactAnalysisComponent",
     "ArtifactAnalysisResult",
     "ArtifactAnalyzer",
+    "analyze_artifact_dict",
     "build_artifact_analyzer",
 ]

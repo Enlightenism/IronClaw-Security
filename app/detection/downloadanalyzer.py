@@ -622,9 +622,65 @@ def build_download_analyzer(
     )
 
 
+def analyze_download_dict(
+    *,
+    actiontype: str | None = None,
+    target: str | None = None,
+    content: str | None = None,
+    filepath: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    url: str | None = None
+    file_name: str | None = target or filepath or None
+
+    if target and (target.startswith("http://") or target.startswith("https://")):
+        url = target
+        file_name = filepath or None
+
+    analyzer = build_download_analyzer()
+    result = analyzer.analyze(
+        url=url,
+        file_name=file_name,
+        context=actiontype or "download-analysis",
+    )
+    result_dict = result.as_dict()
+
+    verdict = result_dict.get("verdict", "allow")
+    score = float(result_dict.get("score", 0.0))
+    risk_delta = int(round(score * 100))
+
+    reasons_out: list[dict[str, Any]] = [
+        {
+            "source": "downloadanalyzer",
+            "label": r,
+            "details": r,
+            "score": 0,
+        }
+        for r in result_dict.get("reasons", [])
+    ]
+
+    return {
+        "verdict": verdict,
+        "score": score,
+        "severity": result_dict.get("severity", "low"),
+        "confidence": result_dict.get("confidence", 0.0),
+        "riskdelta": risk_delta,
+        "reasons": reasons_out,
+        "signals": result_dict.get("signals", []),
+        "metadata": result_dict.get("metadata", {}),
+        "shouldreview": verdict in {"review", "monitor"},
+        "shouldblock": verdict == "block",
+        "shouldquarantine": False,
+        "blocked": verdict == "block",
+        "download_id": result_dict.get("download_id"),
+        "analyzed_at": result_dict.get("analyzed_at"),
+    }
+
+
 __all__ = [
     "DownloadAnalysisResult",
     "DownloadAnalyzer",
     "DownloadSignal",
+    "analyze_download_dict",
     "build_download_analyzer",
 ]
