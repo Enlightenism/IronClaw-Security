@@ -9,10 +9,7 @@ from app.models.action_guard import (
     ActionGuardResponse,
     ActionPolicyResponse,
 )
-from app.services.action_decision import (
-    ActionExecutionDecision,
-    evaluate_action_execution,
-)
+from app.services.action_decision import evaluate_action_execution
 from app.services.action_guard import (
     ActionGuardDecision,
     analyze_action,
@@ -23,6 +20,7 @@ from app.services.action_policy import (
 )
 from app.services.behavioral_baseline import get_behavioral_baseline_store
 from app.services.telemetry import append_telemetry_event
+from app.services.verdict_enforcer import EnforcedVerdict
 
 router = APIRouter(dependencies=[Depends(limit_guard_routes)])
 
@@ -33,8 +31,6 @@ _REASON_SOURCE_MAP = {
     "prompt_injection": "scan",
 }
 
-# Verdict severity order — maps action_guard/action_policy verdicts to a
-# comparable rank so we can escalate based on threat detection results.
 _VERDICT_RANK: dict[str, int] = {
     "allow": 1,
     "warn": 2,
@@ -42,7 +38,6 @@ _VERDICT_RANK: dict[str, int] = {
     "block": 4,
 }
 
-# Map DetectionVerdict values → action_guard VerdictType equivalents
 _DETECTION_VERDICT_MAP: dict[str, str] = {
     "allow": "allow",
     "monitor": "warn",
@@ -108,11 +103,6 @@ def _record_baseline_observation(
     risk_score: int,
     matched_patterns: list[str],
 ) -> None:
-    """Passively feed each analyzed action into the behavioral baseline store.
-
-    Failures are intentionally swallowed so that baseline instrumentation
-    never disrupts the guard response contract.
-    """
     agent_id = getattr(payload, "agent_id", None) or payload.client_id
     if not agent_id:
         return
@@ -135,13 +125,6 @@ def _run_threat_screen(
     current_verdict: str,
     caller_context: str,
 ) -> tuple[str, list[dict[str, object]]]:
-    """
-    Call run_detection() from app.api.threat_detection as the single threat
-    detection entry point. Returns an (escalated_verdict, extra_reasons) tuple.
-
-    Failures are fail-open: if run_detection is unavailable or raises,
-    the original verdict is returned unchanged and no reasons are added.
-    """
     try:
         from app.api.threat_detection import run_detection  # noqa: PLC0415
         from app.schemas.threat_detection import DetectionRequest  # noqa: PLC0415
@@ -205,7 +188,6 @@ def guard_action(payload: ActionGuardRequest, request: Request) -> ActionGuardRe
     )
     result["reasons"] = _normalize_reasons(result.get("reasons", []))
 
-    # Threat detection screen — escalate verdict via single entry point
     escalated_verdict, threat_reasons = _run_threat_screen(
         payload,
         current_verdict=result.get("verdict", "allow"),
@@ -253,7 +235,6 @@ def guard_action_policy(payload: ActionGuardRequest, request: Request) -> Action
     )
     result["reasons"] = _normalize_reasons(result.get("reasons", []))
 
-    # Threat detection screen — escalate verdict via single entry point
     escalated_verdict, threat_reasons = _run_threat_screen(
         payload,
         current_verdict=result.get("verdict", "allow"),
@@ -292,7 +273,7 @@ def guard_action_decision(payload: ActionGuardRequest, request: Request) -> Acti
         _request_context(payload, request),
     )
 
-    result: ActionExecutionDecision = evaluate_action_execution(
+    result: EnforcedVerdict = evaluate_action_execution(
         action_type=payload.action_type,
         target=payload.target,
         content=payload.content,
@@ -301,7 +282,6 @@ def guard_action_decision(payload: ActionGuardRequest, request: Request) -> Acti
     )
     result["reasons"] = _normalize_reasons(result.get("reasons", []))
 
-    # Threat detection screen — escalate verdict via single entry point
     escalated_verdict, threat_reasons = _run_threat_screen(
         payload,
         current_verdict=result.get("verdict", "allow"),
