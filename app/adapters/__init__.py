@@ -11,9 +11,12 @@ from app.adapters.secret_scanner_adapter import (
     SecretScannerAdapter,
     SecretScannerAdapterRequest,
     SecretScannerAdapterResponse,
+    adapt_policy_decision_to_secret_scanner,
     build_secret_scanner_adapter,
     build_secret_scanner_adapter_request,
+    evaluate_secret_scanner_request,
     scan_for_secrets,
+    summarize_secret_scanner_adapter_response,
 )
 
 __all__ = [
@@ -29,7 +32,10 @@ __all__ = [
     "SecretScannerAdapter",
     "SecretScannerAdapterRequest",
     "SecretScannerAdapterResponse",
+    "adapt_policy_decision_to_secret_scanner",
     "build_secret_scanner_adapter",
     "build_secret_scanner_adapter_request",
+    "evaluate_secret_scanner_request",
     "scan_for_secrets",
+    "summarize_secret_scanner_adapter_response",
 ]
