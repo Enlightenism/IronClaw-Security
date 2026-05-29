@@ -283,7 +283,7 @@ class IntegrationInstaller:
 
 
 # ---------------------------------------------------------------------------
-# Factory — build_integration_installer (used by testintegrationinstaller.py)
+# Factory — build_integration_installer
 # ---------------------------------------------------------------------------
 
 
@@ -304,7 +304,6 @@ def build_integration_installer(
 
 
 class _RouteInstaller:
-    """Thin install orchestrator used by the integrations API router."""
 
     def install_integration(
         self,

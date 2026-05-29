@@ -17,6 +17,7 @@ from app.orchestrator.policy_enforcer import (
 from app.services.integration_registry import (
     IntegrationRegistry,
     get_integration,
+    initialize_integration_registry,
 )
 
 AdapterVerdict = Literal["allow", "warn", "quarantine", "block"]
@@ -429,7 +430,9 @@ class ClaudeCodeAdapter:
         return out
 
 
-def build_claude_code_adapter(registry: IntegrationRegistry) -> ClaudeCodeAdapter:
+def build_claude_code_adapter(registry: IntegrationRegistry | None = None) -> ClaudeCodeAdapter:
+    if registry is None:
+        registry = initialize_integration_registry()
     record = get_integration(registry, "integration-claude-code")
     if record is None:
         raise KeyError("unknown integration slug: claude-code")

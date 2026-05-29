@@ -2,12 +2,147 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
+import uuid
 
 from app.detection.outputsanitizer import OutputSanitizationResult, build_output_sanitizer
 from app.detection.secretscanner import SecretScanResult, build_secret_scanner
 from app.runtime.networkguard import NetworkPolicy, build_network_guard
 from app.services.secretsredaction import SecretsRedactionResult, build_secrets_redaction_service
+
+# ---------------------------------------------------------------------------
+# SecretRecord — vault-record data model used by integrations secrets routes
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class SecretRecord:
+    secret_id: str
+    name: str
+    provider: str
+    kind: str
+    active: bool
+    masked_value: str
+    raw_value: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    last_used_at: datetime | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# In-process secret vault — stores records in memory for the current runtime
+# ---------------------------------------------------------------------------
+
+
+class _SecretVault:
+    def __init__(self) -> None:
+        self._records: dict[str, SecretRecord] = {}
+
+    @staticmethod
+    def _mask(value: str) -> str:
+        if len(value) <= 8:
+            return "*" * len(value)
+        return value[:4] + "*" * (len(value) - 8) + value[-4:]
+
+    def list_secrets(self, *, include_inactive: bool = False) -> list[SecretRecord]:
+        records = list(self._records.values())
+        if not include_inactive:
+            records = [r for r in records if r.active]
+        return records
+
+    def create_secret(
+        self,
+        *,
+        name: str,
+        value: str,
+        provider: str,
+        kind: str = "api_key",
+        metadata: dict[str, Any] | None = None,
+    ) -> SecretRecord:
+        existing_names = {r.name for r in self._records.values() if r.active}
+        if name in existing_names:
+            raise ValueError(f"An active secret named '{name}' already exists.")
+        now = datetime.now(UTC)
+        record = SecretRecord(
+            secret_id=str(uuid.uuid4()),
+            name=name,
+            provider=provider,
+            kind=kind,
+            active=True,
+            masked_value=self._mask(value),
+            raw_value=value,
+            created_at=now,
+            updated_at=now,
+            metadata=dict(metadata or {}),
+        )
+        self._records[record.secret_id] = record
+        return record
+
+    def rotate_secret(
+        self,
+        secret_id: str,
+        *,
+        new_value: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> SecretRecord | None:
+        record = self._records.get(secret_id)
+        if record is None or not record.active:
+            return None
+        now = datetime.now(UTC)
+        merged = {**record.metadata, **(metadata or {})}
+        rotated = SecretRecord(
+            secret_id=record.secret_id,
+            name=record.name,
+            provider=record.provider,
+            kind=record.kind,
+            active=True,
+            masked_value=self._mask(new_value),
+            raw_value=new_value,
+            created_at=record.created_at,
+            updated_at=now,
+            last_used_at=record.last_used_at,
+            metadata=merged,
+        )
+        self._records[secret_id] = rotated
+        return rotated
+
+    def revoke_secret(self, secret_id: str) -> SecretRecord | None:
+        record = self._records.get(secret_id)
+        if record is None:
+            return None
+        now = datetime.now(UTC)
+        revoked = SecretRecord(
+            secret_id=record.secret_id,
+            name=record.name,
+            provider=record.provider,
+            kind=record.kind,
+            active=False,
+            masked_value=record.masked_value,
+            raw_value=None,
+            created_at=record.created_at,
+            updated_at=now,
+            last_used_at=record.last_used_at,
+            metadata=record.metadata,
+        )
+        self._records[secret_id] = revoked
+        return revoked
+
+
+_vault: _SecretVault | None = None
+
+
+def get_secret_service() -> _SecretVault:
+    global _vault
+    if _vault is None:
+        _vault = _SecretVault()
+    return _vault
+
+
+# ---------------------------------------------------------------------------
+# SecretServiceResult — inspection result for the scanning/redaction pipeline
+# ---------------------------------------------------------------------------
 
 
 @dataclass(slots=True)
@@ -50,6 +185,11 @@ class SecretServiceResult:
         }
 
 
+# ---------------------------------------------------------------------------
+# SecretService — scanning / redaction / network inspection pipeline
+# ---------------------------------------------------------------------------
+
+
 class SecretService:
     def __init__(self) -> None:
         self._scanner = build_secret_scanner()
@@ -78,7 +218,7 @@ class SecretService:
         network_result = self._evaluate_network(metadata=metadata)
         return self._compose_result(
             scan_result=scan_result,
-            redaction_result=redaction_result if redact_secrets else self._noop_redaction(original_text),
+            redaction_result=redaction_result if redact_secrets else self._noop_redaction(original_text, scan_result),
             output_result=output_result,
             network_result=network_result,
             context=context,
@@ -105,7 +245,7 @@ class SecretService:
         network_result = self._evaluate_network(metadata=metadata)
         return self._compose_result(
             scan_result=scan_result,
-            redaction_result=redaction_result if redact_secrets else self._noop_redaction(redaction_result.text),
+            redaction_result=redaction_result if redact_secrets else self._noop_redaction(redaction_result.text, scan_result),
             output_result=output_result,
             network_result=network_result,
             context=context,
@@ -131,7 +271,7 @@ class SecretService:
         network_result = self._evaluate_network(metadata=payload)
         return self._compose_result(
             scan_result=scan_result,
-            redaction_result=redaction_result if redact_secrets else self._noop_redaction(redaction_result.text),
+            redaction_result=redaction_result if redact_secrets else self._noop_redaction(redaction_result.text, scan_result),
             output_result=output_result,
             network_result=network_result,
             context=context,
@@ -169,7 +309,7 @@ class SecretService:
         network_result = self._evaluate_network(metadata=metadata)
         return self._compose_result(
             scan_result=scan_result,
-            redaction_result=redaction_result if redact_secrets else self._noop_redaction(redaction_result.text),
+            redaction_result=redaction_result if redact_secrets else self._noop_redaction(redaction_result.text, scan_result),
             output_result=output_result,
             network_result=network_result,
             context=context or tool_name,
@@ -250,7 +390,6 @@ class SecretService:
             verdict=verdict,
             context=context,
         )
-
         return SecretServiceResult(
             verdict=verdict,
             allowed=allowed,
@@ -358,23 +497,20 @@ class SecretService:
             reasons.append(
                 f"Network guard returned verdict '{network_result.verdict}' for outbound context.",
             )
-
         reasons.extend(str(item) for item in output_result.reasons[:3])
-
         if not scan_result.found and not redaction_result.changed and network_result.verdict == "allow":
             reasons.append("No secret, sanitization, or egress risk indicators were detected.")
-
         return reasons[:10]
 
-    def _noop_redaction(self, text: str) -> SecretsRedactionResult:
+    def _noop_redaction(self, text: str, scan_result: SecretScanResult) -> SecretsRedactionResult:
         return SecretsRedactionResult(
             text=text,
             changed=False,
-            findings_detected=0,
+            findings_detected=len(scan_result.findings),
             findings_redacted=0,
-            risk_delta=0,
+            risk_delta=scan_result.risk_delta,
             records=[],
-            scan={},
+            scan=scan_result.as_dict(),
         )
 
 
@@ -383,7 +519,9 @@ def build_secret_service() -> SecretService:
 
 
 __all__ = [
+    "SecretRecord",
     "SecretService",
     "SecretServiceResult",
     "build_secret_service",
+    "get_secret_service",
 ]

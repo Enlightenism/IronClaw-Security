@@ -200,7 +200,9 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
 
 def _include_optional_protected_routers(app: FastAPI) -> None:
     dependencies = _protected_dependencies()
-    optional_modules = [
+
+    # Legacy optional modules
+    legacy_modules = [
         "app.api.routes.quarantine",
         "app.api.routes.llamafirewall",
         "app.api.routes.reviewqueue",
@@ -209,12 +211,24 @@ def _include_optional_protected_routers(app: FastAPI) -> None:
         "app.api.routes.dashboard",
         "app.api.routes.organizations",
     ]
-    for module_path in optional_modules:
-        _include_optional_router(
-            app,
-            module_path,
-            dependencies=dependencies,
-        )
+    for module_path in legacy_modules:
+        _include_optional_router(app, module_path, dependencies=dependencies)
+
+    # Integration sub-routers under app/routes/integrations/
+    integration_modules = [
+        "app.routes.integrations.claude_code",
+        "app.routes.integrations.compatibility",
+        "app.routes.integrations.installer",
+        "app.routes.integrations.lifecycle",
+        "app.routes.integrations.observability",
+        "app.routes.integrations.readiness",
+        "app.routes.integrations.rollouts",
+        "app.routes.integrations.secrets",
+        "app.routes.integrations.telemetry",
+        "app.routes.integrations.verifier",
+    ]
+    for module_path in integration_modules:
+        _include_optional_router(app, module_path, dependencies=dependencies)
 
 
 def _install_core_middleware(app: FastAPI) -> None:

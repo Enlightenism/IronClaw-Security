@@ -6,11 +6,12 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 
-from app.services.integrationtelemetry import IntegrationTelemetry
+from app.services.integrationtelemetry import get_integration_telemetry_service
 
 router = APIRouter(prefix="/integrations", tags=["integration-observability"])
 
-_service = IntegrationTelemetry()
+
+_service = get_integration_telemetry_service()
 
 
 def _utc_now_iso() -> str:
@@ -51,7 +52,6 @@ def _coerce_mapping(record: Any) -> dict[str, Any]:
         return record.model_dump()
     if isinstance(record, dict):
         return dict(record)
-
     data: dict[str, Any] = {}
     for name in dir(record):
         if name.startswith("_"):
@@ -71,13 +71,6 @@ def _extract_value(data: dict[str, Any], *keys: str) -> Any:
         if key in data and data.get(key) is not None:
             return data.get(key)
     return None
-
-
-def _safe_int(value: Any, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -154,7 +147,6 @@ class IntegrationObservabilityResponse(BaseModel):
 
 def _build_metric_view(record: Any, fallback_index: int) -> IntegrationMetricView:
     data = _coerce_mapping(record)
-
     metric_id = str(
         _extract_value(data, "metric_id", "metricid", "id", "name", "key") or f"metric-{fallback_index}",
     )
@@ -163,12 +155,10 @@ def _build_metric_view(record: Any, fallback_index: int) -> IntegrationMetricVie
     unit = _extract_value(data, "unit")
     status_value = _normalize_status(_extract_value(data, "status", "state"))
     updated_at = _datetime_to_iso(_extract_value(data, "updated_at", "timestamp", "observed_at"))
-
     metadata = _normalize_dict(data.get("metadata"))
     for key in ("description", "source", "provider", "window", "threshold"):
         if key in data and key not in metadata and data.get(key) is not None:
             metadata[key] = data.get(key)
-
     return IntegrationMetricView(
         metric_id=metric_id,
         name=name,
@@ -182,7 +172,6 @@ def _build_metric_view(record: Any, fallback_index: int) -> IntegrationMetricVie
 
 def _build_event_view(record: Any, fallback_index: int) -> IntegrationEventView:
     data = _coerce_mapping(record)
-
     event_id = str(
         _extract_value(data, "event_id", "eventid", "id", "name", "key") or f"event-{fallback_index}",
     )
@@ -197,12 +186,10 @@ def _build_event_view(record: Any, fallback_index: int) -> IntegrationEventView:
         )
         or _utc_now_iso()
     )
-
     metadata = _normalize_dict(data.get("metadata"))
     for key in ("source", "component", "provider", "code", "trace_id"):
         if key in data and key not in metadata and data.get(key) is not None:
             metadata[key] = data.get(key)
-
     return IntegrationEventView(
         event_id=event_id,
         category=category,
@@ -215,7 +202,6 @@ def _build_event_view(record: Any, fallback_index: int) -> IntegrationEventView:
 
 def _build_alert_view(record: Any, fallback_index: int) -> IntegrationAlertView:
     data = _coerce_mapping(record)
-
     alert_id = str(
         _extract_value(data, "alert_id", "alertid", "id", "name", "key") or f"alert-{fallback_index}",
     )
@@ -223,12 +209,10 @@ def _build_alert_view(record: Any, fallback_index: int) -> IntegrationAlertView:
     severity = str(_extract_value(data, "severity", "level") or "info").strip().lower()
     status_value = _normalize_status(_extract_value(data, "status", "state"))
     opened_at = _datetime_to_iso(_extract_value(data, "opened_at", "created_at", "timestamp"))
-
     metadata = _normalize_dict(data.get("metadata"))
     for key in ("source", "component", "provider", "rule_id", "runbook"):
         if key in data and key not in metadata and data.get(key) is not None:
             metadata[key] = data.get(key)
-
     return IntegrationAlertView(
         alert_id=alert_id,
         title=title,
@@ -249,62 +233,15 @@ def _collect_section(data: dict[str, Any], primary: str, *fallbacks: str) -> lis
 def _build_response(
     integration_id: str,
     environment: str,
-    result: Any,
+    events_raw: list[Any],
 ) -> IntegrationObservabilityResponse:
-    data = _coerce_mapping(result)
-    observability = _coerce_mapping(_extract_value(data, "observability", "summary") or result)
-
-    metrics_raw = _collect_section(
-        observability,
-        "metrics",
-        "signals",
-        "kpis",
-    )
-    events_raw = _collect_section(
-        observability,
-        "events",
-        "activity",
-        "logs",
-    )
-    alerts_raw = _collect_section(
-        observability,
-        "alerts",
-        "issues",
-        "incidents",
-    )
-
-    metrics = [_build_metric_view(item, index + 1) for index, item in enumerate(metrics_raw)]
     events = [_build_event_view(item, index + 1) for index, item in enumerate(events_raw)]
-    alerts = [_build_alert_view(item, index + 1) for index, item in enumerate(alerts_raw)]
+    metrics: list[IntegrationMetricView] = []
+    alerts: list[IntegrationAlertView] = []
 
-    open_alerts = sum(1 for item in alerts if item.status not in {"ok", "resolved", "closed"})
-    warning_alerts = sum(1 for item in alerts if item.severity in {"warning", "warn", "medium"})
-    error_alerts = sum(1 for item in alerts if item.severity in {"error", "critical", "high"})
-
-    overall_status = _normalize_status(
-        _extract_value(observability, "overall_status", "status", "state"),
-    )
-    if overall_status == "ok":
-        if error_alerts:
-            overall_status = "error"
-        elif warning_alerts:
-            overall_status = "warning"
-
-    updated_at = (
-        _datetime_to_iso(
-            _extract_value(observability, "updated_at", "timestamp", "generated_at"),
-        )
-        or _utc_now_iso()
-    )
-
-    signal_sources = _normalize_string_list(
-        _extract_value(observability, "signal_sources", "sources", "providers"),
-    )
-
-    metadata = _normalize_dict(observability.get("metadata"))
-    for key in ("provider", "platform", "adapter_version", "trace_id"):
-        if key in observability and key not in metadata and observability.get(key) is not None:
-            metadata[key] = observability.get(key)
+    open_alerts = 0
+    warning_alerts = 0
+    error_alerts = 0
 
     return IntegrationObservabilityResponse(
         status="ok",
@@ -312,9 +249,9 @@ def _build_response(
         timestamp=_utc_now_iso(),
         integration_id=integration_id,
         summary=IntegrationObservabilitySummaryView(
-            overall_status=overall_status,
-            updated_at=updated_at,
-            environment=str(_extract_value(observability, "environment") or environment),
+            overall_status="ok",
+            updated_at=_utc_now_iso(),
+            environment=environment,
             integration_id=integration_id,
             total_metrics=len(metrics),
             total_events=len(events),
@@ -322,44 +259,12 @@ def _build_response(
             open_alerts=open_alerts,
             warning_alerts=warning_alerts,
             error_alerts=error_alerts,
-            signal_sources=signal_sources,
-            metadata=metadata,
+            signal_sources=[],
+            metadata={},
         ),
         metrics=metrics,
         events=events,
         alerts=alerts,
-    )
-
-
-def _run_observability(integration_id: str, environment: str, limit: int) -> Any:
-    candidate_calls = [
-        lambda: _service.summary(integration_id=integration_id, environment=environment, limit=limit),
-        lambda: _service.summary(integration_id, environment, limit),
-        lambda: _service.summary(integration_id=integration_id, environment=environment),
-        lambda: _service.summary(integration_id, environment),
-        lambda: _service.get(integration_id=integration_id, environment=environment, limit=limit),
-        lambda: _service.get(integration_id, environment, limit),
-        lambda: _service.get(integration_id=integration_id, environment=environment),
-        lambda: _service.get(integration_id, environment),
-        lambda: _service.observe(integration_id=integration_id, environment=environment, limit=limit),
-        lambda: _service.observe(integration_id, environment, limit),
-        lambda: _service.observe(integration_id=integration_id, environment=environment),
-        lambda: _service.observe(integration_id, environment),
-        lambda: _service.list(integration_id=integration_id, environment=environment, limit=limit),
-        lambda: _service.list(integration_id, environment, limit),
-    ]
-
-    for call in candidate_calls:
-        try:
-            return call()
-        except AttributeError:
-            continue
-        except TypeError:
-            continue
-
-    raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail="integration telemetry service does not expose a supported observability method",
     )
 
 
@@ -376,13 +281,10 @@ def get_integration_observability(
     normalized_integration_id = integration_id.strip()
     normalized_environment = environment.strip()
 
-    result = _run_observability(
-        integration_id=normalized_integration_id,
-        environment=normalized_environment,
-        limit=limit,
-    )
+    svc = get_integration_telemetry_service()
+    events_raw = svc.list_events(integrationid=normalized_integration_id)
 
-    if result is None:
+    if events_raw is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"integration '{normalized_integration_id}' not found",
@@ -391,5 +293,5 @@ def get_integration_observability(
     return _build_response(
         integration_id=normalized_integration_id,
         environment=normalized_environment,
-        result=result,
+        events_raw=events_raw[:limit],
     )

@@ -17,7 +17,7 @@ from app.orchestrator.policy_enforcer import (
     TOOL_GUARDED_ACTIONS,
     build_policy_engine,
 )
-from app.services.integration_registry import build_integration_registry
+from app.services.integration_registry import initialize_integration_registry
 from app.services.secret_scanner import evaluate_secret_scanner_request, scan_for_secrets
 
 router = APIRouter(
@@ -25,9 +25,6 @@ router = APIRouter(
     tags=["claude-code"],
 )
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
 
 _ADAPTER_VERSION = "1.0.0"
 _PLATFORM = "claude-code"
@@ -44,7 +41,7 @@ def _trace_id() -> str:
 
 def _build_adapter() -> ClaudeCodeAdapter:
     try:
-        registry = build_integration_registry()
+        registry = initialize_integration_registry()
         return build_claude_code_adapter(registry)
     except KeyError:
         return ClaudeCodeAdapter(
@@ -52,11 +49,6 @@ def _build_adapter() -> ClaudeCodeAdapter:
             health="ready",
             metadata={"runtime": "claude-code", "guard_mode": "strict"},
         )
-
-
-# ---------------------------------------------------------------------------
-# Request / Response schemas
-# ---------------------------------------------------------------------------
 
 
 class ClaudeCodeEvaluateRequest(BaseModel):
@@ -153,11 +145,6 @@ class ClaudeCodeManifestResponse(BaseModel):
     generated_at: str
 
 
-# ---------------------------------------------------------------------------
-# POST /integrations/claude-code/evaluate
-# ---------------------------------------------------------------------------
-
-
 @router.post(
     "/evaluate",
     response_model=ClaudeCodeEvaluateResponse,
@@ -175,10 +162,6 @@ async def evaluate_claude_code(
 ) -> ClaudeCodeEvaluateResponse:
     trace_id = _trace_id()
 
-    # ------------------------------------------------------------------
-    # Secret scanning — runs before ANY adapter or policy dispatch.
-    # Combines target + content as the full inspection surface.
-    # ------------------------------------------------------------------
     scan_payload = f"{body.target}\n{body.content}".strip()
     secret_scan_result: dict[str, Any] = {}
     try:
@@ -194,7 +177,6 @@ async def evaluate_claude_code(
         )
         secret_scan_result = scan_result if isinstance(scan_result, dict) else scan_result.model_dump()
     except Exception:
-        # Fallback to raw scan so we never silently skip secret detection
         try:
             raw_findings = scan_for_secrets(scan_payload)
             secret_scan_result = {
@@ -205,7 +187,6 @@ async def evaluate_claude_code(
         except Exception:
             secret_scan_result = {"scanned": False, "findings": [], "source": "error"}
 
-    # Hard-block if secrets detected — no policy dispatch needed
     secrets_found: list[Any] = secret_scan_result.get("findings", [])
     if secrets_found:
         return ClaudeCodeEvaluateResponse(
@@ -252,9 +233,6 @@ async def evaluate_claude_code(
             secret_scan=secret_scan_result,
         )
 
-    # ------------------------------------------------------------------
-    # Build adapter request
-    # ------------------------------------------------------------------
     try:
         adapter_request = build_claude_code_adapter_request(
             action_type=body.action_type,
@@ -332,11 +310,6 @@ async def evaluate_claude_code(
     )
 
 
-# ---------------------------------------------------------------------------
-# POST /integrations/claude-code/handshake
-# ---------------------------------------------------------------------------
-
-
 @router.post(
     "/handshake",
     response_model=ClaudeCodeHandshakeResponse,
@@ -385,11 +358,6 @@ async def claude_code_handshake(
             **body.metadata,
         },
     )
-
-
-# ---------------------------------------------------------------------------
-# GET /integrations/claude-code/manifest
-# ---------------------------------------------------------------------------
 
 
 @router.get(

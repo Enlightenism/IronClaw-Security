@@ -1,3 +1,4 @@
+# app/routes/integrations/readiness.py
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -6,11 +7,12 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 
-from app.services.deploymentreadiness import DeploymentReadiness
+from app.services.deploymentreadiness import DeploymentReadinessService
 
 router = APIRouter(prefix="/integrations", tags=["integration-readiness"])
 
-_service = DeploymentReadiness()
+
+_service = DeploymentReadinessService()
 
 
 def _utc_now_iso() -> str:
@@ -214,17 +216,8 @@ def _build_readiness_response(
 
 def _run_readiness(integration_id: str, environment: str) -> Any:
     candidate_calls = [
-        lambda: _service.evaluate(release_id=integration_id, environment=environment),
-        lambda: _service.evaluate(integration_id=integration_id, environment=environment),
-        lambda: _service.evaluate(integration_id, environment),
-        lambda: _service.evaluate(integration_id),
-        lambda: _service.check(release_id=integration_id, environment=environment),
-        lambda: _service.check(integration_id=integration_id, environment=environment),
-        lambda: _service.check(integration_id, environment),
-        lambda: _service.check(integration_id),
-        lambda: _service.get(release_id=integration_id, environment=environment),
-        lambda: _service.get(integration_id=integration_id, environment=environment),
-        lambda: _service.get(integration_id),
+        lambda: _service.evaluate(),
+        lambda: _service.run(),
     ]
 
     for call in candidate_calls:

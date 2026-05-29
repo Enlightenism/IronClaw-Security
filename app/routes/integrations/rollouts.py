@@ -6,11 +6,12 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 
-from app.services.integrationrollout import IntegrationRollout
+from app.services.integrationrollout import IntegrationRolloutService
 
 router = APIRouter(prefix="/integrations", tags=["integration-rollouts"])
 
-_service = IntegrationRollout()
+
+_service = IntegrationRolloutService()
 
 
 def _utc_now_iso() -> str:
@@ -150,13 +151,13 @@ def _build_stage_view(record: Any, fallback_index: int) -> RolloutStageView:
     data = _coerce_mapping(record)
 
     stage_id = str(
-        _extract_value(data, "stage_id", "stageid", "id", "name", "key") or f"stage-{fallback_index}",
+        _extract_value(data, "stage_id", "stageid", "stepid", "id", "name", "key") or f"stage-{fallback_index}",
     )
     title = str(
         _extract_value(data, "title", "label", "name", "summary") or stage_id.replace("-", " ").replace("_", " ").title(),
     )
     detail = str(_extract_value(data, "detail", "details", "message", "summary", "description") or "")
-    status_value = _normalize_stage_status(_extract_value(data, "status", "state", "result"))
+    status_value = _normalize_stage_status(_extract_value(data, "status", "state", "result", "completed"))
 
     metadata = _normalize_dict(data.get("metadata"))
     for key in ("percentage", "wave", "cohort", "started_at", "completed_at"):
@@ -188,9 +189,9 @@ def _build_rollout_response(
         if key in rollout and key not in summary_metadata and rollout.get(key) is not None:
             summary_metadata[key] = rollout.get(key)
 
-    rollout_id_value = _extract_value(rollout, "rollout_id", "id")
+    rollout_id_value = _extract_value(rollout, "rollout_id", "id", "integrationid")
     adapter_version_value = _extract_value(rollout, "adapter_version", "version")
-    updated_at_value = _extract_value(rollout, "updated_at", "timestamp", "generated_at")
+    updated_at_value = _extract_value(rollout, "updated_at", "updatedat", "timestamp", "generated_at")
 
     return IntegrationRolloutResponse(
         status="ok",
@@ -200,7 +201,7 @@ def _build_rollout_response(
         rollout=RolloutSummaryView(
             rollout_id=str(rollout_id_value) if rollout_id_value is not None else None,
             state=_normalize_rollout_state(
-                _extract_value(rollout, "state", "status", "rollout_state"),
+                _extract_value(rollout, "state", "status", "stage", "rollout_state"),
                 stages,
             ),
             environment=str(_extract_value(rollout, "environment") or environment),
@@ -221,28 +222,10 @@ def _build_rollout_response(
 
 
 def _run_rollout_lookup(integration_id: str, environment: str) -> Any:
-    candidate_calls = [
-        lambda: _service.get(integration_id=integration_id, environment=environment),
-        lambda: _service.get(integration_id, environment),
-        lambda: _service.get(integration_id),
-        lambda: _service.status(integration_id=integration_id, environment=environment),
-        lambda: _service.status(integration_id, environment),
-        lambda: _service.status(integration_id),
-        lambda: _service.current(integration_id=integration_id, environment=environment),
-        lambda: _service.current(integration_id, environment),
-        lambda: _service.current(integration_id),
-        lambda: _service.rollout(integration_id=integration_id, environment=environment),
-        lambda: _service.rollout(integration_id, environment),
-        lambda: _service.rollout(integration_id),
-    ]
-
-    for call in candidate_calls:
-        try:
-            return call()
-        except AttributeError:
-            continue
-        except TypeError:
-            continue
+    try:
+        return _service.plan_rollout(integration_id)
+    except AttributeError:
+        pass
 
     raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
