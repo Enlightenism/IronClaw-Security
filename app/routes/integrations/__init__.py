@@ -8,6 +8,7 @@ from app.routes.integrations.health import router as health_router
 from app.routes.integrations.installer import router as installer_router
 from app.routes.integrations.lifecycle import router as lifecycle_router
 from app.routes.integrations.observability import router as observability_router
+from app.routes.integrations.openclaw import router as openclaw_router
 from app.routes.integrations.readiness import router as readiness_router
 from app.routes.integrations.rollouts import router as rollouts_router
 from app.routes.integrations.secrets import router as secrets_router
@@ -27,3 +28,4 @@ router.include_router(lifecycle_router)
 router.include_router(readiness_router)
 router.include_router(observability_router)
 router.include_router(claude_code_router)
+router.include_router(openclaw_router)
