@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Path
 from pydantic import BaseModel, Field
 
+from app.adapters.secret_scanner_adapter import scan_for_secrets
 from app.services.secretservice import SecretRecord, get_secret_service
 
 router = APIRouter(prefix="/integrations", tags=["integration-secrets"])
@@ -23,6 +24,16 @@ def _datetime_to_iso(value: datetime | None) -> str | None:
 
 def _normalize_metadata(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _guard_secret_value(value: str, location: str) -> None:
+    result = scan_for_secrets(prompt_text=value)
+    if result.verdict == "block":
+        patterns = ", ".join({m.pattern_type for m in result.matches})
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Secret value rejected by IronClaw secret scanner at '{location}': " f"{result.block_matches} high-severity pattern(s) detected " f"[{patterns}]. Do not submit live credentials as secret values."),
+        )
 
 
 class SecretCreateRequest(BaseModel):
@@ -182,8 +193,10 @@ def create_integration_secret(
     integration_id: str = Path(..., min_length=1, max_length=255),
 ) -> SecretActionResponse:
     normalized_integration_id = integration_id.strip()
-    service = get_secret_service()
 
+    _guard_secret_value(payload.value, location="create.value")
+
+    service = get_secret_service()
     metadata = _normalize_metadata(payload.metadata)
     metadata.setdefault("integration_id", normalized_integration_id)
 
@@ -219,6 +232,8 @@ def rotate_integration_secret(
 ) -> SecretActionResponse:
     normalized_integration_id = integration_id.strip()
     normalized_secret_id = secret_id.strip()
+
+    _guard_secret_value(payload.value, location="rotate.value")
 
     existing = _get_record_for_integration(normalized_integration_id, normalized_secret_id)
     if existing is None:

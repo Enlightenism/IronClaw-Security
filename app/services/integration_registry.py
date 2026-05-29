@@ -238,6 +238,32 @@ def default_integrations() -> list[IntegrationRecord]:
                 "analysis_mode": "sandbox-guard",
             },
         ),
+        IntegrationRecord(
+            integration_id="integration-secret-scanner",
+            name="Secret Scanner Adapter",
+            slug="secret-scanner",
+            platform="secret-scanner",
+            integration_type="adapter",
+            status="planned",
+            version="0.1.0",
+            command_name="ironclaw install secret-scanner",
+            description="IronClaw adapter for scanning prompts, tool calls, and file content for leaked secrets and credentials.",
+            entrypoint="app.adapters.secret_scanner_adapter",
+            install_target="local",
+            capabilities=[
+                IntegrationCapability("prompt_interception", True, "Scan prompt text for secrets before dispatch."),
+                IntegrationCapability("tool_interception", True, "Scan tool call arguments for secrets."),
+                IntegrationCapability("file_guard", True, "Scan file content for leaked credentials."),
+                IntegrationCapability("audit_export", True, "Export secret scan decisions to the audit log."),
+                IntegrationCapability("telemetry", True, "Publish secret scanner integration telemetry events."),
+            ],
+            metadata={
+                "priority": 6,
+                "one_command_install": True,
+                "supports_local_runtime": True,
+                "runtime": "secret-scanner",
+            },
+        ),
     ]
 
 
@@ -266,7 +292,6 @@ def get_integration(
     registry: IntegrationRegistry,
     integration_id: str,
 ) -> IntegrationRecord | None:
-    # Support lookup by integration_id (primary key) or by slug
     if integration_id in registry.items:
         return registry.items[integration_id]
     for record in registry.items.values():
