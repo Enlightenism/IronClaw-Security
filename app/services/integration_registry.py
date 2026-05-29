@@ -266,7 +266,13 @@ def get_integration(
     registry: IntegrationRegistry,
     integration_id: str,
 ) -> IntegrationRecord | None:
-    return registry.items.get(integration_id)
+    # Support lookup by integration_id (primary key) or by slug
+    if integration_id in registry.items:
+        return registry.items[integration_id]
+    for record in registry.items.values():
+        if record.slug == integration_id:
+            return record
+    return None
 
 
 def list_integrations(

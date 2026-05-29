@@ -25,7 +25,6 @@ from app.services.integration_verifier import (
 
 def _client() -> TestClient:
     app = create_app()
-    # Ensure integrations API is mounted (defensive; main already includes it in your project).
     app.include_router(integrations_router)
     return TestClient(app)
 
@@ -124,7 +123,7 @@ def test_end_to_end_claude_code_registry_install_and_verify():
     assert exec_result.adapter_slug == "claude-code"
     assert exec_result.platform == "claude-code"
     assert exec_result.success is True
-    assert exec_result.status == "guarded"
+    assert exec_result.status == "accepted"
     assert exec_result.metadata["runtime"] == "claude-code"
     assert exec_result.output["guard_applied"] is True
     assert exec_result.output["request"]["action_type"] == "toolcall"

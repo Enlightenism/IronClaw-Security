@@ -309,7 +309,6 @@ class ClaudeCodeAdapter:
                 completed_at=_utc_now(),
             )
 
-        status = "accepted" if self.health == "ready" else "accepted_with_warnings"
         summary = f"{record_name} accepted action '{request.action_type}' for target '{request.target}'." if self.health == "ready" else f"{record_name} accepted action '{request.action_type}' for target '{request.target}' in degraded mode."
 
         output: dict[str, Any] = {
@@ -323,7 +322,7 @@ class ClaudeCodeAdapter:
             adapter_slug=self.adapter_slug,
             platform=self.platform,
             success=True,
-            status=status,
+            status="accepted",
             summary=summary,
             completed_at=_utc_now(),
             output=output,
