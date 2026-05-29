@@ -21,7 +21,7 @@ from app.services.integration_registry import (
     get_integration,
 )
 
-AdapterVerdict = Literal["allow", "warn", "block"]
+AdapterVerdict = Literal["allow", "warn", "quarantine", "block"]
 AdapterExecutionMode = Literal["monitor", "enforce"]
 SecretScanStatus = Literal["clean", "warned", "blocked"]
 
@@ -76,7 +76,7 @@ _SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     # Generic private key blocks
     ("private_key_block", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----")),
     # Generic password patterns in k/v assignment
-    ("generic_password", re.compile(r"(?i)(?:password|passwd|pwd|pass|secret|token|apikey|api_key|auth_token|access_token|secret_key|private_key)[\s:='\"\`]+([\S]{8,})")),
+    ("generic_password", re.compile(r"(?i)(?:password|passwd|pwd|pass|secret|token|apikey|api_key|auth_token|access_token|secret_key|private_key)[\s:='\"\`]+([^\s]{8,})")),
     # Generic hex secret (64 chars — common for SHA-256 HMAC secrets)
     ("hex_secret_64", re.compile(r"(?<![a-fA-F0-9])[a-fA-F0-9]{64}(?![a-fA-F0-9])")),
     # JWT
@@ -374,6 +374,7 @@ class SecretScannerAdapterResponse:
     verdict: AdapterVerdict
     should_allow: bool
     should_warn: bool
+    should_quarantine: bool
     should_block: bool
     scan_status: SecretScanStatus
     risk_score: int
@@ -400,6 +401,7 @@ class SecretScannerAdapterResponse:
             "verdict": self.verdict,
             "should_allow": self.should_allow,
             "should_warn": self.should_warn,
+            "should_quarantine": self.should_quarantine,
             "should_block": self.should_block,
             "scan_status": self.scan_status,
             "risk_score": self.risk_score,
@@ -472,16 +474,18 @@ def adapt_policy_decision_to_secret_scanner(
     request: SecretScannerAdapterRequest | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> SecretScannerAdapterResponse:
-    # Secret scan verdict overrides policy verdict when more severe
-    policy_verdict: AdapterVerdict = decision.verdict
+    policy_verdict: AdapterVerdict = decision.verdict  # type: ignore[assignment]
     scan_verdict = scan_result.verdict
 
     _severity: dict[str, int] = {"allow": 0, "warn": 1, "quarantine": 2, "block": 3}
-    final_verdict: AdapterVerdict = scan_verdict if _severity.get(scan_verdict, 0) >= _severity.get(policy_verdict, 0) else policy_verdict  # type: ignore[assignment]
+    final_verdict: AdapterVerdict = scan_verdict if _severity.get(scan_verdict, 0) >= _severity.get(policy_verdict, 0) else policy_verdict
 
     if final_verdict == "block":
         risk_score = max(decision.risk_score, 90)
         risk_level = "critical"
+    elif final_verdict == "quarantine":
+        risk_score = max(decision.risk_score, 70)
+        risk_level = "high"
     elif final_verdict == "warn":
         risk_score = max(decision.risk_score, 50)
         risk_level = "high" if risk_score >= 70 else "medium"
@@ -506,6 +510,7 @@ def adapt_policy_decision_to_secret_scanner(
         verdict=final_verdict,
         should_allow=final_verdict == "allow",
         should_warn=final_verdict == "warn",
+        should_quarantine=final_verdict == "quarantine",
         should_block=final_verdict == "block",
         scan_status=scan_result.scan_status,
         risk_score=risk_score,
@@ -535,7 +540,6 @@ def evaluate_secret_scanner_request(
     trace_id: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> SecretScannerAdapterResponse:
-    # Merge caller-supplied context into extra_fields so it is scanned
     merged_extra: dict[str, Any] | None = None
     if request.content or context or request.context:
         merged_extra = {}
@@ -545,6 +549,7 @@ def evaluate_secret_scanner_request(
             merged_extra.update(request.context)
         if context:
             merged_extra.update(context)
+
     scan_result = scan_for_secrets(
         prompt_text=request.prompt_text,
         tool_call_arguments=request.tool_call_arguments,
@@ -607,6 +612,7 @@ class SecretScannerAdapter(BaseIntegrationAdapter):
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         self.metadata.setdefault("integration_id", self.record.integration_id)
         self.metadata.setdefault("runtime", self.runtime)
         self.metadata.setdefault("scan_mode", self.scan_mode)
@@ -621,10 +627,15 @@ class SecretScannerAdapter(BaseIntegrationAdapter):
         ]
 
     def execute(self, request: AdapterExecutionRequest) -> AdapterExecutionResult:
-        result = super().execute(request)
+        self.validate_request(request)
 
-        if not result.success:
-            return result
+        if self.health == "offline":
+            return self.build_result(
+                request=request,
+                success=False,
+                status="offline",
+                summary=f"{self.record.name} is offline and cannot execute '{request.action_type}'.",
+            )
 
         payload = request.payload or {}
         scan_result = scan_for_secrets(
@@ -635,36 +646,57 @@ class SecretScannerAdapter(BaseIntegrationAdapter):
         )
 
         if scan_result.verdict == "block":
-            result.success = False
-            result.status = "blocked"
-            result.summary = f"{self.record.name} blocked action '{request.action_type}': " f"{scan_result.block_matches} high-severity secret(s) detected."
-        elif scan_result.verdict == "warn":
-            result.status = "accepted_with_warnings"
-            result.summary = f"{self.record.name} warned on action '{request.action_type}': " f"{scan_result.warn_matches} potential secret(s) detected."
-        else:
-            result.status = "guarded"
-            result.summary = f"{self.record.name} cleared action '{request.action_type}': " f"no secrets detected."
+            return self.build_result(
+                request=request,
+                success=False,
+                status="blocked",
+                summary=(f"{self.record.name} blocked action '{request.action_type}': " f"{scan_result.block_matches} high-severity secret(s) detected."),
+                output={
+                    "guard_applied": True,
+                    "scan_result": scan_result.to_dict(),
+                },
+                metadata={
+                    "runtime": self.runtime,
+                    "scan_mode": self.scan_mode,
+                },
+            )
 
-        result.output.update(
-            {
+        if scan_result.verdict == "warn":
+            return self.build_result(
+                request=request,
+                success=True,
+                status="accepted_with_warnings",
+                summary=(f"{self.record.name} warned on action '{request.action_type}': " f"{scan_result.warn_matches} potential secret(s) detected."),
+                output={
+                    "guard_applied": True,
+                    "scan_result": scan_result.to_dict(),
+                },
+                metadata={
+                    "runtime": self.runtime,
+                    "scan_mode": self.scan_mode,
+                },
+            )
+
+        return self.build_result(
+            request=request,
+            success=True,
+            status="accepted",
+            summary=(f"{self.record.name} cleared action '{request.action_type}': " f"no secrets detected."),
+            output={
                 "guard_applied": True,
                 "scan_result": scan_result.to_dict(),
-            }
-        )
-        result.metadata.update(
-            {
+            },
+            metadata={
                 "runtime": self.runtime,
                 "scan_mode": self.scan_mode,
-            }
+            },
         )
-
-        return result
 
 
 def build_secret_scanner_adapter(registry: IntegrationRegistry) -> SecretScannerAdapter:
-    record = get_integration(registry, "integration-secret-scanner")
+    record = get_integration(registry, "secret-scanner")
     if record is None:
-        raise KeyError("unknown integration_id: integration-secret-scanner")
+        raise KeyError("unknown integration slug: secret-scanner")
 
     return SecretScannerAdapter(
         record=record,

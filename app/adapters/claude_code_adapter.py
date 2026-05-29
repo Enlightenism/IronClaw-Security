@@ -68,6 +68,9 @@ class ClaudeCodeAdapterRequest:
             "metadata": dict(self.metadata),
         }
 
+    def model_dump(self) -> dict[str, Any]:
+        return self.to_dict()
+
 
 @dataclass(slots=True)
 class ClaudeCodeAdapterResponse:
@@ -84,6 +87,7 @@ class ClaudeCodeAdapterResponse:
     summary: str
     matched_rules: list[str] = field(default_factory=list)
     reasons: list[dict[str, Any]] = field(default_factory=list)
+    secret_scan: dict[str, Any] = field(default_factory=dict)
     decision_id: str | None = None
     trace_id: str | None = None
     reviewed_at: str = field(default_factory=_utc_now)
@@ -105,12 +109,16 @@ class ClaudeCodeAdapterResponse:
             "summary": self.summary,
             "matched_rules": list(self.matched_rules),
             "reasons": list(self.reasons),
+            "secret_scan": dict(self.secret_scan),
             "decision_id": self.decision_id,
             "trace_id": self.trace_id,
             "reviewed_at": self.reviewed_at,
             "request": dict(self.request),
             "metadata": dict(self.metadata),
         }
+
+    def model_dump(self) -> dict[str, Any]:
+        return self.to_dict()
 
 
 def build_claude_code_adapter_request(
@@ -147,8 +155,9 @@ def adapt_policy_decision_to_claude_code(
     trace_id: str | None = None,
     request: ClaudeCodeAdapterRequest | None = None,
     metadata: dict[str, Any] | None = None,
+    secret_scan: dict[str, Any] | None = None,
 ) -> ClaudeCodeAdapterResponse:
-    verdict: AdapterVerdict = decision.verdict
+    verdict: AdapterVerdict = decision.verdict  # type: ignore[assignment]
     matched_rules = [match.rule_id for match in decision.matched_rules]
     reasons = [match.to_dict() for match in decision.matched_rules]
 
@@ -166,6 +175,7 @@ def adapt_policy_decision_to_claude_code(
         summary=decision.summary,
         matched_rules=matched_rules,
         reasons=reasons,
+        secret_scan=dict(secret_scan or {}),
         decision_id=decision.decision_id,
         trace_id=trace_id,
         request=request.to_dict() if request else {},
@@ -181,6 +191,7 @@ def evaluate_claude_code_request(
     mode: AdapterExecutionMode = "enforce",
     trace_id: str | None = None,
     metadata: dict[str, Any] | None = None,
+    secret_scan: dict[str, Any] | None = None,
 ) -> ClaudeCodeAdapterResponse:
     decision = evaluate_policy(
         engine,
@@ -193,6 +204,7 @@ def evaluate_claude_code_request(
         trace_id=trace_id,
         request=request,
         metadata=metadata,
+        secret_scan=secret_scan,
     )
 
 
@@ -229,11 +241,9 @@ class ClaudeCodeAdapter:
         if self.metadata is None:
             self.metadata = {}
         if self.record is not None:
-            # registry-wired path — initialise base adapter state
+            self.metadata.setdefault("integration_id", self.record.integration_id)
             self.metadata.setdefault("runtime", self.runtime)
             self.metadata.setdefault("guard_mode", self.guard_mode)
-
-    # --- registry-wired path helpers (delegate to BaseIntegrationAdapter logic) ---
 
     @property
     def adapter_slug(self) -> str:
@@ -279,15 +289,15 @@ class ClaudeCodeAdapter:
             },
         )
 
-    # --- execute dispatch ---
-
     def execute(self, *args: Any, **kwargs: Any) -> Any:
         if self.policy_enforcer is not None:
             return self._execute_with_enforcer(**kwargs)
-        # registry path
+
         request: AdapterExecutionRequest = args[0] if args else kwargs.get("request")
 
         self.from_base_validate(request)
+
+        record_name = self.record.name if self.record else self.adapter_slug
 
         if self.health == "offline":
             return AdapterExecutionResult(
@@ -295,29 +305,34 @@ class ClaudeCodeAdapter:
                 platform=self.platform,
                 success=False,
                 status="offline",
-                summary=f"{self.record.name} is offline and cannot execute '{request.action_type}'.",
+                summary=f"{record_name} is offline and cannot execute '{request.action_type}'.",
                 completed_at=_utc_now(),
             )
 
-        result = AdapterExecutionResult(
+        status = "accepted" if self.health == "ready" else "accepted_with_warnings"
+        summary = f"{record_name} accepted action '{request.action_type}' for target '{request.target}'." if self.health == "ready" else f"{record_name} accepted action '{request.action_type}' for target '{request.target}' in degraded mode."
+
+        output: dict[str, Any] = {
+            "request": request.to_dict(),
+            "guard_applied": True,
+        }
+        if self.record is not None:
+            output["integration_id"] = self.record.integration_id
+
+        return AdapterExecutionResult(
             adapter_slug=self.adapter_slug,
             platform=self.platform,
             success=True,
-            status="guarded",
-            summary=f"{self.record.name} guarded action '{request.action_type}' for target '{request.target}'.",
+            status=status,
+            summary=summary,
             completed_at=_utc_now(),
-            output={
-                "request": request.to_dict(),
-                "integration_id": self.record.integration_id,
-                "guard_applied": True,
-            },
+            output=output,
             metadata={
                 **self.base_metadata(),
                 "runtime": self.runtime,
                 "guard_mode": self.guard_mode,
             },
         )
-        return result
 
     def from_base_validate(self, request: AdapterExecutionRequest) -> None:
         pass
@@ -418,7 +433,7 @@ class ClaudeCodeAdapter:
 def build_claude_code_adapter(registry: IntegrationRegistry) -> ClaudeCodeAdapter:
     record = get_integration(registry, "integration-claude-code")
     if record is None:
-        raise KeyError("unknown integration_id: integration-claude-code")
+        raise KeyError("unknown integration slug: claude-code")
 
     return ClaudeCodeAdapter(
         record=record,
