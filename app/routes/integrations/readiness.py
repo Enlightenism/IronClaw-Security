@@ -236,6 +236,7 @@ def _run_readiness(integration_id: str, environment: str) -> Any:
 
 @router.get(
     "/{integration_id}/readiness",
+    operation_id="integrations_get_readiness",
     response_model=IntegrationReadinessResponse,
     summary="Get integration deployment readiness",
 )

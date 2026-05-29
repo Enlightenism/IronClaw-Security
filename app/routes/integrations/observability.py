@@ -270,6 +270,7 @@ def _build_response(
 
 @router.get(
     "/{integration_id}/observability",
+    operation_id="integrations_get_observability",
     response_model=IntegrationObservabilityResponse,
     summary="Get integration observability and telemetry",
 )

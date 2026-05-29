@@ -265,12 +265,18 @@ def _build_compatibility_response(
         "timestamp",
     )
 
+    target_payload = _coerce_mapping(_extract_value(payload, "target") or {})
+    if not target_payload:
+        for key in ("platform", "provider", "version", "runtime", "environment"):
+            if key in payload and payload.get(key) is not None:
+                target_payload[key] = payload.get(key)
+
     return IntegrationCompatibilityResponse(
         status="ok",
         service="IronClaw-Security",
         timestamp=_utc_now_iso(),
         integration_id=integration_id,
-        target=_build_target_view(payload, environment=environment),
+        target=_build_target_view(target_payload, environment),
         summary=CompatibilitySummaryView(
             compatible=compatible,
             score=score,
@@ -283,20 +289,14 @@ def _build_compatibility_response(
     )
 
 
-def _run_compatibility_lookup(
-    integration_id: str,
-    environment: str | None,
-) -> Any:
+def _run_compatibility(integration_id: str, environment: str) -> Any:
     candidate_calls = [
-        lambda: _service.get(integration_id=integration_id, environment=environment),
-        lambda: _service.get(integration_id, environment),
-        lambda: _service.get(integration_id),
         lambda: _service.verify(integration_id=integration_id, environment=environment),
-        lambda: _service.verify(integration_id, environment),
+        lambda: _service.check(integration_id=integration_id),
         lambda: _service.verify(integration_id),
-        lambda: _service.compatibility(integration_id=integration_id, environment=environment),
-        lambda: _service.compatibility(integration_id, environment),
-        lambda: _service.compatibility(integration_id),
+        lambda: _service.check(integration_id),
+        lambda: _service.verify(),
+        lambda: _service.check(),
     ]
 
     for call in candidate_calls:
@@ -315,26 +315,30 @@ def _run_compatibility_lookup(
 
 @router.get(
     "/{integration_id}/compatibility",
+    operation_id="integrations_get_compatibility",
     response_model=IntegrationCompatibilityResponse,
-    summary="Get integration compatibility verification",
+    summary="Get integration compatibility report",
 )
 def get_integration_compatibility(
     integration_id: str = Path(..., min_length=1, max_length=255),
-    environment: str | None = Query(default=None, min_length=1, max_length=100),
+    environment: str = Query(default="production", min_length=1, max_length=100),
 ) -> IntegrationCompatibilityResponse:
-    result = _run_compatibility_lookup(
-        integration_id=integration_id.strip(),
-        environment=environment.strip() if environment is not None else None,
+    normalized_integration_id = integration_id.strip()
+    normalized_environment = environment.strip()
+
+    result = _run_compatibility(
+        integration_id=normalized_integration_id,
+        environment=normalized_environment,
     )
 
     if result is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"integration '{integration_id}' not found",
+            detail=f"integration '{normalized_integration_id}' not found",
         )
 
     return _build_compatibility_response(
-        integration_id=integration_id.strip(),
+        integration_id=normalized_integration_id,
         result=result,
-        environment=environment.strip() if environment is not None else None,
+        environment=normalized_environment,
     )

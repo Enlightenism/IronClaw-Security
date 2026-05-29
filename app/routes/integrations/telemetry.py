@@ -276,6 +276,7 @@ def _run_telemetry_lookup(integration_id: str, environment: str, window: str) ->
 
 @router.get(
     "/{integration_id}/telemetry",
+    operation_id="integrations_get_telemetry",
     response_model=IntegrationTelemetryResponse,
     summary="Get integration telemetry and observability signals",
 )

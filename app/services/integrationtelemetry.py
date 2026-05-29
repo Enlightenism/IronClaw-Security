@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 from app.services.integrationregistry import get_integration_registry
 
@@ -63,8 +64,93 @@ class IntegrationTelemetryService:
         return events
 
 
+# ---------------------------------------------------------------------------
+# IntegrationTelemetry — facade used by routes/integrations/telemetry.py
+# Exposes .get(), .summary(), .metrics() over the event-based service above.
+# ---------------------------------------------------------------------------
+
+
+class IntegrationTelemetry:
+    def __init__(self) -> None:
+        self._service = IntegrationTelemetryService()
+
+    def _build_payload(
+        self,
+        integration_id: str,
+        environment: str = "production",
+        window: str = "24h",
+    ) -> dict[str, Any]:
+        events = self._service.list_events(integrationid=integration_id)
+        signals = [
+            {
+                "signal_id": ev.eventid,
+                "category": ev.eventtype,
+                "severity": "healthy" if ev.level == "info" else "warning",
+                "status": "active",
+                "title": ev.message,
+                "detail": ev.message,
+                "timestamp": ev.createdat,
+                "metadata": {k: v for k, v in ev.metadata.items()},
+            }
+            for ev in events
+        ]
+        metrics: list[dict[str, Any]] = [
+            {
+                "metric": "event_count",
+                "unit": "count",
+                "points": [
+                    {
+                        "timestamp": datetime.now(UTC).isoformat(),
+                        "value": float(len(events)),
+                        "label": "total",
+                    }
+                ],
+                "metadata": {"integration_id": integration_id},
+            }
+        ]
+        return {
+            "environment": environment,
+            "window": window,
+            "updated_at": datetime.now(UTC).isoformat(),
+            "signals": signals,
+            "metrics": metrics,
+        }
+
+    def get(
+        self,
+        integration_id: str,
+        environment: str = "production",
+        window: str = "24h",
+    ) -> dict[str, Any]:
+        return self._build_payload(integration_id, environment, window)
+
+    def summary(
+        self,
+        integration_id: str,
+        environment: str = "production",
+        window: str = "24h",
+    ) -> dict[str, Any]:
+        return self._build_payload(integration_id, environment, window)
+
+    def metrics(
+        self,
+        integration_id: str,
+        environment: str = "production",
+        window: str = "24h",
+    ) -> dict[str, Any]:
+        return self._build_payload(integration_id, environment, window)
+
+
 _telemetry_service = IntegrationTelemetryService()
 
 
 def get_integration_telemetry_service() -> IntegrationTelemetryService:
     return _telemetry_service
+
+
+__all__ = [
+    "IntegrationTelemetry",
+    "IntegrationTelemetryEvent",
+    "IntegrationTelemetryService",
+    "get_integration_telemetry_service",
+]
