@@ -32,6 +32,13 @@ _NOW = _utcnow_iso()
 _PAST = "2020-01-01T00:00:00Z"
 _FUTURE = "2099-12-31T23:59:59Z"
 
+_PATCH_TARGET = "app.services.ioc_store._get_client"
+
+
+# ---------------------------------------------------------------------------
+# Builders / factories
+# ---------------------------------------------------------------------------
+
 
 def _make_record(
     *,
@@ -107,31 +114,36 @@ def _make_ingest_result(
     )
 
 
-def _make_builder(data=None, count=0) -> MagicMock:
+def _make_builder(data: Any = None, count: int = 0) -> MagicMock:
+    """Return a fully-chained Supabase query builder mock."""
     resp = MagicMock()
     resp.data = data if data is not None else []
     resp.count = count
+
     b = MagicMock()
-    b.select.return_value = b
-    b.insert.return_value = b
-    b.update.return_value = b
-    b.delete.return_value = b
-    b.eq.return_value = b
-    b.neq.return_value = b
-    b.lt.return_value = b
-    b.lte.return_value = b
-    b.gt.return_value = b
-    b.gte.return_value = b
-    b.in_.return_value = b
-    b.or_.return_value = b
+    for method in (
+        "select",
+        "insert",
+        "update",
+        "delete",
+        "eq",
+        "neq",
+        "lt",
+        "lte",
+        "gt",
+        "gte",
+        "in_",
+        "or_",
+        "is_",
+        "ilike",
+        "contains",
+        "limit",
+        "range",
+        "order",
+        "maybe_single",
+    ):
+        getattr(b, method).return_value = b
     b.not_ = b
-    b.is_.return_value = b
-    b.ilike.return_value = b
-    b.contains.return_value = b
-    b.limit.return_value = b
-    b.range.return_value = b
-    b.order.return_value = b
-    b.maybe_single.return_value = b
     b.execute.return_value = resp
     return b
 
@@ -165,6 +177,29 @@ def _row_from_record(record: IOCRecord) -> dict[str, Any]:
     }
 
 
+def _sequential_builder(*responses: Any) -> MagicMock:
+    """
+    Return a builder whose execute() returns each response in order.
+    Eliminates the repeated call_count / side_effect boilerplate.
+    """
+    it = iter(responses)
+    b = _make_builder()
+    b.execute.side_effect = lambda: next(it)
+    return b
+
+
+def _resp(data: Any = None, count: int = 0) -> MagicMock:
+    r = MagicMock()
+    r.data = data if data is not None else []
+    r.count = count
+    return r
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
 @pytest.fixture()
 def mock_client() -> MagicMock:
     return _make_supabase_mock()
@@ -172,7 +207,7 @@ def mock_client() -> MagicMock:
 
 @pytest.fixture()
 def store(mock_client: MagicMock) -> IOCStore:
-    with patch("app.services.ioc_store._get_client", return_value=mock_client):
+    with patch(_PATCH_TARGET, return_value=mock_client):
         yield IOCStore()
 
 
@@ -183,16 +218,12 @@ def store(mock_client: MagicMock) -> IOCStore:
 
 class TestUpsertIoc:
     def test_insert_new_record_returns_true(self, mock_client: MagicMock) -> None:
-        resp_none = MagicMock()
-        resp_none.data = None
-
-        builder = _make_builder()
-        builder.execute.return_value = resp_none
+        # maybe_single().execute() returns data=None → triggers insert path
+        builder = _make_builder(data=None)
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.upsert_ioc(_make_record())
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().upsert_ioc(_make_record())
 
         assert result is True
 
@@ -203,34 +234,18 @@ class TestUpsertIoc:
             "tags": ["old-tag"],
             "description": "old desc",
             "extra": {},
+            "expiry": None,
         }
-        resp_existing = MagicMock()
-        resp_existing.data = existing_row
+        # first execute() → select existing; second → update confirmation
+        builder = _sequential_builder(_resp(data=existing_row), _resp(data=[existing_row]))
+        mock_client.table.return_value = builder
 
-        resp_ok = MagicMock()
-        resp_ok.data = [existing_row]
-
-        table_mock = _make_builder()
-        table_mock.maybe_single.return_value = table_mock
-
-        call_count = [0]
-
-        def execute_side_effect():
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return resp_existing
-            return resp_ok
-
-        table_mock.execute.side_effect = execute_side_effect
-        mock_client.table.return_value = table_mock
-
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.upsert_ioc(_make_record(confidence=0.9, tags=["new-tag"]))
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().upsert_ioc(_make_record(confidence=0.9, tags=["new-tag"]))
 
         assert result is True
-        call_args = table_mock.update.call_args
-        payload: dict[str, Any] = call_args[0][0]
+        payload: dict[str, Any] = builder.update.call_args[0][0]
+        # _merge_record_update takes max(existing=0.5, incoming=0.9) → 0.9
         assert payload["confidence"] == 0.9
 
     def test_update_existing_merges_tags(self, mock_client: MagicMock) -> None:
@@ -240,40 +255,24 @@ class TestUpsertIoc:
             "tags": ["alpha"],
             "description": "",
             "extra": {},
+            "expiry": None,
         }
-        resp_existing = MagicMock()
-        resp_existing.data = existing_row
+        builder = _sequential_builder(_resp(data=existing_row), _resp(data=[existing_row]))
+        mock_client.table.return_value = builder
 
-        resp_ok = MagicMock()
-        resp_ok.data = [existing_row]
-
-        table_mock = _make_builder()
-        call_count = [0]
-
-        def execute_side_effect():
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return resp_existing
-            return resp_ok
-
-        table_mock.execute.side_effect = execute_side_effect
-        mock_client.table.return_value = table_mock
-
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.upsert_ioc(_make_record(tags=["beta"]))
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().upsert_ioc(_make_record(tags=["beta"]))
 
         assert result is True
-        payload = table_mock.update.call_args[0][0]
+        payload = builder.update.call_args[0][0]
         assert "alpha" in payload["tags"]
         assert "beta" in payload["tags"]
 
     def test_upsert_ioc_exception_returns_false(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("db down")
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.upsert_ioc(_make_record())
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().upsert_ioc(_make_record())
 
         assert result is False
 
@@ -284,30 +283,15 @@ class TestUpsertIoc:
             "tags": [],
             "description": "",
             "extra": {},
+            "expiry": None,
         }
-        resp_existing = MagicMock()
-        resp_existing.data = existing_row
+        builder = _sequential_builder(_resp(data=existing_row), _resp(data=[existing_row]))
+        mock_client.table.return_value = builder
 
-        resp_ok = MagicMock()
-        resp_ok.data = [existing_row]
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            IOCStore().upsert_ioc(_make_record(description="new description"))
 
-        table_mock = _make_builder()
-        call_count = [0]
-
-        def execute_side_effect():
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return resp_existing
-            return resp_ok
-
-        table_mock.execute.side_effect = execute_side_effect
-        mock_client.table.return_value = table_mock
-
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            store.upsert_ioc(_make_record(description="new description"))
-
-        payload = table_mock.update.call_args[0][0]
+        payload = builder.update.call_args[0][0]
         assert payload["description"] == "new description"
 
 
@@ -318,67 +302,43 @@ class TestUpsertIoc:
 
 class TestBulkUpsert:
     def test_empty_list_returns_zero(self, mock_client: MagicMock) -> None:
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            inserted, updated, skipped = store.bulk_upsert([])
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            inserted, updated, skipped = IOCStore().bulk_upsert([])
         assert (inserted, updated, skipped) == (0, 0, 0)
 
     def test_deduplication_within_batch(self, mock_client: MagicMock) -> None:
-        resp_empty = MagicMock()
-        resp_empty.data = []
-
-        resp_insert = MagicMock()
-        resp_insert.data = [{"ioc_id": "ioc-aaaa0000bbbb1111"}]
-
-        table_mock = _make_builder()
-        call_count = [0]
-
-        def execute_side_effect():
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return resp_empty
-            return resp_insert
-
-        table_mock.execute.side_effect = execute_side_effect
-        mock_client.table.return_value = table_mock
+        # Both records share the same ioc_id; dedup keeps the last one.
+        # select returns empty → both treated as new, but only 1 unique id after dedup.
+        builder = _sequential_builder(
+            _resp(data=[]),
+            _resp(data=[{"ioc_id": "ioc-aaaa0000bbbb1111"}]),
+        )
+        mock_client.table.return_value = builder
 
         r1 = _make_record(ioc_id="ioc-aaaa0000bbbb1111", confidence=0.7)
         r2 = _make_record(ioc_id="ioc-aaaa0000bbbb1111", confidence=0.9)
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            inserted, updated, skipped = store.bulk_upsert([r1, r2])
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            IOCStore().bulk_upsert([r1, r2])
 
-        assert table_mock.insert.call_count == 1
-        insert_payload = table_mock.insert.call_args[0][0]
+        assert builder.insert.call_count == 1
+        insert_payload = builder.insert.call_args[0][0]
         assert isinstance(insert_payload, list)
         assert len(insert_payload) == 1
 
     def test_bulk_upsert_inserts_new_records(self, mock_client: MagicMock) -> None:
-        resp_empty = MagicMock()
-        resp_empty.data = []
-
-        resp_insert = MagicMock()
-        resp_insert.data = [{"ioc_id": "x"}, {"ioc_id": "y"}]
-
-        table_mock = _make_builder()
-        call_count = [0]
-
-        def execute_side_effect():
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return resp_empty
-            return resp_insert
-
-        table_mock.execute.side_effect = execute_side_effect
-        mock_client.table.return_value = table_mock
+        # select returns empty → both records go to insert path
+        builder = _sequential_builder(
+            _resp(data=[]),
+            _resp(data=[{"ioc_id": "x"}, {"ioc_id": "y"}]),
+        )
+        mock_client.table.return_value = builder
 
         r1 = _make_record(ioc_id="ioc-0001", value="10.0.0.1")
         r2 = _make_record(ioc_id="ioc-0002", value="10.0.0.2")
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            inserted, updated, skipped = store.bulk_upsert([r1, r2])
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            inserted, updated, skipped = IOCStore().bulk_upsert([r1, r2])
 
         assert inserted == 2
         assert updated == 0
@@ -393,33 +353,19 @@ class TestBulkUpsert:
             "extra": {"k": "v"},
             "expiry": None,
         }
-        resp_existing = MagicMock()
-        resp_existing.data = [existing_row]
-
-        resp_update = MagicMock()
-        resp_update.data = [existing_row]
-
-        table_mock = _make_builder()
-        call_count = [0]
-
-        def execute_side_effect():
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return resp_existing
-            return resp_update
-
-        table_mock.execute.side_effect = execute_side_effect
-        mock_client.table.return_value = table_mock
+        # select returns existing row → update path; second execute → update result
+        builder = _sequential_builder(_resp(data=[existing_row]), _resp(data=[existing_row]))
+        mock_client.table.return_value = builder
 
         r = _make_record(ioc_id="ioc-0001", confidence=0.95, tags=["new-tag"])
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            inserted, updated, skipped = store.bulk_upsert([r])
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            inserted, updated, skipped = IOCStore().bulk_upsert([r])
 
         assert inserted == 0
         assert updated == 1
-        update_payload = table_mock.update.call_args[0][0]
+        update_payload = builder.update.call_args[0][0]
+        # max(0.4, 0.95) → 0.95
         assert update_payload["confidence"] == 0.95
         assert "existing-tag" in update_payload["tags"]
         assert "new-tag" in update_payload["tags"]
@@ -433,39 +379,23 @@ class TestBulkUpsert:
             "extra": {},
             "expiry": None,
         }
-        resp_existing = MagicMock()
-        resp_existing.data = [existing_row]
-
-        resp_update = MagicMock()
-        resp_update.data = [existing_row]
-
-        table_mock = _make_builder()
-        call_count = [0]
-
-        def execute_side_effect():
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return resp_existing
-            return resp_update
-
-        table_mock.execute.side_effect = execute_side_effect
-        mock_client.table.return_value = table_mock
+        builder = _sequential_builder(_resp(data=[existing_row]), _resp(data=[existing_row]))
+        mock_client.table.return_value = builder
 
         r = _make_record(ioc_id="ioc-0001", confidence=0.1, tags=["replacement"])
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            store.bulk_upsert([r], overwrite=True)
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            IOCStore().bulk_upsert([r], overwrite=True)
 
-        update_payload = table_mock.update.call_args[0][0]
+        update_payload = builder.update.call_args[0][0]
+        # overwrite=True uses _record_to_row → confidence comes directly from record
         assert update_payload["confidence"] == 0.1
 
     def test_bulk_upsert_batch_exception_increments_skipped(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("connection refused")
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            inserted, updated, skipped = store.bulk_upsert([_make_record(ioc_id="ioc-0001"), _make_record(ioc_id="ioc-0002")])
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            inserted, updated, skipped = IOCStore().bulk_upsert([_make_record(ioc_id="ioc-0001"), _make_record(ioc_id="ioc-0002")])
 
         assert skipped == 2
         assert inserted == 0
@@ -480,13 +410,11 @@ class TestBulkUpsert:
 class TestGetIoc:
     def test_returns_record_when_found(self, mock_client: MagicMock) -> None:
         record = _make_record()
-        row = _row_from_record(record)
-        builder = _make_builder(data=row)
+        builder = _make_builder(data=_row_from_record(record))
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.get_ioc(record.ioc_id)
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().get_ioc(record.ioc_id)
 
         assert result is not None
         assert result.ioc_id == record.ioc_id
@@ -495,18 +423,16 @@ class TestGetIoc:
         builder = _make_builder(data=None)
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.get_ioc("ioc-does-not-exist")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().get_ioc("ioc-does-not-exist")
 
         assert result is None
 
     def test_exception_returns_none(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("db error")
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.get_ioc("ioc-0001")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().get_ioc("ioc-0001")
 
         assert result is None
 
@@ -519,14 +445,11 @@ class TestGetIoc:
 class TestLookupByValue:
     def test_returns_matching_record(self, mock_client: MagicMock) -> None:
         record = _make_record(value="1.2.3.4")
-        row = _row_from_record(record)
-
-        builder = _make_builder(data=[row])
+        builder = _make_builder(data=[_row_from_record(record)])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            results = store.lookup_by_value("1.2.3.4")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            results = IOCStore().lookup_by_value("1.2.3.4")
 
         assert len(results) == 1
         assert results[0].value == "1.2.3.4"
@@ -536,9 +459,8 @@ class TestLookupByValue:
         builder = _make_builder(data=[])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            results = store.lookup_by_value("10.99.99.99")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            results = IOCStore().lookup_by_value("10.99.99.99")
 
         assert results == []
 
@@ -546,9 +468,8 @@ class TestLookupByValue:
         builder = _make_builder(data=[])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            store.lookup_by_value("EVIL.COM")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            IOCStore().lookup_by_value("EVIL.COM")
 
         eq_calls = [str(c) for c in builder.eq.call_args_list]
         assert any("evil.com" in c for c in eq_calls)
@@ -556,9 +477,8 @@ class TestLookupByValue:
     def test_exception_returns_empty_list(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("timeout")
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            results = store.lookup_by_value("1.2.3.4")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            results = IOCStore().lookup_by_value("1.2.3.4")
 
         assert results == []
 
@@ -566,9 +486,8 @@ class TestLookupByValue:
         builder = _make_builder(data=[])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            store.lookup_by_value("1.2.3.4", org_id="org-xyz")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            IOCStore().lookup_by_value("1.2.3.4", org_id="org-xyz")
 
         builder.or_.assert_called_once()
         or_arg: str = builder.or_.call_args[0][0]
@@ -580,79 +499,45 @@ class TestLookupByValue:
 # ---------------------------------------------------------------------------
 
 
+def _full_row(record: IOCRecord) -> dict[str, Any]:
+    return {
+        **_row_from_record(record),
+        "mitre_technique_id": None,
+        "mitre_tactic": None,
+        "cve_id": None,
+        "first_seen": _NOW,
+        "last_seen": _NOW,
+        "expiry": None,
+        "active": True,
+        "extra": {},
+    }
+
+
 class TestLookupByValues:
     def test_returns_empty_for_empty_input(self, mock_client: MagicMock) -> None:
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            results = store.lookup_by_values([])
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            results = IOCStore().lookup_by_values([])
         assert results == []
 
     def test_returns_matching_records(self, mock_client: MagicMock) -> None:
-        record1 = _make_record(ioc_id="ioc-0001", value="1.1.1.1")
-        record2 = _make_record(ioc_id="ioc-0002", value="2.2.2.2")
-
-        rows = [
-            {
-                "ioc_id": record1.ioc_id,
-                "ioc_type": record1.ioc_type,
-                "value": record1.value,
-                "source": record1.source,
-                "severity": record1.severity,
-                "confidence": record1.confidence,
-                "tags": record1.tags,
-                "description": record1.description,
-                "org_id": record1.org_id,
-                "mitre_technique_id": None,
-                "mitre_tactic": None,
-                "cve_id": None,
-                "first_seen": _NOW,
-                "last_seen": _NOW,
-                "expiry": None,
-                "active": True,
-                "feed_ingest_id": record1.feed_ingest_id,
-                "extra": {},
-            },
-            {
-                "ioc_id": record2.ioc_id,
-                "ioc_type": record2.ioc_type,
-                "value": record2.value,
-                "source": record2.source,
-                "severity": record2.severity,
-                "confidence": record2.confidence,
-                "tags": record2.tags,
-                "description": record2.description,
-                "org_id": record2.org_id,
-                "mitre_technique_id": None,
-                "mitre_tactic": None,
-                "cve_id": None,
-                "first_seen": _NOW,
-                "last_seen": _NOW,
-                "expiry": None,
-                "active": True,
-                "feed_ingest_id": record2.feed_ingest_id,
-                "extra": {},
-            },
-        ]
-
-        builder = _make_builder(data=rows)
+        r1 = _make_record(ioc_id="ioc-0001", value="1.1.1.1")
+        r2 = _make_record(ioc_id="ioc-0002", value="2.2.2.2")
+        builder = _make_builder(data=[_full_row(r1), _full_row(r2)])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            results = store.lookup_by_values(["1.1.1.1", "2.2.2.2"])
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            results = IOCStore().lookup_by_values(["1.1.1.1", "2.2.2.2"])
 
         assert len(results) == 2
         values = {r.value for r in results}
-        assert "1.1.1.1" in values
-        assert "2.2.2.2" in values
+        assert {"1.1.1.1", "2.2.2.2"} == values
 
     def test_normalizes_values_before_query(self, mock_client: MagicMock) -> None:
         builder = _make_builder(data=[])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            store.lookup_by_values(["EVIL.COM", "BADGUY.NET"])
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            IOCStore().lookup_by_values(["EVIL.COM", "BADGUY.NET"])
 
         in_calls = builder.in_.call_args_list
         assert len(in_calls) >= 1
@@ -663,9 +548,8 @@ class TestLookupByValues:
     def test_exception_returns_empty_list(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("network error")
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            results = store.lookup_by_values(["1.2.3.4"])
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            results = IOCStore().lookup_by_values(["1.2.3.4"])
 
         assert results == []
 
@@ -678,13 +562,11 @@ class TestLookupByValues:
 class TestLookupByCve:
     def test_returns_matching_records(self, mock_client: MagicMock) -> None:
         record = _make_record(cve_id="CVE-2024-1234")
-        row = _row_from_record(record)
-        builder = _make_builder(data=[row])
+        builder = _make_builder(data=[_row_from_record(record)])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            results = store.lookup_by_cve("CVE-2024-1234")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            results = IOCStore().lookup_by_cve("CVE-2024-1234")
 
         assert len(results) == 1
         assert results[0].cve_id == "CVE-2024-1234"
@@ -693,9 +575,8 @@ class TestLookupByCve:
         builder = _make_builder(data=[])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            store.lookup_by_cve("cve-2024-1234")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            IOCStore().lookup_by_cve("cve-2024-1234")
 
         eq_calls = builder.eq.call_args_list
         assert any(call[0][1] == "CVE-2024-1234" for call in eq_calls)
@@ -704,18 +585,16 @@ class TestLookupByCve:
         builder = _make_builder(data=[])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            results = store.lookup_by_cve("CVE-0000-0000")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            results = IOCStore().lookup_by_cve("CVE-0000-0000")
 
         assert results == []
 
     def test_exception_returns_empty_list(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("db error")
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            results = store.lookup_by_cve("CVE-2024-1234")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            results = IOCStore().lookup_by_cve("CVE-2024-1234")
 
         assert results == []
 
@@ -723,9 +602,8 @@ class TestLookupByCve:
         builder = _make_builder(data=[])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            store.lookup_by_cve("CVE-2024-9999", org_id="org-abc")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            IOCStore().lookup_by_cve("CVE-2024-9999", org_id="org-abc")
 
         builder.or_.assert_called_once()
         or_arg: str = builder.or_.call_args[0][0]
@@ -740,13 +618,11 @@ class TestLookupByCve:
 class TestLookupByMitreTechnique:
     def test_returns_matching_records(self, mock_client: MagicMock) -> None:
         record = _make_record(mitre_technique_id="T1059")
-        row = _row_from_record(record)
-        builder = _make_builder(data=[row])
+        builder = _make_builder(data=[_row_from_record(record)])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            results = store.lookup_by_mitre_technique("T1059")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            results = IOCStore().lookup_by_mitre_technique("T1059")
 
         assert len(results) == 1
         assert results[0].mitre_technique_id == "T1059"
@@ -755,9 +631,8 @@ class TestLookupByMitreTechnique:
         builder = _make_builder(data=[])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            store.lookup_by_mitre_technique("t1059")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            IOCStore().lookup_by_mitre_technique("t1059")
 
         eq_calls = builder.eq.call_args_list
         assert any(call[0][1] == "T1059" for call in eq_calls)
@@ -766,18 +641,16 @@ class TestLookupByMitreTechnique:
         builder = _make_builder(data=[])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            results = store.lookup_by_mitre_technique("T9999")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            results = IOCStore().lookup_by_mitre_technique("T9999")
 
         assert results == []
 
     def test_exception_returns_empty_list(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("db error")
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            results = store.lookup_by_mitre_technique("T1059")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            results = IOCStore().lookup_by_mitre_technique("T1059")
 
         assert results == []
 
@@ -816,9 +689,8 @@ class TestFilterIocs:
 
         req = IOCFilterRequest(severity=ThreatSeverityLevel.HIGH, active=True, limit=10, offset=0)
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            results = store.filter_iocs(req)
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            results = IOCStore().filter_iocs(req)
 
         assert len(results) == 1
         assert results[0].severity == ThreatSeverityLevel.HIGH
@@ -829,9 +701,8 @@ class TestFilterIocs:
 
         req = IOCFilterRequest(severity=ThreatSeverityLevel.CRITICAL, limit=10, offset=0)
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            results = store.filter_iocs(req)
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            results = IOCStore().filter_iocs(req)
 
         assert results == []
 
@@ -841,9 +712,8 @@ class TestFilterIocs:
 
         req = IOCFilterRequest(source=ThreatFeedSourceEnum.MITRE_ATTACK, limit=10, offset=0)
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            store.filter_iocs(req)
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            IOCStore().filter_iocs(req)
 
         eq_calls = builder.eq.call_args_list
         assert any(call[0][0] == "source" and call[0][1] == ThreatFeedSourceEnum.MITRE_ATTACK for call in eq_calls)
@@ -854,9 +724,8 @@ class TestFilterIocs:
 
         req = IOCFilterRequest(tag="ransomware", limit=10, offset=0)
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            store.filter_iocs(req)
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            IOCStore().filter_iocs(req)
 
         builder.contains.assert_called_once_with("tags", ["ransomware"])
 
@@ -866,18 +735,16 @@ class TestFilterIocs:
 
         req = IOCFilterRequest(value_contains="evil", limit=10, offset=0)
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            store.filter_iocs(req)
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            IOCStore().filter_iocs(req)
 
         builder.ilike.assert_called_once_with("value", "%evil%")
 
     def test_exception_returns_empty_list(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("db error")
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            results = store.filter_iocs(IOCFilterRequest())
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            results = IOCStore().filter_iocs(IOCFilterRequest())
 
         assert results == []
 
@@ -892,9 +759,8 @@ class TestDeactivateIoc:
         builder = _make_builder(data=[{"ioc_id": "ioc-0001"}])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.deactivate_ioc("ioc-0001")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().deactivate_ioc("ioc-0001")
 
         assert result is True
 
@@ -902,18 +768,16 @@ class TestDeactivateIoc:
         builder = _make_builder(data=[])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.deactivate_ioc("ioc-does-not-exist")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().deactivate_ioc("ioc-does-not-exist")
 
         assert result is False
 
     def test_exception_returns_false(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("db error")
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.deactivate_ioc("ioc-0001")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().deactivate_ioc("ioc-0001")
 
         assert result is False
 
@@ -921,9 +785,8 @@ class TestDeactivateIoc:
         builder = _make_builder(data=[{"ioc_id": "ioc-0001"}])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            store.deactivate_ioc("ioc-0001")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            IOCStore().deactivate_ioc("ioc-0001")
 
         update_payload = builder.update.call_args[0][0]
         assert update_payload["active"] is False
@@ -939,9 +802,8 @@ class TestDeleteIoc:
         builder = _make_builder(data=[{"ioc_id": "ioc-0001"}])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.delete_ioc("ioc-0001")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().delete_ioc("ioc-0001")
 
         assert result is True
 
@@ -949,18 +811,16 @@ class TestDeleteIoc:
         builder = _make_builder(data=[])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.delete_ioc("ioc-does-not-exist")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().delete_ioc("ioc-does-not-exist")
 
         assert result is False
 
     def test_exception_returns_false(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("db error")
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.delete_ioc("ioc-0001")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().delete_ioc("ioc-0001")
 
         assert result is False
 
@@ -975,9 +835,8 @@ class TestDeleteByIngestId:
         builder = _make_builder(data=[{"ioc_id": "ioc-0001"}, {"ioc_id": "ioc-0002"}])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            count = store.delete_by_ingest_id("ingest-test0001")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            count = IOCStore().delete_by_ingest_id("ingest-test0001")
 
         assert count == 2
 
@@ -985,18 +844,16 @@ class TestDeleteByIngestId:
         builder = _make_builder(data=[])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            count = store.delete_by_ingest_id("ingest-none")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            count = IOCStore().delete_by_ingest_id("ingest-none")
 
         assert count == 0
 
     def test_exception_returns_zero(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("db error")
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            count = store.delete_by_ingest_id("ingest-test0001")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            count = IOCStore().delete_by_ingest_id("ingest-test0001")
 
         assert count == 0
 
@@ -1008,13 +865,11 @@ class TestDeleteByIngestId:
 
 class TestPruneExpired:
     def test_deactivates_expired_records_returns_count(self, mock_client: MagicMock) -> None:
-        pruned_rows = [{"ioc_id": "ioc-exp-0001"}, {"ioc_id": "ioc-exp-0002"}]
-        builder = _make_builder(data=pruned_rows)
+        builder = _make_builder(data=[{"ioc_id": "ioc-exp-0001"}, {"ioc_id": "ioc-exp-0002"}])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            count = store.prune_expired()
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            count = IOCStore().prune_expired()
 
         assert count == 2
 
@@ -1022,9 +877,8 @@ class TestPruneExpired:
         builder = _make_builder(data=[])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            count = store.prune_expired()
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            count = IOCStore().prune_expired()
 
         assert count == 0
 
@@ -1032,19 +886,18 @@ class TestPruneExpired:
         builder = _make_builder(data=[])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            store.prune_expired()
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            IOCStore().prune_expired()
 
+        # prune_expired does: .eq("active", True).lt("expiry", now_iso).not_.is_("expiry", "null")
         builder.eq.assert_called_once_with("active", True)
         builder.lt.assert_called_once()
 
     def test_exception_returns_zero(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("db error")
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            count = store.prune_expired()
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            count = IOCStore().prune_expired()
 
         assert count == 0
 
@@ -1059,9 +912,8 @@ class TestCountIocs:
         builder = _make_builder(data=[], count=17)
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.count_iocs()
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().count_iocs()
 
         assert result == 17
 
@@ -1069,9 +921,8 @@ class TestCountIocs:
         builder = _make_builder(data=[], count=5)
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            store.count_iocs(source=ThreatFeedSourceEnum.CUSTOM_IOC)
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            IOCStore().count_iocs(source=ThreatFeedSourceEnum.CUSTOM_IOC)
 
         eq_calls = builder.eq.call_args_list
         assert any(call[0][0] == "source" for call in eq_calls)
@@ -1081,18 +932,16 @@ class TestCountIocs:
         builder.execute.return_value.count = None
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.count_iocs()
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().count_iocs()
 
         assert result == 0
 
     def test_exception_returns_zero(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("db error")
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.count_iocs()
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().count_iocs()
 
         assert result == 0
 
@@ -1107,11 +956,8 @@ class TestPersistIngestResult:
         builder = _make_builder(data=[{"ingest_id": "ingest-abc123"}])
         mock_client.table.return_value = builder
 
-        result_obj = _make_ingest_result()
-
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            ok = store.persist_ingest_result(result_obj)
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            ok = IOCStore().persist_ingest_result(_make_ingest_result())
 
         builder.insert.assert_called_once()
         assert ok is True
@@ -1128,9 +974,8 @@ class TestPersistIngestResult:
             iocs_skipped=0,
         )
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            store.persist_ingest_result(result_obj)
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            IOCStore().persist_ingest_result(result_obj)
 
         insert_payload: dict[str, Any] = builder.insert.call_args[0][0]
         assert insert_payload["ingest_id"] == "ingest-abc123"
@@ -1142,9 +987,8 @@ class TestPersistIngestResult:
     def test_returns_false_on_exception(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("write error")
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            ok = store.persist_ingest_result(_make_ingest_result())
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            ok = IOCStore().persist_ingest_result(_make_ingest_result())
 
         assert ok is False
 
@@ -1160,9 +1004,8 @@ class TestGetIngestResult:
         builder = _make_builder(data=row)
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.get_ingest_result("ingest-abc123")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().get_ingest_result("ingest-abc123")
 
         assert result is not None
         assert result["ingest_id"] == "ingest-abc123"
@@ -1171,18 +1014,16 @@ class TestGetIngestResult:
         builder = _make_builder(data=None)
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.get_ingest_result("ingest-does-not-exist")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().get_ingest_result("ingest-does-not-exist")
 
         assert result is None
 
     def test_exception_returns_none(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("db error")
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.get_ingest_result("ingest-abc123")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().get_ingest_result("ingest-abc123")
 
         assert result is None
 
@@ -1201,9 +1042,8 @@ class TestListIngestHistory:
         builder = _make_builder(data=rows)
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            results = store.list_ingest_history()
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            results = IOCStore().list_ingest_history()
 
         assert len(results) == 2
 
@@ -1211,9 +1051,8 @@ class TestListIngestHistory:
         builder = _make_builder(data=[])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            results = store.list_ingest_history()
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            results = IOCStore().list_ingest_history()
 
         assert results == []
 
@@ -1221,9 +1060,8 @@ class TestListIngestHistory:
         builder = _make_builder(data=[])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            store.list_ingest_history(source=ThreatFeedSourceEnum.CUSTOM_IOC)
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            IOCStore().list_ingest_history(source=ThreatFeedSourceEnum.CUSTOM_IOC)
 
         eq_calls = builder.eq.call_args_list
         assert any(call[0][0] == "source" for call in eq_calls)
@@ -1231,9 +1069,8 @@ class TestListIngestHistory:
     def test_exception_returns_empty_list(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("db error")
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            results = store.list_ingest_history()
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            results = IOCStore().list_ingest_history()
 
         assert results == []
 
@@ -1248,18 +1085,16 @@ class TestDeleteIngestLog:
         builder = _make_builder(data=[{"ingest_id": "ingest-abc123"}])
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.delete_ingest_log("ingest-abc123")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().delete_ingest_log("ingest-abc123")
 
         assert result is True
 
     def test_exception_returns_false(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("db error")
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.delete_ingest_log("ingest-abc123")
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().delete_ingest_log("ingest-abc123")
 
         assert result is False
 
@@ -1274,9 +1109,8 @@ class TestHealthCheck:
         builder = _make_builder(data=[], count=42)
         mock_client.table.return_value = builder
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.health_check()
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().health_check()
 
         assert result["status"] == "ok"
         assert result["ioc_count"] == 42
@@ -1284,9 +1118,8 @@ class TestHealthCheck:
     def test_returns_error_status_on_exception(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("db down")
 
-        with patch("app.services.ioc_store._get_client", return_value=mock_client):
-            store = IOCStore()
-            result = store.health_check()
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().health_check()
 
         assert result["status"] == "error"
         assert "detail" in result

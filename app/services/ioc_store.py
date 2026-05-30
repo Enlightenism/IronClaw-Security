@@ -43,6 +43,22 @@ def _get_client():
     raise RuntimeError("ioc_store: cannot resolve Supabase client — " "expected get_supabase_client() at app.clients.supabase or app.core.supabase")
 
 
+def _is_supabase_configured() -> bool:
+    try:
+        from app.clients.supabase import is_supabase_configured
+
+        return is_supabase_configured()
+    except ImportError:
+        pass
+    try:
+        from app.core.supabase import is_supabase_configured
+
+        return is_supabase_configured()
+    except ImportError:
+        pass
+    return False
+
+
 def _record_to_row(record: IOCRecord) -> dict[str, Any]:
     return {
         "ioc_id": record.ioc_id,
@@ -175,6 +191,9 @@ def _merge_record_update(existing: dict[str, Any], record: IOCRecord) -> dict[st
 
 class IOCStore:
     def upsert_ioc(self, record: IOCRecord) -> bool:
+        if not _is_supabase_configured():
+            logger.warning("ioc_store.upsert_ioc: Supabase not configured — skipping")
+            return False
         try:
             client = _get_client()
             table = client.table(_TABLE_IOCS)
@@ -197,6 +216,10 @@ class IOCStore:
         *,
         overwrite: bool = False,
     ) -> tuple[int, int, int]:
+        if not _is_supabase_configured():
+            logger.warning("ioc_store.bulk_upsert: Supabase not configured — skipping")
+            return 0, 0, 0
+
         if not records:
             return 0, 0, 0
 
@@ -264,6 +287,9 @@ class IOCStore:
         return inserted, updated, skipped
 
     def get_ioc(self, ioc_id: str) -> IOCRecord | None:
+        if not _is_supabase_configured():
+            logger.warning("ioc_store.get_ioc: Supabase not configured — skipping")
+            return None
         try:
             client = _get_client()
             table = client.table(_TABLE_IOCS)
@@ -282,6 +308,9 @@ class IOCStore:
         org_id: str | None = None,
         active_only: bool = True,
     ) -> list[IOCRecord]:
+        if not _is_supabase_configured():
+            logger.warning("ioc_store.lookup_by_value: Supabase not configured — skipping")
+            return []
         ioc_type = _detect_ioc_type(value)
         normalized = _normalize_value(value, ioc_type)
         try:
@@ -307,6 +336,9 @@ class IOCStore:
         org_id: str | None = None,
         active_only: bool = True,
     ) -> list[IOCRecord]:
+        if not _is_supabase_configured():
+            logger.warning("ioc_store.lookup_by_cve: Supabase not configured — skipping")
+            return []
         normalized = cve_id.strip().upper()
         try:
             client = _get_client()
@@ -331,6 +363,9 @@ class IOCStore:
         org_id: str | None = None,
         active_only: bool = True,
     ) -> list[IOCRecord]:
+        if not _is_supabase_configured():
+            logger.warning("ioc_store.lookup_by_mitre_technique: Supabase not configured — skipping")
+            return []
         normalized = technique_id.strip().upper()
         try:
             client = _get_client()
@@ -355,6 +390,9 @@ class IOCStore:
         org_id: str | None = None,
         active_only: bool = True,
     ) -> list[IOCRecord]:
+        if not _is_supabase_configured():
+            logger.warning("ioc_store.lookup_by_values: Supabase not configured — skipping")
+            return []
         if not values:
             return []
         normalized_values: list[str] = []
@@ -378,6 +416,9 @@ class IOCStore:
             return []
 
     def filter_iocs(self, req: IOCFilterRequest) -> list[IOCRecord]:
+        if not _is_supabase_configured():
+            logger.warning("ioc_store.filter_iocs: Supabase not configured — skipping")
+            return []
         try:
             client = _get_client()
             table = client.table(_TABLE_IOCS)
@@ -413,6 +454,9 @@ class IOCStore:
             return []
 
     def deactivate_ioc(self, ioc_id: str) -> bool:
+        if not _is_supabase_configured():
+            logger.warning("ioc_store.deactivate_ioc: Supabase not configured — skipping")
+            return False
         try:
             client = _get_client()
             table = client.table(_TABLE_IOCS)
@@ -426,6 +470,9 @@ class IOCStore:
             return False
 
     def delete_ioc(self, ioc_id: str) -> bool:
+        if not _is_supabase_configured():
+            logger.warning("ioc_store.delete_ioc: Supabase not configured — skipping")
+            return False
         try:
             client = _get_client()
             table = client.table(_TABLE_IOCS)
@@ -439,6 +486,9 @@ class IOCStore:
             return False
 
     def delete_by_ingest_id(self, feed_ingest_id: str) -> int:
+        if not _is_supabase_configured():
+            logger.warning("ioc_store.delete_by_ingest_id: Supabase not configured — skipping")
+            return 0
         try:
             client = _get_client()
             table = client.table(_TABLE_IOCS)
@@ -451,6 +501,9 @@ class IOCStore:
             return 0
 
     def prune_expired(self) -> int:
+        if not _is_supabase_configured():
+            logger.warning("ioc_store.prune_expired: Supabase not configured — skipping")
+            return 0
         now_iso = _utcnow_iso()
         try:
             client = _get_client()
@@ -471,6 +524,9 @@ class IOCStore:
         active: bool | None = None,
         org_id: str | None = None,
     ) -> int:
+        if not _is_supabase_configured():
+            logger.warning("ioc_store.count_iocs: Supabase not configured — skipping")
+            return 0
         try:
             client = _get_client()
             table = client.table(_TABLE_IOCS)
@@ -488,6 +544,9 @@ class IOCStore:
             return 0
 
     def persist_ingest_result(self, result: FeedIngestResult) -> bool:
+        if not _is_supabase_configured():
+            logger.warning("ioc_store.persist_ingest_result: Supabase not configured — skipping")
+            return False
         try:
             client = _get_client()
             table = client.table(_TABLE_INGEST_LOG)
@@ -498,6 +557,9 @@ class IOCStore:
             return False
 
     def get_ingest_result(self, ingest_id: str) -> dict[str, Any] | None:
+        if not _is_supabase_configured():
+            logger.warning("ioc_store.get_ingest_result: Supabase not configured — skipping")
+            return None
         try:
             client = _get_client()
             table = client.table(_TABLE_INGEST_LOG)
@@ -515,6 +577,9 @@ class IOCStore:
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
+        if not _is_supabase_configured():
+            logger.warning("ioc_store.list_ingest_history: Supabase not configured — skipping")
+            return []
         try:
             client = _get_client()
             table = client.table(_TABLE_INGEST_LOG)
@@ -531,6 +596,9 @@ class IOCStore:
             return []
 
     def delete_ingest_log(self, ingest_id: str) -> bool:
+        if not _is_supabase_configured():
+            logger.warning("ioc_store.delete_ingest_log: Supabase not configured — skipping")
+            return False
         try:
             client = _get_client()
             table = client.table(_TABLE_INGEST_LOG)
@@ -541,6 +609,8 @@ class IOCStore:
             return False
 
     def health_check(self) -> dict[str, Any]:
+        if not _is_supabase_configured():
+            return {"status": "unconfigured", "detail": "Supabase credentials not set"}
         try:
             client = _get_client()
             table = client.table(_TABLE_IOCS)
