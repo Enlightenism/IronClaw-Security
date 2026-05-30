@@ -191,11 +191,12 @@ def _merge_record_update(existing: dict[str, Any], record: IOCRecord) -> dict[st
 
 class IOCStore:
     def upsert_ioc(self, record: IOCRecord) -> bool:
-        if not _is_supabase_configured():
+        try:
+            client = _get_client()
+        except Exception:
             logger.warning("ioc_store.upsert_ioc: Supabase not configured — skipping")
             return False
         try:
-            client = _get_client()
             table = client.table(_TABLE_IOCS)
             existing_resp = table.select("ioc_id,confidence,tags,description,extra,expiry").eq("ioc_id", record.ioc_id).maybe_single().execute()
             existing = existing_resp.data if existing_resp else None
@@ -216,7 +217,9 @@ class IOCStore:
         *,
         overwrite: bool = False,
     ) -> tuple[int, int, int]:
-        if not _is_supabase_configured():
+        try:
+            _get_client()
+        except Exception:
             logger.warning("ioc_store.bulk_upsert: Supabase not configured — skipping")
             return 0, 0, 0
 
@@ -287,11 +290,12 @@ class IOCStore:
         return inserted, updated, skipped
 
     def get_ioc(self, ioc_id: str) -> IOCRecord | None:
-        if not _is_supabase_configured():
+        try:
+            client = _get_client()
+        except Exception:
             logger.warning("ioc_store.get_ioc: Supabase not configured — skipping")
             return None
         try:
-            client = _get_client()
             table = client.table(_TABLE_IOCS)
             resp = table.select("*").eq("ioc_id", ioc_id).maybe_single().execute()
             if resp and resp.data:
@@ -308,13 +312,14 @@ class IOCStore:
         org_id: str | None = None,
         active_only: bool = True,
     ) -> list[IOCRecord]:
-        if not _is_supabase_configured():
+        try:
+            client = _get_client()
+        except Exception:
             logger.warning("ioc_store.lookup_by_value: Supabase not configured — skipping")
             return []
         ioc_type = _detect_ioc_type(value)
         normalized = _normalize_value(value, ioc_type)
         try:
-            client = _get_client()
             table = client.table(_TABLE_IOCS)
             q = table.select("*").eq("value", normalized)
             if active_only:
@@ -336,12 +341,13 @@ class IOCStore:
         org_id: str | None = None,
         active_only: bool = True,
     ) -> list[IOCRecord]:
-        if not _is_supabase_configured():
+        try:
+            client = _get_client()
+        except Exception:
             logger.warning("ioc_store.lookup_by_cve: Supabase not configured — skipping")
             return []
         normalized = cve_id.strip().upper()
         try:
-            client = _get_client()
             table = client.table(_TABLE_IOCS)
             q = table.select("*").eq("cve_id", normalized)
             if active_only:
@@ -363,12 +369,13 @@ class IOCStore:
         org_id: str | None = None,
         active_only: bool = True,
     ) -> list[IOCRecord]:
-        if not _is_supabase_configured():
+        try:
+            client = _get_client()
+        except Exception:
             logger.warning("ioc_store.lookup_by_mitre_technique: Supabase not configured — skipping")
             return []
         normalized = technique_id.strip().upper()
         try:
-            client = _get_client()
             table = client.table(_TABLE_IOCS)
             q = table.select("*").eq("mitre_technique_id", normalized)
             if active_only:
@@ -390,7 +397,9 @@ class IOCStore:
         org_id: str | None = None,
         active_only: bool = True,
     ) -> list[IOCRecord]:
-        if not _is_supabase_configured():
+        try:
+            client = _get_client()
+        except Exception:
             logger.warning("ioc_store.lookup_by_values: Supabase not configured — skipping")
             return []
         if not values:
@@ -400,7 +409,6 @@ class IOCStore:
             ioc_type = _detect_ioc_type(v)
             normalized_values.append(_normalize_value(v, ioc_type))
         try:
-            client = _get_client()
             table = client.table(_TABLE_IOCS)
             q = table.select("*").in_("value", normalized_values)
             if active_only:
@@ -416,11 +424,12 @@ class IOCStore:
             return []
 
     def filter_iocs(self, req: IOCFilterRequest) -> list[IOCRecord]:
-        if not _is_supabase_configured():
+        try:
+            client = _get_client()
+        except Exception:
             logger.warning("ioc_store.filter_iocs: Supabase not configured — skipping")
             return []
         try:
-            client = _get_client()
             table = client.table(_TABLE_IOCS)
             q = table.select("*")
 
@@ -454,11 +463,12 @@ class IOCStore:
             return []
 
     def deactivate_ioc(self, ioc_id: str) -> bool:
-        if not _is_supabase_configured():
+        try:
+            client = _get_client()
+        except Exception:
             logger.warning("ioc_store.deactivate_ioc: Supabase not configured — skipping")
             return False
         try:
-            client = _get_client()
             table = client.table(_TABLE_IOCS)
             resp = table.update({"active": False, "last_seen": _utcnow_iso()}).eq("ioc_id", ioc_id).execute()
             if resp and resp.data:
@@ -470,11 +480,12 @@ class IOCStore:
             return False
 
     def delete_ioc(self, ioc_id: str) -> bool:
-        if not _is_supabase_configured():
+        try:
+            client = _get_client()
+        except Exception:
             logger.warning("ioc_store.delete_ioc: Supabase not configured — skipping")
             return False
         try:
-            client = _get_client()
             table = client.table(_TABLE_IOCS)
             resp = table.delete().eq("ioc_id", ioc_id).execute()
             if resp and resp.data:
@@ -486,11 +497,12 @@ class IOCStore:
             return False
 
     def delete_by_ingest_id(self, feed_ingest_id: str) -> int:
-        if not _is_supabase_configured():
+        try:
+            client = _get_client()
+        except Exception:
             logger.warning("ioc_store.delete_by_ingest_id: Supabase not configured — skipping")
             return 0
         try:
-            client = _get_client()
             table = client.table(_TABLE_IOCS)
             resp = table.delete().eq("feed_ingest_id", feed_ingest_id).execute()
             count = len(resp.data) if resp and resp.data else 0
@@ -501,12 +513,13 @@ class IOCStore:
             return 0
 
     def prune_expired(self) -> int:
-        if not _is_supabase_configured():
+        try:
+            client = _get_client()
+        except Exception:
             logger.warning("ioc_store.prune_expired: Supabase not configured — skipping")
             return 0
         now_iso = _utcnow_iso()
         try:
-            client = _get_client()
             table = client.table(_TABLE_IOCS)
             resp = table.update({"active": False, "last_seen": now_iso}).eq("active", True).lt("expiry", now_iso).not_.is_("expiry", "null").execute()
             count = len(resp.data) if resp and resp.data else 0
@@ -524,11 +537,12 @@ class IOCStore:
         active: bool | None = None,
         org_id: str | None = None,
     ) -> int:
-        if not _is_supabase_configured():
+        try:
+            client = _get_client()
+        except Exception:
             logger.warning("ioc_store.count_iocs: Supabase not configured — skipping")
             return 0
         try:
-            client = _get_client()
             table = client.table(_TABLE_IOCS)
             q = table.select("ioc_id", count="exact")
             if source is not None:
@@ -544,24 +558,30 @@ class IOCStore:
             return 0
 
     def persist_ingest_result(self, result: FeedIngestResult) -> bool:
-        if not _is_supabase_configured():
+        try:
+            client = _get_client()
+        except Exception:
             logger.warning("ioc_store.persist_ingest_result: Supabase not configured — skipping")
             return False
         try:
-            client = _get_client()
             table = client.table(_TABLE_INGEST_LOG)
             table.insert(_ingest_result_to_row(result)).execute()
             return True
         except Exception as exc:
-            logger.error("ioc_store.persist_ingest_result.error ingest_id=%s: %s", result.ingest_id, exc)
+            logger.error(
+                "ioc_store.persist_ingest_result.error ingest_id=%s: %s",
+                result.ingest_id,
+                exc,
+            )
             return False
 
     def get_ingest_result(self, ingest_id: str) -> dict[str, Any] | None:
-        if not _is_supabase_configured():
+        try:
+            client = _get_client()
+        except Exception:
             logger.warning("ioc_store.get_ingest_result: Supabase not configured — skipping")
             return None
         try:
-            client = _get_client()
             table = client.table(_TABLE_INGEST_LOG)
             resp = table.select("*").eq("ingest_id", ingest_id).maybe_single().execute()
             return resp.data if resp and resp.data else None
@@ -577,11 +597,12 @@ class IOCStore:
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        if not _is_supabase_configured():
+        try:
+            client = _get_client()
+        except Exception:
             logger.warning("ioc_store.list_ingest_history: Supabase not configured — skipping")
             return []
         try:
-            client = _get_client()
             table = client.table(_TABLE_INGEST_LOG)
             q = table.select("*").order("started_at", desc=True)
             if source is not None:
@@ -596,11 +617,12 @@ class IOCStore:
             return []
 
     def delete_ingest_log(self, ingest_id: str) -> bool:
-        if not _is_supabase_configured():
+        try:
+            client = _get_client()
+        except Exception:
             logger.warning("ioc_store.delete_ingest_log: Supabase not configured — skipping")
             return False
         try:
-            client = _get_client()
             table = client.table(_TABLE_INGEST_LOG)
             table.delete().eq("ingest_id", ingest_id).execute()
             return True
@@ -609,10 +631,11 @@ class IOCStore:
             return False
 
     def health_check(self) -> dict[str, Any]:
-        if not _is_supabase_configured():
-            return {"status": "unconfigured", "detail": "Supabase credentials not set"}
         try:
             client = _get_client()
+        except Exception:
+            return {"status": "unconfigured", "detail": "Supabase credentials not set"}
+        try:
             table = client.table(_TABLE_IOCS)
             resp = table.select("ioc_id", count="exact").limit(1).execute()
             return {
