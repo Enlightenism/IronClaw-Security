@@ -1,0 +1,459 @@
+/* =============================================================================
+   IronClaw-Security — frontend/static/overrides.css
+   Token overrides and IronClaw-specific custom properties.
+   All tokens follow [data-theme="dark"] pattern matching base.html.
+   Zero layout rules — layout lives exclusively in base.html inline styles.
+   Risk bands mirror settings.py thresholds:
+     allow:       0–29   (risk_threshold_allow_max = 29)
+     quarantine: 30–69   (risk_threshold_quarantine_min = 30)
+     block:      70–100  (risk_threshold_block_min = 70)
+   ============================================================================= */
+
+/* ── Light mode (default) ──────────────────────────────────────────────────── */
+:root,
+[data-theme="light"] {
+
+  /* -- Verdict colors --------------------------------------------------------
+     allow       → green  — safe, permitted
+     warn        → amber  — passed but flagged, proceed with caution
+     quarantine  → orange — held for review, not executed
+     block       → red    — hard stop, denied
+  --------------------------------------------------------------------------- */
+  --verdict-allow:                #2e7d32;
+  --verdict-allow-bg:             #e8f5e9;
+  --verdict-allow-border:         #a5d6a7;
+  --verdict-allow-text:           #1b5e20;
+
+  --verdict-warn:                 #e65100;
+  --verdict-warn-bg:              #fff3e0;
+  --verdict-warn-border:          #ffcc80;
+  --verdict-warn-text:            #bf360c;
+
+  --verdict-quarantine:           #ef6c00;
+  --verdict-quarantine-bg:        #fff8e1;
+  --verdict-quarantine-border:    #ffe082;
+  --verdict-quarantine-text:      #e65100;
+
+  --verdict-block:                #b71c1c;
+  --verdict-block-bg:             #ffebee;
+  --verdict-block-border:         #ef9a9a;
+  --verdict-block-text:           #7f0000;
+
+  /* -- Risk score bands ------------------------------------------------------
+     low:       0–29   (maps to allow threshold)
+     medium:   30–59   (lower half of quarantine band)
+     high:     60–79   (upper quarantine + entry into block band)
+     critical: 80–100  (deep block territory)
+  --------------------------------------------------------------------------- */
+  --risk-low:                     #388e3c;
+  --risk-low-bg:                  #f1f8e9;
+  --risk-low-border:              #aed581;
+  --risk-low-text:                #1b5e20;
+
+  --risk-medium:                  #f57c00;
+  --risk-medium-bg:               #fff3e0;
+  --risk-medium-border:           #ffb74d;
+  --risk-medium-text:             #e65100;
+
+  --risk-high:                    #d84315;
+  --risk-high-bg:                 #fbe9e7;
+  --risk-high-border:             #ff8a65;
+  --risk-high-text:               #bf360c;
+
+  --risk-critical:                #b71c1c;
+  --risk-critical-bg:             #ffebee;
+  --risk-critical-border:         #e57373;
+  --risk-critical-text:           #7f0000;
+
+  /* -- Severity levels (incidents + alerts) ----------------------------------
+     Mirrors risk bands semantically but scoped to incident/alert domain.
+  --------------------------------------------------------------------------- */
+  --severity-low:                 #388e3c;
+  --severity-low-bg:              #f1f8e9;
+  --severity-low-border:          #aed581;
+  --severity-low-text:            #1b5e20;
+
+  --severity-medium:              #f57c00;
+  --severity-medium-bg:           #fff3e0;
+  --severity-medium-border:       #ffb74d;
+  --severity-medium-text:         #e65100;
+
+  --severity-high:                #d84315;
+  --severity-high-bg:             #fbe9e7;
+  --severity-high-border:         #ff8a65;
+  --severity-high-text:           #bf360c;
+
+  --severity-critical:            #7b1fa2;
+  --severity-critical-bg:         #f3e5f5;
+  --severity-critical-border:     #ce93d8;
+  --severity-critical-text:       #4a148c;
+
+  /* -- Review queue status badges --------------------------------------------
+     pending     → blue   — awaiting human decision
+     approved    → green  — operator approved
+     rejected    → red    — operator rejected
+     quarantined → orange — held, pending escalation
+  --------------------------------------------------------------------------- */
+  --status-pending:               #1565c0;
+  --status-pending-bg:            #e3f2fd;
+  --status-pending-border:        #90caf9;
+  --status-pending-text:          #0d47a1;
+
+  --status-approved:              #2e7d32;
+  --status-approved-bg:           #e8f5e9;
+  --status-approved-border:       #a5d6a7;
+  --status-approved-text:         #1b5e20;
+
+  --status-rejected:              #b71c1c;
+  --status-rejected-bg:           #ffebee;
+  --status-rejected-border:       #ef9a9a;
+  --status-rejected-text:         #7f0000;
+
+  --status-quarantined:           #ef6c00;
+  --status-quarantined-bg:        #fff8e1;
+  --status-quarantined-border:    #ffe082;
+  --status-quarantined-text:      #e65100;
+
+  /* -- Resolution badge tokens -----------------------------------------------
+     allow / deny / quarantine / needsreview
+  --------------------------------------------------------------------------- */
+  --resolution-allow:             var(--verdict-allow);
+  --resolution-allow-bg:          var(--verdict-allow-bg);
+  --resolution-allow-text:        var(--verdict-allow-text);
+
+  --resolution-deny:              var(--verdict-block);
+  --resolution-deny-bg:           var(--verdict-block-bg);
+  --resolution-deny-text:         var(--verdict-block-text);
+
+  --resolution-quarantine:        var(--verdict-quarantine);
+  --resolution-quarantine-bg:     var(--verdict-quarantine-bg);
+  --resolution-quarantine-text:   var(--verdict-quarantine-text);
+
+  --resolution-needsreview:       var(--status-pending);
+  --resolution-needsreview-bg:    var(--status-pending-bg);
+  --resolution-needsreview-text:  var(--status-pending-text);
+
+  /* -- Layout chrome tokens --------------------------------------------------
+     Consumed by base.html template for structural sizing only.
+     No layout rules live in this file — values only.
+  --------------------------------------------------------------------------- */
+  --topnav-height:                3.5rem;       /* 56px */
+  --sidebar-width:                15rem;        /* 240px */
+  --sidebar-collapsed-width:      3.5rem;       /* 56px — icon-only rail */
+  --sidebar-transition:           220ms cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* -- IronClaw brand tokens ------------------------------------------------- */
+  --ic-brand-primary:             #01696f;      /* Hydra Teal — matches base */
+  --ic-brand-accent:              #0f3638;      /* deep teal for active states */
+  --ic-threat-pulse:              #b71c1c;      /* animated threat indicator */
+  --ic-safe-pulse:                #2e7d32;      /* animated safe indicator */
+
+  /* -- Scan target type badges ----------------------------------------------- */
+  --target-text:                  #1565c0;
+  --target-text-bg:               #e3f2fd;
+  --target-url:                   #6a1b9a;
+  --target-url-bg:                #f3e5f5;
+  --target-github:                #1b5e20;
+  --target-github-bg:             #e8f5e9;
+  --target-archive:               #e65100;
+  --target-archive-bg:            #fff3e0;
+
+  /* -- Audit event type badges ----------------------------------------------- */
+  --audit-scan:                   #1565c0;
+  --audit-scan-bg:                #e3f2fd;
+  --audit-guard:                  #4a148c;
+  --audit-guard-bg:               #f3e5f5;
+  --audit-policy:                 #e65100;
+  --audit-policy-bg:              #fff3e0;
+  --audit-review:                 #1b5e20;
+  --audit-review-bg:              #e8f5e9;
+  --audit-auth:                   #b71c1c;
+  --audit-auth-bg:                #ffebee;
+  --audit-system:                 #37474f;
+  --audit-system-bg:              #eceff1;
+
+  /* -- Telemetry / KPI delta indicators -------------------------------------- */
+  --delta-positive:               #2e7d32;
+  --delta-positive-bg:            #e8f5e9;
+  --delta-negative:               #b71c1c;
+  --delta-negative-bg:            #ffebee;
+  --delta-neutral:                #546e7a;
+  --delta-neutral-bg:             #eceff1;
+
+  /* -- Risk score progress bar track ---------------------------------------- */
+  --risk-bar-track:               #e0e0e0;
+  --risk-bar-radius:              0.25rem;
+}
+
+
+/* ── Dark mode ─────────────────────────────────────────────────────────────── */
+[data-theme="dark"] {
+
+  /* -- Verdict colors -------------------------------------------------------- */
+  --verdict-allow:                #66bb6a;
+  --verdict-allow-bg:             #1b2e1b;
+  --verdict-allow-border:         #2e7d32;
+  --verdict-allow-text:           #a5d6a7;
+
+  --verdict-warn:                 #ffa726;
+  --verdict-warn-bg:              #2e1f0a;
+  --verdict-warn-border:          #e65100;
+  --verdict-warn-text:            #ffcc80;
+
+  --verdict-quarantine:           #ffa726;
+  --verdict-quarantine-bg:        #2e1c05;
+  --verdict-quarantine-border:    #ef6c00;
+  --verdict-quarantine-text:      #ffe082;
+
+  --verdict-block:                #ef5350;
+  --verdict-block-bg:             #2e1212;
+  --verdict-block-border:         #b71c1c;
+  --verdict-block-text:           #ef9a9a;
+
+  /* -- Risk score bands ------------------------------------------------------ */
+  --risk-low:                     #66bb6a;
+  --risk-low-bg:                  #1a2e1a;
+  --risk-low-border:              #388e3c;
+  --risk-low-text:                #a5d6a7;
+
+  --risk-medium:                  #ffa726;
+  --risk-medium-bg:               #2e1f08;
+  --risk-medium-border:           #f57c00;
+  --risk-medium-text:             #ffcc80;
+
+  --risk-high:                    #ff7043;
+  --risk-high-bg:                 #2e1508;
+  --risk-high-border:             #d84315;
+  --risk-high-text:               #ff8a65;
+
+  --risk-critical:                #ef5350;
+  --risk-critical-bg:             #2e1010;
+  --risk-critical-border:         #b71c1c;
+  --risk-critical-text:           #ef9a9a;
+
+  /* -- Severity levels ------------------------------------------------------- */
+  --severity-low:                 #66bb6a;
+  --severity-low-bg:              #1a2e1a;
+  --severity-low-border:          #388e3c;
+  --severity-low-text:            #a5d6a7;
+
+  --severity-medium:              #ffa726;
+  --severity-medium-bg:           #2e1f08;
+  --severity-medium-border:       #f57c00;
+  --severity-medium-text:         #ffcc80;
+
+  --severity-high:                #ff7043;
+  --severity-high-bg:             #2e1508;
+  --severity-high-border:         #d84315;
+  --severity-high-text:           #ff8a65;
+
+  --severity-critical:            #ce93d8;
+  --severity-critical-bg:         #1e1028;
+  --severity-critical-border:     #7b1fa2;
+  --severity-critical-text:       #e1bee7;
+
+  /* -- Review queue status badges -------------------------------------------- */
+  --status-pending:               #64b5f6;
+  --status-pending-bg:            #0d1e2e;
+  --status-pending-border:        #1565c0;
+  --status-pending-text:          #90caf9;
+
+  --status-approved:              #66bb6a;
+  --status-approved-bg:           #1b2e1b;
+  --status-approved-border:       #2e7d32;
+  --status-approved-text:         #a5d6a7;
+
+  --status-rejected:              #ef5350;
+  --status-rejected-bg:           #2e1212;
+  --status-rejected-border:       #b71c1c;
+  --status-rejected-text:         #ef9a9a;
+
+  --status-quarantined:           #ffa726;
+  --status-quarantined-bg:        #2e1c05;
+  --status-quarantined-border:    #ef6c00;
+  --status-quarantined-text:      #ffe082;
+
+  /* -- Resolution badges ----------------------------------------------------- */
+  --resolution-allow:             var(--verdict-allow);
+  --resolution-allow-bg:          var(--verdict-allow-bg);
+  --resolution-allow-text:        var(--verdict-allow-text);
+
+  --resolution-deny:              var(--verdict-block);
+  --resolution-deny-bg:           var(--verdict-block-bg);
+  --resolution-deny-text:         var(--verdict-block-text);
+
+  --resolution-quarantine:        var(--verdict-quarantine);
+  --resolution-quarantine-bg:     var(--verdict-quarantine-bg);
+  --resolution-quarantine-text:   var(--verdict-quarantine-text);
+
+  --resolution-needsreview:       var(--status-pending);
+  --resolution-needsreview-bg:    var(--status-pending-bg);
+  --resolution-needsreview-text:  var(--status-pending-text);
+
+  /* -- Layout chrome tokens -------------------------------------------------- */
+  --topnav-height:                3.5rem;
+  --sidebar-width:                15rem;
+  --sidebar-collapsed-width:      3.5rem;
+  --sidebar-transition:           220ms cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* -- IronClaw brand tokens ------------------------------------------------- */
+  --ic-brand-primary:             #4f98a3;
+  --ic-brand-accent:              #1a626b;
+  --ic-threat-pulse:              #ef5350;
+  --ic-safe-pulse:                #66bb6a;
+
+  /* -- Scan target type badges ----------------------------------------------- */
+  --target-text:                  #64b5f6;
+  --target-text-bg:               #0d1e2e;
+  --target-url:                   #ce93d8;
+  --target-url-bg:                #1e1028;
+  --target-github:                #66bb6a;
+  --target-github-bg:             #1a2e1a;
+  --target-archive:               #ffa726;
+  --target-archive-bg:            #2e1f08;
+
+  /* -- Audit event type badges ----------------------------------------------- */
+  --audit-scan:                   #64b5f6;
+  --audit-scan-bg:                #0d1e2e;
+  --audit-guard:                  #ce93d8;
+  --audit-guard-bg:               #1e1028;
+  --audit-policy:                 #ffa726;
+  --audit-policy-bg:              #2e1f08;
+  --audit-review:                 #66bb6a;
+  --audit-review-bg:              #1a2e1a;
+  --audit-auth:                   #ef5350;
+  --audit-auth-bg:                #2e1212;
+  --audit-system:                 #90a4ae;
+  --audit-system-bg:              #1c2428;
+
+  /* -- Telemetry / KPI delta indicators -------------------------------------- */
+  --delta-positive:               #66bb6a;
+  --delta-positive-bg:            #1b2e1b;
+  --delta-negative:               #ef5350;
+  --delta-negative-bg:            #2e1212;
+  --delta-neutral:                #90a4ae;
+  --delta-neutral-bg:             #1c2428;
+
+  /* -- Risk score progress bar track ---------------------------------------- */
+  --risk-bar-track:               #37474f;
+  --risk-bar-radius:              0.25rem;
+}
+
+
+/* ── System preference fallback (no manual toggle set yet) ─────────────────── */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --verdict-allow:                #66bb6a;
+    --verdict-allow-bg:             #1b2e1b;
+    --verdict-allow-border:         #2e7d32;
+    --verdict-allow-text:           #a5d6a7;
+    --verdict-warn:                 #ffa726;
+    --verdict-warn-bg:              #2e1f0a;
+    --verdict-warn-border:          #e65100;
+    --verdict-warn-text:            #ffcc80;
+    --verdict-quarantine:           #ffa726;
+    --verdict-quarantine-bg:        #2e1c05;
+    --verdict-quarantine-border:    #ef6c00;
+    --verdict-quarantine-text:      #ffe082;
+    --verdict-block:                #ef5350;
+    --verdict-block-bg:             #2e1212;
+    --verdict-block-border:         #b71c1c;
+    --verdict-block-text:           #ef9a9a;
+    --risk-low:                     #66bb6a;
+    --risk-low-bg:                  #1a2e1a;
+    --risk-low-border:              #388e3c;
+    --risk-low-text:                #a5d6a7;
+    --risk-medium:                  #ffa726;
+    --risk-medium-bg:               #2e1f08;
+    --risk-medium-border:           #f57c00;
+    --risk-medium-text:             #ffcc80;
+    --risk-high:                    #ff7043;
+    --risk-high-bg:                 #2e1508;
+    --risk-high-border:             #d84315;
+    --risk-high-text:               #ff8a65;
+    --risk-critical:                #ef5350;
+    --risk-critical-bg:             #2e1010;
+    --risk-critical-border:         #b71c1c;
+    --risk-critical-text:           #ef9a9a;
+    --severity-low:                 #66bb6a;
+    --severity-low-bg:              #1a2e1a;
+    --severity-low-border:          #388e3c;
+    --severity-low-text:            #a5d6a7;
+    --severity-medium:              #ffa726;
+    --severity-medium-bg:           #2e1f08;
+    --severity-medium-border:       #f57c00;
+    --severity-medium-text:         #ffcc80;
+    --severity-high:                #ff7043;
+    --severity-high-bg:             #2e1508;
+    --severity-high-border:         #d84315;
+    --severity-high-text:           #ff8a65;
+    --severity-critical:            #ce93d8;
+    --severity-critical-bg:         #1e1028;
+    --severity-critical-border:     #7b1fa2;
+    --severity-critical-text:       #e1bee7;
+    --status-pending:               #64b5f6;
+    --status-pending-bg:            #0d1e2e;
+    --status-pending-border:        #1565c0;
+    --status-pending-text:          #90caf9;
+    --status-approved:              #66bb6a;
+    --status-approved-bg:           #1b2e1b;
+    --status-approved-border:       #2e7d32;
+    --status-approved-text:         #a5d6a7;
+    --status-rejected:              #ef5350;
+    --status-rejected-bg:           #2e1212;
+    --status-rejected-border:       #b71c1c;
+    --status-rejected-text:         #ef9a9a;
+    --status-quarantined:           #ffa726;
+    --status-quarantined-bg:        #2e1c05;
+    --status-quarantined-border:    #ef6c00;
+    --status-quarantined-text:      #ffe082;
+    --resolution-allow:             #66bb6a;
+    --resolution-allow-bg:          #1b2e1b;
+    --resolution-allow-text:        #a5d6a7;
+    --resolution-deny:              #ef5350;
+    --resolution-deny-bg:           #2e1212;
+    --resolution-deny-text:         #ef9a9a;
+    --resolution-quarantine:        #ffa726;
+    --resolution-quarantine-bg:     #2e1c05;
+    --resolution-quarantine-text:   #ffe082;
+    --resolution-needsreview:       #64b5f6;
+    --resolution-needsreview-bg:    #0d1e2e;
+    --resolution-needsreview-text:  #90caf9;
+    --topnav-height:                3.5rem;
+    --sidebar-width:                15rem;
+    --sidebar-collapsed-width:      3.5rem;
+    --sidebar-transition:           220ms cubic-bezier(0.16, 1, 0.3, 1);
+    --ic-brand-primary:             #4f98a3;
+    --ic-brand-accent:              #1a626b;
+    --ic-threat-pulse:              #ef5350;
+    --ic-safe-pulse:                #66bb6a;
+    --target-text:                  #64b5f6;
+    --target-text-bg:               #0d1e2e;
+    --target-url:                   #ce93d8;
+    --target-url-bg:                #1e1028;
+    --target-github:                #66bb6a;
+    --target-github-bg:             #1a2e1a;
+    --target-archive:               #ffa726;
+    --target-archive-bg:            #2e1f08;
+    --audit-scan:                   #64b5f6;
+    --audit-scan-bg:                #0d1e2e;
+    --audit-guard:                  #ce93d8;
+    --audit-guard-bg:               #1e1028;
+    --audit-policy:                 #ffa726;
+    --audit-policy-bg:              #2e1f08;
+    --audit-review:                 #66bb6a;
+    --audit-review-bg:              #1a2e1a;
+    --audit-auth:                   #ef5350;
+    --audit-auth-bg:                #2e1212;
+    --audit-system:                 #90a4ae;
+    --audit-system-bg:              #1c2428;
+    --delta-positive:               #66bb6a;
+    --delta-positive-bg:            #1b2e1b;
+    --delta-negative:               #ef5350;
+    --delta-negative-bg:            #2e1212;
+    --delta-neutral:                #90a4ae;
+    --delta-neutral-bg:             #1c2428;
+    --risk-bar-track:               #37474f;
+    --risk-bar-radius:              0.25rem;
+  }
+}
