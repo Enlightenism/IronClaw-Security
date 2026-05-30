@@ -33,6 +33,8 @@ UI_ROUTERS: Final[tuple[APIRouter, ...]] = (
     *filter(
         None,
         (
+            # ── auth ─────────────────────────────────────────────────────────
+            _optional_router("app.ui.auth.login"),
             # ── core domain ──────────────────────────────────────────────────
             _optional_router("app.ui.organizations"),
             _optional_router("app.ui.request_context"),
