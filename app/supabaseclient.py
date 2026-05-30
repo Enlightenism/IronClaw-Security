@@ -79,16 +79,23 @@ def get_supabase_config() -> SupabaseConfig:
     return SupabaseConfig(url=url.rstrip("/"), key=key)
 
 
+def is_supabase_configured() -> bool:
+    """Return True only when both SUPABASE_URL and a key are non-empty."""
+    url = _clean_env(
+        os.getenv("SUPABASE_URL") or os.getenv("IRONCLAW_SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL"),
+    )
+    key = _clean_env(
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY") or os.getenv("IRONCLAW_SUPABASE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+    )
+    return bool(url and key and url.startswith(("http://", "https://")))
+
+
 # ---------------------------------------------------------------------------
-# Fluent query builder — returned by SupabaseClient.table()
-# Mimics the supabase-py PostgREST query interface used by ioc_store and
-# other services so no SDK dependency is required.
+# Fluent query builder
 # ---------------------------------------------------------------------------
 
 
 class _QueryBuilder:
-    """Chainable PostgREST query builder backed by SupabaseClient.request()."""
-
     def __init__(self, client: SupabaseClient, table: str) -> None:
         self._client = client
         self._table = table
@@ -110,10 +117,7 @@ class _QueryBuilder:
         self._schema: str = "public"
         self._single: bool = False
         self._maybe: bool = False
-        # .not_ proxy
         self.not_ = _NotProxy(self)
-
-    # -- projection ----------------------------------------------------------
 
     def select(self, columns: str = "*", *, count: str | None = None) -> _QueryBuilder:
         self._method = "GET"
@@ -121,8 +125,6 @@ class _QueryBuilder:
         if count:
             self._count_mode = count
         return self
-
-    # -- filters -------------------------------------------------------------
 
     def eq(self, column: str, value: Any) -> _QueryBuilder:
         self._filters.append((column, "eq", value))
@@ -172,8 +174,6 @@ class _QueryBuilder:
         self._filters.append((column, "not.is", value))
         return self
 
-    # -- ordering / pagination -----------------------------------------------
-
     def order(self, column: str, *, desc: bool = False) -> _QueryBuilder:
         self._order_col = column
         self._order_desc = desc
@@ -188,8 +188,6 @@ class _QueryBuilder:
         self._range_to = to
         return self
 
-    # -- single-row helpers --------------------------------------------------
-
     def single(self) -> _QueryBuilder:
         self._single = True
         return self
@@ -197,8 +195,6 @@ class _QueryBuilder:
     def maybe_single(self) -> _QueryBuilder:
         self._maybe = True
         return self
-
-    # -- mutation builders ---------------------------------------------------
 
     def insert(self, payload: Any, *, returning: str = "representation") -> _QueryBuilder:
         self._method = "POST"
@@ -216,8 +212,6 @@ class _QueryBuilder:
         self._method = "DELETE"
         self._returning = returning
         return self
-
-    # -- execution -----------------------------------------------------------
 
     def _build_params(self) -> dict[str, Any]:
         params: dict[str, Any] = {}
@@ -257,9 +251,7 @@ class _QueryBuilder:
         return params
 
     def _build_headers(self) -> dict[str, str]:
-        hdrs: dict[str, str] = {
-            "Accept-Profile": self._schema,
-        }
+        hdrs: dict[str, str] = {"Accept-Profile": self._schema}
 
         if self._method in ("POST", "PATCH", "DELETE"):
             hdrs["Content-Profile"] = self._schema
@@ -276,9 +268,7 @@ class _QueryBuilder:
             hdrs["Accept"] = "application/vnd.pgrst.object+json"
             hdrs["Prefer"] = (hdrs.get("Prefer", "") + ",missing=null").lstrip(",")
 
-        range_hdrs = self._build_range_header()
-        hdrs.update(range_hdrs)
-
+        hdrs.update(self._build_range_header())
         return hdrs
 
     def _build_range_header(self) -> dict[str, str]:
@@ -300,12 +290,10 @@ class _QueryBuilder:
                 headers=headers,
             )
         except SupabaseAPIError as exc:
-            # 406 on maybe_single means no row found — return empty
             if self._maybe and "406" in str(exc):
                 return _Response(data=None, count=None)
             raise
 
-        # parse count from Content-Range header if requested
         count: int | None = None
 
         if isinstance(raw, list):
@@ -322,8 +310,6 @@ class _QueryBuilder:
 
 
 class _NotProxy:
-    """Proxy for .not_.is_() style calls on _QueryBuilder."""
-
     def __init__(self, builder: _QueryBuilder) -> None:
         self._builder = builder
 
@@ -332,8 +318,6 @@ class _NotProxy:
 
 
 class _Response:
-    """Minimal response object matching supabase-py APIResponse shape."""
-
     __slots__ = ("data", "count")
 
     def __init__(self, data: Any, count: int | None) -> None:
@@ -354,11 +338,24 @@ class SupabaseClient:
         timeout: float = SUPABASE_TIMEOUT_SECONDS,
         session: requests.Session | None = None,
     ) -> None:
-        self.config = config or get_supabase_config()
+        # Defer config resolution — do NOT call get_supabase_config() here
+        # when no config is passed. Resolve lazily on first request so the
+        # app starts cleanly when creds are absent.
+        self._config: SupabaseConfig | None = config
         self.timeout = float(timeout)
         if self.timeout <= 0:
             raise ValueError("timeout must be greater than zero")
         self.session = session or requests.Session()
+
+    @property
+    def config(self) -> SupabaseConfig:
+        if self._config is None:
+            self._config = get_supabase_config()
+        return self._config
+
+    @property
+    def is_configured(self) -> bool:
+        return is_supabase_configured()
 
     @property
     def headers(self) -> dict[str, str]:
@@ -369,7 +366,6 @@ class SupabaseClient:
         }
 
     def table(self, table_name: str) -> _QueryBuilder:
-        """Return a fluent query builder for the given table."""
         return _QueryBuilder(self, table_name)
 
     def request(
