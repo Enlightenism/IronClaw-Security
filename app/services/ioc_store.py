@@ -11,6 +11,7 @@ from app.schemas.threat_detection import (
 
 logger = logging.getLogger(__name__)
 
+
 from app.services.threat_feed_ingestion import (  # noqa: E402
     FeedIngestResult,
     IOCFilterRequest,
@@ -22,6 +23,7 @@ from app.services.threat_feed_ingestion import (  # noqa: E402
 
 _MAX_BULK_UPSERT_BATCH = 500
 _TTL_PRUNE_BATCH = 1000
+
 
 _TABLE_IOCS = "ioc_records"
 _TABLE_INGEST_LOG = "feed_ingest_log"
@@ -681,6 +683,7 @@ CREATE TABLE IF NOT EXISTS ioc_records (
     extra               JSONB NOT NULL DEFAULT '{}'
 );
 
+
 CREATE INDEX IF NOT EXISTS idx_ioc_records_value       ON ioc_records (value);
 CREATE INDEX IF NOT EXISTS idx_ioc_records_ioc_type    ON ioc_records (ioc_type);
 CREATE INDEX IF NOT EXISTS idx_ioc_records_source      ON ioc_records (source);
@@ -692,6 +695,7 @@ CREATE INDEX IF NOT EXISTS idx_ioc_records_cve_id      ON ioc_records (cve_id);
 CREATE INDEX IF NOT EXISTS idx_ioc_records_expiry      ON ioc_records (expiry) WHERE expiry IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_ioc_records_ingest_id   ON ioc_records (feed_ingest_id);
 CREATE INDEX IF NOT EXISTS idx_ioc_records_tags        ON ioc_records USING GIN (tags);
+
 
 -- ============================================================
 -- IronClaw IOC Store — feed_ingest_log table
@@ -711,11 +715,13 @@ CREATE TABLE IF NOT EXISTS feed_ingest_log (
     metadata        JSONB NOT NULL DEFAULT '{}'
 );
 
+
 CREATE INDEX IF NOT EXISTS idx_feed_ingest_log_source     ON feed_ingest_log (source);
 CREATE INDEX IF NOT EXISTS idx_feed_ingest_log_status     ON feed_ingest_log (status);
 CREATE INDEX IF NOT EXISTS idx_feed_ingest_log_started_at ON feed_ingest_log (started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_feed_ingest_log_org_id     ON feed_ingest_log (org_id);
 """
+
 
 __all__ = [
     "IOC_STORE_MIGRATION_SQL",

@@ -6,6 +6,7 @@ from app.ui.router import (
     include_ui_routers,
     includeuirouters,
     iter_ui_routers,
+    register_page,
     router,
     ui_router_status,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "include_ui_routers",
     "includeuirouters",
     "iter_ui_routers",
+    "register_page",
     "router",
     "ui_router_status",
 ]
