@@ -121,6 +121,7 @@ def _public_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (scan_router, {"prefix": "/api/scan"}),
         (_optional_router("app.api.router"), {}),
         (_optional_router("app.api.actionusage"), {}),
+        (_optional_router("app.api.region_status"), {}),
     ]
 
 
@@ -201,7 +202,6 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
 def _include_optional_protected_routers(app: FastAPI) -> None:
     dependencies = _protected_dependencies()
 
-    # Legacy optional modules
     legacy_modules = [
         "app.api.routes.quarantine",
         "app.api.routes.llamafirewall",
@@ -214,7 +214,6 @@ def _include_optional_protected_routers(app: FastAPI) -> None:
     for module_path in legacy_modules:
         _include_optional_router(app, module_path, dependencies=dependencies)
 
-    # Integration sub-routers under app/routes/integrations/
     integration_modules = [
         "app.routes.integrations.claude_code",
         "app.routes.integrations.compatibility",
