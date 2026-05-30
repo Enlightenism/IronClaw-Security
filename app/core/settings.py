@@ -199,6 +199,22 @@ class Settings(BaseSettings):
     backup_dir: str = Field(default="./data/backups", alias="BACKUP_DIR")
 
     # -------------------------------------------------------------------------
+    # Multi-region / High-Availability
+    # region.py reads MultiRegionSettings independently for per-region Supabase
+    # credentials.  These fields ensure the single .env file drives all HA
+    # behaviour coherently and that validate_runtime() can enforce HA guards
+    # at boot alongside the rest of the system checks.
+    # -------------------------------------------------------------------------
+    ha_enabled: bool = Field(default=False, alias="HA_ENABLED")
+    primary_region: str = Field(default="us-east-1", alias="PRIMARY_REGION")
+    replica_regions: str = Field(default="", alias="REPLICA_REGIONS")
+    region_failover_enabled: bool = Field(default=False, alias="REGION_FAILOVER_ENABLED")
+    region_health_check_interval_seconds: int = Field(
+        default=30,
+        alias="REGION_HEALTH_CHECK_INTERVAL_SECONDS",
+    )
+
+    # -------------------------------------------------------------------------
     # Field validators
     # -------------------------------------------------------------------------
 
@@ -283,6 +299,23 @@ class Settings(BaseSettings):
             raise ValueError("GROQ_TIMEOUT_SECONDS must be greater than 0")
         return value
 
+    @field_validator("primary_region")
+    @classmethod
+    def normalize_primary_region(cls, value: str) -> str:
+        return value.strip().lower()
+
+    @field_validator("replica_regions")
+    @classmethod
+    def normalize_replica_regions(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("region_health_check_interval_seconds")
+    @classmethod
+    def positive_health_check_interval(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("REGION_HEALTH_CHECK_INTERVAL_SECONDS must be >= 1")
+        return value
+
     # -------------------------------------------------------------------------
     # Cross-field model validator — port coherence
     # -------------------------------------------------------------------------
@@ -328,6 +361,13 @@ class Settings(BaseSettings):
         """Resolve final base URL: ironclaw_base_url > app_base_url."""
         return self.ironclaw_base_url or self.app_base_url
 
+    @property
+    def parsed_replica_regions(self) -> list[str]:
+        """Return REPLICA_REGIONS as a stripped, non-empty list of region codes."""
+        if not self.replica_regions.strip():
+            return []
+        return [c.strip().lower() for c in self.replica_regions.split(",") if c.strip()]
+
     # -------------------------------------------------------------------------
     # Runtime validation — called once at boot by get_settings()
     # -------------------------------------------------------------------------
@@ -352,6 +392,8 @@ class Settings(BaseSettings):
             raise ValueError("AUTH_REQUIRED is true but no API key is configured " "(API_KEY, ADMIN_API_KEY, PLATFORM_API_KEY, " "INTERNAL_PLATFORM_API_KEY, or IRONCLAW_API_KEY)")
         if not (1 <= self.app_port <= 65535):
             raise ValueError(f"APP_PORT {self.app_port} is out of valid range 1–65535")
+        if self.ha_enabled and not self.replica_regions.strip():
+            raise ValueError("HA_ENABLED requires at least one REPLICA_REGIONS entry")
 
 
 @lru_cache(maxsize=1)
