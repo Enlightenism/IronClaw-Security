@@ -26,7 +26,20 @@ def _optional_page_router(module_path: str) -> Any | None:
 
 
 def _build_frontend_router() -> APIRouter:
-    root = APIRouter(prefix=_DASHBOARD_PREFIX, tags=["frontend"])
+    root = APIRouter(tags=["frontend"])
+
+    # ── Auth routes (no /dashboard prefix) ─────────────────────────────────
+    auth_page_modules: list[tuple[str, dict[str, Any]]] = [
+        ("frontend.pages.login", {}),
+    ]
+    for module_path, kwargs in auth_page_modules:
+        page_router = _optional_page_router(module_path)
+        if page_router is None:
+            continue
+        root.include_router(page_router, **kwargs)
+
+    # ── Dashboard-prefixed routes ───────────────────────────────────────────
+    dashboard = APIRouter(prefix=_DASHBOARD_PREFIX)
 
     page_modules: list[tuple[str, dict[str, Any]]] = [
         # ── Phase 3 — Dashboard home ────────────────────────────────────────
@@ -60,6 +73,8 @@ def _build_frontend_router() -> APIRouter:
         page_router = _optional_page_router(module_path)
         if page_router is None:
             continue
-        root.include_router(page_router, **kwargs)
+        dashboard.include_router(page_router, **kwargs)
+
+    root.include_router(dashboard)
 
     return root
