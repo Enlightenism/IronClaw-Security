@@ -9,7 +9,7 @@ import SecurityAnalysis from "@/components/dashboard/SecurityAnalysis";
 import IntegrationCard from "@/components/dashboard/IntegrationCard";
 
 const Dashboard = () => {
-  const { user, loading, logout, refreshUser } = useAuth();
+  const { user, setUser, loading, logout, refreshUser } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [data, setData] = useState(null);
@@ -17,6 +17,14 @@ const Dashboard = () => {
   const [loadingData, setLoadingData] = useState(true);
   const [purchasingId, setPurchasingId] = useState(null);
   const polledRef = useRef(false);
+
+  // Surgically update wallet balance in AuthContext without a full /auth/me round-trip
+  const updateWalletUnits = useCallback(
+    (units) => {
+      setUser((prev) => (prev ? { ...prev, wallet_units: units } : prev));
+    },
+    [setUser]
+  );
 
   const fetchDashboard = useCallback(async () => {
     try {
@@ -26,14 +34,14 @@ const Dashboard = () => {
       ]);
       setData(dash.data);
       setTokens(tok.data);
-    } catch (e) {
+    } catch {
       // handled by interceptor
     } finally {
       setLoadingData(false);
     }
   }, []);
 
-  // redirect if unauthenticated
+  // Redirect if unauthenticated
   useEffect(() => {
     if (!loading && !user) navigate("/");
   }, [loading, user, navigate]);
@@ -42,7 +50,8 @@ const Dashboard = () => {
     if (user) fetchDashboard();
   }, [user, fetchDashboard]);
 
-  // auto refresh chart + live attacks every 5 minutes; light simulate every 20s for liveliness
+  // Auto-refresh dashboard data every 5 minutes; live attack simulation every 20s
+  // refreshUser removed from live loop — fetchDashboard is sufficient for live telemetry
   useEffect(() => {
     if (!user) return;
     const refresh = setInterval(fetchDashboard, 5 * 60 * 1000);
@@ -50,32 +59,37 @@ const Dashboard = () => {
       try {
         await api.post("/events/simulate");
         fetchDashboard();
-        refreshUser();
       } catch {}
     }, 20000);
     return () => {
       clearInterval(refresh);
       clearInterval(live);
     };
-  }, [user, fetchDashboard, refreshUser]);
+  }, [user, fetchDashboard]);
 
-  // handle stripe return
+  // Handle Stripe return — poll payment status and update wallet units surgically
   const pollPayment = useCallback(
     async (sessionId, attempts = 0) => {
       const maxAttempts = 6;
       if (attempts >= maxAttempts) {
+        toast.dismiss("pay");
         toast.error("Payment status check timed out. Refresh in a moment.");
         return;
       }
       try {
         const { data: status } = await api.get(`/payments/status/${sessionId}`);
         if (status.payment_status === "paid") {
-          toast.success(`Payment confirmed — ${status.units.toLocaleString()} units added!`);
+          toast.dismiss("pay");
+          toast.success(
+            `Payment confirmed — ${status.units.toLocaleString()} units added!`
+          );
+          // Surgical wallet update — no full /auth/me re-fetch
+          updateWalletUnits(status.units);
           await fetchDashboard();
-          await refreshUser();
           return;
         }
         if (status.status === "expired") {
+          toast.dismiss("pay");
           toast.error("Payment session expired. Please try again.");
           return;
         }
@@ -84,7 +98,7 @@ const Dashboard = () => {
         setTimeout(() => pollPayment(sessionId, attempts + 1), 2000);
       }
     },
-    [fetchDashboard, refreshUser]
+    [fetchDashboard, updateWalletUnits]
   );
 
   useEffect(() => {
@@ -92,7 +106,7 @@ const Dashboard = () => {
     const sessionId = params.get("session_id");
     if (sessionId && !polledRef.current) {
       polledRef.current = true;
-      toast.loading("Verifying your payment...", { id: "pay", duration: 2000 });
+      toast.loading("Verifying your payment...", { id: "pay" });
       pollPayment(sessionId);
       navigate("/dashboard", { replace: true });
     }
@@ -143,7 +157,10 @@ const Dashboard = () => {
             </span>
           </button>
           <div className="flex items-center gap-4">
-            <span className="font-tech hidden text-sm text-[#BFC1C2] sm:block" data-testid="user-email">
+            <span
+              className="font-tech hidden text-sm text-[#BFC1C2] sm:block"
+              data-testid="user-email"
+            >
               {user?.email}
             </span>
             <button
