@@ -28,12 +28,14 @@ from starlette.middleware.cors import CORSMiddleware
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
+
 # ---------------------------------------------------------------------------
 # MongoDB connection
 # ---------------------------------------------------------------------------
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
+
 
 # ---------------------------------------------------------------------------
 # Auth / Stripe config
@@ -43,6 +45,7 @@ JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
 JWT_EXPIRE_DAYS = 7
 STRIPE_API_KEY = os.environ["STRIPE_API_KEY"]
 
+
 # ---------------------------------------------------------------------------
 # App / router / security
 # ---------------------------------------------------------------------------
@@ -50,11 +53,13 @@ app = FastAPI(title="IronClaw-Security API")
 api_router = APIRouter(prefix="/api")
 security_scheme = HTTPBearer(auto_error=True)
 
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("ironclaw")
+
 
 # ---------------------------------------------------------------------------
 # Fixed server-side packages (NEVER trust amounts from the frontend)
@@ -64,6 +69,7 @@ PACKAGES = {
     "tier_100k": {"units": 100000, "amount": 90.00, "label": "100,000 units"},
     "tier_200k": {"units": 200000, "amount": 150.00, "label": "200,000 units"},
 }
+
 
 THREAT_TYPES = [
     "Prompt Injection",
@@ -79,6 +85,7 @@ THREAT_TYPES = [
 ]
 PLATFORMS = ["claude-code", "openclaw"]
 
+
 # ---------------------------------------------------------------------------
 # CORS origins — env-driven; CRA dev default is :3000, also allow :5173 (Vite)
 # ---------------------------------------------------------------------------
@@ -87,6 +94,7 @@ _raw_origins = os.environ.get(
     "http://localhost:3000,http://localhost:5173",
 )
 CORS_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
 
 # ---------------------------------------------------------------------------
 # Frontend build path — CRA outputs to build/, not dist/
@@ -159,10 +167,10 @@ async def get_current_user(
     token = creds.credentials
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Session expired. Please sign in again.")
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid authentication token.")
+    except jwt.ExpiredSignatureError as err:
+        raise HTTPException(status_code=401, detail="Session expired. Please sign in again.") from err
+    except jwt.PyJWTError as err:
+        raise HTTPException(status_code=401, detail="Invalid authentication token.") from err
     user = await db.users.find_one({"id": payload.get("sub")}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="User not found.")
@@ -510,7 +518,7 @@ async def stripe_webhook(request: Request):
         resp = await checkout.handle_webhook(body, sig)
     except Exception as exc:
         logger.error("Webhook handling failed: %s", exc)
-        raise HTTPException(status_code=400, detail="Webhook verification failed.")
+        raise HTTPException(status_code=400, detail="Webhook verification failed.") from exc
 
     if resp.payment_status == "paid" and resp.session_id:
         await db.payment_transactions.update_one(
@@ -533,6 +541,7 @@ async def stripe_webhook(request: Request):
 # ---------------------------------------------------------------------------
 app.include_router(api_router)
 
+
 # ---------------------------------------------------------------------------
 # CORS — registered after routers, before static mount
 # ---------------------------------------------------------------------------
@@ -543,6 +552,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # ---------------------------------------------------------------------------
 # Static frontend — CRA builds to frontend/build/

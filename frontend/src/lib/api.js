@@ -24,4 +24,33 @@ api.interceptors.response.use(
   }
 );
 
+// ── Health ────────────────────────────────────────────────────────────────────
+export const health = {
+  check: () => api.get("/health"),
+};
+
+// ── Prompts ───────────────────────────────────────────────────────────────────
+export const prompts = {
+  inspect: (payload) => api.post("/inspect", payload),
+};
+
+// ── Audit ─────────────────────────────────────────────────────────────────────
+export const audit = {
+  getLogs: (params) => api.get("/audit/logs", { params }),
+};
+
+// ── Policies ──────────────────────────────────────────────────────────────────
+export const policies = {
+  list:   ()             => api.get("/policies"),
+  get:    (id)           => api.get(`/policies/${id}`),
+  create: (payload)      => api.post("/policies", payload),
+  update: (id, payload)  => api.put(`/policies/${id}`, payload),
+  delete: (id)           => api.delete(`/policies/${id}`),
+};
+
+// ── Tools ─────────────────────────────────────────────────────────────────────
+export const tools = {
+  inspect: (payload) => api.post("/tools/inspect", payload),
+};
+
 export default api;
