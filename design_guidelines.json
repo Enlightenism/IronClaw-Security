@@ -1,0 +1,141 @@
+{
+  "project_name": "IronClaw-Security",
+  "theme": "dark",
+  "archetype": "Luxury Tactical",
+  "mood": "Futuristic, battle-hardened, trustworthy, expensive, powerful",
+  "colors": {
+    "background": {
+      "primary": "#050607",
+      "secondary": "#0A0B0D",
+      "glass": "rgba(255, 255, 255, 0.08)"
+    },
+    "accents": {
+      "gold_light": "#FFD700",
+      "gold_dark": "#C9A84C",
+      "platinum_light": "#E5E4E2",
+      "platinum_dark": "#BFC1C2",
+      "sky_blue": "#38BDF8"
+    },
+    "status": {
+      "allow": "#22C55E",
+      "warn": "#EAB308",
+      "quarantine": "#F97316",
+      "block": "#EF4444"
+    },
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "#BFC1C2",
+      "muted": "#737373"
+    }
+  },
+  "typography": {
+    "headings": {
+      "font_family": "Outfit, sans-serif",
+      "weight": "600",
+      "tracking": "tracking-tight"
+    },
+    "body": {
+      "font_family": "Outfit, sans-serif",
+      "weight": "400",
+      "tracking": "tracking-normal"
+    },
+    "monospace": {
+      "font_family": "JetBrains Mono, monospace",
+      "weight": "500",
+      "tracking": "tracking-tight"
+    }
+  },
+  "surfaces": {
+    "glass_panel": "bg-white/[0.08] backdrop-blur-[20px] border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.4)] rounded-xl",
+    "glass_panel_gold_tint": "bg-[#C9A84C]/[0.05] backdrop-blur-[20px] border border-[#FFD700]/20 shadow-[0_8px_32px_rgba(201,168,76,0.1)] rounded-xl",
+    "glass_panel_platinum_tint": "bg-[#E5E4E2]/[0.05] backdrop-blur-[20px] border border-[#E5E4E2]/20 shadow-[0_8px_32px_rgba(229,228,226,0.1)] rounded-xl",
+    "glass_panel_blue_tint": "bg-[#38BDF8]/[0.05] backdrop-blur-[20px] border border-[#38BDF8]/20 shadow-[0_8px_32px_rgba(56,189,248,0.1)] rounded-xl"
+  },
+  "animations": {
+    "shimmer_gold": "relative overflow-hidden before:absolute before:inset-0 before:-translate-x-full hover:before:animate-[shimmer_1.5s_infinite] before:bg-gradient-to-r before:from-transparent before:via-[#FFD700]/20 before:to-transparent",
+    "shimmer_platinum": "relative overflow-hidden before:absolute before:inset-0 before:-translate-x-full hover:before:animate-[shimmer_1.5s_infinite] before:bg-gradient-to-r before:from-transparent before:via-[#E5E4E2]/20 before:to-transparent",
+    "glow_pulse": "animate-pulse shadow-[0_0_30px_rgba(56,189,248,0.3)]",
+    "entrance": "motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: 'easeOut' }}"
+  },
+  "layout_spacing": {
+    "section_padding": "py-24 md:py-32",
+    "container": "max-w-7xl mx-auto px-6",
+    "bento_grid": "grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6",
+    "bento_gap": "gap-6"
+  },
+  "pages": {
+    "landing": {
+      "background": "Deep black #050607 with tsparticles constellation/network effect in platinum/gold.",
+      "hero": {
+        "layout": "Centered, high negative space.",
+        "headline": "text-5xl md:text-6xl+ Outfit tracking-tight text-white with subtle platinum text-shadow.",
+        "counter": "Monospace JetBrains Mono text-4xl text-sky_blue glowing, animated count up.",
+        "glow": "Floating radial gradients in #38BDF8 and #C9A84C behind the hero content (blur-3xl opacity-20)."
+      },
+      "features": {
+        "layout": "Grid of 6 (3x2 on desktop).",
+        "cards": "glass_panel surface. On hover: shimmer_gold animation and border color shifts to #FFD700."
+      },
+      "credits": {
+        "layout": "Centered section.",
+        "card": "glass_panel_platinum_tint. Large typography, highlighting Starter Package $20 = 20,000 units."
+      },
+      "footer": {
+        "cta": "Gold button. bg-gradient-to-r from-[#C9A84C] to-[#FFD700] text-black font-semibold rounded-md px-8 py-4 hover:shadow-[0_0_20px_rgba(255,215,0,0.4)] transition-all"
+      }
+    },
+    "dashboard": {
+      "navigation": "Top sticky nav, glassmorphism border-b border-white/10, showing user email & Sign Out.",
+      "layout": "Bento Grid (Control Room). Dense, data-heavy.",
+      "wallet_card": {
+        "surface": "glass_panel_platinum_tint",
+        "typography": "Balance in JetBrains Mono text-5xl.",
+        "actions": "3 purchase buttons triggering Stripe checkout. Platinum styled borders."
+      },
+      "security_analysis": {
+        "surface": "glass_panel_blue_tint",
+        "chart": "Recharts BarChart. Bars colored #38BDF8. X/Y axis in JetBrains Mono text-xs text-muted.",
+        "table": "Attack log table. Headers in Outfit text-sm muted. Rows animated entrance. Timestamp in monospace. Verdict chips."
+      },
+      "verdict_chips": {
+        "ALLOW": "bg-[#22C55E]/10 text-[#22C55E] border border-[#22C55E]/20 px-2 py-1 rounded text-xs",
+        "WARN": "bg-[#EAB308]/10 text-[#EAB308] border border-[#EAB308]/20 px-2 py-1 rounded text-xs",
+        "QUARANTINE": "bg-[#F97316]/10 text-[#F97316] border border-[#F97316]/20 px-2 py-1 rounded text-xs",
+        "BLOCK": "bg-[#EF4444]/10 text-[#EF4444] border border-[#EF4444]/20 px-2 py-1 rounded text-xs"
+      },
+      "integrations": {
+        "claude_code": "glass_panel_gold_tint, monospace install command, gold copy button.",
+        "openclaw": "glass_panel_platinum_tint, monospace install command, platinum copy button."
+      }
+    }
+  },
+  "dependencies_to_install": [
+    "framer-motion",
+    "recharts",
+    "react-tsparticles",
+    "tsparticles",
+    "lucide-react",
+    "react-countup"
+  ],
+  "components_to_use": {
+    "buttons": "Custom HTML/Tailwind for Landing. Shadcn UI Button for Dashboard, styled with hover shimmers.",
+    "inputs": "Shadcn UI Input, Select, Table",
+    "charts": "Recharts"
+  },
+  "media": {
+    "images": [
+      {
+        "category": "logo",
+        "url": "https://static.prod-images.emergentagent.com/jobs/de00accc-7bc3-402d-9207-d34259e4ec7f/images/0b6cc2f4d768d2fa67738f23193a1ceec2088b82e302f3df18434772996da56e.png",
+        "description": "IronClaw minimalist cybernetic platinum shield logo"
+      }
+    ]
+  },
+  "instructions_to_main_agent": {
+    "css_additions": "Add a global @keyframes shimmer { 100% { transform: translateX(100%); } } to your index.css to support the shimmer animations.",
+    "fonts": "Import 'Outfit' (weights 400, 600) and 'JetBrains Mono' (weights 400, 500) from Google Fonts in index.html.",
+    "testing": "Ensure all interactive elements have data-testid attributes (e.g., data-testid='sign-in-btn').",
+    "glassmorphism_rule": "Do not use generic gray backgrounds. All cards must be frosted glass over the #050607 background.",
+    "routing": "Setup react-router for '/' (Landing) and '/dashboard' (Dashboard protected view)."
+  }
+}
