@@ -1,5 +1,7 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -23,32 +25,42 @@ from emergentintegrations.payments.stripe.checkout import (
 )
 
 ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+load_dotenv(ROOT_DIR / ".env")
 
+# ---------------------------------------------------------------------------
 # MongoDB connection
-mongo_url = os.environ['MONGO_URL']
+# ---------------------------------------------------------------------------
+mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+db = client[os.environ["DB_NAME"]]
 
-# Auth config
-JWT_SECRET = os.environ['JWT_SECRET']
-JWT_ALGORITHM = os.environ.get('JWT_ALGORITHM', 'HS256')
+# ---------------------------------------------------------------------------
+# Auth / Stripe config
+# ---------------------------------------------------------------------------
+JWT_SECRET = os.environ["JWT_SECRET"]
+JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
 JWT_EXPIRE_DAYS = 7
-STRIPE_API_KEY = os.environ['STRIPE_API_KEY']
+STRIPE_API_KEY = os.environ["STRIPE_API_KEY"]
 
+# ---------------------------------------------------------------------------
+# App / router / security
+# ---------------------------------------------------------------------------
 app = FastAPI(title="IronClaw-Security API")
 api_router = APIRouter(prefix="/api")
 security_scheme = HTTPBearer(auto_error=True)
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
 logger = logging.getLogger("ironclaw")
 
 # ---------------------------------------------------------------------------
 # Fixed server-side packages (NEVER trust amounts from the frontend)
 # ---------------------------------------------------------------------------
 PACKAGES = {
-    "tier_20k": {"units": 20000, "amount": 20.00, "label": "20,000 units"},
-    "tier_100k": {"units": 100000, "amount": 90.00, "label": "100,000 units"},
+    "tier_20k":  {"units": 20000,  "amount": 20.00,  "label": "20,000 units"},
+    "tier_100k": {"units": 100000, "amount": 90.00,  "label": "100,000 units"},
     "tier_200k": {"units": 200000, "amount": 150.00, "label": "200,000 units"},
 }
 
@@ -66,7 +78,16 @@ THREAT_TYPES = [
 ]
 PLATFORMS = ["claude-code", "openclaw"]
 
+# ---------------------------------------------------------------------------
+# CORS origins — env-driven, dev-safe default includes Vite port
+# ---------------------------------------------------------------------------
+_raw_origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000")
+CORS_ORIGINS: List[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 def verdict_for_score(score: int) -> str:
     if score < 30:
         return "ALLOW"
@@ -123,7 +144,9 @@ def create_access_token(user: dict) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
-async def get_current_user(creds: HTTPAuthorizationCredentials = Depends(security_scheme)) -> dict:
+async def get_current_user(
+    creds: HTTPAuthorizationCredentials = Depends(security_scheme),
+) -> dict:
     token = creds.credentials
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
@@ -150,33 +173,45 @@ def public_user(user: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Seed simulated security events
 # ---------------------------------------------------------------------------
-async def seed_security_events(user_id: str, count: int = 48):
+async def seed_security_events(user_id: str, count: int = 48) -> None:
     events = []
     now = datetime.now(timezone.utc)
     for _ in range(count):
         offset_seconds = random.randint(0, 7 * 24 * 3600)
         ts = now - timedelta(seconds=offset_seconds)
         score = random.choices(
-            [random.randint(2, 29), random.randint(30, 59), random.randint(60, 84), random.randint(85, 100)],
+            [
+                random.randint(2, 29),
+                random.randint(30, 59),
+                random.randint(60, 84),
+                random.randint(85, 100),
+            ],
             weights=[40, 28, 20, 12],
         )[0]
-        events.append({
-            "id": str(uuid.uuid4()),
-            "user_id": user_id,
-            "threat_type": random.choice(THREAT_TYPES),
-            "risk_score": score,
-            "verdict": verdict_for_score(score),
-            "units_used": random.randint(3, 45),
-            "platform": random.choice(PLATFORMS),
-            "timestamp": ts.isoformat(),
-        })
+        events.append(
+            {
+                "id": str(uuid.uuid4()),
+                "user_id": user_id,
+                "threat_type": random.choice(THREAT_TYPES),
+                "risk_score": score,
+                "verdict": verdict_for_score(score),
+                "units_used": random.randint(3, 45),
+                "platform": random.choice(PLATFORMS),
+                "timestamp": ts.isoformat(),
+            }
+        )
     if events:
         await db.security_events.insert_many(events)
 
 
 async def create_live_event(user_id: str) -> dict:
     score = random.choices(
-        [random.randint(2, 29), random.randint(30, 59), random.randint(60, 84), random.randint(85, 100)],
+        [
+            random.randint(2, 29),
+            random.randint(30, 59),
+            random.randint(60, 84),
+            random.randint(85, 100),
+        ],
         weights=[35, 28, 22, 15],
     )[0]
     event = {
@@ -201,7 +236,7 @@ async def create_live_event(user_id: str) -> dict:
 # ---------------------------------------------------------------------------
 # Payment crediting (idempotent)
 # ---------------------------------------------------------------------------
-async def credit_units_once(session_id: str):
+async def credit_units_once(session_id: str) -> None:
     txn = await db.payment_transactions.find_one_and_update(
         {"session_id": session_id, "credited": {"$ne": True}},
         {"$set": {"credited": True, "credited_at": now_iso()}},
@@ -224,7 +259,9 @@ async def credit_units_once(session_id: str):
             },
         },
     )
-    logger.info(f"Credited {txn['units']} units to user {txn['user_id']} for session {session_id}")
+    logger.info(
+        f"Credited {txn['units']} units to user {txn['user_id']} for session {session_id}"
+    )
 
 
 def stripe_client(request: Request) -> StripeCheckout:
@@ -290,7 +327,9 @@ async def integrations_token(user: dict = Depends(get_current_user)):
 
 @api_router.get("/dashboard")
 async def dashboard(user: dict = Depends(get_current_user)):
-    events = await db.security_events.find({"user_id": user["id"]}, {"_id": 0}).to_list(2000)
+    events = await db.security_events.find(
+        {"user_id": user["id"]}, {"_id": 0}
+    ).to_list(2000)
 
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -303,7 +342,9 @@ async def dashboard(user: dict = Depends(get_current_user)):
     buckets = []
     for i in range(6, -1, -1):
         day = (now - timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0)
-        buckets.append({"key": day, "label": day.strftime("%a"), "date": day.strftime("%m/%d"), "units": 0})
+        buckets.append(
+            {"key": day, "label": day.strftime("%a"), "date": day.strftime("%m/%d"), "units": 0}
+        )
 
     for e in events:
         try:
@@ -324,7 +365,9 @@ async def dashboard(user: dict = Depends(get_current_user)):
                 b["units"] += e.get("units_used", 0)
                 break
 
-    daily_usage = [{"label": b["label"], "date": b["date"], "units": b["units"]} for b in buckets]
+    daily_usage = [
+        {"label": b["label"], "date": b["date"], "units": b["units"]} for b in buckets
+    ]
 
     sorted_events = sorted(events, key=lambda x: x.get("timestamp", ""), reverse=True)
     attacks = [
@@ -360,7 +403,11 @@ async def simulate_events(user: dict = Depends(get_current_user)):
 
 
 @api_router.post("/payments/create-checkout")
-async def create_checkout(body: CreateCheckoutRequest, request: Request, user: dict = Depends(get_current_user)):
+async def create_checkout(
+    body: CreateCheckoutRequest,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
     pkg = PACKAGES.get(body.package_id)
     if not pkg:
         raise HTTPException(status_code=400, detail="Invalid package selected.")
@@ -408,7 +455,11 @@ async def create_checkout(body: CreateCheckoutRequest, request: Request, user: d
 
 
 @api_router.get("/payments/status/{session_id}")
-async def payment_status(session_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def payment_status(
+    session_id: str,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
     txn = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found.")
@@ -420,7 +471,13 @@ async def payment_status(session_id: str, request: Request, user: dict = Depends
 
     await db.payment_transactions.update_one(
         {"session_id": session_id},
-        {"$set": {"payment_status": cs.payment_status, "status": cs.status, "updated_at": now_iso()}},
+        {
+            "$set": {
+                "payment_status": cs.payment_status,
+                "status": cs.status,
+                "updated_at": now_iso(),
+            }
+        },
     )
 
     if cs.payment_status == "paid":
@@ -450,24 +507,61 @@ async def stripe_webhook(request: Request):
     if resp.payment_status == "paid" and resp.session_id:
         await db.payment_transactions.update_one(
             {"session_id": resp.session_id},
-            {"$set": {"payment_status": resp.payment_status, "status": "complete", "updated_at": now_iso()}},
+            {
+                "$set": {
+                    "payment_status": resp.payment_status,
+                    "status": "complete",
+                    "updated_at": now_iso(),
+                }
+            },
         )
         await credit_units_once(resp.session_id)
 
     return {"status": "ok"}
 
 
+# ---------------------------------------------------------------------------
+# Register API router BEFORE static mount so /api/* always wins
+# ---------------------------------------------------------------------------
 app.include_router(api_router)
 
+# ---------------------------------------------------------------------------
+# CORS — must be added after routers, before static mount
+# ---------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# ---------------------------------------------------------------------------
+# Static frontend — served only if the dist folder exists (safe for dev)
+# ---------------------------------------------------------------------------
+_FRONTEND_DIST = ROOT_DIR.parent / "frontend" / "dist"
 
+if _FRONTEND_DIST.is_dir():
+    app.mount("/assets", StaticFiles(directory=str(_FRONTEND_DIST / "assets")), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        """Catch-all: return index.html for all non-API routes (SPA routing)."""
+        index = _FRONTEND_DIST / "index.html"
+        if index.is_file():
+            return FileResponse(str(index))
+        raise HTTPException(status_code=404, detail="Frontend not built.")
+else:
+    logger.warning(
+        "Frontend dist not found at %s — static serving disabled. "
+        "Run `npm run build` inside the frontend directory to enable it.",
+        _FRONTEND_DIST,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle
+# ---------------------------------------------------------------------------
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()

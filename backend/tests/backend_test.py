@@ -1,10 +1,13 @@
 """IronClaw-Security backend API tests"""
+
 import os
 import uuid
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://enforcement-hub-7.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get(
+    "REACT_APP_BACKEND_URL", "https://enforcement-hub-7.preview.emergentagent.com"
+).rstrip("/")
 API = f"{BASE_URL}/api"
 
 
@@ -16,10 +19,17 @@ def _unique_email():
 def signup_user():
     email = _unique_email()
     password = "defend123"
-    r = requests.post(f"{API}/auth/signup", json={"email": email, "password": password}, timeout=30)
+    r = requests.post(
+        f"{API}/auth/signup", json={"email": email, "password": password}, timeout=30
+    )
     assert r.status_code == 200, r.text
     data = r.json()
-    return {"email": email, "password": password, "token": data["token"], "user": data["user"]}
+    return {
+        "email": email,
+        "password": password,
+        "token": data["token"],
+        "user": data["user"],
+    }
 
 
 @pytest.fixture
@@ -37,21 +47,32 @@ class TestAuth:
         assert isinstance(signup_user["token"], str) and len(signup_user["token"]) > 20
 
     def test_signup_duplicate_email_returns_409(self, signup_user):
-        r = requests.post(f"{API}/auth/signup", json={"email": signup_user["email"], "password": "defend123"})
+        r = requests.post(
+            f"{API}/auth/signup",
+            json={"email": signup_user["email"], "password": "defend123"},
+        )
         assert r.status_code == 409
 
     def test_signup_short_password_422(self):
-        r = requests.post(f"{API}/auth/signup", json={"email": _unique_email(), "password": "abc"})
+        r = requests.post(
+            f"{API}/auth/signup", json={"email": _unique_email(), "password": "abc"}
+        )
         assert r.status_code == 422
 
     def test_signin_valid(self, signup_user):
-        r = requests.post(f"{API}/auth/signin", json={"email": signup_user["email"], "password": signup_user["password"]})
+        r = requests.post(
+            f"{API}/auth/signin",
+            json={"email": signup_user["email"], "password": signup_user["password"]},
+        )
         assert r.status_code == 200
         d = r.json()
         assert "token" in d and d["user"]["email"] == signup_user["email"]
 
     def test_signin_invalid(self, signup_user):
-        r = requests.post(f"{API}/auth/signin", json={"email": signup_user["email"], "password": "WRONG_PASS"})
+        r = requests.post(
+            f"{API}/auth/signin",
+            json={"email": signup_user["email"], "password": "WRONG_PASS"},
+        )
         assert r.status_code == 401
 
     def test_me_without_token_401(self):
@@ -59,7 +80,9 @@ class TestAuth:
         assert r.status_code in (401, 403)
 
     def test_me_invalid_token_401(self):
-        r = requests.get(f"{API}/auth/me", headers={"Authorization": "Bearer not_a_real_token"})
+        r = requests.get(
+            f"{API}/auth/me", headers={"Authorization": "Bearer not_a_real_token"}
+        )
         assert r.status_code == 401
 
     def test_me_valid(self, auth_headers, signup_user):
@@ -74,7 +97,14 @@ class TestDashboard:
         r = requests.get(f"{API}/dashboard", headers=auth_headers)
         assert r.status_code == 200, r.text
         d = r.json()
-        for key in ("wallet_units", "units_today", "units_week", "total_threats_blocked", "daily_usage", "attacks"):
+        for key in (
+            "wallet_units",
+            "units_today",
+            "units_week",
+            "total_threats_blocked",
+            "daily_usage",
+            "attacks",
+        ):
             assert key in d, f"missing {key}"
         assert isinstance(d["daily_usage"], list) and len(d["daily_usage"]) == 7
         assert isinstance(d["attacks"], list) and len(d["attacks"]) <= 30
