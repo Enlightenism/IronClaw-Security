@@ -1,0 +1,272 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+    --ic-black: #050607;
+    --ic-black-2: #0a0b0d;
+    --ic-gold: #ffd700;
+    --ic-gold-dark: #c9a84c;
+    --ic-platinum: #e5e4e2;
+    --ic-platinum-dark: #bfc1c2;
+    --ic-sky: #38bdf8;
+}
+
+* {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+html,
+body {
+    margin: 0;
+    background-color: #050607;
+    color: #ffffff;
+    font-family: "Outfit", system-ui, sans-serif;
+}
+
+.font-tech {
+    font-family: "JetBrains Mono", monospace;
+}
+
+::selection {
+    background: rgba(255, 215, 0, 0.25);
+    color: #fff;
+}
+
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+::-webkit-scrollbar-track {
+    background: #0a0b0d;
+}
+::-webkit-scrollbar-thumb {
+    background: linear-gradient(#c9a84c, #38bdf8);
+    border-radius: 6px;
+}
+
+/* ---------- Surfaces ---------- */
+.glass {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+.glass-gold {
+    background: rgba(201, 168, 76, 0.06);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 215, 0, 0.22);
+    box-shadow: 0 8px 32px rgba(201, 168, 76, 0.12);
+}
+.glass-platinum {
+    background: rgba(229, 228, 226, 0.06);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(229, 228, 226, 0.22);
+    box-shadow: 0 8px 32px rgba(229, 228, 226, 0.12);
+}
+.glass-blue {
+    background: rgba(56, 189, 248, 0.06);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(56, 189, 248, 0.22);
+    box-shadow: 0 8px 32px rgba(56, 189, 248, 0.12);
+}
+
+/* ---------- Text treatments ---------- */
+.text-gold-gradient {
+    background: linear-gradient(135deg, #fff6c2 0%, #ffd700 35%, #c9a84c 70%, #ffd700 100%);
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: text-shimmer 4s linear infinite;
+}
+.text-platinum-gradient {
+    background: linear-gradient(135deg, #ffffff 0%, #e5e4e2 40%, #bfc1c2 70%, #ffffff 100%);
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: text-shimmer 5s linear infinite;
+}
+
+/* ---------- Buttons ---------- */
+.btn-shimmer {
+    position: relative;
+    overflow: hidden;
+}
+.btn-shimmer::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -150%;
+    width: 60%;
+    height: 100%;
+    background: linear-gradient(
+        120deg,
+        transparent,
+        rgba(255, 255, 255, 0.45),
+        transparent
+    );
+    transform: skewX(-20deg);
+}
+.btn-shimmer:hover::after {
+    animation: btn-sheen 0.9s ease;
+}
+
+/* card hover gold border glow */
+.card-hover-gold {
+    transition: border-color 0.4s ease, box-shadow 0.4s ease, transform 0.4s ease;
+}
+.card-hover-gold:hover {
+    border-color: rgba(255, 215, 0, 0.55);
+    box-shadow: 0 0 0 1px rgba(255, 215, 0, 0.25),
+        0 12px 48px rgba(201, 168, 76, 0.25);
+    transform: translateY(-4px);
+}
+
+/* shimmering sweep overlay used on feature cards */
+.sweep::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        115deg,
+        transparent 30%,
+        rgba(255, 215, 0, 0.12) 50%,
+        transparent 70%
+    );
+    transform: translateX(-100%);
+    transition: transform 0.7s ease;
+    pointer-events: none;
+}
+.sweep:hover::before {
+    transform: translateX(100%);
+}
+
+/* ---------- Feature layer cards: white glass + gold metallic ---------- */
+.metal-gold-text {
+    background: linear-gradient(
+        135deg,
+        #fff6c2 0%,
+        #ffd700 28%,
+        #c9a84c 52%,
+        #a8862f 70%,
+        #ffd700 100%
+    );
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.metal-gold-icon {
+    background: linear-gradient(145deg, rgba(255, 246, 194, 0.18), rgba(168, 134, 47, 0.12));
+    border: 1px solid rgba(255, 215, 0, 0.35);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+.feature-card {
+    position: relative;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+        border-color 0.45s ease, box-shadow 0.45s ease, background-color 0.45s ease;
+}
+.feature-card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    background: radial-gradient(
+        420px circle at var(--mx, 50%) var(--my, 0%),
+        rgba(255, 215, 0, 0.18),
+        transparent 45%
+    );
+    transition: opacity 0.4s ease;
+    pointer-events: none;
+}
+.feature-card:hover {
+    transform: translateY(-6px) scale(1.01);
+    border-color: rgba(255, 215, 0, 0.6);
+    background: rgba(255, 255, 255, 0.09);
+    box-shadow: 0 0 0 1px rgba(255, 215, 0, 0.3),
+        0 24px 64px rgba(201, 168, 76, 0.28);
+}
+.feature-card:hover::after {
+    opacity: 1;
+}
+.feature-card .layer-tag {
+    transition: color 0.4s ease;
+}
+
+/* ---------- Keyframes ---------- */
+@keyframes text-shimmer {
+    to {
+        background-position: 200% center;
+    }
+}
+@keyframes btn-sheen {
+    0% {
+        left: -150%;
+    }
+    100% {
+        left: 150%;
+    }
+}
+@keyframes shimmer {
+    100% {
+        transform: translateX(100%);
+    }
+}
+@keyframes float-glow {
+    0%,
+    100% {
+        transform: translateY(0) scale(1);
+        opacity: 0.25;
+    }
+    50% {
+        transform: translateY(-24px) scale(1.08);
+        opacity: 0.4;
+    }
+}
+.animate-float-glow {
+    animation: float-glow 7s ease-in-out infinite;
+}
+
+@layer base {
+    :root {
+        --background: 220 33% 2%;
+        --foreground: 0 0% 100%;
+        --card: 220 14% 5%;
+        --card-foreground: 0 0% 100%;
+        --popover: 220 14% 6%;
+        --popover-foreground: 0 0% 100%;
+        --primary: 47 100% 50%;
+        --primary-foreground: 0 0% 4%;
+        --secondary: 0 0% 14%;
+        --secondary-foreground: 0 0% 98%;
+        --muted: 0 0% 14%;
+        --muted-foreground: 0 0% 64%;
+        --accent: 199 89% 60%;
+        --accent-foreground: 0 0% 4%;
+        --destructive: 0 84% 60%;
+        --destructive-foreground: 0 0% 98%;
+        --border: 0 0% 16%;
+        --input: 0 0% 16%;
+        --ring: 47 100% 50%;
+        --radius: 0.625rem;
+    }
+}
+
+@layer base {
+    * {
+        @apply border-border;
+    }
+}

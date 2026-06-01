@@ -1,0 +1,35 @@
+{
+  "summary": "First-pass full backend + frontend test for IronClaw-Security. 17/18 backend pytest cases passed initially; one /api/events/simulate failure was MongoDB ObjectId serialization (fixed by excluding _id from response — see updated_files). After fix: 18/18 pass. Frontend landing, signin, dashboard widgets, purchase API fire, signout, and unauth /dashboard redirect all work. One critical frontend bug: AuthModal does not sync its internal `mode` state when `initialMode` prop changes, so clicking nav-signup-btn / hero-signup-btn opens the modal in SIGNIN mode (not SIGNUP). The signup UI path is therefore effectively broken — users can only sign up via the modal's 'Create an account' link.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/events/simulate", "issue": "Returned 500 because insert_one() mutated event dict with ObjectId _id (then serialization failed). FIXED in /app/backend/server.py by event.pop('_id', None) after insert."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "AuthModal", "issue": "`mode` is initialized from `initialMode` only on first mount via useState(initialMode). Subsequent prop changes (Landing toggling authMode between 'signin' and 'signup') are ignored, so nav-signup-btn and hero-signup-btn open the modal in SIGNIN mode. Verified visually: modal title shows 'Operator sign in' even after clicking Sign Up. Fix: add `useEffect(() => setMode(initialMode), [initialMode, open])` in /app/frontend/src/components/AuthModal.jsx.", "selector": "[data-testid=\"nav-signup-btn\"] / [data-testid=\"hero-signup-btn\"]", "priority": "CRITICAL"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Fix AuthModal mode sync: add useEffect to update mode whenever initialMode prop or open toggles (critical — signup UI is broken).",
+    "Consider showing inline form-error from toast.error so users get feedback when signin fails (currently only sonner toast). Optional."
+  ],
+  "critical_code_review_comments": [
+    "AuthModal: useState(initialMode) without an effect to sync prop changes — classic React pitfall. The component is always mounted on Landing (only renders null when !open), so the initializer fires once with initial 'signin'.",
+    "server.py create_live_event: insert_one mutates the dict in place and pollutes downstream responses with ObjectId; pattern is repeated elsewhere — recommend always projecting {_id: 0} on reads and stripping _id after writes.",
+    "AuthContext probably stores token in localStorage 'ironclaw_token' — verify SSR/cleanup on signout (signout flow works correctly in testing).",
+    "Dashboard polling every 20s for /api/events/simulate is intentional but could cause noisy logs / wallet drift; consider gating behind a visibility check (document.visibilityState === 'visible')."
+  ],
+  "updated_files": ["/app/backend/server.py", "/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (18/18 after one fix)", "frontend": "~85% (signup-button-mode bug; signin + dashboard + purchase + signout all work)"},
+  "test_credentials": "Created via signup: test_ui2_<ts>@ironclaw.io / defend123. Backend tests create unique TEST_*@ironclaw.io accounts per run.",
+  "seed_data_creation": "Each signup auto-seeds 48 security events via /api/auth/signup (verified via dashboard total_events>=40).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test suite is at /app/backend/tests/backend_test.py — run `pytest backend/tests/backend_test.py -v` from /app. The ObjectId bug in /api/events/simulate is fixed. AuthModal mode-sync bug is the only remaining critical issue. After it's fixed, re-test signup UI flow: click nav-signup-btn → modal should say 'Deploy your defenses' (signup mode) → fill new email/password → submit → /dashboard. Frontend purchase button fires /api/payments/create-checkout (status 200 confirmed in network) and would redirect to Stripe — do not actually complete Stripe payment.",
+  "rca_of_the_issue": "AuthModal RCA: `const [mode, setMode] = useState(initialMode);` only reads initialMode once. Landing.jsx mounts <AuthModal initialMode={authMode} ... /> from initial state, so mode='signin'. When user clicks Sign Up, Landing calls setAuthMode('signup'); setAuthOpen(true). AuthModal re-renders with new initialMode prop but its local `mode` state stays 'signin'. Reproduction: Landing → click Sign Up → modal opens but title 'Operator sign in' and submit calls /api/auth/signin. Mitigation: `useEffect(() => { setMode(initialMode); }, [initialMode, open]);` inside AuthModal. ObjectId RCA: motor's insert_one mutates the inserted document, adding `_id: ObjectId`. The same dict is then returned from the FastAPI endpoint, where jsonable_encoder fails on ObjectId. Mitigation applied: `event.pop('_id', None)` after insert (alternatively, copy dict before insert or project on subsequent reads)."
+}
