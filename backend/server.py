@@ -1,28 +1,29 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
-import os
-import logging
-import uuid
-import secrets
-import random
-import jwt
-import bcrypt
-from pathlib import Path
-from pydantic import BaseModel, Field, EmailStr
-from typing import List, Optional
-from datetime import datetime, timezone, timedelta
+from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+import logging
+import os
+from pathlib import Path
+import random
+import secrets
+import uuid
+
+import bcrypt
+from dotenv import load_dotenv
 from emergentintegrations.payments.stripe.checkout import (
-    StripeCheckout,
+    CheckoutSessionRequest,
     CheckoutSessionResponse,
     CheckoutStatusResponse,
-    CheckoutSessionRequest,
+    StripeCheckout,
 )
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.staticfiles import StaticFiles
+import jwt
+from motor.motor_asyncio import AsyncIOMotorClient
+from pydantic import BaseModel, EmailStr, Field
+from starlette.middleware.cors import CORSMiddleware
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -59,8 +60,8 @@ logger = logging.getLogger("ironclaw")
 # Fixed server-side packages (NEVER trust amounts from the frontend)
 # ---------------------------------------------------------------------------
 PACKAGES = {
-    "tier_20k":  {"units": 20000,  "amount": 20.00,  "label": "20,000 units"},
-    "tier_100k": {"units": 100000, "amount": 90.00,  "label": "100,000 units"},
+    "tier_20k": {"units": 20000, "amount": 20.00, "label": "20,000 units"},
+    "tier_100k": {"units": 100000, "amount": 90.00, "label": "100,000 units"},
     "tier_200k": {"units": 200000, "amount": 150.00, "label": "200,000 units"},
 }
 
@@ -79,10 +80,18 @@ THREAT_TYPES = [
 PLATFORMS = ["claude-code", "openclaw"]
 
 # ---------------------------------------------------------------------------
-# CORS origins — env-driven, dev-safe default includes Vite port
+# CORS origins — env-driven; CRA dev default is :3000, also allow :5173 (Vite)
 # ---------------------------------------------------------------------------
-_raw_origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000")
-CORS_ORIGINS: List[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+_raw_origins = os.environ.get(
+    "CORS_ORIGINS",
+    "http://localhost:3000,http://localhost:5173",
+)
+CORS_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
+# ---------------------------------------------------------------------------
+# Frontend build path — CRA outputs to build/, not dist/
+# ---------------------------------------------------------------------------
+_FRONTEND_BUILD = ROOT_DIR.parent / "frontend" / "build"
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +108,7 @@ def verdict_for_score(score: int) -> str:
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 # ---------------------------------------------------------------------------
@@ -138,8 +147,8 @@ def create_access_token(user: dict) -> str:
     payload = {
         "sub": user["id"],
         "email": user["email"],
-        "exp": datetime.now(timezone.utc) + timedelta(days=JWT_EXPIRE_DAYS),
-        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(UTC) + timedelta(days=JWT_EXPIRE_DAYS),
+        "iat": datetime.now(UTC),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
@@ -166,6 +175,8 @@ def public_user(user: dict) -> dict:
         "email": user["email"],
         "user_token": user["user_token"],
         "wallet_units": user.get("wallet_units", 0),
+        "has_paid": user.get("has_paid", False),
+        "last_payment": user.get("last_payment"),
         "created_at": user.get("created_at"),
     }
 
@@ -175,7 +186,7 @@ def public_user(user: dict) -> dict:
 # ---------------------------------------------------------------------------
 async def seed_security_events(user_id: str, count: int = 48) -> None:
     events = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for _ in range(count):
         offset_seconds = random.randint(0, 7 * 24 * 3600)
         ts = now - timedelta(seconds=offset_seconds)
@@ -260,7 +271,10 @@ async def credit_units_once(session_id: str) -> None:
         },
     )
     logger.info(
-        f"Credited {txn['units']} units to user {txn['user_id']} for session {session_id}"
+        "Credited %d units to user %s for session %s",
+        txn["units"],
+        txn["user_id"],
+        session_id,
     )
 
 
@@ -327,11 +341,9 @@ async def integrations_token(user: dict = Depends(get_current_user)):
 
 @api_router.get("/dashboard")
 async def dashboard(user: dict = Depends(get_current_user)):
-    events = await db.security_events.find(
-        {"user_id": user["id"]}, {"_id": 0}
-    ).to_list(2000)
+    events = await db.security_events.find({"user_id": user["id"]}, {"_id": 0}).to_list(2000)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = now - timedelta(days=7)
 
@@ -342,9 +354,7 @@ async def dashboard(user: dict = Depends(get_current_user)):
     buckets = []
     for i in range(6, -1, -1):
         day = (now - timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0)
-        buckets.append(
-            {"key": day, "label": day.strftime("%a"), "date": day.strftime("%m/%d"), "units": 0}
-        )
+        buckets.append({"key": day, "label": day.strftime("%a"), "date": day.strftime("%m/%d"), "units": 0})
 
     for e in events:
         try:
@@ -352,7 +362,7 @@ async def dashboard(user: dict = Depends(get_current_user)):
         except Exception:
             continue
         if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
+            ts = ts.replace(tzinfo=UTC)
         if e.get("verdict") in ("BLOCK", "QUARANTINE"):
             blocked_total += 1
         if ts >= today_start:
@@ -365,9 +375,7 @@ async def dashboard(user: dict = Depends(get_current_user)):
                 b["units"] += e.get("units_used", 0)
                 break
 
-    daily_usage = [
-        {"label": b["label"], "date": b["date"], "units": b["units"]} for b in buckets
-    ]
+    daily_usage = [{"label": b["label"], "date": b["date"], "units": b["units"]} for b in buckets]
 
     sorted_events = sorted(events, key=lambda x: x.get("timestamp", ""), reverse=True)
     attacks = [
@@ -501,7 +509,7 @@ async def stripe_webhook(request: Request):
     try:
         resp = await checkout.handle_webhook(body, sig)
     except Exception as exc:
-        logger.error(f"Webhook handling failed: {exc}")
+        logger.error("Webhook handling failed: %s", exc)
         raise HTTPException(status_code=400, detail="Webhook verification failed.")
 
     if resp.payment_status == "paid" and resp.session_id:
@@ -526,7 +534,7 @@ async def stripe_webhook(request: Request):
 app.include_router(api_router)
 
 # ---------------------------------------------------------------------------
-# CORS — must be added after routers, before static mount
+# CORS — registered after routers, before static mount
 # ---------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
@@ -537,25 +545,26 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
-# Static frontend — served only if the dist folder exists (safe for dev)
+# Static frontend — CRA builds to frontend/build/
+# Served only when the build folder exists (safe for dev without a build)
 # ---------------------------------------------------------------------------
-_FRONTEND_DIST = ROOT_DIR.parent / "frontend" / "dist"
-
-if _FRONTEND_DIST.is_dir():
-    app.mount("/assets", StaticFiles(directory=str(_FRONTEND_DIST / "assets")), name="assets")
+if _FRONTEND_BUILD.is_dir():
+    _assets_dir = _FRONTEND_BUILD / "static"
+    if _assets_dir.is_dir():
+        app.mount("/static", StaticFiles(directory=str(_assets_dir)), name="static")
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
-        """Catch-all: return index.html for all non-API routes (SPA routing)."""
-        index = _FRONTEND_DIST / "index.html"
+        """Catch-all: serve index.html for all non-API routes (SPA client-side routing)."""
+        index = _FRONTEND_BUILD / "index.html"
         if index.is_file():
             return FileResponse(str(index))
         raise HTTPException(status_code=404, detail="Frontend not built.")
+
 else:
     logger.warning(
-        "Frontend dist not found at %s — static serving disabled. "
-        "Run `npm run build` inside the frontend directory to enable it.",
-        _FRONTEND_DIST,
+        "Frontend build not found at %s — static serving disabled. " "Run `yarn build` inside the frontend directory to enable it.",
+        _FRONTEND_BUILD,
     )
 
 

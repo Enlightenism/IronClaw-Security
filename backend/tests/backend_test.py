@@ -2,12 +2,11 @@
 
 import os
 import uuid
+
 import pytest
 import requests
 
-BASE_URL = os.environ.get(
-    "REACT_APP_BACKEND_URL", "https://enforcement-hub-7.preview.emergentagent.com"
-).rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://enforcement-hub-7.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 
 
@@ -19,9 +18,7 @@ def _unique_email():
 def signup_user():
     email = _unique_email()
     password = "defend123"
-    r = requests.post(
-        f"{API}/auth/signup", json={"email": email, "password": password}, timeout=30
-    )
+    r = requests.post(f"{API}/auth/signup", json={"email": email, "password": password}, timeout=30)
     assert r.status_code == 200, r.text
     data = r.json()
     return {
@@ -54,9 +51,7 @@ class TestAuth:
         assert r.status_code == 409
 
     def test_signup_short_password_422(self):
-        r = requests.post(
-            f"{API}/auth/signup", json={"email": _unique_email(), "password": "abc"}
-        )
+        r = requests.post(f"{API}/auth/signup", json={"email": _unique_email(), "password": "abc"})
         assert r.status_code == 422
 
     def test_signin_valid(self, signup_user):
@@ -80,9 +75,7 @@ class TestAuth:
         assert r.status_code in (401, 403)
 
     def test_me_invalid_token_401(self):
-        r = requests.get(
-            f"{API}/auth/me", headers={"Authorization": "Bearer not_a_real_token"}
-        )
+        r = requests.get(f"{API}/auth/me", headers={"Authorization": "Bearer not_a_real_token"})
         assert r.status_code == 401
 
     def test_me_valid(self, auth_headers, signup_user):
