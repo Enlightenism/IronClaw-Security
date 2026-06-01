@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { useNavigate, Link } from "react-router-dom";
 import {
   ShieldCheck,
-  ScanSearch,
+  Syringe,
   ShieldAlert,
   ScrollText,
   Workflow,
@@ -27,8 +27,8 @@ import { useCountUp } from "@/hooks/useCountUp";
 
 const LAYERS = [
   {
-    icon: ScanSearch,
-    title: "Prompt Inspection",
+    icon: Syringe,
+    title: "Prompt Injection",
     body: "Scans every inbound prompt for injection patterns, jailbreak attempts, and adversarial content before a single LLM call is ever made. The first gate nothing bypasses.",
   },
   {
@@ -107,18 +107,46 @@ const fadeUp = {
   }),
 };
 
-const LiveCounter = ({ base, intervalMs, step, color, testid }) => {
-  const target = useCountUp(base, 2200);
-  const [extra, setExtra] = useState(0);
+const LiveCounter = ({ base, minMs = 15000, maxMs = 20000, step, color, testid, storageKey }) => {
+  const stored = parseInt(localStorage.getItem(storageKey) || "", 10);
+  const initial = Number.isFinite(stored) && stored >= base ? stored : base;
+  const animated = useCountUp(initial, 2000);
+  const [value, setValue] = useState(initial);
+  const [live, setLive] = useState(false);
+
+  // switch to live-increment mode once the initial count-up finishes
   useEffect(() => {
-    const t = setInterval(() => {
-      setExtra((e) => e + (typeof step === "function" ? step() : step));
-    }, intervalMs);
-    return () => clearInterval(t);
-  }, [intervalMs, step]);
+    const t = setTimeout(() => setLive(true), 2100);
+    return () => clearTimeout(t);
+  }, []);
+
+  // continuous, randomly-timed (15-20s) increments; persisted so it never resets
+  useEffect(() => {
+    if (!live) return;
+    let timer;
+    const tick = () => {
+      const delay = minMs + Math.random() * (maxMs - minMs);
+      timer = setTimeout(() => {
+        setValue((v) => {
+          const next = v + (typeof step === "function" ? step() : step);
+          try {
+            localStorage.setItem(storageKey, String(next));
+          } catch (e) {
+            /* ignore storage errors */
+          }
+          return next;
+        });
+        tick();
+      }, delay);
+    };
+    tick();
+    return () => clearTimeout(timer);
+  }, [live, minMs, maxMs, step, storageKey]);
+
+  const shown = live ? value : animated;
   return (
     <span className="font-tech" style={{ color }} data-testid={testid}>
-      {(target + extra).toLocaleString()}
+      {shown.toLocaleString()}
     </span>
   );
 };
@@ -230,10 +258,12 @@ const Landing = () => {
               <div className="text-4xl font-bold drop-shadow-[0_0_18px_rgba(56,189,248,0.5)]">
                 <LiveCounter
                   base={12000}
-                  intervalMs={1500}
+                  minMs={15000}
+                  maxMs={20000}
                   step={() => Math.floor(Math.random() * 7) + 1}
                   color="#38BDF8"
                   testid="threat-counter"
+                  storageKey="ic_threats_blocked"
                 />
               </div>
             </div>
@@ -245,10 +275,12 @@ const Landing = () => {
               <div className="text-4xl font-bold drop-shadow-[0_0_18px_rgba(255,215,0,0.45)]">
                 <LiveCounter
                   base={1000}
-                  intervalMs={2500}
+                  minMs={15000}
+                  maxMs={20000}
                   step={1}
                   color="#FFD700"
                   testid="user-counter"
+                  storageKey="ic_engineers_protected"
                 />
               </div>
             </div>
@@ -353,6 +385,9 @@ const Landing = () => {
             <span className="text-platinum-gradient">20,000 units</span>
           </h2>
           <p className="mt-3 text-lg text-[#BFC1C2]">Pay only for what you use.</p>
+          <p className="mt-2 font-tech text-sm text-[#FFD700]" data-testid="agents-protected-line">
+            20,000 units = 20,000 agents protected.
+          </p>
 
           <div className="mx-auto mt-8 grid max-w-2xl grid-cols-1 gap-3 text-left sm:grid-cols-2">
             {[
@@ -425,7 +460,7 @@ const Landing = () => {
           <p className="font-tech text-xs text-[#737373]" data-testid="powered-by">
             Powered by &mdash;{" "}
             <span className="metal-gold-text">Universal Rejuvenation Inc.</span>{" "}
-            &mdash; The Enlightenism Organization
+            &mdash; <span className="metal-gold-text">The Enlightenism Organization</span>
           </p>
         </div>
       </footer>

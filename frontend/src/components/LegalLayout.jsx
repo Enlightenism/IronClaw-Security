@@ -36,9 +36,9 @@ const LegalLayout = ({ title, updated, children, testid }) => {
 
         <div className="mt-14 border-t border-white/10 pt-8 text-center text-xs text-[#737373]">
           <p className="font-tech">
-            Powered by &mdash;{" "}
-            <span className="metal-gold-text">Universal Rejuvenation Inc.</span>{" "}
-            &mdash; The Enlightenism Organization
+            &copy; 2026{" "}
+            <span className="metal-gold-text">IronClaw-Security</span>. All rights
+            reserved.
           </p>
         </div>
       </main>
