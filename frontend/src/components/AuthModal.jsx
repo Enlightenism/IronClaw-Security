@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ShieldCheck, Loader2, X, Mail, Lock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -13,6 +13,10 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
   const [loading, setLoading] = useState(false);
   const { authenticate } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (open) setMode(initialMode);
+  }, [initialMode, open]);
 
   if (!open) return null;
 
