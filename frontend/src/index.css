@@ -148,6 +148,64 @@ body {
     transform: translateX(100%);
 }
 
+/* ---------- Feature layer cards: white glass + gold metallic ---------- */
+.metal-gold-text {
+    background: linear-gradient(
+        135deg,
+        #fff6c2 0%,
+        #ffd700 28%,
+        #c9a84c 52%,
+        #a8862f 70%,
+        #ffd700 100%
+    );
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.metal-gold-icon {
+    background: linear-gradient(145deg, rgba(255, 246, 194, 0.18), rgba(168, 134, 47, 0.12));
+    border: 1px solid rgba(255, 215, 0, 0.35);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+.feature-card {
+    position: relative;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+        border-color 0.45s ease, box-shadow 0.45s ease, background-color 0.45s ease;
+}
+.feature-card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    background: radial-gradient(
+        420px circle at var(--mx, 50%) var(--my, 0%),
+        rgba(255, 215, 0, 0.18),
+        transparent 45%
+    );
+    transition: opacity 0.4s ease;
+    pointer-events: none;
+}
+.feature-card:hover {
+    transform: translateY(-6px) scale(1.01);
+    border-color: rgba(255, 215, 0, 0.6);
+    background: rgba(255, 255, 255, 0.09);
+    box-shadow: 0 0 0 1px rgba(255, 215, 0, 0.3),
+        0 24px 64px rgba(201, 168, 76, 0.28);
+}
+.feature-card:hover::after {
+    opacity: 1;
+}
+.feature-card .layer-tag {
+    transition: color 0.4s ease;
+}
+
 /* ---------- Keyframes ---------- */
 @keyframes text-shimmer {
     to {

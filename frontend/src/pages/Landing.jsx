@@ -1,14 +1,22 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import {
   ShieldCheck,
-  Syringe,
-  Terminal,
-  FileLock2,
-  Boxes,
-  Layers,
+  ScanSearch,
+  ShieldAlert,
   ScrollText,
+  Workflow,
+  Boxes,
+  Activity,
+  Network,
+  FileSearch,
+  KeyRound,
+  Lock,
+  UserCheck,
+  FileClock,
+  Fingerprint,
+  BrainCircuit,
   ArrowRight,
   Check,
 } from "lucide-react";
@@ -17,36 +25,76 @@ import AuthModal from "@/components/AuthModal";
 import { useAuth } from "@/context/AuthContext";
 import { useCountUp } from "@/hooks/useCountUp";
 
-const FEATURES = [
+const LAYERS = [
   {
-    icon: Syringe,
-    title: "Prompt Injection Defense",
-    body: "Pattern heuristics + LLM brain semantic reasoning detect adversarial instructions hidden inside agent-returned content before they reach your workflow.",
+    icon: ScanSearch,
+    title: "Prompt Inspection",
+    body: "Scans every inbound prompt for injection patterns, jailbreak attempts, and adversarial content before a single LLM call is ever made. The first gate nothing bypasses.",
   },
   {
-    icon: Terminal,
-    title: "Unsafe Tool Execution Guard",
-    body: "Every tool call is evaluated against policy before execution. No agent-initiated shell command, file write, or API call runs without enforcement.",
-  },
-  {
-    icon: FileLock2,
-    title: "Data Exfiltration Prevention",
-    body: "Sensitive data encoded into agent responses is intercepted and blocked before it can be routed out through tool calls or returned content.",
-  },
-  {
-    icon: Boxes,
-    title: "Sandbox Isolation",
-    body: "Every artifact is evaluated inside a controlled runtime boundary. Nothing is released directly without system-built analysis.",
-  },
-  {
-    icon: Layers,
-    title: "Five-Layer Verdict Engine",
-    body: "Every agent output traverses Ingress → Normalizer → Heuristics → AI Brain → Policy Enforcer. No bypass path. No silent pass-through.",
+    icon: ShieldAlert,
+    title: "Action Guard",
+    body: "A pre-execution gate that evaluates every proposed agent action against risk rules, returning allow / warn / block verdicts before the action is ever allowed to run.",
   },
   {
     icon: ScrollText,
-    title: "Full Audit Trail",
-    body: "Every verdict logged with risk score 0–100, reasoning, and timestamp. Allow / Warn / Quarantine / Block. Exportable for compliance.",
+    title: "Action Policy Enforcement",
+    body: "Applies named policy rules — allow-lists, deny-lists, and hard capability constraints — to every tool call and agent decision at the policy layer. No exceptions.",
+  },
+  {
+    icon: Workflow,
+    title: "Action Decision",
+    body: "Synthesizes the guard verdict and policy verdict into a single final executable decision, complete with a full reasoning trace captured for audit.",
+  },
+  {
+    icon: Boxes,
+    title: "Sandboxed Execution",
+    body: "Executes risky tool calls and code payloads inside an isolated runtime boundary. The detonation service stress-tests payloads in a contained environment before anything reaches production.",
+  },
+  {
+    icon: Activity,
+    title: "Heuristics & Behavioral Baseline",
+    body: "Detects anomalous agent behavior by comparing live activity against learned baselines, flagging statistical deviations as threats in real time — before they escalate.",
+  },
+  {
+    icon: Network,
+    title: "Attack Correlation",
+    body: "Cross-correlates signals from every layer and across sessions to expose coordinated multi-step attacks, chained injections, and lateral movement patterns.",
+  },
+  {
+    icon: FileSearch,
+    title: "File Inspection + Malware",
+    body: "Inspects all file inputs and outputs for malicious payloads, embedded scripts, and malware signatures before they are ever processed or returned to your system.",
+  },
+  {
+    icon: KeyRound,
+    title: "Secrets Detection & Redaction",
+    body: "Detects credentials, API keys, and sensitive tokens across prompts, responses, and tool outputs — redacting them before leakage and vaulting them securely.",
+  },
+  {
+    icon: Lock,
+    title: "Quarantine",
+    body: "Holds flagged actions, payloads, and sessions in an isolated store pending human review. Nothing quarantined proceeds downstream automatically. Ever.",
+  },
+  {
+    icon: UserCheck,
+    title: "Review Queue & Human-in-the-Loop",
+    body: "Routes high-risk or ambiguous verdicts to a human operator review queue — with full context and audit trail — before any final release decision is made.",
+  },
+  {
+    icon: FileClock,
+    title: "Audit Log + Incident Store",
+    body: "An immutable, timestamped audit trail of every verdict, action, and policy decision. Incidents are persisted for post-hoc investigation and compliance.",
+  },
+  {
+    icon: Fingerprint,
+    title: "Access Control, Auth & Org Isolation",
+    body: "Enforces API-level authentication, role-based permissions, and hard tenant isolation — so no org can read, influence, or pollute another org's security context.",
+  },
+  {
+    icon: BrainCircuit,
+    title: "AI Brain",
+    body: "An AI brain analyzes every agent return isolated inside the sandbox, working in lockstep with the security system to ensure NOTHING reaches your computer or phone.",
   },
 ];
 
@@ -55,20 +103,21 @@ const fadeUp = {
   show: (i = 0) => ({
     opacity: 1,
     y: 0,
-    transition: { duration: 0.6, delay: i * 0.08, ease: [0.22, 1, 0.36, 1] },
+    transition: { duration: 0.6, delay: i * 0.05, ease: [0.22, 1, 0.36, 1] },
   }),
 };
 
-const ThreatCounter = () => {
-  const base = 8472193;
-  const target = useCountUp(base, 2600);
+const LiveCounter = ({ base, intervalMs, step, color, testid }) => {
+  const target = useCountUp(base, 2200);
   const [extra, setExtra] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => setExtra((e) => e + Math.floor(Math.random() * 7) + 1), 1800);
+    const t = setInterval(() => {
+      setExtra((e) => e + (typeof step === "function" ? step() : step));
+    }, intervalMs);
     return () => clearInterval(t);
-  }, []);
+  }, [intervalMs, step]);
   return (
-    <span className="font-tech text-[#38BDF8]" data-testid="threat-counter">
+    <span className="font-tech" style={{ color }} data-testid={testid}>
       {(target + extra).toLocaleString()}
     </span>
   );
@@ -89,6 +138,12 @@ const Landing = () => {
     setAuthOpen(true);
   };
 
+  const onCardMove = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    e.currentTarget.style.setProperty("--mx", `${e.clientX - r.left}px`);
+    e.currentTarget.style.setProperty("--my", `${e.clientY - r.top}px`);
+  };
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#050607] text-white">
       {/* nav */}
@@ -97,8 +152,8 @@ const Landing = () => {
           <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#FFD700]/30 bg-[#C9A84C]/10">
             <ShieldCheck className="text-[#FFD700]" size={20} />
           </div>
-          <span className="font-tech text-lg font-bold tracking-tight">
-            IRON<span className="text-gold-gradient">CLAW</span>
+          <span className="font-tech text-base font-bold tracking-tight sm:text-lg">
+            IRONCLAW<span className="metal-gold-text">-SECURITY</span>
           </span>
         </div>
         <div className="flex items-center gap-3">
@@ -160,18 +215,42 @@ const Landing = () => {
             auditable.
           </motion.p>
 
+          {/* live counters */}
           <motion.div
             variants={fadeUp}
             initial="hidden"
             animate="show"
             custom={3}
-            className="mt-8 inline-flex flex-col items-center gap-1"
+            className="mt-9 flex flex-wrap items-center justify-center gap-x-14 gap-y-6"
           >
-            <div className="text-xs uppercase tracking-[0.3em] text-[#737373]">
-              Threats blocked
+            <div className="flex flex-col items-center gap-1">
+              <div className="text-xs uppercase tracking-[0.3em] text-[#737373]">
+                Threats blocked
+              </div>
+              <div className="text-4xl font-bold drop-shadow-[0_0_18px_rgba(56,189,248,0.5)]">
+                <LiveCounter
+                  base={12000}
+                  intervalMs={1500}
+                  step={() => Math.floor(Math.random() * 7) + 1}
+                  color="#38BDF8"
+                  testid="threat-counter"
+                />
+              </div>
             </div>
-            <div className="font-tech text-4xl font-bold drop-shadow-[0_0_18px_rgba(56,189,248,0.5)]">
-              <ThreatCounter />
+            <div className="hidden h-12 w-px bg-white/10 sm:block" />
+            <div className="flex flex-col items-center gap-1">
+              <div className="text-xs uppercase tracking-[0.3em] text-[#737373]">
+                Engineers protected
+              </div>
+              <div className="text-4xl font-bold drop-shadow-[0_0_18px_rgba(255,215,0,0.45)]">
+                <LiveCounter
+                  base={1000}
+                  intervalMs={2500}
+                  step={1}
+                  color="#FFD700"
+                  testid="user-counter"
+                />
+              </div>
             </div>
           </motion.div>
 
@@ -200,7 +279,7 @@ const Landing = () => {
         </div>
       </section>
 
-      {/* features */}
+      {/* features / 14 layers */}
       <section className="relative z-10 mx-auto max-w-7xl px-6 py-20">
         <motion.div
           variants={fadeUp}
@@ -209,33 +288,44 @@ const Landing = () => {
           viewport={{ once: true, margin: "-80px" }}
           className="mb-14 text-center"
         >
+          <div className="mb-3 inline-block rounded-full border border-[#FFD700]/25 bg-[#C9A84C]/10 px-4 py-1 font-tech text-xs uppercase tracking-[0.3em] text-[#FFD700]">
+            14 enforcement layers
+          </div>
           <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-            Six layers of <span className="text-platinum-gradient">relentless</span> enforcement
+            Fourteen layers of <span className="metal-gold-text">relentless</span> enforcement
           </h2>
           <p className="mx-auto mt-3 max-w-2xl text-[#BFC1C2]">
-            No agent output reaches your workflow without passing every gate.
+            No agent output reaches your workflow without passing every gate. No
+            bypass path. No silent pass-through.
           </p>
         </motion.div>
 
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {FEATURES.map((f, i) => {
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {LAYERS.map((f, i) => {
             const Icon = f.icon;
             return (
               <motion.div
                 key={f.title}
                 variants={fadeUp}
-                custom={i}
+                custom={i % 4}
                 initial="hidden"
                 whileInView="show"
-                viewport={{ once: true, margin: "-60px" }}
-                className="sweep card-hover-gold glass relative overflow-hidden rounded-2xl p-7"
+                viewport={{ once: true, margin: "-40px" }}
+                onMouseMove={onCardMove}
+                className="feature-card rounded-2xl p-6"
                 data-testid={`feature-card-${i}`}
               >
-                <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl border border-[#FFD700]/25 bg-[#C9A84C]/10">
-                  <Icon className="text-[#FFD700]" size={22} />
+                <div className="mb-4 flex items-center justify-between">
+                  <div className="metal-gold-icon flex h-11 w-11 items-center justify-center rounded-xl">
+                    <Icon className="text-[#FFD700]" size={20} />
+                  </div>
+                  <span className="layer-tag font-tech text-xs font-semibold tracking-widest text-white/30">
+                    L{i + 1}
+                  </span>
                 </div>
-                <h3 className="mb-2 text-lg font-semibold tracking-tight text-white">
-                  {f.title}
+                <h3 className="mb-2 text-base font-semibold tracking-tight">
+                  <span className="metal-gold-text">Layer {i + 1}</span>
+                  <span className="text-white"> — {f.title}</span>
                 </h3>
                 <p className="text-sm leading-relaxed text-[#BFC1C2]">{f.body}</p>
               </motion.div>
@@ -282,7 +372,7 @@ const Landing = () => {
       </section>
 
       {/* footer cta */}
-      <section className="relative z-10 mx-auto max-w-4xl px-6 pb-28 pt-10 text-center">
+      <section className="relative z-10 mx-auto max-w-4xl px-6 pb-24 pt-10 text-center">
         <motion.div
           variants={fadeUp}
           initial="hidden"
@@ -302,8 +392,42 @@ const Landing = () => {
         </motion.div>
       </section>
 
-      <footer className="relative z-10 border-t border-white/10 py-8 text-center text-xs text-[#737373]">
-        <span className="font-tech">IRONCLAW-SECURITY</span> &middot; The enforcement layer serious engineers trust.
+      {/* footer */}
+      <footer className="relative z-10 border-t border-white/10 py-10">
+        <div className="mx-auto flex max-w-7xl flex-col items-center gap-4 px-6 text-center">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="text-[#FFD700]" size={16} />
+            <span className="font-tech text-sm font-bold tracking-tight">
+              IRONCLAW<span className="metal-gold-text">-SECURITY</span>
+            </span>
+          </div>
+          <div className="flex items-center gap-6 text-xs">
+            <Link
+              to="/privacy"
+              data-testid="footer-privacy-link"
+              className="text-[#BFC1C2] transition hover:text-[#FFD700]"
+            >
+              Privacy Policy
+            </Link>
+            <span className="text-white/15">|</span>
+            <Link
+              to="/terms"
+              data-testid="footer-terms-link"
+              className="text-[#BFC1C2] transition hover:text-[#FFD700]"
+            >
+              Terms of Service
+            </Link>
+          </div>
+          <p className="text-xs text-[#737373]">
+            The enforcement layer serious engineers trust with production AI
+            systems.
+          </p>
+          <p className="font-tech text-xs text-[#737373]" data-testid="powered-by">
+            Powered by &mdash;{" "}
+            <span className="metal-gold-text">Universal Rejuvenation Inc.</span>{" "}
+            &mdash; The Enlightenism Organization
+          </p>
+        </div>
       </footer>
 
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} initialMode={authMode} />

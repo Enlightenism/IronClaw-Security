@@ -4,6 +4,8 @@ import { Toaster } from "sonner";
 import { AuthProvider } from "@/context/AuthContext";
 import Landing from "@/pages/Landing";
 import Dashboard from "@/pages/Dashboard";
+import Privacy from "@/pages/Privacy";
+import Terms from "@/pages/Terms";
 
 function App() {
   return (
@@ -13,6 +15,8 @@ function App() {
           <Routes>
             <Route path="/" element={<Landing />} />
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/privacy" element={<Privacy />} />
+            <Route path="/terms" element={<Terms />} />
           </Routes>
           <Toaster
             theme="dark"

@@ -139,7 +139,7 @@ const Dashboard = () => {
               <ShieldCheck className="text-[#FFD700]" size={20} />
             </div>
             <span className="font-tech text-lg font-bold tracking-tight">
-              IRON<span className="text-gold-gradient">CLAW</span>
+              IRONCLAW<span className="metal-gold-text">-SECURITY</span>
             </span>
           </button>
           <div className="flex items-center gap-4">

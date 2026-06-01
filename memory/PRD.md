@@ -34,3 +34,11 @@ Cybersecurity SaaS protecting AI agents from prompt injection, unsafe tool execu
 - P2: Real "AI Brain" LLM semantic scoring endpoint (Emergent LLM key / Claude Sonnet 4.5).
 - P2: Gate the 20s live-simulate poll behind document.visibilityState.
 - P2: Per-platform usage breakdown (claude-code vs openclaw).
+
+## Iteration 2 (2026-06-01) — Landing upgrades
+- Logo renamed to IRONCLAW-SECURITY everywhere.
+- Hero counters: Threats blocked starts at 12,000 (random tick); new Engineers protected counter starts at 1,000 (ticks by ones).
+- Expanded to full 14 enforcement layers (L1 Prompt Inspection ... L14 AI Brain), white-glass + gold-metallic cards with cursor-tracking radial glow hover.
+- ParticleField rewritten: twinkling 4-point star sparkles + brighter gold lines following the cursor.
+- New /privacy and /terms routes with full standard documents (LegalLayout).
+- Footer: Privacy/Terms links + "Powered by — Universal Rejuvenation Inc. — The Enlightenism Organization".
