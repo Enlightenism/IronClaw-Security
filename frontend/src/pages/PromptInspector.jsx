@@ -81,7 +81,7 @@ const ThreatBar = ({ score, barClass }) => (
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 const PromptInspector = () => {
-  const { user, loading, logout } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
 
   const [prompt, setPrompt] = useState("");
@@ -90,11 +90,6 @@ const PromptInspector = () => {
   const [result, setResult] = useState(null);
   const [reasoningOpen, setReasoningOpen] = useState(true);
   const textareaRef = useRef(null);
-
-  if (!loading && !user) {
-    navigate("/");
-    return null;
-  }
 
   const handleSignOut = () => {
     logout();
@@ -146,6 +141,7 @@ const PromptInspector = () => {
             onClick={() => navigate("/dashboard")}
             className="flex items-center gap-2.5"
             data-testid="inspector-logo"
+            aria-label="Back to Control Room"
           >
             <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#FFD700]/30 bg-[#C9A84C]/10">
               <ShieldCheck className="text-[#FFD700]" size={20} />

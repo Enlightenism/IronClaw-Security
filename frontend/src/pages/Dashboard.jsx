@@ -1,6 +1,13 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
-import { ShieldCheck, LogOut, Loader2, RefreshCw } from "lucide-react";
+import { useNavigate, useLocation, Link } from "react-router-dom";
+import {
+  ShieldCheck,
+  LogOut,
+  Loader2,
+  RefreshCw,
+  FileSearch,
+  ScrollText,
+} from "lucide-react";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
@@ -9,7 +16,7 @@ import SecurityAnalysis from "@/components/dashboard/SecurityAnalysis";
 import IntegrationCard from "@/components/dashboard/IntegrationCard";
 
 const Dashboard = () => {
-  const { user, setUser, loading, logout } = useAuth();
+  const { user, loading, logout, updateWalletUnits } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [data, setData] = useState(null);
@@ -17,13 +24,6 @@ const Dashboard = () => {
   const [loadingData, setLoadingData] = useState(true);
   const [purchasingId, setPurchasingId] = useState(null);
   const polledRef = useRef(false);
-
-  const updateWalletUnits = useCallback(
-    (units) => {
-      setUser((prev) => (prev ? { ...prev, wallet_units: units } : prev));
-    },
-    [setUser],
-  );
 
   const fetchDashboard = useCallback(async () => {
     try {
@@ -151,7 +151,24 @@ const Dashboard = () => {
               IRONCLAW<span className="metal-gold-text">-SECURITY</span>
             </span>
           </button>
-          <div className="flex items-center gap-4">
+
+          <div className="flex items-center gap-3">
+            {/* Sub-page navigation */}
+            <Link
+              to="/inspector"
+              data-testid="nav-inspector-link"
+              className="hidden items-center gap-1.5 rounded-lg border border-white/15 px-4 py-2 text-sm text-[#BFC1C2] transition hover:border-[#38BDF8]/50 hover:text-[#38BDF8] sm:flex"
+            >
+              <FileSearch size={15} /> Inspector
+            </Link>
+            <Link
+              to="/policies"
+              data-testid="nav-policies-link"
+              className="hidden items-center gap-1.5 rounded-lg border border-white/15 px-4 py-2 text-sm text-[#BFC1C2] transition hover:border-[#FFD700]/50 hover:text-[#FFD700] sm:flex"
+            >
+              <ScrollText size={15} /> Policies
+            </Link>
+
             <span
               className="font-tech hidden text-sm text-[#BFC1C2] sm:block"
               data-testid="user-email"

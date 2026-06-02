@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ShieldCheck, Loader2, X, Mail, Lock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import api from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 
@@ -11,7 +10,7 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const { authenticate } = useAuth();
+  const { authenticate, register } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -24,19 +23,17 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const endpoint = mode === "signup" ? "/auth/signup" : "/auth/signin";
-      const { data } = await api.post(endpoint, { email, password });
-      authenticate(data.token, data.user);
-      toast.success(
-        mode === "signup"
-          ? "Account created. Defenses online."
-          : "Welcome back, operator.",
-      );
+      if (mode === "signup") {
+        await register(email, password);
+        toast.success("Account created. Defenses online.");
+      } else {
+        await authenticate(email, password);
+        toast.success("Welcome back, operator.");
+      }
       onClose();
       navigate("/dashboard");
     } catch (err) {
-      const detail =
-        err?.response?.data?.detail || "Something went wrong. Try again.";
+      const detail = err?.message || "Something went wrong. Try again.";
       toast.error(detail);
     } finally {
       setLoading(false);

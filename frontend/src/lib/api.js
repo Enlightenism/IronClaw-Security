@@ -1,38 +1,26 @@
 /* global process */
 import axios from "axios";
+import { supabase } from "@/lib/supabase";
 
 const BACKEND_URL =
   process.env.REACT_APP_BACKEND_URL || "http://127.0.0.1:8000";
 
 export const API_BASE = `${BACKEND_URL}/api`;
-export const TOKEN_KEY = "ironclaw_token";
 
 const api = axios.create({
   baseURL: API_BASE,
   timeout: 15000,
 });
 
-// ── Request: inject auth token ────────────────────────────────────────────────
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem(TOKEN_KEY);
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
-
 // ── Response: handle 401 globally ────────────────────────────────────────────
+// Authorization header is kept current by AuthContext.syncAxiosToken via
+// supabase.auth.onAuthStateChange — no request interceptor needed.
 api.interceptors.response.use(
   (res) => res,
-  (error) => {
+  async (error) => {
     if (error?.response?.status === 401) {
-      localStorage.removeItem(TOKEN_KEY);
-      if (
-        !window.location.pathname.includes("/signin") &&
-        !window.location.pathname.includes("/signup")
-      ) {
-        window.location.href = "/signin";
-      }
+      await supabase.auth.signOut();
+      window.location.href = "/";
     }
     return Promise.reject(error);
   },
@@ -44,9 +32,9 @@ export const health = {
 };
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
+// signup/signin removed — handled by Supabase Auth directly in AuthContext.
+// me() retained for backend session/user validation.
 export const auth = {
-  signup: (payload) => api.post("/auth/signup", payload),
-  signin: (payload) => api.post("/auth/signin", payload),
   me: () => api.get("/auth/me"),
 };
 

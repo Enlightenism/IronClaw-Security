@@ -374,7 +374,7 @@ const normalizePolicyList = (data) =>
 
 // ── PolicyManager (main page) ─────────────────────────────────────────────────
 const PolicyManager = () => {
-  const { user, loading, logout } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
 
   const [policyList, setPolicyList] = useState([]);
@@ -386,10 +386,6 @@ const PolicyManager = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterAction, setFilterAction] = useState("all");
   const [filterEnabled, setFilterEnabled] = useState("all");
-
-  useEffect(() => {
-    if (!loading && !user) navigate("/");
-  }, [loading, user, navigate]);
 
   const fetchPolicies = useCallback(async () => {
     setFetching(true);
@@ -519,6 +515,7 @@ const PolicyManager = () => {
   const closeModal = useCallback(() => {
     if (!saving) setModal(null);
   }, [saving]);
+
   const closeDelete = useCallback(() => {
     if (!deleting) setDeleteTarget(null);
   }, [deleting]);
@@ -544,6 +541,7 @@ const PolicyManager = () => {
             onClick={() => navigate("/dashboard")}
             className="flex items-center gap-2.5"
             data-testid="policy-manager-logo"
+            aria-label="Back to Control Room"
           >
             <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#FFD700]/30 bg-[#C9A84C]/10">
               <ShieldCheck className="text-[#FFD700]" size={20} />
