@@ -92,7 +92,7 @@ def _build_kpis(packages: list[BillingSummaryPackageView]) -> list[BillingSummar
         BillingSummaryKpiView(
             label="Entry price",
             value=f"${lowest:.2f}",
-            detail="Starts with 20,000 prepaid protection units.",
+            detail="Starts with 10,000 prepaid protection units.",
             metadata={"kind": "entry-price"},
         ),
         BillingSummaryKpiView(
@@ -150,7 +150,7 @@ def get_billing_summary() -> BillingSummaryResponse:
         links=_build_links(),
         notes=[
             "Billing is sold as prepaid protection-unit bundles.",
-            "Current package pricing is $20 for 20,000 units, $90 for 100,000 units, and $150 for 200,000 units.",
+            "Current package pricing is $20 for 10,000 units, $90 for 50,000 units, and $150 for 100,000 units.",
             "Team Security is the featured package for balanced usage growth.",
             "Billing summary now links directly to the wallet-facing UI surface.",
         ],
