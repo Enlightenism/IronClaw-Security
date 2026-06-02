@@ -5,7 +5,6 @@ const easeOutQuad = (t) => t * (2 - t);
 export function useCountUp(end, duration = 1400, deps = []) {
   const [value, setValue] = useState(0);
   const frame = useRef();
-  const startRef = useRef(0);
 
   useEffect(() => {
     const target = Number(end) || 0;

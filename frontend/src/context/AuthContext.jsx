@@ -1,4 +1,10 @@
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+} from "react";
 import api, { TOKEN_KEY } from "@/lib/api";
 
 const AuthContext = createContext(null);
@@ -17,7 +23,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const { data } = await api.get("/auth/me");
       setUser(data.user);
-    } catch (e) {
+    } catch {
       localStorage.removeItem(TOKEN_KEY);
       setUser(null);
     } finally {
@@ -40,7 +46,16 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, setUser, loading, authenticate, logout, refreshUser: loadUser }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        setUser,
+        loading,
+        authenticate,
+        logout,
+        refreshUser: loadUser,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

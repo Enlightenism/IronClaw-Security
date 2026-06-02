@@ -6,7 +6,6 @@ import {
   Send,
   Loader2,
   ShieldAlert,
-  ShieldOff,
   ShieldX,
   AlertTriangle,
   RotateCcw,
@@ -67,7 +66,8 @@ const ThreatBar = ({ score, barClass }) => (
         Threat Score
       </span>
       <span className="font-tech text-sm font-bold text-white">
-        {clampScore(score)}<span className="text-[#737373]">/100</span>
+        {clampScore(score)}
+        <span className="text-[#737373]">/100</span>
       </span>
     </div>
     <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
@@ -91,7 +91,6 @@ const PromptInspector = () => {
   const [reasoningOpen, setReasoningOpen] = useState(true);
   const textareaRef = useRef(null);
 
-  // Auth guard — redirect if session is gone
   if (!loading && !user) {
     navigate("/");
     return null;
@@ -177,8 +176,9 @@ const PromptInspector = () => {
             Prompt Inspector
           </h1>
           <p className="mt-1 text-sm text-[#BFC1C2]">
-            Submit any prompt or instruction to IronClaw's enforcement layer and
-            receive a real-time verdict with threat scoring and reasoning.
+            Submit any prompt or instruction to IronClaw&apos;s enforcement
+            layer and receive a real-time verdict with threat scoring and
+            reasoning.
           </p>
         </div>
 
@@ -262,7 +262,6 @@ const PromptInspector = () => {
 
           {/* ── Result panel ── */}
           <div className="flex flex-col gap-4">
-            {/* Idle state */}
             {!result && !inspecting && (
               <div className="glass-platinum flex min-h-[280px] flex-col items-center justify-center rounded-2xl p-8 text-center">
                 <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-white/10 bg-white/5">
@@ -275,7 +274,6 @@ const PromptInspector = () => {
               </div>
             )}
 
-            {/* Loading skeleton */}
             {inspecting && (
               <div className="glass-platinum min-h-[280px] rounded-2xl p-6">
                 <div className="mb-6 flex items-center gap-3">
@@ -293,13 +291,11 @@ const PromptInspector = () => {
               </div>
             )}
 
-            {/* Verdict result */}
             {result && !inspecting && (
               <div
                 className={`rounded-2xl border p-6 ${cfg.bg} ${cfg.border} ${cfg.glow}`}
                 data-testid="verdict-card"
               >
-                {/* Verdict badge + icon */}
                 <div className="mb-5 flex items-center gap-3">
                   <div
                     className={`flex h-11 w-11 items-center justify-center rounded-full border ${cfg.border} ${cfg.bg}`}
@@ -324,10 +320,8 @@ const PromptInspector = () => {
                   </span>
                 </div>
 
-                {/* Threat score bar */}
                 <ThreatBar score={result.threat_score} barClass={cfg.bar} />
 
-                {/* Reasoning */}
                 {result.reasoning && (
                   <div className="mt-5">
                     <button
@@ -353,7 +347,6 @@ const PromptInspector = () => {
                   </div>
                 )}
 
-                {/* Extra fields if backend returns them */}
                 {result.policy_triggered && (
                   <div className="mt-4 flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-[#BFC1C2]">
                     <span className="uppercase tracking-wider">Policy:</span>

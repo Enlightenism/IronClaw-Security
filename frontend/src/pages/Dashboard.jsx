@@ -9,7 +9,7 @@ import SecurityAnalysis from "@/components/dashboard/SecurityAnalysis";
 import IntegrationCard from "@/components/dashboard/IntegrationCard";
 
 const Dashboard = () => {
-  const { user, setUser, loading, logout, refreshUser } = useAuth();
+  const { user, setUser, loading, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [data, setData] = useState(null);
@@ -18,12 +18,11 @@ const Dashboard = () => {
   const [purchasingId, setPurchasingId] = useState(null);
   const polledRef = useRef(false);
 
-  // Surgically update wallet balance in AuthContext without a full /auth/me round-trip
   const updateWalletUnits = useCallback(
     (units) => {
       setUser((prev) => (prev ? { ...prev, wallet_units: units } : prev));
     },
-    [setUser]
+    [setUser],
   );
 
   const fetchDashboard = useCallback(async () => {
@@ -41,7 +40,6 @@ const Dashboard = () => {
     }
   }, []);
 
-  // Redirect if unauthenticated
   useEffect(() => {
     if (!loading && !user) navigate("/");
   }, [loading, user, navigate]);
@@ -50,8 +48,6 @@ const Dashboard = () => {
     if (user) fetchDashboard();
   }, [user, fetchDashboard]);
 
-  // Auto-refresh dashboard data every 5 minutes; live attack simulation every 20s
-  // refreshUser removed from live loop — fetchDashboard is sufficient for live telemetry
   useEffect(() => {
     if (!user) return;
     const refresh = setInterval(fetchDashboard, 5 * 60 * 1000);
@@ -59,7 +55,9 @@ const Dashboard = () => {
       try {
         await api.post("/events/simulate");
         fetchDashboard();
-      } catch {}
+      } catch {
+        // handled by interceptor
+      }
     }, 20000);
     return () => {
       clearInterval(refresh);
@@ -67,7 +65,6 @@ const Dashboard = () => {
     };
   }, [user, fetchDashboard]);
 
-  // Handle Stripe return — poll payment status and update wallet units surgically
   const pollPayment = useCallback(
     async (sessionId, attempts = 0) => {
       const maxAttempts = 6;
@@ -81,9 +78,8 @@ const Dashboard = () => {
         if (status.payment_status === "paid") {
           toast.dismiss("pay");
           toast.success(
-            `Payment confirmed — ${status.units.toLocaleString()} units added!`
+            `Payment confirmed — ${status.units.toLocaleString()} units added!`,
           );
-          // Surgical wallet update — no full /auth/me re-fetch
           updateWalletUnits(status.units);
           await fetchDashboard();
           return;
@@ -98,7 +94,7 @@ const Dashboard = () => {
         setTimeout(() => pollPayment(sessionId, attempts + 1), 2000);
       }
     },
-    [fetchDashboard, updateWalletUnits]
+    [fetchDashboard, updateWalletUnits],
   );
 
   useEffect(() => {
@@ -141,7 +137,6 @@ const Dashboard = () => {
 
   return (
     <div className="min-h-screen bg-[#050607] text-white">
-      {/* nav */}
       <nav className="sticky top-0 z-40 border-b border-white/10 bg-[#050607]/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <button
@@ -181,7 +176,8 @@ const Dashboard = () => {
               Enforcement Control Room
             </h1>
             <p className="mt-1 text-sm text-[#BFC1C2]">
-              Live verdicts, unit draw, and blocked attacks across your installs.
+              Live verdicts, unit draw, and blocked attacks across your
+              installs.
             </p>
           </div>
           <button

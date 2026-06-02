@@ -107,20 +107,26 @@ const fadeUp = {
   }),
 };
 
-const LiveCounter = ({ base, minMs = 15000, maxMs = 20000, step, color, testid, storageKey }) => {
+const LiveCounter = ({
+  base,
+  minMs = 15000,
+  maxMs = 20000,
+  step,
+  color,
+  testid,
+  storageKey,
+}) => {
   const stored = parseInt(localStorage.getItem(storageKey) || "", 10);
   const initial = Number.isFinite(stored) && stored >= base ? stored : base;
   const animated = useCountUp(initial, 2000);
   const [value, setValue] = useState(initial);
   const [live, setLive] = useState(false);
 
-  // switch to live-increment mode once the initial count-up finishes
   useEffect(() => {
     const t = setTimeout(() => setLive(true), 2100);
     return () => clearTimeout(t);
   }, []);
 
-  // continuous, randomly-timed (15-20s) increments; persisted so it never resets
   useEffect(() => {
     if (!live) return;
     let timer;
@@ -131,8 +137,8 @@ const LiveCounter = ({ base, minMs = 15000, maxMs = 20000, step, color, testid, 
           const next = v + (typeof step === "function" ? step() : step);
           try {
             localStorage.setItem(storageKey, String(next));
-          } catch (e) {
-            /* ignore storage errors */
+          } catch {
+            // ignore storage errors
           }
           return next;
         });
@@ -174,7 +180,6 @@ const Landing = () => {
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#050607] text-white">
-      {/* nav */}
       <nav className="relative z-20 mx-auto flex max-w-7xl items-center justify-between px-6 py-6">
         <div className="flex items-center gap-2.5" data-testid="brand-logo">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#FFD700]/30 bg-[#C9A84C]/10">
@@ -202,11 +207,13 @@ const Landing = () => {
         </div>
       </nav>
 
-      {/* hero */}
       <section className="relative overflow-hidden">
         <ParticleField />
         <div className="pointer-events-none absolute left-1/4 top-20 h-72 w-72 rounded-full bg-[#38BDF8] opacity-20 blur-[120px] animate-float-glow" />
-        <div className="pointer-events-none absolute right-1/4 top-40 h-72 w-72 rounded-full bg-[#C9A84C] opacity-20 blur-[120px] animate-float-glow" style={{ animationDelay: "2s" }} />
+        <div
+          className="pointer-events-none absolute right-1/4 top-40 h-72 w-72 rounded-full bg-[#C9A84C] opacity-20 blur-[120px] animate-float-glow"
+          style={{ animationDelay: "2s" }}
+        />
 
         <div className="relative z-10 mx-auto max-w-5xl px-6 pb-28 pt-20 text-center">
           <motion.div
@@ -243,7 +250,6 @@ const Landing = () => {
             auditable.
           </motion.p>
 
-          {/* live counters */}
           <motion.div
             variants={fadeUp}
             initial="hidden"
@@ -311,7 +317,6 @@ const Landing = () => {
         </div>
       </section>
 
-      {/* features / 14 layers */}
       <section className="relative z-10 mx-auto max-w-7xl px-6 py-20">
         <motion.div
           variants={fadeUp}
@@ -324,7 +329,8 @@ const Landing = () => {
             14 enforcement layers
           </div>
           <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-            Fourteen layers of <span className="metal-gold-text">relentless</span> enforcement
+            Fourteen layers of{" "}
+            <span className="metal-gold-text">relentless</span> enforcement
           </h2>
           <p className="mx-auto mt-3 max-w-2xl text-[#BFC1C2]">
             No agent output reaches your workflow without passing every gate. No
@@ -359,14 +365,15 @@ const Landing = () => {
                   <span className="metal-gold-text">Layer {i + 1}</span>
                   <span className="text-white"> — {f.title}</span>
                 </h3>
-                <p className="text-sm leading-relaxed text-[#BFC1C2]">{f.body}</p>
+                <p className="text-sm leading-relaxed text-[#BFC1C2]">
+                  {f.body}
+                </p>
               </motion.div>
             );
           })}
         </div>
       </section>
 
-      {/* credits */}
       <section className="relative z-10 mx-auto max-w-4xl px-6 py-20">
         <motion.div
           variants={fadeUp}
@@ -384,8 +391,13 @@ const Landing = () => {
             <span className="text-[#BFC1C2]">=</span>{" "}
             <span className="text-platinum-gradient">20,000 units</span>
           </h2>
-          <p className="mt-3 text-lg text-[#BFC1C2]">Pay only for what you use.</p>
-          <p className="mt-2 font-tech text-sm text-[#FFD700]" data-testid="agents-protected-line">
+          <p className="mt-3 text-lg text-[#BFC1C2]">
+            Pay only for what you use.
+          </p>
+          <p
+            className="mt-2 font-tech text-sm text-[#FFD700]"
+            data-testid="agents-protected-line"
+          >
             20,000 units = 20,000 agents protected.
           </p>
 
@@ -398,7 +410,10 @@ const Landing = () => {
               "Full spend control",
               "Transparent per-unit pricing",
             ].map((b) => (
-              <div key={b} className="flex items-center gap-2 text-sm text-white/90">
+              <div
+                key={b}
+                className="flex items-center gap-2 text-sm text-white/90"
+              >
                 <Check size={16} className="text-[#FFD700]" /> {b}
               </div>
             ))}
@@ -406,7 +421,6 @@ const Landing = () => {
         </motion.div>
       </section>
 
-      {/* footer cta */}
       <section className="relative z-10 mx-auto max-w-4xl px-6 pb-24 pt-10 text-center">
         <motion.div
           variants={fadeUp}
@@ -427,7 +441,6 @@ const Landing = () => {
         </motion.div>
       </section>
 
-      {/* footer */}
       <footer className="relative z-10 border-t border-white/10 py-10">
         <div className="mx-auto flex max-w-7xl flex-col items-center gap-4 px-6 text-center">
           <div className="flex items-center gap-2">
@@ -457,15 +470,25 @@ const Landing = () => {
             The enforcement layer serious engineers trust with production AI
             systems.
           </p>
-          <p className="font-tech text-xs text-[#737373]" data-testid="powered-by">
+          <p
+            className="font-tech text-xs text-[#737373]"
+            data-testid="powered-by"
+          >
             Powered by &mdash;{" "}
             <span className="metal-gold-text">Universal Rejuvenation Inc.</span>{" "}
-            &mdash; <span className="metal-gold-text">The Enlightenism Organization</span>
+            &mdash;{" "}
+            <span className="metal-gold-text">
+              The Enlightenism Organization
+            </span>
           </p>
         </div>
       </footer>
 
-      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} initialMode={authMode} />
+      <AuthModal
+        open={authOpen}
+        onClose={() => setAuthOpen(false)}
+        initialMode={authMode}
+      />
     </div>
   );
 };

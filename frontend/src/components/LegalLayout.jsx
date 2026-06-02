@@ -6,7 +6,11 @@ const LegalLayout = ({ title, updated, children, testid }) => {
     <div className="min-h-screen bg-[#050607] text-white">
       <nav className="sticky top-0 z-40 border-b border-white/10 bg-[#050607]/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
-          <Link to="/" className="flex items-center gap-2.5" data-testid="legal-logo">
+          <Link
+            to="/"
+            className="flex items-center gap-2.5"
+            data-testid="legal-logo"
+          >
             <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#FFD700]/30 bg-[#C9A84C]/10">
               <ShieldCheck className="text-[#FFD700]" size={20} />
             </div>
@@ -32,13 +36,15 @@ const LegalLayout = ({ title, updated, children, testid }) => {
           Last updated: {updated}
         </p>
 
-        <div className="legal-body mt-10 space-y-8 text-[#BFC1C2]">{children}</div>
+        <div className="legal-body mt-10 space-y-8 text-[#BFC1C2]">
+          {children}
+        </div>
 
         <div className="mt-14 border-t border-white/10 pt-8 text-center text-xs text-[#737373]">
           <p className="font-tech">
             &copy; 2026{" "}
-            <span className="metal-gold-text">IronClaw-Security</span>. All rights
-            reserved.
+            <span className="metal-gold-text">IronClaw-Security</span>. All
+            rights reserved.
           </p>
         </div>
       </main>

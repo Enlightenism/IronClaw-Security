@@ -1,3 +1,4 @@
+/* global process */
 import axios from "axios";
 
 const BACKEND_URL =
@@ -26,7 +27,6 @@ api.interceptors.response.use(
   (error) => {
     if (error?.response?.status === 401) {
       localStorage.removeItem(TOKEN_KEY);
-      // Avoid redirect loop if already on auth pages
       if (
         !window.location.pathname.includes("/signin") &&
         !window.location.pathname.includes("/signup")
@@ -35,7 +35,7 @@ api.interceptors.response.use(
       }
     }
     return Promise.reject(error);
-  }
+  },
 );
 
 // ── Health ────────────────────────────────────────────────────────────────────
@@ -45,9 +45,9 @@ export const health = {
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 export const auth = {
-  signup: (payload)  => api.post("/auth/signup", payload),
-  signin: (payload)  => api.post("/auth/signin", payload),
-  me:     ()         => api.get("/auth/me"),
+  signup: (payload) => api.post("/auth/signup", payload),
+  signin: (payload) => api.post("/auth/signin", payload),
+  me: () => api.get("/auth/me"),
 };
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -67,8 +67,8 @@ export const integrations = {
 
 // ── Payments ──────────────────────────────────────────────────────────────────
 export const payments = {
-  createCheckout: (payload)    => api.post("/payments/create-checkout", payload),
-  getStatus:      (sessionId)  => api.get(`/payments/status/${sessionId}`),
+  createCheckout: (payload) => api.post("/payments/create-checkout", payload),
+  getStatus: (sessionId) => api.get(`/payments/status/${sessionId}`),
 };
 
 // ── Prompts ───────────────────────────────────────────────────────────────────
@@ -83,11 +83,11 @@ export const audit = {
 
 // ── Policies ──────────────────────────────────────────────────────────────────
 export const policies = {
-  list:   ()             => api.get("/policies"),
-  get:    (id)           => api.get(`/policies/${id}`),
-  create: (payload)      => api.post("/policies", payload),
-  update: (id, payload)  => api.put(`/policies/${id}`, payload),
-  delete: (id)           => api.delete(`/policies/${id}`),
+  list: () => api.get("/policies"),
+  get: (id) => api.get(`/policies/${id}`),
+  create: (payload) => api.post("/policies", payload),
+  update: (id, payload) => api.put(`/policies/${id}`, payload),
+  delete: (id) => api.delete(`/policies/${id}`),
 };
 
 // ── Tools ─────────────────────────────────────────────────────────────────────

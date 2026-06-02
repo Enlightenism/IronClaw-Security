@@ -28,21 +28,31 @@ const PAGE_SIZE = 20;
 
 const verdictVariant = (verdict) => {
   switch (verdict) {
-    case "allow":      return "secondary";
-    case "warn":       return "outline";
-    case "quarantine": return "outline";
-    case "block":      return "destructive";
-    default:           return "outline";
+    case "allow":
+      return "secondary";
+    case "warn":
+      return "outline";
+    case "quarantine":
+      return "outline";
+    case "block":
+      return "destructive";
+    default:
+      return "outline";
   }
 };
 
 const verdictClass = (verdict) => {
   switch (verdict) {
-    case "allow":      return "text-green-600 border-green-400";
-    case "warn":       return "text-yellow-600 border-yellow-400";
-    case "quarantine": return "text-orange-600 border-orange-400";
-    case "block":      return "text-red-600 border-red-400";
-    default:           return "";
+    case "allow":
+      return "text-green-600 border-green-400";
+    case "warn":
+      return "text-yellow-600 border-yellow-400";
+    case "quarantine":
+      return "text-orange-600 border-orange-400";
+    case "block":
+      return "text-red-600 border-red-400";
+    default:
+      return "";
   }
 };
 
@@ -50,18 +60,16 @@ const AuditLog = () => {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
 
-  const [logs, setLogs]           = useState([]);
-  const [total, setTotal]         = useState(0);
-  const [page, setPage]           = useState(1);
-  const [fetching, setFetching]   = useState(false);
+  const [logs, setLogs] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [fetching, setFetching] = useState(false);
 
-  // Filters
-  const [verdict, setVerdict]     = useState("all");
-  const [agent, setAgent]         = useState("");
-  const [dateFrom, setDateFrom]   = useState("");
-  const [dateTo, setDateTo]       = useState("");
+  const [verdict, setVerdict] = useState("all");
+  const [agent, setAgent] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
-  // Redirect if unauthenticated
   useEffect(() => {
     if (!loading && !user) navigate("/");
   }, [loading, user, navigate]);
@@ -69,16 +77,16 @@ const AuditLog = () => {
   const buildParams = useCallback(
     (overridePage) => {
       const params = {
-        page:  overridePage ?? page,
+        page: overridePage ?? page,
         limit: PAGE_SIZE,
       };
       if (verdict && verdict !== "all") params.verdict = verdict;
-      if (agent.trim())                 params.agent   = agent.trim();
-      if (dateFrom)                     params.from    = dateFrom;
-      if (dateTo)                       params.to      = dateTo;
+      if (agent.trim()) params.agent = agent.trim();
+      if (dateFrom) params.from = dateFrom;
+      if (dateTo) params.to = dateTo;
       return params;
     },
-    [page, verdict, agent, dateFrom, dateTo]
+    [page, verdict, agent, dateFrom, dateTo],
   );
 
   const fetchLogs = useCallback(
@@ -88,16 +96,15 @@ const AuditLog = () => {
         const { data } = await audit.getLogs(buildParams(overridePage));
         setLogs(data.logs ?? data.items ?? data.results ?? []);
         setTotal(data.total ?? 0);
-      } catch (err) {
+      } catch {
         toast.error("Failed to load audit logs.");
       } finally {
         setFetching(false);
       }
     },
-    [buildParams]
+    [buildParams],
   );
 
-  // Re-fetch when user is ready
   useEffect(() => {
     if (user) fetchLogs(page);
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -113,10 +120,8 @@ const AuditLog = () => {
     setDateFrom("");
     setDateTo("");
     setPage(1);
-    // fetchLogs called after state settles via effect below
   };
 
-  // Re-fetch when page changes (pagination buttons)
   const handlePageChange = (next) => {
     setPage(next);
     fetchLogs(next);
@@ -126,10 +131,11 @@ const AuditLog = () => {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* Header */}
       <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-background/80 backdrop-blur px-6 py-3">
         <div className="flex items-center gap-2">
-          <span className="text-lg font-semibold tracking-tight">Audit Log</span>
+          <span className="text-lg font-semibold tracking-tight">
+            Audit Log
+          </span>
           {total > 0 && (
             <Badge variant="secondary" className="text-xs">
               {total.toLocaleString()} entries
@@ -149,14 +155,12 @@ const AuditLog = () => {
       </header>
 
       <main className="mx-auto max-w-7xl px-6 py-6 space-y-4">
-        {/* Filter Bar */}
         <section className="flex flex-wrap items-end gap-3 rounded-lg border bg-card p-4">
           <div className="flex items-center gap-1 text-sm text-muted-foreground">
             <Filter className="h-4 w-4" />
             Filters
           </div>
 
-          {/* Verdict */}
           <div className="flex flex-col gap-1">
             <label className="text-xs text-muted-foreground">Verdict</label>
             <Select value={verdict} onValueChange={setVerdict}>
@@ -174,7 +178,6 @@ const AuditLog = () => {
             </Select>
           </div>
 
-          {/* Agent */}
           <div className="flex flex-col gap-1">
             <label className="text-xs text-muted-foreground">Agent</label>
             <Input
@@ -186,7 +189,6 @@ const AuditLog = () => {
             />
           </div>
 
-          {/* Date From */}
           <div className="flex flex-col gap-1">
             <label className="text-xs text-muted-foreground">From</label>
             <Input
@@ -197,7 +199,6 @@ const AuditLog = () => {
             />
           </div>
 
-          {/* Date To */}
           <div className="flex flex-col gap-1">
             <label className="text-xs text-muted-foreground">To</label>
             <Input
@@ -214,13 +215,16 @@ const AuditLog = () => {
               Clear
             </Button>
             <Button size="sm" onClick={handleApplyFilters} disabled={fetching}>
-              {fetching ? <Loader2 className="animate-spin" /> : <Filter className="h-3.5 w-3.5" />}
+              {fetching ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <Filter className="h-3.5 w-3.5" />
+              )}
               Apply
             </Button>
           </div>
         </section>
 
-        {/* Table */}
         <div className="rounded-lg border bg-card overflow-hidden">
           {fetching && logs.length === 0 ? (
             <div className="flex items-center justify-center py-20 text-muted-foreground gap-2">
@@ -230,7 +234,9 @@ const AuditLog = () => {
           ) : logs.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-muted-foreground gap-2">
               <span className="text-4xl">🗂️</span>
-              <p className="text-sm">No audit log entries match the current filters.</p>
+              <p className="text-sm">
+                No audit log entries match the current filters.
+              </p>
             </div>
           ) : (
             <Table>
@@ -251,8 +257,8 @@ const AuditLog = () => {
                       {log.created_at
                         ? new Date(log.created_at).toLocaleString()
                         : log.timestamp
-                        ? new Date(log.timestamp).toLocaleString()
-                        : "—"}
+                          ? new Date(log.timestamp).toLocaleString()
+                          : "—"}
                     </TableCell>
                     <TableCell className="text-xs font-mono max-w-[160px] truncate">
                       {log.agent_id ?? log.agent ?? "—"}
@@ -281,7 +287,6 @@ const AuditLog = () => {
           )}
         </div>
 
-        {/* Pagination */}
         {totalPages > 1 && (
           <div className="flex items-center justify-between text-sm text-muted-foreground">
             <span>

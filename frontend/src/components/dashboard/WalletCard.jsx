@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Wallet, CreditCard, Loader2, Zap, ShieldCheck } from "lucide-react";
 import { useCountUp } from "@/hooks/useCountUp";
 
@@ -8,7 +7,13 @@ const TIERS = [
   { id: "tier_200k", units: "200,000", price: "$150" },
 ];
 
-const WalletCard = ({ balance = 0, lastPayment, hasPaid, onPurchase, purchasingId }) => {
+const WalletCard = ({
+  balance = 0,
+  lastPayment,
+  hasPaid,
+  onPurchase,
+  purchasingId,
+}) => {
   const animated = useCountUp(balance, 1500, [balance]);
 
   return (
@@ -55,7 +60,9 @@ const WalletCard = ({ balance = 0, lastPayment, hasPaid, onPurchase, purchasingI
                 Best value
               </span>
             )}
-            <span className="font-tech text-base font-bold text-white">{t.units}</span>
+            <span className="font-tech text-base font-bold text-white">
+              {t.units}
+            </span>
             <span className="text-[11px] text-[#BFC1C2]">units</span>
             <span className="mt-2 flex items-center gap-1 text-lg font-semibold text-[#FFD700]">
               {purchasingId === t.id ? (
@@ -68,8 +75,10 @@ const WalletCard = ({ balance = 0, lastPayment, hasPaid, onPurchase, purchasingI
         ))}
       </div>
 
-      {/* Saved payment method */}
-      <div className="mt-6 rounded-xl border border-white/10 bg-black/30 p-4" data-testid="saved-payment-method">
+      <div
+        className="mt-6 rounded-xl border border-white/10 bg-black/30 p-4"
+        data-testid="saved-payment-method"
+      >
         <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-widest text-[#BFC1C2]">
           <CreditCard size={14} /> Payment method
         </div>

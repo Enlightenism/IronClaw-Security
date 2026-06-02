@@ -27,11 +27,16 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
       const endpoint = mode === "signup" ? "/auth/signup" : "/auth/signin";
       const { data } = await api.post(endpoint, { email, password });
       authenticate(data.token, data.user);
-      toast.success(mode === "signup" ? "Account created. Defenses online." : "Welcome back, operator.");
+      toast.success(
+        mode === "signup"
+          ? "Account created. Defenses online."
+          : "Welcome back, operator.",
+      );
       onClose();
       navigate("/dashboard");
     } catch (err) {
-      const detail = err?.response?.data?.detail || "Something went wrong. Try again.";
+      const detail =
+        err?.response?.data?.detail || "Something went wrong. Try again.";
       toast.error(detail);
     } finally {
       setLoading(false);
@@ -86,7 +91,10 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
 
           <form onSubmit={submit} className="space-y-4">
             <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" size={18} />
+              <Mail
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40"
+                size={18}
+              />
               <input
                 type="email"
                 required
@@ -98,7 +106,10 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
               />
             </div>
             <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" size={18} />
+              <Lock
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40"
+                size={18}
+              />
               <input
                 type="password"
                 required

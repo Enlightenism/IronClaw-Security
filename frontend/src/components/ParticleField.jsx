@@ -88,7 +88,8 @@ const ParticleField = ({ density = 90 }) => {
         if (s.y > height) s.y = 0;
 
         // twinkle: oscillate alpha
-        const twinkle = 0.35 + 0.5 * (0.5 + 0.5 * Math.sin(t * s.speed + s.phase));
+        const twinkle =
+          0.35 + 0.5 * (0.5 + 0.5 * Math.sin(t * s.speed + s.phase));
         drawSparkle(s.x, s.y, s.r, twinkle, s.c);
 
         // faint constellation lines between nearby stars
@@ -112,7 +113,14 @@ const ParticleField = ({ density = 90 }) => {
       // bright gold lines reaching out to the cursor (many of them)
       if (mouse.active) {
         // halo around cursor
-        const cg = ctx.createRadialGradient(mouse.x, mouse.y, 0, mouse.x, mouse.y, 90);
+        const cg = ctx.createRadialGradient(
+          mouse.x,
+          mouse.y,
+          0,
+          mouse.x,
+          mouse.y,
+          90,
+        );
         cg.addColorStop(0, "rgba(255,215,0,0.10)");
         cg.addColorStop(1, "rgba(255,215,0,0)");
         ctx.fillStyle = cg;
