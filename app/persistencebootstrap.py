@@ -18,6 +18,18 @@ DEFAULT_PERSISTENCE_MODE = "auto"
 MEMORY_MODE = "memory"
 SUPABASE_MODE = "supabase"
 
+# ---------------------------------------------------------------------------
+# Billing tier constants (units : price_usd)
+# ---------------------------------------------------------------------------
+BILLING_TIER_10K_UNITS = 10_000
+BILLING_TIER_10K_PRICE_USD = 20
+
+BILLING_TIER_50K_UNITS = 50_000
+BILLING_TIER_50K_PRICE_USD = 90
+
+BILLING_TIER_100K_UNITS = 100_000
+BILLING_TIER_100K_PRICE_USD = 150
+
 
 class PersistenceBootstrapError(RuntimeError):
     pass
@@ -42,7 +54,14 @@ class PersistenceStore(Protocol):
 
     def as_dict(self) -> dict[str, Any]: ...
     def healthcheck(self) -> bool: ...
-    def select(self, table: str, **kwargs: Any) -> list[dict[str, Any]]: ...
+    def select(
+        self,
+        table: str,
+        *,
+        filters: dict[str, Any] | None = None,
+        limit: int | None = None,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]: ...
     def insert(
         self,
         table: str,
@@ -53,9 +72,17 @@ class PersistenceStore(Protocol):
         self,
         table: str,
         payload: dict[str, Any],
+        *,
+        filters: dict[str, Any],
         **kwargs: Any,
     ) -> list[dict[str, Any]]: ...
-    def delete(self, table: str, **kwargs: Any) -> list[dict[str, Any]]: ...
+    def delete(
+        self,
+        table: str,
+        *,
+        filters: dict[str, Any],
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]: ...
 
 
 @dataclass(frozen=True)
@@ -175,7 +202,6 @@ class InMemoryPersistenceStore:
     ) -> list[dict[str, Any]]:
         if not filters:
             raise ValueError("filters are required")
-
         updated: list[dict[str, Any]] = []
         for row in self._tables.get(table, []):
             if all(row.get(key) == value for key, value in filters.items()):
@@ -192,7 +218,6 @@ class InMemoryPersistenceStore:
     ) -> list[dict[str, Any]]:
         if not filters:
             raise ValueError("filters are required")
-
         remaining: list[dict[str, Any]] = []
         deleted: list[dict[str, Any]] = []
         for row in self._tables.get(table, []):
@@ -255,8 +280,15 @@ class SupabasePersistenceStore:
     def healthcheck(self) -> bool:
         return self.client.healthcheck()
 
-    def select(self, table: str, **kwargs: Any) -> list[dict[str, Any]]:
-        return self.client.select(table, **kwargs)
+    def select(
+        self,
+        table: str,
+        *,
+        filters: dict[str, Any] | None = None,
+        limit: int | None = None,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        return self.client.select(table, filters=filters, limit=limit, **kwargs)
 
     def insert(
         self,
@@ -270,12 +302,20 @@ class SupabasePersistenceStore:
         self,
         table: str,
         payload: dict[str, Any],
+        *,
+        filters: dict[str, Any],
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
-        return self.client.update(table, payload, **kwargs)
+        return self.client.update(table, payload, filters=filters, **kwargs)
 
-    def delete(self, table: str, **kwargs: Any) -> list[dict[str, Any]]:
-        return self.client.delete(table, **kwargs)
+    def delete(
+        self,
+        table: str,
+        *,
+        filters: dict[str, Any],
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        return self.client.delete(table, filters=filters, **kwargs)
 
     def rpc(
         self,
