@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.core.auth import require_api_key
@@ -89,37 +89,37 @@ def _price_per_1k_units(price_usd: float, unit_count: int) -> float:
 
 _SAMPLE_PACKAGES: list[UnitPackageView] = [
     UnitPackageView(
-        package_id="pkg_20000",
-        name="20,000 Units",
-        unit_count=20_000,
+        package_id="pkg_10000",
+        name="10,000 Units",
+        unit_count=10_000,
         price_usd=20.0,
         price_display="$20.00",
         active=True,
         featured=False,
         description="Entry package for light usage and initial production traffic.",
-        effective_price_per_1k_units=_price_per_1k_units(20.0, 20_000),
+        effective_price_per_1k_units=_price_per_1k_units(20.0, 10_000),
     ),
     UnitPackageView(
-        package_id="pkg_100000",
-        name="100,000 Units",
-        unit_count=100_000,
+        package_id="pkg_50000",
+        name="50,000 Units",
+        unit_count=50_000,
         price_usd=90.0,
         price_display="$90.00",
         active=True,
         featured=True,
         description="Best balance for growing workloads and regular operational usage.",
-        effective_price_per_1k_units=_price_per_1k_units(90.0, 100_000),
+        effective_price_per_1k_units=_price_per_1k_units(90.0, 50_000),
     ),
     UnitPackageView(
-        package_id="pkg_200000",
-        name="200,000 Units",
-        unit_count=200_000,
+        package_id="pkg_100000",
+        name="100,000 Units",
+        unit_count=100_000,
         price_usd=150.0,
         price_display="$150.00",
         active=True,
         featured=False,
         description="High-volume prepaid package for heavier sustained usage.",
-        effective_price_per_1k_units=_price_per_1k_units(150.0, 200_000),
+        effective_price_per_1k_units=_price_per_1k_units(150.0, 100_000),
     ),
 ]
 
@@ -130,7 +130,7 @@ _SAMPLE_LEDGER: list[UnitLedgerItem] = [
         timestamp=_utc_now_iso(),
         entry_type="debit",
         units=-640,
-        balance_after=94_360,
+        balance_after=49_360,
         amount_usd=None,
         description="Usage debit for guarded execution and prompt protection activity.",
         reference_id="usage_evt_003",
@@ -140,12 +140,12 @@ _SAMPLE_LEDGER: list[UnitLedgerItem] = [
         entry_id="ledger_002",
         timestamp=_utc_now_iso(),
         entry_type="purchase",
-        units=100_000,
-        balance_after=95_000,
+        units=50_000,
+        balance_after=50_000,
         amount_usd=90.0,
         description="Package purchase credited to wallet.",
         reference_id="order_002",
-        metadata={"package_id": "pkg_100000", "package_name": "100,000 Units"},
+        metadata={"package_id": "pkg_50000", "package_name": "50,000 Units"},
     ),
     UnitLedgerItem(
         entry_id="ledger_001",
@@ -207,9 +207,9 @@ def get_unit_wallet() -> UnitWalletResponse:
         recent_ledger=_SAMPLE_LEDGER,
         notes=[
             "Prepaid wallet model: units are purchased in fixed packages and consumed by usage.",
-            "Available packages are 20,000 units for $20.00 USD, 100,000 units for $90.00 USD, and 200,000 units for $150.00 USD.",
+            "Available packages are 10,000 units for $20.00 USD, 50,000 units for $90.00 USD, and 100,000 units for $150.00 USD.",
             "No recurring subscription state is tracked in this route.",
-            "Current implementation returns in-memory sample data for UI scaffolding.",
+            "Current implementation returns in-memory sample data for UI scaffolding; Supabase persistence is the target backend.",
         ],
     )
 
@@ -218,16 +218,9 @@ def get_unit_wallet() -> UnitWalletResponse:
 def purchase_units(payload: UnitPurchaseRequest) -> UnitPurchaseResponse:
     package = _find_package(payload.package_id)
     if package is None:
-        package = UnitPackageView(
-            package_id=payload.package_id,
-            name="20,000 Units",
-            unit_count=20_000,
-            price_usd=20.0,
-            price_display="$20.00",
-            active=True,
-            featured=False,
-            description="Fallback package for unknown package ids in the UI scaffold.",
-            effective_price_per_1k_units=_price_per_1k_units(20.0, 20_000),
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown package_id: {payload.package_id}",
         )
 
     credited_units = package.unit_count * payload.quantity

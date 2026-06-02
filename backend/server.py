@@ -64,10 +64,6 @@ logging.basicConfig(
 logger = logging.getLogger("ironclaw")
 
 
-# ---------------------------------------------------------------------------
-# Fixed server-side packages (NEVER trust amounts from the frontend)
-# Retired IDs aliased so orphaned checkout sessions still resolve correctly.
-# ---------------------------------------------------------------------------
 PACKAGES = {
     "tier_10k": {"units": 10000, "amount": 20.00, "label": "10,000 units"},
     "tier_50k": {"units": 50000, "amount": 90.00, "label": "50,000 units"},

@@ -156,11 +156,24 @@ class TestPayments:
         )
         assert r.status_code == 400
 
-    def test_create_checkout_tier_20k(self, auth_headers):
+    def test_create_checkout_tier_10k(self, auth_headers):
+        # base tier: 10,000 units / $20
         r = requests.post(
             f"{API}/payments/create-checkout",
             headers=auth_headers,
-            json={"package_id": "tier_20k", "origin_url": "https://example.com"},
+            json={"package_id": "tier_10k", "origin_url": "https://example.com"},
+        )
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert "url" in d and d["url"].startswith("http")
+        assert "session_id" in d and len(d["session_id"]) > 5
+
+    def test_create_checkout_tier_50k(self, auth_headers):
+        # mid tier: 50,000 units / $90
+        r = requests.post(
+            f"{API}/payments/create-checkout",
+            headers=auth_headers,
+            json={"package_id": "tier_50k", "origin_url": "https://example.com"},
         )
         assert r.status_code == 200, r.text
         d = r.json()
@@ -168,7 +181,7 @@ class TestPayments:
         assert "session_id" in d and len(d["session_id"]) > 5
 
     def test_payment_status_lookup(self, auth_headers):
-        # Create a session first
+        # top tier: 100,000 units / $150
         r = requests.post(
             f"{API}/payments/create-checkout",
             headers=auth_headers,

@@ -16,7 +16,7 @@ import SecurityAnalysis from "@/components/dashboard/SecurityAnalysis";
 import IntegrationCard from "@/components/dashboard/IntegrationCard";
 
 const Dashboard = () => {
-  const { user, loading, logout, updateWalletUnits } = useAuth();
+  const { user, loading, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [data, setData] = useState(null);
@@ -80,7 +80,7 @@ const Dashboard = () => {
           toast.success(
             `Payment confirmed — ${status.units.toLocaleString()} units added!`,
           );
-          updateWalletUnits(status.units);
+          // Re-fetch dashboard to sync wallet balance from Supabase source of truth
           await fetchDashboard();
           return;
         }
@@ -94,7 +94,7 @@ const Dashboard = () => {
         setTimeout(() => pollPayment(sessionId, attempts + 1), 2000);
       }
     },
-    [fetchDashboard, updateWalletUnits],
+    [fetchDashboard],
   );
 
   useEffect(() => {
@@ -109,6 +109,12 @@ const Dashboard = () => {
   }, [location.search, pollPayment, navigate]);
 
   const handlePurchase = async (packageId) => {
+    // Guard: only accept known tier IDs — base tier is now tier_10k
+    const validTiers = ["tier_10k", "tier_50k", "tier_100k"];
+    if (!validTiers.includes(packageId)) {
+      toast.error("Invalid package selected.");
+      return;
+    }
     setPurchasingId(packageId);
     try {
       const { data: res } = await api.post("/payments/create-checkout", {
@@ -153,7 +159,6 @@ const Dashboard = () => {
           </button>
 
           <div className="flex items-center gap-3">
-            {/* Sub-page navigation */}
             <Link
               to="/inspector"
               data-testid="nav-inspector-link"
