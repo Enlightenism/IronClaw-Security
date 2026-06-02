@@ -13,12 +13,15 @@ os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
 os.environ["SUPABASE_KEY"] = ""
 os.environ["SUPABASE_ANON_KEY"] = ""
 
+
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 import pytest
 
 from app.core.settings import get_settings
+import app.core.unit_wallet as _unit_wallet_module
+from app.core.unit_wallet import UnitWalletRegistry
 from app.main import app as _app
 from app.services.audit_log_service import reset_audit_log
 from ironclaw_sdk.client import IronclawClient
@@ -32,6 +35,16 @@ def _refresh_app_settings() -> None:
     get_settings.cache_clear()
     settings = get_settings()
     _app.state.settings = settings
+
+
+@pytest.fixture(scope="function", autouse=True)
+def _reset_unit_wallet_registry() -> Generator[None, None, None]:
+    """Replace the module-level singleton with a fresh registry before each test
+    and restore it after, so wallet state never bleeds between tests."""
+    fresh = UnitWalletRegistry()
+    _unit_wallet_module._unit_wallet_registry = fresh
+    yield
+    _unit_wallet_module._unit_wallet_registry = UnitWalletRegistry()
 
 
 @pytest.fixture(autouse=True)

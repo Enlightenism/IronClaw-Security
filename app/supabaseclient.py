@@ -202,6 +202,14 @@ class _QueryBuilder:
         self._returning = returning
         return self
 
+    def upsert(self, payload: Any, *, on_conflict: str | None = None, returning: str = "representation") -> _QueryBuilder:
+        self._method = "POST"
+        self._payload = payload
+        self._returning = returning
+        if on_conflict:
+            self._upsert_conflict = on_conflict
+        return self
+
     def update(self, payload: dict[str, Any], *, returning: str = "representation") -> _QueryBuilder:
         self._method = "PATCH"
         self._payload = payload
@@ -258,6 +266,10 @@ class _QueryBuilder:
             hdrs["Prefer"] = f"return={self._returning}"
             if self._method in ("POST", "PATCH"):
                 hdrs["Content-Type"] = "application/json"
+
+        if hasattr(self, "_upsert_conflict") and self._upsert_conflict:
+            hdrs["Prefer"] = f"return={self._returning},resolution=merge-duplicates"
+            hdrs["on_conflict"] = self._upsert_conflict
 
         if self._count_mode:
             hdrs["Prefer"] = f"count={self._count_mode}"
@@ -338,9 +350,6 @@ class SupabaseClient:
         timeout: float = SUPABASE_TIMEOUT_SECONDS,
         session: requests.Session | None = None,
     ) -> None:
-        # Defer config resolution — do NOT call get_supabase_config() here
-        # when no config is passed. Resolve lazily on first request so the
-        # app starts cleanly when creds are absent.
         self._config: SupabaseConfig | None = config
         self.timeout = float(timeout)
         if self.timeout <= 0:
@@ -583,9 +592,21 @@ def create_supabase_client(
     return SupabaseClient(timeout=timeout, session=session)
 
 
+def get_supabase_client(
+    *,
+    timeout: float = SUPABASE_TIMEOUT_SECONDS,
+    session: requests.Session | None = None,
+) -> SupabaseClient:
+    return SupabaseClient(timeout=timeout, session=session)
+
+
 def createsupabaseclient(
     *,
     timeout: float = SUPABASE_TIMEOUT_SECONDS,
     session: requests.Session | None = None,
 ) -> SupabaseClient:
     return create_supabase_client(timeout=timeout, session=session)
+
+
+# Alias for backward compatibility
+supabaseclient = get_supabase_client

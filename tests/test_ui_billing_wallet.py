@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
-import pytest
 
 _WALLET_URL = "/billing-wallet"
+_PURCHASE_URL = "/billing-purchase"
 _OWNER_KEY = "test-owner-wallet-001"
 
 
@@ -207,37 +207,35 @@ def test_billing_wallet_idempotent_for_same_owner(test_client: TestClient) -> No
     assert w1["owner_key"] == w2["owner_key"]
 
 
-@pytest.mark.skip(reason="POST /billing/purchase route not yet registered in app/ui/router.py")
 def test_billing_purchase_returns_200(test_client: TestClient) -> None:
     response = test_client.post(
-        "/billing/purchase",
+        _PURCHASE_URL,
         json={
             "owner_key": _OWNER_KEY,
-            "package_id": "team-security",
-            "quantity": 1,
+            "units": 10000,
+            "source": "manual_purchase",
         },
     )
-    assert response.status_code == 200
+    assert response.status_code == 201
 
 
-@pytest.mark.skip(reason="POST /billing/purchase route not yet registered in app/ui/router.py")
 def test_billing_purchase_ledger_shape(test_client: TestClient) -> None:
     response = test_client.post(
-        "/billing/purchase",
+        _PURCHASE_URL,
         json={
             "owner_key": _OWNER_KEY,
-            "package_id": "single-user",
-            "quantity": 1,
+            "units": 10000,
+            "source": "manual_purchase",
         },
     )
-    assert response.status_code == 200
+    assert response.status_code == 201
     body = response.json()
 
     assert body["status"] == "ok"
     assert "ledger_entry" in body
     entry = body["ledger_entry"]
     assert isinstance(entry["entry_id"], str)
-    assert entry["entry_type"] == "purchase"
+    assert entry["entry_type"] == "credit"
     assert isinstance(entry["units"], int)
     assert entry["units"] > 0
     assert isinstance(entry["balance_after"], int)
