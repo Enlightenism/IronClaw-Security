@@ -127,7 +127,7 @@ _SAMPLE_PACKAGES: list[UnitPackageView] = [
 _SAMPLE_LEDGER: list[UnitLedgerItem] = [
     UnitLedgerItem(
         entry_id="ledger_003",
-        timestamp=_utc_now_iso(),
+        timestamp="2026-06-01T12:00:00Z",
         entry_type="debit",
         units=-640,
         balance_after=49_360,
@@ -138,18 +138,22 @@ _SAMPLE_LEDGER: list[UnitLedgerItem] = [
     ),
     UnitLedgerItem(
         entry_id="ledger_002",
-        timestamp=_utc_now_iso(),
+        timestamp="2026-06-01T11:00:00Z",
         entry_type="purchase",
         units=50_000,
         balance_after=50_000,
         amount_usd=90.0,
         description="Package purchase credited to wallet.",
         reference_id="order_002",
-        metadata={"package_id": "pkg_50000", "package_name": "50,000 Units"},
+        metadata={
+            "package_id": "pkg_50000",
+            "package_name": "50,000 Units",
+            "price_per_unit_usd": round(90.0 / 50_000, 6),
+        },
     ),
     UnitLedgerItem(
         entry_id="ledger_001",
-        timestamp=_utc_now_iso(),
+        timestamp="2026-06-01T10:00:00Z",
         entry_type="debit",
         units=-5_000,
         balance_after=0,
@@ -243,6 +247,7 @@ def purchase_units(payload: UnitPurchaseRequest) -> UnitPurchaseResponse:
             "package_id": package.package_id,
             "package_name": package.name,
             "quantity": payload.quantity,
+            "price_per_unit_usd": round(package.price_usd / package.unit_count, 6),
         },
     )
 
