@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+import logging
 import os
 from threading import Lock
 from typing import Any
 import uuid
+
+logger = logging.getLogger(__name__)
 
 
 class InsufficientUnitsError(ValueError):
@@ -13,35 +16,107 @@ class InsufficientUnitsError(ValueError):
 
 
 # ---------------------------------------------------------------------------
-# Canonical package catalog — single source of truth for all billing routes
+# Canonical package catalog — derived from billing.PLAN_DEFINITIONS
+# Single source of truth: billing.py owns plan codes + limits + prices.
+# unit_wallet.py maps them to purchasable package records.
 # ---------------------------------------------------------------------------
 
-UNIT_PACKAGE_CATALOG: dict[str, dict[str, Any]] = {
-    "pkg_10000": {
-        "package_id": "pkg_10000",
-        "name": "Starter",
-        "unit_amount": 10_000,
-        "price_usd": 20.00,
-        "display_label": "10,000 units — $20.00",
-        "description": ("Prepaid protection units for individual builders who want guarded " "prompt handling, tool-call review, source inspection, and safe response release."),
-    },
-    "pkg_50000": {
-        "package_id": "pkg_50000",
-        "name": "Team",
-        "unit_amount": 50_000,
-        "price_usd": 90.00,
-        "display_label": "50,000 units — $90.00",
-        "description": ("Prepaid protection units for teams running higher volumes of AI-assisted " "development, research, and guarded agent workflows."),
-    },
-    "pkg_100000": {
-        "package_id": "pkg_100000",
-        "name": "Enterprise",
-        "unit_amount": 100_000,
-        "price_usd": 150.00,
-        "display_label": "100,000 units — $150.00",
-        "description": ("Prepaid protection units for organizations protecting large-scale agent " "operations, sensitive workflows, and high-frequency prompt activity."),
-    },
+
+def _build_package_catalog() -> dict[str, dict[str, Any]]:
+    """
+    Derive the unit package catalog from billing.PLAN_DEFINITIONS.
+    Keeps unit_wallet.py in sync with billing.py automatically.
+    Falls back to hardcoded values only if billing import fails (should never happen).
+    """
+    try:
+        from app.core.billing import PLAN_DEFINITIONS
+
+        _PKG_META: dict[str, dict[str, str]] = {
+            "starter-10k": {
+                "package_id": "pkg_10000",
+                "name": "Starter",
+                "display_label": "10,000 units — $20.00",
+                "description": ("Prepaid protection units for individual builders who want guarded " "prompt handling, tool-call review, source inspection, and safe response release."),
+            },
+            "growth-50k": {
+                "package_id": "pkg_50000",
+                "name": "Team",
+                "display_label": "50,000 units — $90.00",
+                "description": ("Prepaid protection units for teams running higher volumes of AI-assisted " "development, research, and guarded agent workflows."),
+            },
+            "scale-100k": {
+                "package_id": "pkg_100000",
+                "name": "Enterprise",
+                "display_label": "100,000 units — $150.00",
+                "description": ("Prepaid protection units for organizations protecting large-scale agent " "operations, sensitive workflows, and high-frequency prompt activity."),
+            },
+        }
+
+        catalog: dict[str, dict[str, Any]] = {}
+        for plan_code, plan_def in PLAN_DEFINITIONS.items():
+            meta = _PKG_META.get(plan_code)
+            if meta is None:
+                logger.warning("unit_wallet: no package metadata for plan_code=%r — skipping", plan_code)
+                continue
+            pkg_id = meta["package_id"]
+            catalog[pkg_id] = {
+                "package_id": pkg_id,
+                "name": meta["name"],
+                "unit_amount": plan_def["unit_limit"],
+                "price_usd": float(plan_def["price_usd"]),
+                "display_label": meta["display_label"],
+                "description": meta["description"],
+            }
+        return catalog
+
+    except Exception:
+        logger.exception("unit_wallet: failed to derive catalog from billing.PLAN_DEFINITIONS; " "using hardcoded fallback")
+        # Hardcoded fallback — must match billing.PLAN_DEFINITIONS exactly
+        return {
+            "pkg_10000": {
+                "package_id": "pkg_10000",
+                "name": "Starter",
+                "unit_amount": 10_000,
+                "price_usd": 20.00,
+                "display_label": "10,000 units — $20.00",
+                "description": ("Prepaid protection units for individual builders who want guarded " "prompt handling, tool-call review, source inspection, and safe response release."),
+            },
+            "pkg_50000": {
+                "package_id": "pkg_50000",
+                "name": "Team",
+                "unit_amount": 50_000,
+                "price_usd": 90.00,
+                "display_label": "50,000 units — $90.00",
+                "description": ("Prepaid protection units for teams running higher volumes of AI-assisted " "development, research, and guarded agent workflows."),
+            },
+            "pkg_100000": {
+                "package_id": "pkg_100000",
+                "name": "Enterprise",
+                "unit_amount": 100_000,
+                "price_usd": 150.00,
+                "display_label": "100,000 units — $150.00",
+                "description": ("Prepaid protection units for organizations protecting large-scale agent " "operations, sensitive workflows, and high-frequency prompt activity."),
+            },
+        }
+
+
+UNIT_PACKAGE_CATALOG: dict[str, dict[str, Any]] = _build_package_catalog()
+
+# ---------------------------------------------------------------------------
+# Module-level integrity assertion — catches catalog drift at startup
+# ---------------------------------------------------------------------------
+
+_EXPECTED_PACKAGES = {
+    "pkg_10000": (10_000, 20.00),
+    "pkg_50000": (50_000, 90.00),
+    "pkg_100000": (100_000, 150.00),
 }
+
+for _pkg_id, (_expected_units, _expected_price) in _EXPECTED_PACKAGES.items():
+    _entry = UNIT_PACKAGE_CATALOG.get(_pkg_id)
+    assert _entry is not None, f"unit_wallet: UNIT_PACKAGE_CATALOG is missing required package {_pkg_id!r}"
+    assert _entry["unit_amount"] == _expected_units, f"unit_wallet: {_pkg_id} unit_amount mismatch: " f"got {_entry['unit_amount']}, expected {_expected_units}"
+    assert _entry["price_usd"] == _expected_price, f"unit_wallet: {_pkg_id} price_usd mismatch: " f"got {_entry['price_usd']}, expected {_expected_price}"
 
 
 # ---------------------------------------------------------------------------
@@ -321,12 +396,20 @@ def _make_repo() -> SupabaseUnitWalletRepository | MemoryUnitWalletRepository:
     if os.environ.get("IRONCLAW_PERSISTENCE_MODE", "").lower() == "memory":
         return MemoryUnitWalletRepository()
 
-    from app.supabaseclient import is_supabase_configured
+    try:
+        from app.supabaseclient import is_supabase_configured
 
-    if not is_supabase_configured():
+        if not is_supabase_configured():
+            logger.info("unit_wallet: Supabase not configured — using MemoryUnitWalletRepository")
+            return MemoryUnitWalletRepository()
+
+        repo = SupabaseUnitWalletRepository()
+        logger.info("unit_wallet: SupabaseUnitWalletRepository initialized")
+        return repo
+
+    except Exception:
+        logger.exception("unit_wallet: Supabase init failed — falling back to MemoryUnitWalletRepository")
         return MemoryUnitWalletRepository()
-
-    return SupabaseUnitWalletRepository()
 
 
 # ---------------------------------------------------------------------------
