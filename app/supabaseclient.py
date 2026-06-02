@@ -9,6 +9,21 @@ import requests
 
 SUPABASE_TIMEOUT_SECONDS = 15.0
 
+# ---------------------------------------------------------------------------
+# Billing tier constants — single source of truth for unit pricing
+# 10,000 units  → $20 USD
+# 50,000 units  → $90 USD
+# 100,000 units → $150 USD
+# ---------------------------------------------------------------------------
+BILLING_TIER_10K_UNITS: int = 10_000
+BILLING_TIER_10K_PRICE_USD: int = 20
+
+BILLING_TIER_50K_UNITS: int = 50_000
+BILLING_TIER_50K_PRICE_USD: int = 90
+
+BILLING_TIER_100K_UNITS: int = 100_000
+BILLING_TIER_100K_PRICE_USD: int = 150
+
 
 class SupabaseClientError(RuntimeError):
     pass
@@ -202,7 +217,13 @@ class _QueryBuilder:
         self._returning = returning
         return self
 
-    def upsert(self, payload: Any, *, on_conflict: str | None = None, returning: str = "representation") -> _QueryBuilder:
+    def upsert(
+        self,
+        payload: Any,
+        *,
+        on_conflict: str | None = None,
+        returning: str = "representation",
+    ) -> _QueryBuilder:
         self._method = "POST"
         self._payload = payload
         self._returning = returning
@@ -210,7 +231,12 @@ class _QueryBuilder:
             self._upsert_conflict = on_conflict
         return self
 
-    def update(self, payload: dict[str, Any], *, returning: str = "representation") -> _QueryBuilder:
+    def update(
+        self,
+        payload: dict[str, Any],
+        *,
+        returning: str = "representation",
+    ) -> _QueryBuilder:
         self._method = "PATCH"
         self._payload = payload
         self._returning = returning
@@ -450,7 +476,7 @@ class SupabaseClient:
         order: str | None = None,
         ascending: bool = True,
         schema: str = "public",
-    ) -> list[dict[str, Any]] | dict[str, Any]:
+    ) -> list[dict[str, Any]]:
         if not table or not table.strip():
             raise ValueError("table is required")
 
@@ -475,8 +501,10 @@ class SupabaseClient:
             headers={"Accept-Profile": schema},
         )
 
-        if isinstance(result, (list, dict)):
-            return result
+        if isinstance(result, list):
+            return result  # type: ignore[return-value]
+        if isinstance(result, dict):
+            return [result]  # type: ignore[return-value]
 
         raise SupabaseAPIError("unexpected supabase select response shape")
 
