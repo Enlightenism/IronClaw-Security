@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+import os
 from threading import Lock
 from typing import Any
+import uuid
 
 
 class InsufficientUnitsError(ValueError):
@@ -87,7 +89,7 @@ class UnitWallet:
         self.balance_units += safe_units
         self.total_purchased_units += safe_units
         transaction = UnitWalletTransaction(
-            transaction_id=f"txn_{len(self.transactions) + 1}",
+            transaction_id=f"txn_{uuid.uuid4().hex}",
             owner_id=self.owner_id,
             transaction_type="purchase",
             units=safe_units,
@@ -112,7 +114,7 @@ class UnitWallet:
         self.balance_units -= safe_units
         self.total_consumed_units += safe_units
         transaction = UnitWalletTransaction(
-            transaction_id=f"txn_{len(self.transactions) + 1}",
+            transaction_id=f"txn_{uuid.uuid4().hex}",
             owner_id=self.owner_id,
             transaction_type="consume",
             units=safe_units,
@@ -135,7 +137,7 @@ class UnitWallet:
         self.balance_units += safe_units
         self.total_refunded_units += safe_units
         transaction = UnitWalletTransaction(
-            transaction_id=f"txn_{len(self.transactions) + 1}",
+            transaction_id=f"txn_{uuid.uuid4().hex}",
             owner_id=self.owner_id,
             transaction_type="refund",
             units=safe_units,
@@ -155,6 +157,7 @@ class RegistryUnitWallet:
     balance_units: int = 0
     total_purchased_units: int = 0
     total_consumed_units: int = 0
+    total_refunded_units: int = 0
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -172,7 +175,7 @@ class RegistryUnitLedgerEntry:
 
 
 # ---------------------------------------------------------------------------
-# Supabase persistence layer — lazy-imported, never touched in memory mode
+# Supabase persistence layer — only used when Supabase is configured
 # ---------------------------------------------------------------------------
 
 
@@ -180,11 +183,11 @@ class SupabaseUnitWalletRepository:
     """Durable wallet + ledger persistence via Supabase.
 
     Table contracts expected in Supabase:
-      unit_wallets      (wallet_id, owner_key, balance_units,
-                         total_purchased_units, total_consumed_units,
-                         updated_at, metadata)
-      unit_ledger       (entry_id, wallet_id, owner_key, entry_type,
-                         units, balance_after, created_at, metadata)
+      unit_wallets  (wallet_id, owner_key, balance_units,
+                     total_purchased_units, total_consumed_units,
+                     total_refunded_units, updated_at, metadata)
+      unit_ledger   (entry_id, wallet_id, owner_key, entry_type,
+                     units, balance_after, created_at, metadata)
     """
 
     _WALLETS_TABLE = "unit_wallets"
@@ -203,6 +206,7 @@ class SupabaseUnitWalletRepository:
                 "balance_units": wallet.balance_units,
                 "total_purchased_units": wallet.total_purchased_units,
                 "total_consumed_units": wallet.total_consumed_units,
+                "total_refunded_units": wallet.total_refunded_units,
                 "updated_at": wallet.updated_at.isoformat(),
                 "metadata": wallet.metadata,
             },
@@ -220,6 +224,7 @@ class SupabaseUnitWalletRepository:
             balance_units=row["balance_units"],
             total_purchased_units=row["total_purchased_units"],
             total_consumed_units=row["total_consumed_units"],
+            total_refunded_units=row.get("total_refunded_units", 0),
             updated_at=datetime.fromisoformat(row["updated_at"]),
             metadata=row.get("metadata") or {},
         )
@@ -248,7 +253,7 @@ class SupabaseUnitWalletRepository:
         if owner_key is not None:
             query = query.eq("owner_key", owner_key)
         result = query.execute()
-        entries = []
+        entries: list[RegistryUnitLedgerEntry] = []
         for row in result.data or []:
             entries.append(
                 RegistryUnitLedgerEntry(
@@ -267,6 +272,7 @@ class SupabaseUnitWalletRepository:
 
 # ---------------------------------------------------------------------------
 # Pure in-memory repository — used when IRONCLAW_PERSISTENCE_MODE=memory
+# or when Supabase is not configured
 # ---------------------------------------------------------------------------
 
 
@@ -312,10 +318,14 @@ class MemoryUnitWalletRepository:
 
 
 def _make_repo() -> SupabaseUnitWalletRepository | MemoryUnitWalletRepository:
-    import os
-
     if os.environ.get("IRONCLAW_PERSISTENCE_MODE", "").lower() == "memory":
         return MemoryUnitWalletRepository()
+
+    from app.supabaseclient import is_supabase_configured
+
+    if not is_supabase_configured():
+        return MemoryUnitWalletRepository()
+
     return SupabaseUnitWalletRepository()
 
 
@@ -360,18 +370,19 @@ class UnitWalletRegistry:
             return existing
 
         with self._lock:
+            # Re-check after acquiring lock to prevent double-creation
             wallet_id = self._wallets_by_owner.get(normalized_owner)
             if wallet_id is not None:
                 return self._wallets[wallet_id]
 
-            wallet_id = f"wallet_{len(self._wallets) + 1}"
+            new_wallet_id = f"wallet_{uuid.uuid4().hex}"
             wallet = RegistryUnitWallet(
-                wallet_id=wallet_id,
+                wallet_id=new_wallet_id,
                 owner_key=normalized_owner,
                 metadata=metadata or {},
             )
-            self._wallets[wallet_id] = wallet
-            self._wallets_by_owner[normalized_owner] = wallet_id
+            self._wallets[new_wallet_id] = wallet
+            self._wallets_by_owner[normalized_owner] = new_wallet_id
 
         self._repo.upsert_wallet(wallet)
         return wallet
@@ -391,7 +402,7 @@ class UnitWalletRegistry:
             wallet.updated_at = datetime.now(UTC)
 
             entry = RegistryUnitLedgerEntry(
-                entry_id=f"ledger_{len(self._repo._ledger) + 1}" if hasattr(self._repo, "_ledger") else f"ledger_{id(wallet)}",
+                entry_id=f"ledger_{uuid.uuid4().hex}",
                 wallet_id=wallet.wallet_id,
                 owner_key=wallet.owner_key,
                 entry_type="credit",
@@ -422,10 +433,39 @@ class UnitWalletRegistry:
             wallet.updated_at = datetime.now(UTC)
 
             entry = RegistryUnitLedgerEntry(
-                entry_id=f"ledger_{id(wallet)}_{safe_units}",
+                entry_id=f"ledger_{uuid.uuid4().hex}",
                 wallet_id=wallet.wallet_id,
                 owner_key=wallet.owner_key,
                 entry_type="debit",
+                units=safe_units,
+                balance_after=wallet.balance_units,
+                metadata=metadata or {},
+            )
+
+        self._repo.upsert_wallet(wallet)
+        self._repo.append_ledger_entry(entry)
+        return wallet
+
+    def refund_units(
+        self,
+        owner_key: str,
+        units: int,
+        metadata: dict[str, Any] | None = None,
+    ) -> RegistryUnitWallet:
+        """Credit units back to a wallet as a refund, tracked separately from purchases."""
+        safe_units = max(0, int(units))
+        wallet = self.get_or_create_wallet(owner_key=owner_key)
+
+        with self._lock:
+            wallet.balance_units += safe_units
+            wallet.total_refunded_units += safe_units
+            wallet.updated_at = datetime.now(UTC)
+
+            entry = RegistryUnitLedgerEntry(
+                entry_id=f"ledger_{uuid.uuid4().hex}",
+                wallet_id=wallet.wallet_id,
+                owner_key=wallet.owner_key,
+                entry_type="refund",
                 units=safe_units,
                 balance_after=wallet.balance_units,
                 metadata=metadata or {},
