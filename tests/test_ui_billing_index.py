@@ -71,7 +71,7 @@ def test_billing_index_summary_pricing_model(test_client: TestClient) -> None:
 
 def test_billing_index_summary_featured_package_id(test_client: TestClient) -> None:
     response = test_client.get("/billing-index")
-    assert response.json()["summary"]["featured_package_id"] == "team-security"
+    assert response.json()["summary"]["featured_package_id"] == "pkg_50000"
 
 
 def test_billing_index_has_packages(test_client: TestClient) -> None:
@@ -136,7 +136,7 @@ def test_billing_index_exactly_one_featured_package(test_client: TestClient) -> 
 def test_billing_index_featured_package_is_team_security(test_client: TestClient) -> None:
     response = test_client.get("/billing-index")
     featured = [pkg for pkg in response.json()["packages"] if pkg["featured"]]
-    assert featured[0]["package_id"] == "team-security"
+    assert featured[0]["package_id"] == "pkg_50000"
 
 
 def test_billing_index_has_links(test_client: TestClient) -> None:

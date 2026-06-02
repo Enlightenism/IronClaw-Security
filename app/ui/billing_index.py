@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from app.api.routes.billing import PACKAGE_CATALOG
+from app.core.unit_wallet import UNIT_PACKAGE_CATALOG
 
 router = APIRouter(prefix="/billing-index", tags=["billing-index"])
 
@@ -21,6 +21,7 @@ class BillingIndexPackageView(BaseModel):
     description: str
     price_usd: float
     included_units: int
+    display_label: str
     featured: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -52,25 +53,26 @@ class BillingIndexResponse(BaseModel):
 
 
 def _build_packages() -> list[BillingIndexPackageView]:
-    ordered_package_ids = ["single-user", "team-security", "enterprise-security"]
-    featured_package_id = "team-security"
+    ordered_package_ids = ["pkg_10000", "pkg_50000", "pkg_100000"]
+    featured_package_id = "pkg_50000"
     packages: list[BillingIndexPackageView] = []
 
     for package_id in ordered_package_ids:
-        package = PACKAGE_CATALOG.get(package_id)
+        package = UNIT_PACKAGE_CATALOG.get(package_id)
         if package is None:
             continue
 
         price_usd = float(package["price_usd"])
-        included_units = int(package["included_units"])
+        included_units = int(package["unit_amount"])
 
         packages.append(
             BillingIndexPackageView(
                 package_id=package_id,
                 name=str(package["name"]),
-                description=str(package["description"]),
+                description=str(package.get("description", "")),
                 price_usd=price_usd,
                 included_units=included_units,
+                display_label=str(package.get("display_label", "")),
                 featured=package_id == featured_package_id,
                 metadata={
                     "price_display": f"${price_usd:.2f}",
@@ -165,7 +167,7 @@ def get_billing_index() -> BillingIndexResponse:
         summary=BillingIndexSummaryView(
             title="Billing Overview",
             subtitle="Prepaid protection-unit pricing and related billing surfaces.",
-            featured_package_id="team-security",
+            featured_package_id="pkg_50000",
             package_count=len(packages),
             links_count=len(links),
             currency="USD",
@@ -175,8 +177,8 @@ def get_billing_index() -> BillingIndexResponse:
         links=links,
         notes=[
             "Billing is sold as prepaid protection-unit bundles.",
-            "Current package pricing is $20 for 20,000 units, $90 for 100,000 units, and $150 for 200,000 units.",
-            "Team Security is the featured package for balanced usage growth.",
+            "Current package pricing: $20 for 10,000 units, $90 for 50,000 units, and $150 for 100,000 units.",
+            "Team (pkg_50000) is the featured package for balanced usage growth.",
             "All active UI billing surfaces are enumerated in the links list for full discoverability.",
             "invoice_id in /ui/billing/invoices/{invoice_id} must be a valid invoice ID from the invoice list.",
         ],
