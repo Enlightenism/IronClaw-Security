@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { useNavigate, Link } from "react-router-dom";
 import {
@@ -118,9 +118,16 @@ const LiveCounter = ({
 }) => {
   const stored = parseInt(localStorage.getItem(storageKey) || "", 10);
   const initial = Number.isFinite(stored) && stored >= base ? stored : base;
-  const animated = useCountUp(initial, 2000);
+
   const [value, setValue] = useState(initial);
   const [live, setLive] = useState(false);
+  const prevRef = useRef(initial);
+
+  // Mount animation: animate from stored value to itself (no reset from 0)
+  const mountAnimated = useCountUp(initial, 2000, [], initial);
+
+  // Live tick animation: animate from prev to current value
+  const liveAnimated = useCountUp(value, 600, [value], prevRef.current);
 
   useEffect(() => {
     const t = setTimeout(() => setLive(true), 2100);
@@ -135,6 +142,7 @@ const LiveCounter = ({
       timer = setTimeout(() => {
         setValue((v) => {
           const next = v + (typeof step === "function" ? step() : step);
+          prevRef.current = v;
           try {
             localStorage.setItem(storageKey, String(next));
           } catch {
@@ -149,7 +157,8 @@ const LiveCounter = ({
     return () => clearTimeout(timer);
   }, [live, minMs, maxMs, step, storageKey]);
 
-  const shown = live ? value : animated;
+  const shown = live ? liveAnimated : mountAnimated;
+
   return (
     <span className="font-tech" style={{ color }} data-testid={testid}>
       {shown.toLocaleString()}

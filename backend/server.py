@@ -10,31 +10,34 @@ import uuid
 
 import bcrypt
 from dotenv import load_dotenv
-from emergentintegrations.payments.stripe.checkout import (
-    CheckoutSessionRequest,
-    CheckoutSessionResponse,
-    CheckoutStatusResponse,
-    StripeCheckout,
-)
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 import jwt
-from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
 from starlette.middleware.cors import CORSMiddleware
 
+from supabase_client import _request
+
+try:
+    from stripe_checkout import (
+        CheckoutSessionRequest,
+        CheckoutSessionResponse,
+        CheckoutStatusResponse,
+        StripeCheckout,
+    )
+except ImportError:
+    from app.stripe_checkout import (  # type: ignore[no-redef]
+        CheckoutSessionRequest,
+        CheckoutSessionResponse,
+        CheckoutStatusResponse,
+        StripeCheckout,
+    )
+
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
-
-
-# ---------------------------------------------------------------------------
-# MongoDB connection
-# ---------------------------------------------------------------------------
-mongo_url = os.environ["MONGO_URL"]
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ["DB_NAME"]]
 
 
 # ---------------------------------------------------------------------------
@@ -63,12 +66,15 @@ logger = logging.getLogger("ironclaw")
 
 # ---------------------------------------------------------------------------
 # Fixed server-side packages (NEVER trust amounts from the frontend)
+# Retired IDs aliased so orphaned checkout sessions still resolve correctly.
 # ---------------------------------------------------------------------------
 PACKAGES = {
-    "tier_20k": {"units": 20000, "amount": 20.00, "label": "20,000 units"},
-    "tier_100k": {"units": 100000, "amount": 90.00, "label": "100,000 units"},
-    "tier_200k": {"units": 200000, "amount": 150.00, "label": "200,000 units"},
+    "tier_10k": {"units": 10000, "amount": 20.00, "label": "10,000 units"},
+    "tier_50k": {"units": 50000, "amount": 90.00, "label": "50,000 units"},
+    "tier_100k": {"units": 100000, "amount": 150.00, "label": "100,000 units"},
 }
+
+ACTIVE_PACKAGE_IDS = {"tier_10k", "tier_50k", "tier_100k"}
 
 
 THREAT_TYPES = [
@@ -87,7 +93,7 @@ PLATFORMS = ["claude-code", "openclaw"]
 
 
 # ---------------------------------------------------------------------------
-# CORS origins — env-driven; CRA dev default is :3000, also allow :5173 (Vite)
+# CORS origins — env-driven
 # ---------------------------------------------------------------------------
 _raw_origins = os.environ.get(
     "CORS_ORIGINS",
@@ -161,6 +167,88 @@ def create_access_token(user: dict) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
+# ---------------------------------------------------------------------------
+# Supabase query helpers
+# ---------------------------------------------------------------------------
+def _sb_get_user_by_email(email: str) -> dict | None:
+    rows = _request(
+        "GET",
+        "users",
+        params={"email": f"eq.{email}", "limit": "1"},
+        prefer="return=representation",
+    )
+    return rows[0] if rows else None
+
+
+def _sb_get_user_by_id(user_id: str) -> dict | None:
+    rows = _request(
+        "GET",
+        "users",
+        params={"id": f"eq.{user_id}", "limit": "1"},
+        prefer="return=representation",
+    )
+    return rows[0] if rows else None
+
+
+def _sb_insert_user(user: dict) -> None:
+    _request("POST", "users", json_body=user, prefer="return=minimal")
+
+
+def _sb_update_user(user_id: str, patch: dict) -> None:
+    _request(
+        "PATCH",
+        "users",
+        json_body=patch,
+        params={"id": f"eq.{user_id}"},
+        prefer="return=minimal",
+    )
+
+
+def _sb_insert_events(events: list[dict]) -> None:
+    _request("POST", "security_events", json_body=events, prefer="return=minimal")
+
+
+def _sb_insert_event(event: dict) -> None:
+    _request("POST", "security_events", json_body=event, prefer="return=minimal")
+
+
+def _sb_get_events_by_user(user_id: str, limit: int = 2000) -> list[dict]:
+    rows = _request(
+        "GET",
+        "security_events",
+        params={"user_id": f"eq.{user_id}", "limit": str(limit)},
+        prefer="return=representation",
+    )
+    return rows or []
+
+
+def _sb_get_txn_by_session(session_id: str) -> dict | None:
+    rows = _request(
+        "GET",
+        "payment_transactions",
+        params={"session_id": f"eq.{session_id}", "limit": "1"},
+        prefer="return=representation",
+    )
+    return rows[0] if rows else None
+
+
+def _sb_insert_txn(txn: dict) -> None:
+    _request("POST", "payment_transactions", json_body=txn, prefer="return=minimal")
+
+
+def _sb_update_txn(session_id: str, patch: dict) -> None:
+    _request(
+        "PATCH",
+        "payment_transactions",
+        json_body=patch,
+        params={"session_id": f"eq.{session_id}"},
+        prefer="return=minimal",
+    )
+
+
+# ---------------------------------------------------------------------------
+# get_current_user dependency
+# ---------------------------------------------------------------------------
 async def get_current_user(
     creds: HTTPAuthorizationCredentials = Depends(security_scheme),
 ) -> dict:
@@ -171,7 +259,7 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="Session expired. Please sign in again.") from err
     except jwt.PyJWTError as err:
         raise HTTPException(status_code=401, detail="Invalid authentication token.") from err
-    user = await db.users.find_one({"id": payload.get("sub")}, {"_id": 0})
+    user = _sb_get_user_by_id(payload.get("sub", ""))
     if not user:
         raise HTTPException(status_code=401, detail="User not found.")
     return user
@@ -192,7 +280,7 @@ def public_user(user: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Seed simulated security events
 # ---------------------------------------------------------------------------
-async def seed_security_events(user_id: str, count: int = 48) -> None:
+def seed_security_events(user_id: str, count: int = 48) -> None:
     events = []
     now = datetime.now(UTC)
     for _ in range(count):
@@ -220,10 +308,10 @@ async def seed_security_events(user_id: str, count: int = 48) -> None:
             }
         )
     if events:
-        await db.security_events.insert_many(events)
+        _sb_insert_events(events)
 
 
-async def create_live_event(user_id: str) -> dict:
+def create_live_event(user_id: str) -> dict:
     score = random.choices(
         [
             random.randint(2, 29),
@@ -243,38 +331,37 @@ async def create_live_event(user_id: str) -> dict:
         "platform": random.choice(PLATFORMS),
         "timestamp": now_iso(),
     }
-    await db.security_events.insert_one(event)
-    event.pop("_id", None)
-    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    _sb_insert_event(event)
+    user = _sb_get_user_by_id(user_id)
     if user:
         new_balance = max(0, user.get("wallet_units", 0) - event["units_used"])
-        await db.users.update_one({"id": user_id}, {"$set": {"wallet_units": new_balance}})
+        _sb_update_user(user_id, {"wallet_units": new_balance})
     return event
 
 
 # ---------------------------------------------------------------------------
 # Payment crediting (idempotent)
 # ---------------------------------------------------------------------------
-async def credit_units_once(session_id: str) -> None:
-    txn = await db.payment_transactions.find_one_and_update(
-        {"session_id": session_id, "credited": {"$ne": True}},
-        {"$set": {"credited": True, "credited_at": now_iso()}},
-    )
-    if not txn:
+def credit_units_once(session_id: str) -> None:
+    txn = _sb_get_txn_by_session(session_id)
+    if not txn or txn.get("credited") is True:
         return
-    await db.users.update_one(
-        {"id": txn["user_id"]},
+    _sb_update_txn(session_id, {"credited": True, "credited_at": now_iso()})
+    user = _sb_get_user_by_id(txn["user_id"])
+    if not user:
+        return
+    new_units = user.get("wallet_units", 0) + txn["units"]
+    _sb_update_user(
+        txn["user_id"],
         {
-            "$inc": {"wallet_units": txn["units"]},
-            "$set": {
-                "has_paid": True,
-                "last_payment": {
-                    "amount": txn["amount"],
-                    "units": txn["units"],
-                    "package_id": txn["package_id"],
-                    "label": PACKAGES.get(txn["package_id"], {}).get("label", ""),
-                    "date": now_iso(),
-                },
+            "wallet_units": new_units,
+            "has_paid": True,
+            "last_payment": {
+                "amount": txn["amount"],
+                "units": txn["units"],
+                "package_id": txn["package_id"],
+                "label": PACKAGES.get(txn["package_id"], {}).get("label", ""),
+                "date": now_iso(),
             },
         },
     )
@@ -303,7 +390,7 @@ async def root():
 @api_router.post("/auth/signup")
 async def signup(body: SignupRequest):
     email = body.email.lower().strip()
-    existing = await db.users.find_one({"email": email})
+    existing = _sb_get_user_by_email(email)
     if existing:
         raise HTTPException(status_code=409, detail="An account with this email already exists.")
     user = {
@@ -316,8 +403,8 @@ async def signup(body: SignupRequest):
         "last_payment": None,
         "created_at": now_iso(),
     }
-    await db.users.insert_one(user)
-    await seed_security_events(user["id"])
+    _sb_insert_user(user)
+    seed_security_events(user["id"])
     token = create_access_token(user)
     return {"token": token, "user": public_user(user)}
 
@@ -325,7 +412,7 @@ async def signup(body: SignupRequest):
 @api_router.post("/auth/signin")
 async def signin(body: SigninRequest):
     email = body.email.lower().strip()
-    user = await db.users.find_one({"email": email}, {"_id": 0})
+    user = _sb_get_user_by_email(email)
     if not user or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password.")
     token = create_access_token(user)
@@ -349,7 +436,7 @@ async def integrations_token(user: dict = Depends(get_current_user)):
 
 @api_router.get("/dashboard")
 async def dashboard(user: dict = Depends(get_current_user)):
-    events = await db.security_events.find({"user_id": user["id"]}, {"_id": 0}).to_list(2000)
+    events = _sb_get_events_by_user(user["id"], limit=2000)
 
     now = datetime.now(UTC)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -414,7 +501,7 @@ async def dashboard(user: dict = Depends(get_current_user)):
 @api_router.post("/events/simulate")
 async def simulate_events(user: dict = Depends(get_current_user)):
     n = random.randint(1, 3)
-    created = [await create_live_event(user["id"]) for _ in range(n)]
+    created = [create_live_event(user["id"]) for _ in range(n)]
     return {"created": len(created), "events": created}
 
 
@@ -424,9 +511,10 @@ async def create_checkout(
     request: Request,
     user: dict = Depends(get_current_user),
 ):
-    pkg = PACKAGES.get(body.package_id)
-    if not pkg:
+    if body.package_id not in ACTIVE_PACKAGE_IDS:
         raise HTTPException(status_code=400, detail="Invalid package selected.")
+
+    pkg = PACKAGES[body.package_id]
 
     origin = body.origin_url.rstrip("/")
     success_url = f"{origin}/dashboard?session_id={{CHECKOUT_SESSION_ID}}"
@@ -465,7 +553,7 @@ async def create_checkout(
         "credited": False,
         "created_at": now_iso(),
     }
-    await db.payment_transactions.insert_one(txn)
+    _sb_insert_txn(txn)
 
     return {"url": session.url, "session_id": session.session_id}
 
@@ -476,7 +564,7 @@ async def payment_status(
     request: Request,
     user: dict = Depends(get_current_user),
 ):
-    txn = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
+    txn = _sb_get_txn_by_session(session_id)
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found.")
     if txn["user_id"] != user["id"]:
@@ -485,19 +573,17 @@ async def payment_status(
     checkout = stripe_client(request)
     cs: CheckoutStatusResponse = await checkout.get_checkout_status(session_id)
 
-    await db.payment_transactions.update_one(
-        {"session_id": session_id},
+    _sb_update_txn(
+        session_id,
         {
-            "$set": {
-                "payment_status": cs.payment_status,
-                "status": cs.status,
-                "updated_at": now_iso(),
-            }
+            "payment_status": cs.payment_status,
+            "status": cs.status,
+            "updated_at": now_iso(),
         },
     )
 
     if cs.payment_status == "paid":
-        await credit_units_once(session_id)
+        credit_units_once(session_id)
 
     return {
         "payment_status": cs.payment_status,
@@ -521,17 +607,15 @@ async def stripe_webhook(request: Request):
         raise HTTPException(status_code=400, detail="Webhook verification failed.") from exc
 
     if resp.payment_status == "paid" and resp.session_id:
-        await db.payment_transactions.update_one(
-            {"session_id": resp.session_id},
+        _sb_update_txn(
+            resp.session_id,
             {
-                "$set": {
-                    "payment_status": resp.payment_status,
-                    "status": "complete",
-                    "updated_at": now_iso(),
-                }
+                "payment_status": resp.payment_status,
+                "status": "complete",
+                "updated_at": now_iso(),
             },
         )
-        await credit_units_once(resp.session_id)
+        credit_units_once(resp.session_id)
 
     return {"status": "ok"}
 
@@ -576,11 +660,3 @@ else:
         "Frontend build not found at %s — static serving disabled. " "Run `yarn build` inside the frontend directory to enable it.",
         _FRONTEND_BUILD,
     )
-
-
-# ---------------------------------------------------------------------------
-# Lifecycle
-# ---------------------------------------------------------------------------
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()

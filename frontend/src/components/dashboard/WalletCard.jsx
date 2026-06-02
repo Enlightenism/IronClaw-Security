@@ -2,9 +2,9 @@ import { Wallet, CreditCard, Loader2, Zap, ShieldCheck } from "lucide-react";
 import { useCountUp } from "@/hooks/useCountUp";
 
 const TIERS = [
-  { id: "tier_20k", units: "20,000", price: "$20" },
-  { id: "tier_100k", units: "100,000", price: "$90", popular: true },
-  { id: "tier_200k", units: "200,000", price: "$150" },
+  { id: "tier_10k", units: "10,000", price: "$20" },
+  { id: "tier_50k", units: "50,000", price: "$90", popular: true },
+  { id: "tier_100k", units: "100,000", price: "$150" },
 ];
 
 const WalletCard = ({
@@ -99,7 +99,7 @@ const WalletCard = ({
               </div>
             </div>
             <button
-              onClick={() => onPurchase("tier_20k")}
+              onClick={() => onPurchase("tier_10k")}
               data-testid="update-card-btn"
               className="rounded-lg border border-[#E5E4E2]/25 px-3 py-1.5 text-xs text-[#E5E4E2] transition hover:border-[#FFD700]/50 hover:text-white"
             >
