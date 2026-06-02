@@ -7,11 +7,30 @@ from threading import Lock
 from typing import Any, Final, Literal, TypedDict
 from uuid import uuid4
 
-from app.persistencebootstrap import StoreType, build_store
+from app.persistencebootstrap import (
+    BILLING_TIER_10K_PRICE_USD,
+    BILLING_TIER_10K_UNITS,
+    BILLING_TIER_50K_PRICE_USD,
+    BILLING_TIER_50K_UNITS,
+    BILLING_TIER_100K_PRICE_USD,
+    BILLING_TIER_100K_UNITS,
+    StoreType,
+    build_store,
+)
 
 logger = logging.getLogger(__name__)
 
-PlanCode = Literal["starter-10k", "growth-50k", "scale-100k"]
+__all__ = [
+    "BillingCustomer",
+    "BillingRegistry",
+    "BillingSubscription",
+    "PlanCode",
+    "PlanDefinition",
+    "PLAN_DEFINITIONS",
+    "get_billing_registry",
+]
+
+PlanCode = Literal["starter-10k", "team-50k", "enterprise-100k"]
 
 
 class PlanDefinition(TypedDict):
@@ -24,21 +43,21 @@ class PlanDefinition(TypedDict):
 PLAN_DEFINITIONS: Final[dict[PlanCode, PlanDefinition]] = {
     "starter-10k": {
         "code": "starter-10k",
-        "name": "Starter 10k",
-        "unit_limit": 10_000,
-        "price_usd": 20,
+        "name": "Starter",
+        "unit_limit": BILLING_TIER_10K_UNITS,
+        "price_usd": BILLING_TIER_10K_PRICE_USD,
     },
-    "growth-50k": {
-        "code": "growth-50k",
-        "name": "Growth 50k",
-        "unit_limit": 50_000,
-        "price_usd": 90,
+    "team-50k": {
+        "code": "team-50k",
+        "name": "Team",
+        "unit_limit": BILLING_TIER_50K_UNITS,
+        "price_usd": BILLING_TIER_50K_PRICE_USD,
     },
-    "scale-100k": {
-        "code": "scale-100k",
-        "name": "Scale 100k",
-        "unit_limit": 100_000,
-        "price_usd": 150,
+    "enterprise-100k": {
+        "code": "enterprise-100k",
+        "name": "Enterprise",
+        "unit_limit": BILLING_TIER_100K_UNITS,
+        "price_usd": BILLING_TIER_100K_PRICE_USD,
     },
 }
 
@@ -138,7 +157,6 @@ class BillingRegistry:
     def __init__(self, *, store: StoreType | None = None) -> None:
         self._lock = Lock()
         self._store: StoreType = store if store is not None else build_store()
-        # In-memory mirrors kept for fast reads and fallback coherence
         self._customers: dict[str, BillingCustomer] = {}
         self._subscriptions: dict[str, BillingSubscription] = {}
         self._loaded = False
@@ -162,6 +180,20 @@ class BillingRegistry:
         if plan_code not in PLAN_DEFINITIONS:
             raise ValueError(f"Unknown plan code: {plan_code!r}. Valid codes: {list(PLAN_DEFINITIONS)}")
         return plan_code  # type: ignore[return-value]
+
+    # ------------------------------------------------------------------
+    # Internal helper — must be called with _lock already held
+    # ------------------------------------------------------------------
+
+    def _get_active_subscription_unlocked(self, customer_id: str) -> BillingSubscription | None:
+        for sub in self._subscriptions.values():
+            if sub.customer_id == customer_id and sub.is_active:
+                return sub
+        return None
+
+    # ------------------------------------------------------------------
+    # Customer operations
+    # ------------------------------------------------------------------
 
     def create_customer(
         self,
@@ -210,6 +242,42 @@ class BillingRegistry:
         with self._lock:
             self._ensure_loaded()
             return self._customers.get(customer_id)
+
+    def deactivate_customer(self, customer_id: str) -> BillingCustomer:
+        """Deactivate a customer and cancel their active subscription."""
+        with self._lock:
+            self._ensure_loaded()
+            customer = self._customers.get(customer_id)
+            if customer is None:
+                raise KeyError(f"Unknown customer_id: {customer_id!r}")
+            customer.active = False
+            try:
+                self._store.update(
+                    _CUSTOMERS_TABLE,
+                    {"active": False},
+                    filters={"customer_id": customer_id},
+                )
+            except Exception:
+                logger.exception("billing: failed to persist deactivation for customer %s", customer_id)
+            sub = self._get_active_subscription_unlocked(customer_id)
+            if sub is not None:
+                sub.status = "cancelled"
+                try:
+                    self._store.update(
+                        _SUBSCRIPTIONS_TABLE,
+                        {"status": "cancelled"},
+                        filters={"subscription_id": sub.subscription_id},
+                    )
+                except Exception:
+                    logger.exception(
+                        "billing: failed to persist cancellation for subscription %s",
+                        sub.subscription_id,
+                    )
+            return customer
+
+    # ------------------------------------------------------------------
+    # Subscription operations
+    # ------------------------------------------------------------------
 
     def create_subscription(
         self,
@@ -267,10 +335,32 @@ class BillingRegistry:
     ) -> BillingSubscription | None:
         with self._lock:
             self._ensure_loaded()
-            for sub in self._subscriptions.values():
-                if sub.customer_id == customer_id and sub.is_active:
-                    return sub
-            return None
+            return self._get_active_subscription_unlocked(customer_id)
+
+    def cancel_subscription(self, subscription_id: str) -> BillingSubscription:
+        """Cancel a subscription by ID."""
+        with self._lock:
+            self._ensure_loaded()
+            sub = self._subscriptions.get(subscription_id)
+            if sub is None:
+                raise KeyError(f"Unknown subscription_id: {subscription_id!r}")
+            sub.status = "cancelled"
+            try:
+                self._store.update(
+                    _SUBSCRIPTIONS_TABLE,
+                    {"status": "cancelled"},
+                    filters={"subscription_id": subscription_id},
+                )
+            except Exception:
+                logger.exception(
+                    "billing: failed to persist cancellation for subscription %s",
+                    subscription_id,
+                )
+            return sub
+
+    # ------------------------------------------------------------------
+    # Usage operations
+    # ------------------------------------------------------------------
 
     def record_usage(
         self,
@@ -289,7 +379,7 @@ class BillingRegistry:
 
         with self._lock:
             self._ensure_loaded()
-            subscription = self.get_active_subscription_for_customer(customer_id)
+            subscription = self._get_active_subscription_unlocked(customer_id)
             if subscription is None:
                 raise KeyError(f"No active subscription for customer_id={customer_id!r}")
 
@@ -325,7 +415,7 @@ class BillingRegistry:
 
         with self._lock:
             self._ensure_loaded()
-            subscription = self.get_active_subscription_for_customer(customer_id)
+            subscription = self._get_active_subscription_unlocked(customer_id)
             if subscription is None:
                 return False
             return subscription.units_consumed + units <= subscription.unit_limit

@@ -38,13 +38,13 @@ def _build_package_catalog() -> dict[str, dict[str, Any]]:
                 "display_label": "10,000 units — $20.00",
                 "description": ("Prepaid protection units for individual builders who want guarded " "prompt handling, tool-call review, source inspection, and safe response release."),
             },
-            "growth-50k": {
+            "team-50k": {
                 "package_id": "pkg_50000",
                 "name": "Team",
                 "display_label": "50,000 units — $90.00",
                 "description": ("Prepaid protection units for teams running higher volumes of AI-assisted " "development, research, and guarded agent workflows."),
             },
-            "scale-100k": {
+            "enterprise-100k": {
                 "package_id": "pkg_100000",
                 "name": "Enterprise",
                 "display_label": "100,000 units — $150.00",
@@ -102,15 +102,18 @@ def _build_package_catalog() -> dict[str, dict[str, Any]]:
 
 UNIT_PACKAGE_CATALOG: dict[str, dict[str, Any]] = _build_package_catalog()
 
+
 # ---------------------------------------------------------------------------
 # Module-level integrity assertion — catches catalog drift at startup
 # ---------------------------------------------------------------------------
+
 
 _EXPECTED_PACKAGES = {
     "pkg_10000": (10_000, 20.00),
     "pkg_50000": (50_000, 90.00),
     "pkg_100000": (100_000, 150.00),
 }
+
 
 for _pkg_id, (_expected_units, _expected_price) in _EXPECTED_PACKAGES.items():
     _entry = UNIT_PACKAGE_CATALOG.get(_pkg_id)
@@ -256,6 +259,7 @@ class RegistryUnitLedgerEntry:
 
 class SupabaseUnitWalletRepository:
     """Durable wallet + ledger persistence via Supabase.
+
 
     Table contracts expected in Supabase:
       unit_wallets  (wallet_id, owner_key, balance_units,
@@ -420,6 +424,7 @@ def _make_repo() -> SupabaseUnitWalletRepository | MemoryUnitWalletRepository:
 class UnitWalletRegistry:
     """Prepaid unit wallet registry with pluggable persistence backend.
 
+
     Supports:
     - creating or resolving a wallet for an owner,
     - crediting units after a package purchase,
@@ -577,6 +582,7 @@ class UnitWalletRegistry:
 # ---------------------------------------------------------------------------
 # Module-level singleton
 # ---------------------------------------------------------------------------
+
 
 _unit_wallet_registry = UnitWalletRegistry()
 
