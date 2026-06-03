@@ -52,34 +52,69 @@ class BillingIndexResponse(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+_ORDERED_PACKAGE_IDS = ["pkg_10000", "pkg_50000", "pkg_100000"]
+_FEATURED_PACKAGE_ID = "pkg_50000"
+
+_PRICING_FALLBACK: dict[str, tuple[int, float, str, str, str]] = {
+    "pkg_10000": (
+        10_000,
+        20.00,
+        "Starter",
+        "10,000 units — $20.00",
+        ("Prepaid protection units for individual builders who want guarded " "prompt handling, tool-call review, source inspection, and safe response release."),
+    ),
+    "pkg_50000": (
+        50_000,
+        90.00,
+        "Team",
+        "50,000 units — $90.00",
+        ("Prepaid protection units for teams running higher volumes of AI-assisted " "development, research, and guarded agent workflows."),
+    ),
+    "pkg_100000": (
+        100_000,
+        150.00,
+        "Enterprise",
+        "100,000 units — $150.00",
+        ("Prepaid protection units for organizations protecting large-scale agent " "operations, sensitive workflows, and high-frequency prompt activity."),
+    ),
+}
+
+
 def _build_packages() -> list[BillingIndexPackageView]:
-    ordered_package_ids = ["pkg_10000", "pkg_50000", "pkg_100000"]
-    featured_package_id = "pkg_50000"
     packages: list[BillingIndexPackageView] = []
 
-    for package_id in ordered_package_ids:
+    for package_id in _ORDERED_PACKAGE_IDS:
         package = UNIT_PACKAGE_CATALOG.get(package_id)
-        if package is None:
-            continue
 
-        price_usd = float(package["price_usd"])
-        included_units = int(package["unit_amount"])
+        if package is not None:
+            price_usd = float(package["price_usd"])
+            included_units = int(package["unit_amount"])
+            name = str(package["name"])
+            display_label = str(package.get("display_label", ""))
+            description = str(package.get("description", ""))
+        else:
+            fallback = _PRICING_FALLBACK.get(package_id)
+            if fallback is None:
+                continue
+            included_units, price_usd, name, display_label, description = fallback
+
+        price_per_1k = round((price_usd / included_units) * 1_000, 4) if included_units > 0 else 0.0
 
         packages.append(
             BillingIndexPackageView(
                 package_id=package_id,
-                name=str(package["name"]),
-                description=str(package.get("description", "")),
+                name=name,
+                description=description,
                 price_usd=price_usd,
                 included_units=included_units,
-                display_label=str(package.get("display_label", "")),
-                featured=package_id == featured_package_id,
+                display_label=display_label,
+                featured=package_id == _FEATURED_PACKAGE_ID,
                 metadata={
                     "price_display": f"${price_usd:.2f}",
                     "units_display": f"{included_units:,} units",
-                    "effective_price_per_1k_units": round((price_usd / included_units) * 1000, 4),
+                    "effective_price_per_1k_units": price_per_1k,
                 },
-            ),
+            )
         )
 
     return packages
@@ -167,7 +202,7 @@ def get_billing_index() -> BillingIndexResponse:
         summary=BillingIndexSummaryView(
             title="Billing Overview",
             subtitle="Prepaid protection-unit pricing and related billing surfaces.",
-            featured_package_id="pkg_50000",
+            featured_package_id=_FEATURED_PACKAGE_ID,
             package_count=len(packages),
             links_count=len(links),
             currency="USD",
