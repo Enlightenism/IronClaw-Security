@@ -8,17 +8,20 @@ from typing import Any, Final, Literal, TypedDict
 from uuid import uuid4
 
 from app.persistencebootstrap import (
+    StoreType,
+    build_store,
+)
+from app.supabaseclient import (
     BILLING_TIER_10K_PRICE_USD,
     BILLING_TIER_10K_UNITS,
     BILLING_TIER_50K_PRICE_USD,
     BILLING_TIER_50K_UNITS,
     BILLING_TIER_100K_PRICE_USD,
     BILLING_TIER_100K_UNITS,
-    StoreType,
-    build_store,
 )
 
 logger = logging.getLogger(__name__)
+
 
 __all__ = [
     "BillingCustomer",
@@ -29,6 +32,7 @@ __all__ = [
     "PLAN_DEFINITIONS",
     "get_billing_registry",
 ]
+
 
 PlanCode = Literal["starter-10k", "team-50k", "enterprise-100k"]
 
@@ -60,6 +64,7 @@ PLAN_DEFINITIONS: Final[dict[PlanCode, PlanDefinition]] = {
         "price_usd": BILLING_TIER_100K_PRICE_USD,
     },
 }
+
 
 _CUSTOMERS_TABLE = "billing_customers"
 _SUBSCRIPTIONS_TABLE = "billing_subscriptions"
@@ -149,6 +154,7 @@ def _subscription_from_row(row: dict[str, Any]) -> BillingSubscription:
 class BillingRegistry:
     """Billing foundation for IronClaw agentic systems.
 
+
     Persists customers and subscriptions to Supabase via the canonical
     StoreType interface. Falls back to in-memory when Supabase is unavailable.
     IDs are uuid4-based — no sequential collision risk.
@@ -181,19 +187,11 @@ class BillingRegistry:
             raise ValueError(f"Unknown plan code: {plan_code!r}. Valid codes: {list(PLAN_DEFINITIONS)}")
         return plan_code  # type: ignore[return-value]
 
-    # ------------------------------------------------------------------
-    # Internal helper — must be called with _lock already held
-    # ------------------------------------------------------------------
-
     def _get_active_subscription_unlocked(self, customer_id: str) -> BillingSubscription | None:
         for sub in self._subscriptions.values():
             if sub.customer_id == customer_id and sub.is_active:
                 return sub
         return None
-
-    # ------------------------------------------------------------------
-    # Customer operations
-    # ------------------------------------------------------------------
 
     def create_customer(
         self,
@@ -244,7 +242,6 @@ class BillingRegistry:
             return self._customers.get(customer_id)
 
     def deactivate_customer(self, customer_id: str) -> BillingCustomer:
-        """Deactivate a customer and cancel their active subscription."""
         with self._lock:
             self._ensure_loaded()
             customer = self._customers.get(customer_id)
@@ -274,10 +271,6 @@ class BillingRegistry:
                         sub.subscription_id,
                     )
             return customer
-
-    # ------------------------------------------------------------------
-    # Subscription operations
-    # ------------------------------------------------------------------
 
     def create_subscription(
         self,
@@ -338,7 +331,6 @@ class BillingRegistry:
             return self._get_active_subscription_unlocked(customer_id)
 
     def cancel_subscription(self, subscription_id: str) -> BillingSubscription:
-        """Cancel a subscription by ID."""
         with self._lock:
             self._ensure_loaded()
             sub = self._subscriptions.get(subscription_id)
@@ -358,22 +350,12 @@ class BillingRegistry:
                 )
             return sub
 
-    # ------------------------------------------------------------------
-    # Usage operations
-    # ------------------------------------------------------------------
-
     def record_usage(
         self,
         *,
         customer_id: str,
         units: int,
     ) -> BillingSubscription:
-        """Record usage units for a customer.
-
-        Raises:
-            ValueError: if units <= 0 or usage would exceed the plan limit.
-            KeyError: if no active subscription exists.
-        """
         if units <= 0:
             raise ValueError("units must be positive")
 
@@ -409,7 +391,6 @@ class BillingRegistry:
         customer_id: str,
         units: int,
     ) -> bool:
-        """Check whether a customer can consume the requested units under their current plan."""
         if units <= 0:
             return False
 
@@ -421,7 +402,6 @@ class BillingRegistry:
             return subscription.units_consumed + units <= subscription.unit_limit
 
     def get_plan_definitions(self) -> dict[PlanCode, PlanDefinition]:
-        """Return the canonical plan definitions (read-only view)."""
         return dict(PLAN_DEFINITIONS)
 
 

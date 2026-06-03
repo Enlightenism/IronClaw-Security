@@ -14,21 +14,10 @@ from app.supabaseclient import (
 
 logger = logging.getLogger(__name__)
 
+
 DEFAULT_PERSISTENCE_MODE = "auto"
 MEMORY_MODE = "memory"
 SUPABASE_MODE = "supabase"
-
-# ---------------------------------------------------------------------------
-# Billing tier constants (units : price_usd)
-# ---------------------------------------------------------------------------
-BILLING_TIER_10K_UNITS = 10_000
-BILLING_TIER_10K_PRICE_USD = 20
-
-BILLING_TIER_50K_UNITS = 50_000
-BILLING_TIER_50K_PRICE_USD = 90
-
-BILLING_TIER_100K_UNITS = 100_000
-BILLING_TIER_100K_PRICE_USD = 150
 
 
 class PersistenceBootstrapError(RuntimeError):
