@@ -9,6 +9,7 @@ import requests
 
 SUPABASE_TIMEOUT_SECONDS = 15.0
 
+
 # ---------------------------------------------------------------------------
 # Billing tier constants — single source of truth for unit pricing
 # 10,000 units  → $20 USD
@@ -18,8 +19,10 @@ SUPABASE_TIMEOUT_SECONDS = 15.0
 BILLING_TIER_10K_UNITS: int = 10_000
 BILLING_TIER_10K_PRICE_USD: int = 20
 
+
 BILLING_TIER_50K_UNITS: int = 50_000
 BILLING_TIER_50K_PRICE_USD: int = 90
+
 
 BILLING_TIER_100K_UNITS: int = 100_000
 BILLING_TIER_100K_PRICE_USD: int = 150
@@ -132,6 +135,7 @@ class _QueryBuilder:
         self._schema: str = "public"
         self._single: bool = False
         self._maybe: bool = False
+        self._upsert_conflict: str | None = None
         self.not_ = _NotProxy(self)
 
     def select(self, columns: str = "*", *, count: str | None = None) -> _QueryBuilder:
@@ -227,8 +231,7 @@ class _QueryBuilder:
         self._method = "POST"
         self._payload = payload
         self._returning = returning
-        if on_conflict:
-            self._upsert_conflict = on_conflict
+        self._upsert_conflict = on_conflict
         return self
 
     def update(
@@ -293,7 +296,7 @@ class _QueryBuilder:
             if self._method in ("POST", "PATCH"):
                 hdrs["Content-Type"] = "application/json"
 
-        if hasattr(self, "_upsert_conflict") and self._upsert_conflict:
+        if self._upsert_conflict:
             hdrs["Prefer"] = f"return={self._returning},resolution=merge-duplicates"
             hdrs["on_conflict"] = self._upsert_conflict
 
@@ -314,16 +317,24 @@ class _QueryBuilder:
             return {"Range": f"{self._range_from}-{self._range_to}"}
         return {}
 
+    def _has_filters(self) -> bool:
+        return bool(self._filters or self._in_filters or self._or_filters or self._contains_filters or self._ilike_filters)
+
     def execute(self) -> _Response:
         params = self._build_params()
         headers = self._build_headers()
         url = f"{self._client.config.rest_url}/{self._table}"
 
+        # For GET: always pass params (contains "select" + any filters).
+        # For mutating methods: pass params only when filters are present
+        # (PostgREST requires filter params on the query string for PATCH/DELETE).
+        send_params: dict[str, Any] | None = params if (self._method == "GET" or self._has_filters()) else None
+
         try:
             raw = self._client.request(
                 self._method,
                 url,
-                params=params if self._method == "GET" or self._filters or self._in_filters or self._or_filters or self._contains_filters or self._ilike_filters else None,
+                params=send_params,
                 json=self._payload if self._method in ("POST", "PATCH") else None,
                 headers=headers,
             )
@@ -505,6 +516,8 @@ class SupabaseClient:
             return result  # type: ignore[return-value]
         if isinstance(result, dict):
             return [result]  # type: ignore[return-value]
+        if result is None:
+            return []
 
         raise SupabaseAPIError("unexpected supabase select response shape")
 
@@ -515,13 +528,13 @@ class SupabaseClient:
         *,
         schema: str = "public",
         returning: str = "representation",
-    ) -> Any:
+    ) -> list[dict[str, Any]]:
         if not table or not table.strip():
             raise ValueError("table is required")
         if payload is None:
             raise ValueError("payload is required")
 
-        return self.request(
+        result = self.request(
             "POST",
             f"{self.config.rest_url}/{table}",
             json=payload,
@@ -532,6 +545,15 @@ class SupabaseClient:
             },
         )
 
+        if isinstance(result, list):
+            return result  # type: ignore[return-value]
+        if isinstance(result, dict):
+            return [result]  # type: ignore[return-value]
+        if result is None:
+            return []
+
+        raise SupabaseAPIError("unexpected supabase insert response shape")
+
     def update(
         self,
         table: str,
@@ -540,7 +562,7 @@ class SupabaseClient:
         filters: dict[str, Any],
         schema: str = "public",
         returning: str = "representation",
-    ) -> Any:
+    ) -> list[dict[str, Any]]:
         if not table or not table.strip():
             raise ValueError("table is required")
         if not payload:
@@ -548,7 +570,7 @@ class SupabaseClient:
         if not filters:
             raise ValueError("filters are required")
 
-        return self.request(
+        result = self.request(
             "PATCH",
             f"{self.config.rest_url}/{table}",
             params=filters,
@@ -560,6 +582,15 @@ class SupabaseClient:
             },
         )
 
+        if isinstance(result, list):
+            return result  # type: ignore[return-value]
+        if isinstance(result, dict):
+            return [result]  # type: ignore[return-value]
+        if result is None:
+            return []
+
+        raise SupabaseAPIError("unexpected supabase update response shape")
+
     def delete(
         self,
         table: str,
@@ -567,13 +598,13 @@ class SupabaseClient:
         filters: dict[str, Any],
         schema: str = "public",
         returning: str = "representation",
-    ) -> Any:
+    ) -> list[dict[str, Any]]:
         if not table or not table.strip():
             raise ValueError("table is required")
         if not filters:
             raise ValueError("filters are required")
 
-        return self.request(
+        result = self.request(
             "DELETE",
             f"{self.config.rest_url}/{table}",
             params=filters,
@@ -582,6 +613,15 @@ class SupabaseClient:
                 "Content-Profile": schema,
             },
         )
+
+        if isinstance(result, list):
+            return result  # type: ignore[return-value]
+        if isinstance(result, dict):
+            return [result]  # type: ignore[return-value]
+        if result is None:
+            return []
+
+        raise SupabaseAPIError("unexpected supabase delete response shape")
 
     def rpc(
         self,
