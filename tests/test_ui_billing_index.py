@@ -7,26 +7,28 @@ from fastapi.testclient import TestClient
 # Mirrors UNIT_PACKAGE_CATALOG and _PRICING_FALLBACK in app/ui/billing_index.py.
 # ---------------------------------------------------------------------------
 
+
 _EXPECTED_PACKAGES: dict[str, dict] = {
-    "pkg_10000": {
+    "pkg_5000": {
         "name": "Starter",
         "price_usd": 20.0,
-        "included_units": 10_000,
+        "included_units": 5_000,
     },
-    "pkg_50000": {
+    "pkg_25000": {
         "name": "Team",
         "price_usd": 90.0,
-        "included_units": 50_000,
+        "included_units": 25_000,
     },
-    "pkg_100000": {
+    "pkg_60000": {
         "name": "Enterprise",
-        "price_usd": 150.0,
-        "included_units": 100_000,
+        "price_usd": 180.0,
+        "included_units": 60_000,
     },
 }
 
-_FEATURED_PACKAGE_ID = "pkg_50000"
-_ORDERED_PACKAGE_IDS = ["pkg_10000", "pkg_50000", "pkg_100000"]
+
+_FEATURED_PACKAGE_ID = "pkg_25000"
+_ORDERED_PACKAGE_IDS = ["pkg_5000", "pkg_25000", "pkg_60000"]
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +199,7 @@ def test_billing_index_exactly_one_featured_package(test_client: TestClient) -> 
     assert len(featured) == 1, f"Expected exactly 1 featured package, got {len(featured)}"
 
 
-def test_billing_index_featured_package_is_pkg_50000(test_client: TestClient) -> None:
+def test_billing_index_featured_package_is_pkg_25000(test_client: TestClient) -> None:
     featured = [pkg for pkg in _get_body(test_client)["packages"] if pkg["featured"]]
     assert featured[0]["package_id"] == _FEATURED_PACKAGE_ID
 
@@ -217,31 +219,31 @@ def test_billing_index_packages_returned_in_canonical_order(test_client: TestCli
 # ---------------------------------------------------------------------------
 
 
-def test_billing_index_pkg_10000_exact_values(test_client: TestClient) -> None:
+def test_billing_index_pkg_5000_exact_values(test_client: TestClient) -> None:
     pkg_map = _get_pkg_map(test_client)
-    assert "pkg_10000" in pkg_map, "pkg_10000 missing from packages"
-    pkg = pkg_map["pkg_10000"]
+    assert "pkg_5000" in pkg_map, "pkg_5000 missing from packages"
+    pkg = pkg_map["pkg_5000"]
     assert pkg["name"] == "Starter", f"Expected name='Starter', got {pkg['name']!r}"
     assert pkg["price_usd"] == 20.0, f"Expected price_usd=20.0, got {pkg['price_usd']}"
-    assert pkg["included_units"] == 10_000, f"Expected included_units=10000, got {pkg['included_units']}"
+    assert pkg["included_units"] == 5_000, f"Expected included_units=5000, got {pkg['included_units']}"
 
 
-def test_billing_index_pkg_50000_exact_values(test_client: TestClient) -> None:
+def test_billing_index_pkg_25000_exact_values(test_client: TestClient) -> None:
     pkg_map = _get_pkg_map(test_client)
-    assert "pkg_50000" in pkg_map, "pkg_50000 missing from packages"
-    pkg = pkg_map["pkg_50000"]
+    assert "pkg_25000" in pkg_map, "pkg_25000 missing from packages"
+    pkg = pkg_map["pkg_25000"]
     assert pkg["name"] == "Team", f"Expected name='Team', got {pkg['name']!r}"
     assert pkg["price_usd"] == 90.0, f"Expected price_usd=90.0, got {pkg['price_usd']}"
-    assert pkg["included_units"] == 50_000, f"Expected included_units=50000, got {pkg['included_units']}"
+    assert pkg["included_units"] == 25_000, f"Expected included_units=25000, got {pkg['included_units']}"
 
 
-def test_billing_index_pkg_100000_exact_values(test_client: TestClient) -> None:
+def test_billing_index_pkg_60000_exact_values(test_client: TestClient) -> None:
     pkg_map = _get_pkg_map(test_client)
-    assert "pkg_100000" in pkg_map, "pkg_100000 missing from packages"
-    pkg = pkg_map["pkg_100000"]
+    assert "pkg_60000" in pkg_map, "pkg_60000 missing from packages"
+    pkg = pkg_map["pkg_60000"]
     assert pkg["name"] == "Enterprise", f"Expected name='Enterprise', got {pkg['name']!r}"
-    assert pkg["price_usd"] == 150.0, f"Expected price_usd=150.0, got {pkg['price_usd']}"
-    assert pkg["included_units"] == 100_000, f"Expected included_units=100000, got {pkg['included_units']}"
+    assert pkg["price_usd"] == 180.0, f"Expected price_usd=180.0, got {pkg['price_usd']}"
+    assert pkg["included_units"] == 60_000, f"Expected included_units=60000, got {pkg['included_units']}"
 
 
 def test_billing_index_all_catalog_values_match_expected(test_client: TestClient) -> None:
@@ -285,19 +287,19 @@ def test_billing_index_each_package_metadata_has_effective_price_per_1k(test_cli
         assert pkg["metadata"]["effective_price_per_1k_units"] > 0, f"packages[{i}].metadata.effective_price_per_1k_units must be > 0"
 
 
-def test_billing_index_pkg_10000_effective_price_per_1k(test_client: TestClient) -> None:
-    pkg = _get_pkg_map(test_client)["pkg_10000"]
-    assert pkg["metadata"]["effective_price_per_1k_units"] == round((20.0 / 10_000) * 1_000, 4)
+def test_billing_index_pkg_5000_effective_price_per_1k(test_client: TestClient) -> None:
+    pkg = _get_pkg_map(test_client)["pkg_5000"]
+    assert pkg["metadata"]["effective_price_per_1k_units"] == round((20.0 / 5_000) * 1_000, 4)
 
 
-def test_billing_index_pkg_50000_effective_price_per_1k(test_client: TestClient) -> None:
-    pkg = _get_pkg_map(test_client)["pkg_50000"]
-    assert pkg["metadata"]["effective_price_per_1k_units"] == round((90.0 / 50_000) * 1_000, 4)
+def test_billing_index_pkg_25000_effective_price_per_1k(test_client: TestClient) -> None:
+    pkg = _get_pkg_map(test_client)["pkg_25000"]
+    assert pkg["metadata"]["effective_price_per_1k_units"] == round((90.0 / 25_000) * 1_000, 4)
 
 
-def test_billing_index_pkg_100000_effective_price_per_1k(test_client: TestClient) -> None:
-    pkg = _get_pkg_map(test_client)["pkg_100000"]
-    assert pkg["metadata"]["effective_price_per_1k_units"] == round((150.0 / 100_000) * 1_000, 4)
+def test_billing_index_pkg_60000_effective_price_per_1k(test_client: TestClient) -> None:
+    pkg = _get_pkg_map(test_client)["pkg_60000"]
+    assert pkg["metadata"]["effective_price_per_1k_units"] == round((180.0 / 60_000) * 1_000, 4)
 
 
 # ---------------------------------------------------------------------------

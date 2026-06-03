@@ -57,19 +57,22 @@ class BillingManifestResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-def _build_packages() -> list[BillingManifestPackageView]:
-    featured_package_id = "team-security"
-    ordered_package_ids = ["single-user", "team-security", "enterprise-security"]
+_TOKENS_PER_UNIT = 25_000
+_FEATURED_PACKAGE_ID = "pkg_25000"
+_ORDERED_PACKAGE_IDS = ["pkg_5000", "pkg_25000", "pkg_60000"]
 
+
+def _build_packages() -> list[BillingManifestPackageView]:
     packages: list[BillingManifestPackageView] = []
-    for package_id in ordered_package_ids:
+    for package_id in _ORDERED_PACKAGE_IDS:
         package = PACKAGE_CATALOG.get(package_id)
         if package is None:
             continue
 
         price_usd = float(package["price_usd"])
         included_units = int(package["included_units"])
-        unit_price_per_1k = round((price_usd / included_units) * 1000, 4)
+        unit_price_per_1k = round((price_usd / included_units) * 1000, 4) if included_units > 0 else 0.0
+        display_label = str(package.get("display_label", f"{included_units:,} units — ${price_usd:.2f}"))
 
         packages.append(
             BillingManifestPackageView(
@@ -78,11 +81,13 @@ def _build_packages() -> list[BillingManifestPackageView]:
                 price_usd=price_usd,
                 included_units=included_units,
                 description=str(package["description"]),
-                featured=package_id == featured_package_id,
+                featured=package_id == _FEATURED_PACKAGE_ID,
                 metadata={
                     "price_display": f"${price_usd:.2f}",
                     "units_display": f"{included_units:,} units",
+                    "display_label": display_label,
                     "effective_price_per_1k_units": unit_price_per_1k,
+                    "tokens_per_unit": _TOKENS_PER_UNIT,
                 },
             ),
         )
@@ -94,15 +99,15 @@ def _build_kpis(packages: list[BillingManifestPackageView]) -> list[BillingManif
     if not packages:
         return []
 
-    lowest_price = min(package.price_usd for package in packages)
+    lowest_price_package = min(packages, key=lambda package: package.price_usd)
     highest_units = max(package.included_units for package in packages)
     featured = next((package for package in packages if package.featured), packages[0])
 
     return [
         BillingManifestKpiView(
             label="Entry package",
-            value=f"${lowest_price:.2f}",
-            detail="Starts at 10,000 prepaid protection units.",
+            value=f"${lowest_price_package.price_usd:.2f}",
+            detail=f"Starts at {lowest_price_package.included_units:,} prepaid protection units.",
         ),
         BillingManifestKpiView(
             label="Featured package",
@@ -132,8 +137,9 @@ def get_billing_manifest() -> BillingManifestResponse:
             kpis=_build_kpis(packages),
             notes=[
                 "Billing is sold as prepaid protection-unit bundles.",
-                "Current package pricing is $20 for 10,000 units, $90 for 50,000 units, and $150 for 100,000 units.",
-                "The featured package is Team Security for balanced operational usage.",
+                "Current package pricing is $20 for 5,000 units, $90 for 25,000 units, and $180 for 60,000 units.",
+                "Each protection unit covers up to 25,000 tokens; larger token volumes consume additional units in 25,000-token chunks.",
+                "The featured package is Team for balanced operational usage.",
             ],
         ),
         actions=[
@@ -169,6 +175,6 @@ def get_billing_manifest() -> BillingManifestResponse:
         metadata={
             "source": "app.api.routes.billing",
             "package_count": len(packages),
-            "featured_package_id": "team-security",
+            "featured_package_id": _FEATURED_PACKAGE_ID,
         },
     )

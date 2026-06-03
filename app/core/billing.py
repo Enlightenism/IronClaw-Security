@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import logging
+import math
 from threading import Lock
 from typing import Any, Final, Literal, TypedDict
 from uuid import uuid4
@@ -12,12 +13,12 @@ from app.persistencebootstrap import (
     build_store,
 )
 from app.supabaseclient import (
-    BILLING_TIER_10K_PRICE_USD,
-    BILLING_TIER_10K_UNITS,
-    BILLING_TIER_50K_PRICE_USD,
-    BILLING_TIER_50K_UNITS,
-    BILLING_TIER_100K_PRICE_USD,
-    BILLING_TIER_100K_UNITS,
+    BILLING_TIER_5K_PRICE_USD,
+    BILLING_TIER_5K_UNITS,
+    BILLING_TIER_25K_PRICE_USD,
+    BILLING_TIER_25K_UNITS,
+    BILLING_TIER_60K_PRICE_USD,
+    BILLING_TIER_60K_UNITS,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,11 +31,22 @@ __all__ = [
     "PlanCode",
     "PlanDefinition",
     "PLAN_DEFINITIONS",
+    "TOKENS_PER_UNIT",
+    "units_required_for_tokens",
     "get_billing_registry",
 ]
 
 
-PlanCode = Literal["starter-10k", "team-50k", "enterprise-100k"]
+TOKENS_PER_UNIT: Final[int] = 25_000
+
+
+def units_required_for_tokens(token_count: int) -> int:
+    if token_count <= 0:
+        return 0
+    return math.ceil(token_count / TOKENS_PER_UNIT)
+
+
+PlanCode = Literal["starter-5k", "team-25k", "enterprise-60k"]
 
 
 class PlanDefinition(TypedDict):
@@ -42,26 +54,30 @@ class PlanDefinition(TypedDict):
     name: str
     unit_limit: int
     price_usd: int
+    tokens_per_unit: int
 
 
 PLAN_DEFINITIONS: Final[dict[PlanCode, PlanDefinition]] = {
-    "starter-10k": {
-        "code": "starter-10k",
+    "starter-5k": {
+        "code": "starter-5k",
         "name": "Starter",
-        "unit_limit": BILLING_TIER_10K_UNITS,
-        "price_usd": BILLING_TIER_10K_PRICE_USD,
+        "unit_limit": BILLING_TIER_5K_UNITS,
+        "price_usd": BILLING_TIER_5K_PRICE_USD,
+        "tokens_per_unit": TOKENS_PER_UNIT,
     },
-    "team-50k": {
-        "code": "team-50k",
+    "team-25k": {
+        "code": "team-25k",
         "name": "Team",
-        "unit_limit": BILLING_TIER_50K_UNITS,
-        "price_usd": BILLING_TIER_50K_PRICE_USD,
+        "unit_limit": BILLING_TIER_25K_UNITS,
+        "price_usd": BILLING_TIER_25K_PRICE_USD,
+        "tokens_per_unit": TOKENS_PER_UNIT,
     },
-    "enterprise-100k": {
-        "code": "enterprise-100k",
+    "enterprise-60k": {
+        "code": "enterprise-60k",
         "name": "Enterprise",
-        "unit_limit": BILLING_TIER_100K_UNITS,
-        "price_usd": BILLING_TIER_100K_PRICE_USD,
+        "unit_limit": BILLING_TIER_60K_UNITS,
+        "price_usd": BILLING_TIER_60K_PRICE_USD,
+        "tokens_per_unit": TOKENS_PER_UNIT,
     },
 }
 
@@ -102,8 +118,24 @@ class BillingSubscription:
         return self.plan_definition["unit_limit"]
 
     @property
+    def price_usd(self) -> int:
+        return self.plan_definition["price_usd"]
+
+    @property
+    def tokens_per_unit(self) -> int:
+        return self.plan_definition["tokens_per_unit"]
+
+    @property
     def remaining_units(self) -> int:
         return max(self.unit_limit - self.units_consumed, 0)
+
+    @property
+    def token_coverage_limit(self) -> int:
+        return self.unit_limit * self.tokens_per_unit
+
+    @property
+    def remaining_token_coverage(self) -> int:
+        return self.remaining_units * self.tokens_per_unit
 
     @property
     def is_active(self) -> bool:
@@ -153,7 +185,6 @@ def _subscription_from_row(row: dict[str, Any]) -> BillingSubscription:
 
 class BillingRegistry:
     """Billing foundation for IronClaw agentic systems.
-
 
     Persists customers and subscriptions to Supabase via the canonical
     StoreType interface. Falls back to in-memory when Supabase is unavailable.
@@ -385,6 +416,16 @@ class BillingRegistry:
                 )
             return subscription
 
+    def record_token_usage(
+        self,
+        *,
+        customer_id: str,
+        token_count: int,
+    ) -> tuple[BillingSubscription, int]:
+        required_units = units_required_for_tokens(token_count)
+        subscription = self.record_usage(customer_id=customer_id, units=required_units)
+        return subscription, required_units
+
     def can_consume(
         self,
         *,
@@ -400,6 +441,15 @@ class BillingRegistry:
             if subscription is None:
                 return False
             return subscription.units_consumed + units <= subscription.unit_limit
+
+    def can_consume_tokens(
+        self,
+        *,
+        customer_id: str,
+        token_count: int,
+    ) -> bool:
+        required_units = units_required_for_tokens(token_count)
+        return self.can_consume(customer_id=customer_id, units=required_units)
 
     def get_plan_definitions(self) -> dict[PlanCode, PlanDefinition]:
         return dict(PLAN_DEFINITIONS)

@@ -11,34 +11,29 @@ router = APIRouter(
     tags=["billing-overview"],
 )
 
+
+_TOKENS_PER_UNIT = 25_000
+
 _PLAN_PRICES_CENTS: dict[str, int] = {
-    "starter": 9_900,
-    "pro": 29_900,
-    "enterprise": 149_900,
+    "starter": 2_000,
+    "team": 9_000,
+    "enterprise": 18_000,
 }
 
 _PLAN_INCLUDED_UNITS: dict[str, dict[str, int]] = {
     "starter": {
-        "guardedexecutions": 10_000,
-        "manualreviews": 1_000,
-        "securityalerts": 2_500,
+        "protectionunits": 5_000,
     },
-    "pro": {
-        "guardedexecutions": 50_000,
-        "manualreviews": 5_000,
-        "securityalerts": 10_000,
+    "team": {
+        "protectionunits": 25_000,
     },
     "enterprise": {
-        "guardedexecutions": 250_000,
-        "manualreviews": 25_000,
-        "securityalerts": 50_000,
+        "protectionunits": 60_000,
     },
 }
 
 _UNIT_LABELS: dict[str, str] = {
-    "guardedexecutions": "requests",
-    "manualreviews": "items",
-    "securityalerts": "alerts",
+    "protectionunits": "units",
 }
 
 
@@ -136,35 +131,19 @@ def _sample_packages() -> list[BillingPackageView]:
             packageid="pkg-001",
             organizationid="org-001",
             organizationname="Alpha Security Lab",
-            plan="pro",
+            plan="team",
             status="active",
             purchasedat=_utc_iso(2026, 4, 10, 9, 0),
             expiresat=None,
-            packageprice=_usd(_PLAN_PRICES_CENTS["pro"]),
-            planchangeurl=_plan_change_url("pro"),
+            packageprice=_usd(_PLAN_PRICES_CENTS["team"]),
+            planchangeurl=_plan_change_url("team"),
             usage=[
                 BillingUsageBucketView(
-                    metric="guardedexecutions",
-                    used=18340,
-                    included=_PLAN_INCLUDED_UNITS["pro"]["guardedexecutions"],
+                    metric="protectionunits",
+                    used=18_340,
+                    included=_PLAN_INCLUDED_UNITS["team"]["protectionunits"],
                     overage=0,
-                    unit=_UNIT_LABELS["guardedexecutions"],
-                    status="healthy",
-                ),
-                BillingUsageBucketView(
-                    metric="manualreviews",
-                    used=1220,
-                    included=_PLAN_INCLUDED_UNITS["pro"]["manualreviews"],
-                    overage=0,
-                    unit=_UNIT_LABELS["manualreviews"],
-                    status="healthy",
-                ),
-                BillingUsageBucketView(
-                    metric="securityalerts",
-                    used=3870,
-                    included=_PLAN_INCLUDED_UNITS["pro"]["securityalerts"],
-                    overage=0,
-                    unit=_UNIT_LABELS["securityalerts"],
+                    unit=_UNIT_LABELS["protectionunits"],
                     status="healthy",
                 ),
             ],
@@ -181,27 +160,11 @@ def _sample_packages() -> list[BillingPackageView]:
             planchangeurl=_plan_change_url("starter"),
             usage=[
                 BillingUsageBucketView(
-                    metric="guardedexecutions",
-                    used=4120,
-                    included=_PLAN_INCLUDED_UNITS["starter"]["guardedexecutions"],
+                    metric="protectionunits",
+                    used=4_120,
+                    included=_PLAN_INCLUDED_UNITS["starter"]["protectionunits"],
                     overage=0,
-                    unit=_UNIT_LABELS["guardedexecutions"],
-                    status="healthy",
-                ),
-                BillingUsageBucketView(
-                    metric="manualreviews",
-                    used=620,
-                    included=_PLAN_INCLUDED_UNITS["starter"]["manualreviews"],
-                    overage=0,
-                    unit=_UNIT_LABELS["manualreviews"],
-                    status="warning",
-                ),
-                BillingUsageBucketView(
-                    metric="securityalerts",
-                    used=2010,
-                    included=_PLAN_INCLUDED_UNITS["starter"]["securityalerts"],
-                    overage=0,
-                    unit=_UNIT_LABELS["securityalerts"],
+                    unit=_UNIT_LABELS["protectionunits"],
                     status="warning",
                 ),
             ],
@@ -218,28 +181,12 @@ def _sample_packages() -> list[BillingPackageView]:
             planchangeurl=_plan_change_url("enterprise"),
             usage=[
                 BillingUsageBucketView(
-                    metric="guardedexecutions",
-                    used=271400,
-                    included=_PLAN_INCLUDED_UNITS["enterprise"]["guardedexecutions"],
-                    overage=21400,
-                    unit=_UNIT_LABELS["guardedexecutions"],
+                    metric="protectionunits",
+                    used=61_200,
+                    included=_PLAN_INCLUDED_UNITS["enterprise"]["protectionunits"],
+                    overage=1_200,
+                    unit=_UNIT_LABELS["protectionunits"],
                     status="critical",
-                ),
-                BillingUsageBucketView(
-                    metric="manualreviews",
-                    used=26110,
-                    included=_PLAN_INCLUDED_UNITS["enterprise"]["manualreviews"],
-                    overage=1110,
-                    unit=_UNIT_LABELS["manualreviews"],
-                    status="critical",
-                ),
-                BillingUsageBucketView(
-                    metric="securityalerts",
-                    used=41200,
-                    included=_PLAN_INCLUDED_UNITS["enterprise"]["securityalerts"],
-                    overage=0,
-                    unit=_UNIT_LABELS["securityalerts"],
-                    status="healthy",
                 ),
             ],
         ),
@@ -257,9 +204,9 @@ def _sample_invoices() -> list[BillingInvoiceView]:
             dueat=_utc_iso(2026, 4, 17, 9, 5),
             periodstart=_utc_iso(2026, 4, 1, 0, 0),
             periodend=_utc_iso(2026, 4, 30, 23, 59),
-            subtotal=_usd(29900),
+            subtotal=_usd(_PLAN_PRICES_CENTS["team"]),
             tax=_usd(0),
-            total=_usd(29900),
+            total=_usd(_PLAN_PRICES_CENTS["team"]),
         ),
         BillingInvoiceView(
             invoiceid="inv-002",
@@ -270,9 +217,9 @@ def _sample_invoices() -> list[BillingInvoiceView]:
             dueat=_utc_iso(2026, 4, 26, 14, 25),
             periodstart=_utc_iso(2026, 4, 12, 0, 0),
             periodend=_utc_iso(2026, 5, 11, 23, 59),
-            subtotal=_usd(9900),
+            subtotal=_usd(_PLAN_PRICES_CENTS["starter"]),
             tax=_usd(0),
-            total=_usd(9900),
+            total=_usd(_PLAN_PRICES_CENTS["starter"]),
         ),
         BillingInvoiceView(
             invoiceid="inv-003",
@@ -283,9 +230,9 @@ def _sample_invoices() -> list[BillingInvoiceView]:
             dueat=_utc_iso(2026, 4, 15, 8, 50),
             periodstart=_utc_iso(2026, 4, 1, 0, 0),
             periodend=_utc_iso(2026, 4, 30, 23, 59),
-            subtotal=_usd(149900),
+            subtotal=_usd(_PLAN_PRICES_CENTS["enterprise"]),
             tax=_usd(0),
-            total=_usd(149900),
+            total=_usd(_PLAN_PRICES_CENTS["enterprise"]),
         ),
     ]
 
@@ -323,7 +270,7 @@ def get_billing_overview() -> BillingOverviewResponse:
         BillingKpiView(
             label="activepackages",
             value=activepackages,
-            trendlabel="Organizations with active subscriptions",
+            trendlabel="Organizations with active prepaid packages",
             status="healthy" if activepackages > 0 else "warning",
         ),
         BillingKpiView(
@@ -356,13 +303,13 @@ def get_billing_overview() -> BillingOverviewResponse:
         packages=packages,
         invoices=invoices,
         notes=[
-            "Billing overview exposes subscription state, canonical plan data, usage against plan limits, and invoice lifecycle visibility.",
-            "Plan names (starter, pro, enterprise) and included unit counts match the canonical plan catalog at /ui/billing/plan-change.",
-            "planchangeurl on each package provides a direct link to the plan-change surface for that organization's current plan.",
+            "Billing overview exposes prepaid package state, package pricing, usage against included unit limits, and invoice lifecycle visibility.",
+            "Package pricing is Starter $20 for 5,000 units, Team $90 for 25,000 units, and Enterprise $180 for 60,000 units.",
+            f"Each protection unit covers up to {_TOKENS_PER_UNIT:,} tokens; larger token volumes consume additional units in {_TOKENS_PER_UNIT:,}-token chunks.",
+            "planchangeurl on each package provides a direct link to the plan-change surface for that organization's current package.",
             "overallstatus is 'attention' when any package is past_due, 'notice' when any package is trialing, 'healthy' otherwise.",
             "totalrevenuecents KPI counts paid invoices only — draft and past_due invoices are excluded.",
             "Dedicated invoice list surface available at /ui/billing/invoices.",
             "All values are placeholder UI contract data for the current local-first Gen1 build.",
-            "This page is ready to be wired to live billing providers, metering pipelines, and package enforcement services.",
         ],
     )

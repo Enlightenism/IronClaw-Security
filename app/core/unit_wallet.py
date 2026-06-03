@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import logging
+import math
 import os
 from threading import Lock
 from typing import Any
@@ -16,38 +17,76 @@ class InsufficientUnitsError(ValueError):
 
 
 # ---------------------------------------------------------------------------
+# Token-to-unit coverage constants
+#
+# Each protection unit covers one inspection window of up to TOKEN_CHUNK_SIZE
+# tokens. Any request exceeding the boundary consumes one additional unit
+# per additional chunk (ceiling division).
+#
+# Coverage rule:
+#   units_required = ceil(token_count / TOKEN_CHUNK_SIZE)
+#
+# Examples:
+#   1 token       → 1 unit
+#   25_000 tokens → 1 unit
+#   25_001 tokens → 2 units
+#   50_000 tokens → 2 units
+#   50_001 tokens → 3 units
+# ---------------------------------------------------------------------------
+
+
+TOKEN_CHUNK_SIZE: int = 25_000
+
+
+def units_required_for_tokens(token_count: int) -> int:
+    """Return the number of protection units required to cover *token_count* tokens.
+
+    Uses ceiling division so any partial chunk above a boundary consumes a
+    full additional unit. Returns 0 for non-positive token counts.
+    """
+    if token_count <= 0:
+        return 0
+    return math.ceil(token_count / TOKEN_CHUNK_SIZE)
+
+
+# ---------------------------------------------------------------------------
 # Canonical package catalog — derived from billing.PLAN_DEFINITIONS
 # Single source of truth: billing.py owns plan codes + limits + prices.
 # unit_wallet.py maps them to purchasable package records.
+#
+# Authoritative package IDs and pricing:
+#   pkg_5000   — Starter    —  5,000 units — $20.00
+#   pkg_25000  — Team       — 25,000 units — $90.00
+#   pkg_60000  — Enterprise — 60,000 units — $180.00
 # ---------------------------------------------------------------------------
 
 
 def _build_package_catalog() -> dict[str, dict[str, Any]]:
-    """
-    Derive the unit package catalog from billing.PLAN_DEFINITIONS.
+    """Derive the unit package catalog from billing.PLAN_DEFINITIONS.
+
     Keeps unit_wallet.py in sync with billing.py automatically.
-    Falls back to hardcoded values only if billing import fails (should never happen).
+    Falls back to hardcoded values only if billing import fails.
     """
     try:
         from app.core.billing import PLAN_DEFINITIONS
 
         _PKG_META: dict[str, dict[str, str]] = {
-            "starter-10k": {
-                "package_id": "pkg_10000",
+            "starter-5k": {
+                "package_id": "pkg_5000",
                 "name": "Starter",
-                "display_label": "10,000 units — $20.00",
+                "display_label": "5,000 units — $20.00",
                 "description": ("Prepaid protection units for individual builders who want guarded " "prompt handling, tool-call review, source inspection, and safe response release."),
             },
-            "team-50k": {
-                "package_id": "pkg_50000",
+            "team-25k": {
+                "package_id": "pkg_25000",
                 "name": "Team",
-                "display_label": "50,000 units — $90.00",
+                "display_label": "25,000 units — $90.00",
                 "description": ("Prepaid protection units for teams running higher volumes of AI-assisted " "development, research, and guarded agent workflows."),
             },
-            "enterprise-100k": {
-                "package_id": "pkg_100000",
+            "enterprise-60k": {
+                "package_id": "pkg_60000",
                 "name": "Enterprise",
-                "display_label": "100,000 units — $150.00",
+                "display_label": "60,000 units — $180.00",
                 "description": ("Prepaid protection units for organizations protecting large-scale agent " "operations, sensitive workflows, and high-frequency prompt activity."),
             },
         }
@@ -56,7 +95,10 @@ def _build_package_catalog() -> dict[str, dict[str, Any]]:
         for plan_code, plan_def in PLAN_DEFINITIONS.items():
             meta = _PKG_META.get(plan_code)
             if meta is None:
-                logger.warning("unit_wallet: no package metadata for plan_code=%r — skipping", plan_code)
+                logger.warning(
+                    "unit_wallet: no package metadata for plan_code=%r — skipping",
+                    plan_code,
+                )
                 continue
             pkg_id = meta["package_id"]
             catalog[pkg_id] = {
@@ -66,36 +108,41 @@ def _build_package_catalog() -> dict[str, dict[str, Any]]:
                 "price_usd": float(plan_def["price_usd"]),
                 "display_label": meta["display_label"],
                 "description": meta["description"],
+                "tokens_per_unit": TOKEN_CHUNK_SIZE,
             }
         return catalog
 
     except Exception:
-        logger.exception("unit_wallet: failed to derive catalog from billing.PLAN_DEFINITIONS; " "using hardcoded fallback")
-        # Hardcoded fallback — must match billing.PLAN_DEFINITIONS exactly
+        logger.exception(
+            "unit_wallet: failed to derive catalog from billing.PLAN_DEFINITIONS; using hardcoded fallback",
+        )
         return {
-            "pkg_10000": {
-                "package_id": "pkg_10000",
+            "pkg_5000": {
+                "package_id": "pkg_5000",
                 "name": "Starter",
-                "unit_amount": 10_000,
+                "unit_amount": 5_000,
                 "price_usd": 20.00,
-                "display_label": "10,000 units — $20.00",
+                "display_label": "5,000 units — $20.00",
                 "description": ("Prepaid protection units for individual builders who want guarded " "prompt handling, tool-call review, source inspection, and safe response release."),
+                "tokens_per_unit": TOKEN_CHUNK_SIZE,
             },
-            "pkg_50000": {
-                "package_id": "pkg_50000",
+            "pkg_25000": {
+                "package_id": "pkg_25000",
                 "name": "Team",
-                "unit_amount": 50_000,
+                "unit_amount": 25_000,
                 "price_usd": 90.00,
-                "display_label": "50,000 units — $90.00",
+                "display_label": "25,000 units — $90.00",
                 "description": ("Prepaid protection units for teams running higher volumes of AI-assisted " "development, research, and guarded agent workflows."),
+                "tokens_per_unit": TOKEN_CHUNK_SIZE,
             },
-            "pkg_100000": {
-                "package_id": "pkg_100000",
+            "pkg_60000": {
+                "package_id": "pkg_60000",
                 "name": "Enterprise",
-                "unit_amount": 100_000,
-                "price_usd": 150.00,
-                "display_label": "100,000 units — $150.00",
+                "unit_amount": 60_000,
+                "price_usd": 180.00,
+                "display_label": "60,000 units — $180.00",
                 "description": ("Prepaid protection units for organizations protecting large-scale agent " "operations, sensitive workflows, and high-frequency prompt activity."),
+                "tokens_per_unit": TOKEN_CHUNK_SIZE,
             },
         }
 
@@ -109,17 +156,18 @@ UNIT_PACKAGE_CATALOG: dict[str, dict[str, Any]] = _build_package_catalog()
 
 
 _EXPECTED_PACKAGES = {
-    "pkg_10000": (10_000, 20.00),
-    "pkg_50000": (50_000, 90.00),
-    "pkg_100000": (100_000, 150.00),
+    "pkg_5000": (5_000, 20.00),
+    "pkg_25000": (25_000, 90.00),
+    "pkg_60000": (60_000, 180.00),
 }
 
 
 for _pkg_id, (_expected_units, _expected_price) in _EXPECTED_PACKAGES.items():
     _entry = UNIT_PACKAGE_CATALOG.get(_pkg_id)
     assert _entry is not None, f"unit_wallet: UNIT_PACKAGE_CATALOG is missing required package {_pkg_id!r}"
-    assert _entry["unit_amount"] == _expected_units, f"unit_wallet: {_pkg_id} unit_amount mismatch: " f"got {_entry['unit_amount']}, expected {_expected_units}"
-    assert _entry["price_usd"] == _expected_price, f"unit_wallet: {_pkg_id} price_usd mismatch: " f"got {_entry['price_usd']}, expected {_expected_price}"
+    assert _entry["unit_amount"] == _expected_units, f"unit_wallet: {_pkg_id} unit_amount mismatch: got {_entry['unit_amount']}, expected {_expected_units}"
+    assert _entry["price_usd"] == _expected_price, f"unit_wallet: {_pkg_id} price_usd mismatch: got {_entry['price_usd']}, expected {_expected_price}"
+    assert _entry["tokens_per_unit"] == TOKEN_CHUNK_SIZE, f"unit_wallet: {_pkg_id} tokens_per_unit mismatch: got {_entry['tokens_per_unit']}, expected {TOKEN_CHUNK_SIZE}"
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +252,33 @@ class UnitWallet:
         self.transactions.append(transaction)
         return transaction
 
+    def consume_units_for_tokens(
+        self,
+        token_count: int,
+        source: str,
+        reference_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> UnitWalletTransaction:
+        """Consume the correct number of units to cover *token_count* tokens.
+
+        Calculates required units via ceiling division against TOKEN_CHUNK_SIZE
+        then delegates to consume_units. Raises InsufficientUnitsError if
+        the wallet does not have enough units to cover the full token payload.
+        """
+        required = units_required_for_tokens(token_count)
+        combined_metadata = {
+            "token_count": token_count,
+            "tokens_per_unit": TOKEN_CHUNK_SIZE,
+            "units_required": required,
+            **(metadata or {}),
+        }
+        return self.consume_units(
+            units=required,
+            source=source,
+            reference_id=reference_id,
+            metadata=combined_metadata,
+        )
+
     def refund_units(
         self,
         units: int,
@@ -259,7 +334,6 @@ class RegistryUnitLedgerEntry:
 
 class SupabaseUnitWalletRepository:
     """Durable wallet + ledger persistence via Supabase.
-
 
     Table contracts expected in Supabase:
       unit_wallets  (wallet_id, owner_key, balance_units,
@@ -424,11 +498,11 @@ def _make_repo() -> SupabaseUnitWalletRepository | MemoryUnitWalletRepository:
 class UnitWalletRegistry:
     """Prepaid unit wallet registry with pluggable persistence backend.
 
-
     Supports:
     - creating or resolving a wallet for an owner,
     - crediting units after a package purchase,
     - debiting units as protection events are consumed,
+    - debiting the correct number of units for a given token count,
     - returning a compact ledger for UI and billing routes.
     """
 
@@ -458,7 +532,6 @@ class UnitWalletRegistry:
             return existing
 
         with self._lock:
-            # Re-check after acquiring lock to prevent double-creation
             wallet_id = self._wallets_by_owner.get(normalized_owner)
             if wallet_id is not None:
                 return self._wallets[wallet_id]
@@ -533,6 +606,34 @@ class UnitWalletRegistry:
         self._repo.upsert_wallet(wallet)
         self._repo.append_ledger_entry(entry)
         return wallet
+
+    def debit_units_for_tokens(
+        self,
+        owner_key: str,
+        token_count: int,
+        metadata: dict[str, Any] | None = None,
+    ) -> tuple[RegistryUnitWallet, int]:
+        """Debit the correct number of units to cover *token_count* tokens.
+
+        Uses ceiling division against TOKEN_CHUNK_SIZE. Returns the updated
+        wallet and the number of units actually debited.
+
+        Raises InsufficientUnitsError if the wallet cannot cover the full
+        token payload.
+        """
+        required = units_required_for_tokens(token_count)
+        combined_metadata = {
+            "token_count": token_count,
+            "tokens_per_unit": TOKEN_CHUNK_SIZE,
+            "units_required": required,
+            **(metadata or {}),
+        }
+        wallet = self.debit_units(
+            owner_key=owner_key,
+            units=required,
+            metadata=combined_metadata,
+        )
+        return wallet, required
 
     def refund_units(
         self,

@@ -53,18 +53,23 @@ class BillingRegistryResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+_TOKENS_PER_UNIT = 25_000
+_ORDERED_PACKAGE_IDS = ["pkg_5000", "pkg_25000", "pkg_60000"]
+_FEATURED_PACKAGE_ID = "pkg_25000"
+
+
 def _build_packages() -> list[BillingRegistryPackageView]:
-    ordered_package_ids = ["single-user", "team-security", "enterprise-security"]
     packages: list[BillingRegistryPackageView] = []
 
-    for package_id in ordered_package_ids:
+    for package_id in _ORDERED_PACKAGE_IDS:
         package = PACKAGE_CATALOG.get(package_id)
         if package is None:
             continue
 
         price_usd = float(package["price_usd"])
         included_units = int(package["included_units"])
-        unit_price_per_1k = round((price_usd / included_units) * 1000, 4)
+        unit_price_per_1k = round((price_usd / included_units) * 1000, 4) if included_units > 0 else 0.0
+        display_label = str(package.get("display_label", f"{included_units:,} units — ${price_usd:.2f}"))
 
         packages.append(
             BillingRegistryPackageView(
@@ -76,8 +81,10 @@ def _build_packages() -> list[BillingRegistryPackageView]:
                 metadata={
                     "price_display": f"${price_usd:.2f}",
                     "units_display": f"{included_units:,} units",
+                    "display_label": display_label,
                     "effective_price_per_1k_units": unit_price_per_1k,
-                    "featured": package_id == "team-security",
+                    "featured": package_id == _FEATURED_PACKAGE_ID,
+                    "tokens_per_unit": _TOKENS_PER_UNIT,
                 },
             ),
         )
@@ -92,7 +99,7 @@ def _build_summary(packages: list[BillingRegistryPackageView]) -> BillingRegistr
             lowest_price_usd=0.0,
             highest_price_usd=0.0,
             total_available_units=0,
-            featured_package_id="team-security",
+            featured_package_id=_FEATURED_PACKAGE_ID,
             currency="USD",
             model="prepaid-protection-units",
         )
@@ -102,7 +109,7 @@ def _build_summary(packages: list[BillingRegistryPackageView]) -> BillingRegistr
         lowest_price_usd=min(package.price_usd for package in packages),
         highest_price_usd=max(package.price_usd for package in packages),
         total_available_units=sum(package.included_units for package in packages),
-        featured_package_id="team-security",
+        featured_package_id=_FEATURED_PACKAGE_ID,
         currency="USD",
         model="prepaid-protection-units",
     )
@@ -110,7 +117,6 @@ def _build_summary(packages: list[BillingRegistryPackageView]) -> BillingRegistr
 
 def _build_routes() -> list[BillingRegistryRouteView]:
     return [
-        # --- API routes (authenticated) ---
         BillingRegistryRouteView(
             name="List billing packages",
             method="GET",
@@ -135,7 +141,6 @@ def _build_routes() -> list[BillingRegistryRouteView]:
             path="/billing/ledger",
             purpose="Returns wallet ledger activity with optional owner filtering.",
         ),
-        # --- UI billing routes (no API key required) ---
         BillingRegistryRouteView(
             name="UI billing index",
             method="GET",
@@ -230,14 +235,15 @@ def get_billing_registry() -> BillingRegistryResponse:
         routes=routes,
         notes=[
             "Billing is modeled as prepaid protection-unit bundles.",
-            "Available package pricing is $20 for 20,000 units, $90 for 100,000 units, and $150 for 200,000 units.",
-            "Team Security is the featured package for balanced ongoing usage.",
+            "Available package pricing is $20 for 5,000 units, $90 for 25,000 units, and $180 for 60,000 units.",
+            "Each protection unit covers up to 25,000 tokens; larger token volumes consume additional units in 25,000-token chunks.",
+            "Team is the featured package for balanced ongoing usage.",
             "All active billing API and UI routes are enumerated here for full system discoverability.",
             "requires_api_key=False denotes UI-layer routes served without an API key requirement.",
         ],
         metadata={
             "source_catalog": "app.api.routes.billing.PACKAGE_CATALOG",
-            "featured_package_id": "team-security",
+            "featured_package_id": _FEATURED_PACKAGE_ID,
             "route_count": len(routes),
         },
     )

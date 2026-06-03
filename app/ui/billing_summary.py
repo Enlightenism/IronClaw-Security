@@ -49,18 +49,23 @@ class BillingSummaryResponse(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+_TOKENS_PER_UNIT = 25_000
+_ORDERED_PACKAGE_IDS = ["pkg_5000", "pkg_25000", "pkg_60000"]
+_FEATURED_PACKAGE_ID = "pkg_25000"
+
+
 def _build_packages() -> list[BillingSummaryPackageView]:
-    ordered_package_ids = ["single-user", "team-security", "enterprise-security"]
-    featured_package_id = "team-security"
     packages: list[BillingSummaryPackageView] = []
 
-    for package_id in ordered_package_ids:
+    for package_id in _ORDERED_PACKAGE_IDS:
         package = PACKAGE_CATALOG.get(package_id)
         if package is None:
             continue
 
         price_usd = float(package["price_usd"])
         included_units = int(package["included_units"])
+        effective_price_per_1k_units = round((price_usd / included_units) * 1000, 4) if included_units > 0 else 0.0
+        display_label = str(package.get("display_label", f"{included_units:,} units — ${price_usd:.2f}"))
 
         packages.append(
             BillingSummaryPackageView(
@@ -68,11 +73,13 @@ def _build_packages() -> list[BillingSummaryPackageView]:
                 name=str(package["name"]),
                 price_usd=price_usd,
                 included_units=included_units,
-                featured=package_id == featured_package_id,
+                featured=package_id == _FEATURED_PACKAGE_ID,
                 metadata={
                     "price_display": f"${price_usd:.2f}",
                     "units_display": f"{included_units:,} units",
-                    "effective_price_per_1k_units": round((price_usd / included_units) * 1000, 4),
+                    "display_label": display_label,
+                    "effective_price_per_1k_units": effective_price_per_1k_units,
+                    "tokens_per_unit": _TOKENS_PER_UNIT,
                 },
             ),
         )
@@ -85,14 +92,14 @@ def _build_kpis(packages: list[BillingSummaryPackageView]) -> list[BillingSummar
         return []
 
     featured = next((package for package in packages if package.featured), packages[0])
-    lowest = min(package.price_usd for package in packages)
+    lowest_package = min(packages, key=lambda package: package.price_usd)
     highest_units = max(package.included_units for package in packages)
 
     return [
         BillingSummaryKpiView(
             label="Entry price",
-            value=f"${lowest:.2f}",
-            detail="Starts with 10,000 prepaid protection units.",
+            value=f"${lowest_package.price_usd:.2f}",
+            detail=f"Starts with {lowest_package.included_units:,} prepaid protection units.",
             metadata={"kind": "entry-price"},
         ),
         BillingSummaryKpiView(
@@ -150,8 +157,9 @@ def get_billing_summary() -> BillingSummaryResponse:
         links=_build_links(),
         notes=[
             "Billing is sold as prepaid protection-unit bundles.",
-            "Current package pricing is $20 for 10,000 units, $90 for 50,000 units, and $150 for 100,000 units.",
-            "Team Security is the featured package for balanced usage growth.",
+            "Current package pricing is $20 for 5,000 units, $90 for 25,000 units, and $180 for 60,000 units.",
+            "Each protection unit covers up to 25,000 tokens; larger token volumes consume additional units in 25,000-token chunks.",
+            "Team is the featured package for balanced usage growth.",
             "Billing summary now links directly to the wallet-facing UI surface.",
         ],
     )

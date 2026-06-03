@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Body, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
+from app.core.billing import TOKENS_PER_UNIT
 from app.core.unit_wallet import RegistryUnitLedgerEntry, UnitWalletRegistry, get_unit_wallet_registry
 
 router = APIRouter(prefix="/billing-purchase", tags=["billing-purchase"])
@@ -13,11 +14,6 @@ router = APIRouter(prefix="/billing-purchase", tags=["billing-purchase"])
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
-
-# ---------------------------------------------------------------------------
-# Request
-# ---------------------------------------------------------------------------
 
 
 class BillingPurchaseRequest(BaseModel):
@@ -36,11 +32,6 @@ class BillingPurchaseRequest(BaseModel):
     @classmethod
     def normalize_source(cls, v: str) -> str:
         return v.strip()
-
-
-# ---------------------------------------------------------------------------
-# Response shapes
-# ---------------------------------------------------------------------------
 
 
 class BillingPurchaseLedgerEntryView(BaseModel):
@@ -72,11 +63,6 @@ class BillingPurchaseResponse(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _entry_to_view(entry: RegistryUnitLedgerEntry) -> BillingPurchaseLedgerEntryView:
     return BillingPurchaseLedgerEntryView(
         entry_id=entry.entry_id,
@@ -92,11 +78,6 @@ def _entry_to_view(entry: RegistryUnitLedgerEntry) -> BillingPurchaseLedgerEntry
 
 def _get_registry() -> UnitWalletRegistry:
     return get_unit_wallet_registry()
-
-
-# ---------------------------------------------------------------------------
-# Route
-# ---------------------------------------------------------------------------
 
 
 @router.post(
@@ -117,6 +98,7 @@ def purchase_units(
             units=payload.units,
             metadata={
                 "source": payload.source,
+                "tokens_per_unit": TOKENS_PER_UNIT,
                 **({"reference_id": payload.reference_id} if payload.reference_id else {}),
                 **payload.metadata,
             },
@@ -151,6 +133,7 @@ def purchase_units(
         ),
         notes=[
             "Units have been credited to the wallet balance immediately.",
+            f"Each protection unit covers up to {TOKENS_PER_UNIT:,} tokens; larger token volumes consume additional units in {TOKENS_PER_UNIT:,}-token chunks.",
             "Use GET /ui/billing-wallet to inspect the full ledger history.",
             "The ledger_entry.entry_type will always be 'credit' for purchase operations.",
         ],

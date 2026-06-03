@@ -12,20 +12,21 @@ SUPABASE_TIMEOUT_SECONDS = 15.0
 
 # ---------------------------------------------------------------------------
 # Billing tier constants — single source of truth for unit pricing
-# 10,000 units  → $20 USD
-# 50,000 units  → $90 USD
-# 100,000 units → $150 USD
+# 5,000 units  → $20 USD
+# 25,000 units → $90 USD
+# 60,000 units → $180 USD
+# Each protection unit covers up to 25,000 tokens.
 # ---------------------------------------------------------------------------
-BILLING_TIER_10K_UNITS: int = 10_000
-BILLING_TIER_10K_PRICE_USD: int = 20
+TOKENS_PER_UNIT: int = 25_000
 
+BILLING_TIER_5K_UNITS: int = 5_000
+BILLING_TIER_5K_PRICE_USD: int = 20
 
-BILLING_TIER_50K_UNITS: int = 50_000
-BILLING_TIER_50K_PRICE_USD: int = 90
+BILLING_TIER_25K_UNITS: int = 25_000
+BILLING_TIER_25K_PRICE_USD: int = 90
 
-
-BILLING_TIER_100K_UNITS: int = 100_000
-BILLING_TIER_100K_PRICE_USD: int = 150
+BILLING_TIER_60K_UNITS: int = 60_000
+BILLING_TIER_60K_PRICE_USD: int = 180
 
 
 class SupabaseClientError(RuntimeError):
@@ -106,11 +107,6 @@ def is_supabase_configured() -> bool:
         os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY") or os.getenv("IRONCLAW_SUPABASE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
     )
     return bool(url and key and url.startswith(("http://", "https://")))
-
-
-# ---------------------------------------------------------------------------
-# Fluent query builder
-# ---------------------------------------------------------------------------
 
 
 class _QueryBuilder:
@@ -325,9 +321,6 @@ class _QueryBuilder:
         headers = self._build_headers()
         url = f"{self._client.config.rest_url}/{self._table}"
 
-        # For GET: always pass params (contains "select" + any filters).
-        # For mutating methods: pass params only when filters are present
-        # (PostgREST requires filter params on the query string for PATCH/DELETE).
         send_params: dict[str, Any] | None = params if (self._method == "GET" or self._has_filters()) else None
 
         try:
@@ -372,11 +365,6 @@ class _Response:
     def __init__(self, data: Any, count: int | None) -> None:
         self.data = data
         self.count = count
-
-
-# ---------------------------------------------------------------------------
-# Main client
-# ---------------------------------------------------------------------------
 
 
 class SupabaseClient:
@@ -513,9 +501,9 @@ class SupabaseClient:
         )
 
         if isinstance(result, list):
-            return result  # type: ignore[return-value]
+            return result
         if isinstance(result, dict):
-            return [result]  # type: ignore[return-value]
+            return [result]
         if result is None:
             return []
 
@@ -546,9 +534,9 @@ class SupabaseClient:
         )
 
         if isinstance(result, list):
-            return result  # type: ignore[return-value]
+            return result
         if isinstance(result, dict):
-            return [result]  # type: ignore[return-value]
+            return [result]
         if result is None:
             return []
 
@@ -583,9 +571,9 @@ class SupabaseClient:
         )
 
         if isinstance(result, list):
-            return result  # type: ignore[return-value]
+            return result
         if isinstance(result, dict):
-            return [result]  # type: ignore[return-value]
+            return [result]
         if result is None:
             return []
 
@@ -615,9 +603,9 @@ class SupabaseClient:
         )
 
         if isinstance(result, list):
-            return result  # type: ignore[return-value]
+            return result
         if isinstance(result, dict):
-            return [result]  # type: ignore[return-value]
+            return [result]
         if result is None:
             return []
 
@@ -676,5 +664,4 @@ def createsupabaseclient(
     return create_supabase_client(timeout=timeout, session=session)
 
 
-# Alias for backward compatibility
 supabaseclient = get_supabase_client

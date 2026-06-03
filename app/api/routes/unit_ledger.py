@@ -25,10 +25,11 @@ def _utc_now_iso() -> str:
 
 LedgerEntryType = Literal["purchase", "debit", "credit", "adjustment", "refund"]
 
+
 # ---------------------------------------------------------------------------
 # Canonical package pricing — single source of truth for this module.
 # ---------------------------------------------------------------------------
-_PACKAGE_PRICING_NOTE = "Package pricing: 10,000 units for $20.00 USD | " "50,000 units for $90.00 USD | " "100,000 units for $150.00 USD."
+_PACKAGE_PRICING_NOTE = "Package pricing: 5,000 units for $20.00 USD | " "25,000 units for $90.00 USD | " "60,000 units for $180.00 USD."
 
 
 # ---------------------------------------------------------------------------
@@ -82,11 +83,11 @@ class UnitLedgerDetailResponse(BaseModel):
 # Corrected canonical sample ledger (fallback when Supabase is unavailable).
 # balance_after chain (ascending from ledger_001):
 #   ledger_001: start 6,200 debit → balance 0
-#   ledger_002: +50,000 purchase → balance 50,000
-#   ledger_003: -600 debit → balance 49,400
-#   ledger_004: +1,200 adjustment → balance 50,600
-#   ledger_005: +100,000 purchase → balance 150,600
-#   ledger_006: -880 debit → balance 149,720
+#   ledger_002: +25,000 purchase → balance 25,000
+#   ledger_003: -600 debit → balance 24,400
+#   ledger_004: +1,200 adjustment → balance 25,600
+#   ledger_005: +60,000 purchase → balance 85,600
+#   ledger_006: -880 debit → balance 84,720
 # ---------------------------------------------------------------------------
 _SAMPLE_LEDGER: list[UnitLedgerItem] = [
     UnitLedgerItem(
@@ -94,55 +95,65 @@ _SAMPLE_LEDGER: list[UnitLedgerItem] = [
         timestamp="2026-04-22T18:10:00Z",
         entry_type="debit",
         units=-880,
-        balance_after=149_720,
+        balance_after=84_720,
         amount_usd=None,
         description="Usage debit for guarded execution, telemetry, and prompt protection traffic.",
         reference_id="usage_evt_006",
-        metadata={"request_count": 22, "route_group": "guard"},
+        metadata={"request_count": 22, "route_group": "guard", "tokens_per_unit": 25_000},
     ),
     UnitLedgerItem(
         entry_id="ledger_005",
         timestamp="2026-04-22T17:42:00Z",
         entry_type="purchase",
-        units=100_000,
-        balance_after=150_600,
-        amount_usd=150.0,
+        units=60_000,
+        balance_after=85_600,
+        amount_usd=180.0,
         description="Package purchase credited to wallet.",
         reference_id="order_005",
-        metadata={"package_id": "pkg_100000", "package_name": "100,000 Units", "quantity": 1},
+        metadata={
+            "package_id": "pkg_60000",
+            "package_name": "Enterprise",
+            "quantity": 1,
+            "tokens_per_unit": 25_000,
+        },
     ),
     UnitLedgerItem(
         entry_id="ledger_004",
         timestamp="2026-04-22T16:15:00Z",
         entry_type="adjustment",
         units=1_200,
-        balance_after=50_600,
+        balance_after=25_600,
         amount_usd=None,
         description="Manual unit adjustment applied for account reconciliation.",
         reference_id="adj_004",
-        metadata={"reason": "reconciliation", "approved_by": "system"},
+        metadata={"reason": "reconciliation", "approved_by": "system", "tokens_per_unit": 25_000},
     ),
     UnitLedgerItem(
         entry_id="ledger_003",
         timestamp="2026-04-22T15:25:00Z",
         entry_type="debit",
         units=-600,
-        balance_after=49_400,
+        balance_after=24_400,
         amount_usd=None,
         description="Usage debit for scan, policy evaluation, and execution traffic.",
         reference_id="usage_evt_003",
-        metadata={"request_count": 16, "route_group": "scan"},
+        metadata={"request_count": 16, "route_group": "scan", "tokens_per_unit": 25_000},
     ),
     UnitLedgerItem(
         entry_id="ledger_002",
         timestamp="2026-04-22T14:50:00Z",
         entry_type="purchase",
-        units=50_000,
-        balance_after=50_000,
+        units=25_000,
+        balance_after=25_000,
         amount_usd=90.0,
         description="Package purchase credited to wallet.",
         reference_id="order_002",
-        metadata={"package_id": "pkg_50000", "package_name": "50,000 Units", "quantity": 1},
+        metadata={
+            "package_id": "pkg_25000",
+            "package_name": "Team",
+            "quantity": 1,
+            "tokens_per_unit": 25_000,
+        },
     ),
     UnitLedgerItem(
         entry_id="ledger_001",
@@ -153,7 +164,7 @@ _SAMPLE_LEDGER: list[UnitLedgerItem] = [
         amount_usd=None,
         description="Usage debit for prior execution, audit, and review activity.",
         reference_id="usage_evt_001",
-        metadata={"request_count": 125, "route_group": "ui"},
+        metadata={"request_count": 125, "route_group": "ui", "tokens_per_unit": 25_000},
     ),
 ]
 
@@ -201,7 +212,7 @@ def _fetch_from_supabase(
     except SupabaseAPIError as exc:
         logger.warning("unit_ledger Supabase query failed: %s", exc)
         return None
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("unit_ledger unexpected db error: %s", exc)
         return None
 
@@ -216,7 +227,7 @@ def _fetch_entry_from_supabase(entry_id: str) -> UnitLedgerItem | None:
     except SupabaseAPIError as exc:
         logger.warning("unit_ledger detail Supabase query failed: %s", exc)
         return None
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("unit_ledger detail unexpected db error: %s", exc)
         return None
 
@@ -256,7 +267,6 @@ def _build_totals(items: list[UnitLedgerItem], all_items: list[UnitLedgerItem]) 
         2,
     )
 
-    # current_balance derived from the full unfiltered set, not the filtered slice.
     current_balance_units = max(sum(item.units for item in all_items), 0)
 
     return UnitLedgerTotalsView(
@@ -297,7 +307,6 @@ def get_unit_ledger(
     using_live_data = db_items is not None
 
     if using_live_data:
-        # Supabase already applied filters + limit; fetch full unfiltered set for balance.
         all_items_raw = _fetch_from_supabase(None, None, 1000) or db_items
         filtered_items = db_items
         limited_items = db_items

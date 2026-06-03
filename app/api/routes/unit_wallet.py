@@ -29,6 +29,7 @@ class UnitPackageView(BaseModel):
     featured: bool = False
     description: str | None = None
     effective_price_per_1k_units: float = Field(ge=0)
+    tokens_per_unit: int = Field(ge=1)
 
 
 class UnitWalletBalanceView(BaseModel):
@@ -89,37 +90,40 @@ def _price_per_1k_units(price_usd: float, unit_count: int) -> float:
 
 _SAMPLE_PACKAGES: list[UnitPackageView] = [
     UnitPackageView(
-        package_id="pkg_10000",
-        name="10,000 Units",
-        unit_count=10_000,
+        package_id="pkg_5000",
+        name="Starter",
+        unit_count=5_000,
         price_usd=20.0,
         price_display="$20.00",
         active=True,
         featured=False,
         description="Entry package for light usage and initial production traffic.",
-        effective_price_per_1k_units=_price_per_1k_units(20.0, 10_000),
+        effective_price_per_1k_units=_price_per_1k_units(20.0, 5_000),
+        tokens_per_unit=25_000,
     ),
     UnitPackageView(
-        package_id="pkg_50000",
-        name="50,000 Units",
-        unit_count=50_000,
+        package_id="pkg_25000",
+        name="Team",
+        unit_count=25_000,
         price_usd=90.0,
         price_display="$90.00",
         active=True,
         featured=True,
         description="Best balance for growing workloads and regular operational usage.",
-        effective_price_per_1k_units=_price_per_1k_units(90.0, 50_000),
+        effective_price_per_1k_units=_price_per_1k_units(90.0, 25_000),
+        tokens_per_unit=25_000,
     ),
     UnitPackageView(
-        package_id="pkg_100000",
-        name="100,000 Units",
-        unit_count=100_000,
-        price_usd=150.0,
-        price_display="$150.00",
+        package_id="pkg_60000",
+        name="Enterprise",
+        unit_count=60_000,
+        price_usd=180.0,
+        price_display="$180.00",
         active=True,
         featured=False,
         description="High-volume prepaid package for heavier sustained usage.",
-        effective_price_per_1k_units=_price_per_1k_units(150.0, 100_000),
+        effective_price_per_1k_units=_price_per_1k_units(180.0, 60_000),
+        tokens_per_unit=25_000,
     ),
 ]
 
@@ -130,25 +134,26 @@ _SAMPLE_LEDGER: list[UnitLedgerItem] = [
         timestamp="2026-06-01T12:00:00Z",
         entry_type="debit",
         units=-640,
-        balance_after=49_360,
+        balance_after=24_360,
         amount_usd=None,
         description="Usage debit for guarded execution and prompt protection activity.",
         reference_id="usage_evt_003",
-        metadata={"request_count": 16},
+        metadata={"request_count": 16, "tokens_per_unit": 25_000},
     ),
     UnitLedgerItem(
         entry_id="ledger_002",
         timestamp="2026-06-01T11:00:00Z",
         entry_type="purchase",
-        units=50_000,
-        balance_after=50_000,
+        units=25_000,
+        balance_after=25_000,
         amount_usd=90.0,
         description="Package purchase credited to wallet.",
         reference_id="order_002",
         metadata={
-            "package_id": "pkg_50000",
-            "package_name": "50,000 Units",
-            "price_per_unit_usd": round(90.0 / 50_000, 6),
+            "package_id": "pkg_25000",
+            "package_name": "Team",
+            "price_per_unit_usd": round(90.0 / 25_000, 6),
+            "tokens_per_unit": 25_000,
         },
     ),
     UnitLedgerItem(
@@ -160,7 +165,7 @@ _SAMPLE_LEDGER: list[UnitLedgerItem] = [
         amount_usd=None,
         description="Usage debit for prior scan, review, and execution activity.",
         reference_id="usage_evt_001",
-        metadata={"request_count": 125},
+        metadata={"request_count": 125, "tokens_per_unit": 25_000},
     ),
 ]
 
@@ -211,7 +216,8 @@ def get_unit_wallet() -> UnitWalletResponse:
         recent_ledger=_SAMPLE_LEDGER,
         notes=[
             "Prepaid wallet model: units are purchased in fixed packages and consumed by usage.",
-            "Available packages are 10,000 units for $20.00 USD, 50,000 units for $90.00 USD, and 100,000 units for $150.00 USD.",
+            "Available packages are 5,000 units for $20.00 USD, 25,000 units for $90.00 USD, and 60,000 units for $180.00 USD.",
+            "Each unit protects and inspects up to 25,000 tokens; usage above that is charged in additional 25,000-token unit chunks.",
             "No recurring subscription state is tracked in this route.",
             "Current implementation returns in-memory sample data for UI scaffolding; Supabase persistence is the target backend.",
         ],
@@ -248,6 +254,7 @@ def purchase_units(payload: UnitPurchaseRequest) -> UnitPurchaseResponse:
             "package_name": package.name,
             "quantity": payload.quantity,
             "price_per_unit_usd": round(package.price_usd / package.unit_count, 6),
+            "tokens_per_unit": package.tokens_per_unit,
         },
     )
 

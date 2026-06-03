@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
+from app.core.billing import TOKENS_PER_UNIT
 from app.core.unit_wallet import get_unit_wallet_registry
 
 router = APIRouter(prefix="/billing-wallet", tags=["billing-wallet"])
@@ -53,6 +54,8 @@ class BillingWalletResponse(BaseModel):
 
 
 def _wallet_to_view(wallet: Any) -> BillingWalletBalanceView:
+    metadata = dict(getattr(wallet, "metadata", {}) or {})
+    metadata.setdefault("tokens_per_unit", TOKENS_PER_UNIT)
     return BillingWalletBalanceView(
         wallet_id=wallet.wallet_id,
         owner_key=wallet.owner_key,
@@ -60,18 +63,20 @@ def _wallet_to_view(wallet: Any) -> BillingWalletBalanceView:
         total_purchased_units=wallet.total_purchased_units,
         total_consumed_units=wallet.total_consumed_units,
         updated_at=wallet.updated_at.isoformat().replace("+00:00", "Z"),
-        metadata=wallet.metadata,
+        metadata=metadata,
     )
 
 
 def _ledger_entry_to_view(entry: Any) -> BillingWalletLedgerPreviewItem:
+    metadata = dict(getattr(entry, "metadata", {}) or {})
+    metadata.setdefault("tokens_per_unit", TOKENS_PER_UNIT)
     return BillingWalletLedgerPreviewItem(
         entry_id=entry.entry_id,
         entry_type=entry.entry_type,
         units=entry.units,
         balance_after=entry.balance_after,
         created_at=entry.created_at.isoformat().replace("+00:00", "Z"),
-        metadata=entry.metadata,
+        metadata=metadata,
     )
 
 
@@ -105,6 +110,7 @@ def get_billing_wallet(
         recent_entries=[_ledger_entry_to_view(entry) for entry in entries],
         notes=[
             "Billing wallet reflects prepaid protection-unit balance state for a specific owner key.",
+            "Each protection unit covers up to 25,000 tokens; larger token volumes consume additional units in 25,000-token chunks.",
             "Recent entries provide a lightweight preview of purchase and debit activity.",
             "Use the billing ledger routes for deeper wallet activity inspection.",
         ],

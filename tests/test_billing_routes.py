@@ -28,12 +28,12 @@ def test_billing_wallet_summary_returns_wallet_state() -> None:
     registry.credit_units(
         owner_key="customer-001",
         units=300,
-        metadata={"source": "starter-package"},
+        metadata={"source": "starter-package", "package_id": "pkg_5000"},
     )
     registry.debit_units(
         owner_key="customer-001",
         units=40,
-        metadata={"source": "usage-metering"},
+        metadata={"source": "usage-metering", "tokens_per_unit": 25_000},
     )
 
     client = TestClient(_build_app())
@@ -69,13 +69,13 @@ def test_billing_ledger_returns_recent_entries_for_owner() -> None:
     registry = get_unit_wallet_registry()
     registry.credit_units(
         owner_key="customer-ledger",
-        units=500,
-        metadata={"package": "growth"},
+        units=25_000,
+        metadata={"package": "team", "package_id": "pkg_25000"},
     )
     registry.debit_units(
         owner_key="customer-ledger",
         units=125,
-        metadata={"route": "/guard/execute"},
+        metadata={"route": "/guard/execute", "tokens_per_unit": 25_000},
     )
 
     client = TestClient(_build_app())

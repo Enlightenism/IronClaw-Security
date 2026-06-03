@@ -7,25 +7,27 @@ from fastapi.testclient import TestClient
 # Mirrors PACKAGE_CATALOG in app/api/routes/billing.py exactly.
 # ---------------------------------------------------------------------------
 
+
 _EXPECTED_PACKAGES: dict[str, dict] = {
-    "single-user": {
-        "name": "Single User",
+    "pkg_5000": {
+        "name": "Starter",
         "price_usd": 20.0,
-        "included_units": 10_000,
+        "included_units": 5_000,
     },
-    "team-security": {
-        "name": "Team Security",
+    "pkg_25000": {
+        "name": "Team",
         "price_usd": 90.0,
-        "included_units": 50_000,
+        "included_units": 25_000,
     },
-    "enterprise-security": {
-        "name": "Enterprise Security",
-        "price_usd": 150.0,
-        "included_units": 100_000,
+    "pkg_60000": {
+        "name": "Enterprise",
+        "price_usd": 180.0,
+        "included_units": 60_000,
     },
 }
 
-_FEATURED_PACKAGE_ID = "team-security"
+
+_FEATURED_PACKAGE_ID = "pkg_25000"
 
 
 # ---------------------------------------------------------------------------
@@ -190,31 +192,31 @@ def test_billing_manifest_all_expected_package_ids_present(test_client: TestClie
 def test_billing_manifest_single_user_exact_values(test_client: TestClient) -> None:
     response = test_client.get("/billing-manifest")
     pkg_map = {pkg["package_id"]: pkg for pkg in response.json()["pricing"]["packages"]}
-    assert "single-user" in pkg_map, "single-user package missing"
-    pkg = pkg_map["single-user"]
-    assert pkg["name"] == "Single User", f"Got name={pkg['name']!r}"
+    assert "pkg_5000" in pkg_map, "pkg_5000 package missing"
+    pkg = pkg_map["pkg_5000"]
+    assert pkg["name"] == "Starter", f"Got name={pkg['name']!r}"
     assert pkg["price_usd"] == 20.0, f"Got price_usd={pkg['price_usd']}"
-    assert pkg["included_units"] == 10_000, f"Got included_units={pkg['included_units']}"
+    assert pkg["included_units"] == 5_000, f"Got included_units={pkg['included_units']}"
 
 
 def test_billing_manifest_team_security_exact_values(test_client: TestClient) -> None:
     response = test_client.get("/billing-manifest")
     pkg_map = {pkg["package_id"]: pkg for pkg in response.json()["pricing"]["packages"]}
-    assert "team-security" in pkg_map, "team-security package missing"
-    pkg = pkg_map["team-security"]
-    assert pkg["name"] == "Team Security", f"Got name={pkg['name']!r}"
+    assert "pkg_25000" in pkg_map, "pkg_25000 package missing"
+    pkg = pkg_map["pkg_25000"]
+    assert pkg["name"] == "Team", f"Got name={pkg['name']!r}"
     assert pkg["price_usd"] == 90.0, f"Got price_usd={pkg['price_usd']}"
-    assert pkg["included_units"] == 50_000, f"Got included_units={pkg['included_units']}"
+    assert pkg["included_units"] == 25_000, f"Got included_units={pkg['included_units']}"
 
 
 def test_billing_manifest_enterprise_security_exact_values(test_client: TestClient) -> None:
     response = test_client.get("/billing-manifest")
     pkg_map = {pkg["package_id"]: pkg for pkg in response.json()["pricing"]["packages"]}
-    assert "enterprise-security" in pkg_map, "enterprise-security package missing"
-    pkg = pkg_map["enterprise-security"]
-    assert pkg["name"] == "Enterprise Security", f"Got name={pkg['name']!r}"
-    assert pkg["price_usd"] == 150.0, f"Got price_usd={pkg['price_usd']}"
-    assert pkg["included_units"] == 100_000, f"Got included_units={pkg['included_units']}"
+    assert "pkg_60000" in pkg_map, "pkg_60000 package missing"
+    pkg = pkg_map["pkg_60000"]
+    assert pkg["name"] == "Enterprise", f"Got name={pkg['name']!r}"
+    assert pkg["price_usd"] == 180.0, f"Got price_usd={pkg['price_usd']}"
+    assert pkg["included_units"] == 60_000, f"Got included_units={pkg['included_units']}"
 
 
 def test_billing_manifest_all_catalog_values_match_expected(test_client: TestClient) -> None:
@@ -258,6 +260,14 @@ def test_billing_manifest_each_package_metadata_has_effective_price_per_1k(test_
         assert "effective_price_per_1k_units" in meta, f"pricing.packages[{i}].metadata missing effective_price_per_1k_units"
         assert isinstance(meta["effective_price_per_1k_units"], (int, float))
         assert meta["effective_price_per_1k_units"] > 0
+
+
+def test_billing_manifest_each_package_metadata_has_tokens_per_unit(test_client: TestClient) -> None:
+    response = test_client.get("/billing-manifest")
+    for i, pkg in enumerate(response.json()["pricing"]["packages"]):
+        meta = pkg.get("metadata", {})
+        assert "tokens_per_unit" in meta, f"pricing.packages[{i}].metadata missing tokens_per_unit"
+        assert meta["tokens_per_unit"] == 25_000
 
 
 # ---------------------------------------------------------------------------

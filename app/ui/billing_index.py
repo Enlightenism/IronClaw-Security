@@ -52,29 +52,30 @@ class BillingIndexResponse(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
-_ORDERED_PACKAGE_IDS = ["pkg_10000", "pkg_50000", "pkg_100000"]
-_FEATURED_PACKAGE_ID = "pkg_50000"
+_TOKENS_PER_UNIT = 25_000
+_ORDERED_PACKAGE_IDS = ["pkg_5000", "pkg_25000", "pkg_60000"]
+_FEATURED_PACKAGE_ID = "pkg_25000"
 
 _PRICING_FALLBACK: dict[str, tuple[int, float, str, str, str]] = {
-    "pkg_10000": (
-        10_000,
+    "pkg_5000": (
+        5_000,
         20.00,
         "Starter",
-        "10,000 units — $20.00",
+        "5,000 units — $20.00",
         ("Prepaid protection units for individual builders who want guarded " "prompt handling, tool-call review, source inspection, and safe response release."),
     ),
-    "pkg_50000": (
-        50_000,
+    "pkg_25000": (
+        25_000,
         90.00,
         "Team",
-        "50,000 units — $90.00",
+        "25,000 units — $90.00",
         ("Prepaid protection units for teams running higher volumes of AI-assisted " "development, research, and guarded agent workflows."),
     ),
-    "pkg_100000": (
-        100_000,
-        150.00,
+    "pkg_60000": (
+        60_000,
+        180.00,
         "Enterprise",
-        "100,000 units — $150.00",
+        "60,000 units — $180.00",
         ("Prepaid protection units for organizations protecting large-scale agent " "operations, sensitive workflows, and high-frequency prompt activity."),
     ),
 }
@@ -113,6 +114,7 @@ def _build_packages() -> list[BillingIndexPackageView]:
                     "price_display": f"${price_usd:.2f}",
                     "units_display": f"{included_units:,} units",
                     "effective_price_per_1k_units": price_per_1k,
+                    "tokens_per_unit": _TOKENS_PER_UNIT,
                 },
             )
         )
@@ -212,8 +214,9 @@ def get_billing_index() -> BillingIndexResponse:
         links=links,
         notes=[
             "Billing is sold as prepaid protection-unit bundles.",
-            "Current package pricing: $20 for 10,000 units, $90 for 50,000 units, and $150 for 100,000 units.",
-            "Team (pkg_50000) is the featured package for balanced usage growth.",
+            "Current package pricing: $20 for 5,000 units, $90 for 25,000 units, and $180 for 60,000 units.",
+            "Each protection unit covers up to 25,000 tokens; larger token volumes consume additional units in 25,000-token chunks.",
+            "Team (pkg_25000) is the featured package for balanced usage growth.",
             "All active UI billing surfaces are enumerated in the links list for full discoverability.",
             "invoice_id in /ui/billing/invoices/{invoice_id} must be a valid invoice ID from the invoice list.",
         ],

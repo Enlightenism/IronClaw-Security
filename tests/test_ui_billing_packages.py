@@ -17,20 +17,20 @@ from app.core.errors import register_exception_handlers
 
 
 _EXPECTED_CATALOG: dict[str, dict] = {
-    "single-user": {
-        "name": "Single User",
+    "pkg_5000": {
+        "name": "Starter",
         "price_usd": 20.0,
-        "included_units": 10_000,
+        "included_units": 5_000,
     },
-    "team-security": {
-        "name": "Team Security",
+    "pkg_25000": {
+        "name": "Team",
         "price_usd": 90.0,
-        "included_units": 50_000,
+        "included_units": 25_000,
     },
-    "enterprise-security": {
-        "name": "Enterprise Security",
-        "price_usd": 150.0,
-        "included_units": 100_000,
+    "pkg_60000": {
+        "name": "Enterprise",
+        "price_usd": 180.0,
+        "included_units": 60_000,
     },
 }
 
@@ -161,11 +161,17 @@ def test_list_billing_packages_item_shape() -> None:
         assert "price_usd" in pkg
         assert "included_units" in pkg
         assert "description" in pkg
+        assert "display_label" in pkg
+        assert "token_coverage" in pkg
+        assert "tokens_per_unit" in pkg
         assert isinstance(pkg["package_id"], str)
         assert isinstance(pkg["name"], str)
         assert isinstance(pkg["price_usd"], float)
         assert isinstance(pkg["included_units"], int)
         assert isinstance(pkg["description"], str)
+        assert isinstance(pkg["display_label"], str)
+        assert isinstance(pkg["token_coverage"], int)
+        assert isinstance(pkg["tokens_per_unit"], int)
         assert pkg["price_usd"] > 0
         assert pkg["included_units"] > 0
 
@@ -192,34 +198,34 @@ def test_list_billing_packages_no_extra_package_ids_beyond_catalog() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_list_billing_packages_single_user_exact_values() -> None:
+def test_list_billing_packages_pkg_5000_exact_values() -> None:
     client = TestClient(_build_packages_app())
     pkg_map = _get_pkg_map(client)
-    assert "single-user" in pkg_map, "single-user package missing from response"
-    pkg = pkg_map["single-user"]
-    assert pkg["name"] == "Single User", f"Expected name='Single User', got {pkg['name']!r}"
+    assert "pkg_5000" in pkg_map, "pkg_5000 package missing from response"
+    pkg = pkg_map["pkg_5000"]
+    assert pkg["name"] == "Starter", f"Expected name='Starter', got {pkg['name']!r}"
     assert pkg["price_usd"] == 20.0, f"Expected price_usd=20.0, got {pkg['price_usd']}"
-    assert pkg["included_units"] == 10_000, f"Expected included_units=10000, got {pkg['included_units']}"
+    assert pkg["included_units"] == 5_000, f"Expected included_units=5000, got {pkg['included_units']}"
 
 
-def test_list_billing_packages_team_security_exact_values() -> None:
+def test_list_billing_packages_pkg_25000_exact_values() -> None:
     client = TestClient(_build_packages_app())
     pkg_map = _get_pkg_map(client)
-    assert "team-security" in pkg_map, "team-security package missing from response"
-    pkg = pkg_map["team-security"]
-    assert pkg["name"] == "Team Security", f"Expected name='Team Security', got {pkg['name']!r}"
+    assert "pkg_25000" in pkg_map, "pkg_25000 package missing from response"
+    pkg = pkg_map["pkg_25000"]
+    assert pkg["name"] == "Team", f"Expected name='Team', got {pkg['name']!r}"
     assert pkg["price_usd"] == 90.0, f"Expected price_usd=90.0, got {pkg['price_usd']}"
-    assert pkg["included_units"] == 50_000, f"Expected included_units=50000, got {pkg['included_units']}"
+    assert pkg["included_units"] == 25_000, f"Expected included_units=25000, got {pkg['included_units']}"
 
 
-def test_list_billing_packages_enterprise_security_exact_values() -> None:
+def test_list_billing_packages_pkg_60000_exact_values() -> None:
     client = TestClient(_build_packages_app())
     pkg_map = _get_pkg_map(client)
-    assert "enterprise-security" in pkg_map, "enterprise-security package missing from response"
-    pkg = pkg_map["enterprise-security"]
-    assert pkg["name"] == "Enterprise Security", f"Expected name='Enterprise Security', got {pkg['name']!r}"
-    assert pkg["price_usd"] == 150.0, f"Expected price_usd=150.0, got {pkg['price_usd']}"
-    assert pkg["included_units"] == 100_000, f"Expected included_units=100000, got {pkg['included_units']}"
+    assert "pkg_60000" in pkg_map, "pkg_60000 package missing from response"
+    pkg = pkg_map["pkg_60000"]
+    assert pkg["name"] == "Enterprise", f"Expected name='Enterprise', got {pkg['name']!r}"
+    assert pkg["price_usd"] == 180.0, f"Expected price_usd=180.0, got {pkg['price_usd']}"
+    assert pkg["included_units"] == 60_000, f"Expected included_units=60000, got {pkg['included_units']}"
 
 
 def test_list_billing_packages_all_catalog_values_match_expected() -> None:
@@ -248,17 +254,20 @@ def test_list_billing_packages_unit_policy_present() -> None:
     assert "unit_policy" in data
     policy = data["unit_policy"]
     assert "unit_definition" in policy
+    assert "token_chunk_size" in policy
     assert "delivery_model" in policy
     assert "buyer_positioning" in policy
     assert "protection_layers" in policy
     assert "market_context" in policy
     assert isinstance(policy["unit_definition"], str)
+    assert isinstance(policy["token_chunk_size"], int)
     assert isinstance(policy["delivery_model"], str)
     assert isinstance(policy["buyer_positioning"], str)
     assert isinstance(policy["protection_layers"], list)
     assert isinstance(policy["market_context"], list)
     assert len(policy["protection_layers"]) > 0
     assert len(policy["market_context"]) > 0
+    assert policy["token_chunk_size"] == 25_000
 
 
 def test_list_billing_packages_protection_layer_shape() -> None:

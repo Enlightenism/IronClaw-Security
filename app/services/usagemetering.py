@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
 
-from app.core.billing import BillingRegistry, get_billing_registry
+from app.core.billing import TOKENS_PER_UNIT, BillingRegistry, get_billing_registry, units_required_for_tokens
 from app.core.unit_wallet import get_unit_wallet_registry
 
 
@@ -132,6 +132,29 @@ class UsageMeteringService:
                 metadata=metadata,
             )
 
+    def authorize_token_usage(
+        self,
+        *,
+        owner_key: str,
+        token_count: int,
+        metadata: dict[str, Any] | None = None,
+    ) -> UsageAuthorization:
+        if token_count <= 0:
+            raise ValueError("token_count must be positive")
+
+        requested_units = units_required_for_tokens(token_count)
+        merged_metadata = {
+            **dict(metadata or {}),
+            "token_count": token_count,
+            "tokens_per_unit": TOKENS_PER_UNIT,
+            "requested_units": requested_units,
+        }
+        return self.authorize_usage(
+            owner_key=owner_key,
+            units=requested_units,
+            metadata=merged_metadata,
+        )
+
     def consume_usage(
         self,
         *,
@@ -192,6 +215,29 @@ class UsageMeteringService:
                 metadata=metadata,
             )
 
+    def consume_token_usage(
+        self,
+        *,
+        owner_key: str,
+        token_count: int,
+        metadata: dict[str, Any] | None = None,
+    ) -> UsageConsumptionResult:
+        if token_count <= 0:
+            raise ValueError("token_count must be positive")
+
+        required_units = units_required_for_tokens(token_count)
+        merged_metadata = {
+            **dict(metadata or {}),
+            "token_count": token_count,
+            "tokens_per_unit": TOKENS_PER_UNIT,
+            "requested_units": required_units,
+        }
+        return self.consume_usage(
+            owner_key=owner_key,
+            units=required_units,
+            metadata=merged_metadata,
+        )
+
     def get_usage_snapshot(self, *, owner_key: str) -> dict[str, Any]:
         normalized_owner_key = self._normalize_owner_key(owner_key)
 
@@ -210,6 +256,9 @@ class UsageMeteringService:
                     "unit_limit": 0,
                     "units_consumed": 0,
                     "remaining_units": 0,
+                    "tokens_per_unit": TOKENS_PER_UNIT,
+                    "token_coverage_limit": 0,
+                    "remaining_token_coverage": 0,
                     "wallet_balance_units": wallet.balance_units if wallet else 0,
                     "checked_at": _utc_now().isoformat().replace("+00:00", "Z"),
                 }
@@ -222,6 +271,9 @@ class UsageMeteringService:
                 "unit_limit": subscription.unit_limit,
                 "units_consumed": subscription.units_consumed,
                 "remaining_units": subscription.remaining_units,
+                "tokens_per_unit": subscription.tokens_per_unit,
+                "token_coverage_limit": subscription.token_coverage_limit,
+                "remaining_token_coverage": subscription.remaining_token_coverage,
                 "wallet_balance_units": wallet.balance_units if wallet else 0,
                 "checked_at": _utc_now().isoformat().replace("+00:00", "Z"),
             }
