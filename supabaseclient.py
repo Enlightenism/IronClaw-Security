@@ -16,6 +16,30 @@ Json = Union[None, bool, int, float, str, "JsonDict", "JsonList"]
 JsonDict = dict[str, Json]
 JsonList = list[Json]
 
+# ---------------------------------------------------------------------------
+# Billing tier constants — single source of truth for all pricing logic.
+# Imported by stripe_service.py and any other billing-aware module.
+#
+# Starter    :  5,000 units  →  $20  USD
+# Team       : 25,000 units  →  $90  USD
+# Enterprise : 60,000 units  → $180  USD
+#
+# TOKENS_PER_UNIT: maximum tokens one protection unit covers.
+# Any token count that exceeds a unit boundary consumes the next full unit
+# (ceiling division — see units_for_tokens() in stripe_service.py).
+# ---------------------------------------------------------------------------
+
+TOKENS_PER_UNIT: int = 25_000
+
+BILLING_TIER_5K_UNITS: int = 5_000
+BILLING_TIER_5K_PRICE_USD: float = 20.0
+
+BILLING_TIER_25K_UNITS: int = 25_000
+BILLING_TIER_25K_PRICE_USD: float = 90.0
+
+BILLING_TIER_60K_UNITS: int = 60_000
+BILLING_TIER_60K_PRICE_USD: float = 180.0
+
 
 class SupabaseConfigurationError(RuntimeError):
     """Raised when required Supabase configuration is missing or invalid."""
@@ -109,7 +133,6 @@ class SupabaseClient:
             "Authorization": f"Bearer {config.key}",
             "Content-Type": "application/json",
         }
-        # Prefer service-role when available for backend-only operations
         if config.service_role_key:
             headers["Authorization"] = f"Bearer {config.service_role_key}"
         return headers
@@ -131,7 +154,6 @@ class SupabaseClient:
                 except json.JSONDecodeError:
                     logger.exception("Supabase JSON decode error")
                     raise SupabaseAPIError(response.status_code, "Invalid JSON in Supabase response") from None
-            # Fallback: return text content
             return response.text
 
         try:
@@ -178,7 +200,6 @@ class SupabaseClient:
     # ---------- Table helpers ----------
 
     def _table_url(self, table: str) -> str:
-        # PostgREST: /rest/v1/{table} with optional schema via Prefer / headers
         return f"/rest/v1/{table}"
 
     def select(
@@ -198,7 +219,6 @@ class SupabaseClient:
         params: dict[str, Any] = {"select": "*"}
         filters = filters or {}
         for col, value in filters.items():
-            # PostgREST filter syntax: column=eq.value
             params[col] = f"eq.{value}"
         if limit is not None:
             params["limit"] = int(limit)
@@ -336,8 +356,14 @@ def createsupabaseclient() -> SupabaseClient:
     return SupabaseClient(config)
 
 
-# Convenience alias used throughout the app.persistence layer
 __all__ = [
+    "BILLING_TIER_5K_PRICE_USD",
+    "BILLING_TIER_5K_UNITS",
+    "BILLING_TIER_25K_PRICE_USD",
+    "BILLING_TIER_25K_UNITS",
+    "BILLING_TIER_60K_PRICE_USD",
+    "BILLING_TIER_60K_UNITS",
+    "TOKENS_PER_UNIT",
     "SupabaseAPIError",
     "SupabaseClient",
     "SupabaseConfig",
