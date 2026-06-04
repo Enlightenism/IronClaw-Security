@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac as _hmac
 import json
+import math
 import os
 import threading
 import time
@@ -37,6 +38,15 @@ from app.services.stripe_service import (
     get_stripe_service,
     reset_stripe_service,
 )
+from app.supabaseclient import (
+    BILLING_TIER_5K_PRICE_USD,
+    BILLING_TIER_5K_UNITS,
+    BILLING_TIER_25K_PRICE_USD,
+    BILLING_TIER_25K_UNITS,
+    BILLING_TIER_60K_PRICE_USD,
+    BILLING_TIER_60K_UNITS,
+    TOKENS_PER_UNIT,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -51,6 +61,29 @@ _TEST_SUB_ID = "sub_test_abc123"
 _TEST_SESSION_ID = "cs_test_abc123"
 _TEST_WEBHOOK_SECRET = "whsec_testsecret1234567890abcdefghij"
 _TEST_API_KEY = "sk_test_ironclaw_key_abc123456789"
+
+# ---------------------------------------------------------------------------
+# Package catalogue test constants — derived from supabaseclient single source
+# of truth so test assertions never drift from production values.
+# starter    :  5,000 units → $20 USD
+# team       : 25,000 units → $90 USD
+# enterprise : 60,000 units → $180 USD
+# Each unit covers up to TOKENS_PER_UNIT (25,000) tokens.
+# ---------------------------------------------------------------------------
+
+_PKG_STARTER_UNITS: int = BILLING_TIER_5K_UNITS  # 5_000
+_PKG_STARTER_PRICE_USD: int = BILLING_TIER_5K_PRICE_USD  # 20
+_PKG_STARTER_PRICE_CENTS: int = BILLING_TIER_5K_PRICE_USD * 100  # 2_000
+
+_PKG_TEAM_UNITS: int = BILLING_TIER_25K_UNITS  # 25_000
+_PKG_TEAM_PRICE_USD: int = BILLING_TIER_25K_PRICE_USD  # 90
+_PKG_TEAM_PRICE_CENTS: int = BILLING_TIER_25K_PRICE_USD * 100  # 9_000
+
+_PKG_ENTERPRISE_UNITS: int = BILLING_TIER_60K_UNITS  # 60_000
+_PKG_ENTERPRISE_PRICE_USD: int = BILLING_TIER_60K_PRICE_USD  # 180
+_PKG_ENTERPRISE_PRICE_CENTS: int = BILLING_TIER_60K_PRICE_USD * 100  # 18_000
+
+_TOKENS_PER_UNIT: int = TOKENS_PER_UNIT  # 25_000
 
 
 # ---------------------------------------------------------------------------
@@ -283,13 +316,13 @@ class TestCheckoutSessionCreation:
             price_id=_TEST_PRICE_ID,
             mode=StripeCheckoutMode.PAYMENT,
             quantity=1,
-            unit_credits=100,
+            unit_credits=_PKG_STARTER_UNITS,
             success_url=_TEST_SUCCESS_URL,
             cancel_url=_TEST_CANCEL_URL,
         )
         assert isinstance(resp, CheckoutSessionResponse)
         assert resp.session_id == _TEST_SESSION_ID
-        assert resp.unit_credits == 100
+        assert resp.unit_credits == _PKG_STARTER_UNITS
         assert resp.org_id == _TEST_ORG
 
     def test_create_checkout_session_stores_record(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
@@ -385,14 +418,14 @@ class TestCheckoutSessionCreation:
 
 class TestUnitBalanceLedger:
     def test_credit_units_increases_balance(self, svc: StripeService) -> None:
-        resp = svc.credit_units(_TEST_ORG, 500, StripeUnitEventReason.CHECKOUT_COMPLETE)
-        assert resp.balance == 500
+        resp = svc.credit_units(_TEST_ORG, _PKG_STARTER_UNITS, StripeUnitEventReason.CHECKOUT_COMPLETE)
+        assert resp.balance == _PKG_STARTER_UNITS
         assert resp.org_id == _TEST_ORG
 
     def test_credit_units_accumulates(self, svc: StripeService) -> None:
-        svc.credit_units(_TEST_ORG, 100, StripeUnitEventReason.CHECKOUT_COMPLETE)
-        resp = svc.credit_units(_TEST_ORG, 200, StripeUnitEventReason.MANUAL_CREDIT)
-        assert resp.balance == 300
+        svc.credit_units(_TEST_ORG, _PKG_STARTER_UNITS, StripeUnitEventReason.CHECKOUT_COMPLETE)
+        resp = svc.credit_units(_TEST_ORG, _PKG_STARTER_UNITS, StripeUnitEventReason.MANUAL_CREDIT)
+        assert resp.balance == _PKG_STARTER_UNITS * 2
 
     def test_credit_units_zero_raises(self, svc: StripeService) -> None:
         with pytest.raises(StripeServiceError):
@@ -403,9 +436,9 @@ class TestUnitBalanceLedger:
             svc.credit_units(_TEST_ORG, -1, StripeUnitEventReason.MANUAL_CREDIT)
 
     def test_debit_units_decreases_balance(self, svc: StripeService) -> None:
-        svc.credit_units(_TEST_ORG, 1000, StripeUnitEventReason.CHECKOUT_COMPLETE)
-        resp = svc.debit_units(_TEST_ORG, 400, StripeUnitEventReason.METERED_SYNC)
-        assert resp.balance == 600
+        svc.credit_units(_TEST_ORG, _PKG_TEAM_UNITS, StripeUnitEventReason.CHECKOUT_COMPLETE)
+        resp = svc.debit_units(_TEST_ORG, _PKG_STARTER_UNITS, StripeUnitEventReason.METERED_SYNC)
+        assert resp.balance == _PKG_TEAM_UNITS - _PKG_STARTER_UNITS
 
     def test_debit_units_insufficient_raises(self, svc: StripeService) -> None:
         svc.credit_units(_TEST_ORG, 10, StripeUnitEventReason.CHECKOUT_COMPLETE)
@@ -421,46 +454,46 @@ class TestUnitBalanceLedger:
         assert resp.balance == 0
 
     def test_get_unit_balance_reflects_credits(self, svc: StripeService) -> None:
-        svc.credit_units(_TEST_ORG, 777, StripeUnitEventReason.MANUAL_CREDIT)
+        svc.credit_units(_TEST_ORG, _PKG_TEAM_UNITS, StripeUnitEventReason.MANUAL_CREDIT)
         resp = svc.get_unit_balance(_TEST_ORG)
-        assert resp.balance == 777
+        assert resp.balance == _PKG_TEAM_UNITS
 
     def test_adjust_unit_balance_sets_exact_value(self, svc: StripeService) -> None:
-        svc.credit_units(_TEST_ORG, 100, StripeUnitEventReason.CHECKOUT_COMPLETE)
-        resp = svc.adjust_unit_balance(_TEST_ORG, 250)
-        assert resp.balance == 250
+        svc.credit_units(_TEST_ORG, _PKG_STARTER_UNITS, StripeUnitEventReason.CHECKOUT_COMPLETE)
+        resp = svc.adjust_unit_balance(_TEST_ORG, _PKG_STARTER_UNITS)
+        assert resp.balance == _PKG_STARTER_UNITS
 
     def test_adjust_unit_balance_negative_raises(self, svc: StripeService) -> None:
         with pytest.raises(StripeServiceError):
             svc.adjust_unit_balance(_TEST_ORG, -1)
 
     def test_ledger_records_credit_entry(self, svc: StripeService) -> None:
-        svc.credit_units(_TEST_ORG, 100, StripeUnitEventReason.CHECKOUT_COMPLETE, reference_id="ref-1")
+        svc.credit_units(_TEST_ORG, _PKG_STARTER_UNITS, StripeUnitEventReason.CHECKOUT_COMPLETE, reference_id="ref-1")
         resp = svc.get_unit_balance(_TEST_ORG)
         assert len(resp.ledger_entries) == 1
         entry = resp.ledger_entries[0]
-        assert entry["delta"] == 100
+        assert entry["delta"] == _PKG_STARTER_UNITS
         assert entry["reason"] == "checkout.complete"
         assert entry["reference_id"] == "ref-1"
-        assert entry["balance_after"] == 100
+        assert entry["balance_after"] == _PKG_STARTER_UNITS
 
     def test_ledger_records_debit_as_negative_delta(self, svc: StripeService) -> None:
-        svc.credit_units(_TEST_ORG, 500, StripeUnitEventReason.CHECKOUT_COMPLETE)
-        svc.debit_units(_TEST_ORG, 200, StripeUnitEventReason.METERED_SYNC)
+        svc.credit_units(_TEST_ORG, _PKG_TEAM_UNITS, StripeUnitEventReason.CHECKOUT_COMPLETE)
+        svc.debit_units(_TEST_ORG, _PKG_STARTER_UNITS, StripeUnitEventReason.METERED_SYNC)
         resp = svc.get_unit_balance(_TEST_ORG)
         debit_entry = next(e for e in resp.ledger_entries if e["delta"] < 0)
-        assert debit_entry["delta"] == -200
+        assert debit_entry["delta"] == -_PKG_STARTER_UNITS
 
     def test_ledger_isolated_by_org(self, svc: StripeService) -> None:
-        svc.credit_units("org-a", 100, StripeUnitEventReason.MANUAL_CREDIT)
-        svc.credit_units("org-b", 200, StripeUnitEventReason.MANUAL_CREDIT)
+        svc.credit_units("org-a", _PKG_STARTER_UNITS, StripeUnitEventReason.MANUAL_CREDIT)
+        svc.credit_units("org-b", _PKG_TEAM_UNITS, StripeUnitEventReason.MANUAL_CREDIT)
         resp_a = svc.get_unit_balance("org-a")
         resp_b = svc.get_unit_balance("org-b")
-        assert resp_a.balance == 100
-        assert resp_b.balance == 200
+        assert resp_a.balance == _PKG_STARTER_UNITS
+        assert resp_b.balance == _PKG_TEAM_UNITS
 
     def test_unit_balance_thread_safety(self, svc: StripeService) -> None:
-        svc.credit_units(_TEST_ORG, 10000, StripeUnitEventReason.MANUAL_CREDIT)
+        svc.credit_units(_TEST_ORG, _PKG_ENTERPRISE_UNITS, StripeUnitEventReason.MANUAL_CREDIT)
         errors: list[Exception] = []
 
         def _debit() -> None:
@@ -752,11 +785,11 @@ class TestWebhookEventDispatch:
             "id": "cs_webhook_1",
             "mode": "payment",
             "customer": _TEST_CUSTOMER_ID,
-            "metadata": {"org_id": _TEST_ORG, "unit_credits": "250"},
+            "metadata": {"org_id": _TEST_ORG, "unit_credits": str(_PKG_STARTER_UNITS)},
         }
         result = svc.handle_webhook_event(self._event("checkout.session.completed", obj))
         assert result["action"] == "processed"
-        assert svc.get_unit_balance(_TEST_ORG).balance == 250
+        assert svc.get_unit_balance(_TEST_ORG).balance == _PKG_STARTER_UNITS
 
     def test_checkout_completed_no_credits_skips_credit(self, svc: StripeService) -> None:
         obj = {
@@ -824,7 +857,7 @@ class TestWebhookEventDispatch:
             "id": "in_test",
             "customer": _TEST_CUSTOMER_ID,
             "subscription": _TEST_SUB_ID,
-            "amount_paid": 1999,
+            "amount_paid": _PKG_STARTER_PRICE_CENTS,
         }
         svc.handle_webhook_event(self._event("invoice.paid", obj))
         sub = svc.get_subscription(_TEST_SUB_ID)
@@ -871,7 +904,7 @@ class TestWebhookEventDispatch:
 
 class TestServiceReset:
     def test_reset_clears_unit_balances(self, svc: StripeService) -> None:
-        svc.credit_units(_TEST_ORG, 500, StripeUnitEventReason.MANUAL_CREDIT)
+        svc.credit_units(_TEST_ORG, _PKG_STARTER_UNITS, StripeUnitEventReason.MANUAL_CREDIT)
         svc.reset()
         assert svc.get_unit_balance(_TEST_ORG).balance == 0
 
@@ -907,7 +940,7 @@ class TestServiceReset:
 
     def test_module_reset_clears_singleton_state(self) -> None:
         svc = get_stripe_service()
-        svc.credit_units("org-module-reset", 100, StripeUnitEventReason.MANUAL_CREDIT)
+        svc.credit_units("org-module-reset", _PKG_STARTER_UNITS, StripeUnitEventReason.MANUAL_CREDIT)
         reset_stripe_service()
         assert get_stripe_service().get_unit_balance("org-module-reset").balance == 0
 
@@ -984,3 +1017,122 @@ class TestStripeHTTPClient:
                 client.get("/customers/cus_missing")
 
         assert exc_info.value.http_status == 404
+
+
+# ===========================================================================
+# Section 13 — Package catalogue correctness
+# ===========================================================================
+
+
+class TestPackageCatalogue:
+    def test_tokens_per_unit_is_25000(self) -> None:
+        assert _TOKENS_PER_UNIT == 25_000
+
+    def test_starter_units(self) -> None:
+        assert _PKG_STARTER_UNITS == 5_000
+
+    def test_starter_price_usd(self) -> None:
+        assert _PKG_STARTER_PRICE_USD == 20
+
+    def test_starter_price_cents(self) -> None:
+        assert _PKG_STARTER_PRICE_CENTS == 2_000
+
+    def test_team_units(self) -> None:
+        assert _PKG_TEAM_UNITS == 25_000
+
+    def test_team_price_usd(self) -> None:
+        assert _PKG_TEAM_PRICE_USD == 90
+
+    def test_team_price_cents(self) -> None:
+        assert _PKG_TEAM_PRICE_CENTS == 9_000
+
+    def test_enterprise_units(self) -> None:
+        assert _PKG_ENTERPRISE_UNITS == 60_000
+
+    def test_enterprise_price_usd(self) -> None:
+        assert _PKG_ENTERPRISE_PRICE_USD == 180
+
+    def test_enterprise_price_cents(self) -> None:
+        assert _PKG_ENTERPRISE_PRICE_CENTS == 18_000
+
+    def test_starter_token_coverage(self) -> None:
+        assert _PKG_STARTER_UNITS * _TOKENS_PER_UNIT == 125_000_000
+
+    def test_team_token_coverage(self) -> None:
+        assert _PKG_TEAM_UNITS * _TOKENS_PER_UNIT == 625_000_000
+
+    def test_enterprise_token_coverage(self) -> None:
+        assert _PKG_ENTERPRISE_UNITS * _TOKENS_PER_UNIT == 1_500_000_000
+
+    def test_tier_ordering_by_units(self) -> None:
+        assert _PKG_STARTER_UNITS < _PKG_TEAM_UNITS < _PKG_ENTERPRISE_UNITS
+
+    def test_tier_ordering_by_price(self) -> None:
+        assert _PKG_STARTER_PRICE_USD < _PKG_TEAM_PRICE_USD < _PKG_ENTERPRISE_PRICE_USD
+
+
+# ===========================================================================
+# Section 14 — units_for_tokens() boundary conditions
+# ===========================================================================
+
+
+class TestUnitsForTokens:
+    """
+    Each protection unit covers exactly TOKENS_PER_UNIT (25,000) tokens.
+    Any partial chunk beyond a full unit consumes an additional whole unit
+    (ceiling division). This section validates every boundary condition.
+    """
+
+    def _units_for_tokens(self, token_count: int) -> int:
+        if token_count <= 0:
+            return 0
+        return math.ceil(token_count / _TOKENS_PER_UNIT)
+
+    def test_zero_tokens_requires_zero_units(self) -> None:
+        assert self._units_for_tokens(0) == 0
+
+    def test_negative_tokens_requires_zero_units(self) -> None:
+        assert self._units_for_tokens(-1) == 0
+
+    def test_one_token_requires_one_unit(self) -> None:
+        assert self._units_for_tokens(1) == 1
+
+    def test_exact_one_chunk_requires_one_unit(self) -> None:
+        assert self._units_for_tokens(25_000) == 1
+
+    def test_one_over_first_chunk_requires_two_units(self) -> None:
+        assert self._units_for_tokens(25_001) == 2
+
+    def test_exact_two_chunks_requires_two_units(self) -> None:
+        assert self._units_for_tokens(50_000) == 2
+
+    def test_one_over_two_chunks_requires_three_units(self) -> None:
+        assert self._units_for_tokens(50_001) == 3
+
+    def test_exact_three_chunks_requires_three_units(self) -> None:
+        assert self._units_for_tokens(75_000) == 3
+
+    def test_one_over_three_chunks_requires_four_units(self) -> None:
+        assert self._units_for_tokens(75_001) == 4
+
+    def test_non_multiple_mid_chunk(self) -> None:
+        assert self._units_for_tokens(12_500) == 1
+
+    def test_non_multiple_straddles_boundary(self) -> None:
+        assert self._units_for_tokens(37_500) == 2
+
+    def test_starter_package_token_ceiling(self) -> None:
+        max_tokens = _PKG_STARTER_UNITS * _TOKENS_PER_UNIT
+        assert self._units_for_tokens(max_tokens) == _PKG_STARTER_UNITS
+
+    def test_starter_package_one_over_ceiling(self) -> None:
+        max_tokens = _PKG_STARTER_UNITS * _TOKENS_PER_UNIT
+        assert self._units_for_tokens(max_tokens + 1) == _PKG_STARTER_UNITS + 1
+
+    def test_team_package_token_ceiling(self) -> None:
+        max_tokens = _PKG_TEAM_UNITS * _TOKENS_PER_UNIT
+        assert self._units_for_tokens(max_tokens) == _PKG_TEAM_UNITS
+
+    def test_enterprise_package_token_ceiling(self) -> None:
+        max_tokens = _PKG_ENTERPRISE_UNITS * _TOKENS_PER_UNIT
+        assert self._units_for_tokens(max_tokens) == _PKG_ENTERPRISE_UNITS
