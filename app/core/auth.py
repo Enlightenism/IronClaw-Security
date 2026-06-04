@@ -109,8 +109,8 @@ def _record_is_usable(record: APIKeyRecord | None) -> bool:
         return False
     if getattr(record, "revoked_at", None) is not None:
         return False
-    expires_at = getattr(record, "expires_at", None)
-    if is_api_key_expired(expires_at):
+    # pass the full record — is_api_key_expired takes APIKeyRecord
+    if is_api_key_expired(record):
         return False
     return True
 
@@ -121,33 +121,33 @@ def _resolve_registry_api_key(provided_api_key: str) -> APIKeyRecord | None:
         return None
 
     registry = get_api_key_registry()
-    fingerprint = fingerprint_api_key(normalized_api_key)
 
+    # prefer get_by_fingerprint when available
     resolver = getattr(registry, "get_by_fingerprint", None)
     if callable(resolver):
+        fingerprint = fingerprint_api_key(normalized_api_key)
         try:
             record = resolver(fingerprint)
         except Exception:
             record = None
         if _record_is_usable(record):
             return _touch_record_if_possible(record)
-        return None
+        # fall through to authenticate below
 
+    # fall back to authenticate (handles touch internally)
     authenticate = getattr(registry, "authenticate", None)
     if callable(authenticate):
         try:
-            record = authenticate(normalized_api_key, touch=True)
-            if _record_is_usable(record):
-                return record
+            record = authenticate(normalized_api_key, touch=False)
         except TypeError:
             try:
                 record = authenticate(normalized_api_key)
-                if _record_is_usable(record):
-                    return _touch_record_if_possible(record)
             except Exception:
-                pass
+                record = None
         except Exception:
-            pass
+            record = None
+        if _record_is_usable(record):
+            return _touch_record_if_possible(record)
 
     return None
 
@@ -164,11 +164,7 @@ def _has_registry_keys() -> bool:
         except Exception:
             pass
 
-    for attr_name in (
-        "has_keys",
-        "has_api_keys",
-        "has_active_keys",
-    ):
+    for attr_name in ("has_keys", "has_api_keys", "has_active_keys"):
         method = getattr(registry, attr_name, None)
         if callable(method):
             try:
@@ -186,11 +182,7 @@ def _has_registry_keys() -> bool:
             except Exception:
                 pass
 
-    for attr_name in (
-        "keys_by_id",
-        "_keys_by_id",
-        "_records_by_id",
-    ):
+    for attr_name in ("keys_by_id", "_keys_by_id", "_records_by_id"):
         value = getattr(registry, attr_name, None)
         if value is not None:
             try:

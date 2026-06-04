@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -16,17 +16,14 @@ CustomerKeyStatus = Literal["active", "revoked"]
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(datetime.UTC).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class CustomerApiKeyCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
-    owner_id: str | None = Field(
-        default=None,
-        description="Optional owner identifier. Defaults to the authenticated principal subject.",
-    )
 
 
+# Safe read model — never exposes raw_key
 class CustomerApiKeyResponse(BaseModel):
     key_id: str
     name: str
@@ -35,17 +32,31 @@ class CustomerApiKeyResponse(BaseModel):
     scope: KeyScope
     status: KeyStatus
     owner_id: str | None = None
+    created_by: str
     created_at: str
     updated_at: str
     last_used_at: str | None = None
     revoked_at: str | None = None
-    raw_key: str | None = None
 
 
-class CustomerApiKeyListResponse(BaseModel):
-    items: list[CustomerApiKeyResponse] = Field(default_factory=list)
+# Creation-only model — reveals raw_key exactly once
+class CustomerApiKeyCreatedResponse(BaseModel):
+    key_id: str
+    name: str
+    key_prefix: str
+    key_hint: str
+    scope: KeyScope
+    status: KeyStatus
+    owner_id: str | None = None
+    created_by: str
+    created_at: str
+    updated_at: str
+    last_used_at: str | None = None
+    revoked_at: str | None = None
+    revealed_key: str  # present only at creation; never returned again
 
 
+# Rotate model — reveals raw_key exactly once
 class CustomerApiKeyRotateResponse(BaseModel):
     key_id: str
     name: str
@@ -54,14 +65,19 @@ class CustomerApiKeyRotateResponse(BaseModel):
     scope: KeyScope
     status: KeyStatus
     owner_id: str | None = None
+    created_by: str
     created_at: str
     updated_at: str
     last_used_at: str | None = None
     revoked_at: str | None = None
-    raw_key: str
+    revealed_key: str  # present only at rotation; never returned again
 
 
-def _to_response(record: ApiKeyRecord, raw_key: str | None = None) -> CustomerApiKeyResponse:
+class CustomerApiKeyListResponse(BaseModel):
+    items: list[CustomerApiKeyResponse] = Field(default_factory=list)
+
+
+def _to_response(record: ApiKeyRecord) -> CustomerApiKeyResponse:
     return CustomerApiKeyResponse(
         key_id=record.key_id,
         name=record.name,
@@ -70,11 +86,11 @@ def _to_response(record: ApiKeyRecord, raw_key: str | None = None) -> CustomerAp
         scope=record.scope,
         status=record.status,
         owner_id=record.owner_id,
+        created_by=record.created_by,
         created_at=record.created_at,
         updated_at=record.updated_at,
         last_used_at=record.last_used_at,
         revoked_at=record.revoked_at,
-        raw_key=raw_key,
     )
 
 
@@ -93,25 +109,38 @@ def list_customer_keys(
 
 @router.post(
     "",
-    response_model=CustomerApiKeyResponse,
+    response_model=CustomerApiKeyCreatedResponse,
     status_code=status.HTTP_201_CREATED,
 )
 def create_customer_key(
     body: CustomerApiKeyCreateRequest,
     principal: AuthPrincipal = Depends(resolve_api_key),  # noqa: B008
-) -> CustomerApiKeyResponse:
-    if principal.principal_type == "customer":
-        owner_id = principal.subject
-    else:
-        owner_id = body.owner_id or principal.subject
+) -> CustomerApiKeyCreatedResponse:
     require_scope(principal, "customer", "internal")
+    # created_by is always the authenticated user UID — never caller-supplied
+    created_by = principal.subject
     record, raw_key = registry.create_key(
         name=body.name,
         scope="customer",
-        owner_id=owner_id,
+        owner_id=created_by,
+        created_by=created_by,
         prefix="icpk",
     )
-    return _to_response(record, raw_key=raw_key)
+    return CustomerApiKeyCreatedResponse(
+        key_id=record.key_id,
+        name=record.name,
+        key_prefix=record.key_prefix,
+        key_hint=record.key_hint,
+        scope=record.scope,
+        status=record.status,
+        owner_id=record.owner_id,
+        created_by=record.created_by,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+        last_used_at=record.last_used_at,
+        revoked_at=record.revoked_at,
+        revealed_key=raw_key,
+    )
 
 
 @router.post(
@@ -143,11 +172,12 @@ def rotate_customer_key(
         scope=rotated.scope,
         status=rotated.status,
         owner_id=rotated.owner_id,
+        created_by=rotated.created_by,
         created_at=rotated.created_at,
         updated_at=rotated.updated_at,
         last_used_at=rotated.last_used_at,
         revoked_at=rotated.revoked_at,
-        raw_key=raw_key,
+        revealed_key=raw_key,
     )
 
 

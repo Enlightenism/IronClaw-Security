@@ -49,6 +49,11 @@ def constant_time_api_key_match(provided_key: str, expected_key: str) -> bool:
     return hmac.compare_digest(provided_key, expected_key)
 
 
+def is_api_key_expired(record: APIKeyRecord) -> bool:
+    """Return True if the record is inactive (revoked). No TTL field exists yet."""
+    return not record.active
+
+
 @dataclass(frozen=True)
 class APIKeyRecord:
     key_id: str
