@@ -28,6 +28,11 @@ def get_release_policy_client() -> ReleasePolicyClient:
     return get_service_registry().get_release_policy_client()
 
 
+def get_auth_service():
+    """Return the shared auth service from the canonical service registry."""
+    return get_service_registry().get_auth_service()
+
+
 def _reset_dependencies_for_tests() -> None:
     """Test-only helper to reset the global registry.
 
