@@ -1,9 +1,24 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import math
+import os
+from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
+
+from app.supabaseclient import (
+    BILLING_TIER_5K_PRICE_USD,
+    BILLING_TIER_5K_UNITS,
+    BILLING_TIER_25K_PRICE_USD,
+    BILLING_TIER_25K_UNITS,
+    BILLING_TIER_60K_PRICE_USD,
+    BILLING_TIER_60K_UNITS,
+    TOKENS_PER_UNIT,
+    get_supabase_client,
+    is_supabase_configured,
+)
 
 router = APIRouter(
     prefix="/ui/billing",
@@ -25,6 +40,68 @@ _BRAND_DISPLAY: dict[str, str] = {
     "discover": "Discover",
     "bank_account": "Bank Account",
 }
+
+# ---------------------------------------------------------------------------
+# Package catalogue — single source of truth imported from supabaseclient
+# Starter   :  5,000 units → $20 USD
+# Team      : 25,000 units → $90 USD
+# Enterprise: 60,000 units → $180 USD
+# Each protection unit covers up to TOKENS_PER_UNIT (25,000) tokens.
+# ---------------------------------------------------------------------------
+
+PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
+    "starter": {
+        "label": "Starter",
+        "units": BILLING_TIER_5K_UNITS,
+        "price_usd": BILLING_TIER_5K_PRICE_USD,
+        "tokens_per_unit": TOKENS_PER_UNIT,
+        "notes": (
+            f"{BILLING_TIER_5K_UNITS:,} units · ${BILLING_TIER_5K_PRICE_USD} USD"
+            f" · each unit protects up to {TOKENS_PER_UNIT:,} tokens"
+        ),
+    },
+    "team": {
+        "label": "Team",
+        "units": BILLING_TIER_25K_UNITS,
+        "price_usd": BILLING_TIER_25K_PRICE_USD,
+        "tokens_per_unit": TOKENS_PER_UNIT,
+        "notes": (
+            f"{BILLING_TIER_25K_UNITS:,} units · ${BILLING_TIER_25K_PRICE_USD} USD"
+            f" · each unit protects up to {TOKENS_PER_UNIT:,} tokens"
+        ),
+    },
+    "enterprise": {
+        "label": "Enterprise",
+        "units": BILLING_TIER_60K_UNITS,
+        "price_usd": BILLING_TIER_60K_PRICE_USD,
+        "tokens_per_unit": TOKENS_PER_UNIT,
+        "notes": (
+            f"{BILLING_TIER_60K_UNITS:,} units · ${BILLING_TIER_60K_PRICE_USD} USD"
+            f" · each unit protects up to {TOKENS_PER_UNIT:,} tokens"
+        ),
+    },
+}
+
+
+def units_for_tokens(token_count: int) -> int:
+    """
+    Return the number of protection units required to cover token_count tokens.
+    Each unit covers up to TOKENS_PER_UNIT (25,000) tokens.
+    Partial chunks consume a full unit (ceiling division).
+
+    Examples:
+        units_for_tokens(1)       -> 1
+        units_for_tokens(25_000)  -> 1
+        units_for_tokens(25_001)  -> 2
+        units_for_tokens(75_000)  -> 3
+    """
+    if token_count <= 0:
+        return 0
+    return math.ceil(token_count / TOKENS_PER_UNIT)
+
+
+def _get_environment() -> str:
+    return os.environ.get("IRONCLAW_ENV", os.environ.get("APP_ENV", "production"))
 
 
 class BillingPaymentMethodView(BaseModel):
@@ -49,6 +126,14 @@ class BillingPaymentMethodStatusCount(BaseModel):
     statuscolor: str
 
 
+class PackageCatalogueEntry(BaseModel):
+    label: str
+    units: int
+    price_usd: int
+    tokens_per_unit: int
+    notes: str
+
+
 class BillingPaymentMethodsResponse(BaseModel):
     generatedat: str
     environment: str
@@ -60,6 +145,8 @@ class BillingPaymentMethodsResponse(BaseModel):
     canaddnew: bool
     maxmethods: int
     statuscounts: list[BillingPaymentMethodStatusCount] = Field(default_factory=list)
+    tokens_per_unit: int
+    package_catalogue: dict[str, PackageCatalogueEntry] = Field(default_factory=dict)
     notes: list[str] = Field(default_factory=list)
 
 
@@ -116,150 +203,6 @@ def _build_method(
     )
 
 
-_ORG_NAMES: dict[str, str] = {
-    "org-001": "Alpha Security Lab",
-    "org-002": "Beta Runtime Defense",
-    "org-003": "Gamma Internal QA",
-    "org-004": "Delta Threat Ops",
-    "org-005": "Epsilon Red Team",
-}
-
-_ORG_METHODS: dict[str, list[BillingPaymentMethodView]] = {
-    "org-001": [
-        _build_method(
-            methodid="pm-001",
-            type="card",
-            brand="visa",
-            last4="4242",
-            expmonth=9,
-            expyear=2027,
-            isdefault=True,
-            status="active",
-            createdat=_utc_iso(2026, 1, 15, 10, 0),
-            organizationid="org-001",
-        ),
-        _build_method(
-            methodid="pm-009",
-            type="card",
-            brand="mastercard",
-            last4="1234",
-            expmonth=2,
-            expyear=2026,
-            isdefault=False,
-            status="expired",
-            createdat=_utc_iso(2025, 6, 10, 9, 30),
-            organizationid="org-001",
-        ),
-        _build_method(
-            methodid="pm-010",
-            type="card",
-            brand="amex",
-            last4="7890",
-            expmonth=12,
-            expyear=2028,
-            isdefault=False,
-            status="active",
-            createdat=_utc_iso(2026, 3, 22, 14, 15),
-            organizationid="org-001",
-        ),
-    ],
-    "org-002": [
-        _build_method(
-            methodid="pm-002",
-            type="card",
-            brand="mastercard",
-            last4="5555",
-            expmonth=3,
-            expyear=2026,
-            isdefault=True,
-            status="expired",
-            createdat=_utc_iso(2025, 9, 5, 11, 0),
-            organizationid="org-002",
-        ),
-        _build_method(
-            methodid="pm-006",
-            type="card",
-            brand="visa",
-            last4="9999",
-            expmonth=8,
-            expyear=2027,
-            isdefault=False,
-            status="active",
-            createdat=_utc_iso(2026, 4, 1, 8, 45),
-            organizationid="org-002",
-        ),
-    ],
-    "org-003": [
-        _build_method(
-            methodid="pm-003",
-            type="card",
-            brand="amex",
-            last4="0005",
-            expmonth=11,
-            expyear=2027,
-            isdefault=True,
-            status="active",
-            createdat=_utc_iso(2025, 11, 20, 16, 0),
-            organizationid="org-003",
-        ),
-        _build_method(
-            methodid="pm-007",
-            type="card",
-            brand="visa",
-            last4="3333",
-            expmonth=5,
-            expyear=2025,
-            isdefault=False,
-            status="revoked",
-            createdat=_utc_iso(2025, 3, 14, 9, 0),
-            organizationid="org-003",
-        ),
-        _build_method(
-            methodid="pm-008",
-            type="card",
-            brand="mastercard",
-            last4="6677",
-            expmonth=1,
-            expyear=2029,
-            isdefault=False,
-            status="active",
-            createdat=_utc_iso(2026, 2, 28, 13, 0),
-            organizationid="org-003",
-        ),
-    ],
-    "org-004": [
-        _build_method(
-            methodid="pm-004",
-            type="card",
-            brand="visa",
-            last4="1234",
-            expmonth=6,
-            expyear=2028,
-            isdefault=True,
-            status="active",
-            createdat=_utc_iso(2026, 2, 15, 10, 0),
-            organizationid="org-004",
-        ),
-    ],
-    "org-005": [
-        _build_method(
-            methodid="pm-005",
-            type="card",
-            brand="mastercard",
-            last4="9876",
-            expmonth=1,
-            expyear=2027,
-            isdefault=True,
-            status="active",
-            createdat=_utc_iso(2026, 3, 1, 9, 0),
-            organizationid="org-005",
-        ),
-    ],
-}
-
-_VALID_ORG_IDS: frozenset[str] = frozenset(_ORG_METHODS.keys())
-
-
 def _resolve_default_method_id(methods: list[BillingPaymentMethodView]) -> str | None:
     for method in methods:
         if method.isdefault:
@@ -281,6 +224,78 @@ def _build_status_counts(methods: list[BillingPaymentMethodView]) -> list[Billin
     ]
 
 
+def _fetch_org_payment_methods(organizationid: str) -> list[BillingPaymentMethodView] | None:
+    """
+    Query Supabase for payment methods belonging to the given organizationid.
+    Returns a list of BillingPaymentMethodView on success, or None if Supabase
+    is not configured or the query fails.
+    """
+    if not is_supabase_configured():
+        return None
+    try:
+        client = get_supabase_client()
+        rows = (
+            client.table("payment_methods")
+            .select("*")
+            .eq("organization_id", organizationid)
+            .order("created_at", desc=False)
+            .execute()
+            .data
+        )
+        if not rows:
+            return []
+        methods: list[BillingPaymentMethodView] = []
+        for row in rows:
+            methods.append(
+                _build_method(
+                    methodid=str(row.get("id", "")),
+                    type=str(row.get("type", "card")),
+                    brand=str(row.get("brand", "")),
+                    last4=str(row.get("last4", "")),
+                    expmonth=int(row.get("exp_month", 0)),
+                    expyear=int(row.get("exp_year", 0)),
+                    isdefault=bool(row.get("is_default", False)),
+                    status=str(row.get("status", "active")),
+                    createdat=str(row.get("created_at", datetime.now(UTC).isoformat())),
+                    organizationid=organizationid,
+                )
+            )
+        return methods
+    except Exception:
+        return None
+
+
+def _fetch_org_name(organizationid: str) -> str | None:
+    """
+    Query Supabase for the organization name. Returns None if unavailable.
+    """
+    if not is_supabase_configured():
+        return None
+    try:
+        client = get_supabase_client()
+        rows = (
+            client.table("organizations")
+            .select("name")
+            .eq("id", organizationid)
+            .limit(1)
+            .execute()
+            .data
+        )
+        if rows:
+            return str(rows[0].get("name", organizationid))
+        return None
+    except Exception:
+        return None
+
+
+def _stripe_connection_note() -> str:
+    stripe_key = os.environ.get("STRIPE_API_KEY", "")
+    if stripe_key and stripe_key.startswith(("sk_live_", "sk_test_")):
+        mode = "live" if stripe_key.startswith("sk_live_") else "test"
+        return f"Stripe is connected and active (mode: {mode})."
+    return "Stripe API key is not configured — payment processing is unavailable."
+
+
 @router.get(
     "/payment-methods",
     response_model=BillingPaymentMethodsResponse | BillingPaymentMethodsNotFoundResponse,
@@ -288,16 +303,40 @@ def _build_status_counts(methods: list[BillingPaymentMethodView]) -> list[Billin
 def get_payment_methods(
     organizationid: str = "org-001",
 ) -> BillingPaymentMethodsResponse | BillingPaymentMethodsNotFoundResponse:
-    if organizationid not in _VALID_ORG_IDS:
+    env = _get_environment()
+
+    # Attempt live Supabase lookup
+    sb_methods = _fetch_org_payment_methods(organizationid)
+    sb_org_name = _fetch_org_name(organizationid)
+
+    # If Supabase returned an empty list the org exists but has no methods;
+    # if it returned None, Supabase is unconfigured — treat as not found.
+    if sb_methods is None and not is_supabase_configured():
         return BillingPaymentMethodsNotFoundResponse(
             status="not_found",
             organizationid=organizationid,
-            message=(f"Organization '{organizationid}' was not found. " "Valid sample IDs are: org-001, org-002, org-003, org-004, org-005."),
+            message=(
+                f"Organization '{organizationid}' could not be resolved. "
+                "Supabase is not configured — connect SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
+            ),
             generatedat=datetime.now(UTC).isoformat(),
-            environment="local",
+            environment=env,
         )
 
-    methods = _ORG_METHODS[organizationid]
+    if sb_methods is None:
+        return BillingPaymentMethodsNotFoundResponse(
+            status="not_found",
+            organizationid=organizationid,
+            message=(
+                f"Organization '{organizationid}' was not found or returned no data from Supabase."
+            ),
+            generatedat=datetime.now(UTC).isoformat(),
+            environment=env,
+        )
+
+    methods: list[BillingPaymentMethodView] = sb_methods
+    org_name: str = sb_org_name or organizationid
+
     methodcount = len(methods)
     defaultmethodid = _resolve_default_method_id(methods)
     canaddnew = methodcount < _MAX_METHODS
@@ -313,8 +352,8 @@ def get_payment_methods(
         f"Maximum allowed payment methods per organization is {_MAX_METHODS}.",
         f"canaddnew is {'true' if canaddnew else 'false'} — organization {'can' if canaddnew else 'cannot'} add new payment methods.",
         "statuscolor maps payment method status to a UI hint: success (active), warning (expired), error (revoked).",
-        "All values are placeholder UI contract data for the current local-first Gen1 build.",
-        "This page is ready to be wired to a live payment provider such as Stripe.",
+        f"Each protection unit covers up to {TOKENS_PER_UNIT:,} tokens. Partial token chunks consume a full additional unit.",
+        _stripe_connection_note(),
     ]
 
     if expired_count > 0:
@@ -322,16 +361,22 @@ def get_payment_methods(
     if revoked_count > 0:
         notes.append("One or more payment methods have been revoked and cannot be used for future charges.")
 
+    catalogue_out: dict[str, PackageCatalogueEntry] = {
+        k: PackageCatalogueEntry(**v) for k, v in PACKAGE_CATALOGUE.items()
+    }
+
     return BillingPaymentMethodsResponse(
         generatedat=datetime.now(UTC).isoformat(),
-        environment="local",
+        environment=env,
         organizationid=organizationid,
-        organizationname=_ORG_NAMES.get(organizationid, organizationid),
+        organizationname=org_name,
         defaultmethodid=defaultmethodid,
         methods=methods,
         methodcount=methodcount,
         canaddnew=canaddnew,
         maxmethods=_MAX_METHODS,
         statuscounts=statuscounts,
+        tokens_per_unit=TOKENS_PER_UNIT,
+        package_catalogue=catalogue_out,
         notes=notes,
     )
