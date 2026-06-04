@@ -1,12 +1,16 @@
 -- =============================================================================
 -- 007_seed_default_policy_set.sql
 -- IronClaw default policy set seed
--- Creates the policy_sets table and inserts the ironclaw_default row.
--- This row becomes the system-wide fallback policy when no tenant-specific
--- policy set is found. It references all builtin policy_rules from 006 by
--- rule_id. enforcement_mode = 'block', severity thresholds, and sandbox lane
--- mappings are stored as structured JSONB.
--- Depends on: 006_seed_ioc_patterns.sql (policy_rules table + rule_id seeds)
+-- Creates the policy_sets and policy_set_memberships tables and seeds the
+-- ironclaw_default row. This row is the system-wide fallback policy when no
+-- tenant-specific policy set is found. It references all builtin policy_rules
+-- from 006 by rule_id. enforcement_mode = 'block', severity thresholds, and
+-- sandbox lane mappings are stored as structured JSONB.
+-- Depends on: 005_ironclaw_rls_policies.sql (RLS for policy_sets and
+--             policy_set_memberships owned exclusively by 005)
+--             006_seed_ioc_patterns.sql (policy_rules table + rule_id seeds)
+-- NOTE: RLS blocks for policy_sets and policy_set_memberships have been
+-- removed from this file. 005_ironclaw_rls_policies.sql owns them exclusively.
 -- =============================================================================
 
 BEGIN;
@@ -109,7 +113,7 @@ VALUES (
     TRUE,
     'block',
     -- policy_rule_ids: all builtin rule_ids from 006 in priority order
-    -- Priority bands: trust_collapse (5) → target_block (10) → target_review (50) → action_review (40)
+    -- Priority bands: trust_collapse (5) → target_block (10) → action_review (40) → target_review (50)
     jsonb_build_array(
         -- trust_collapse rules (priority 5 — highest, terminate session)
         'trust_collapse_system_prompt_exfil',
@@ -204,17 +208,17 @@ VALUES (
     ),
     -- extra_config: operational tuning defaults
     jsonb_build_object(
-        'max_risk_score_allow',      0.30,
-        'max_risk_score_review',     0.65,
-        'quarantine_ttl_hours',      72,
-        'review_timeout_minutes',    30,
-        'trust_collapse_auto_block', TRUE,
-        'pii_scan_enabled',          TRUE,
+        'max_risk_score_allow',          0.30,
+        'max_risk_score_review',         0.65,
+        'quarantine_ttl_hours',          72,
+        'review_timeout_minutes',        30,
+        'trust_collapse_auto_block',     TRUE,
+        'pii_scan_enabled',              TRUE,
         'prompt_injection_scan_enabled', TRUE,
-        'shell_scan_enabled',        TRUE,
-        'exfiltration_scan_enabled', TRUE,
-        'audit_all_verdicts',        TRUE,
-        'schema_version',            '1.0'
+        'shell_scan_enabled',            TRUE,
+        'exfiltration_scan_enabled',     TRUE,
+        'audit_all_verdicts',            TRUE,
+        'schema_version',               '1.0'
     )
 )
 ON CONFLICT (set_key) DO NOTHING;
@@ -246,44 +250,6 @@ WHERE ps.set_key = 'ironclaw_default'
 ON CONFLICT (policy_set_id, policy_rule_id) DO NOTHING;
 
 -- ---------------------------------------------------------------------------
--- RLS: policy_sets (builtin rows are globally readable; mutations restricted)
--- ---------------------------------------------------------------------------
-
-ALTER TABLE public.policy_sets ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY policy_sets_select_all
-    ON public.policy_sets
-    FOR SELECT
-    USING (TRUE);
-
-CREATE POLICY policy_sets_service_role_all
-    ON public.policy_sets
-    AS PERMISSIVE
-    FOR ALL
-    TO service_role
-    USING (TRUE)
-    WITH CHECK (TRUE);
-
--- ---------------------------------------------------------------------------
--- RLS: policy_set_memberships
--- ---------------------------------------------------------------------------
-
-ALTER TABLE public.policy_set_memberships ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY psm_select_all
-    ON public.policy_set_memberships
-    FOR SELECT
-    USING (TRUE);
-
-CREATE POLICY psm_service_role_all
-    ON public.policy_set_memberships
-    AS PERMISSIVE
-    FOR ALL
-    TO service_role
-    USING (TRUE)
-    WITH CHECK (TRUE);
-
--- ---------------------------------------------------------------------------
 -- Migration record
 -- ---------------------------------------------------------------------------
 
@@ -300,12 +266,12 @@ VALUES (
     'referencing all builtin policy_rules from migration 006. Includes enforcement_mode = block, '
     'severity_thresholds (critical/high → block, medium → review, low → warn), sandbox_lane_mappings '
     '(restricted → block, elevated → review, trusted → audit), and operational extra_config defaults. '
-    'Applies RLS: SELECT open to all authenticated, mutations restricted to service_role.',
+    'RLS for policy_sets and policy_set_memberships is owned exclusively by 005_ironclaw_rls_policies.sql.',
     'system',
     '',
     jsonb_build_object(
         'section',       'detection_and_policy',
-        'depends_on',    '006_seed_ioc_patterns',
+        'depends_on',    jsonb_build_array('005_ironclaw_rls_policies', '006_seed_ioc_patterns'),
         'seed_version',  '1.0',
         'default_set',   'ironclaw_default'
     )
