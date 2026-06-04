@@ -55,30 +55,21 @@ PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
         "units": BILLING_TIER_5K_UNITS,
         "price_usd": BILLING_TIER_5K_PRICE_USD,
         "tokens_per_unit": TOKENS_PER_UNIT,
-        "notes": (
-            f"{BILLING_TIER_5K_UNITS:,} units · ${BILLING_TIER_5K_PRICE_USD} USD"
-            f" · each unit protects up to {TOKENS_PER_UNIT:,} tokens"
-        ),
+        "notes": (f"{BILLING_TIER_5K_UNITS:,} units · ${BILLING_TIER_5K_PRICE_USD} USD" f" · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
     },
     "team": {
         "label": "Team",
         "units": BILLING_TIER_25K_UNITS,
         "price_usd": BILLING_TIER_25K_PRICE_USD,
         "tokens_per_unit": TOKENS_PER_UNIT,
-        "notes": (
-            f"{BILLING_TIER_25K_UNITS:,} units · ${BILLING_TIER_25K_PRICE_USD} USD"
-            f" · each unit protects up to {TOKENS_PER_UNIT:,} tokens"
-        ),
+        "notes": (f"{BILLING_TIER_25K_UNITS:,} units · ${BILLING_TIER_25K_PRICE_USD} USD" f" · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
     },
     "enterprise": {
         "label": "Enterprise",
         "units": BILLING_TIER_60K_UNITS,
         "price_usd": BILLING_TIER_60K_PRICE_USD,
         "tokens_per_unit": TOKENS_PER_UNIT,
-        "notes": (
-            f"{BILLING_TIER_60K_UNITS:,} units · ${BILLING_TIER_60K_PRICE_USD} USD"
-            f" · each unit protects up to {TOKENS_PER_UNIT:,} tokens"
-        ),
+        "notes": (f"{BILLING_TIER_60K_UNITS:,} units · ${BILLING_TIER_60K_PRICE_USD} USD" f" · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
     },
 }
 
@@ -234,14 +225,7 @@ def _fetch_org_payment_methods(organizationid: str) -> list[BillingPaymentMethod
         return None
     try:
         client = get_supabase_client()
-        rows = (
-            client.table("payment_methods")
-            .select("*")
-            .eq("organization_id", organizationid)
-            .order("created_at", desc=False)
-            .execute()
-            .data
-        )
+        rows = client.table("payment_methods").select("*").eq("organization_id", organizationid).order("created_at", desc=False).execute().data
         if not rows:
             return []
         methods: list[BillingPaymentMethodView] = []
@@ -273,14 +257,7 @@ def _fetch_org_name(organizationid: str) -> str | None:
         return None
     try:
         client = get_supabase_client()
-        rows = (
-            client.table("organizations")
-            .select("name")
-            .eq("id", organizationid)
-            .limit(1)
-            .execute()
-            .data
-        )
+        rows = client.table("organizations").select("name").eq("id", organizationid).limit(1).execute().data
         if rows:
             return str(rows[0].get("name", organizationid))
         return None
@@ -315,10 +292,7 @@ def get_payment_methods(
         return BillingPaymentMethodsNotFoundResponse(
             status="not_found",
             organizationid=organizationid,
-            message=(
-                f"Organization '{organizationid}' could not be resolved. "
-                "Supabase is not configured — connect SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
-            ),
+            message=(f"Organization '{organizationid}' could not be resolved. " "Supabase is not configured — connect SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."),
             generatedat=datetime.now(UTC).isoformat(),
             environment=env,
         )
@@ -327,9 +301,7 @@ def get_payment_methods(
         return BillingPaymentMethodsNotFoundResponse(
             status="not_found",
             organizationid=organizationid,
-            message=(
-                f"Organization '{organizationid}' was not found or returned no data from Supabase."
-            ),
+            message=(f"Organization '{organizationid}' was not found or returned no data from Supabase."),
             generatedat=datetime.now(UTC).isoformat(),
             environment=env,
         )
@@ -361,9 +333,7 @@ def get_payment_methods(
     if revoked_count > 0:
         notes.append("One or more payment methods have been revoked and cannot be used for future charges.")
 
-    catalogue_out: dict[str, PackageCatalogueEntry] = {
-        k: PackageCatalogueEntry(**v) for k, v in PACKAGE_CATALOGUE.items()
-    }
+    catalogue_out: dict[str, PackageCatalogueEntry] = {k: PackageCatalogueEntry(**v) for k, v in PACKAGE_CATALOGUE.items()}
 
     return BillingPaymentMethodsResponse(
         generatedat=datetime.now(UTC).isoformat(),

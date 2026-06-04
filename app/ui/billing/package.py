@@ -2,9 +2,24 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import UTC, datetime
+import math
+import os
+from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
+
+from app.supabaseclient import (
+    BILLING_TIER_5K_PRICE_USD,
+    BILLING_TIER_5K_UNITS,
+    BILLING_TIER_25K_PRICE_USD,
+    BILLING_TIER_25K_UNITS,
+    BILLING_TIER_60K_PRICE_USD,
+    BILLING_TIER_60K_UNITS,
+    TOKENS_PER_UNIT,
+    get_supabase_client,
+    is_supabase_configured,
+)
 
 router = APIRouter(
     prefix="/ui/billing",
@@ -24,6 +39,68 @@ _USAGE_STATUS_COLOR: dict[str, str] = {
     "warning": "warning",
     "critical": "error",
 }
+
+# ---------------------------------------------------------------------------
+# Package catalogue — single source of truth imported from supabaseclient
+# starter    :  5,000 units → $20 USD
+# team       : 25,000 units → $90 USD
+# enterprise : 60,000 units → $180 USD
+# Each protection unit covers up to TOKENS_PER_UNIT (25,000) tokens.
+# ---------------------------------------------------------------------------
+
+PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
+    "starter": {
+        "label": "Starter",
+        "units": BILLING_TIER_5K_UNITS,
+        "price_usd": BILLING_TIER_5K_PRICE_USD,
+        "price_cents": BILLING_TIER_5K_PRICE_USD * 100,
+        "tokens_per_unit": TOKENS_PER_UNIT,
+        "token_coverage": BILLING_TIER_5K_UNITS * TOKENS_PER_UNIT,
+        "notes": (f"{BILLING_TIER_5K_UNITS:,} units · ${BILLING_TIER_5K_PRICE_USD} USD" f" · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
+    },
+    "team": {
+        "label": "Team",
+        "units": BILLING_TIER_25K_UNITS,
+        "price_usd": BILLING_TIER_25K_PRICE_USD,
+        "price_cents": BILLING_TIER_25K_PRICE_USD * 100,
+        "tokens_per_unit": TOKENS_PER_UNIT,
+        "token_coverage": BILLING_TIER_25K_UNITS * TOKENS_PER_UNIT,
+        "notes": (f"{BILLING_TIER_25K_UNITS:,} units · ${BILLING_TIER_25K_PRICE_USD} USD" f" · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
+    },
+    "enterprise": {
+        "label": "Enterprise",
+        "units": BILLING_TIER_60K_UNITS,
+        "price_usd": BILLING_TIER_60K_PRICE_USD,
+        "price_cents": BILLING_TIER_60K_PRICE_USD * 100,
+        "tokens_per_unit": TOKENS_PER_UNIT,
+        "token_coverage": BILLING_TIER_60K_UNITS * TOKENS_PER_UNIT,
+        "notes": (f"{BILLING_TIER_60K_UNITS:,} units · ${BILLING_TIER_60K_PRICE_USD} USD" f" · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
+    },
+}
+
+_PLAN_UNITS: dict[str, int] = {plan: meta["units"] for plan, meta in PACKAGE_CATALOGUE.items()}
+_PLAN_PRICE_CENTS: dict[str, int] = {plan: meta["price_cents"] for plan, meta in PACKAGE_CATALOGUE.items()}
+
+
+def units_for_tokens(token_count: int) -> int:
+    """
+    Return the number of protection units required to cover token_count tokens.
+    Each unit covers up to TOKENS_PER_UNIT (25,000) tokens.
+    Partial chunks consume a full unit (ceiling division).
+
+    Examples:
+        units_for_tokens(1)       -> 1
+        units_for_tokens(25_000)  -> 1
+        units_for_tokens(25_001)  -> 2
+        units_for_tokens(75_000)  -> 3
+    """
+    if token_count <= 0:
+        return 0
+    return math.ceil(token_count / TOKENS_PER_UNIT)
+
+
+def _get_environment() -> str:
+    return os.environ.get("IRONCLAW_ENV", os.environ.get("APP_ENV", "production"))
 
 
 class BillingCurrencyAmountView(BaseModel):
@@ -56,6 +133,8 @@ class BillingPackageListItem(BaseModel):
     usage: list[BillingUsageBucketView] = Field(default_factory=list)
     overallusagestatus: str
     invoiceid: str | None = None
+    tokens_per_unit: int
+    token_coverage: int
 
 
 class BillingPackageListFilters(BaseModel):
@@ -77,6 +156,16 @@ class BillingPackagePlanCount(BaseModel):
     count: int
 
 
+class PackageCatalogueEntry(BaseModel):
+    label: str
+    units: int
+    price_usd: int
+    price_cents: int
+    tokens_per_unit: int
+    token_coverage: int
+    notes: str
+
+
 class BillingPackageListResponse(BaseModel):
     generatedat: str
     environment: str
@@ -87,6 +176,8 @@ class BillingPackageListResponse(BaseModel):
     packages: list[BillingPackageListItem] = Field(default_factory=list)
     statuscounts: list[BillingPackageStatusCount] = Field(default_factory=list)
     plancounts: list[BillingPackagePlanCount] = Field(default_factory=list)
+    tokens_per_unit: int
+    package_catalogue: dict[str, PackageCatalogueEntry] = Field(default_factory=dict)
     notes: list[str] = Field(default_factory=list)
 
 
@@ -146,171 +237,238 @@ def _build_usage(
     )
 
 
-def _all_packages() -> list[BillingPackageListItem]:
+def _usage_status_for_percent(pct: float) -> str:
+    if pct >= 100.0:
+        return "critical"
+    if pct >= 80.0:
+        return "warning"
+    return "healthy"
+
+
+def _make_item(
+    packageid: str,
+    organizationid: str,
+    organizationname: str,
+    plan: str,
+    status: str,
+    purchasedat: str,
+    usage: list[BillingUsageBucketView],
+    invoiceid: str | None = None,
+    expiresat: str | None = None,
+) -> BillingPackageListItem:
+    plan_units = _PLAN_UNITS.get(plan, BILLING_TIER_5K_UNITS)
+    price_cents = _PLAN_PRICE_CENTS.get(plan, BILLING_TIER_5K_PRICE_USD * 100)
+    return BillingPackageListItem(
+        packageid=packageid,
+        organizationid=organizationid,
+        organizationname=organizationname,
+        plan=plan,
+        status=status,
+        statuscolor=_status_color(status),
+        purchasedat=purchasedat,
+        expiresat=expiresat,
+        packageprice=_usd(price_cents),
+        usage=usage,
+        overallusagestatus=_overall_usage_status(usage),
+        invoiceid=invoiceid,
+        tokens_per_unit=TOKENS_PER_UNIT,
+        token_coverage=plan_units * TOKENS_PER_UNIT,
+    )
+
+
+def _fetch_packages_from_supabase() -> list[BillingPackageListItem] | None:
+    """
+    Query Supabase for all package records.
+    Returns a list on success, None if Supabase is not configured or query fails.
+    """
+    if not is_supabase_configured():
+        return None
+    try:
+        client = get_supabase_client()
+        rows = client.table("billing_packages").select("*").order("purchased_at", desc=False).execute().data
+        if rows is None:
+            return None
+        items: list[BillingPackageListItem] = []
+        for row in rows:
+            plan = str(row.get("plan", "starter"))
+            plan_units = _PLAN_UNITS.get(plan, BILLING_TIER_5K_UNITS)
+            used_units = int(row.get("used_units", 0))
+            pct = _percent_used(used_units, plan_units)
+            usage = [
+                _build_usage(
+                    "guardedexecutions",
+                    used_units,
+                    plan_units,
+                    0,
+                    "units",
+                    _usage_status_for_percent(pct),
+                )
+            ]
+            items.append(
+                _make_item(
+                    packageid=str(row.get("id", "")),
+                    organizationid=str(row.get("organization_id", "")),
+                    organizationname=str(row.get("organization_name", row.get("organization_id", ""))),
+                    plan=plan,
+                    status=str(row.get("status", "active")),
+                    purchasedat=str(row.get("purchased_at", datetime.now(UTC).isoformat())),
+                    usage=usage,
+                    invoiceid=row.get("invoice_id"),
+                    expiresat=row.get("expires_at"),
+                )
+            )
+        return items
+    except Exception:
+        return None
+
+
+def _static_fallback_packages() -> list[BillingPackageListItem]:
+    """
+    Static demo packages using canonical plan IDs and correct pricing.
+    Used only when Supabase is not configured.
+    """
+    starter_units = BILLING_TIER_5K_UNITS
+    team_units = BILLING_TIER_25K_UNITS
+    enterprise_units = BILLING_TIER_60K_UNITS
+
     packages: list[BillingPackageListItem] = []
 
-    # pkg-001 — Alpha Security Lab — team-security — active
     usage_001 = [
-        _build_usage("guardedexecutions", 18340, 100000, 0, "units", "healthy"),
-        _build_usage("manualreviews", 1220, 100000, 0, "units", "healthy"),
-        _build_usage("securityalerts", 3870, 100000, 0, "units", "healthy"),
+        _build_usage("guardedexecutions", 3240, team_units, 0, "units", "healthy"),
+        _build_usage("manualreviews", 810, team_units, 0, "units", "healthy"),
+        _build_usage("securityalerts", 1580, team_units, 0, "units", "healthy"),
     ]
     packages.append(
-        BillingPackageListItem(
+        _make_item(
             packageid="pkg-001",
             organizationid="org-001",
             organizationname="Alpha Security Lab",
-            plan="team-security",
+            plan="team",
             status="active",
-            statuscolor=_status_color("active"),
             purchasedat=_utc_iso(2026, 4, 10, 9, 0),
-            expiresat=None,
-            packageprice=_usd(9000),
             usage=usage_001,
-            overallusagestatus=_overall_usage_status(usage_001),
             invoiceid="inv-001",
         )
     )
 
-    # pkg-002 — Beta Runtime Defense — single-user — active
     usage_002 = [
-        _build_usage("guardedexecutions", 4120, 20000, 0, "units", "healthy"),
-        _build_usage("manualreviews", 620, 20000, 0, "units", "healthy"),
-        _build_usage("securityalerts", 2010, 20000, 0, "units", "warning"),
+        _build_usage("guardedexecutions", 2100, starter_units, 0, "units", "healthy"),
+        _build_usage("manualreviews", 310, starter_units, 0, "units", "healthy"),
+        _build_usage("securityalerts", 4010, starter_units, 0, "units", "warning"),
     ]
     packages.append(
-        BillingPackageListItem(
+        _make_item(
             packageid="pkg-002",
             organizationid="org-002",
             organizationname="Beta Runtime Defense",
-            plan="single-user",
+            plan="starter",
             status="active",
-            statuscolor=_status_color("active"),
             purchasedat=_utc_iso(2026, 4, 12, 14, 20),
-            expiresat=None,
-            packageprice=_usd(2000),
             usage=usage_002,
-            overallusagestatus=_overall_usage_status(usage_002),
             invoiceid="inv-002",
         )
     )
 
-    # pkg-003 — Gamma Internal QA — enterprise-security — units_exhausted
     usage_003 = [
-        _build_usage("guardedexecutions", 200000, 200000, 0, "units", "critical"),
-        _build_usage("manualreviews", 200000, 200000, 0, "units", "critical"),
-        _build_usage("securityalerts", 180000, 200000, 0, "units", "healthy"),
+        _build_usage("guardedexecutions", enterprise_units, enterprise_units, 0, "units", "critical"),
+        _build_usage("manualreviews", enterprise_units, enterprise_units, 0, "units", "critical"),
+        _build_usage("securityalerts", 55000, enterprise_units, 0, "units", "healthy"),
     ]
     packages.append(
-        BillingPackageListItem(
+        _make_item(
             packageid="pkg-003",
             organizationid="org-003",
             organizationname="Gamma Internal QA",
-            plan="enterprise-security",
+            plan="enterprise",
             status="units_exhausted",
-            statuscolor=_status_color("units_exhausted"),
             purchasedat=_utc_iso(2026, 4, 8, 8, 45),
-            expiresat=None,
-            packageprice=_usd(15000),
             usage=usage_003,
-            overallusagestatus=_overall_usage_status(usage_003),
             invoiceid="inv-003",
         )
     )
 
-    # pkg-004 — Delta Threat Ops — single-user — active
     usage_004 = [
-        _build_usage("guardedexecutions", 7810, 20000, 0, "units", "healthy"),
-        _build_usage("manualreviews", 430, 20000, 0, "units", "healthy"),
-        _build_usage("securityalerts", 1260, 20000, 0, "units", "healthy"),
+        _build_usage("guardedexecutions", 1810, starter_units, 0, "units", "healthy"),
+        _build_usage("manualreviews", 430, starter_units, 0, "units", "healthy"),
+        _build_usage("securityalerts", 960, starter_units, 0, "units", "healthy"),
     ]
     packages.append(
-        BillingPackageListItem(
+        _make_item(
             packageid="pkg-004",
             organizationid="org-004",
             organizationname="Delta Threat Ops",
-            plan="single-user",
+            plan="starter",
             status="active",
-            statuscolor=_status_color("active"),
             purchasedat=_utc_iso(2026, 3, 20, 11, 0),
-            expiresat=None,
-            packageprice=_usd(2000),
             usage=usage_004,
-            overallusagestatus=_overall_usage_status(usage_004),
             invoiceid="inv-005",
         )
     )
 
-    # pkg-005 — Epsilon Red Team — team-security — suspended
     usage_005 = [
-        _build_usage("guardedexecutions", 0, 100000, 0, "units", "healthy"),
-        _build_usage("manualreviews", 0, 100000, 0, "units", "healthy"),
-        _build_usage("securityalerts", 0, 100000, 0, "units", "healthy"),
+        _build_usage("guardedexecutions", 0, team_units, 0, "units", "healthy"),
+        _build_usage("manualreviews", 0, team_units, 0, "units", "healthy"),
+        _build_usage("securityalerts", 0, team_units, 0, "units", "healthy"),
     ]
     packages.append(
-        BillingPackageListItem(
+        _make_item(
             packageid="pkg-005",
             organizationid="org-005",
             organizationname="Epsilon Red Team",
-            plan="team-security",
+            plan="team",
             status="suspended",
-            statuscolor=_status_color("suspended"),
             purchasedat=_utc_iso(2026, 3, 15, 10, 0),
-            expiresat=_utc_iso(2026, 6, 15, 10, 0),
-            packageprice=_usd(9000),
             usage=usage_005,
-            overallusagestatus=_overall_usage_status(usage_005),
             invoiceid="inv-007",
+            expiresat=_utc_iso(2026, 6, 15, 10, 0),
         )
     )
 
-    # pkg-006 — Alpha Security Lab — enterprise-security — active (second purchase)
     usage_006 = [
-        _build_usage("guardedexecutions", 161200, 200000, 0, "units", "warning"),
-        _build_usage("manualreviews", 18900, 200000, 0, "units", "healthy"),
-        _build_usage("securityalerts", 44100, 200000, 0, "units", "healthy"),
+        _build_usage("guardedexecutions", 49200, enterprise_units, 0, "units", "warning"),
+        _build_usage("manualreviews", 8900, enterprise_units, 0, "units", "healthy"),
+        _build_usage("securityalerts", 14100, enterprise_units, 0, "units", "healthy"),
     ]
     packages.append(
-        BillingPackageListItem(
+        _make_item(
             packageid="pkg-006",
             organizationid="org-001",
             organizationname="Alpha Security Lab",
-            plan="enterprise-security",
+            plan="enterprise",
             status="active",
-            statuscolor=_status_color("active"),
             purchasedat=_utc_iso(2026, 5, 1, 8, 30),
-            expiresat=None,
-            packageprice=_usd(15000),
             usage=usage_006,
-            overallusagestatus=_overall_usage_status(usage_006),
             invoiceid="inv-004",
         )
     )
 
-    # pkg-007 — Beta Runtime Defense — team-security — cancelled
     usage_007 = [
-        _build_usage("guardedexecutions", 3200, 100000, 0, "units", "healthy"),
-        _build_usage("manualreviews", 210, 100000, 0, "units", "healthy"),
-        _build_usage("securityalerts", 880, 100000, 0, "units", "healthy"),
+        _build_usage("guardedexecutions", 3200, team_units, 0, "units", "healthy"),
+        _build_usage("manualreviews", 210, team_units, 0, "units", "healthy"),
+        _build_usage("securityalerts", 880, team_units, 0, "units", "healthy"),
     ]
     packages.append(
-        BillingPackageListItem(
+        _make_item(
             packageid="pkg-007",
             organizationid="org-002",
             organizationname="Beta Runtime Defense",
-            plan="team-security",
+            plan="team",
             status="cancelled",
-            statuscolor=_status_color("cancelled"),
             purchasedat=_utc_iso(2026, 2, 14, 9, 0),
-            expiresat=_utc_iso(2026, 3, 14, 9, 0),
-            packageprice=_usd(9000),
             usage=usage_007,
-            overallusagestatus=_overall_usage_status(usage_007),
             invoiceid="inv-010",
+            expiresat=_utc_iso(2026, 3, 14, 9, 0),
         )
     )
 
     return packages
+
+
+def _all_packages() -> list[BillingPackageListItem]:
+    live = _fetch_packages_from_supabase()
+    if live is not None:
+        return live
+    return _static_fallback_packages()
 
 
 def _build_status_counts(
@@ -366,18 +524,27 @@ def get_billing_packages(
     page: int = 1,
     pagesize: int = 25,
 ) -> BillingPackageListResponse:
-    all_packages = _all_packages()
-    status_counts = _build_status_counts(all_packages)
-    plan_counts = _build_plan_counts(all_packages)
-    filtered = _apply_filters(all_packages, status, plan, organizationid)
+    all_pkgs = _all_packages()
+    status_counts = _build_status_counts(all_pkgs)
+    plan_counts = _build_plan_counts(all_pkgs)
+    filtered = _apply_filters(all_pkgs, status, plan, organizationid)
     totalcount = len(filtered)
     page = max(1, page)
     pagesize = max(1, min(pagesize, 100))
     paginated = _paginate_packages(filtered, page, pagesize)
 
+    catalogue_out: dict[str, PackageCatalogueEntry] = {k: PackageCatalogueEntry(**v) for k, v in PACKAGE_CATALOGUE.items()}
+
+    stripe_key = os.environ.get("STRIPE_API_KEY", "")
+    if stripe_key and stripe_key.startswith(("sk_live_", "sk_test_")):
+        mode = "live" if stripe_key.startswith("sk_live_") else "test"
+        stripe_note = f"Stripe is connected and active (mode: {mode})."
+    else:
+        stripe_note = "Stripe API key is not configured — payment processing is unavailable."
+
     return BillingPackageListResponse(
         generatedat=datetime.now(UTC).isoformat(),
-        environment="local",
+        environment=_get_environment(),
         totalcount=totalcount,
         page=page,
         pagesize=pagesize,
@@ -391,15 +558,18 @@ def get_billing_packages(
         packages=paginated,
         statuscounts=status_counts,
         plancounts=plan_counts,
+        tokens_per_unit=TOKENS_PER_UNIT,
+        package_catalogue=catalogue_out,
         notes=[
             "Package list supports filtering by status (active, units_exhausted, suspended, cancelled, pending), plan, and organizationid.",
             "statuscounts and plancounts reflect the full unfiltered dataset for badge and summary rendering.",
             "statuscolor maps package status to a UI hint: success (active), error (units_exhausted), warning (suspended), neutral (cancelled, pending).",
             "overallusagestatus reflects the worst usage bucket status across all metrics for that package.",
             "percentused is pre-computed per usage bucket: (used / included) * 100, capped at 100.",
+            f"Each protection unit covers up to {TOKENS_PER_UNIT:,} tokens. Partial token chunks consume a full additional unit (ceiling division).",
+            f"Canonical plans: starter ({BILLING_TIER_5K_UNITS:,} units / ${BILLING_TIER_5K_PRICE_USD}), team ({BILLING_TIER_25K_UNITS:,} units / ${BILLING_TIER_25K_PRICE_USD}), enterprise ({BILLING_TIER_60K_UNITS:,} units / ${BILLING_TIER_60K_PRICE_USD}).",
             "Pagination is 1-indexed. Default pagesize is 25, maximum is 100.",
-            "All values are placeholder UI contract data for the current local-first Gen1 build.",
-            "This page is ready to be wired to a live package persistence and metering layer.",
+            stripe_note,
             "Dedicated billing overview available at /ui/billing/overview. Invoice list available at /ui/billing/invoices.",
         ],
     )
