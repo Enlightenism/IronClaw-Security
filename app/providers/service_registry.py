@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from app.clients.release_policy_client import ReleasePolicyClient
+from app.services.authservice import AuthService
 
 
 @dataclass
@@ -19,6 +20,12 @@ class ServiceRegistry:
         repr=False,
     )
 
+    _auth_service: AuthService | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+
     def get_release_policy_client(self) -> ReleasePolicyClient:
         """Return a singleton ReleasePolicyClient instance.
 
@@ -28,6 +35,16 @@ class ServiceRegistry:
         if self._release_policy_client is None:
             self._release_policy_client = ReleasePolicyClient()
         return self._release_policy_client
+
+    def get_auth_service(self) -> AuthService:
+        """Return a singleton AuthService instance.
+
+        Created lazily on first access with default SessionPolicy so
+        callers in routes and tasks receive the same stateless instance.
+        """
+        if self._auth_service is None:
+            self._auth_service = AuthService()
+        return self._auth_service
 
 
 def build_service_registry() -> ServiceRegistry:
