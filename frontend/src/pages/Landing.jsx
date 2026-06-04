@@ -123,10 +123,7 @@ const LiveCounter = ({
   const [live, setLive] = useState(false);
   const prevRef = useRef(initial);
 
-  // Mount animation: animate from stored value to itself (no reset from 0)
   const mountAnimated = useCountUp(initial, 2000, [], initial);
-
-  // Live tick animation: animate from prev to current value
   const liveAnimated = useCountUp(value, 600, [value], prevRef.current);
 
   useEffect(() => {
@@ -398,7 +395,7 @@ const Landing = () => {
           <h2 className="text-3xl font-bold tracking-tight sm:text-5xl">
             <span className="text-gold-gradient">$20</span>{" "}
             <span className="text-[#BFC1C2]">=</span>{" "}
-            <span className="text-platinum-gradient">20,000 units</span>
+            <span className="text-platinum-gradient">5,000 units</span>
           </h2>
           <p className="mt-3 text-lg text-[#BFC1C2]">
             Pay only for what you use.
@@ -407,7 +404,7 @@ const Landing = () => {
             className="mt-2 font-tech text-sm text-[#FFD700]"
             data-testid="agents-protected-line"
           >
-            20,000 units = 20,000 agents protected.
+            5,000 units · each unit inspects up to 25,000 tokens
           </p>
 
           <div className="mx-auto mt-8 grid max-w-2xl grid-cols-1 gap-3 text-left sm:grid-cols-2">
