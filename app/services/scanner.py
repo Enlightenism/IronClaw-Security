@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import logging
 import re
 from typing import Any
 import unicodedata
@@ -6,6 +9,8 @@ from app.services.heuristics import heuristic_prompt_injection_score
 from app.services.rules import ALL_RULE_GROUPS
 from app.services.telemetry import append_telemetry_event
 
+logger = logging.getLogger(__name__)
+
 ZERO_WIDTH_RE = re.compile(r"[\u200B-\u200D\uFEFF\u2060\u180E\u00AD]")
 CONTROL_RE = re.compile(r"[\u0000-\u001F\u007F-\u009F]")
 
@@ -13,6 +18,8 @@ SHELL_DOWNLOAD_EXECUTE_RE = re.compile(
     r"(curl|wget)\b[^|]{0,200}\|\s*(bash|sh|/bin/bash|/bin/sh)",
     re.IGNORECASE,
 )
+
+_SEVERITY_ORDER = ["low", "medium", "high", "critical"]
 
 
 def _normalize_text(text: str) -> str:
@@ -37,7 +44,83 @@ def _build_rule_index() -> dict[str, dict[str, str]]:
     return index
 
 
-RULE_INDEX = _build_rule_index()
+# Module-level index — seeded from rules.py at import time.
+# load_builtin_patterns_from_db() merges DB rows on top at startup.
+RULE_INDEX: dict[str, dict[str, str]] = _build_rule_index()
+
+
+# ---------------------------------------------------------------------------
+# DB hydration — call once at startup inside the lifespan handler.
+# Falls back silently to the in-memory rules.py baseline when Supabase is
+# unavailable or not configured.
+# ---------------------------------------------------------------------------
+
+
+def load_builtin_patterns_from_db() -> int:
+    """Hydrate RULE_INDEX from the scan_patterns table in Supabase.
+
+    Merges DB rows on top of the rules.py baseline so that patterns added
+    in the dashboard are picked up without a redeploy.  DB rows with the
+    same id overwrite in-memory defaults; rows with new ids are appended.
+
+    Returns the number of rows loaded from the DB (0 on any failure).
+    """
+    try:
+        from app.supabaseclient import get_supabase_client, is_supabase_configured  # noqa: PLC0415
+
+        if not is_supabase_configured():
+            logger.debug("scanner: Supabase not configured — using in-memory rule baseline only")
+            return 0
+
+        client = get_supabase_client()
+        rows: list[dict[str, Any]] = client.select(
+            "scan_patterns",
+            columns="id,pattern,severity,category",
+        )
+
+        if not rows:
+            logger.debug("scanner: scan_patterns table returned 0 rows — using in-memory baseline")
+            return 0
+
+        loaded = 0
+        for row in rows:
+            rule_id = row.get("id")
+            pattern = row.get("pattern") or ""
+            severity = row.get("severity") or "medium"
+            category = row.get("category") or "unknown"
+
+            if not rule_id:
+                continue
+
+            RULE_INDEX[rule_id] = {
+                "severity": severity,
+                "category": category,
+                "pattern": pattern,
+            }
+            loaded += 1
+
+        logger.info("scanner: loaded %d pattern(s) from scan_patterns", loaded)
+        return loaded
+
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("scanner: could not load scan_patterns from DB — falling back to in-memory rules: %s", exc)
+        return 0
+
+
+def reload_rule_index() -> int:
+    """Reset RULE_INDEX to the rules.py baseline then re-hydrate from DB.
+
+    Useful after a scan_patterns write so callers can refresh without a
+    restart.  Returns the number of DB rows applied (0 on failure/offline).
+    """
+    global RULE_INDEX  # noqa: PLW0603
+    RULE_INDEX = _build_rule_index()
+    return load_builtin_patterns_from_db()
+
+
+# ---------------------------------------------------------------------------
+# Core helpers
+# ---------------------------------------------------------------------------
 
 
 def get_rule_severities(matched_patterns: list[str]) -> list[str]:
@@ -116,6 +199,21 @@ def scan_text(text: str) -> list[str]:
                 continue
             if pattern in normalized and rule["id"] not in matches:
                 matches.append(rule["id"])
+
+    # Also scan any DB-only rules that are not in ALL_RULE_GROUPS
+    static_ids: set[str] = set()
+    for group in ALL_RULE_GROUPS:
+        for rule in group:
+            static_ids.add(rule["id"])
+
+    for rule_id, meta in RULE_INDEX.items():
+        if rule_id in static_ids:
+            continue
+        pattern = (meta.get("pattern") or "").lower()
+        if not pattern:
+            continue
+        if pattern in normalized and rule_id not in matches:
+            matches.append(rule_id)
 
     if "downloadstring(" in normalized and "iex " in normalized:
         if "powershell_download_execute_combo" not in matches:
@@ -242,9 +340,6 @@ def _build_rule_details(matched_patterns: list[str]) -> list[dict[str, Any]]:
                 },
             )
     return details
-
-
-_SEVERITY_ORDER = ["low", "medium", "high", "critical"]
 
 
 def _max_severity(matched_patterns: list[str]) -> str | None:

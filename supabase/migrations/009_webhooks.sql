@@ -4,12 +4,14 @@
 -- Depends on: 001initialpersistenceschema.sql (set_updated_at, pgcrypto,
 --                                              persistence_migrations)
 --             004ironclawinternaltables.sql    (ironclaw_set_updated_at)
---             005_ironclaw_rls_policies.sql    (RLS pattern reference)
+--             005_ironclaw_rls_policies.sql    (RLS for webhook_subscriptions
+--                                              and webhook_delivery_log owned
+--                                              exclusively by 005)
 -- tenant_id is TEXT (matches client_id pattern established in 004/005).
 -- secret_hash stores HMAC signing secret as SHA-256 hex; never raw secret.
--- webhook_delivery_log is append-only; no UPDATE policy for authenticated.
--- RLS: service_role = full access; authenticated = own tenant rows;
---      anon = zero access.
+-- webhook_delivery_log is append-only; writes restricted to service_role.
+-- NOTE: RLS for webhook_subscriptions and webhook_delivery_log is owned
+-- exclusively by 005_ironclaw_rls_policies.sql.
 -- =============================================================================
 
 BEGIN;
@@ -147,71 +149,6 @@ CREATE TRIGGER set_webhook_delivery_log_updated_at
     FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 -- ---------------------------------------------------------------------------
--- Row Level Security — webhook_subscriptions
--- service_role : full access (matches 005 pattern)
--- authenticated: SELECT / INSERT / UPDATE own tenant rows
---               (tenant_id = auth.uid()::TEXT)
--- anon         : no policy defined — RLS default-deny, zero access
--- ---------------------------------------------------------------------------
-
-ALTER TABLE public.webhook_subscriptions ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY webhook_subscriptions_service_role_all
-    ON public.webhook_subscriptions
-    AS PERMISSIVE
-    FOR ALL
-    TO service_role
-    USING (TRUE)
-    WITH CHECK (TRUE);
-
-CREATE POLICY webhook_subscriptions_select_own
-    ON public.webhook_subscriptions
-    FOR SELECT
-    TO authenticated
-    USING (tenant_id = (SELECT auth.uid()::TEXT));
-
-CREATE POLICY webhook_subscriptions_insert_own
-    ON public.webhook_subscriptions
-    FOR INSERT
-    TO authenticated
-    WITH CHECK (tenant_id = (SELECT auth.uid()::TEXT));
-
-CREATE POLICY webhook_subscriptions_update_own
-    ON public.webhook_subscriptions
-    FOR UPDATE
-    TO authenticated
-    USING (tenant_id = (SELECT auth.uid()::TEXT))
-    WITH CHECK (tenant_id = (SELECT auth.uid()::TEXT));
-
--- ---------------------------------------------------------------------------
--- Row Level Security — webhook_delivery_log
--- Append-only for authenticated: SELECT own deliveries; no INSERT/UPDATE/DELETE.
--- All writes go through service_role (the IronClaw dispatch worker).
--- ---------------------------------------------------------------------------
-
-ALTER TABLE public.webhook_delivery_log ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY webhook_delivery_log_service_role_all
-    ON public.webhook_delivery_log
-    AS PERMISSIVE
-    FOR ALL
-    TO service_role
-    USING (TRUE)
-    WITH CHECK (TRUE);
-
-CREATE POLICY webhook_delivery_log_select_own
-    ON public.webhook_delivery_log
-    FOR SELECT
-    TO authenticated
-    USING (
-        subscription_id IN (
-            SELECT id
-            FROM public.webhook_subscriptions
-            WHERE tenant_id = (SELECT auth.uid()::TEXT)
-        )
-    );
-
--- ---------------------------------------------------------------------------
 -- Migration record
 -- ---------------------------------------------------------------------------
 
@@ -228,19 +165,18 @@ VALUES (
     'and webhook_delivery_log (subscription_id FK, event_type, payload, status, '
     'response_code, attempts, delivered_at). Adds required indexes on subscription_id '
     'and event_type plus GIN index on events array for fan-out queries. '
-    'RLS: service_role full access, authenticated own-tenant rows, anon zero access. '
-    'webhook_delivery_log is write-restricted to service_role; authenticated may only SELECT.',
+    'RLS for both tables is owned exclusively by 005_ironclaw_rls_policies.sql. '
+    'webhook_delivery_log is append-only; writes restricted to service_role.',
     'system',
     '',
     jsonb_build_object(
-        'section',        'webhooks_and_egress',
-        'depends_on',     jsonb_build_array(
-                              '001_initial_persistence_schema',
-                              '004_ironclaw_internal_tables',
-                              '005_ironclaw_rls_policies'
-                          ),
-        'rls_roles',      jsonb_build_array('service_role', 'authenticated'),
-        'anon_access',    FALSE,
+        'section',            'webhooks_and_egress',
+        'depends_on',         jsonb_build_array(
+                                  '001_initial_persistence_schema',
+                                  '004_ironclaw_internal_tables',
+                                  '005_ironclaw_rls_policies'
+                              ),
+        'anon_access',        FALSE,
         'append_only_tables', jsonb_build_array('webhook_delivery_log')
     )
 )
