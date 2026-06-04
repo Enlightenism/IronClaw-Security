@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 import logging
+import math
 import os
 from pathlib import Path
 import random
@@ -64,13 +65,59 @@ logging.basicConfig(
 logger = logging.getLogger("ironclaw")
 
 
-PACKAGES = {
-    "tier_10k": {"units": 10000, "amount": 20.00, "label": "10,000 units"},
-    "tier_50k": {"units": 50000, "amount": 90.00, "label": "50,000 units"},
-    "tier_100k": {"units": 100000, "amount": 150.00, "label": "100,000 units"},
+# ---------------------------------------------------------------------------
+# Billing catalogue — single source of truth for this module
+# Starter   : pkg_5000  —  5,000 units — $20 USD
+# Team      : pkg_25000 — 25,000 units — $90 USD
+# Enterprise: pkg_60000 — 60,000 units — $180 USD
+# Each protection unit covers up to TOKENS_PER_UNIT (25,000) tokens.
+# Partial token chunks consume a full additional unit (ceiling division).
+# ---------------------------------------------------------------------------
+
+TOKENS_PER_UNIT: int = 25_000
+
+PACKAGES: dict[str, dict] = {
+    "pkg_5000": {
+        "units": 5_000,
+        "amount": 20.00,
+        "label": "Starter — 5,000 units",
+        "tokens_per_unit": TOKENS_PER_UNIT,
+        "notes": f"5,000 units · $20.00 USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens",
+    },
+    "pkg_25000": {
+        "units": 25_000,
+        "amount": 90.00,
+        "label": "Team — 25,000 units",
+        "tokens_per_unit": TOKENS_PER_UNIT,
+        "notes": f"25,000 units · $90.00 USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens",
+    },
+    "pkg_60000": {
+        "units": 60_000,
+        "amount": 180.00,
+        "label": "Enterprise — 60,000 units",
+        "tokens_per_unit": TOKENS_PER_UNIT,
+        "notes": f"60,000 units · $180.00 USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens",
+    },
 }
 
-ACTIVE_PACKAGE_IDS = {"tier_10k", "tier_50k", "tier_100k"}
+ACTIVE_PACKAGE_IDS: set[str] = {"pkg_5000", "pkg_25000", "pkg_60000"}
+
+
+def units_for_tokens(token_count: int) -> int:
+    """
+    Return the number of protection units required to cover token_count tokens.
+    Each unit covers up to TOKENS_PER_UNIT (25,000) tokens.
+    Partial chunks consume a full unit (ceiling division).
+
+    Examples:
+        units_for_tokens(1)       -> 1
+        units_for_tokens(25_000)  -> 1
+        units_for_tokens(25_001)  -> 2
+        units_for_tokens(75_000)  -> 3
+    """
+    if token_count <= 0:
+        return 0
+    return math.ceil(token_count / TOKENS_PER_UNIT)
 
 
 THREAT_TYPES = [
@@ -346,6 +393,7 @@ def credit_units_once(session_id: str) -> None:
     user = _sb_get_user_by_id(txn["user_id"])
     if not user:
         return
+    pkg = PACKAGES.get(txn["package_id"], {})
     new_units = user.get("wallet_units", 0) + txn["units"]
     _sb_update_user(
         txn["user_id"],
@@ -356,16 +404,19 @@ def credit_units_once(session_id: str) -> None:
                 "amount": txn["amount"],
                 "units": txn["units"],
                 "package_id": txn["package_id"],
-                "label": PACKAGES.get(txn["package_id"], {}).get("label", ""),
+                "label": pkg.get("label", ""),
+                "tokens_per_unit": TOKENS_PER_UNIT,
+                "token_coverage": txn["units"] * TOKENS_PER_UNIT,
                 "date": now_iso(),
             },
         },
     )
     logger.info(
-        "Credited %d units to user %s for session %s",
+        "Credited %d units to user %s for session %s (tokens_per_unit=%d)",
         txn["units"],
         txn["user_id"],
         session_id,
+        TOKENS_PER_UNIT,
     )
 
 
@@ -521,6 +572,8 @@ async def create_checkout(
         "email": user["email"],
         "package_id": body.package_id,
         "units": str(pkg["units"]),
+        "tokens_per_unit": str(TOKENS_PER_UNIT),
+        "token_coverage": str(pkg["units"] * TOKENS_PER_UNIT),
         "source": "ironclaw_wallet",
     }
 
@@ -543,6 +596,8 @@ async def create_checkout(
         "units": pkg["units"],
         "amount": float(pkg["amount"]),
         "currency": "usd",
+        "tokens_per_unit": TOKENS_PER_UNIT,
+        "token_coverage": pkg["units"] * TOKENS_PER_UNIT,
         "metadata": metadata,
         "payment_status": "pending",
         "status": "initiated",
@@ -587,6 +642,8 @@ async def payment_status(
         "amount_total": cs.amount_total,
         "currency": cs.currency,
         "units": txn["units"],
+        "tokens_per_unit": TOKENS_PER_UNIT,
+        "token_coverage": txn.get("token_coverage", txn["units"] * TOKENS_PER_UNIT),
         "package_id": txn["package_id"],
     }
 
