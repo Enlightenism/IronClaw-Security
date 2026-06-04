@@ -3,13 +3,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-import hashlib
 from typing import Any
 
 from app.core.apikeys import (
     APIKeyRecord,
     fingerprint_api_key,
     get_api_key_registry,
+    is_api_key_expired,
 )
 from app.core.auth import AuthContext
 from app.core.org_isolation import evaluate_org_isolation
@@ -48,8 +48,11 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def _sha256_hex(raw: str) -> str:
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+def _getattr_safe(obj: object, attr: str) -> object:
+    try:
+        return getattr(obj, attr, None)
+    except Exception:
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,7 +94,7 @@ class AuthService:
         return self._session_policy
 
     # ------------------------------------------------------------------
-    # API Key authentication — SHA-256 hash lookup with full guard chain
+    # API Key authentication — O(1) SHA-256 fingerprint lookup
     # ------------------------------------------------------------------
 
     def authenticate_api_key(
@@ -104,72 +107,61 @@ class AuthService:
         metadata: Mapping[str, object] | None = None,
     ) -> AuthResult:
         """
-        Authenticate a raw API key against the registry using SHA-256 hash lookup.
+        Authenticate a raw API key against the registry using O(1) SHA-256
+        fingerprint lookup via registry.get_by_fingerprint().
 
         Guard chain (fail-closed):
-          1. Compute SHA-256 fingerprint of the raw key.
-          2. Locate the record by fingerprint via the registry.
+          1. Compute SHA-256 fingerprint via fingerprint_api_key().
+          2. Look up record by fingerprint — O(1), no plaintext stored in lookup path.
           3. Reject if record not found.
-          4. Reject if active is False (revoked = FALSE guard).
-          5. Reject if revoked_at is not None (belt-and-suspenders revocation check).
+          4. Reject if active is False  (revoked = FALSE guard).
+          5. Reject if revoked_at is not None (belt-and-suspenders).
           6. Reject if expires_at is present and <= now (expires_at > NOW() guard).
-          7. On pass: write last_used_at via record.touch() + registry.upsert_record().
-          8. Return AuthResult with authenticated=True and auth_method="api_key".
+          7. Write last_used_at via record.touch() + registry.upsert_record().
+          8. Return AuthResult authenticated=True, auth_method="api_key".
         """
         effective_now = now or _utc_now()
-        key_fingerprint = _sha256_hex(raw_key)
-        # fingerprint_api_key from app.core.apikeys also produces SHA-256 hex —
-        # use it here to guarantee we stay on the single source of truth.
-        assert key_fingerprint == fingerprint_api_key(raw_key), "Internal hash mismatch — fingerprint_api_key contract changed"
+        fingerprint = fingerprint_api_key(raw_key)
 
         registry = get_api_key_registry()
         record: APIKeyRecord | None = None
 
-        # Resolve by fingerprint: iterate active records for hash match.
-        # The in-memory registry indexes by plaintext secret, not fingerprint.
-        # We look up by fingerprint to support future DB-backed registries where
-        # the plaintext secret is never stored.
-        list_keys = getattr(registry, "list_keys", None)
-        if callable(list_keys):
+        get_by_fp = getattr(registry, "get_by_fingerprint", None)
+        if callable(get_by_fp):
             try:
-                candidates = list_keys()
-                for candidate in candidates:
-                    if getattr(candidate, "fingerprint", None) == key_fingerprint:
-                        record = candidate
-                        break
+                record = get_by_fp(fingerprint)
             except Exception:
                 record = None
+        else:
+            # Hard fallback: registry does not yet expose get_by_fingerprint.
+            # Scan list_keys() by fingerprint — slower but safe.
+            list_keys = getattr(registry, "list_keys", None)
+            if callable(list_keys):
+                try:
+                    for candidate in list_keys():
+                        if getattr(candidate, "fingerprint", None) == fingerprint:
+                            record = candidate
+                            break
+                except Exception:
+                    record = None
 
         if record is None:
-            return self._denied_api_key_result(raw_key, "key_not_found", metadata)
+            return self._denied_api_key_result("key_not_found", metadata)
 
-        # Guard 1: active flag (maps to revoked = FALSE in DB schema)
+        # Guard: active flag (revoked = FALSE)
         if not getattr(record, "active", True):
-            return self._denied_api_key_result(raw_key, "key_revoked", metadata)
+            return self._denied_api_key_result("key_revoked", metadata)
 
-        # Guard 2: revoked_at belt-and-suspenders
+        # Guard: explicit revoked_at timestamp
         if getattr(record, "revoked_at", None) is not None:
-            return self._denied_api_key_result(raw_key, "key_revoked", metadata)
+            return self._denied_api_key_result("key_revoked", metadata)
 
-        # Guard 3: expires_at > NOW()
-        expires_at_raw = getattr(record, "expires_at", None)
-        if expires_at_raw is not None:
-            try:
-                if isinstance(expires_at_raw, str):
-                    expires_dt = datetime.fromisoformat(expires_at_raw)
-                elif isinstance(expires_at_raw, datetime):
-                    expires_dt = expires_at_raw
-                else:
-                    expires_dt = None
-                if expires_dt is not None:
-                    if expires_dt.tzinfo is None:
-                        expires_dt = expires_dt.replace(tzinfo=UTC)
-                    if effective_now >= expires_dt:
-                        return self._denied_api_key_result(raw_key, "key_expired", metadata)
-            except (ValueError, TypeError):
-                pass
+        # Guard: expires_at > NOW()
+        expires_at = getattr(record, "expires_at", None)
+        if is_api_key_expired(expires_at, now=effective_now):
+            return self._denied_api_key_result("key_expired", metadata)
 
-        # Write last_used_at on successful authentication
+        # Write last_used_at on successful auth
         touch = getattr(record, "touch", None)
         if callable(touch):
             try:
@@ -184,14 +176,14 @@ class AuthService:
             except Exception:
                 pass
 
-        principal_id = None
+        principal_id: str | None = None
         for attr in ("key_id", "id", "client_id", "owner_id", "principal_id"):
             val = _clean(_getattr_safe(record, attr))
             if val:
                 principal_id = val
                 break
 
-        org_id = None
+        org_id: str | None = None
         for attr in ("org_id", "organization_id", "tenant_id"):
             val = _clean(_getattr_safe(record, attr))
             if val:
@@ -213,7 +205,7 @@ class AuthService:
                 break
 
         extra_meta = _stringify_metadata(metadata)
-        extra_meta["fingerprint"] = key_fingerprint
+        extra_meta["fingerprint"] = fingerprint
         if ip_address:
             extra_meta["ip_address"] = ip_address
         if user_agent:
@@ -244,11 +236,9 @@ class AuthService:
 
     def _denied_api_key_result(
         self,
-        raw_key: str,
         reason: str,
         metadata: Mapping[str, object] | None,
     ) -> AuthResult:
-        extra_meta = _stringify_metadata(metadata)
         context = AuthContext(
             api_key=None,
             principal_type="anonymous",
@@ -260,7 +250,7 @@ class AuthService:
             authenticated=False,
             auth_source="registry",
             auth_method="api_key",
-            metadata=extra_meta,
+            metadata=_stringify_metadata(metadata),
         )
         return AuthResult(
             authenticated=False,
@@ -501,13 +491,6 @@ class AuthService:
             auth_source="session",
             metadata=combined_metadata,
         )
-
-
-def _getattr_safe(obj: object, attr: str) -> object:
-    try:
-        return getattr(obj, attr, None)
-    except Exception:
-        return None
 
 
 def build_auth_service(
