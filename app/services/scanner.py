@@ -57,13 +57,17 @@ RULE_INDEX: dict[str, dict[str, str]] = _build_rule_index()
 
 
 def load_builtin_patterns_from_db() -> int:
-    """Hydrate RULE_INDEX from the scan_patterns table in Supabase.
+    """Hydrate RULE_INDEX from scan_patterns AND policy_rules in Supabase.
 
-    Merges DB rows on top of the rules.py baseline so that patterns added
-    in the dashboard are picked up without a redeploy.  DB rows with the
-    same id overwrite in-memory defaults; rows with new ids are appended.
+    Merge order (lowest → highest precedence):
+      1. rules.py baseline (always present)
+      2. scan_patterns rows (overwrite matching ids, append new ids)
+      3. policy_rules rows where pattern is non-empty (highest precedence)
 
-    Returns the number of rows loaded from the DB (0 on any failure).
+    This ensures runtime rule additions in either table are reflected
+    without a redeploy.  Falls back silently to baseline on any failure.
+
+    Returns the total number of rows loaded from the DB (0 on any failure).
     """
     try:
         from app.supabaseclient import get_supabase_client, is_supabase_configured  # noqa: PLC0415
@@ -73,45 +77,77 @@ def load_builtin_patterns_from_db() -> int:
             return 0
 
         client = get_supabase_client()
-        rows: list[dict[str, Any]] = client.select(
-            "scan_patterns",
-            columns="id,pattern,severity,category",
-        )
+        total_loaded = 0
 
-        if not rows:
-            logger.debug("scanner: scan_patterns table returned 0 rows — using in-memory baseline")
-            return 0
+        # --- Layer 1: scan_patterns ---
+        try:
+            scan_rows: list[dict[str, Any]] = client.select(
+                "scan_patterns",
+                columns="id,pattern,severity,category",
+            )
+            for row in scan_rows:
+                rule_id = row.get("id")
+                pattern = row.get("pattern") or ""
+                severity = row.get("severity") or "medium"
+                category = row.get("category") or "unknown"
+                if not rule_id:
+                    continue
+                RULE_INDEX[rule_id] = {
+                    "severity": severity,
+                    "category": category,
+                    "pattern": pattern,
+                }
+                total_loaded += 1
+            if scan_rows:
+                logger.info("scanner: loaded %d pattern(s) from scan_patterns", len(scan_rows))
+            else:
+                logger.debug("scanner: scan_patterns returned 0 rows")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("scanner: scan_patterns load failed — skipping layer: %s", exc)
 
-        loaded = 0
-        for row in rows:
-            rule_id = row.get("id")
-            pattern = row.get("pattern") or ""
-            severity = row.get("severity") or "medium"
-            category = row.get("category") or "unknown"
+        # --- Layer 2: policy_rules (highest precedence) ---
+        # Pulls rows that carry a non-empty pattern string so that policies
+        # configured at runtime override static defaults without a redeploy.
+        try:
+            policy_rows: list[dict[str, Any]] = client.select(
+                "policy_rules",
+                columns="id,pattern,severity,category",
+                filters={"pattern": "not.is.null"},
+            )
+            policy_loaded = 0
+            for row in policy_rows:
+                rule_id = row.get("id")
+                pattern = (row.get("pattern") or "").strip()
+                severity = row.get("severity") or "medium"
+                category = row.get("category") or "policy"
+                if not rule_id or not pattern:
+                    continue
+                RULE_INDEX[rule_id] = {
+                    "severity": severity,
+                    "category": category,
+                    "pattern": pattern,
+                }
+                policy_loaded += 1
+                total_loaded += 1
+            if policy_loaded:
+                logger.info("scanner: loaded %d pattern(s) from policy_rules", policy_loaded)
+            else:
+                logger.debug("scanner: policy_rules returned 0 usable pattern rows")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("scanner: policy_rules load failed — skipping layer: %s", exc)
 
-            if not rule_id:
-                continue
-
-            RULE_INDEX[rule_id] = {
-                "severity": severity,
-                "category": category,
-                "pattern": pattern,
-            }
-            loaded += 1
-
-        logger.info("scanner: loaded %d pattern(s) from scan_patterns", loaded)
-        return loaded
+        return total_loaded
 
     except Exception as exc:  # noqa: BLE001
-        logger.warning("scanner: could not load scan_patterns from DB — falling back to in-memory rules: %s", exc)
+        logger.warning("scanner: DB hydration aborted — falling back to in-memory rules: %s", exc)
         return 0
 
 
 def reload_rule_index() -> int:
     """Reset RULE_INDEX to the rules.py baseline then re-hydrate from DB.
 
-    Useful after a scan_patterns write so callers can refresh without a
-    restart.  Returns the number of DB rows applied (0 on failure/offline).
+    Useful after a scan_patterns or policy_rules write so callers can
+    refresh without a restart.  Returns total DB rows applied (0 on failure).
     """
     global RULE_INDEX  # noqa: PLW0603
     RULE_INDEX = _build_rule_index()
@@ -152,33 +188,25 @@ def _has_shell_download_execute_pattern(normalized: str) -> bool:
     ]
     if any(pattern in normalized for pattern in direct_patterns):
         return True
-
     if SHELL_DOWNLOAD_EXECUTE_RE.search(normalized):
         return True
-
     return False
 
 
 def _has_exfiltration_pattern(normalized: str) -> list[str]:
     exfil_matches: list[str] = []
-
     compact = re.sub(r"[^a-z0-9]", "", normalized)
 
     if "awss3cp" in compact:
         exfil_matches.append("exfil_aws_s3_cp")
-
     if "awss3sync" in compact:
         exfil_matches.append("exfil_aws_s3_sync")
-
     if "azcopy" in compact:
         exfil_matches.append("exfil_az_copy")
-
     if "gcloudstoragecp" in compact:
         exfil_matches.append("exfil_gcloud_storage_cp")
-
     if "rclonecopy" in compact:
         exfil_matches.append("exfil_rclone")
-
     if "curlt" in compact:
         exfil_matches.append("exfil_curl_upload")
 
@@ -200,7 +228,7 @@ def scan_text(text: str) -> list[str]:
             if pattern in normalized and rule["id"] not in matches:
                 matches.append(rule["id"])
 
-    # Also scan any DB-only rules that are not in ALL_RULE_GROUPS
+    # Scan DB-only rules (scan_patterns + policy_rules not in ALL_RULE_GROUPS)
     static_ids: set[str] = set()
     for group in ALL_RULE_GROUPS:
         for rule in group:
@@ -247,11 +275,9 @@ def _build_summary(verdict: str, matched_patterns: list[str]) -> str:
 
 def _build_risk_score(matched_patterns: list[str], heuristic_score: int) -> int:
     severities = get_rule_severities(matched_patterns)
-
     severity_points = sum(_severity_weight(sev) for sev in severities)
     pattern_bonus = max(0, len(matched_patterns) - 1) * 3
     heuristic_points = heuristic_score * 4
-
     base = severity_points + pattern_bonus + heuristic_points
     return max(0, min(100, base))
 
@@ -315,10 +341,8 @@ def _choose_sandbox_lane(matched_patterns: list[str]) -> str:
 def _build_quarantine_reason(verdict: str, matched_patterns: list[str]) -> str | None:
     if verdict != "quarantine":
         return None
-
     if "heuristic_prompt_injection_score" in matched_patterns:
         return "Quarantined due to prompt injection heuristic match."
-
     return "Detection requires review."
 
 
@@ -327,9 +351,7 @@ def _build_rule_details(matched_patterns: list[str]) -> list[dict[str, Any]]:
     for rule_id in matched_patterns:
         meta = RULE_INDEX.get(rule_id)
         if not meta:
-            details.append(
-                {"id": rule_id, "severity": None, "category": None, "pattern": None},
-            )
+            details.append({"id": rule_id, "severity": None, "category": None, "pattern": None})
         else:
             details.append(
                 {
@@ -337,7 +359,7 @@ def _build_rule_details(matched_patterns: list[str]) -> list[dict[str, Any]]:
                     "severity": meta["severity"],
                     "category": meta["category"],
                     "pattern": meta["pattern"],
-                },
+                }
             )
     return details
 

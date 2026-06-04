@@ -1,33 +1,22 @@
 from __future__ import annotations
 
+import logging
 from typing import Literal, TypedDict
 
 from app.services.action_guard import ActionType, VerdictType
 
+logger = logging.getLogger(__name__)
+
 PolicyMode = Literal["allow", "review", "block"]
 
+DEFAULT_POLICY_SET_KEY = "ironclaw_default"
 
-class ActionPolicyReason(TypedDict):
-    source: Literal["policy"]
-    label: str
-    details: str
-    score: float | None
+# ---------------------------------------------------------------------------
+# Cold-start fallback constants — used when DB is unavailable at startup.
+# These are the authoritative defaults; the DB loader overwrites them.
+# ---------------------------------------------------------------------------
 
-
-class ActionPolicyDecision(TypedDict):
-    action_type: ActionType
-    target: str
-    policy_mode: PolicyMode
-    verdict: VerdictType
-    summary: str
-    should_halt: bool
-    should_warn: bool
-    client_id: str | None
-    session_id: str | None
-    reasons: list[ActionPolicyReason]
-
-
-BLOCKED_TARGETS = frozenset(
+_DEFAULT_BLOCKED_TARGETS: frozenset[str] = frozenset(
     {
         "c:\\windows\\system32",
         "c:\\windows\\syswow64",
@@ -56,7 +45,7 @@ BLOCKED_TARGETS = frozenset(
     },
 )
 
-HIGH_REVIEW_TARGETS = frozenset(
+_DEFAULT_HIGH_REVIEW_TARGETS: frozenset[str] = frozenset(
     {
         "powershell",
         "pwsh",
@@ -92,7 +81,7 @@ HIGH_REVIEW_TARGETS = frozenset(
     },
 )
 
-ELEVATED_REVIEW_ACTIONS = frozenset(
+_DEFAULT_ELEVATED_REVIEW_ACTIONS: frozenset[str] = frozenset(
     {
         "shell_command",
         "network_request",
@@ -101,6 +90,193 @@ ELEVATED_REVIEW_ACTIONS = frozenset(
         "tool_call",
     },
 )
+
+# ---------------------------------------------------------------------------
+# Runtime mutable sets — hydrated from DB at startup, fallback to defaults.
+# Never import these directly from outside this module; use the accessors.
+# ---------------------------------------------------------------------------
+
+BLOCKED_TARGETS: frozenset[str] = _DEFAULT_BLOCKED_TARGETS
+HIGH_REVIEW_TARGETS: frozenset[str] = _DEFAULT_HIGH_REVIEW_TARGETS
+ELEVATED_REVIEW_ACTIONS: frozenset[str] = _DEFAULT_ELEVATED_REVIEW_ACTIONS
+
+_policy_loaded_from_db: bool = False
+
+
+# ---------------------------------------------------------------------------
+# TypedDicts
+# ---------------------------------------------------------------------------
+
+
+class ActionPolicyReason(TypedDict):
+    source: Literal["policy"]
+    label: str
+    details: str
+    score: float | None
+
+
+class ActionPolicyDecision(TypedDict):
+    action_type: ActionType
+    target: str
+    policy_mode: PolicyMode
+    verdict: VerdictType
+    summary: str
+    should_halt: bool
+    should_warn: bool
+    client_id: str | None
+    session_id: str | None
+    reasons: list[ActionPolicyReason]
+
+
+# ---------------------------------------------------------------------------
+# DB-backed rule loader
+# ---------------------------------------------------------------------------
+
+_RULE_TYPE_TO_SET: dict[str, str] = {
+    "blocked_target": "blocked",
+    "high_review_target": "high_review",
+    "elevated_review_action": "elevated_action",
+}
+
+
+def load_builtin_policy_rules_from_db(
+    tenant_key: str | None = None,
+) -> bool:
+    """
+    Hydrate BLOCKED_TARGETS, HIGH_REVIEW_TARGETS, and ELEVATED_REVIEW_ACTIONS
+    from policy_sets + policy_set_memberships + policy_rules in Supabase.
+
+    Resolution order:
+      1. Tenant-specific set identified by `tenant_key` (when provided).
+      2. `ironclaw_default` set as the authoritative fallback.
+      3. Python cold-start constants when the DB is unavailable or returns nothing.
+
+    Returns True if rules were successfully loaded from the DB, False otherwise.
+    """
+    global BLOCKED_TARGETS, HIGH_REVIEW_TARGETS, ELEVATED_REVIEW_ACTIONS, _policy_loaded_from_db
+
+    try:
+        from app.supabaseclient import get_supabase_client, is_supabase_configured  # noqa: PLC0415
+    except ImportError:
+        logger.warning("action_policy: supabaseclient unavailable — using cold-start defaults")
+        return False
+
+    if not is_supabase_configured():
+        logger.warning("action_policy: Supabase not configured — using cold-start defaults")
+        return False
+
+    try:
+        client = get_supabase_client()
+
+        set_key = tenant_key or DEFAULT_POLICY_SET_KEY
+
+        # --- resolve policy_set id by set_key, fall back to ironclaw_default ---
+        set_rows = client.table("policy_sets").select("id, set_key").eq("set_key", set_key).eq("is_active", True).limit(1).execute().data
+
+        # If tenant set not found and we were looking for a tenant, fall back to default
+        if not set_rows and tenant_key and set_key != DEFAULT_POLICY_SET_KEY:
+            logger.info(
+                "action_policy: tenant set %r not found — falling back to %r",
+                set_key,
+                DEFAULT_POLICY_SET_KEY,
+            )
+            set_rows = client.table("policy_sets").select("id, set_key").eq("set_key", DEFAULT_POLICY_SET_KEY).eq("is_active", True).limit(1).execute().data
+
+        if not set_rows:
+            logger.warning(
+                "action_policy: policy_set %r not found in DB — using cold-start defaults",
+                set_key,
+            )
+            return False
+
+        policy_set_id: str = set_rows[0]["id"]
+        resolved_key: str = set_rows[0]["set_key"]
+
+        # --- fetch rule IDs belonging to the resolved set via membership table ---
+        membership_rows = client.table("policy_set_memberships").select("rule_id").eq("set_id", policy_set_id).execute().data
+
+        if not membership_rows:
+            logger.warning(
+                "action_policy: policy_set %r has no memberships — using cold-start defaults",
+                resolved_key,
+            )
+            return False
+
+        rule_ids: list[str] = [row["rule_id"] for row in membership_rows if row.get("rule_id")]
+
+        if not rule_ids:
+            logger.warning(
+                "action_policy: no rule_ids from memberships for set %r — using cold-start defaults",
+                resolved_key,
+            )
+            return False
+
+        # --- fetch the actual policy_rules rows ---
+        rules_rows = client.table("policy_rules").select("rule_type, value").in_("id", rule_ids).eq("is_active", True).execute().data
+
+        if not rules_rows:
+            logger.warning(
+                "action_policy: no active rules found for set %r — using cold-start defaults",
+                resolved_key,
+            )
+            return False
+
+        blocked: set[str] = set()
+        high_review: set[str] = set()
+        elevated_action: set[str] = set()
+
+        for row in rules_rows:
+            rule_type = (row.get("rule_type") or "").strip()
+            value = (row.get("value") or "").strip().lower()
+            if not value:
+                continue
+            if rule_type == "blocked_target":
+                blocked.add(value)
+            elif rule_type == "high_review_target":
+                high_review.add(value)
+            elif rule_type == "elevated_review_action":
+                elevated_action.add(value)
+            else:
+                logger.debug("action_policy: unrecognised rule_type %r — skipped", rule_type)
+
+        # Merge DB rules with cold-start defaults so the defaults are always
+        # a minimum floor — the DB can only extend, never leave the set empty.
+        BLOCKED_TARGETS = _DEFAULT_BLOCKED_TARGETS | frozenset(blocked)
+        HIGH_REVIEW_TARGETS = _DEFAULT_HIGH_REVIEW_TARGETS | frozenset(high_review)
+        ELEVATED_REVIEW_ACTIONS = _DEFAULT_ELEVATED_REVIEW_ACTIONS | frozenset(elevated_action)
+
+        _policy_loaded_from_db = True
+
+        logger.info(
+            "action_policy: loaded rules from DB set %r — " "blocked=%d high_review=%d elevated_action=%d",
+            resolved_key,
+            len(BLOCKED_TARGETS),
+            len(HIGH_REVIEW_TARGETS),
+            len(ELEVATED_REVIEW_ACTIONS),
+        )
+        return True
+
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "action_policy: DB rule load failed — using cold-start defaults. Error: %s",
+            exc,
+        )
+        return False
+
+
+def is_policy_loaded_from_db() -> bool:
+    """Return True if rules were successfully hydrated from the DB at startup."""
+    return _policy_loaded_from_db
+
+
+def reload_policy_rules(tenant_key: str | None = None) -> bool:
+    """Force a live reload of policy rules from the DB. Thread-safe via GIL for frozenset swap."""
+    return load_builtin_policy_rules_from_db(tenant_key=tenant_key)
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 
 def _target_contains_any(target: str, needles: frozenset[str]) -> bool:
@@ -235,6 +411,11 @@ def _build_allow_decision(
             ),
         ],
     )
+
+
+# ---------------------------------------------------------------------------
+# Public evaluation entry point
+# ---------------------------------------------------------------------------
 
 
 def evaluate_action_policy(
