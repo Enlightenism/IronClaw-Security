@@ -28,6 +28,25 @@ BILLING_TIER_25K_PRICE_USD: int = 90
 BILLING_TIER_60K_UNITS: int = 60_000
 BILLING_TIER_60K_PRICE_USD: int = 180
 
+# ---------------------------------------------------------------------------
+# Known IronClaw table registry — single source of truth for table names
+# used across the system.  Add new tables here; never hardcode strings
+# in caller modules.
+# ---------------------------------------------------------------------------
+IRONCLAW_TABLES: frozenset[str] = frozenset(
+    {
+        "scan_history",
+        "scan_patterns",
+        "policy_rules",
+        "policy_sets",
+        "policy_set_memberships",
+        "agents",
+        "telemetry_events",
+        "webhook_subscriptions",
+        "webhook_delivery_log",
+    }
+)
+
 
 class SupabaseClientError(RuntimeError):
     pass
@@ -637,6 +656,95 @@ class SupabaseClient:
                 "Content-Type": "application/json",
                 "Content-Profile": schema,
             },
+        )
+
+    # -----------------------------------------------------------------------
+    # Domain-specific fetch helpers — typed convenience wrappers over select()
+    # that expose IronClaw tables through a stable interface.
+    # -----------------------------------------------------------------------
+
+    def fetch_scan_patterns(
+        self,
+        *,
+        enabled_only: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Return rows from scan_patterns, optionally filtered to enabled=true."""
+        filters: dict[str, Any] = {}
+        if enabled_only:
+            filters["enabled"] = "eq.true"
+        return self.select("scan_patterns", filters=filters or None)
+
+    def fetch_policy_rules(
+        self,
+        *,
+        enabled_only: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Return rows from policy_rules, optionally filtered to enabled=true."""
+        filters: dict[str, Any] = {}
+        if enabled_only:
+            filters["enabled"] = "eq.true"
+        return self.select("policy_rules", filters=filters or None)
+
+    def fetch_policy_set(self, set_key: str) -> dict[str, Any] | None:
+        """Return the policy_sets row matching set_key, or None if absent.
+
+        set_key is the unique string key used at runtime to identify the active
+        rule set (e.g. "default", "strict", "permissive").
+        """
+        if not set_key or not set_key.strip():
+            raise ValueError("set_key is required")
+
+        rows = self.select(
+            "policy_sets",
+            filters={"set_key": f"eq.{set_key}"},
+            limit=1,
+        )
+        return rows[0] if rows else None
+
+    def fetch_policy_set_memberships(self, policy_set_id: str) -> list[dict[str, Any]]:
+        """Return all policy_set_memberships rows for the given policy_set_id.
+
+        Each membership row links a policy_set to a policy_rule.  Use the
+        returned list to resolve which rules are active for a given set.
+        """
+        if not policy_set_id or not policy_set_id.strip():
+            raise ValueError("policy_set_id is required")
+
+        return self.select(
+            "policy_set_memberships",
+            filters={"policy_set_id": f"eq.{policy_set_id}"},
+        )
+
+    def fetch_webhook_subscriptions(
+        self,
+        *,
+        active_only: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Return rows from webhook_subscriptions, optionally filtered to active=true."""
+        filters: dict[str, Any] = {}
+        if active_only:
+            filters["active"] = "eq.true"
+        return self.select("webhook_subscriptions", filters=filters or None)
+
+    def fetch_webhook_delivery_log(
+        self,
+        *,
+        subscription_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Return rows from webhook_delivery_log.
+
+        Optionally scoped to a single subscription_id and bounded by limit.
+        """
+        filters: dict[str, Any] = {}
+        if subscription_id:
+            filters["subscription_id"] = f"eq.{subscription_id}"
+        return self.select(
+            "webhook_delivery_log",
+            filters=filters or None,
+            limit=limit,
+            order="created_at",
+            ascending=False,
         )
 
 
