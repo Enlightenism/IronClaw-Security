@@ -1,10 +1,42 @@
 import { Wallet, CreditCard, Loader2, Zap, ShieldCheck } from "lucide-react";
 import { useCountUp } from "@/hooks/useCountUp";
 
+// ---------------------------------------------------------------------------
+// Package catalogue — single source of truth for this component.
+// Starter    : pkg_5000  —  5,000 units — $20   — 25,000 tokens / unit
+// Team       : pkg_25000 — 25,000 units — $90   — 25,000 tokens / unit
+// Enterprise : pkg_60000 — 60,000 units — $180  — 25,000 tokens / unit
+//
+// Each protection unit covers up to TOKENS_PER_UNIT (25,000) tokens.
+// Any request exceeding the boundary consumes one additional unit per
+// additional 25,000-token chunk (ceiling division).
+// ---------------------------------------------------------------------------
+
+const TOKENS_PER_UNIT = 25_000;
+
 const TIERS = [
-  { id: "tier_10k", units: "10,000", price: "$20" },
-  { id: "tier_50k", units: "50,000", price: "$90", popular: true },
-  { id: "tier_100k", units: "100,000", price: "$150" },
+  {
+    id: "pkg_5000",
+    name: "Starter",
+    units: "5,000",
+    price: "$20",
+    tokensPerUnit: TOKENS_PER_UNIT,
+  },
+  {
+    id: "pkg_25000",
+    name: "Team",
+    units: "25,000",
+    price: "$90",
+    popular: true,
+    tokensPerUnit: TOKENS_PER_UNIT,
+  },
+  {
+    id: "pkg_60000",
+    name: "Enterprise",
+    units: "60,000",
+    price: "$180",
+    tokensPerUnit: TOKENS_PER_UNIT,
+  },
 ];
 
 const WalletCard = ({
@@ -60,10 +92,16 @@ const WalletCard = ({
                 Best value
               </span>
             )}
+            <span className="font-tech text-[11px] font-semibold uppercase tracking-widest text-[#BFC1C2]">
+              {t.name}
+            </span>
             <span className="font-tech text-base font-bold text-white">
               {t.units}
             </span>
             <span className="text-[11px] text-[#BFC1C2]">units</span>
+            <span className="mt-1 text-[10px] text-[#737373]">
+              {t.tokensPerUnit.toLocaleString()} tokens / unit
+            </span>
             <span className="mt-2 flex items-center gap-1 text-lg font-semibold text-[#FFD700]">
               {purchasingId === t.id ? (
                 <Loader2 size={16} className="animate-spin" />
@@ -99,7 +137,7 @@ const WalletCard = ({
               </div>
             </div>
             <button
-              onClick={() => onPurchase("tier_10k")}
+              onClick={() => onPurchase("pkg_5000")}
               data-testid="update-card-btn"
               className="rounded-lg border border-[#E5E4E2]/25 px-3 py-1.5 text-xs text-[#E5E4E2] transition hover:border-[#FFD700]/50 hover:text-white"
             >
