@@ -4,12 +4,22 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 import logging
+import math
 from threading import Lock
 import time
 from typing import Any
 from uuid import uuid4
 
 from app.services.secrets_vault import vault
+from app.supabaseclient import (
+    BILLING_TIER_5K_PRICE_USD,
+    BILLING_TIER_5K_UNITS,
+    BILLING_TIER_25K_PRICE_USD,
+    BILLING_TIER_25K_UNITS,
+    BILLING_TIER_60K_PRICE_USD,
+    BILLING_TIER_60K_UNITS,
+    TOKENS_PER_UNIT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +32,56 @@ _STRIPE_TIMEOUT_SECONDS = 15
 _METERED_USAGE_BUFFER_MAX = 500
 _CHECKOUT_SESSION_TTL_SECONDS = 1800  # 30 min
 _SCHEMA_VERSION = "1.0"
+
+# ---------------------------------------------------------------------------
+# Billing tier catalogue — single source of truth imported from supabaseclient
+# Starter   :  5,000 units → $20 USD
+# Team      : 25,000 units → $90 USD
+# Enterprise: 60,000 units → $180 USD
+# Each protection unit covers up to 25,000 tokens.
+# TOKENS_PER_UNIT = 25_000  (imported above)
+# ---------------------------------------------------------------------------
+
+PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
+    "starter": {
+        "label": "Starter",
+        "units": BILLING_TIER_5K_UNITS,
+        "price_usd": BILLING_TIER_5K_PRICE_USD,
+        "tokens_per_unit": TOKENS_PER_UNIT,
+        "notes": f"{BILLING_TIER_5K_UNITS:,} units · ${BILLING_TIER_5K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens",
+    },
+    "team": {
+        "label": "Team",
+        "units": BILLING_TIER_25K_UNITS,
+        "price_usd": BILLING_TIER_25K_PRICE_USD,
+        "tokens_per_unit": TOKENS_PER_UNIT,
+        "notes": f"{BILLING_TIER_25K_UNITS:,} units · ${BILLING_TIER_25K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens",
+    },
+    "enterprise": {
+        "label": "Enterprise",
+        "units": BILLING_TIER_60K_UNITS,
+        "price_usd": BILLING_TIER_60K_PRICE_USD,
+        "tokens_per_unit": TOKENS_PER_UNIT,
+        "notes": f"{BILLING_TIER_60K_UNITS:,} units · ${BILLING_TIER_60K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens",
+    },
+}
+
+
+def units_for_tokens(token_count: int) -> int:
+    """
+    Return the number of protection units required to cover token_count tokens.
+    Each unit covers up to TOKENS_PER_UNIT (25,000) tokens.
+    Partial chunks consume a full unit.
+
+    Examples:
+        units_for_tokens(1)       → 1
+        units_for_tokens(25_000)  → 1
+        units_for_tokens(25_001)  → 2
+        units_for_tokens(75_000)  → 3
+    """
+    if token_count <= 0:
+        return 0
+    return math.ceil(token_count / TOKENS_PER_UNIT)
 
 
 # ---------------------------------------------------------------------------
@@ -505,6 +565,11 @@ class StripeService:
     - Provide per-org unit balance ledger.
     - Thread-safe in-memory state with full reset for test isolation.
 
+    Unit model:
+    - Each protection unit covers up to TOKENS_PER_UNIT (25,000) tokens.
+    - Packages: Starter 5,000 units/$20 · Team 25,000 units/$90 · Enterprise 60,000 units/$180.
+    - Use units_for_tokens(n) to convert a raw token count to required unit debit.
+
     All network calls are isolated through _StripeHTTPClient so they can be
     patched in tests without monkey-patching urllib directly.
     """
@@ -624,6 +689,13 @@ class StripeService:
         - mode=payment: one-time purchase that grants unit_credits on completion.
         - mode=subscription: recurring subscription with optional metered usage.
         - unit_credits: number of IronClaw units to credit on checkout.session.completed.
+          Each unit protects up to TOKENS_PER_UNIT (25,000) tokens.
+          Use units_for_tokens(n) to derive the correct unit_credits from a token budget.
+
+        Package reference (from PACKAGE_CATALOGUE):
+          Starter:    5,000 units / $20 USD  — each unit ≤ 25,000 tokens
+          Team:      25,000 units / $90 USD  — each unit ≤ 25,000 tokens
+          Enterprise: 60,000 units / $180 USD — each unit ≤ 25,000 tokens
         """
         if quantity < 1:
             raise StripeServiceError("quantity must be >= 1")
@@ -634,6 +706,7 @@ class StripeService:
         session_meta: dict[str, Any] = {
             "org_id": org_id,
             "unit_credits": str(unit_credits),
+            "tokens_per_unit": str(TOKENS_PER_UNIT),
             "ironclaw_source": "ironclaw-security",
             **(metadata or {}),
         }
@@ -680,11 +753,12 @@ class StripeService:
             self._checkout_sessions[session_id] = record
 
         logger.info(
-            "stripe.checkout_session_created org=%s session=%s mode=%s credits=%d",
+            "stripe.checkout_session_created org=%s session=%s mode=%s credits=%d tokens_per_unit=%d",
             org_id,
             session_id,
             mode.value,
             unit_credits,
+            TOKENS_PER_UNIT,
         )
         return CheckoutSessionResponse(
             session_id=session_id,
@@ -743,6 +817,7 @@ class StripeService:
         """
         Credit units to an org's balance and record a ledger entry.
         Thread-safe; safe to call from webhook handlers.
+        Each unit protects up to TOKENS_PER_UNIT (25,000) tokens.
         """
         if amount <= 0:
             raise StripeServiceError("credit amount must be > 0")
@@ -767,11 +842,12 @@ class StripeService:
             ledger_snapshot = [e.to_dict() for e in self._unit_ledger[org_id][-50:]]
 
         logger.info(
-            "stripe.units_credited org=%s amount=%d reason=%s balance=%d",
+            "stripe.units_credited org=%s amount=%d reason=%s balance=%d tokens_per_unit=%d",
             org_id,
             amount,
             reason.value,
             new_balance,
+            TOKENS_PER_UNIT,
         )
         return UnitBalanceResponse(
             org_id=org_id,
@@ -789,6 +865,8 @@ class StripeService:
         """
         Debit units from an org's balance. Raises StripeServiceError on
         insufficient balance.
+        Each unit covers up to TOKENS_PER_UNIT (25,000) tokens.
+        Use units_for_tokens(token_count) to compute the correct debit amount.
         """
         if amount <= 0:
             raise StripeServiceError("debit amount must be > 0")
@@ -826,6 +904,28 @@ class StripeService:
             balance=new_balance,
             ledger_entries=ledger_snapshot,
         )
+
+    def debit_units_for_tokens(
+        self,
+        org_id: str,
+        token_count: int,
+        reason: StripeUnitEventReason,
+        reference_id: str | None = None,
+    ) -> UnitBalanceResponse:
+        """
+        Debit the exact number of units required to cover token_count tokens.
+        Each unit covers up to TOKENS_PER_UNIT (25,000) tokens.
+        Partial chunks consume a full unit (ceiling division).
+
+        Raises StripeServiceError if the org has insufficient balance.
+        """
+        units_needed = units_for_tokens(token_count)
+        if units_needed == 0:
+            with self._lock:
+                balance = self._unit_balances.get(org_id, 0)
+                ledger = [e.to_dict() for e in self._unit_ledger.get(org_id, [])[-50:]]
+            return UnitBalanceResponse(org_id=org_id, balance=balance, ledger_entries=ledger)
+        return self.debit_units(org_id, units_needed, reason, reference_id)
 
     def get_unit_balance(self, org_id: str) -> UnitBalanceResponse:
         with self._lock:
@@ -1258,7 +1358,6 @@ class StripeService:
         except (ValueError, TypeError):
             unit_credits = 0
 
-        # Update local session status
         with self._lock:
             record = self._checkout_sessions.get(session_id)
             if record is not None:
@@ -1282,7 +1381,12 @@ class StripeService:
         if customer_id and org_id:
             self.register_customer_mapping(org_id, customer_id)
 
-        result: dict[str, Any] = {"session_id": session_id, "org_id": org_id, "mode": mode}
+        result: dict[str, Any] = {
+            "session_id": session_id,
+            "org_id": org_id,
+            "mode": mode,
+            "tokens_per_unit": TOKENS_PER_UNIT,
+        }
 
         if org_id and unit_credits > 0:
             self.credit_units(
@@ -1292,6 +1396,7 @@ class StripeService:
                 reference_id=session_id,
             )
             result["units_credited"] = unit_credits
+            result["tokens_covered"] = unit_credits * TOKENS_PER_UNIT
 
         return result
 
