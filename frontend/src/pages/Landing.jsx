@@ -404,7 +404,7 @@ const Landing = () => {
             className="mt-2 font-tech text-sm text-[#FFD700]"
             data-testid="agents-protected-line"
           >
-            5,000 units · each unit inspects up to 25,000 tokens
+            5,000 units = 5,000 agents protected up to 25,000 tokens, against unsafe behavior. No subscription. No recurring charge. Idle time cost nothing per month. Scale instantly.
           </p>
 
           <div className="mx-auto mt-8 grid max-w-2xl grid-cols-1 gap-3 text-left sm:grid-cols-2">
@@ -435,7 +435,7 @@ const Landing = () => {
           viewport={{ once: true }}
         >
           <h2 className="mx-auto max-w-2xl text-3xl font-bold tracking-tight sm:text-4xl">
-            Start protecting your system against unsafe agents today.
+            Start protecting your system against unsafe autonomous agents now. Eventually your luck will run out. IronClaw-Security is the safety net every production team needs.
           </h2>
           <button
             onClick={() => openAuth("signup")}
