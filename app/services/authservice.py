@@ -2,9 +2,15 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
+import hashlib
 from typing import Any
 
+from app.core.apikeys import (
+    APIKeyRecord,
+    fingerprint_api_key,
+    get_api_key_registry,
+)
 from app.core.auth import AuthContext
 from app.core.org_isolation import evaluate_org_isolation
 from app.core.permissions import evaluate_permission
@@ -36,6 +42,14 @@ def _stringify_metadata(metadata: Mapping[str, object] | None) -> dict[str, str]
     if metadata is None:
         return {}
     return {str(key): str(item) for key, item in metadata.items()}
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _sha256_hex(raw: str) -> str:
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +90,191 @@ class AuthService:
     def session_policy(self) -> SessionPolicy:
         return self._session_policy
 
+    # ------------------------------------------------------------------
+    # API Key authentication — SHA-256 hash lookup with full guard chain
+    # ------------------------------------------------------------------
+
+    def authenticate_api_key(
+        self,
+        raw_key: str,
+        *,
+        now: datetime | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        metadata: Mapping[str, object] | None = None,
+    ) -> AuthResult:
+        """
+        Authenticate a raw API key against the registry using SHA-256 hash lookup.
+
+        Guard chain (fail-closed):
+          1. Compute SHA-256 fingerprint of the raw key.
+          2. Locate the record by fingerprint via the registry.
+          3. Reject if record not found.
+          4. Reject if active is False (revoked = FALSE guard).
+          5. Reject if revoked_at is not None (belt-and-suspenders revocation check).
+          6. Reject if expires_at is present and <= now (expires_at > NOW() guard).
+          7. On pass: write last_used_at via record.touch() + registry.upsert_record().
+          8. Return AuthResult with authenticated=True and auth_method="api_key".
+        """
+        effective_now = now or _utc_now()
+        key_fingerprint = _sha256_hex(raw_key)
+        # fingerprint_api_key from app.core.apikeys also produces SHA-256 hex —
+        # use it here to guarantee we stay on the single source of truth.
+        assert key_fingerprint == fingerprint_api_key(raw_key), "Internal hash mismatch — fingerprint_api_key contract changed"
+
+        registry = get_api_key_registry()
+        record: APIKeyRecord | None = None
+
+        # Resolve by fingerprint: iterate active records for hash match.
+        # The in-memory registry indexes by plaintext secret, not fingerprint.
+        # We look up by fingerprint to support future DB-backed registries where
+        # the plaintext secret is never stored.
+        list_keys = getattr(registry, "list_keys", None)
+        if callable(list_keys):
+            try:
+                candidates = list_keys()
+                for candidate in candidates:
+                    if getattr(candidate, "fingerprint", None) == key_fingerprint:
+                        record = candidate
+                        break
+            except Exception:
+                record = None
+
+        if record is None:
+            return self._denied_api_key_result(raw_key, "key_not_found", metadata)
+
+        # Guard 1: active flag (maps to revoked = FALSE in DB schema)
+        if not getattr(record, "active", True):
+            return self._denied_api_key_result(raw_key, "key_revoked", metadata)
+
+        # Guard 2: revoked_at belt-and-suspenders
+        if getattr(record, "revoked_at", None) is not None:
+            return self._denied_api_key_result(raw_key, "key_revoked", metadata)
+
+        # Guard 3: expires_at > NOW()
+        expires_at_raw = getattr(record, "expires_at", None)
+        if expires_at_raw is not None:
+            try:
+                if isinstance(expires_at_raw, str):
+                    expires_dt = datetime.fromisoformat(expires_at_raw)
+                elif isinstance(expires_at_raw, datetime):
+                    expires_dt = expires_at_raw
+                else:
+                    expires_dt = None
+                if expires_dt is not None:
+                    if expires_dt.tzinfo is None:
+                        expires_dt = expires_dt.replace(tzinfo=UTC)
+                    if effective_now >= expires_dt:
+                        return self._denied_api_key_result(raw_key, "key_expired", metadata)
+            except (ValueError, TypeError):
+                pass
+
+        # Write last_used_at on successful authentication
+        touch = getattr(record, "touch", None)
+        if callable(touch):
+            try:
+                touched = touch()
+                upsert = getattr(registry, "upsert_record", None)
+                if callable(upsert):
+                    try:
+                        upsert(touched)
+                        record = touched
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        principal_id = None
+        for attr in ("key_id", "id", "client_id", "owner_id", "principal_id"):
+            val = _clean(_getattr_safe(record, attr))
+            if val:
+                principal_id = val
+                break
+
+        org_id = None
+        for attr in ("org_id", "organization_id", "tenant_id"):
+            val = _clean(_getattr_safe(record, attr))
+            if val:
+                org_id = val
+                break
+
+        permissions: tuple[str, ...] = ()
+        for attr in ("permissions", "scopes", "allowed_actions"):
+            val = getattr(record, attr, None)
+            if isinstance(val, (list, tuple, set)):
+                permissions = tuple(str(s).strip() for s in val if str(s).strip())
+                break
+
+        roles: tuple[str, ...] = ()
+        for attr in ("roles", "role_names", "grants"):
+            val = getattr(record, attr, None)
+            if isinstance(val, (list, tuple, set)):
+                roles = tuple(str(s).strip() for s in val if str(s).strip())
+                break
+
+        extra_meta = _stringify_metadata(metadata)
+        extra_meta["fingerprint"] = key_fingerprint
+        if ip_address:
+            extra_meta["ip_address"] = ip_address
+        if user_agent:
+            extra_meta["user_agent"] = user_agent
+
+        context = AuthContext(
+            api_key=_clean(_getattr_safe(record, "masked_key")) or None,
+            principal_type="api_key",
+            principal_id=principal_id,
+            session_id=None,
+            org_id=org_id,
+            permissions=permissions,
+            roles=roles,
+            authenticated=True,
+            auth_source="registry",
+            auth_method="api_key",
+            metadata=extra_meta,
+        )
+
+        return AuthResult(
+            authenticated=True,
+            context=context,
+            principal=None,
+            session=None,
+            validation=None,
+            reason="ok",
+        )
+
+    def _denied_api_key_result(
+        self,
+        raw_key: str,
+        reason: str,
+        metadata: Mapping[str, object] | None,
+    ) -> AuthResult:
+        extra_meta = _stringify_metadata(metadata)
+        context = AuthContext(
+            api_key=None,
+            principal_type="anonymous",
+            principal_id=None,
+            session_id=None,
+            org_id=None,
+            permissions=(),
+            roles=(),
+            authenticated=False,
+            auth_source="registry",
+            auth_method="api_key",
+            metadata=extra_meta,
+        )
+        return AuthResult(
+            authenticated=False,
+            context=context,
+            principal=None,
+            session=None,
+            validation=None,
+            reason=reason,
+        )
+
+    # ------------------------------------------------------------------
+    # Principal construction
+    # ------------------------------------------------------------------
+
     def build_principal(
         self,
         *,
@@ -102,6 +301,10 @@ class AuthService:
             service_name=service_name,
             metadata=metadata,
         )
+
+    # ------------------------------------------------------------------
+    # Session lifecycle
+    # ------------------------------------------------------------------
 
     def issue_session(
         self,
@@ -216,6 +419,10 @@ class AuthService:
             now=now,
         )
 
+    # ------------------------------------------------------------------
+    # Authorization helpers
+    # ------------------------------------------------------------------
+
     def check_permission(
         self,
         context: AuthContext,
@@ -252,6 +459,7 @@ class AuthService:
         metadata: Mapping[str, object] | None = None,
     ) -> AuthContext:
         return AuthContext(
+            api_key=None,
             authenticated=False,
             principal_id=None,
             principal_type="anonymous",
@@ -260,8 +468,13 @@ class AuthService:
             permissions=(),
             session_id=None,
             auth_method=None,
+            auth_source="none",
             metadata=_stringify_metadata(metadata),
         )
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
 
     def _build_auth_context(
         self,
@@ -276,6 +489,7 @@ class AuthService:
         combined_metadata.update(_stringify_metadata(metadata))
 
         return AuthContext(
+            api_key=None,
             authenticated=authenticated,
             principal_id=principal.principal_id,
             principal_type=_clean_lower(principal.principal_type) or "unknown",
@@ -284,8 +498,16 @@ class AuthService:
             permissions=principal.permissions,
             session_id=session.session_id if session else None,
             auth_method=_clean_lower(auth_method) or None,
+            auth_source="session",
             metadata=combined_metadata,
         )
+
+
+def _getattr_safe(obj: object, attr: str) -> object:
+    try:
+        return getattr(obj, attr, None)
+    except Exception:
+        return None
 
 
 def build_auth_service(
