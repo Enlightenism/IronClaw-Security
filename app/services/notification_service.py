@@ -31,6 +31,10 @@ class NotificationEvent(str, Enum):
     SANDBOX_THREAT_DETECTED = "sandbox_threat_detected"
     AUDIT_ANOMALY = "audit_anomaly"
     SYSTEM_HEALTH_DEGRADED = "system_health_degraded"
+    THREAT_DETECTED = "threat_detected"
+    THREAT_BLOCKED = "threat_blocked"
+    FEED_REFRESHED = "feed_refreshed"
+    HUNT_COMPLETED = "hunt_completed"
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +417,125 @@ class NotificationEngine:
     def clear_log(self) -> None:
         self._delivery_log.clear()
 
+    # -----------------------------------------------------------------------
+    # Threat-detection integration methods
+    # Called by threat_detection router via notification_engine DI.
+    # These translate domain results into notification payloads and dispatch.
+    # -----------------------------------------------------------------------
+
+    def notify_detection(self, result: Any, *, org_id: str | None = None) -> None:
+        """Notify on a completed threat detection result."""
+        try:
+            verdict = getattr(result, "verdict", None)
+            verdict_val = verdict.value if hasattr(verdict, "value") else str(verdict)
+            severity_raw = getattr(result, "severity", None)
+            severity_val = severity_raw.value if hasattr(severity_raw, "value") else str(severity_raw or "warning")
+            score = getattr(result, "score", 0.0)
+            event_id = getattr(result, "event_id", "unknown")
+
+            if verdict_val == "block":
+                event = NotificationEvent.THREAT_BLOCKED
+                notif_severity: NotificationSeverity = "critical"
+            elif float(score) >= 0.7:
+                event = NotificationEvent.THREAT_DETECTED
+                notif_severity = "critical"
+            elif float(score) >= 0.4:
+                event = NotificationEvent.THREAT_DETECTED
+                notif_severity = "warning"
+            else:
+                event = NotificationEvent.THREAT_DETECTED
+                notif_severity = "info"
+
+            payload = build_notification_payload(
+                event=event,
+                title=f"IronClaw Threat Detection: {verdict_val.upper()} [{severity_val}]",
+                body=(f"Event ID: {event_id} | Score: {score:.3f} | " f"Verdict: {verdict_val} | Severity: {severity_val}"),
+                source_id=event_id,
+                source_type="threat_detection",
+                severity=notif_severity,
+                org_id=org_id,
+                metadata={
+                    "verdict": verdict_val,
+                    "score": score,
+                    "severity": severity_val,
+                },
+            )
+            channels = default_channels_for_severity(notif_severity)
+            self.dispatch(payload, channels)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "notification_service.notify_detection error: %s",
+                exc,
+            )
+
+    def notify_feed_refresh(self, feed_result: Any, *, org_id: str | None = None) -> None:
+        """Notify on a completed threat feed refresh."""
+        try:
+            request_id = getattr(feed_result, "request_id", "unknown")
+            total_inserted = getattr(feed_result, "total_iocs_inserted", 0)
+            total_updated = getattr(feed_result, "total_iocs_updated", 0)
+            total_errors = getattr(feed_result, "total_errors", 0)
+
+            notif_severity: NotificationSeverity = "critical" if total_errors > 0 else "info"
+            event = NotificationEvent.FEED_REFRESHED
+
+            payload = build_notification_payload(
+                event=event,
+                title=f"IronClaw Feed Refresh: {request_id}",
+                body=(f"Inserted: {total_inserted} | Updated: {total_updated} | " f"Errors: {total_errors}"),
+                source_id=request_id,
+                source_type="feed_refresh",
+                severity=notif_severity,
+                org_id=org_id,
+                metadata={
+                    "total_iocs_inserted": total_inserted,
+                    "total_iocs_updated": total_updated,
+                    "total_errors": total_errors,
+                },
+            )
+            channels = default_channels_for_severity(notif_severity)
+            self.dispatch(payload, channels)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "notification_service.notify_feed_refresh error: %s",
+                exc,
+            )
+
+    def notify_hunt(self, result: Any, *, org_id: str | None = None) -> None:
+        """Notify on a completed threat hunt."""
+        try:
+            hunt_id = getattr(result, "hunt_id", "unknown")
+            total_matches = getattr(result, "total_matches", 0)
+            status_raw = getattr(result, "status", None)
+            status_val = status_raw.value if hasattr(status_raw, "value") else str(status_raw or "completed")
+            duration_ms = getattr(result, "duration_ms", 0)
+
+            notif_severity: NotificationSeverity = "warning" if int(total_matches) > 0 else "info"
+            event = NotificationEvent.HUNT_COMPLETED
+
+            payload = build_notification_payload(
+                event=event,
+                title=f"IronClaw Hunt Completed: {hunt_id}",
+                body=(f"Hunt ID: {hunt_id} | Matches: {total_matches} | " f"Status: {status_val} | Duration: {duration_ms}ms"),
+                source_id=hunt_id,
+                source_type="threat_hunt",
+                severity=notif_severity,
+                org_id=org_id,
+                metadata={
+                    "hunt_id": hunt_id,
+                    "total_matches": total_matches,
+                    "status": status_val,
+                    "duration_ms": duration_ms,
+                },
+            )
+            channels = default_channels_for_severity(notif_severity)
+            self.dispatch(payload, channels)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "notification_service.notify_hunt error: %s",
+                exc,
+            )
+
 
 # ---------------------------------------------------------------------------
 # Channel routing helpers
@@ -446,6 +569,10 @@ _EVENT_SEVERITY_MAP: dict[str, NotificationSeverity] = {
     NotificationEvent.SANDBOX_THREAT_DETECTED.value: "critical",
     NotificationEvent.AUDIT_ANOMALY.value: "warning",
     NotificationEvent.SYSTEM_HEALTH_DEGRADED.value: "critical",
+    NotificationEvent.THREAT_DETECTED.value: "warning",
+    NotificationEvent.THREAT_BLOCKED.value: "critical",
+    NotificationEvent.FEED_REFRESHED.value: "info",
+    NotificationEvent.HUNT_COMPLETED.value: "info",
 }
 
 
