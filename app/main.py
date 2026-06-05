@@ -532,6 +532,11 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Store settings on app.state so _get_settings(request) always returns
+    # the instance that was active when the app was constructed — this is the
+    # correct settings object for the current process/test environment.
+    app.state.settings = settings
+
     _install_openapi_factory(app)
     _install_core_middleware(app)
 

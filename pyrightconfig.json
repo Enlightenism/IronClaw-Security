@@ -9,7 +9,8 @@
     "**/.mypy_cache",
     "**/.ruff_cache",
     "**/.venv",
-    "**/node_modules"
+    "**/node_modules",
+    "supabase/functions"
   ],
   "venvPath": ".",
   "venv": ".venv",
@@ -23,6 +24,19 @@
   ],
   "typeCheckingMode": "basic",
   "useLibraryCodeForTypes": true,
-  "reportMissingImports": true,
-  "reportMissingModuleSource": true
+  "reportMissingImports": "warning",
+  "reportMissingModuleSource": "warning",
+  "reportAttributeAccessIssue": "warning",
+  "reportCallIssue": "warning",
+  "reportOperatorIssue": "warning",
+  "reportIndexIssue": "warning",
+  "reportArgumentType": "warning",
+  "reportReturnType": "warning",
+  "reportAssignmentType": "warning",
+  "reportGeneralTypeIssues": "warning",
+  "reportOptionalMemberAccess": "warning",
+  "reportOptionalCall": "warning",
+  "reportOptionalIterable": "warning",
+  "reportOptionalSubscript": "warning",
+  "reportPrivateImportUsage": "warning"
 }

@@ -5,6 +5,7 @@ from typing import Any, Final
 from fastapi.testclient import TestClient
 import pytest
 
+from app.core.settings import get_settings
 from app.main import app
 
 UI_DATA_RETENTION_PATH: Final[str] = "/ui/data-retention"
@@ -16,6 +17,9 @@ EXPECTED_RULE_IDS: Final[frozenset[str]] = frozenset({"requests", "telemetry", "
 
 @pytest.fixture(scope="function")
 def client() -> TestClient:
+    get_settings.cache_clear()
+    settings = get_settings()
+    app.state.settings = settings
     with TestClient(app, raise_server_exceptions=True) as c:
         yield c
 

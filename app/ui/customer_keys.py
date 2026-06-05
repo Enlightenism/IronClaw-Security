@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.core.apikeys import get_api_key_registry, mask_api_key
+from app.core.auth import require_api_key
 
 router = APIRouter(prefix="/customer-keys", tags=["customer-keys"])
 
@@ -205,7 +206,7 @@ def _build_actions() -> list[CustomerKeyActionView]:
     ]
 
 
-@router.get("", response_model=CustomerKeysResponse)
+@router.get("", response_model=CustomerKeysResponse, dependencies=[Depends(require_api_key)])
 def get_customer_keys() -> CustomerKeysResponse:
     keys = _build_customer_keys()
 

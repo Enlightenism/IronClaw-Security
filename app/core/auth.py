@@ -109,7 +109,6 @@ def _record_is_usable(record: APIKeyRecord | None) -> bool:
         return False
     if getattr(record, "revoked_at", None) is not None:
         return False
-    # pass the full record — is_api_key_expired takes APIKeyRecord
     if is_api_key_expired(record):
         return False
     return True
@@ -122,7 +121,6 @@ def _resolve_registry_api_key(provided_api_key: str) -> APIKeyRecord | None:
 
     registry = get_api_key_registry()
 
-    # prefer get_by_fingerprint when available
     resolver = getattr(registry, "get_by_fingerprint", None)
     if callable(resolver):
         fingerprint = fingerprint_api_key(normalized_api_key)
@@ -132,9 +130,7 @@ def _resolve_registry_api_key(provided_api_key: str) -> APIKeyRecord | None:
             record = None
         if _record_is_usable(record):
             return _touch_record_if_possible(record)
-        # fall through to authenticate below
 
-    # fall back to authenticate (handles touch internally)
     authenticate = getattr(registry, "authenticate", None)
     if callable(authenticate):
         try:
@@ -282,41 +278,52 @@ def get_api_key(
     provided_api_key: str | None = Depends(api_key_header),
 ) -> str | None:
     normalized_api_key = _clean_optional_string(provided_api_key)
+    auth_required = _is_auth_required(request)
 
-    if not _is_auth_required(request):
-        return normalized_api_key
+    # No key provided
+    if normalized_api_key is None:
+        if auth_required:
+            raise AppError(
+                error="missing_api_key",
+                message="Missing API key",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                details={"header": API_KEY_HEADER_NAME},
+            )
+        return None
 
+    # A key WAS provided — always validate it
     configured_api_key = _extract_configured_api_key(request)
     has_registry_keys = _has_registry_keys()
 
-    if configured_api_key is None and not has_registry_keys:
+    # Match against configured key
+    if _constant_time_match(configured_api_key, normalized_api_key):
+        return normalized_api_key
+
+    # Match against registry
+    registry_record = _resolve_registry_api_key(normalized_api_key)
+    if registry_record is not None:
+        return normalized_api_key
+
+    # Key was provided but did not match anything known
+    if configured_api_key is not None or has_registry_keys:
+        # Keys are configured — reject the bad key unconditionally
+        raise AppError(
+            error="invalid_api_key",
+            message="Invalid API key",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            details={"header": API_KEY_HEADER_NAME},
+        )
+
+    # No keys configured at all
+    if auth_required:
         raise AppError(
             error="auth_not_configured",
             message="API authentication is enabled but no API key is configured",
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
 
-    if normalized_api_key is None:
-        raise AppError(
-            error="missing_api_key",
-            message="Missing API key",
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            details={"header": API_KEY_HEADER_NAME},
-        )
-
-    if _constant_time_match(configured_api_key, normalized_api_key):
-        return normalized_api_key
-
-    registry_record = _resolve_registry_api_key(normalized_api_key)
-    if registry_record is not None:
-        return normalized_api_key
-
-    raise AppError(
-        error="invalid_api_key",
-        message="Invalid API key",
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        details={"header": API_KEY_HEADER_NAME},
-    )
+    # Auth not required and no keys configured — pass through
+    return normalized_api_key
 
 
 def get_auth_context(

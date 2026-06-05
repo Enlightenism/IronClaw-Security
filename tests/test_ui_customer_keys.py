@@ -27,11 +27,6 @@ def registry() -> APIKeyRegistry:
 
 @pytest.fixture()
 def client(registry: APIKeyRegistry) -> TestClient:
-    """
-    TestClient with:
-    - require_api_key bypassed (returns a fixed token)
-    - get_api_key_registry patched to the isolated registry
-    """
     import app.api.customer_keys as ck_module
     from app.main import app
 
@@ -43,7 +38,6 @@ def client(registry: APIKeyRegistry) -> TestClient:
 
     app.dependency_overrides[require_api_key] = _override_require_api_key
 
-    # Patch the module-level get_api_key_registry used inside the router
     original = ck_module.get_api_key_registry
     ck_module.get_api_key_registry = _override_registry  # type: ignore[assignment]
 
@@ -69,6 +63,50 @@ def _create(client: TestClient, display_name: str = "Test Key", metadata: dict |
     resp = client.post(_BASE, json=body, headers=_AUTH)
     assert resp.status_code == 201
     return resp.json()
+
+
+# ---------------------------------------------------------------------------
+# No-auth helpers
+# ---------------------------------------------------------------------------
+
+
+def _patch_singleton(registry: APIKeyRegistry):
+    """
+    Replaces app.core.apikeys._registry with the provided registry and forces
+    auth_required=True on app.state.settings so _is_auth_required() returns
+    True regardless of the .env default.
+    """
+    import app.core.apikeys as apikeys_module
+    from app.main import app
+
+    class _Ctx:
+        def __enter__(self):
+            self._orig_registry = apikeys_module._registry
+            apikeys_module._registry = registry
+
+            self._orig_settings = getattr(app.state, "settings", None)
+            try:
+                from app.core.settings import get_settings
+
+                settings = get_settings().model_copy(update={"auth_required": True})
+            except Exception:
+                from app.core.settings import Settings
+
+                settings = Settings(auth_required=True)
+            app.state.settings = settings
+            return self
+
+        def __exit__(self, *_):
+            apikeys_module._registry = self._orig_registry
+            if self._orig_settings is None:
+                try:
+                    del app.state.settings
+                except AttributeError:
+                    pass
+            else:
+                app.state.settings = self._orig_settings
+
+    return _Ctx()
 
 
 # ---------------------------------------------------------------------------
@@ -106,12 +144,13 @@ def test_list_customer_keys_content_type_json(client: TestClient) -> None:
 def test_list_customer_keys_without_auth_returns_401_or_403(registry: APIKeyRegistry) -> None:
     from app.main import app
 
-    # Ensure a key exists so auth is active
     registry.create_key("guard-key", api_key=generate_api_key())
 
-    with TestClient(app, raise_server_exceptions=False) as c:
-        resp = c.get(_BASE)
-    assert resp.status_code in (401, 403)
+    with _patch_singleton(registry):
+        app.dependency_overrides.clear()
+        with TestClient(app, raise_server_exceptions=False) as c:
+            resp = c.get(_BASE)
+        assert resp.status_code in (401, 403)
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +278,8 @@ def test_revoke_customer_key_without_auth_returns_401_or_403(registry: APIKeyReg
 
     record = registry.create_key("auth-guard", api_key=generate_api_key())
 
-    with TestClient(app, raise_server_exceptions=False) as c:
-        resp = c.post(f"{_BASE}/{record.key_id}/revoke")
-    assert resp.status_code in (401, 403)
+    with _patch_singleton(registry):
+        app.dependency_overrides.clear()
+        with TestClient(app, raise_server_exceptions=False) as c:
+            resp = c.post(f"{_BASE}/{record.key_id}/revoke")
+        assert resp.status_code in (401, 403)
