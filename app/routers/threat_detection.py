@@ -6,7 +6,7 @@ import time
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from fastapi.responses import JSONResponse
 
 from app.core.auth import AuthContext, get_auth_context
@@ -27,14 +27,26 @@ from app.schemas.threat_detection import (
 )
 from app.services.stix_adapter import TAXIIConfig, get_stix_adapter
 from app.services.threat_detection_engine import get_detection_engine
+from app.services.webhook_service import (
+    dispatch_event,
+    list_retryable_deliveries,
+    retry_failed_delivery,
+)
 
 logger = logging.getLogger(__name__)
 
-
 router = APIRouter(prefix="/threat", tags=["threat-detection"])
 
-
 _TABLE_DETECTIONS = "threat_detections"
+
+# ---------------------------------------------------------------------------
+# Webhook event constants
+# ---------------------------------------------------------------------------
+
+_EVENT_THREAT_DETECTED = "threat.detected"
+_EVENT_THREAT_BLOCKED = "threat.blocked"
+_EVENT_FEED_REFRESHED = "threat.feed.refreshed"
+_EVENT_HUNT_COMPLETED = "threat.hunt.completed"
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +107,37 @@ def _persist_detection_result(result: DetectionResult) -> None:
         client.table(_TABLE_DETECTIONS).upsert(row, on_conflict="event_id").execute()
     except Exception as exc:
         logger.error("threat_detection.persist error event_id=%s: %s", result.event_id, exc)
+
+
+# ---------------------------------------------------------------------------
+# Webhook fan-out helpers (background-safe)
+# ---------------------------------------------------------------------------
+
+
+def _dispatch_detection_webhook(result: DetectionResult, tenant_id: str) -> None:
+    """Fire-and-forget webhook dispatch for detection events."""
+    try:
+        event_type = _EVENT_THREAT_BLOCKED if result.verdict == DetectionVerdict.BLOCK else _EVENT_THREAT_DETECTED
+        payload: dict[str, Any] = {
+            "event_id": result.event_id,
+            "org_id": result.org_id,
+            "agent_id": result.agent_id,
+            "session_id": result.session_id,
+            "verdict": result.verdict.value,
+            "score": result.score,
+            "severity": result.severity.value,
+            "ioc_match_count": len(result.ioc_matches),
+            "mitre_techniques": result.mitre_techniques,
+            "risk_families": result.risk_families,
+            "assessed_at": result.assessed_at,
+        }
+        dispatch_event(tenant_id, event_type, payload)
+    except Exception as exc:
+        logger.warning(
+            "threat_detection.dispatch_detection_webhook event_id=%s: %s",
+            result.event_id,
+            exc,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +239,7 @@ def _run_scheduler_forced_feed(
 )
 async def detect_threat(
     payload: DetectionRequest,
+    background_tasks: BackgroundTasks,
     auth: AuthContext = Depends(get_auth_context),
 ) -> DetectionResult:
     engine = get_detection_engine()
@@ -203,6 +247,9 @@ async def detect_threat(
     effective_request = payload.model_copy(update={"org_id": effective_org_id}) if effective_org_id != payload.org_id else payload
     result = engine.run(effective_request)
     _persist_detection_result(result)
+    tenant_id = effective_org_id or auth.tenant_id or ""
+    if tenant_id:
+        background_tasks.add_task(_dispatch_detection_webhook, result, tenant_id)
     return result
 
 
@@ -227,6 +274,7 @@ async def detect_threat(
 )
 async def refresh_feeds(
     payload: FeedRefreshRequest,
+    background_tasks: BackgroundTasks,
     use_scheduler: bool = Query(
         default=False,
         description=("When true, delegate to the scheduler's force_feed_run() for sources registered " "in the scheduler (MITRE_ATTACK, CISA_KEV). Produces a full SchedulerRunRecord " "persisted to feed_ingest_log. Has no effect on STIX_TAXII sources."),
@@ -316,7 +364,7 @@ async def refresh_feeds(
         total_errors,
     )
 
-    return FeedRefreshResult(
+    feed_result = FeedRefreshResult(
         request_id=request_id,
         org_id=effective_org_id,
         results=per_source_results,
@@ -326,6 +374,25 @@ async def refresh_feeds(
         started_at=started_at,
         completed_at=_utcnow_iso(),
     )
+
+    tenant_id = effective_org_id or auth.tenant_id or ""
+    if tenant_id:
+        background_tasks.add_task(
+            dispatch_event,
+            tenant_id,
+            _EVENT_FEED_REFRESHED,
+            {
+                "request_id": request_id,
+                "sources": [s.value for s in payload.sources],
+                "total_iocs_inserted": total_inserted,
+                "total_iocs_updated": total_updated,
+                "total_errors": total_errors,
+                "started_at": started_at,
+                "completed_at": feed_result.completed_at,
+            },
+        )
+
+    return feed_result
 
 
 # ---------------------------------------------------------------------------
@@ -429,6 +496,7 @@ async def taxii_ingest(
 )
 async def threat_hunt(
     payload: HuntQuery,
+    background_tasks: BackgroundTasks,
     auth: AuthContext = Depends(get_auth_context),
 ) -> HuntResult:
     from app.services.threat_hunt_service import get_hunt_service
@@ -442,6 +510,23 @@ async def threat_hunt(
         emit_hunt_alert(result)
     except Exception:
         pass
+
+    tenant_id = effective_org_id or auth.tenant_id or ""
+    if tenant_id and result.total_matches > 0:
+        background_tasks.add_task(
+            dispatch_event,
+            tenant_id,
+            _EVENT_HUNT_COMPLETED,
+            {
+                "hunt_id": result.hunt_id,
+                "org_id": result.org_id,
+                "status": result.status.value,
+                "total_matches": result.total_matches,
+                "executed_at": result.executed_at,
+                "duration_ms": result.duration_ms,
+            },
+        )
+
     return result
 
 
@@ -564,3 +649,77 @@ async def list_correlations(
     except Exception as exc:
         logger.error("threat_detection.list_correlations error: %s", exc)
         return []
+
+
+# ---------------------------------------------------------------------------
+# POST /threat/webhooks/retry
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/webhooks/retry",
+    status_code=status.HTTP_200_OK,
+    summary="Retry a single failed webhook delivery",
+    description=("Re-executes a previously failed webhook delivery by its delivery_id. " "Fetches the current subscription state from Supabase before retrying. " "Returns the updated WebhookDispatchResult."),
+)
+async def retry_webhook_delivery(
+    delivery_id: str = Query(..., description="delivery_id from webhook_delivery_log"),
+    subscription_id: str = Query(...),
+    tenant_id: str = Query(...),
+    event_type: str = Query(...),
+    payload_json: str = Query(..., description="Raw payload_json string from the delivery log row"),
+    current_attempts: int = Query(default=1, ge=1),
+    auth: AuthContext = Depends(get_auth_context),
+) -> JSONResponse:
+    try:
+        result = retry_failed_delivery(
+            delivery_id=delivery_id,
+            subscription_id=subscription_id,
+            tenant_id=tenant_id,
+            event_type=event_type,
+            payload_json=payload_json,
+            current_attempts=current_attempts,
+        )
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=result.to_dict(),
+        )
+    except Exception as exc:
+        logger.error(
+            "threat_detection.retry_webhook_delivery delivery_id=%s error=%s",
+            delivery_id,
+            exc,
+        )
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": "retry_failed", "message": str(exc)},
+        )
+
+
+# ---------------------------------------------------------------------------
+# GET /threat/webhooks/retryable
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/webhooks/retryable",
+    status_code=status.HTTP_200_OK,
+    summary="List webhook deliveries eligible for retry",
+    description=("Returns delivery log rows with status='failed' and next_attempt_at <= now. " "Used by the background retry worker and operator tooling."),
+)
+async def list_retryable_webhook_deliveries(
+    limit: int = Query(default=50, ge=1, le=200),
+    auth: AuthContext = Depends(get_auth_context),
+) -> JSONResponse:
+    try:
+        rows = list_retryable_deliveries(limit=limit)
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"count": len(rows), "deliveries": rows},
+        )
+    except Exception as exc:
+        logger.error("threat_detection.list_retryable_webhook_deliveries error=%s", exc)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": "internal_error", "message": str(exc)},
+        )
