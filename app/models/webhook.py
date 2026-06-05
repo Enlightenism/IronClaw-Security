@@ -4,7 +4,16 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AnyHttpUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -44,6 +53,25 @@ class WebhookEventType(StrEnum):
     HARDENING_FAIL = "hardening.fail"
     HARDENING_WARN = "hardening.warn"
 
+    # Router-native IronClaw event types (aligned with app/routers/webhooks.py)
+    POLICY_BLOCK = "policy.block"
+    POLICY_WARN = "policy.warn"
+    POLICY_ALLOW = "policy.allow"
+    THREAT_DETECTED = "threat.detected"
+    THREAT_BLOCKED = "threat.blocked"
+    THREAT_FEED_REFRESHED = "threat.feed.refreshed"
+    THREAT_HUNT_COMPLETED = "threat.hunt.completed"
+    QUARANTINE_CREATED = "quarantine.created"
+    QUARANTINE_RELEASED = "quarantine.released"
+    INCIDENT_CREATED = "incident.created"
+    INCIDENT_ESCALATED = "incident.escalated"
+    AUDIT_ENTRY = "audit.entry"
+    AGENT_SESSION_STARTED = "agent.session.started"
+    AGENT_SESSION_ENDED = "agent.session.ended"
+    REVIEW_REQUESTED = "review.requested"
+    REVIEW_RESOLVED = "review.resolved"
+    WEBHOOK_TEST = "webhook.test"
+
     # Catch-all for internal use
     ALL = "*"
 
@@ -59,6 +87,7 @@ class WebhookDeliveryStatus(StrEnum):
     SUCCESS = "success"
     FAILED = "failed"
     RETRYING = "retrying"
+    EXHAUSTED = "exhausted"
 
 
 class WebhookSigningAlgorithm(StrEnum):
@@ -95,7 +124,7 @@ class WebhookBaseModel(BaseModel):
 
 
 class WebhookCreateRequest(WebhookBaseModel):
-    """Register a new webhook endpoint."""
+    """Register a new webhook endpoint (legacy model — full signing options)."""
 
     name: str = Field(..., min_length=1, max_length=128, description="Human-readable label for this webhook.")
     target_url: AnyHttpUrl = Field(..., description="HTTPS endpoint that will receive event payloads.")
@@ -114,7 +143,7 @@ class WebhookCreateRequest(WebhookBaseModel):
         default=None,
         min_length=1,
         max_length=128,
-        description="Optional organisation scope. When set, only events originating from this org are delivered.",
+        description="Optional organisation scope.",
     )
     signing_algorithm: WebhookSigningAlgorithm = Field(
         default=WebhookSigningAlgorithm.HMAC_SHA256,
@@ -151,6 +180,151 @@ class WebhookCreateRequest(WebhookBaseModel):
         if WebhookEventType.ALL in types and len(types) > 1:
             raise ValueError("When subscribing to '*' (all events), no other event types may be specified.")
         return self
+
+
+# ---------------------------------------------------------------------------
+# WebhookSubscriptionCreate — canonical router-aligned subscription request
+# ---------------------------------------------------------------------------
+
+
+class WebhookSubscriptionCreate(WebhookBaseModel):
+    """
+    Canonical create request for POST /webhooks/subscriptions.
+    Aligns with the router's Supabase row schema (tenant-scoped, auto-generated secret).
+    secret_hash is server-generated and write-only — never accepted from the caller.
+    """
+
+    target_url: AnyHttpUrl = Field(..., description="HTTPS endpoint to receive deliveries.")
+    events: list[str] = Field(
+        ...,
+        min_length=1,
+        description="List of IronClaw event types to subscribe to.",
+    )
+    max_attempts: int = Field(default=5, ge=1, le=10, description="Maximum delivery retry attempts.")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary caller-supplied metadata.")
+
+    @field_validator("target_url", mode="before")
+    @classmethod
+    def _require_https(cls, v: Any) -> Any:
+        url = str(v)
+        if not url.startswith("https://"):
+            raise ValueError("target_url must use HTTPS.")
+        return v
+
+    @field_validator("events")
+    @classmethod
+    def _validate_events(cls, v: list[str]) -> list[str]:
+        valid = {e.value for e in WebhookEventType}
+        unknown = [e for e in v if e not in valid]
+        if unknown:
+            raise ValueError(f"Unsupported event types: {unknown}. " f"Supported: {sorted(valid)}")
+        return v
+
+
+# ---------------------------------------------------------------------------
+# WebhookSubscriptionResponse — canonical read response (secret_hash excluded)
+# ---------------------------------------------------------------------------
+
+
+class WebhookSubscriptionResponse(WebhookBaseModel):
+    """
+    Read response for webhook subscription records.
+    secret_hash is permanently excluded — only secret_hint is surfaced.
+    """
+
+    model_config = ConfigDict(
+        extra="ignore",  # tolerate secret_hash from DB row without error
+        from_attributes=True,
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    id: str
+    tenant_id: str
+    target_url: str
+    events: list[str]
+    active: bool
+    max_attempts: int
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+    secret_hint: str = Field(..., description="First 8 chars of the signing secret prefix — key never re-exposed.")
+
+    @model_serializer(mode="wrap")
+    def _exclude_secret_hash(self, handler: Any) -> dict[str, Any]:
+        result: dict[str, Any] = handler(self)
+        result.pop("secret_hash", None)
+        return result
+
+
+# ---------------------------------------------------------------------------
+# WebhookDeliveryLogEntry — canonical delivery log read model
+# ---------------------------------------------------------------------------
+
+
+class WebhookDeliveryLogEntry(WebhookBaseModel):
+    """
+    Read model for a single delivery log row from the webhook_delivery_log table.
+    Aligns with the column projection used in GET /webhooks/deliveries.
+    """
+
+    model_config = ConfigDict(
+        extra="ignore",
+        from_attributes=True,
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    id: str
+    subscription_id: str
+    tenant_id: str
+    event_type: str
+    status: WebhookDeliveryStatus
+    attempts: int = Field(default=0, ge=0)
+    http_status: int | None = Field(default=None, description="HTTP response status code from the last attempt.")
+    error_detail: str | None = Field(default=None, max_length=1024)
+    delivered_at: str | None = None
+    next_attempt_at: str | None = None
+    created_at: str = Field(default_factory=_utc_now_iso)
+
+
+# ---------------------------------------------------------------------------
+# WebhookCreateResponse — one-time secret exposure on creation
+# ---------------------------------------------------------------------------
+
+
+class WebhookCreateResponse(WebhookBaseModel):
+    """
+    Response for POST /webhooks/subscriptions.
+    signing_secret is returned exactly once — store it securely.
+    """
+
+    id: str
+    tenant_id: str
+    target_url: str
+    events: list[str]
+    active: bool
+    max_attempts: int
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+    secret_hint: str = Field(
+        ...,
+        description="First 8 chars of the signing secret — shown again on subsequent reads.",
+    )
+    signing_secret: str = Field(
+        ...,
+        description="Full HMAC-SHA256 signing secret — only returned once at creation. Store securely.",
+    )
+
+    @model_serializer(mode="wrap")
+    def _exclude_secret_hash(self, handler: Any) -> dict[str, Any]:
+        result: dict[str, Any] = handler(self)
+        result.pop("secret_hash", None)
+        return result
+
+
+# ---------------------------------------------------------------------------
+# WebhookUpdateRequest
+# ---------------------------------------------------------------------------
 
 
 class WebhookUpdateRequest(WebhookBaseModel):
@@ -192,6 +366,40 @@ class WebhookUpdateRequest(WebhookBaseModel):
         return deduped
 
 
+# ---------------------------------------------------------------------------
+# WebhookSubscriptionUpdateRequest — router-aligned partial update
+# ---------------------------------------------------------------------------
+
+
+class WebhookSubscriptionUpdateRequest(WebhookBaseModel):
+    """
+    Partial update for PATCH /webhooks/subscriptions/{id}.
+    Aligns with router field names (events, active, max_attempts, metadata).
+    secret_hash is never accepted from the caller.
+    """
+
+    active: bool | None = Field(default=None, description="Enable or disable the subscription.")
+    events: list[str] | None = Field(default=None, min_length=1, description="Replace the subscribed event list.")
+    max_attempts: int | None = Field(default=None, ge=1, le=10)
+    metadata: dict[str, Any] | None = None
+
+    @field_validator("events")
+    @classmethod
+    def _validate_events(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        valid = {e.value for e in WebhookEventType}
+        unknown = [e for e in v if e not in valid]
+        if unknown:
+            raise ValueError(f"Unsupported event types: {unknown}. " f"Supported: {sorted(valid)}")
+        return v
+
+
+# ---------------------------------------------------------------------------
+# WebhookResponse — full record response (legacy, signing options)
+# ---------------------------------------------------------------------------
+
+
 class WebhookResponse(WebhookBaseModel):
     """Public webhook record — secret is never included."""
 
@@ -210,6 +418,18 @@ class WebhookResponse(WebhookBaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=_utc_now_iso)
     updated_at: str = Field(default_factory=_utc_now_iso)
+
+    @model_serializer(mode="wrap")
+    def _exclude_secret_fields(self, handler: Any) -> dict[str, Any]:
+        result: dict[str, Any] = handler(self)
+        result.pop("secret", None)
+        result.pop("secret_hash", None)
+        return result
+
+
+# ---------------------------------------------------------------------------
+# WebhookSummaryResponse / WebhookListResponse
+# ---------------------------------------------------------------------------
 
 
 class WebhookSummaryResponse(WebhookBaseModel):
@@ -354,6 +574,13 @@ class WebhookRotateSecretResponse(WebhookBaseModel):
     rotated_at: str = Field(default_factory=_utc_now_iso)
     message: str = "Secret rotated successfully. Update your receiver immediately."
 
+    @model_serializer(mode="wrap")
+    def _exclude_secret_fields(self, handler: Any) -> dict[str, Any]:
+        result: dict[str, Any] = handler(self)
+        result.pop("secret", None)
+        result.pop("secret_hash", None)
+        return result
+
 
 # ---------------------------------------------------------------------------
 # Webhook status toggle
@@ -369,3 +596,18 @@ class WebhookStatusUpdateResponse(WebhookBaseModel):
     active: bool
     status: WebhookStatus
     updated_at: str = Field(default_factory=_utc_now_iso)
+
+
+# ---------------------------------------------------------------------------
+# Write-only secret container (internal use — service layer only)
+# ---------------------------------------------------------------------------
+
+
+class _WebhookSecretWrite(BaseModel):
+    """
+    Internal-only container for transporting a raw secret into the service layer.
+    SecretStr prevents the value from appearing in logs, repr, or serialized output.
+    Never instantiated in request/response paths.
+    """
+
+    secret: SecretStr

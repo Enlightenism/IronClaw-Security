@@ -9,9 +9,15 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 from app.core.auth import AuthContext, get_auth_context
+from app.models.webhook import (
+    WebhookCreateResponse,
+    WebhookDeliveryLogEntry,
+    WebhookSubscriptionCreate,
+    WebhookSubscriptionResponse,
+    WebhookSubscriptionUpdateRequest,
+)
 from app.services.webhook_service import (
     dispatch_event,
     list_retryable_deliveries,
@@ -24,24 +30,7 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 _WEBHOOK_SUBSCRIPTIONS_TABLE = "webhook_subscriptions"
 
-_SUPPORTED_EVENTS: set[str] = {
-    "policy.block",
-    "policy.warn",
-    "policy.allow",
-    "threat.detected",
-    "threat.blocked",
-    "threat.feed.refreshed",
-    "threat.hunt.completed",
-    "quarantine.created",
-    "quarantine.released",
-    "incident.created",
-    "incident.escalated",
-    "audit.entry",
-    "agent.session.started",
-    "agent.session.ended",
-    "review.requested",
-    "review.resolved",
-}
+_SUPPORTED_EVENTS: set[str] = {e.value for e in __import__("app.models.webhook", fromlist=["WebhookEventType"]).WebhookEventType if e.value != "*"}
 
 
 # ---------------------------------------------------------------------------
@@ -97,75 +86,6 @@ def _redact_subscription(row: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Request / Response schemas
-# ---------------------------------------------------------------------------
-
-
-class WebhookCreateRequest(BaseModel):
-    target_url: HttpUrl = Field(..., description="HTTPS endpoint to receive deliveries")
-    events: list[str] = Field(..., min_length=1, description="List of IronClaw event types to subscribe to")
-    max_attempts: int = Field(default=5, ge=1, le=10)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-    @field_validator("events")
-    @classmethod
-    def validate_events(cls, v: list[str]) -> list[str]:
-        unknown = [e for e in v if e not in _SUPPORTED_EVENTS]
-        if unknown:
-            raise ValueError(f"Unsupported event types: {unknown}. Supported: {sorted(_SUPPORTED_EVENTS)}")
-        return v
-
-    @field_validator("target_url")
-    @classmethod
-    def validate_https(cls, v: HttpUrl) -> HttpUrl:
-        if str(v).startswith("http://"):
-            raise ValueError("target_url must use HTTPS")
-        return v
-
-
-class WebhookUpdateRequest(BaseModel):
-    active: bool | None = Field(default=None, description="Enable or disable the subscription")
-    events: list[str] | None = Field(default=None, description="Replace the subscribed event list")
-    max_attempts: int | None = Field(default=None, ge=1, le=10)
-    metadata: dict[str, Any] | None = Field(default=None)
-
-    @field_validator("events")
-    @classmethod
-    def validate_events(cls, v: list[str] | None) -> list[str] | None:
-        if v is None:
-            return v
-        unknown = [e for e in v if e not in _SUPPORTED_EVENTS]
-        if unknown:
-            raise ValueError(f"Unsupported event types: {unknown}. Supported: {sorted(_SUPPORTED_EVENTS)}")
-        return v
-
-
-class WebhookCreateResponse(BaseModel):
-    id: str
-    tenant_id: str
-    target_url: str
-    events: list[str]
-    active: bool
-    max_attempts: int
-    metadata: dict[str, Any]
-    created_at: str
-    secret_hint: str = Field(..., description="First 8 chars of the signing secret — store the full secret from this response; it will not be shown again")
-    signing_secret: str = Field(..., description="Full HMAC-SHA256 signing secret — only returned once at creation")
-
-
-class WebhookSubscriptionResponse(BaseModel):
-    id: str
-    tenant_id: str
-    target_url: str
-    events: list[str]
-    active: bool
-    max_attempts: int
-    metadata: dict[str, Any]
-    created_at: str
-    secret_hint: str = Field(..., description="Key prefix display hint — first 8 chars of the signing secret")
-
-
-# ---------------------------------------------------------------------------
 # Tenant ID resolution
 # ---------------------------------------------------------------------------
 
@@ -188,7 +108,7 @@ def _resolve_tenant_id(auth: AuthContext) -> str:
     description=("Creates a new webhook subscription for the authenticated tenant. " "Returns the full signing secret exactly once — store it securely. " "The secret_hash is never returned after creation; only a key_prefix hint is shown on subsequent reads."),
 )
 async def create_webhook_subscription(
-    payload: WebhookCreateRequest,
+    payload: WebhookSubscriptionCreate,
     auth: AuthContext = Depends(get_auth_context),
 ) -> JSONResponse:
     client = _get_supabase_client()
@@ -250,6 +170,7 @@ async def create_webhook_subscription(
 @router.get(
     "/subscriptions",
     status_code=status.HTTP_200_OK,
+    response_model=None,
     summary="List webhook subscriptions for the authenticated tenant",
 )
 async def list_webhook_subscriptions(
@@ -299,6 +220,7 @@ def _build_list_item(row: dict[str, Any]) -> dict[str, Any]:
 @router.get(
     "/subscriptions/{subscription_id}",
     status_code=status.HTTP_200_OK,
+    response_model=WebhookSubscriptionResponse,
     summary="Get a single webhook subscription",
 )
 async def get_webhook_subscription(
@@ -325,11 +247,12 @@ async def get_webhook_subscription(
 @router.patch(
     "/subscriptions/{subscription_id}",
     status_code=status.HTTP_200_OK,
+    response_model=WebhookSubscriptionResponse,
     summary="Update a webhook subscription (enable/disable, change events, etc.)",
 )
 async def update_webhook_subscription(
     subscription_id: str,
-    payload: WebhookUpdateRequest,
+    payload: WebhookSubscriptionUpdateRequest,
     auth: AuthContext = Depends(get_auth_context),
 ) -> JSONResponse:
     client = _get_supabase_client()
@@ -497,6 +420,7 @@ async def test_webhook_dispatch(
 @router.get(
     "/deliveries",
     status_code=status.HTTP_200_OK,
+    response_model=None,
     summary="List webhook delivery log entries for the tenant",
 )
 async def list_webhook_deliveries(
@@ -529,9 +453,10 @@ async def list_webhook_deliveries(
         logger.error("webhooks.list_deliveries tenant_id=%s error=%s", tenant_id, exc)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="list_failed") from exc
 
+    validated: list[dict[str, Any]] = [WebhookDeliveryLogEntry.model_validate(r).model_dump() for r in rows]
     return JSONResponse(
         status_code=status.HTTP_200_OK,
-        content={"count": len(rows), "deliveries": rows},
+        content={"count": len(validated), "deliveries": validated},
     )
 
 
@@ -598,11 +523,11 @@ async def retry_webhook_delivery(
     if tenant_id and record_tenant and record_tenant != tenant_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="delivery_not_accessible")
 
-    delivery_status = record.get("status", "")
-    if delivery_status not in ("failed", "exhausted"):
+    delivery_status_val = record.get("status", "")
+    if delivery_status_val not in ("failed", "exhausted"):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Delivery status '{delivery_status}' is not retryable. Only 'failed' or 'exhausted' deliveries can be retried.",
+            detail=f"Delivery status '{delivery_status_val}' is not retryable. Only 'failed' or 'exhausted' deliveries can be retried.",
         )
 
     try:

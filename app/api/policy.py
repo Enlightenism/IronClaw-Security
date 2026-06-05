@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from app.core.errors import AppError
 from app.dependencies.rate_limit import limit_policy_routes
 from app.schemas.policy import PolicyStatus
-from app.services.policy import get_policy_status
+from app.services.policy import get_policy_status, is_policy_loaded_from_db
 from app.services.prompt_service import analyze_prompt_bundle
 from app.services.review_queue_service import get_review_queue_summary
 from app.services.telemetry import append_telemetry_event
@@ -53,7 +53,9 @@ def _request_meta(request: Request) -> dict[str, Any]:
 
 @router.get("/status", response_model=PolicyStatus)
 def read_policy_status(request: Request) -> PolicyStatus:
-    status = PolicyStatus(**get_policy_status())
+    raw = get_policy_status()
+    raw["policy_loaded_from_db"] = is_policy_loaded_from_db()
+    status = PolicyStatus(**raw)
 
     try:
         append_telemetry_event(
@@ -62,6 +64,7 @@ def read_policy_status(request: Request) -> PolicyStatus:
                 **_request_meta(request),
                 "mode": getattr(status, "mode", None),
                 "enforcement_enabled": getattr(status, "enforcement_enabled", None),
+                "policy_loaded_from_db": status.policy_loaded_from_db,
             },
         )
     except Exception:
@@ -72,7 +75,9 @@ def read_policy_status(request: Request) -> PolicyStatus:
 
 @router.get("/system-status", response_model=SystemStatusResponse)
 def read_system_status(request: Request) -> SystemStatusResponse:
-    policy_status = PolicyStatus(**get_policy_status())
+    raw = get_policy_status()
+    raw["policy_loaded_from_db"] = is_policy_loaded_from_db()
+    policy_status = PolicyStatus(**raw)
     review_summary = get_review_queue_summary()
 
     try:
@@ -81,6 +86,7 @@ def read_system_status(request: Request) -> SystemStatusResponse:
             {
                 **_request_meta(request),
                 "policy_mode": getattr(policy_status, "mode", None),
+                "policy_loaded_from_db": policy_status.policy_loaded_from_db,
                 "pending_reviews": review_summary.get("pending_items"),
                 "critical_items": review_summary.get("critical_items"),
                 "total_items": review_summary.get("total_items"),
