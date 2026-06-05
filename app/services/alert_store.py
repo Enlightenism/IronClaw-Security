@@ -2,9 +2,19 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+import logging
 from threading import Lock
 from typing import Any, Literal
 from uuid import uuid4
+
+from app.services.notification_service import (
+    NotificationEngine,
+    NotificationEvent,
+    build_notification_payload,
+    default_channels_for_severity,
+)
+
+logger = logging.getLogger(__name__)
 
 AlertChannel = Literal["email", "webhook", "slack"]
 AlertEventType = Literal[
@@ -15,11 +25,27 @@ AlertEventType = Literal[
 ]
 AlertDeliveryStatus = Literal["active", "paused", "failed"]
 
+
 _VALID_CHANNELS: frozenset[str] = frozenset({"email", "webhook", "slack"})
 _VALID_STATUSES: frozenset[str] = frozenset({"active", "paused", "failed"})
 _VALID_EVENTS: frozenset[str] = frozenset(
     {"incident_created", "incident_updated", "quarantine_created", "policy_changed"},
 )
+
+# Maps AlertEventType values to NotificationEvent for fan-out
+_ALERT_EVENT_TO_NOTIFICATION: dict[str, NotificationEvent] = {
+    "incident_created": NotificationEvent.INCIDENT_OPENED,
+    "incident_updated": NotificationEvent.INCIDENT_ESCALATED,
+    "quarantine_created": NotificationEvent.POLICY_QUARANTINE,
+    "policy_changed": NotificationEvent.POLICY_BLOCK,
+}
+
+# Maps endpoint mutation operations to NotificationEvent for fan-out
+_ENDPOINT_OP_TO_NOTIFICATION: dict[str, NotificationEvent] = {
+    "created": NotificationEvent.ALERT_CREATED,
+    "updated": NotificationEvent.ALERT_ESCALATED,
+    "deleted": NotificationEvent.SYSTEM_HEALTH_DEGRADED,
+}
 
 
 def _utcnow() -> datetime:
@@ -50,6 +76,39 @@ def _validate_events(events: list[AlertEventType]) -> list[AlertEventType]:
     if invalid:
         raise ValueError(f"Invalid event type(s): {invalid}. Must be one of {sorted(_VALID_EVENTS)}")
     return events
+
+
+def _fan_out(
+    engine: NotificationEngine | None,
+    *,
+    operation: str,
+    endpoint_id: str,
+    channel: str,
+    org_id: str | None = None,
+) -> None:
+    """Fire optional webhook fan-out post-endpoint-mutation. Never raises."""
+    if engine is None:
+        return
+    notification_event = _ENDPOINT_OP_TO_NOTIFICATION.get(operation)
+    if notification_event is None:
+        return
+    try:
+        payload = build_notification_payload(
+            event=notification_event,
+            title=f"IronClaw Alert Endpoint {operation.capitalize()}: {endpoint_id}",
+            body=f"Alert endpoint '{endpoint_id}' was {operation} on channel '{channel}'.",
+            source_id=endpoint_id,
+            source_type="alert_endpoint",
+            org_id=org_id,
+        )
+        resolved_channels = default_channels_for_severity(payload.severity)
+        engine.dispatch(payload, resolved_channels)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "alert_store | fan_out | suppressed error | op=%s endpoint_id=%s",
+            operation,
+            endpoint_id,
+        )
 
 
 @dataclass(slots=True)
@@ -132,6 +191,8 @@ class AlertEndpointStore:
         target: str,
         subscribed_events: list[AlertEventType] | None = None,
         metadata: dict[str, Any] | None = None,
+        notification_engine: NotificationEngine | None = None,
+        org_id: str | None = None,
     ) -> AlertEndpointRecord:
         validated_channel = _validate_channel(channel)
         validated_name = _require_str(name, "name")
@@ -154,6 +215,13 @@ class AlertEndpointStore:
         with self._lock:
             self._items.append(endpoint)
 
+        _fan_out(
+            notification_engine,
+            operation="created",
+            endpoint_id=endpoint.endpoint_id,
+            channel=validated_channel,
+            org_id=org_id,
+        )
         return endpoint
 
     def update_endpoint(
@@ -163,10 +231,13 @@ class AlertEndpointStore:
         subscribed_events: list[AlertEventType] | None = None,
         status: AlertDeliveryStatus,
         metadata: dict[str, Any] | None = None,
+        notification_engine: NotificationEngine | None = None,
+        org_id: str | None = None,
     ) -> AlertEndpointRecord | None:
         validated_status = _validate_status(status)
         validated_events = _validate_events(list(subscribed_events)) if subscribed_events is not None else None
 
+        updated: AlertEndpointRecord | None = None
         with self._lock:
             for index, item in enumerate(self._items):
                 if item.endpoint_id != endpoint_id:
@@ -189,22 +260,46 @@ class AlertEndpointStore:
                     },
                 )
                 self._items[index] = updated
-                return updated
+                break
 
-        return None
+        if updated is not None:
+            _fan_out(
+                notification_engine,
+                operation="updated",
+                endpoint_id=updated.endpoint_id,
+                channel=updated.channel,
+                org_id=org_id,
+            )
+        return updated
 
-    def delete_endpoint(self, endpoint_id: str) -> AlertEndpointRecord | None:
+    def delete_endpoint(
+        self,
+        endpoint_id: str,
+        *,
+        notification_engine: NotificationEngine | None = None,
+        org_id: str | None = None,
+    ) -> AlertEndpointRecord | None:
         """Remove an endpoint by ID. Returns the removed record or None if not found."""
         normalized = endpoint_id.strip() if isinstance(endpoint_id, str) else ""
         if not normalized:
             raise ValueError("endpoint_id must be a non-empty string")
 
+        removed: AlertEndpointRecord | None = None
         with self._lock:
             for index, item in enumerate(self._items):
                 if item.endpoint_id == normalized:
-                    return self._items.pop(index)
+                    removed = self._items.pop(index)
+                    break
 
-        return None
+        if removed is not None:
+            _fan_out(
+                notification_engine,
+                operation="deleted",
+                endpoint_id=removed.endpoint_id,
+                channel=removed.channel,
+                org_id=org_id,
+            )
+        return removed
 
     def reset(self) -> None:
         with self._lock:
@@ -214,6 +309,7 @@ class AlertEndpointStore:
 # ---------------------------------------------------------------------------
 # Module-level singleton — use get_alert_endpoint_store() for DI / testing
 # ---------------------------------------------------------------------------
+
 
 _ALERT_ENDPOINT_STORE = AlertEndpointStore()
 

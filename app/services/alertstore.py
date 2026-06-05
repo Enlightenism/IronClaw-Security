@@ -10,6 +10,7 @@ from app.persistencebootstrap import build_store
 
 DEFAULT_ALERT_TABLE = "alerts"
 
+
 _ALERT_STATUSES = {
     "open",
     "new",
@@ -21,12 +22,14 @@ _ALERT_STATUSES = {
     "false_positive",
 }
 
+
 _ALERT_SEVERITIES = {
     "low",
     "medium",
     "high",
     "critical",
 }
+
 
 _ALERT_VERDICTS = {
     "pending",
@@ -35,6 +38,7 @@ _ALERT_VERDICTS = {
     "malicious",
     "false_positive",
 }
+
 
 _DEFAULT_STATUS = "open"
 _DEFAULT_SEVERITY = "medium"
@@ -262,6 +266,39 @@ def _normalize_alert_payload(
     }
 
 
+# ---------------------------------------------------------------------------
+# Optional webhook fan-out hook
+# ---------------------------------------------------------------------------
+# Callers may inject a dispatch_event callable at store construction time or
+# per-call via the ``dispatch_event`` kwarg on mutating methods.  The
+# signature contract is:
+#
+#   dispatch_event(tenant_id: str, event_type: str, payload: dict) -> None
+#
+# If no hook is provided the store behaves exactly as before — fail-closed,
+# never raises on missing hook.
+# ---------------------------------------------------------------------------
+
+_DispatchFn = Any  # callable(tenant_id, event_type, payload) | None
+
+
+def _safe_dispatch(
+    fn: _DispatchFn,
+    tenant_id: str | None,
+    event_type: str,
+    payload: dict[str, Any],
+) -> None:
+    """Call dispatch_event silently — never let fan-out failures surface."""
+    if fn is None or not callable(fn):
+        return
+    if not tenant_id:
+        return
+    try:
+        fn(tenant_id, event_type, payload)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 @dataclass(slots=True)
 class SecurityAlertStore:
     """Persistence-backed store for security alert records (incidents, threats,
@@ -270,10 +307,15 @@ class SecurityAlertStore:
 
     Distinct from AlertEndpointStore in alert_store.py, which manages
     notification routing targets (email / webhook / slack endpoints).
+
+    ``dispatch_event`` is an optional webhook fan-out hook injected at
+    construction time.  Signature: (tenant_id, event_type, payload) -> None.
+    All mutating methods accept a per-call override via the same kwarg.
     """
 
     backend: Any = field(default_factory=build_store)
     table_name: str = DEFAULT_ALERT_TABLE
+    dispatch_event: _DispatchFn = field(default=None)
 
     @property
     def backend_name(self) -> str:
@@ -295,20 +337,63 @@ class SecurityAlertStore:
             return bool(health())
         return True
 
-    def create_alert(self, payload: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+    # ------------------------------------------------------------------
+    # Internal helper — resolves effective dispatch fn for a call
+    # ------------------------------------------------------------------
+    def _dispatch(
+        self,
+        record: dict[str, Any],
+        event_type: str,
+        *,
+        dispatch_event: _DispatchFn = None,
+    ) -> None:
+        fn = dispatch_event if dispatch_event is not None else self.dispatch_event
+        tenant_id = (_string(record.get("organization_id")) or _string(record.get("org_id")) or _string(record.get("customer_id"))) or None
+        _safe_dispatch(fn, tenant_id, event_type, record)
+
+    # ------------------------------------------------------------------
+    # Create
+    # ------------------------------------------------------------------
+
+    def create_alert(
+        self,
+        payload: dict[str, Any] | None = None,
+        *,
+        dispatch_event: _DispatchFn = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         record = _normalize_alert_payload(payload, **kwargs)
         inserted = self.backend.insert(self.table_name, record)
         if isinstance(inserted, list) and inserted:
-            return dict(inserted[0])
-        if isinstance(inserted, dict):
-            return dict(inserted)
-        return record
+            result = dict(inserted[0])
+        elif isinstance(inserted, dict):
+            result = dict(inserted)
+        else:
+            result = record
+        self._dispatch(result, "alert.created", dispatch_event=dispatch_event)
+        return result
 
-    def create(self, payload: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
-        return self.create_alert(payload, **kwargs)
+    def create(
+        self,
+        payload: dict[str, Any] | None = None,
+        *,
+        dispatch_event: _DispatchFn = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        return self.create_alert(payload, dispatch_event=dispatch_event, **kwargs)
 
-    def open_alert(self, payload: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
-        return self.create_alert(payload, **kwargs)
+    def open_alert(
+        self,
+        payload: dict[str, Any] | None = None,
+        *,
+        dispatch_event: _DispatchFn = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        return self.create_alert(payload, dispatch_event=dispatch_event, **kwargs)
+
+    # ------------------------------------------------------------------
+    # Read
+    # ------------------------------------------------------------------
 
     def list_alerts(
         self,
@@ -375,6 +460,10 @@ class SecurityAlertStore:
     def get(self, alert_id: str) -> dict[str, Any] | None:
         return self.get_alert(alert_id)
 
+    # ------------------------------------------------------------------
+    # Update (internal — no direct fan-out; callers use lifecycle methods)
+    # ------------------------------------------------------------------
+
     def update_alert(self, alert_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
         existing = self.get_alert(alert_id)
         if existing is None:
@@ -419,12 +508,17 @@ class SecurityAlertStore:
     def update(self, alert_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
         return self.update_alert(alert_id, updates)
 
+    # ------------------------------------------------------------------
+    # Lifecycle transitions — each emits a typed fan-out event
+    # ------------------------------------------------------------------
+
     def acknowledge_alert(
         self,
         alert_id: str,
         *,
         assigned_to: str | None = None,
         metadata: dict[str, Any] | None = None,
+        dispatch_event: _DispatchFn = None,
     ) -> dict[str, Any] | None:
         updates: dict[str, Any] = {
             "status": "acknowledged",
@@ -437,22 +531,35 @@ class SecurityAlertStore:
             merged_metadata = _mapping(current.get("metadata"))
             merged_metadata.update(metadata)
             updates["metadata"] = merged_metadata
-        return self.update_alert(alert_id, updates)
+        result = self.update_alert(alert_id, updates)
+        if result is not None:
+            self._dispatch(result, "alert.acknowledged", dispatch_event=dispatch_event)
+        return result
 
-    def assign_alert(self, alert_id: str, assigned_to: str) -> dict[str, Any] | None:
-        return self.update_alert(
+    def assign_alert(
+        self,
+        alert_id: str,
+        assigned_to: str,
+        *,
+        dispatch_event: _DispatchFn = None,
+    ) -> dict[str, Any] | None:
+        result = self.update_alert(
             alert_id,
             {
                 "assigned_to": assigned_to,
                 "status": "investigating",
             },
         )
+        if result is not None:
+            self._dispatch(result, "alert.assigned", dispatch_event=dispatch_event)
+        return result
 
     def suppress_alert(
         self,
         alert_id: str,
         *,
         metadata: dict[str, Any] | None = None,
+        dispatch_event: _DispatchFn = None,
     ) -> dict[str, Any] | None:
         updates: dict[str, Any] = {
             "status": "suppressed",
@@ -463,7 +570,10 @@ class SecurityAlertStore:
             merged_metadata = _mapping(current.get("metadata"))
             merged_metadata.update(metadata)
             updates["metadata"] = merged_metadata
-        return self.update_alert(alert_id, updates)
+        result = self.update_alert(alert_id, updates)
+        if result is not None:
+            self._dispatch(result, "alert.suppressed", dispatch_event=dispatch_event)
+        return result
 
     def resolve_alert(
         self,
@@ -472,6 +582,7 @@ class SecurityAlertStore:
         verdict: str | None = None,
         incident_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        dispatch_event: _DispatchFn = None,
     ) -> dict[str, Any] | None:
         updates: dict[str, Any] = {
             "status": "resolved",
@@ -486,13 +597,17 @@ class SecurityAlertStore:
             merged_metadata = _mapping(current.get("metadata"))
             merged_metadata.update(metadata)
             updates["metadata"] = merged_metadata
-        return self.update_alert(alert_id, updates)
+        result = self.update_alert(alert_id, updates)
+        if result is not None:
+            self._dispatch(result, "alert.resolved", dispatch_event=dispatch_event)
+        return result
 
     def close_alert(
         self,
         alert_id: str,
         *,
         verdict: str | None = None,
+        dispatch_event: _DispatchFn = None,
     ) -> dict[str, Any] | None:
         updates: dict[str, Any] = {
             "status": "closed",
@@ -500,13 +615,17 @@ class SecurityAlertStore:
         }
         if verdict is not None:
             updates["verdict"] = verdict
-        return self.update_alert(alert_id, updates)
+        result = self.update_alert(alert_id, updates)
+        if result is not None:
+            self._dispatch(result, "alert.closed", dispatch_event=dispatch_event)
+        return result
 
     def mark_false_positive(
         self,
         alert_id: str,
         *,
         metadata: dict[str, Any] | None = None,
+        dispatch_event: _DispatchFn = None,
     ) -> dict[str, Any] | None:
         updates: dict[str, Any] = {
             "status": "false_positive",
@@ -518,22 +637,42 @@ class SecurityAlertStore:
             merged_metadata = _mapping(current.get("metadata"))
             merged_metadata.update(metadata)
             updates["metadata"] = merged_metadata
-        return self.update_alert(alert_id, updates)
+        result = self.update_alert(alert_id, updates)
+        if result is not None:
+            self._dispatch(result, "alert.false_positive", dispatch_event=dispatch_event)
+        return result
 
-    def delete_alert(self, alert_id: str) -> dict[str, Any] | None:
+    # ------------------------------------------------------------------
+    # Delete
+    # ------------------------------------------------------------------
+
+    def delete_alert(
+        self,
+        alert_id: str,
+        *,
+        dispatch_event: _DispatchFn = None,
+    ) -> dict[str, Any] | None:
         normalized_id = _string(alert_id)
         if not normalized_id:
             raise ValueError("alert_id is required")
 
         deleted = self.backend.delete(self.table_name, filters={"alert_id": normalized_id})
         if isinstance(deleted, list) and deleted:
-            return dict(deleted[0])
+            result = dict(deleted[0])
+            self._dispatch(result, "alert.deleted", dispatch_event=dispatch_event)
+            return result
 
         deleted = self.backend.delete(self.table_name, filters={"id": normalized_id})
         if isinstance(deleted, list) and deleted:
-            return dict(deleted[0])
+            result = dict(deleted[0])
+            self._dispatch(result, "alert.deleted", dispatch_event=dispatch_event)
+            return result
 
         return None
+
+    # ------------------------------------------------------------------
+    # Summarize
+    # ------------------------------------------------------------------
 
     def summarize(
         self,
@@ -579,25 +718,42 @@ def build_alert_store(
     *,
     backend: Any | None = None,
     table_name: str = DEFAULT_ALERT_TABLE,
+    dispatch_event: _DispatchFn = None,
     **store_kwargs: Any,
 ) -> SecurityAlertStore:
     resolved_backend = backend if backend is not None else build_store(**store_kwargs)
-    return SecurityAlertStore(backend=resolved_backend, table_name=table_name)
+    return SecurityAlertStore(
+        backend=resolved_backend,
+        table_name=table_name,
+        dispatch_event=dispatch_event,
+    )
 
 
 def create_alert_store(
     *,
     backend: Any | None = None,
     table_name: str = DEFAULT_ALERT_TABLE,
+    dispatch_event: _DispatchFn = None,
     **store_kwargs: Any,
 ) -> SecurityAlertStore:
-    return build_alert_store(backend=backend, table_name=table_name, **store_kwargs)
+    return build_alert_store(
+        backend=backend,
+        table_name=table_name,
+        dispatch_event=dispatch_event,
+        **store_kwargs,
+    )
 
 
 def get_alert_store(
     *,
     backend: Any | None = None,
     table_name: str = DEFAULT_ALERT_TABLE,
+    dispatch_event: _DispatchFn = None,
     **store_kwargs: Any,
 ) -> SecurityAlertStore:
-    return build_alert_store(backend=backend, table_name=table_name, **store_kwargs)
+    return build_alert_store(
+        backend=backend,
+        table_name=table_name,
+        dispatch_event=dispatch_event,
+        **store_kwargs,
+    )

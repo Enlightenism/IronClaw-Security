@@ -27,11 +27,7 @@ from app.schemas.threat_detection import (
 )
 from app.services.stix_adapter import TAXIIConfig, get_stix_adapter
 from app.services.threat_detection_engine import get_detection_engine
-from app.services.webhook_service import (
-    dispatch_event,
-    list_retryable_deliveries,
-    retry_failed_delivery,
-)
+from app.services.webhook_service import dispatch_event
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +43,24 @@ _EVENT_THREAT_DETECTED = "threat.detected"
 _EVENT_THREAT_BLOCKED = "threat.blocked"
 _EVENT_FEED_REFRESHED = "threat.feed.refreshed"
 _EVENT_HUNT_COMPLETED = "threat.hunt.completed"
+
+# ---------------------------------------------------------------------------
+# Notification engine DI — optional, degrades gracefully when not configured
+# ---------------------------------------------------------------------------
+
+
+def _get_optional_notification_engine():
+    """
+    Returns a NotificationEngine instance if available, else None.
+    Injected as an optional dependency so routes degrade gracefully
+    when the notification subsystem is not yet initialised.
+    """
+    try:
+        from app.services.notification_engine import get_notification_engine
+
+        return get_notification_engine()
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +120,12 @@ def _persist_detection_result(result: DetectionResult) -> None:
         }
         client.table(_TABLE_DETECTIONS).upsert(row, on_conflict="event_id").execute()
     except Exception as exc:
-        logger.error("threat_detection.persist error event_id=%s: %s", result.event_id, exc)
+        logger.error(
+            "threat_detection.persist error event_id=%s: %s",
+            result.event_id,
+            exc,
+            exc_info=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +260,7 @@ async def detect_threat(
     payload: DetectionRequest,
     background_tasks: BackgroundTasks,
     auth: AuthContext = Depends(get_auth_context),
+    notification_engine: Any | None = Depends(_get_optional_notification_engine),
 ) -> DetectionResult:
     engine = get_detection_engine()
     effective_org_id = payload.org_id or auth.org_id
@@ -250,6 +270,17 @@ async def detect_threat(
     tenant_id = effective_org_id or auth.tenant_id or ""
     if tenant_id:
         background_tasks.add_task(_dispatch_detection_webhook, result, tenant_id)
+    if notification_engine is not None:
+        try:
+            notification_engine.notify_detection(
+                result,
+                org_id=effective_org_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "threat_detection.detect_threat notification_engine.notify_detection error: %s",
+                exc,
+            )
     return result
 
 
@@ -280,6 +311,7 @@ async def refresh_feeds(
         description=("When true, delegate to the scheduler's force_feed_run() for sources registered " "in the scheduler (MITRE_ATTACK, CISA_KEV). Produces a full SchedulerRunRecord " "persisted to feed_ingest_log. Has no effect on STIX_TAXII sources."),
     ),
     auth: AuthContext = Depends(get_auth_context),
+    notification_engine: Any | None = Depends(_get_optional_notification_engine),
 ) -> FeedRefreshResult:
     request_id = str(uuid.uuid4())
     effective_org_id = payload.org_id or auth.org_id
@@ -392,6 +424,18 @@ async def refresh_feeds(
             },
         )
 
+    if notification_engine is not None:
+        try:
+            notification_engine.notify_feed_refresh(
+                feed_result,
+                org_id=effective_org_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "threat_detection.refresh_feeds notification_engine.notify_feed_refresh error: %s",
+                exc,
+            )
+
     return feed_result
 
 
@@ -498,6 +542,7 @@ async def threat_hunt(
     payload: HuntQuery,
     background_tasks: BackgroundTasks,
     auth: AuthContext = Depends(get_auth_context),
+    notification_engine: Any | None = Depends(_get_optional_notification_engine),
 ) -> HuntResult:
     from app.services.threat_hunt_service import get_hunt_service
 
@@ -526,6 +571,18 @@ async def threat_hunt(
                 "duration_ms": result.duration_ms,
             },
         )
+
+    if notification_engine is not None:
+        try:
+            notification_engine.notify_hunt(
+                result,
+                org_id=effective_org_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "threat_detection.threat_hunt notification_engine.notify_hunt error: %s",
+                exc,
+            )
 
     return result
 
@@ -652,74 +709,52 @@ async def list_correlations(
 
 
 # ---------------------------------------------------------------------------
-# POST /threat/webhooks/retry
+# POST /threat/webhooks/retry  — DEPRECATED (410 Gone)
+# Canonical endpoint: POST /webhooks/deliveries/{delivery_id}/retry
 # ---------------------------------------------------------------------------
 
 
 @router.post(
     "/webhooks/retry",
-    status_code=status.HTTP_200_OK,
-    summary="Retry a single failed webhook delivery",
-    description=("Re-executes a previously failed webhook delivery by its delivery_id. " "Fetches the current subscription state from Supabase before retrying. " "Returns the updated WebhookDispatchResult."),
+    status_code=status.HTTP_410_GONE,
+    summary="[DEPRECATED] Retry a single failed webhook delivery",
+    description=("This endpoint has been removed. " "Use POST /webhooks/deliveries/{delivery_id}/retry instead. " "Retry logic is owned exclusively by the webhooks router."),
+    deprecated=True,
 )
-async def retry_webhook_delivery(
-    delivery_id: str = Query(..., description="delivery_id from webhook_delivery_log"),
-    subscription_id: str = Query(...),
-    tenant_id: str = Query(...),
-    event_type: str = Query(...),
-    payload_json: str = Query(..., description="Raw payload_json string from the delivery log row"),
-    current_attempts: int = Query(default=1, ge=1),
+async def retry_webhook_delivery_deprecated(
     auth: AuthContext = Depends(get_auth_context),
 ) -> JSONResponse:
-    try:
-        result = retry_failed_delivery(
-            delivery_id=delivery_id,
-            subscription_id=subscription_id,
-            tenant_id=tenant_id,
-            event_type=event_type,
-            payload_json=payload_json,
-            current_attempts=current_attempts,
-        )
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content=result.to_dict(),
-        )
-    except Exception as exc:
-        logger.error(
-            "threat_detection.retry_webhook_delivery delivery_id=%s error=%s",
-            delivery_id,
-            exc,
-        )
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"error": "retry_failed", "message": str(exc)},
-        )
+    return JSONResponse(
+        status_code=status.HTTP_410_GONE,
+        content={
+            "error": "endpoint_removed",
+            "message": ("POST /threat/webhooks/retry has been removed. " "Use POST /webhooks/deliveries/{delivery_id}/retry."),
+            "canonical_path": "/webhooks/deliveries/{delivery_id}/retry",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
-# GET /threat/webhooks/retryable
+# GET /threat/webhooks/retryable  — DEPRECATED (410 Gone)
+# Canonical endpoint: GET /webhooks/deliveries/retryable
 # ---------------------------------------------------------------------------
 
 
 @router.get(
     "/webhooks/retryable",
-    status_code=status.HTTP_200_OK,
-    summary="List webhook deliveries eligible for retry",
-    description=("Returns delivery log rows with status='failed' and next_attempt_at <= now. " "Used by the background retry worker and operator tooling."),
+    status_code=status.HTTP_410_GONE,
+    summary="[DEPRECATED] List webhook deliveries eligible for retry",
+    description=("This endpoint has been removed. " "Use GET /webhooks/deliveries/retryable instead. " "Retryable delivery listing is owned exclusively by the webhooks router."),
+    deprecated=True,
 )
-async def list_retryable_webhook_deliveries(
-    limit: int = Query(default=50, ge=1, le=200),
+async def list_retryable_webhook_deliveries_deprecated(
     auth: AuthContext = Depends(get_auth_context),
 ) -> JSONResponse:
-    try:
-        rows = list_retryable_deliveries(limit=limit)
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={"count": len(rows), "deliveries": rows},
-        )
-    except Exception as exc:
-        logger.error("threat_detection.list_retryable_webhook_deliveries error=%s", exc)
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"error": "internal_error", "message": str(exc)},
-        )
+    return JSONResponse(
+        status_code=status.HTTP_410_GONE,
+        content={
+            "error": "endpoint_removed",
+            "message": ("GET /threat/webhooks/retryable has been removed. " "Use GET /webhooks/deliveries/retryable."),
+            "canonical_path": "/webhooks/deliveries/retryable",
+        },
+    )
