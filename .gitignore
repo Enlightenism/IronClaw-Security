@@ -34,3 +34,7 @@ app_snapshot.txt
 
 # Temp upload artifacts
 .tmp.driveupload/
+
+node_modules/
+package-lock.json
+supabase/.temp/
