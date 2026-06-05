@@ -355,6 +355,55 @@ def _initialize_scan_history_repository() -> None:
             _log.warning("main: scan_history_repository init failed: %s", exc)
 
 
+async def _initialize_policy_rules() -> None:
+    load_builtin_policy_rules_from_db = _optional_attr(
+        "app.services.rules",
+        "load_builtin_policy_rules_from_db",
+    )
+    if not callable(load_builtin_policy_rules_from_db):
+        _log.debug("main.lifespan: load_builtin_policy_rules_from_db not available, skipping")
+        return
+    try:
+        result = load_builtin_policy_rules_from_db()
+        if isawaitable(result):
+            await result
+        _log.info("main.lifespan: policy rules hydrated from db")
+    except Exception as exc:  # noqa: BLE001
+        _log.error("main.lifespan: policy rules hydration failed: %s", exc)
+
+
+async def _initialize_scanner_rule_index() -> None:
+    load_builtin_patterns_from_db = _optional_attr(
+        "app.services.scanner",
+        "load_builtin_patterns_from_db",
+    )
+    if not callable(load_builtin_patterns_from_db):
+        _log.debug("main.lifespan: load_builtin_patterns_from_db not available, skipping")
+        return
+    try:
+        result = load_builtin_patterns_from_db()
+        if isawaitable(result):
+            await result
+        _log.info("main.lifespan: scanner RULE_INDEX hydrated from db")
+    except Exception as exc:  # noqa: BLE001
+        _log.error("main.lifespan: scanner RULE_INDEX hydration failed: %s", exc)
+
+
+def _initialize_notification_engine() -> None:
+    get_notification_engine = _optional_attr(
+        "app.services.notification_engine",
+        "get_notification_engine",
+    )
+    if not callable(get_notification_engine):
+        _log.debug("main.lifespan: get_notification_engine not available, skipping")
+        return
+    try:
+        get_notification_engine()
+        _log.info("main.lifespan: notification_engine singleton pre-warmed")
+    except Exception as exc:  # noqa: BLE001
+        _log.error("main.lifespan: notification_engine pre-warm failed: %s", exc)
+
+
 def _start_threat_feed_scheduler() -> None:
     try:
         from app.services.threat_feed_scheduler import start_scheduler  # noqa: PLC0415
@@ -398,6 +447,9 @@ async def lifespan(app: FastAPI):
     _log.info("main.lifespan: startup begin")
 
     _initialize_scan_history_repository()
+    await _initialize_policy_rules()
+    await _initialize_scanner_rule_index()
+    _initialize_notification_engine()
 
     if callable(initialize_secure_runtime_pipeline):
         try:

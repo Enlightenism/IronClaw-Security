@@ -67,6 +67,9 @@ def configure_app_state(app: FastAPI) -> FastAPI:
     if not hasattr(app.state, "action_decision_service"):
         app.state.action_decision_service = DefaultActionDecisionService()
 
+    if not hasattr(app.state, "action_execute_pipeline"):
+        app.state.action_execute_pipeline = None
+
     return app
 
 
@@ -109,10 +112,17 @@ def add_security_middleware(app: FastAPI) -> FastAPI:
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers.setdefault("X-XSS-Protection", "1; mode=block")
-        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        response.headers.setdefault(
+            "Permissions-Policy",
+            "camera=(), microphone=(), geolocation=()",
+        )
         response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
         response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
         response.headers.setdefault("Cache-Control", "no-store")
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; frame-ancestors 'none'; form-action 'self'",
+        )
         if request.url.scheme == "https":
             response.headers.setdefault(
                 "Strict-Transport-Security",
@@ -128,7 +138,12 @@ def bootstrap_app(app: FastAPI) -> FastAPI:
     """Entry point to configure global app state and middleware.
     Call this once, right after creating the FastAPI() instance.
     """
+    if getattr(app.state, "_bootstrap_installed", False):
+        return app
+
     app = configure_app_state(app)
     app = add_request_tracing_middleware(app)
     app = add_security_middleware(app)
+
+    app.state._bootstrap_installed = True
     return app
