@@ -15,6 +15,7 @@ from app.core.settings import get_settings
 
 ProtectedDependencyFactory = Callable[[], Any]
 
+
 _log = logging.getLogger(__name__)
 
 
@@ -194,6 +195,10 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         ),
         (
             _optional_router("app.api.ioc_management"),
+            {"dependencies": dependencies},
+        ),
+        (
+            _optional_router("app.worker.remediation_worker"),
             {"dependencies": dependencies},
         ),
     ]
@@ -424,6 +429,26 @@ def _stop_threat_feed_scheduler() -> None:
         _log.error("main.lifespan: threat_feed_scheduler failed to stop: %s", exc)
 
 
+def _start_remediation_scheduler() -> None:
+    try:
+        from app.worker.remediation_worker import start_remediation_scheduler  # noqa: PLC0415
+
+        start_remediation_scheduler()
+        _log.info("main.lifespan: remediation_scheduler started")
+    except Exception as exc:  # noqa: BLE001
+        _log.error("main.lifespan: remediation_scheduler failed to start: %s", exc)
+
+
+def _stop_remediation_scheduler() -> None:
+    try:
+        from app.worker.remediation_worker import stop_remediation_scheduler  # noqa: PLC0415
+
+        stop_remediation_scheduler()
+        _log.info("main.lifespan: remediation_scheduler stopped")
+    except Exception as exc:  # noqa: BLE001
+        _log.error("main.lifespan: remediation_scheduler failed to stop: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     pipeline = None
@@ -467,6 +492,7 @@ async def lifespan(app: FastAPI):
         set_action_execute_pipeline(pipeline)
 
     _start_threat_feed_scheduler()
+    _start_remediation_scheduler()
 
     _log.info("main.lifespan: startup complete")
 
@@ -474,6 +500,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         _log.info("main.lifespan: shutdown begin")
+        _stop_remediation_scheduler()
         _stop_threat_feed_scheduler()
         try:
             close = getattr(pipeline, "close", None)

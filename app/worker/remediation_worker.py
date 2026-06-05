@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+import logging
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
+
+_log = logging.getLogger(__name__)
+
 
 router = APIRouter(
     prefix="/worker/remediation",
@@ -13,11 +18,31 @@ router = APIRouter(
 )
 
 
+# ---------------------------------------------------------------------------
+# Scheduler state
+# ---------------------------------------------------------------------------
+
+
+_scheduler_task: asyncio.Task[None] | None = None
+_SCHEDULER_INTERVAL_SECONDS: int = 30  # recurring retry sweep interval
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+# ---------------------------------------------------------------------------
+# Type aliases
+# ---------------------------------------------------------------------------
+
+
 JobStatus = Literal["pending", "running", "succeeded", "failed", "cancelled"]
+
 
 RemediationKind = Literal[
     "configuration_change",
@@ -28,6 +53,11 @@ RemediationKind = Literal[
     "process_runbook",
     "other",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Domain model
+# ---------------------------------------------------------------------------
 
 
 @dataclass(slots=True)
@@ -72,18 +102,23 @@ class RemediationJob:
         }
 
 
-# In-memory job store (you can swap this for Redis/DB later)
+# ---------------------------------------------------------------------------
+# In-memory store (swap for Redis/DB later)
+# ---------------------------------------------------------------------------
+
+
 _JOBS: dict[str, RemediationJob] = {}
 _JOB_COUNTER: int = 0
 
 
-# --------- Pydantic views ----------------------------------------------------
+# ---------------------------------------------------------------------------
+# Pydantic views
+# ---------------------------------------------------------------------------
 
 
 class RemediationJobCreate(BaseModel):
-    """Job creation payload. This is typically invoked by your queue/bridge
-    when a remediation action moves to 'queued' state on the UI side.
-    """
+    """Job creation payload invoked by queue/bridge when a remediation action
+    moves to 'queued' state on the UI side."""
 
     action_id: str = Field(..., description="ID of the remediation action.")
     kind: RemediationKind = Field(..., description="Type of remediation action.")
@@ -132,9 +167,8 @@ class RemediationJobListResponse(BaseModel):
 
 
 class RemediationJobStatusUpdate(BaseModel):
-    """External status update for a job, for example from an out-of-process
-    worker executor or orchestrator.[web:1300][web:1303]
-    """
+    """External status update for a job from an out-of-process worker
+    executor or orchestrator."""
 
     status: JobStatus = Field(
         ...,
@@ -146,7 +180,15 @@ class RemediationJobStatusUpdate(BaseModel):
     )
 
 
-# --------- internal helpers --------------------------------------------------
+class SchedulerStatusResponse(BaseModel):
+    running: bool
+    interval_seconds: int
+    generated_at: str
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 
 def _next_job_id() -> str:
@@ -163,10 +205,8 @@ def _paginate_jobs(
     total_items = len(jobs)
     if total_items == 0:
         return [], 0, 0
-
     total_pages = (total_items + page_size - 1) // page_size
     page = max(1, min(page, total_pages))
-
     start = (page - 1) * page_size
     end = start + page_size
     return jobs[start:end], total_items, total_pages
@@ -175,16 +215,14 @@ def _paginate_jobs(
 def _simulate_execution(job: RemediationJob) -> None:
     """Placeholder execution logic.
 
-    In a real system, this would dispatch to a secure executor engine
-    (e.g., workflow engine, Ansible, Terraform, internal tools) and
-    update status based on the external result.[web:1299][web:1303]
+    In production, dispatches to a secure executor engine (workflow engine,
+    Ansible, Terraform, internal tools) and updates status from the result.
     """
-    from random import random
+    from random import random  # noqa: PLC0415
 
     job.attempts += 1
     job.started_at = job.started_at or _utc_now()
 
-    # Simple random success/failure for now
     if random() > 0.15:
         job.status = "succeeded"
         job.completed_at = _utc_now()
@@ -196,15 +234,111 @@ def _simulate_execution(job: RemediationJob) -> None:
     job.updated_at = _utc_now()
 
 
-# --------- HTTP endpoints ----------------------------------------------------
+# ---------------------------------------------------------------------------
+# Scheduler — recurring delivery retry sweep
+# ---------------------------------------------------------------------------
+
+
+def list_retryable_deliveries() -> list[RemediationJob]:
+    """Return all jobs eligible for retry: status=failed and attempts < max_attempts."""
+    return [j for j in _JOBS.values() if j.status == "failed" and j.attempts < j.max_attempts]
+
+
+def retry_failed_delivery(job: RemediationJob) -> None:
+    """Re-execute a single retryable job in-place."""
+    if job.status != "failed":
+        return
+    if job.attempts >= job.max_attempts:
+        _log.warning(
+            "remediation_worker.retry: job %s has hit max_attempts=%d, skipping",
+            job.id,
+            job.max_attempts,
+        )
+        return
+    _log.info(
+        "remediation_worker.retry: retrying job %s (attempt %d/%d)",
+        job.id,
+        job.attempts + 1,
+        job.max_attempts,
+    )
+    job.status = "running"
+    job.updated_at = _utc_now()
+    _simulate_execution(job)
+    _log.info(
+        "remediation_worker.retry: job %s completed with status=%s",
+        job.id,
+        job.status,
+    )
+
+
+async def _retry_sweep() -> None:
+    """Single scheduled sweep: list retryable deliveries and retry each one."""
+    retryable = list_retryable_deliveries()
+    if not retryable:
+        _log.debug("remediation_worker.sweep: no retryable jobs found")
+        return
+    _log.info("remediation_worker.sweep: found %d retryable job(s)", len(retryable))
+    for job in retryable:
+        try:
+            retry_failed_delivery(job)
+        except Exception as exc:  # noqa: BLE001
+            _log.error(
+                "remediation_worker.sweep: unhandled error retrying job %s: %s",
+                job.id,
+                exc,
+            )
+
+
+async def _scheduler_loop() -> None:
+    """Recurring async loop that calls _retry_sweep every SCHEDULER_INTERVAL_SECONDS."""
+    _log.info(
+        "remediation_worker.scheduler: started (interval=%ds)",
+        _SCHEDULER_INTERVAL_SECONDS,
+    )
+    while True:
+        try:
+            await _retry_sweep()
+        except Exception as exc:  # noqa: BLE001
+            _log.error("remediation_worker.scheduler: sweep error: %s", exc)
+        await asyncio.sleep(_SCHEDULER_INTERVAL_SECONDS)
+
+
+def start_remediation_scheduler() -> None:
+    """Start the background scheduler task. Safe to call multiple times (idempotent)."""
+    global _scheduler_task
+    if _scheduler_task is not None and not _scheduler_task.done():
+        _log.debug("remediation_worker.scheduler: already running, skipping start")
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _log.warning("remediation_worker.scheduler: no running event loop, cannot start")
+        return
+    _scheduler_task = loop.create_task(_scheduler_loop(), name="remediation_retry_scheduler")
+    _log.info("remediation_worker.scheduler: task created")
+
+
+def stop_remediation_scheduler() -> None:
+    """Cancel the background scheduler task. Safe to call when not running."""
+    global _scheduler_task
+    if _scheduler_task is None or _scheduler_task.done():
+        _log.debug("remediation_worker.scheduler: not running, nothing to stop")
+        return
+    _scheduler_task.cancel()
+    _scheduler_task = None
+    _log.info("remediation_worker.scheduler: task cancelled")
+
+
+# ---------------------------------------------------------------------------
+# HTTP endpoints
+# ---------------------------------------------------------------------------
 
 
 @router.post("/jobs", response_model=RemediationJobView, status_code=201)
 def create_remediation_job(payload: RemediationJobCreate) -> RemediationJobView:
     """Create a remediation execution job.
 
-    Called by your queue/bridge component when a remediation action
-    transitions to 'queued' on the UI side.[web:1300][web:1303]
+    Called by queue/bridge when a remediation action transitions to 'queued'.
     """
     job_id = _next_job_id()
     now = _utc_now()
@@ -244,10 +378,7 @@ def list_remediation_jobs(
         description="Optional filter by remediation action id.",
     ),
 ) -> RemediationJobListResponse:
-    """List remediation jobs for monitoring and debugging.
-
-    Supports filtering by status and action_id, and basic pagination.[web:1301][web:1303]
-    """
+    """List remediation jobs. Supports filtering by status and action_id."""
     jobs = list(_JOBS.values())
     jobs.sort(key=lambda j: j.created_at, reverse=True)
 
@@ -268,6 +399,12 @@ def list_remediation_jobs(
     )
 
 
+@router.get("/jobs/retryable", response_model=list[RemediationJobView])
+def list_retryable_jobs() -> list[RemediationJobView]:
+    """List all jobs currently eligible for retry (status=failed, attempts < max_attempts)."""
+    return [RemediationJobView(**j.to_dict()) for j in list_retryable_deliveries()]
+
+
 @router.get("/jobs/{job_id}", response_model=RemediationJobView)
 def get_remediation_job(job_id: str) -> RemediationJobView:
     """Retrieve a single remediation job by id."""
@@ -281,26 +418,50 @@ def get_remediation_job(job_id: str) -> RemediationJobView:
 def execute_remediation_job(job_id: str) -> RemediationJobView:
     """Trigger execution of a remediation job.
 
-    In a real deployment, this would likely be restricted to internal
-    workers only (e.g., via network policy, auth scopes, or mTLS).[web:1172][web:1291]
+    In production, restrict to internal workers via network policy, auth
+    scopes, or mTLS.
     """
     job = _JOBS.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
     if job.status not in ("pending", "failed"):
-        raise HTTPException(status_code=400, detail=f"Cannot execute job in status {job.status}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot execute job in status {job.status}",
+        )
 
     if job.attempts >= job.max_attempts:
-        raise HTTPException(status_code=400, detail="Max attempts exceeded for this job")
+        raise HTTPException(
+            status_code=400,
+            detail="Max attempts exceeded for this job",
+        )
 
     job.status = "running"
     job.started_at = job.started_at or _utc_now()
     job.updated_at = _utc_now()
 
-    # Simulate execution inline for now
     _simulate_execution(job)
+    return RemediationJobView(**job.to_dict())
 
+
+@router.post("/jobs/{job_id}/retry", response_model=RemediationJobView)
+def retry_remediation_job(job_id: str) -> RemediationJobView:
+    """Manually trigger a retry for a failed job (same guard as scheduler sweep)."""
+    job = _JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "failed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job is not in failed status (current: {job.status})",
+        )
+    if job.attempts >= job.max_attempts:
+        raise HTTPException(
+            status_code=400,
+            detail="Max attempts exceeded; job cannot be retried",
+        )
+    retry_failed_delivery(job)
     return RemediationJobView(**job.to_dict())
 
 
@@ -311,8 +472,8 @@ def update_remediation_job_status(
 ) -> RemediationJobView:
     """Update job status from an external worker/orchestrator.
 
-    This keeps the worker-side API generic if you later move execution
-    out-of-process (e.g., to a queue consumer or Kubernetes Job).[web:1300][web:1303]
+    Keeps the worker-side API generic for out-of-process execution
+    (queue consumer, Kubernetes Job, etc.).
     """
     job = _JOBS.get(job_id)
     if not job:
@@ -329,3 +490,52 @@ def update_remediation_job_status(
 
     job.last_error = payload.last_error
     return RemediationJobView(**job.to_dict())
+
+
+@router.get("/scheduler/status", response_model=SchedulerStatusResponse)
+def get_scheduler_status() -> SchedulerStatusResponse:
+    """Return whether the background retry scheduler is currently running."""
+    running = _scheduler_task is not None and not _scheduler_task.done()
+    return SchedulerStatusResponse(
+        running=running,
+        interval_seconds=_SCHEDULER_INTERVAL_SECONDS,
+        generated_at=_utc_now(),
+    )
+
+
+@router.post("/scheduler/start", response_model=SchedulerStatusResponse)
+def start_scheduler_endpoint() -> SchedulerStatusResponse:
+    """Start the background retry scheduler (idempotent)."""
+    start_remediation_scheduler()
+    running = _scheduler_task is not None and not _scheduler_task.done()
+    return SchedulerStatusResponse(
+        running=running,
+        interval_seconds=_SCHEDULER_INTERVAL_SECONDS,
+        generated_at=_utc_now(),
+    )
+
+
+@router.post("/scheduler/stop", response_model=SchedulerStatusResponse)
+def stop_scheduler_endpoint() -> SchedulerStatusResponse:
+    """Stop the background retry scheduler."""
+    stop_remediation_scheduler()
+    return SchedulerStatusResponse(
+        running=False,
+        interval_seconds=_SCHEDULER_INTERVAL_SECONDS,
+        generated_at=_utc_now(),
+    )
+
+
+__all__ = [
+    "RemediationJob",
+    "RemediationJobCreate",
+    "RemediationJobListResponse",
+    "RemediationJobStatusUpdate",
+    "RemediationJobView",
+    "SchedulerStatusResponse",
+    "list_retryable_deliveries",
+    "retry_failed_delivery",
+    "router",
+    "start_remediation_scheduler",
+    "stop_remediation_scheduler",
+]

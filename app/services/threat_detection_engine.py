@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 import logging
 import re
 import threading
+from typing import TYPE_CHECKING
 import uuid
 
 from app.schemas.threat_detection import (
@@ -17,7 +18,11 @@ from app.schemas.threat_detection import (
 from app.services.ioc_store import get_ioc_store
 from app.services.threat_correlation import get_correlation_engine
 
+if TYPE_CHECKING:
+    from app.services.notification_service import NotificationEngine
+
 logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Internal constants
@@ -46,6 +51,25 @@ _RE_CVE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.IGNORECASE)
 _RE_URL = re.compile(r"https?://[^\s\"'>]+")
 
 _ENGINE_LOCK = threading.Lock()
+
+
+# ---------------------------------------------------------------------------
+# Notification engine DI — optional, degrades gracefully
+# ---------------------------------------------------------------------------
+
+
+def _get_optional_notification_engine() -> NotificationEngine | None:
+    """
+    Returns a NotificationEngine instance if available, else None.
+    Import is deferred so the detection engine never hard-depends on
+    notification infrastructure being configured.
+    """
+    try:
+        from app.services.notification_engine import get_notification_engine  # noqa: PLC0415
+
+        return get_notification_engine()
+    except Exception:  # noqa: BLE001
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +148,6 @@ class ThreatScoringEngine:
                 resolved = sev
             else:
                 sev_str = str(sev)
-                # Handle "ThreatSeverityLevel.CRITICAL" style strings from enum repr
                 if "." in sev_str:
                     sev_str = sev_str.split(".")[-1]
                 try:
@@ -235,6 +258,7 @@ class ThreatDetectionEngine:
         request: DetectionRequest,
         *,
         correlation_signals: list[CorrelationSignal] | None = None,
+        notification_engine: NotificationEngine | None = None,
     ) -> DetectionResult:
         event_id = request.event_id or str(uuid.uuid4())
         caller_signals: list[CorrelationSignal] = correlation_signals or []
@@ -253,7 +277,7 @@ class ThreatDetectionEngine:
 
         score_result: ScoreResult = self._scoring_engine.compute(ioc_matches, all_signals)
 
-        return DetectionResult(
+        result = DetectionResult(
             event_id=event_id,
             org_id=request.org_id,
             agent_id=request.agent_id,
@@ -273,6 +297,20 @@ class ThreatDetectionEngine:
             assessed_at=_utcnow_iso(),
             detection_engine_version=_ENGINE_VERSION,
         )
+
+        # Notify via injected engine; fall back to module-level optional engine
+        _notify_engine = notification_engine or _get_optional_notification_engine()
+        if _notify_engine is not None:
+            try:
+                _notify_engine.notify_detection(result, org_id=request.org_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "threat_detection_engine.run.notify_detection error event_id=%s: %s",
+                    event_id,
+                    exc,
+                )
+
+        return result
 
     @staticmethod
     def _run_correlation(
@@ -350,7 +388,6 @@ class ThreatDetectionEngine:
         for rec in records:
             if float(rec.confidence) < minimum_confidence:
                 continue
-            # Normalize severity: handle both enum instances and string representations
             sev = rec.severity
             if isinstance(sev, ThreatSeverityLevel):
                 sev_str = sev.value

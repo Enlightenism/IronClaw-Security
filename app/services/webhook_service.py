@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 import hashlib
 import hmac
@@ -23,13 +23,12 @@ _WEBHOOK_DELIVERY_TABLE = "webhook_delivery_log"
 _WEBHOOK_SUBSCRIPTIONS_TABLE = "webhook_subscriptions"
 
 _MAX_ATTEMPTS: int = 5
-_RETRY_BACKOFF_BASE: float = 2.0  # seconds; caller controls actual sleep
+_RETRY_BACKOFF_BASE: float = 2.0
 _DELIVERY_TIMEOUT_SECONDS: float = 10.0
 _SIGNATURE_HEADER = "X-IronClaw-Signature-256"
 _DELIVERY_ID_HEADER = "X-IronClaw-Delivery"
 _EVENT_HEADER = "X-IronClaw-Event"
 _TIMESTAMP_HEADER = "X-IronClaw-Timestamp"
-
 
 # ---------------------------------------------------------------------------
 # Enums / types
@@ -149,11 +148,6 @@ class WebhookDispatchResult:
 
 
 def _compute_signature(secret_hash: str, body: bytes, timestamp: str) -> str:
-    """
-    Produces: HMAC-SHA256(secret_hash, timestamp + "." + hex(body))
-    Header value: sha256=<hex_digest>
-    Constant-time safe; derived from the tenant subscription secret_hash.
-    """
     signing_payload = f"{timestamp}.".encode() + body
     digest = hmac.new(
         secret_hash.encode("utf-8"),
@@ -179,11 +173,6 @@ def verify_webhook_signature(
 
 
 def _get_service_role_client() -> Any:
-    """
-    Returns the Supabase service-role client.
-    Uses the canonical supabase-py pattern used across IronClaw services.
-    Reads SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY from the environment.
-    """
     from supabase import create_client  # type: ignore[import]
 
     url = os.environ["SUPABASE_URL"]
@@ -202,12 +191,6 @@ def _query_subscriptions_for_event(
     *,
     client: Any = None,
 ) -> list[WebhookSubscription]:
-    """
-    Queries webhook_subscriptions where:
-      - tenant_id = tenant_id
-      - events @> '[event_type]'   (JSONB containment)
-      - active = true
-    """
     sb = client or _get_service_role_client()
     try:
         resp = sb.table(_WEBHOOK_SUBSCRIPTIONS_TABLE).select("*").eq("tenant_id", tenant_id).eq("active", True).filter("events", "cs", json.dumps([event_type])).execute()
@@ -296,13 +279,6 @@ def _dispatch_http_post(
     attempt: int,
     timeout: float = _DELIVERY_TIMEOUT_SECONDS,
 ) -> tuple[int | None, str | None, str | None]:
-    """
-    Dispatches a single HTTP POST with HMAC-SHA256 signature header.
-
-    Returns:
-        (http_status, response_body_truncated, error_detail)
-        error_detail is None on HTTP-level success (2xx).
-    """
     body_bytes = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     signature = _compute_signature(subscription.secret_hash, body_bytes, timestamp)
@@ -372,24 +348,12 @@ def _dispatch_http_post(
 
 
 def _next_attempt_iso(attempt: int) -> str:
-    """
-    Exponential backoff: base ** attempt seconds from now.
-    attempt=1 → 2s, attempt=2 → 4s, attempt=3 → 8s, …
-    """
-
-    delay_seconds = int(_RETRY_BACKOFF_BASE**attempt)
-    delay_capped = min(delay_seconds, 3600)
-    from datetime import timedelta
-
-    next_at = datetime.now(UTC) + timedelta(seconds=delay_capped)
+    delay_seconds = min(int(_RETRY_BACKOFF_BASE**attempt), 3600)
+    next_at = datetime.now(UTC) + timedelta(seconds=delay_seconds)
     return next_at.isoformat()
 
 
 def _should_retry(http_status: int | None) -> bool:
-    """
-    Retry on: network errors (None), 5xx, 429.
-    Do NOT retry on 4xx (except 429) — misconfigured endpoint is permanent.
-    """
     if http_status is None:
         return True
     if http_status == 429:
@@ -413,22 +377,6 @@ def deliver_webhook(
     current_attempts: int = 0,
     client: Any = None,
 ) -> WebhookDispatchResult:
-    """
-    Executes a single delivery attempt for one subscription.
-    Writes the initial delivery log row on attempt 0, then updates on each retry.
-    Caller is responsible for scheduling retries (e.g. background task, queue).
-
-    Args:
-        subscription: the resolved WebhookSubscription row.
-        event_type: the IronClaw event string (e.g. "policy.block").
-        payload: the event payload dict to POST.
-        existing_delivery_id: pass the delivery_id from a prior failed attempt to continue tracking.
-        current_attempts: how many prior attempts have been made (0 for first attempt).
-        client: optional injected Supabase client (for testing).
-
-    Returns:
-        WebhookDispatchResult with final status and metadata.
-    """
     delivery_id = existing_delivery_id or str(uuid.uuid4())
     attempt_number = current_attempts + 1
     now_iso = datetime.now(UTC).isoformat()
@@ -530,12 +478,6 @@ def dispatch_event(
     *,
     client: Any = None,
 ) -> list[WebhookDispatchResult]:
-    """
-    Resolves all active subscriptions matching tenant_id + event_type,
-    then delivers the event to each. Returns one result per subscription.
-
-    This is the primary public entrypoint for webhook fan-out.
-    """
     subscriptions = _query_subscriptions_for_event(tenant_id, event_type, client=client)
 
     if not subscriptions:
@@ -579,11 +521,6 @@ def retry_failed_delivery(
     *,
     client: Any = None,
 ) -> WebhookDispatchResult:
-    """
-    Re-executes a previously failed delivery by its delivery log ID.
-    Fetches the subscription from Supabase to get the current secret_hash and target_url.
-    Called by a background retry worker or scheduled task.
-    """
     sb = client or _get_service_role_client()
 
     try:
@@ -695,7 +632,7 @@ def list_retryable_deliveries(
 ) -> list[dict[str, Any]]:
     """
     Returns delivery log rows with status='failed' and next_attempt_at <= now.
-    Used by the background retry worker to pick up pending retries.
+    Consumed by the webhooks router retry worker only.
     """
     sb = client or _get_service_role_client()
     now_iso = datetime.now(UTC).isoformat()
