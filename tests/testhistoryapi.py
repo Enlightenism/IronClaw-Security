@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Generator
 from typing import Any, Final
 
 from fastapi.testclient import TestClient
@@ -20,7 +21,7 @@ HISTORY_DETAIL_PATHS: Final[tuple[str, ...]] = (
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client() -> Generator[TestClient, None, None]:
     with TestClient(app) as test_client:
         yield test_client
 
@@ -71,33 +72,28 @@ def _first_available_history_response(
     params: dict[str, Any] | None = None,
 ) -> tuple[str, Any]:
     observed_statuses: list[tuple[str, int]] = []
-
     for path in HISTORY_PATHS:
         response = client.get(path, params=params)
         observed_statuses.append((path, response.status_code))
         if response.status_code == 200:
             assert response.headers["content-type"].startswith("application/json")
             return path, response
-
     raise AssertionError(f"history endpoint not available on expected paths: {observed_statuses}")
 
 
 def test_history_endpoint_is_available_on_common_paths(client: TestClient) -> None:
     observed_statuses: list[int] = []
-
     for path in HISTORY_PATHS:
         response = client.get(path)
         observed_statuses.append(response.status_code)
         if response.status_code == 200:
             assert response.headers["content-type"].startswith("application/json")
             return
-
     assert any(status not in {404, 405} for status in observed_statuses), observed_statuses
 
 
 def test_history_endpoint_returns_json_when_available(client: TestClient) -> None:
     _, response = _first_available_history_response(client)
-
     payload = response.json()
     assert isinstance(payload, list | dict)
 
@@ -106,10 +102,8 @@ def test_history_endpoint_returns_collection_shape_when_available(
     client: TestClient,
 ) -> None:
     _, response = _first_available_history_response(client)
-
     payload = response.json()
     assert isinstance(payload, list | dict)
-
     items = _items_payload(payload)
     if isinstance(payload, list):
         assert isinstance(payload, list)
@@ -121,7 +115,6 @@ def test_history_endpoint_entries_have_stable_shape_when_present(
     client: TestClient,
 ) -> None:
     _, response = _first_available_history_response(client)
-
     items = _items_payload(response.json())
     for entry in items:
         _assert_historyish_entry(entry)
@@ -131,7 +124,6 @@ def test_history_endpoint_supports_session_filter_when_implemented(
     client: TestClient,
 ) -> None:
     observed_statuses: list[tuple[str, int]] = []
-
     for path in HISTORY_PATHS:
         response = client.get(path, params={"session_id": "session-001"})
         observed_statuses.append((path, response.status_code))
@@ -141,7 +133,6 @@ def test_history_endpoint_supports_session_filter_when_implemented(
             return
         if response.status_code in {400, 422}:
             return
-
     raise AssertionError(
         f"history endpoint not available on expected paths: {observed_statuses}",
     )
@@ -151,13 +142,11 @@ def test_history_detail_endpoint_behaves_reasonably_when_available(
     client: TestClient,
 ) -> None:
     observed_statuses: list[tuple[str, int]] = []
-
     for path in HISTORY_DETAIL_PATHS:
         response = client.get(path)
         observed_statuses.append((path, response.status_code))
         if response.status_code == 404:
             continue
-
         assert response.status_code in {200, 400, 422}, observed_statuses
         if response.status_code == 200:
             assert response.headers["content-type"].startswith("application/json")
@@ -165,7 +154,6 @@ def test_history_detail_endpoint_behaves_reasonably_when_available(
             assert isinstance(payload, dict)
             assert _text(payload, "historyid", "history_id", "id")
         return
-
     assert all(status == 404 for _, status in observed_statuses), observed_statuses
 
 
@@ -173,7 +161,6 @@ def test_history_endpoint_rejects_invalid_method_when_route_exists(
     client: TestClient,
 ) -> None:
     path, get_response = _first_available_history_response(client)
-
     assert get_response.status_code == 200
     post_response = client.post(path, json={})
     assert post_response.status_code in {400, 404, 405, 422}
@@ -181,7 +168,6 @@ def test_history_endpoint_rejects_invalid_method_when_route_exists(
 
 def test_history_endpoint_response_is_json_friendly(client: TestClient) -> None:
     _, response = _first_available_history_response(client)
-
     payload = response.json()
     assert isinstance(payload, list | dict)
 
@@ -191,7 +177,6 @@ def test_history_endpoint_response_is_stable_across_repeated_reads(
 ) -> None:
     path, first_response = _first_available_history_response(client)
     second_response = client.get(path)
-
     assert first_response.status_code == 200
     assert second_response.status_code == 200
     assert second_response.headers["content-type"].startswith("application/json")

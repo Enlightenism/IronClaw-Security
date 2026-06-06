@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Generator
 from typing import Any, Final
 
 from fastapi.testclient import TestClient
@@ -11,7 +12,7 @@ REVIEW_QUEUE_PATH: Final[str] = "/guard/reviews/summary"
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client() -> Generator[TestClient, None, None]:
     with TestClient(app) as test_client:
         yield test_client
 
