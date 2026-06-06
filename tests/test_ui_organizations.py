@@ -1,7 +1,6 @@
-# tests/test_ui_organizations.py
-# Tests GET /ui/organizations, POST /ui/organizations, GET /ui/organizations/{id}
-# Verdicts: 200 / 201 / 404 / 409, response shape, field contracts
 from __future__ import annotations
+
+from collections.abc import Generator
 
 from fastapi.testclient import TestClient
 import pytest
@@ -12,6 +11,7 @@ from app.ui.organizations import get_store
 
 _BASE = "/ui/organizations"
 
+
 _VALID_PAYLOAD: dict[str, object] = {
     "name": "Acme Corp",
     "slug": "acme-corp",
@@ -21,7 +21,7 @@ _VALID_PAYLOAD: dict[str, object] = {
 
 
 @pytest.fixture(autouse=True)
-def _isolated_store() -> OrganizationStore:
+def _isolated_store() -> Generator[OrganizationStore, None, None]:
     store = OrganizationStore()
     _app.dependency_overrides[get_store] = lambda: store
     yield store
@@ -30,7 +30,7 @@ def _isolated_store() -> OrganizationStore:
 
 
 @pytest.fixture()
-def client(_isolated_store: OrganizationStore) -> TestClient:
+def client(_isolated_store: OrganizationStore) -> Generator[TestClient, None, None]:
     with TestClient(_app, raise_server_exceptions=True) as tc:
         yield tc
 

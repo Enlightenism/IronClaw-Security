@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Generator
 import hashlib
 import hmac
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -91,7 +92,7 @@ def _fresh_dispatcher() -> WebhookDispatcher:
 
 
 @pytest.fixture(autouse=True)
-def _reset_dispatcher() -> None:
+def _reset_dispatcher() -> Generator[None, None, None]:
     reset_webhook_dispatcher()
     yield
     reset_webhook_dispatcher()
@@ -140,7 +141,7 @@ class _RecordingHandler(BaseHTTPRequestHandler):
 
 
 @pytest.fixture()
-def local_server():
+def local_server() -> Generator[tuple[HTTPServer, int], None, None]:
     _RecordingHandler.received = []
     _RecordingHandler.response_code = 200
     server = HTTPServer(("127.0.0.1", 0), _RecordingHandler)

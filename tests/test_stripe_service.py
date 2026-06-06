@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Generator
 import hashlib
 import hmac as _hmac
 import json
@@ -147,7 +148,7 @@ def _mock_subscription_obj(
 
 
 @pytest.fixture(autouse=True)
-def _reset_service() -> None:
+def _reset_service() -> Generator[None, None, None]:
     reset_stripe_service()
     yield
     reset_stripe_service()

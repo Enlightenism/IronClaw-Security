@@ -1,5 +1,6 @@
 """tests/test_ui_customer_keys.py
 
+
 Tests for:
   GET  /customer-keys
   POST /customer-keys
@@ -7,6 +8,8 @@ Tests for:
 """
 
 from __future__ import annotations
+
+from collections.abc import Generator
 
 from fastapi.testclient import TestClient
 import pytest
@@ -26,7 +29,7 @@ def registry() -> APIKeyRegistry:
 
 
 @pytest.fixture()
-def client(registry: APIKeyRegistry) -> TestClient:
+def client(registry: APIKeyRegistry) -> Generator[TestClient, None, None]:
     import app.api.customer_keys as ck_module
     from app.main import app
 
@@ -51,6 +54,7 @@ def client(registry: APIKeyRegistry) -> TestClient:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 _AUTH = {"X-API-Key": "test-token"}
 _BASE = "/customer-keys"

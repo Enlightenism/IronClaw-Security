@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Generator
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 import uuid
@@ -105,12 +106,11 @@ def mock_store() -> MagicMock:
 
 
 @pytest.fixture()
-def svc(mock_store: MagicMock) -> ThreatFeedIngestionService:
+def svc(mock_store: MagicMock) -> Generator[ThreatFeedIngestionService, None, None]:
     """Fresh service with IOCStore fully mocked — no Supabase calls."""
     reset_threat_feed_service()
     service = get_threat_feed_service()
     service.reset()
-    # Patch the deferred import inside _store()
     with patch("app.services.ioc_store.get_ioc_store", return_value=mock_store):
         yield service
     service.reset()
@@ -347,10 +347,6 @@ class TestParseCisaKev:
 
 
 class TestParseCustomIocJson:
-    """
-    _parse_custom_ioc_json takes a list[dict], not {"iocs": [...]}.
-    """
-
     def _entries(self, entries: list[dict]) -> list[dict]:
         return entries
 
@@ -415,7 +411,6 @@ class TestParseCustomIocCsv:
         return "\n".join([header] + rows)
 
     def test_parses_csv_row(self):
-        # tags split by comma — use single tag to avoid ambiguity with CSV delimiter
         csv_text = self._csv(["198.51.100.1,ipv4,high,0.9,custom,test ip"])
         records, errors = _parse_custom_ioc_csv(csv_text, "ingest-test", None)
         assert len(records) == 1
@@ -456,7 +451,6 @@ class TestParseCustomIocCsv:
 
 # ---------------------------------------------------------------------------
 # Tests — ThreatFeedIngestionService.ingest_mitre_attack (store mock)
-# Service fetches from URL — patch _fetch_json to inject the bundle.
 # ---------------------------------------------------------------------------
 
 
@@ -714,7 +708,7 @@ class TestIngestCustomCsvStoreIntegration:
 
 class TestFeedIngestResultDataclass:
     def _make(self, **kwargs) -> FeedIngestResult:
-        defaults = dict(
+        defaults: dict = dict(
             ingest_id="ingest-001",
             source=ThreatFeedSourceEnum.MITRE_ATTACK,
             status=IngestStatusEnum.SUCCESS,
@@ -815,7 +809,7 @@ class TestIOCFilterRequest:
         assert f.severity is None
         assert f.org_id is None
         assert f.active is None
-        assert f.tag is None  # field is `tag`, not `tags`
+        assert f.tag is None
 
     def test_partial_filter(self):
         f = IOCFilterRequest(source=ThreatFeedSourceEnum.CISA_KEV, active=True)
@@ -837,10 +831,8 @@ class TestSingletonLifecycle:
         assert s1 is s2
 
     def test_reset_clears_state_not_instance(self):
-        # reset_threat_feed_service calls .reset() on the singleton — same instance
         reset_threat_feed_service()
         s1 = get_threat_feed_service()
         reset_threat_feed_service()
         s2 = get_threat_feed_service()
-        # Module-level singleton — same object after reset
         assert s1 is s2

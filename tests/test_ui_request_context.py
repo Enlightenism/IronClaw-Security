@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Generator
+
 from fastapi.testclient import TestClient
 import pytest
 
@@ -9,7 +11,7 @@ _ROUTE = "/ui/request-context"
 
 
 @pytest.fixture(scope="module")
-def client() -> TestClient:
+def client() -> Generator[TestClient, None, None]:
     with TestClient(_app, raise_server_exceptions=True) as tc:
         yield tc
 
