@@ -351,7 +351,7 @@ class TestBulkUpsert:
         builder = _sequential_builder(_resp(data=[existing_row]), _resp(data=[existing_row]))
         mock_client.table.return_value = builder
 
-        r = _make_record(ioc_id="1ioc-0001", confidence=0.95, tags=["new-tag"])
+        r = _make_record(ioc_id="ioc-0001", confidence=0.95, tags=["new-tag"])
 
         with patch(_PATCH_TARGET, return_value=mock_client):
             inserted, updated, skipped = IOCStore().bulk_upsert([r])

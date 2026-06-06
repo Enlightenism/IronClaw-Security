@@ -291,39 +291,37 @@ def get_api_key(
             )
         return None
 
-    # A key WAS provided — always validate it
+    # Key provided — check configured key
     configured_api_key = _extract_configured_api_key(request)
-    has_registry_keys = _has_registry_keys()
 
-    # Match against configured key
     if _constant_time_match(configured_api_key, normalized_api_key):
         return normalized_api_key
 
-    # Match against registry
+    # Check registry
     registry_record = _resolve_registry_api_key(normalized_api_key)
     if registry_record is not None:
         return normalized_api_key
 
-    # Key was provided but did not match anything known
-    if configured_api_key is not None or has_registry_keys:
-        # Keys are configured — reject the bad key unconditionally
+    # Key provided but matched nothing
+    if not auth_required:
+        # Auth is optional — pass the key through as-is
+        return normalized_api_key
+
+    # Auth required and no keys configured anywhere → service misconfiguration
+    if configured_api_key is None and not _has_registry_keys():
         raise AppError(
-            error="invalid_api_key",
-            message="Invalid API key",
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            error="auth_not_configured",
+            message="Authentication is required but no API keys are configured",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             details={"header": API_KEY_HEADER_NAME},
         )
 
-    # No keys configured at all
-    if auth_required:
-        raise AppError(
-            error="auth_not_configured",
-            message="API authentication is enabled but no API key is configured",
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
-
-    # Auth not required and no keys configured — pass through
-    return normalized_api_key
+    raise AppError(
+        error="invalid_api_key",
+        message="Invalid API key",
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        details={"header": API_KEY_HEADER_NAME},
+    )
 
 
 def get_auth_context(

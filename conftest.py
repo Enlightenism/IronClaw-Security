@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 
-# Hard-set all required env vars before ANY app module is imported.
 os.environ["IRONCLAW_PERSISTENCE_MODE"] = "memory"
 os.environ["ENVIRONMENT"] = "test"
 os.environ["AUTH_REQUIRED"] = "true"
@@ -16,10 +15,7 @@ os.environ["SUPABASE_SERVICE_ROLE_KEY"] = os.environ.get("SUPABASE_SERVICE_ROLE_
 os.environ["SUPABASE_KEY"] = os.environ.get("SUPABASE_KEY") or ""
 os.environ["SUPABASE_ANON_KEY"] = os.environ.get("SUPABASE_ANON_KEY") or ""
 
-# Clear any cached Settings instance populated before env vars were applied.
 from app.core.settings import get_settings  # noqa: E402
 
 get_settings.cache_clear()
-
-# Force a fresh validated instance now while env vars are correct.
 get_settings()

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import cast
+from typing import TypedDict, cast
 
 from app.dependencies.action_execute import get_action_execute_pipeline
 from app.models.action_execute_result import ActionExecuteResult
@@ -9,6 +9,13 @@ from app.orchestrator.executor_boundary import (
     summarize_execution_receipt,
 )
 from app.orchestrator.secure_runtime_pipeline import SecureRuntimePipeline
+
+
+class ExecutorResult(TypedDict, total=False):
+    mode: str
+    file_path: str
+    output: str
+    status: str
 
 
 def execute_guarded_action(

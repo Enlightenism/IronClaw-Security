@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Generator
 from typing import Any, Final
 
 from fastapi.testclient import TestClient
@@ -11,7 +12,7 @@ UI_AUDIT_EXPLORER_PATH: Final[str] = "/ui/audit-explorer"
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client() -> Generator[TestClient, None, None]:
     with TestClient(app) as test_client:
         yield test_client
 
@@ -32,14 +33,12 @@ def test_ui_audit_explorer_route_is_registered(client: TestClient) -> None:
 
 def test_ui_audit_explorer_returns_json_object(client: TestClient) -> None:
     response, data = _get_payload(client)
-
     assert response.status_code == 200
     assert isinstance(data, dict)
 
 
 def test_ui_audit_explorer_contains_core_fields(client: TestClient) -> None:
     _, data = _get_payload(client)
-
     assert data
     assert any(k in data for k in ("title", "headline", "summary", "dashboard_title"))
     assert any(k in data for k in ("items", "events", "records", "logs", "entries"))
@@ -57,7 +56,6 @@ def test_ui_audit_explorer_title_like_fields_are_strings_when_present(
     client: TestClient,
 ) -> None:
     _, data = _get_payload(client)
-
     for key in ("title", "headline", "summary", "dashboard_title"):
         if key in data:
             assert isinstance(data[key], str)
@@ -68,7 +66,6 @@ def test_ui_audit_explorer_collection_fields_are_lists_when_present(
     client: TestClient,
 ) -> None:
     _, data = _get_payload(client)
-
     for key in ("items", "events", "records", "logs", "entries", "timeline", "sections", "actions"):
         if key in data:
             assert isinstance(data[key], list)
@@ -78,7 +75,6 @@ def test_ui_audit_explorer_structured_fields_are_json_safe_when_present(
     client: TestClient,
 ) -> None:
     _, data = _get_payload(client)
-
     for key in ("filters", "facets"):
         if key in data:
             assert isinstance(data[key], dict | list | str)
@@ -89,7 +85,6 @@ def test_ui_audit_explorer_response_is_stable_across_repeated_reads(
 ) -> None:
     first_response, first_payload = _get_payload(client)
     second_response, second_payload = _get_payload(client)
-
     assert first_response.status_code == 200
     assert second_response.status_code == 200
     assert first_payload == second_payload

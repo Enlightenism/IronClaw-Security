@@ -247,8 +247,12 @@ class IOCStore:
                 table = client.table(_TABLE_IOCS)
                 existing_resp = table.select("ioc_id,confidence,tags,description,extra,expiry").in_("ioc_id", ioc_ids).execute()
                 if existing_resp and existing_resp.data:
-                    for row in existing_resp.data:
-                        existing_map[row["ioc_id"]] = row
+                    rows = existing_resp.data
+                    if isinstance(rows, dict):
+                        existing_map[rows["ioc_id"]] = rows
+                    else:
+                        for row in rows:
+                            existing_map[row["ioc_id"]] = row
 
                 rows_to_insert: list[dict[str, Any]] = []
                 rows_to_update: list[tuple[str, dict[str, Any]]] = []
@@ -684,6 +688,7 @@ CREATE TABLE IF NOT EXISTS ioc_records (
 );
 
 
+
 CREATE INDEX IF NOT EXISTS idx_ioc_records_value       ON ioc_records (value);
 CREATE INDEX IF NOT EXISTS idx_ioc_records_ioc_type    ON ioc_records (ioc_type);
 CREATE INDEX IF NOT EXISTS idx_ioc_records_source      ON ioc_records (source);
@@ -695,6 +700,7 @@ CREATE INDEX IF NOT EXISTS idx_ioc_records_cve_id      ON ioc_records (cve_id);
 CREATE INDEX IF NOT EXISTS idx_ioc_records_expiry      ON ioc_records (expiry) WHERE expiry IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_ioc_records_ingest_id   ON ioc_records (feed_ingest_id);
 CREATE INDEX IF NOT EXISTS idx_ioc_records_tags        ON ioc_records USING GIN (tags);
+
 
 
 -- ============================================================
@@ -714,6 +720,7 @@ CREATE TABLE IF NOT EXISTS feed_ingest_log (
     org_id          TEXT,
     metadata        JSONB NOT NULL DEFAULT '{}'
 );
+
 
 
 CREATE INDEX IF NOT EXISTS idx_feed_ingest_log_source     ON feed_ingest_log (source);
