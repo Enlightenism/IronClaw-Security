@@ -33,9 +33,11 @@ from app.models.webhook import (
 
 logger = logging.getLogger(__name__)
 
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+
 
 _MAX_DEAD_LETTER_SIZE = 500
 _RETRY_BACKOFF_BASE_SECONDS = 2.0
@@ -165,6 +167,7 @@ def _utcnow_iso() -> str:
 class WebhookDispatcher:
     """
     Delivery engine for IronClaw webhooks.
+
 
     Responsibilities:
     - Register / update / delete webhook registrations.
@@ -515,7 +518,7 @@ class WebhookDispatcher:
                 raw_body = resp.read(512)
                 response_snippet = raw_body.decode("utf-8", errors="replace")
 
-            if 200 <= http_status < 300:
+            if http_status is not None and 200 <= http_status < 300:
                 status = WebhookDeliveryStatus.SUCCESS
             else:
                 error_message = f"Non-2xx HTTP status: {http_status}"
@@ -768,6 +771,7 @@ class WebhookDispatcher:
 # ---------------------------------------------------------------------------
 # Module-level singleton
 # ---------------------------------------------------------------------------
+
 
 _WEBHOOK_DISPATCHER = WebhookDispatcher()
 

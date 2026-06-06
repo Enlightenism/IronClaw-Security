@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Generator
 import csv
 from datetime import UTC, datetime, timedelta
 import io
@@ -95,7 +96,7 @@ def _build_service(
 
 
 @pytest.fixture(autouse=True)
-def _reset_singleton() -> None:
+def _reset_singleton() -> Generator[None, None, None]:
     reset_report_export_service()
     yield
     reset_report_export_service()
@@ -349,8 +350,6 @@ def test_meter_events_filtered_by_since() -> None:
     old = _make_meter_event(occurred_at=now - timedelta(days=10))
     recent = _make_meter_event(occurred_at=now - timedelta(hours=1))
     svc = _build_service(events=[old, recent])
-    # The store mock returns both; the service filters by since
-    # We need to update mock to return both then let the service filter
     svc._meter_store.list_meter_events.return_value = [old, recent]
     payload, _ = svc.export(
         report_type="meter_events",

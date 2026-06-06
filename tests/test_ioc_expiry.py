@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Generator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -579,7 +580,7 @@ def _just_expired_seconds(seconds: float = 1.0) -> datetime:
 
 
 @pytest.fixture()
-def engine() -> IOCExpiryEngine:
+def engine() -> Generator[IOCExpiryEngine, None, None]:
     e = IOCExpiryEngine(near_expiry_threshold_hours=24)
     yield e
     e.flush()
@@ -696,7 +697,6 @@ class TestLookupExpiryGate:
 
     def test_mix_of_active_and_expired_same_value_only_active_returned(self, engine: IOCExpiryEngine, feed_id: str) -> None:
         feed2 = _new_id()
-        # Active indicator for the same value
         engine.add_indicator(
             indicator_type="ip",
             value="5.5.5.5",
@@ -705,7 +705,6 @@ class TestLookupExpiryGate:
             expires_at=_future_hours(48),
             confidence=70,
         )
-        # Expired indicator for the same value from a different feed
         engine.add_indicator(
             indicator_type="ip",
             value="5.5.5.5",
@@ -1064,6 +1063,7 @@ class TestDeactivationVsAutoExpiry:
     def test_deactivated_not_the_same_as_expired(self, engine: IOCExpiryEngine, active_indicator: ThreatIndicator) -> None:
         engine.deactivate_indicator(active_indicator.indicator_id)
         ind = engine.get_indicator(active_indicator.indicator_id)
+        assert ind is not None
         assert ind.is_deactivated is True
         assert ind.is_expired is False
 

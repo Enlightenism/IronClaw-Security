@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Generator
 import os
 import threading
 
@@ -49,7 +50,7 @@ _TOTAL_STEPS = len(_DEFAULT_STEPS)
 
 
 @pytest.fixture(autouse=True)
-def _reset_service() -> None:
+def _reset_service() -> Generator[None, None, None]:
     reset_onboarding_service()
     yield
     reset_onboarding_service()
@@ -710,8 +711,6 @@ class TestOnboardingOwnership:
             f"/onboarding/{created['session_id']}",
             headers={"X-API-Key": "completely-unknown-key", "X-Organization-Id": _ORG_B},
         )
-        # Auth fires first — 401 or 403 both acceptable depending on which
-        # guard layer responds first (auth vs ownership).
         assert resp.status_code in (401, 403)
 
     def test_api_same_key_different_org_allowed(self, client: TestClient) -> None:

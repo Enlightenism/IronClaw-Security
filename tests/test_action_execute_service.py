@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from typing import cast
+
 from app.dependencies.action_execute import get_action_execute_pipeline
-from app.services.action_execute_service import execute_guarded_action
+from app.services.action_execute_service import ExecutorResult, execute_guarded_action
 
 
 def test_execute_guarded_action_allows_safe_request():
@@ -21,7 +23,8 @@ def test_execute_guarded_action_allows_safe_request():
     assert summary["halted_by_boundary"] is False
     assert summary["executor_name"] == "dry_run_executor"
     assert summary["executor_result"] is not None
-    assert summary["executor_result"]["mode"] == "dry_run"
+    result = cast(ExecutorResult, summary["executor_result"])
+    assert result.get("mode") == "dry_run"
     assert summary["policy_verdict"] == "allow"
     assert summary["risk_score"] == 0
     assert summary["reason"]
@@ -64,7 +67,8 @@ def test_execute_guarded_action_uses_default_file_path():
     assert summary["execution_state"] == "executed"
     assert summary["executor_name"] == "dry_run_executor"
     assert summary["executor_result"] is not None
-    assert summary["executor_result"]["file_path"] == "app/api/action_execute.py"
+    result = cast(ExecutorResult, summary["executor_result"])
+    assert result.get("file_path") == "app/api/action_execute.py"
 
 
 def test_execute_guarded_action_accepts_injected_pipeline():
@@ -86,5 +90,6 @@ def test_execute_guarded_action_accepts_injected_pipeline():
     assert summary["halted_by_boundary"] is False
     assert summary["executor_name"] == "dry_run_executor"
     assert summary["executor_result"] is not None
-    assert summary["executor_result"]["file_path"] == "app/api/action_execute.py"
+    result = cast(ExecutorResult, summary["executor_result"])
+    assert result.get("file_path") == "app/api/action_execute.py"
     assert summary["risk_score"] == 2

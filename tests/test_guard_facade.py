@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from typing import cast
+
 from app.facade import guardandexecuteaction, guardandexecuteraw
 from app.models.action_execute import ExecuteRequest
+from app.services.action_execute_service import ExecutorResult
 
 
 def test_guardandexecuteaction_returns_typed_response():
@@ -22,7 +25,8 @@ def test_guardandexecuteaction_returns_typed_response():
     assert response["halted_by_boundary"] is False
     assert response["executor_name"] == "dry_run_executor"
     assert response["executor_result"] is not None
-    assert response["executor_result"]["mode"] == "dry_run"
+    result = cast(ExecutorResult, response["executor_result"])
+    assert result.get("mode") == "dry_run"
     assert response["policy_verdict"] == "allow"
     assert response["risk_score"] == 0
     assert response["reason"]
@@ -69,5 +73,6 @@ def test_guardandexecuteraw_usesdefaultfilepath():
     assert response["execution_state"] == "executed"
     assert response["executor_name"] == "dry_run_executor"
     assert response["executor_result"] is not None
-    assert response["executor_result"]["file_path"] == "app/api/action_execute.py"
+    result = cast(ExecutorResult, response["executor_result"])
+    assert result.get("file_path") == "app/api/action_execute.py"
     assert response["reasons"]

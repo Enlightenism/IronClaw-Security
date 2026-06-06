@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Generator
 from typing import Any, Final
 
 from fastapi.testclient import TestClient
@@ -11,12 +12,11 @@ from app.main import app
 UI_DATA_RETENTION_PATH: Final[str] = "/ui/data-retention"
 API_KEY_HEADER: Final[dict[str, str]] = {"X-API-Key": "test-api-key"}
 
-
 EXPECTED_RULE_IDS: Final[frozenset[str]] = frozenset({"requests", "telemetry", "review-queue", "audit-log"})
 
 
 @pytest.fixture(scope="function")
-def client() -> TestClient:
+def client() -> Generator[TestClient, None, None]:
     get_settings.cache_clear()
     settings = get_settings()
     app.state.settings = settings
@@ -31,11 +31,6 @@ def retention_payload(client: TestClient) -> dict[str, Any]:
     return response.json()
 
 
-# ---------------------------------------------------------------------------
-# Authentication
-# ---------------------------------------------------------------------------
-
-
 class TestDataRetentionAuth:
     def test_missing_api_key_returns_401_or_403(self, client: TestClient) -> None:
         response = client.get(UI_DATA_RETENTION_PATH)
@@ -48,11 +43,6 @@ class TestDataRetentionAuth:
     def test_valid_api_key_returns_200(self, client: TestClient) -> None:
         response = client.get(UI_DATA_RETENTION_PATH, headers=API_KEY_HEADER)
         assert response.status_code == 200
-
-
-# ---------------------------------------------------------------------------
-# Top-level response shape
-# ---------------------------------------------------------------------------
 
 
 class TestDataRetentionResponseShape:
@@ -90,24 +80,11 @@ class TestDataRetentionResponseShape:
         assert isinstance(retention_payload["metadata"], dict)
 
     def test_required_keys_present(self, retention_payload: dict[str, Any]) -> None:
-        for key in (
-            "status",
-            "service",
-            "timestamp",
-            "requested_by",
-            "rules",
-            "total_rules",
-            "metadata",
-        ):
+        for key in ("status", "service", "timestamp", "requested_by", "rules", "total_rules", "metadata"):
             assert key in retention_payload, f"Missing key: {key}"
 
     def test_root_is_not_array(self, retention_payload: dict[str, Any]) -> None:
         assert not isinstance(retention_payload, list)
-
-
-# ---------------------------------------------------------------------------
-# Rules collection
-# ---------------------------------------------------------------------------
 
 
 class TestDataRetentionRulesCollection:
@@ -123,16 +100,7 @@ class TestDataRetentionRulesCollection:
             assert isinstance(rule, dict)
 
     def test_each_rule_has_required_fields(self, retention_payload: dict[str, Any]) -> None:
-        required = {
-            "rule_id",
-            "name",
-            "category",
-            "retention_days",
-            "storage_scope",
-            "purge_behavior",
-            "description",
-            "metadata",
-        }
+        required = {"rule_id", "name", "category", "retention_days", "storage_scope", "purge_behavior", "description", "metadata"}
         for rule in retention_payload["rules"]:
             missing = required - rule.keys()
             assert not missing, f"Rule {rule.get('rule_id')} missing fields: {missing}"
@@ -179,11 +147,6 @@ class TestDataRetentionRulesCollection:
     def test_no_duplicate_rule_ids(self, retention_payload: dict[str, Any]) -> None:
         ids = [r["rule_id"] for r in retention_payload["rules"]]
         assert len(ids) == len(set(ids))
-
-
-# ---------------------------------------------------------------------------
-# Individual rule contracts
-# ---------------------------------------------------------------------------
 
 
 class TestDataRetentionRuleContracts:
@@ -268,11 +231,6 @@ class TestDataRetentionRuleContracts:
         assert telemetry_rule["retention_days"] == min_days
 
 
-# ---------------------------------------------------------------------------
-# requested_by query parameter
-# ---------------------------------------------------------------------------
-
-
 class TestDataRetentionRequestedBy:
     def test_default_requested_by(self, client: TestClient) -> None:
         response = client.get(UI_DATA_RETENTION_PATH, headers=API_KEY_HEADER)
@@ -280,44 +238,23 @@ class TestDataRetentionRequestedBy:
         assert data["requested_by"] == "ui-data-retention"
 
     def test_custom_requested_by(self, client: TestClient) -> None:
-        response = client.get(
-            UI_DATA_RETENTION_PATH,
-            params={"requested_by": "security-analyst"},
-            headers=API_KEY_HEADER,
-        )
+        response = client.get(UI_DATA_RETENTION_PATH, params={"requested_by": "security-analyst"}, headers=API_KEY_HEADER)
         data = response.json()
         assert data["requested_by"] == "security-analyst"
 
     def test_metadata_contains_requested_by(self, client: TestClient) -> None:
-        response = client.get(
-            UI_DATA_RETENTION_PATH,
-            params={"requested_by": "test-caller"},
-            headers=API_KEY_HEADER,
-        )
+        response = client.get(UI_DATA_RETENTION_PATH, params={"requested_by": "test-caller"}, headers=API_KEY_HEADER)
         data = response.json()
         assert data["metadata"]["requested_by"] == "test-caller"
 
     def test_empty_requested_by_returns_422(self, client: TestClient) -> None:
-        response = client.get(
-            UI_DATA_RETENTION_PATH,
-            params={"requested_by": ""},
-            headers=API_KEY_HEADER,
-        )
+        response = client.get(UI_DATA_RETENTION_PATH, params={"requested_by": ""}, headers=API_KEY_HEADER)
         assert response.status_code == 422
 
     def test_rules_unchanged_with_custom_requested_by(self, client: TestClient) -> None:
-        response = client.get(
-            UI_DATA_RETENTION_PATH,
-            params={"requested_by": "admin"},
-            headers=API_KEY_HEADER,
-        )
+        response = client.get(UI_DATA_RETENTION_PATH, params={"requested_by": "admin"}, headers=API_KEY_HEADER)
         data = response.json()
         assert len(data["rules"]) == 4
-
-
-# ---------------------------------------------------------------------------
-# Stability and idempotency
-# ---------------------------------------------------------------------------
 
 
 class TestDataRetentionStability:

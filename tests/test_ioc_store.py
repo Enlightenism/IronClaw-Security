@@ -9,6 +9,7 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
 os.environ.setdefault("SUPABASE_KEY", "")
 os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
+from collections.abc import Generator
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -206,7 +207,7 @@ def mock_client() -> MagicMock:
 
 
 @pytest.fixture()
-def store(mock_client: MagicMock) -> IOCStore:
+def store(mock_client: MagicMock) -> Generator[IOCStore, None, None]:
     with patch(_PATCH_TARGET, return_value=mock_client):
         yield IOCStore()
 
@@ -218,7 +219,6 @@ def store(mock_client: MagicMock) -> IOCStore:
 
 class TestUpsertIoc:
     def test_insert_new_record_returns_true(self, mock_client: MagicMock) -> None:
-        # maybe_single().execute() returns data=None → triggers insert path
         builder = _make_builder(data=None)
         mock_client.table.return_value = builder
 
@@ -236,7 +236,6 @@ class TestUpsertIoc:
             "extra": {},
             "expiry": None,
         }
-        # first execute() → select existing; second → update confirmation
         builder = _sequential_builder(_resp(data=existing_row), _resp(data=[existing_row]))
         mock_client.table.return_value = builder
 
@@ -245,7 +244,6 @@ class TestUpsertIoc:
 
         assert result is True
         payload: dict[str, Any] = builder.update.call_args[0][0]
-        # _merge_record_update takes max(existing=0.5, incoming=0.9) → 0.9
         assert payload["confidence"] == 0.9
 
     def test_update_existing_merges_tags(self, mock_client: MagicMock) -> None:
@@ -307,8 +305,6 @@ class TestBulkUpsert:
         assert (inserted, updated, skipped) == (0, 0, 0)
 
     def test_deduplication_within_batch(self, mock_client: MagicMock) -> None:
-        # Both records share the same ioc_id; dedup keeps the last one.
-        # select returns empty → both treated as new, but only 1 unique id after dedup.
         builder = _sequential_builder(
             _resp(data=[]),
             _resp(data=[{"ioc_id": "ioc-aaaa0000bbbb1111"}]),
@@ -327,7 +323,6 @@ class TestBulkUpsert:
         assert len(insert_payload) == 1
 
     def test_bulk_upsert_inserts_new_records(self, mock_client: MagicMock) -> None:
-        # select returns empty → both records go to insert path
         builder = _sequential_builder(
             _resp(data=[]),
             _resp(data=[{"ioc_id": "x"}, {"ioc_id": "y"}]),
@@ -353,11 +348,10 @@ class TestBulkUpsert:
             "extra": {"k": "v"},
             "expiry": None,
         }
-        # select returns existing row → update path; second execute → update result
         builder = _sequential_builder(_resp(data=[existing_row]), _resp(data=[existing_row]))
         mock_client.table.return_value = builder
 
-        r = _make_record(ioc_id="ioc-0001", confidence=0.95, tags=["new-tag"])
+        r = _make_record(ioc_id="1ioc-0001", confidence=0.95, tags=["new-tag"])
 
         with patch(_PATCH_TARGET, return_value=mock_client):
             inserted, updated, skipped = IOCStore().bulk_upsert([r])
@@ -365,7 +359,6 @@ class TestBulkUpsert:
         assert inserted == 0
         assert updated == 1
         update_payload = builder.update.call_args[0][0]
-        # max(0.4, 0.95) → 0.95
         assert update_payload["confidence"] == 0.95
         assert "existing-tag" in update_payload["tags"]
         assert "new-tag" in update_payload["tags"]
@@ -388,7 +381,6 @@ class TestBulkUpsert:
             IOCStore().bulk_upsert([r], overwrite=True)
 
         update_payload = builder.update.call_args[0][0]
-        # overwrite=True uses _record_to_row → confidence comes directly from record
         assert update_payload["confidence"] == 0.1
 
     def test_bulk_upsert_batch_exception_increments_skipped(self, mock_client: MagicMock) -> None:
@@ -889,7 +881,6 @@ class TestPruneExpired:
         with patch(_PATCH_TARGET, return_value=mock_client):
             IOCStore().prune_expired()
 
-        # prune_expired does: .eq("active", True).lt("expiry", now_iso).not_.is_("expiry", "null")
         builder.eq.assert_called_once_with("active", True)
         builder.lt.assert_called_once()
 

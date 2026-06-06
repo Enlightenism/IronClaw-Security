@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Generator
 import os
 
-# MUST be set before any app module is imported
 os.environ["IRONCLAW_PERSISTENCE_MODE"] = "memory"
 os.environ["ENVIRONMENT"] = "test"
 os.environ["IRONCLAW_API_KEY"] = "test-api-key"
@@ -12,7 +11,6 @@ os.environ["SUPABASE_URL"] = ""
 os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
 os.environ["SUPABASE_KEY"] = ""
 os.environ["SUPABASE_ANON_KEY"] = ""
-
 
 from unittest.mock import MagicMock
 
@@ -39,8 +37,6 @@ def _refresh_app_settings() -> None:
 
 @pytest.fixture(scope="function", autouse=True)
 def _reset_unit_wallet_registry() -> Generator[None, None, None]:
-    """Replace the module-level singleton with a fresh registry before each test
-    and restore it after, so wallet state never bleeds between tests."""
     fresh = UnitWalletRegistry()
     _unit_wallet_module._unit_wallet_registry = fresh
     yield
@@ -55,7 +51,7 @@ def reset_audit_state() -> Generator[None, None, None]:
 
 
 @pytest.fixture(scope="function")
-def test_client() -> TestClient:
+def test_client() -> Generator[TestClient, None, None]:
     with TestClient(_app, raise_server_exceptions=True) as client:
         yield client
 
@@ -95,12 +91,6 @@ def sdk_client() -> Generator[IronclawClient, None, None]:
 
 @pytest.fixture(scope="function")
 def mock_hunt_client() -> MagicMock:
-    """
-    Reusable Supabase client mock for ThreatHuntService tests.
-    Returns a MagicMock pre-configured with a chainable query builder
-    that yields an empty result by default. Tests override .execute.return_value
-    to inject specific row payloads.
-    """
     mock_client = MagicMock()
     mock_response = MagicMock()
     mock_response.data = []

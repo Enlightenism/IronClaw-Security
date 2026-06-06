@@ -60,8 +60,8 @@ DEFAULT_SENSITIVE_FIELD_PATTERNS: tuple[tuple[str, str, int], ...] = (
     ("private_key_field", r"(?i)(private[_-]?key|ssh[_-]?key|pem)$", 80),
 )
 DEFAULT_EXFIL_CONTENT_PATTERNS: tuple[tuple[str, str, int], ...] = (
-    ("ssh_directory_reference", r"(?i)(^|[\\/])\.ssh([\\/]|$)", 45),
-    ("shadow_file_reference", r"(?i)(^|[\\/])(etc[\\/])?(shadow|passwd)(\b|$)", 55),
+    ("ssh_directory_reference", r"(?i)(^|[\\\/])\.ssh([\\\/]|$)", 45),
+    ("shadow_file_reference", r"(?i)(^|[\\\/])(etc[\\\/])?(shadow|passwd)(\b|$)", 55),
     ("kubeconfig_reference", r"(?i)kubeconfig", 35),
     ("env_dump_reference", r"(?i)(^|[^a-z])env(?:ironment)?\s*(dump|export|vars?)", 25),
     ("archive_exfil_pattern", r"(?i)\b(tar|zip|gzip|base64)\b", 10),
@@ -150,6 +150,8 @@ class NetworkGuard:
     exfil_content_patterns: tuple[tuple[str, str, int], ...] = DEFAULT_EXFIL_CONTENT_PATTERNS
     high_risk_ports: dict[int, int] = field(default_factory=lambda: dict(DEFAULT_HIGH_RISK_PORTS))
     allow_private_hosts: bool = False
+    _allowed_host_suffixes: set[str] = field(default_factory=set, init=False, repr=False, compare=False)
+    _secret_scanner: Any = field(default=None, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.allowed_schemes = {item.strip().lower() for item in self.allowed_schemes if str(item).strip()}
@@ -570,7 +572,9 @@ class NetworkGuard:
         ]
 
         for location, value in content_candidates:
-            if value in {None, "", b"", bytearray()}:
+            if value is None or value == "" or value == b"":
+                continue
+            if isinstance(value, bytearray) and len(value) == 0:
                 continue
 
             text = self._to_text(value)

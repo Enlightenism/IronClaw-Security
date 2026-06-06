@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal, cast
+
 import pytest
 
 from ironclaw_skill.billing import (
@@ -56,7 +58,7 @@ def _make_context(
     request_id: str | None = "req-001",
     tenant_id: str | None = "tenant-abc",
     client_id: str | None = "client-xyz",
-    source_platform: str = "unknown",
+    source_platform: Literal["claude", "openclaw", "unknown"] = "unknown",
 ) -> SkillRequestContext:
     return SkillRequestContext(
         request_id=request_id,
@@ -68,9 +70,9 @@ def _make_context(
 
 def _scan_request(
     *,
-    target_type: str = "text",
+    target_type: Literal["text", "url", "file_path", "prompt_bundle"] = "text",
     target_value: str = "eval(user_input)",
-    policy_mode: str = "review",
+    policy_mode: Literal["allow", "review", "block"] = "review",
     context: SkillRequestContext | None = None,
 ) -> SkillScanRequest:
     return SkillScanRequest(
@@ -85,9 +87,9 @@ def _scan_request(
 
 def _action_policy_request(
     *,
-    action_type: str = "python_code",
+    action_type: Literal["shell_command", "python_code", "tool_invocation", "file_write", "file_delete", "network_request", "system_change", "other"] = "python_code",
     target: str = "subprocess.run(['ls'])",
-    policy_mode: str = "review",
+    policy_mode: Literal["allow", "review", "block"] = "review",
     context: SkillRequestContext | None = None,
 ) -> SkillActionPolicyRequest:
     return SkillActionPolicyRequest(
@@ -102,9 +104,9 @@ def _action_policy_request(
 
 def _action_decision_request(
     *,
-    action_type: str = "python_code",
+    action_type: Literal["shell_command", "python_code", "tool_invocation", "file_write", "file_delete", "network_request", "system_change", "other"] = "python_code",
     target: str = "subprocess.run(['ls'])",
-    policy_mode: str = "review",
+    policy_mode: Literal["allow", "review", "block"] = "review",
     context: SkillRequestContext | None = None,
 ) -> SkillActionDecisionRequest:
     return SkillActionDecisionRequest(
@@ -119,7 +121,7 @@ def _action_decision_request(
 
 def _execute_request(
     *,
-    action_type: str = "python_code",
+    action_type: Literal["shell_command", "python_code", "tool_invocation", "file_write", "file_delete", "network_request", "system_change", "other"] = "python_code",
     target: str = "print('hello')",
     require_confirmation: bool = False,
     allow_side_effects: bool = False,
@@ -195,22 +197,26 @@ class TestIronClawSkillRouterRouting:
         response = router.route(_action_decision_request(action_type="shell_command", target="rm -rf /"))
         assert response.payload.verdict == "review"
         assert response.payload.should_warn is True
+        assert response.payload.metadata.risk_score is not None
         assert response.payload.metadata.risk_score >= 70
 
     def test_action_decision_low_risk_returns_allow(self):
         router = IronClawSkillRouter()
         response = router.route(_action_decision_request(action_type="tool_invocation", target="read_file"))
         assert response.payload.verdict == "allow"
+        assert response.payload.metadata.risk_score is not None
         assert response.payload.metadata.risk_score < 50
 
     def test_action_policy_high_risk_elevates_score(self):
         router = IronClawSkillRouter()
         response = router.route(_action_policy_request(action_type="file_delete", target="/etc/passwd"))
+        assert response.payload.metadata.risk_score is not None
         assert response.payload.metadata.risk_score >= 70
 
     def test_action_policy_low_risk_moderate_score(self):
         router = IronClawSkillRouter()
         response = router.route(_action_policy_request(action_type="network_request", target="https://api.example.com"))
+        assert response.payload.metadata.risk_score is not None
         assert response.payload.metadata.risk_score < 70
 
     def test_scan_default_handler_returns_review(self):
@@ -549,7 +555,11 @@ class TestSkillScanInputValidation:
 
     def test_policy_mode_valid_values(self):
         for mode in ("allow", "review", "block"):
-            scan = SkillScanInput(target_type="url", target_value="https://x.com", policy_mode=mode)
+            scan = SkillScanInput(
+                target_type="url",
+                target_value="https://x.com",
+                policy_mode=cast(Literal["allow", "review", "block"], mode),
+            )
             assert scan.policy_mode == mode
 
 
@@ -564,7 +574,7 @@ class TestSkillActionInputValidation:
             SkillActionInput(action_type="python_code", target="  ")
 
     def test_valid_action_types(self):
-        valid_types = [
+        valid_types: list[Literal["shell_command", "python_code", "tool_invocation", "file_write", "file_delete", "network_request", "system_change", "other"]] = [
             "shell_command",
             "python_code",
             "tool_invocation",
@@ -580,11 +590,11 @@ class TestSkillActionInputValidation:
 
     def test_invalid_action_type_raises(self):
         with pytest.raises((ValueError, TypeError)):
-            SkillActionInput(action_type="unknown_type", target="x")
+            SkillActionInput(action_type=cast(Literal["shell_command", "python_code", "tool_invocation", "file_write", "file_delete", "network_request", "system_change", "other"], "unknown_type"), target="x")  # type: ignore[arg-type]
 
     def test_extra_fields_forbidden(self):
         with pytest.raises((ValueError, TypeError)):
-            SkillActionInput(action_type="python_code", target="x", illegal_field="y")
+            SkillActionInput(action_type="python_code", target="x", **{"illegal_field": "y"})  # type: ignore[call-overload]
 
     def test_content_optional(self):
         action = SkillActionInput(action_type="file_write", target="/tmp/test.txt")
@@ -612,12 +622,12 @@ class TestSkillRequestContextValidation:
 
     def test_source_platform_valid_values(self):
         for platform in ("claude", "openclaw", "unknown"):
-            ctx = SkillRequestContext(source_platform=platform)
+            ctx = SkillRequestContext(source_platform=cast(Literal["claude", "openclaw", "unknown"], platform))
             assert ctx.source_platform == platform
 
     def test_invalid_source_platform_raises(self):
         with pytest.raises((ValueError, TypeError)):
-            SkillRequestContext(source_platform="openai")
+            SkillRequestContext(source_platform=cast(Literal["claude", "openclaw", "unknown"], "openai"))  # type: ignore[arg-type]
 
     def test_tags_normalized_lowercase_deduplicated(self):
         ctx = SkillRequestContext(tags=["Security", "SECURITY", "scan", "  "])
@@ -669,12 +679,20 @@ class TestSkillReasonValidation:
 
     def test_valid_sources(self):
         for source in ("policy", "scan", "ai", "runtime", "installer", "skill"):
-            reason = SkillReason(source=source, label="ok", details="ok detail")
+            reason = SkillReason(
+                source=cast(Literal["policy", "scan", "ai", "runtime", "installer", "skill"], source),
+                label="ok",
+                details="ok detail",
+            )
             assert reason.source == source
 
     def test_invalid_source_raises(self):
         with pytest.raises((ValueError, TypeError)):
-            SkillReason(source="unknown_src", label="x", details="y")
+            SkillReason(
+                source=cast(Literal["policy", "scan", "ai", "runtime", "installer", "skill"], "unknown_src"),  # type: ignore[arg-type]
+                label="x",
+                details="y",
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -780,6 +798,7 @@ class TestSkillMiddleware:
         )
         result = run_middleware(mw, _scan_request())
         assert result.trace.operation == "scan"
+        assert result.trace.duration_ms is not None
         assert result.trace.duration_ms >= 0
         assert result.trace.request_id == "req-001"
         assert result.trace.billed is False
@@ -1205,6 +1224,7 @@ class TestRouterMiddlewareBillingPipeline:
 
         assert response.payload.verdict == "block"
         assert response.payload.should_halt is True
+        assert response.payload.metadata.risk_score is not None
         assert response.payload.metadata.risk_score >= 80
 
     def test_full_action_decision_pipeline_custom_handler_with_billing(self):
