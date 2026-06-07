@@ -85,6 +85,11 @@ def _configured_patch():
     return patch("app.supabaseclient.is_supabase_configured", return_value=True)
 
 
+def _cache_patch():
+    """Patch the cache-invalidation side-effect so tests stay hermetic."""
+    return patch("app.services.action_policy._invalidate_policy_engine_cache")
+
+
 # ---------------------------------------------------------------------------
 # evaluate_action_policy — block verdict
 # ---------------------------------------------------------------------------
@@ -161,7 +166,6 @@ class TestEvaluateActionPolicyElevatedAction:
         assert result["reasons"][0]["label"] == "Elevated action type"
 
     def test_non_elevated_action_not_caught_here(self):
-        # file_edit is not in ELEVATED_REVIEW_ACTIONS — must reach allow
         result = evaluate_action_policy("file_edit", "readme.txt")
         assert result["verdict"] == "allow"
 
@@ -191,7 +195,6 @@ class TestEvaluateActionPolicyHighReview:
         assert result["should_halt"] is False
 
     def test_high_review_target_label(self):
-        # file_edit is NOT elevated → high-review branch fires → "Elevated target"
         result = evaluate_action_policy("file_edit", "curl https://example.com")
         assert result["reasons"][0]["label"] == "Elevated target"
 
@@ -365,7 +368,8 @@ class TestLoadPolicyRulesCanonicalColumn:
         )
         with _configured_patch():
             with patch("app.supabaseclient.get_supabase_client", return_value=client):
-                result = load_builtin_policy_rules_from_db()
+                with _cache_patch():
+                    result = load_builtin_policy_rules_from_db()
         assert result is True
         assert "custom_blocked_path" in _ap.BLOCKED_TARGETS
 
@@ -396,7 +400,8 @@ class TestLoadPolicyRulesHydratesGlobals:
         )
         with _configured_patch():
             with patch("app.supabaseclient.get_supabase_client", return_value=client):
-                return load_builtin_policy_rules_from_db()
+                with _cache_patch():
+                    return load_builtin_policy_rules_from_db()
 
     def test_blocked_target_added_to_blocked_targets(self):
         self._run_with_rules([{"rule_type": "blocked_target", "value": "forbidden_path"}])
@@ -438,6 +443,26 @@ class TestLoadPolicyRulesHydratesGlobals:
     def test_policy_loaded_from_db_true_after_success(self):
         self._run_with_rules([{"rule_type": "blocked_target", "value": "x"}])
         assert is_policy_loaded_from_db() is True
+
+    def test_cache_invalidation_called_on_success(self):
+        client = _make_supabase_client(
+            set_rows=[{"id": "set-1", "set_key": DEFAULT_POLICY_SET_KEY}],
+            membership_rows=[{"policy_rule_id": "r0"}],
+            rules_rows=[{"rule_type": "blocked_target", "value": "x"}],
+        )
+        with _configured_patch():
+            with patch("app.supabaseclient.get_supabase_client", return_value=client):
+                with _cache_patch() as mock_invalidate:
+                    load_builtin_policy_rules_from_db()
+        mock_invalidate.assert_called_once()
+
+    def test_cache_invalidation_not_called_on_failure(self):
+        client = _make_supabase_client(set_rows=[], membership_rows=[], rules_rows=[])
+        with _configured_patch():
+            with patch("app.supabaseclient.get_supabase_client", return_value=client):
+                with _cache_patch() as mock_invalidate:
+                    load_builtin_policy_rules_from_db()
+        mock_invalidate.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -494,7 +519,8 @@ class TestLoadPolicyRulesTenantFallback:
 
         with _configured_patch():
             with patch("app.supabaseclient.get_supabase_client", return_value=client):
-                result = load_builtin_policy_rules_from_db(tenant_key="tenant_missing")
+                with _cache_patch():
+                    result = load_builtin_policy_rules_from_db(tenant_key="tenant_missing")
 
         assert result is True
         assert "fallback_blocked" in _ap.BLOCKED_TARGETS
@@ -507,10 +533,64 @@ class TestLoadPolicyRulesTenantFallback:
         )
         with _configured_patch():
             with patch("app.supabaseclient.get_supabase_client", return_value=client):
-                result = load_builtin_policy_rules_from_db(tenant_key=None)
+                with _cache_patch():
+                    result = load_builtin_policy_rules_from_db(tenant_key=None)
 
         assert result is True
         assert "direct_default" in _ap.BLOCKED_TARGETS
+
+    def test_cache_invalidation_called_on_tenant_fallback_success(self):
+        call_count = {"n": 0}
+
+        def _table(name: str) -> MagicMock:
+            tb = MagicMock()
+
+            def _select(*_a, **_kw):
+                q = MagicMock()
+
+                def _eq(col, val):
+                    return q
+
+                def _in_(col, vals):
+                    return q
+
+                def _limit(n):
+                    return q
+
+                def _execute():
+                    resp = MagicMock()
+                    if name == "policy_sets":
+                        call_count["n"] += 1
+                        if call_count["n"] == 1:
+                            resp.data = []
+                        else:
+                            resp.data = [{"id": "set-default", "set_key": DEFAULT_POLICY_SET_KEY}]
+                    elif name == "policy_set_memberships":
+                        resp.data = [{"policy_rule_id": "r1"}]
+                    elif name == "policy_rules":
+                        resp.data = [{"rule_type": "blocked_target", "value": "x"}]
+                    else:
+                        resp.data = []
+                    return resp
+
+                q.eq = _eq
+                q.in_ = _in_
+                q.limit = _limit
+                q.execute = _execute
+                return q
+
+            tb.select = _select
+            return tb
+
+        client = MagicMock()
+        client.table.side_effect = _table
+
+        with _configured_patch():
+            with patch("app.supabaseclient.get_supabase_client", return_value=client):
+                with _cache_patch() as mock_invalidate:
+                    load_builtin_policy_rules_from_db(tenant_key="tenant_missing")
+
+        mock_invalidate.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -545,6 +625,15 @@ class TestLoadPolicyRulesExceptionHandling:
                 load_builtin_policy_rules_from_db()
         assert _ap.BLOCKED_TARGETS == _DEFAULT_BLOCKED_TARGETS
 
+    def test_cache_invalidation_not_called_on_exception(self):
+        client = MagicMock()
+        client.table.side_effect = RuntimeError("db exploded")
+        with _configured_patch():
+            with patch("app.supabaseclient.get_supabase_client", return_value=client):
+                with _cache_patch() as mock_invalidate:
+                    load_builtin_policy_rules_from_db()
+        mock_invalidate.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # reload_policy_rules — delegates to load_builtin_policy_rules_from_db
@@ -560,7 +649,8 @@ class TestReloadPolicyRules:
         )
         with _configured_patch():
             with patch("app.supabaseclient.get_supabase_client", return_value=client):
-                result = reload_policy_rules()
+                with _cache_patch():
+                    result = reload_policy_rules()
         assert result is True
 
     def test_reload_hydrates_globals(self):
@@ -571,7 +661,8 @@ class TestReloadPolicyRules:
         )
         with _configured_patch():
             with patch("app.supabaseclient.get_supabase_client", return_value=client):
-                reload_policy_rules()
+                with _cache_patch():
+                    reload_policy_rules()
         assert "reload_target" in _ap.BLOCKED_TARGETS
 
     def test_reload_passes_tenant_key(self):
@@ -600,7 +691,8 @@ class TestIsPolicyLoadedFromDb:
         )
         with _configured_patch():
             with patch("app.supabaseclient.get_supabase_client", return_value=client):
-                load_builtin_policy_rules_from_db()
+                with _cache_patch():
+                    load_builtin_policy_rules_from_db()
         assert is_policy_loaded_from_db() is True
 
     def test_false_after_failed_load(self):
