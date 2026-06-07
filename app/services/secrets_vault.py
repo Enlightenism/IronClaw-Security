@@ -117,6 +117,20 @@ class _SecretsVault:
         return int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
     # ------------------------------------------------------------------
+    # IronClaw Auth Edge Function
+    # ------------------------------------------------------------------
+    @staticmethod
+    def ironclaw_auth_edge_fn_path() -> str:
+        """URL path or full URL to the IronClaw auth edge function endpoint.
+        Defaults to empty string — callers must guard against empty value."""
+        return os.getenv("IRONCLAW_AUTH_EDGE_FN_PATH", "")
+
+    @staticmethod
+    def ironclaw_auth_edge_fn_timeout_seconds() -> float:
+        """HTTP timeout in seconds for calls to the auth edge function."""
+        return float(os.getenv("IRONCLAW_AUTH_EDGE_FN_TIMEOUT_SECONDS", "10.0"))
+
+    # ------------------------------------------------------------------
     # Supabase
     # ------------------------------------------------------------------
     @staticmethod
