@@ -1,6 +1,10 @@
+from __future__ import annotations
+
 import os
 import re
 from typing import Literal, TypedDict
+
+from app.core import pattern_registry
 
 Severity = Literal["low", "medium", "high", "critical"]
 
@@ -55,6 +59,12 @@ HEURISTIC_TERMS = {
     "do anything now": 4,
 }
 
+# ---------------------------------------------------------------------------
+# These constants are retained as the authoritative single source of truth
+# for callers that import them directly (e.g. legacy routes, tests).
+# Pattern matching in scoring delegates to pattern_registry.match_by_category()
+# so that db-sourced patterns are also evaluated without duplication.
+# ---------------------------------------------------------------------------
 
 OVERRIDE_PATTERNS = [
     r"\bignore\s+(all\s+)?previous\s+instructions\b",
@@ -104,6 +114,18 @@ SEPARATOR_PATTERNS = [
     r"\bEND\s+SYSTEM\s+PROMPT\b",
 ]
 
+# ---------------------------------------------------------------------------
+# Category → PatternCategory mapping for registry delegation
+# ---------------------------------------------------------------------------
+
+_CATEGORY_MAP: dict[str, list[pattern_registry.PatternCategory]] = {
+    "override": ["prompt_injection"],
+    "exfil": ["data_exfiltration"],
+    "role": ["role_hijack"],
+    "encoding": ["encoding_evasion"],
+    "separator": ["separator_injection"],
+}
+
 
 def _normalize_for_heuristics(text: str) -> str:
     text = text.lower()
@@ -112,12 +134,12 @@ def _normalize_for_heuristics(text: str) -> str:
     return text
 
 
-def _regex_match_count(text: str, patterns: list[str]) -> int:
-    count = 0
-    for pattern in patterns:
-        if re.search(pattern, text, re.IGNORECASE):
-            count += 1
-    return count
+def _regex_match_count_by_category(
+    text: str,
+    categories: list[pattern_registry.PatternCategory],
+) -> int:
+    """Delegate pattern matching to pattern_registry — single source of truth."""
+    return len(pattern_registry.match_by_category(text, categories))
 
 
 def _has_split_override_phrase(text: str) -> bool:
@@ -140,11 +162,11 @@ def heuristic_prompt_injection_score(text: str) -> int:
         if term in normalized:
             score += weight
 
-    override_hits = _regex_match_count(text, OVERRIDE_PATTERNS)
-    exfil_hits = _regex_match_count(text, EXFIL_PATTERNS)
-    role_hits = _regex_match_count(text, ROLE_HIJACK_PATTERNS)
-    encoding_hits = _regex_match_count(text, ENCODING_PATTERNS)
-    separator_hits = _regex_match_count(text, SEPARATOR_PATTERNS)
+    override_hits = _regex_match_count_by_category(text, _CATEGORY_MAP["override"])
+    exfil_hits = _regex_match_count_by_category(text, _CATEGORY_MAP["exfil"])
+    role_hits = _regex_match_count_by_category(text, _CATEGORY_MAP["role"])
+    encoding_hits = _regex_match_count_by_category(text, _CATEGORY_MAP["encoding"])
+    separator_hits = _regex_match_count_by_category(text, _CATEGORY_MAP["separator"])
 
     score += override_hits * 4
     score += exfil_hits * 5
