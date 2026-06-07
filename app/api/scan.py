@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 import time
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Request, Response
 
 from app.core.errors import AppError
 from app.schemas.scan import (
@@ -17,6 +17,11 @@ from app.services.intake_service import prepare_intake
 from app.services.sandbox_service import apply_sandbox_policy, evaluate_sandbox
 from app.services.scanner import RULE_INDEX, get_rule_severities, perform_scan
 from app.services.telemetry import append_telemetry_event
+from app.services.telemetry_service import (
+    TelemetryEventInput,
+    build_agent_event,
+    post_telemetry_batch_async,
+)
 
 router = APIRouter()
 
@@ -128,11 +133,6 @@ def _build_explanation(result: dict) -> str:
 
 
 def _coerce_result_scalars(result: dict) -> dict:
-    """
-    Coerce any non-string / non-primitive values that Pydantic ScanResult
-    validates strictly.  This guards against MagicMock leakage in tests and
-    any future case where apply_sandbox_policy returns a non-primitive value.
-    """
     verdict = result.get("verdict")
     if not isinstance(verdict, str) or verdict not in _VALID_VERDICTS:
         result["verdict"] = "allow"
@@ -154,7 +154,40 @@ def _coerce_result_scalars(result: dict) -> dict:
     return result
 
 
-def _run_scan(request: ScanRequest) -> ScanResult:
+def _build_scan_completed_event(saved: dict, client_id: str | None) -> TelemetryEventInput:
+    scan_id = str(saved.get("scan_id") or "")
+    verdict = str(saved.get("verdict") or "allow")
+    target_type = str(saved.get("target_type") or "")
+    risk_score = saved.get("risk_score")
+
+    return build_agent_event(
+        source="ironclaw.scan",
+        metric_name="scan_completed",
+        metric_type="event",
+        org_id=str(client_id) if client_id else None,
+        value_text=verdict,
+        value_numeric=float(risk_score) if risk_score is not None else None,
+        dimensions={
+            "scan_id": scan_id,
+            "verdict": verdict,
+            "target_type": target_type,
+            "untrusted": saved.get("untrusted"),
+            "max_severity": saved.get("max_severity"),
+            "primary_category": saved.get("primary_category"),
+            "client_id": client_id,
+        },
+        extra_key_seed=f"{scan_id}:{verdict}",
+    )
+
+
+async def _flush_scan_event_async(event: TelemetryEventInput) -> None:
+    try:
+        await post_telemetry_batch_async([event])
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _run_scan(request: ScanRequest, background_tasks: BackgroundTasks) -> ScanResult:
     try:
         intake = prepare_intake(request.target_type, request.target_value)
     except ValueError as exc:
@@ -208,18 +241,11 @@ def _run_scan(request: ScanRequest) -> ScanResult:
     )
 
     result = apply_sandbox_policy(result, sandbox_decision)
-
-    # Coerce sandbox-injected fields to real primitives before persistence.
-    # This prevents MagicMock or other non-primitive values from reaching
-    # append_scan_result or ScanResult validation.
     result = _coerce_result_scalars(result)
-
     result["client_id"] = request.client_id
 
     saved = append_scan_result(result)
 
-    # Enrich saved after persistence so these fields are always present on the
-    # returned ScanResult regardless of what append_scan_result stores.
     matched_patterns = result.get("matched_patterns", [])
     saved["client_id"] = request.client_id
     saved["max_severity"] = _max_severity(matched_patterns)
@@ -240,11 +266,19 @@ def _run_scan(request: ScanRequest) -> ScanResult:
         },
     )
 
+    scan_event = _build_scan_completed_event(saved, request.client_id)
+    background_tasks.add_task(_flush_scan_event_async, scan_event)
+
     return ScanResult(**saved)
 
 
 @router.post("/", response_model=ScanResult)
-def create_scan(request: ScanRequest, http_request: Request, response: Response):
+def create_scan(
+    request: ScanRequest,
+    http_request: Request,
+    response: Response,
+    background_tasks: BackgroundTasks,
+):
     key = _client_rate_limit_key(http_request, request)
     limit, remaining = _enforce_scan_rate_limit(key)
 
@@ -262,7 +296,7 @@ def create_scan(request: ScanRequest, http_request: Request, response: Response)
         },
     )
 
-    return _run_scan(request)
+    return _run_scan(request, background_tasks)
 
 
 @router.post("/batch", response_model=BatchScanResponse)
@@ -270,6 +304,7 @@ def create_scan_batch(
     request: BatchScanRequest,
     http_request: Request,
     response: Response,
+    background_tasks: BackgroundTasks,
 ):
     key = _client_rate_limit_key(http_request)
     limit, remaining = _enforce_scan_rate_limit(key)
@@ -288,7 +323,7 @@ def create_scan_batch(
         },
     )
 
-    results = [_run_scan(item) for item in request.items]
+    results = [_run_scan(item, background_tasks) for item in request.items]
     return BatchScanResponse(
         count=len(results),
         items=results,
