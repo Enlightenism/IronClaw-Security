@@ -134,10 +134,16 @@ def _persist_detection_result(result: DetectionResult) -> None:
 
 
 def _dispatch_detection_webhook(result: DetectionResult, tenant_id: str) -> None:
-    """Fire-and-forget webhook dispatch for detection events."""
+    """
+    Fire-and-forget webhook dispatch for detection verdict events.
+    tenant_id is injected into the payload body so the Edge Function
+    and all downstream fan-out consumers can route per-tenant without
+    relying on the top-level dispatch_verdict_to_edge wrapper alone.
+    """
     try:
         event_type = _EVENT_THREAT_BLOCKED if result.verdict == DetectionVerdict.BLOCK else _EVENT_THREAT_DETECTED
         payload: dict[str, Any] = {
+            "tenant_id": tenant_id,
             "event_id": result.event_id,
             "org_id": result.org_id,
             "agent_id": result.agent_id,
@@ -267,9 +273,14 @@ async def detect_threat(
     effective_request = payload.model_copy(update={"org_id": effective_org_id}) if effective_org_id != payload.org_id else payload
     result = engine.run(effective_request)
     _persist_detection_result(result)
-    tenant_id = effective_org_id or auth.tenant_id or ""
+
+    # Resolve tenant_id — prefer org_id, fall back to auth.tenant_id.
+    # Both must be checked for None/empty before dispatching so we never
+    # fire a webhook with an empty tenant_id that would fail Edge fan-out.
+    tenant_id: str = (effective_org_id or auth.tenant_id or "").strip()
     if tenant_id:
         background_tasks.add_task(_dispatch_detection_webhook, result, tenant_id)
+
     if notification_engine is not None:
         try:
             notification_engine.notify_detection(
@@ -407,13 +418,14 @@ async def refresh_feeds(
         completed_at=_utcnow_iso(),
     )
 
-    tenant_id = effective_org_id or auth.tenant_id or ""
+    tenant_id = (effective_org_id or auth.tenant_id or "").strip()
     if tenant_id:
         background_tasks.add_task(
             dispatch_event,
             tenant_id,
             _EVENT_FEED_REFRESHED,
             {
+                "tenant_id": tenant_id,
                 "request_id": request_id,
                 "sources": [s.value for s in payload.sources],
                 "total_iocs_inserted": total_inserted,
@@ -556,13 +568,14 @@ async def threat_hunt(
     except Exception:
         pass
 
-    tenant_id = effective_org_id or auth.tenant_id or ""
+    tenant_id = (effective_org_id or auth.tenant_id or "").strip()
     if tenant_id and result.total_matches > 0:
         background_tasks.add_task(
             dispatch_event,
             tenant_id,
             _EVENT_HUNT_COMPLETED,
             {
+                "tenant_id": tenant_id,
                 "hunt_id": result.hunt_id,
                 "org_id": result.org_id,
                 "status": result.status.value,
