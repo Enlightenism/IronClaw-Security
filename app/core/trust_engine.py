@@ -13,9 +13,11 @@ from app.core.supabase_persistence import _T_AGENT_TRUST_PROFILES, _T_TRUST_EVEN
 
 _logger: logging.Logger = get_logger("ironclaw.trust_engine")
 
+
 # ---------------------------------------------------------------------------
 # Trust event types
 # ---------------------------------------------------------------------------
+
 
 TrustEventType = Literal[
     "anomaly_detected",
@@ -31,9 +33,11 @@ TrustEventType = Literal[
     "manual_adjustment",
 ]
 
+
 # ---------------------------------------------------------------------------
 # Decay weights per event type — how much each event reduces trust_score
 # ---------------------------------------------------------------------------
+
 
 _DECAY_WEIGHTS: dict[str, float] = {
     "anomaly_detected": 0.05,
@@ -49,18 +53,23 @@ _DECAY_WEIGHTS: dict[str, float] = {
     "manual_adjustment": 0.0,
 }
 
+
 # Restore amount applied for "trust_restored" event (negative decay = score gain)
 _RESTORE_AMOUNT: float = 0.10
+
 
 # Floor below which a trust_score cannot decay further without an explicit reset
 _SCORE_FLOOR: float = 0.0
 _SCORE_CEILING: float = 1.0
 
+
 # Default trust score for an agent with no profile
 _DEFAULT_SCORE: float = 0.75
 
+
 # TTL for in-process profile cache (seconds)
 _CACHE_TTL_SECONDS: float = 60.0
+
 
 # ---------------------------------------------------------------------------
 # TrustProfile — the public data structure returned to callers
@@ -96,6 +105,7 @@ class TrustEvent:
 # ---------------------------------------------------------------------------
 # In-process profile cache — keyed by agent_id
 # ---------------------------------------------------------------------------
+
 
 _lock: threading.RLock = threading.RLock()
 _profile_cache: dict[str, tuple[TrustProfile, float]] = {}
@@ -490,8 +500,9 @@ def restore_agent(
         _upsert_profile_to_db(restored)
     except Exception:  # noqa: BLE001
         pass
+
     with _lock:
-        _set_cached(agent_id, restored)
+        _evict_cached(agent_id)
 
     event = TrustEvent(
         event_id=str(uuid.uuid4()),
@@ -579,6 +590,7 @@ def trust_stats() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Public surface
 # ---------------------------------------------------------------------------
+
 
 __all__ = [
     "TrustEventType",
