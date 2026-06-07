@@ -28,6 +28,9 @@ VERDICT_PRIORITY: dict[str, int] = {
     BLOCK: 3,
 }
 
+# Trust score threshold below which a warn rule is injected (but not blocked)
+_TRUST_WARN_THRESHOLD: float = 0.25
+
 
 @dataclass(frozen=True, slots=True)
 class MatchedRule:
@@ -51,6 +54,9 @@ class PolicyVerdict:
     policy_set_key: str
     evaluated_at: str
     duration_ms: float
+    # Trust gate fields — set when agent_id is present on the input
+    trust_score_at_eval: float | None = None
+    agent_suspended: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -449,6 +455,79 @@ def _resolve_rules(tenant_key: str | None) -> tuple[str, list[dict[str, Any]]]:
 
 
 # ---------------------------------------------------------------------------
+# Trust gate — evaluated before any rule matching
+# ---------------------------------------------------------------------------
+
+
+def _apply_trust_gate(pinput: PolicyInput) -> tuple[list[MatchedRule], float | None, bool]:
+    """Evaluate the trust profile for pinput.agent_id.
+
+    Returns:
+        matched_rules  — synthetic MatchedRule entries injected by the trust gate
+        trust_score    — the agent's current trust_score (None if no agent_id)
+        is_suspended   — whether the agent is currently suspended
+
+    Resolution:
+      - No agent_id → no trust gate applied (pass-through).
+      - is_suspended=True → immediate block rule injected; callers must short-circuit.
+      - trust_score < _TRUST_WARN_THRESHOLD → warn rule injected.
+      - Otherwise → no synthetic rules added.
+    """
+    if not pinput.agent_id or not pinput.agent_id.strip():
+        return [], None, False
+
+    try:
+        from app.core.trust_engine import get_trust  # noqa: PLC0415
+
+        profile = get_trust(pinput.agent_id)
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning(
+            "policy_engine: trust_engine.get_trust failed for agent %r — skipping trust gate: %s",
+            pinput.agent_id,
+            exc,
+        )
+        return [], None, False
+
+    trust_score: float = profile.trust_score
+    is_suspended: bool = profile.is_suspended
+
+    if is_suspended:
+        reason = profile.suspension_reason or "Agent suspended"
+        rule = MatchedRule(
+            rule_id="trust_gate",
+            rule_name="Suspended agent blocked by trust gate",
+            rule_type="trust_gated_block",
+            action=BLOCK,
+            risk_contribution=1.0,
+            matched_field="agent_id",
+            matched_value=_truncate(f"{pinput.agent_id} — {reason}", 120),
+        )
+        _logger.warning(
+            "policy_engine.trust_gate.suspended",
+            extra={"agent_id": pinput.agent_id, "suspension_reason": reason},
+        )
+        return [rule], trust_score, True
+
+    if trust_score < _TRUST_WARN_THRESHOLD:
+        rule = MatchedRule(
+            rule_id="trust_gate",
+            rule_name="Low trust score — elevated review",
+            rule_type="trust_score_warn",
+            action=WARN,
+            risk_contribution=round(1.0 - trust_score, 4),
+            matched_field="trust_score",
+            matched_value=str(round(trust_score, 4)),
+        )
+        _logger.info(
+            "policy_engine.trust_gate.low_score",
+            extra={"agent_id": pinput.agent_id, "trust_score": trust_score},
+        )
+        return [rule], trust_score, False
+
+    return [], trust_score, False
+
+
+# ---------------------------------------------------------------------------
 # Core evaluation
 # ---------------------------------------------------------------------------
 
@@ -490,7 +569,10 @@ def _build_explanation(
     matched_rules: list[MatchedRule],
     risk_score: float,
     policy_set_key: str,
+    is_suspended: bool = False,
 ) -> str:
+    if is_suspended:
+        return f"Verdict '{action}' issued: agent is suspended. " f"All further evaluation was skipped. " f"Policy set: '{policy_set_key}'. Risk score: {risk_score:.4f}."
     if action == ALLOW:
         return f"Input passed all {len(matched_rules)} evaluated rules in policy set " f"'{policy_set_key}'. Risk score: {risk_score:.4f}."
     rule_names = ", ".join({r.rule_name for r in matched_rules if r.action != ALLOW})
@@ -509,18 +591,62 @@ def evaluate(pinput: PolicyInput) -> PolicyVerdict:
     No other module may independently compute a PolicyVerdict.
 
     Resolution order:
+      0. Trust gate — if agent_id is set, trust_engine.get_trust() is called.
+         Suspended agents receive an immediate block verdict; no further
+         rule evaluation is performed.  Low-trust agents receive a synthetic
+         warn rule that propagates into the final verdict.
       1. pinput.tenant_key — tenant-specific policy set if non-empty and found.
       2. ironclaw_default  — authoritative fallback policy set.
       3. Built-in safety net patterns — always applied regardless of DB state.
 
     Returns a PolicyVerdict with action: allow | warn | quarantine | block,
-    matched_rules, risk_score, and a human-readable explanation.
+    matched_rules, risk_score, trust_score_at_eval, agent_suspended, and a
+    human-readable explanation.
     """
     start = time.perf_counter()
 
+    # --- Trust gate (step 0) ------------------------------------------------
+    trust_matched, trust_score, is_suspended = _apply_trust_gate(pinput)
+
+    if is_suspended:
+        # Short-circuit: suspended agents never reach rule evaluation
+        risk_score = _compute_risk_score(trust_matched)
+        explanation = _build_explanation(BLOCK, trust_matched, risk_score, _DEFAULT_POLICY_SET_KEY, is_suspended=True)
+        duration_ms = round((time.perf_counter() - start) * 1000, 4)
+        verdict = PolicyVerdict(
+            verdict_id=str(uuid.uuid4()),
+            action=BLOCK,
+            matched_rules=trust_matched,
+            risk_score=risk_score,
+            explanation=explanation,
+            input_type=pinput.input_type,
+            policy_set_key=_DEFAULT_POLICY_SET_KEY,
+            evaluated_at=datetime.now(UTC).isoformat(),
+            duration_ms=duration_ms,
+            trust_score_at_eval=trust_score,
+            agent_suspended=True,
+        )
+        _logger.info(
+            "policy_engine.verdict",
+            extra={
+                "verdict_id": verdict.verdict_id,
+                "action": BLOCK,
+                "risk_score": risk_score,
+                "input_type": pinput.input_type,
+                "policy_set_key": _DEFAULT_POLICY_SET_KEY,
+                "matched_rule_count": len(trust_matched),
+                "duration_ms": duration_ms,
+                "agent_id": pinput.agent_id,
+                "trust_score": trust_score,
+                "agent_suspended": True,
+            },
+        )
+        return verdict
+
+    # --- Policy set resolution + rule evaluation (steps 1-3) ---------------
     policy_set_key, db_rules = _resolve_rules(pinput.tenant_key)
 
-    matched: list[MatchedRule] = []
+    matched: list[MatchedRule] = list(trust_matched)  # carry low-trust warn if present
 
     builtin_hits = _apply_builtin_safety_net(pinput)
     matched.extend(builtin_hits)
@@ -545,6 +671,8 @@ def evaluate(pinput: PolicyInput) -> PolicyVerdict:
         policy_set_key=policy_set_key,
         evaluated_at=datetime.now(UTC).isoformat(),
         duration_ms=duration_ms,
+        trust_score_at_eval=trust_score,
+        agent_suspended=False,
     )
 
     _logger.info(
@@ -558,6 +686,8 @@ def evaluate(pinput: PolicyInput) -> PolicyVerdict:
             "matched_rule_count": len(matched),
             "duration_ms": duration_ms,
             "agent_id": pinput.agent_id,
+            "trust_score": trust_score,
+            "agent_suspended": False,
         },
     )
 
