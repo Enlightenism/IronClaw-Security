@@ -25,10 +25,14 @@ _WEBHOOK_SUBSCRIPTIONS_TABLE = "webhook_subscriptions"
 _MAX_ATTEMPTS: int = 5
 _RETRY_BACKOFF_BASE: float = 2.0
 _DELIVERY_TIMEOUT_SECONDS: float = 10.0
+_EDGE_DISPATCH_TIMEOUT_SECONDS: float = 15.0
 _SIGNATURE_HEADER = "X-IronClaw-Signature-256"
 _DELIVERY_ID_HEADER = "X-IronClaw-Delivery"
 _EVENT_HEADER = "X-IronClaw-Event"
 _TIMESTAMP_HEADER = "X-IronClaw-Timestamp"
+
+# Edge Function name — matches the deployed Supabase function name exactly.
+_EDGE_FUNCTION_NAME = "ironclaw-webhook-dispatch"
 
 # ---------------------------------------------------------------------------
 # Enums / types
@@ -142,6 +146,28 @@ class WebhookDispatchResult:
         }
 
 
+@dataclass(frozen=True)
+class EdgeDispatchResult:
+    """Result of a POST to the ironclaw-webhook-dispatch Edge Function."""
+
+    event_type: str
+    tenant_id: str
+    http_status: int | None
+    succeeded: bool
+    error_detail: str | None
+    dispatched_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "event_type": self.event_type,
+            "tenant_id": self.tenant_id,
+            "http_status": self.http_status,
+            "succeeded": self.succeeded,
+            "error_detail": self.error_detail,
+            "dispatched_at": self.dispatched_at,
+        }
+
+
 # ---------------------------------------------------------------------------
 # HMAC-SHA256 signature
 # ---------------------------------------------------------------------------
@@ -168,16 +194,172 @@ def verify_webhook_signature(
 
 
 # ---------------------------------------------------------------------------
-# Supabase service-role client accessor
+# Supabase service-role client accessor (canonical — delegates to app.core.supabase)
 # ---------------------------------------------------------------------------
 
 
 def _get_service_role_client() -> Any:
-    from supabase import create_client  # type: ignore[import]
+    try:
+        from app.core.supabase import get_supabase_service_client  # type: ignore[import]
 
-    url = os.environ["SUPABASE_URL"]
-    key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-    return create_client(url, key)
+        return get_supabase_service_client()
+    except ImportError:
+        # Fallback: construct directly when core module is unavailable (e.g. isolated tests)
+        from supabase import create_client  # type: ignore[import]
+
+        url = os.environ["SUPABASE_URL"]
+        key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+        return create_client(url, key)
+
+
+# ---------------------------------------------------------------------------
+# Edge Function URL builder
+# ---------------------------------------------------------------------------
+
+
+def _edge_function_url(function_name: str) -> str:
+    """
+    Constructs the Supabase Edge Function URL:
+      {SUPABASE_URL}/functions/v1/{function_name}
+
+    Raises ValueError if SUPABASE_URL is not set.
+    """
+    base = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    if not base:
+        raise ValueError("SUPABASE_URL environment variable is not set.")
+    return f"{base}/functions/v1/{function_name}"
+
+
+# ---------------------------------------------------------------------------
+# Edge Function caller — POST verdict event to ironclaw-webhook-dispatch
+# ---------------------------------------------------------------------------
+
+
+def dispatch_verdict_to_edge(
+    event_type: str,
+    payload: dict[str, Any],
+    tenant_id: str,
+    *,
+    timeout: float = _EDGE_DISPATCH_TIMEOUT_SECONDS,
+) -> EdgeDispatchResult:
+    """
+    POST {event_type, payload, tenant_id} to the ironclaw-webhook-dispatch
+    Supabase Edge Function using the service-role Bearer token.
+
+    Called after every verdict is issued. Failures are logged and returned
+    as a failed EdgeDispatchResult — they never raise so the verdict path
+    is never blocked.
+    """
+    service_role_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    if not service_role_key:
+        logger.error("webhook_service | dispatch_verdict_to_edge | SUPABASE_SERVICE_ROLE_KEY not set")
+        return EdgeDispatchResult(
+            event_type=event_type,
+            tenant_id=tenant_id,
+            http_status=None,
+            succeeded=False,
+            error_detail="SUPABASE_SERVICE_ROLE_KEY not configured",
+            dispatched_at=datetime.now(UTC).isoformat(),
+        )
+
+    try:
+        url = _edge_function_url(_EDGE_FUNCTION_NAME)
+    except ValueError as exc:
+        logger.error("webhook_service | dispatch_verdict_to_edge | url build error | %s", exc)
+        return EdgeDispatchResult(
+            event_type=event_type,
+            tenant_id=tenant_id,
+            http_status=None,
+            succeeded=False,
+            error_detail=str(exc),
+            dispatched_at=datetime.now(UTC).isoformat(),
+        )
+
+    body: dict[str, Any] = {
+        "event_type": event_type,
+        "payload": payload,
+        "tenant_id": tenant_id,
+        "dispatched_at": datetime.now(UTC).isoformat(),
+    }
+    body_bytes = json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {service_role_key}",
+        "User-Agent": "IronClaw-Security/1.0",
+    }
+
+    dispatched_at = datetime.now(UTC).isoformat()
+
+    try:
+        with httpx.Client(timeout=timeout) as http:
+            response = http.post(url, content=body_bytes, headers=headers)
+
+        if response.is_success:
+            logger.info(
+                "webhook_service | dispatch_verdict_to_edge | event_type=%s tenant_id=%s http=%d",
+                event_type,
+                tenant_id,
+                response.status_code,
+            )
+            return EdgeDispatchResult(
+                event_type=event_type,
+                tenant_id=tenant_id,
+                http_status=response.status_code,
+                succeeded=True,
+                error_detail=None,
+                dispatched_at=dispatched_at,
+            )
+
+        error_detail = f"Non-2xx from edge function: HTTP {response.status_code} — {response.text[:512]}"
+        logger.warning(
+            "webhook_service | dispatch_verdict_to_edge | event_type=%s tenant_id=%s http=%d detail=%s",
+            event_type,
+            tenant_id,
+            response.status_code,
+            error_detail,
+        )
+        return EdgeDispatchResult(
+            event_type=event_type,
+            tenant_id=tenant_id,
+            http_status=response.status_code,
+            succeeded=False,
+            error_detail=error_detail,
+            dispatched_at=dispatched_at,
+        )
+
+    except httpx.TimeoutException as exc:
+        detail = f"Timeout after {timeout}s contacting edge function: {exc}"
+        logger.warning(
+            "webhook_service | dispatch_verdict_to_edge | event_type=%s tenant_id=%s timeout",
+            event_type,
+            tenant_id,
+        )
+        return EdgeDispatchResult(
+            event_type=event_type,
+            tenant_id=tenant_id,
+            http_status=None,
+            succeeded=False,
+            error_detail=detail,
+            dispatched_at=dispatched_at,
+        )
+
+    except Exception as exc:  # noqa: BLE001
+        detail = f"HTTP error contacting edge function: {exc}"
+        logger.error(
+            "webhook_service | dispatch_verdict_to_edge | event_type=%s tenant_id=%s error=%s",
+            event_type,
+            tenant_id,
+            exc,
+        )
+        return EdgeDispatchResult(
+            event_type=event_type,
+            tenant_id=tenant_id,
+            http_status=None,
+            succeeded=False,
+            error_detail=detail,
+            dispatched_at=dispatched_at,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +650,7 @@ def deliver_webhook(
 
 # ---------------------------------------------------------------------------
 # Fan-out: dispatch event to all matching subscriptions for a tenant
+# AND fire the ironclaw-webhook-dispatch Edge Function
 # ---------------------------------------------------------------------------
 
 
@@ -477,7 +660,16 @@ def dispatch_event(
     payload: dict[str, Any],
     *,
     client: Any = None,
+    fire_edge_function: bool = True,
 ) -> list[WebhookDispatchResult]:
+    """
+    Fan-out webhook delivery to all active subscriptions for this tenant/event,
+    then POST to the ironclaw-webhook-dispatch Edge Function so that server-side
+    downstream consumers (alerting, SIEM, realtime channels) are notified.
+
+    `fire_edge_function=False` disables the edge call for tests or environments
+    where the Edge Function is not deployed.
+    """
     subscriptions = _query_subscriptions_for_event(tenant_id, event_type, client=client)
 
     if not subscriptions:
@@ -486,7 +678,6 @@ def dispatch_event(
             tenant_id,
             event_type,
         )
-        return []
 
     results: list[WebhookDispatchResult] = []
     for sub in subscriptions:
@@ -503,6 +694,23 @@ def dispatch_event(
         succeeded,
         failed,
     )
+
+    # Fire the ironclaw-webhook-dispatch Edge Function after every verdict fan-out.
+    # This is non-blocking to the verdict path: failures are logged only.
+    if fire_edge_function:
+        edge_result = dispatch_verdict_to_edge(
+            event_type=event_type,
+            payload=payload,
+            tenant_id=tenant_id,
+        )
+        if not edge_result.succeeded:
+            logger.warning(
+                "webhook_service | dispatch_event | edge_dispatch_failed | tenant_id=%s event_type=%s detail=%s",
+                tenant_id,
+                event_type,
+                edge_result.error_detail,
+            )
+
     return results
 
 
