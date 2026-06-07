@@ -324,49 +324,65 @@ def _eval_data_exfil(rule: dict[str, Any], pinput: PolicyInput) -> MatchedRule |
 
 
 # ---------------------------------------------------------------------------
-# Built-in safety net patterns — active even when DB has no rules
+# Built-in safety net — delegates to pattern_registry for zero duplication
 # ---------------------------------------------------------------------------
 
-_BUILTIN_INJECTION_PATTERNS: list[re.Pattern[str]] = []
+# Severity → verdict mapping for safety-net hits from the registry
+_SAFETY_NET_SEVERITY_ACTION: dict[str, VerdictAction] = {
+    "critical": BLOCK,
+    "high": BLOCK,
+    "medium": WARN,
+    "low": WARN,
+}
 
-_RAW_INJECTION_PATTERNS: list[str] = [
-    r"ignore\s+(all\s+)?previous\s+instructions",
-    r"disregard\s+(all\s+)?prior\s+(instructions|directives|constraints)",
-    r"you\s+are\s+now\s+in\s+developer\s+mode",
-    r"jailbreak",
-    r"do\s+anything\s+now",
-    r"DAN\s+mode",
-    r"<\s*SYSTEM\s*>",
-    r"\[\s*SYSTEM\s*\]",
-    r"pretend\s+(you\s+are|to\s+be)\s+.{0,60}(without|no)\s+(restrictions|limits|filter)",
-    r"act\s+as\s+(if\s+you\s+(are|have\s+no)|a)\s+.{0,40}(uncensored|unfiltered|unrestricted)",
-]
-
-for _raw in _RAW_INJECTION_PATTERNS:
-    try:
-        _BUILTIN_INJECTION_PATTERNS.append(re.compile(_raw, re.IGNORECASE | re.DOTALL))
-    except re.error:
-        pass
+# Risk contribution per severity level for safety-net hits
+_SAFETY_NET_SEVERITY_RISK: dict[str, float] = {
+    "critical": 1.0,
+    "high": 1.0,
+    "medium": 0.6,
+    "low": 0.3,
+}
 
 
 def _apply_builtin_safety_net(pinput: PolicyInput) -> list[MatchedRule]:
+    """Apply the built-in injection safety net via pattern_registry.
+
+    Delegates entirely to pattern_registry.match_by_category() — no compiled
+    pattern list is maintained here.  Covers prompt_injection and
+    separator_injection categories for prompt and execution_plan inputs.
+    """
     if pinput.input_type not in ("prompt", "execution_plan"):
         return []
+
+    try:
+        from app.core import pattern_registry  # noqa: PLC0415
+
+        hits = pattern_registry.match_by_category(
+            pinput.content,
+            ["prompt_injection", "separator_injection"],
+        )
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning(
+            "policy_engine: pattern_registry.match_by_category failed — safety net skipped: %s",
+            exc,
+        )
+        return []
+
     results: list[MatchedRule] = []
-    for compiled in _BUILTIN_INJECTION_PATTERNS:
-        m = compiled.search(pinput.content)
-        if m:
-            results.append(
-                MatchedRule(
-                    rule_id="builtin",
-                    rule_name="Built-in prompt injection pattern",
-                    rule_type="prompt_injection_pattern",
-                    action=BLOCK,
-                    risk_contribution=1.0,
-                    matched_field="content",
-                    matched_value=_truncate(m.group(0), 120),
-                )
+    for hit in hits:
+        action = _SAFETY_NET_SEVERITY_ACTION.get(hit.severity, BLOCK)
+        risk = _SAFETY_NET_SEVERITY_RISK.get(hit.severity, 1.0)
+        results.append(
+            MatchedRule(
+                rule_id=f"builtin:{hit.pattern_id}",
+                rule_name=hit.pattern_name,
+                rule_type="prompt_injection_pattern",
+                action=action,
+                risk_contribution=risk,
+                matched_field="content",
+                matched_value=_truncate(hit.matched_value, 120),
             )
+        )
     return results
 
 
@@ -597,7 +613,8 @@ def evaluate(pinput: PolicyInput) -> PolicyVerdict:
          warn rule that propagates into the final verdict.
       1. pinput.tenant_key — tenant-specific policy set if non-empty and found.
       2. ironclaw_default  — authoritative fallback policy set.
-      3. Built-in safety net patterns — always applied regardless of DB state.
+      3. Built-in safety net — always applied via pattern_registry regardless
+         of DB state; covers prompt_injection and separator_injection categories.
 
     Returns a PolicyVerdict with action: allow | warn | quarantine | block,
     matched_rules, risk_score, trust_score_at_eval, agent_suspended, and a
