@@ -260,6 +260,41 @@ def _record_and_drift(
         return None
 
 
+def _fire_verdict_event(
+    *,
+    tenant_id: str | None,
+    verdict: VerdictType,
+    action_type: ActionType,
+    target: str,
+    risk_score: int,
+    scan_id: str | None,
+    client_id: str | None,
+    session_id: str | None,
+    agent_id: str | None,
+    matched_patterns: list[str],
+) -> None:
+    if not tenant_id:
+        return
+    try:
+        from app.services.webhook_service import dispatch_event  # noqa: PLC0415
+
+        event_type = f"guard.{verdict}"
+        payload: dict[str, Any] = {
+            "verdict": verdict,
+            "action_type": action_type,
+            "target": target,
+            "risk_score": risk_score,
+            "scan_id": scan_id,
+            "client_id": client_id,
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "matched_patterns": matched_patterns,
+        }
+        dispatch_event(tenant_id, event_type, payload)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def analyze_action(
     action_type: ActionType,
     target: str,
@@ -267,6 +302,7 @@ def analyze_action(
     client_id: str | None = None,
     session_id: str | None = None,
     agent_id: str | None = None,
+    tenant_id: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> ActionGuardDecision:
     combined_text = f"{action_type}\nTARGET:\n{target}\nCONTENT:\n{content}".strip()
@@ -349,10 +385,25 @@ def analyze_action(
         promptinjection=promptinjection,
     )
 
+    scan_id = result.get("scan_id")
+
+    _fire_verdict_event(
+        tenant_id=tenant_id,
+        verdict=final_verdict,
+        action_type=action_type,
+        target=target,
+        risk_score=risk_score,
+        scan_id=scan_id,
+        client_id=client_id,
+        session_id=session_id,
+        agent_id=agent_id,
+        matched_patterns=matched_patterns,
+    )
+
     return {
         "action_type": action_type,
         "verdict": final_verdict,
-        "scan_id": result.get("scan_id"),
+        "scan_id": scan_id,
         "summary": summary,
         "risk_score": risk_score,
         "matched_patterns": matched_patterns,

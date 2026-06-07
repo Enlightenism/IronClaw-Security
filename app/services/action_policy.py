@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 from app.services.action_guard import ActionType, VerdictType
 
@@ -413,6 +413,35 @@ def _build_allow_decision(
     )
 
 
+def _fire_verdict_event(
+    *,
+    tenant_id: str | None,
+    verdict: VerdictType,
+    action_type: ActionType,
+    target: str,
+    policy_mode: PolicyMode,
+    client_id: str | None,
+    session_id: str | None,
+) -> None:
+    if not tenant_id:
+        return
+    try:
+        from app.services.webhook_service import dispatch_event  # noqa: PLC0415
+
+        event_type = f"policy.{verdict}"
+        payload: dict[str, Any] = {
+            "verdict": verdict,
+            "policy_mode": policy_mode,
+            "action_type": action_type,
+            "target": target,
+            "client_id": client_id,
+            "session_id": session_id,
+        }
+        dispatch_event(tenant_id, event_type, payload)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Public evaluation entry point
 # ---------------------------------------------------------------------------
@@ -423,20 +452,31 @@ def evaluate_action_policy(
     target: str,
     client_id: str | None = None,
     session_id: str | None = None,
+    tenant_id: str | None = None,
 ) -> ActionPolicyDecision:
     normalized_target = _normalize_target(target)
 
     if _target_contains_any(normalized_target, BLOCKED_TARGETS):
-        return _build_block_decision(
+        decision = _build_block_decision(
             action_type=action_type,
             target=target,
             summary="Target is outside the allowed safety boundary.",
             client_id=client_id,
             session_id=session_id,
         )
+        _fire_verdict_event(
+            tenant_id=tenant_id,
+            verdict=decision["verdict"],
+            action_type=action_type,
+            target=target,
+            policy_mode=decision["policy_mode"],
+            client_id=client_id,
+            session_id=session_id,
+        )
+        return decision
 
     if action_type in ELEVATED_REVIEW_ACTIONS:
-        return _build_review_decision(
+        decision = _build_review_decision(
             action_type=action_type,
             target=target,
             summary="Action type requires elevated review before execution.",
@@ -444,9 +484,19 @@ def evaluate_action_policy(
             session_id=session_id,
             label="Elevated action type",
         )
+        _fire_verdict_event(
+            tenant_id=tenant_id,
+            verdict=decision["verdict"],
+            action_type=action_type,
+            target=target,
+            policy_mode=decision["policy_mode"],
+            client_id=client_id,
+            session_id=session_id,
+        )
+        return decision
 
     if _target_contains_any(normalized_target, HIGH_REVIEW_TARGETS):
-        return _build_review_decision(
+        decision = _build_review_decision(
             action_type=action_type,
             target=target,
             summary="Target requires elevated review before execution.",
@@ -454,10 +504,30 @@ def evaluate_action_policy(
             session_id=session_id,
             label="Elevated target",
         )
+        _fire_verdict_event(
+            tenant_id=tenant_id,
+            verdict=decision["verdict"],
+            action_type=action_type,
+            target=target,
+            policy_mode=decision["policy_mode"],
+            client_id=client_id,
+            session_id=session_id,
+        )
+        return decision
 
-    return _build_allow_decision(
+    decision = _build_allow_decision(
         action_type=action_type,
         target=target,
         client_id=client_id,
         session_id=session_id,
     )
+    _fire_verdict_event(
+        tenant_id=tenant_id,
+        verdict=decision["verdict"],
+        action_type=action_type,
+        target=target,
+        policy_mode=decision["policy_mode"],
+        client_id=client_id,
+        session_id=session_id,
+    )
+    return decision
