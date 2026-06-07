@@ -59,13 +59,6 @@ HEURISTIC_TERMS = {
     "do anything now": 4,
 }
 
-# ---------------------------------------------------------------------------
-# These constants are retained as the authoritative single source of truth
-# for callers that import them directly (e.g. legacy routes, tests).
-# Pattern matching in scoring delegates to pattern_registry.match_by_category()
-# so that db-sourced patterns are also evaluated without duplication.
-# ---------------------------------------------------------------------------
-
 OVERRIDE_PATTERNS = [
     r"\bignore\s+(all\s+)?previous\s+instructions\b",
     r"\bdisregard\s+(all\s+)?previous\s+instructions\b",
@@ -114,10 +107,6 @@ SEPARATOR_PATTERNS = [
     r"\bEND\s+SYSTEM\s+PROMPT\b",
 ]
 
-# ---------------------------------------------------------------------------
-# Category → PatternCategory mapping for registry delegation
-# ---------------------------------------------------------------------------
-
 _CATEGORY_MAP: dict[str, list[pattern_registry.PatternCategory]] = {
     "override": ["prompt_injection"],
     "exfil": ["data_exfiltration"],
@@ -132,6 +121,19 @@ def _normalize_for_heuristics(text: str) -> str:
     text = re.sub(r"[^a-z0-9\s]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
+
+
+def _regex_match_count(text: str, patterns: list[str]) -> int:
+    """Count how many patterns in *patterns* produce at least one match in *text*.
+    Case-insensitive. One count per pattern (not per match occurrence).
+    """
+    if not text or not patterns:
+        return 0
+    count = 0
+    for pattern in patterns:
+        if re.search(pattern, text, re.IGNORECASE):
+            count += 1
+    return count
 
 
 def _regex_match_count_by_category(

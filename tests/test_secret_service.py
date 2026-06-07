@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from unittest.mock import patch
 
+import app.services.secrets_vault as _vault_module
 from app.services.secrets_vault import _SecretsVault
 
 # ---------------------------------------------------------------------------
@@ -300,27 +301,32 @@ def test_get_returns_none_when_absent_no_default():
 
 
 # ---------------------------------------------------------------------------
-# Singleton
+# Singleton — all references resolved from the same module object
 # ---------------------------------------------------------------------------
 
 
 def test_vault_singleton_is_same_object():
-    from app.services.secrets_vault import _vault_singleton
-    from app.services.secrets_vault import vault as v1
-
-    v2 = _vault_singleton()
+    _vault_module._vault_singleton.cache_clear()
+    v1 = _vault_module._vault_singleton()
+    v2 = _vault_module._vault_singleton()
     assert v1 is v2
 
 
 def test_vault_singleton_is_secrets_vault_instance():
-    from app.services.secrets_vault import vault
-
-    assert isinstance(vault, _SecretsVault)
+    vault = _vault_module.vault
+    assert isinstance(vault, _vault_module._SecretsVault)
 
 
 def test_vault_module_level_export_functional():
-    from app.services.secrets_vault import vault
-
-    assert vault.app_name() in ("IronClaw-Security", os.getenv("APP_NAME", "IronClaw-Security"))
+    vault = _vault_module.vault
+    assert vault.app_name() in (
+        "IronClaw-Security",
+        os.getenv("APP_NAME", "IronClaw-Security"),
+    )
     assert isinstance(vault.app_port(), int)
-    assert vault.environment() in ("development", "staging", "production", os.getenv("ENVIRONMENT", "development"))
+    assert vault.environment() in (
+        "development",
+        "staging",
+        "production",
+        os.getenv("ENVIRONMENT", "development"),
+    )
