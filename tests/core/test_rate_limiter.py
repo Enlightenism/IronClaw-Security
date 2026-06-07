@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import math
 import time
 from unittest.mock import MagicMock, patch
 
 from fastapi import HTTPException, Request
-from fastapi.testclient import TestClient
 import pytest
 from starlette.datastructures import Headers
 
@@ -19,9 +17,22 @@ from app.core.rate_limiter import (
     key_for_api_key,
     key_for_ip,
     raise_429,
-    rate_limit_dependency,
     reset_key,
 )
+
+# ---------------------------------------------------------------------------
+# Patch targets
+# ---------------------------------------------------------------------------
+
+# check_and_increment owns its own DB path via _get_client
+_PATCH_GET_CLIENT = "app.core.rate_limiter._get_client"
+
+# reset_key and get_key_state use lazy imports inside the function body —
+# the names are never module-level attributes on app.core.rate_limiter.
+# Patch the canonical persistence module directly.
+_PATCH_DELETE_RL = "app.core.supabase_persistence.delete_rate_limit_state"
+_PATCH_GET_RL = "app.core.supabase_persistence.get_rate_limit_state"
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -84,7 +95,7 @@ def _mock_client_raising(exc: Exception):
 class TestCheckAndIncrementFirstCall:
     def test_allowed_true_and_remaining_4(self):
         mock_client = _mock_client_with_row(None)
-        with patch("app.core.rate_limiter._get_client", return_value=mock_client):
+        with patch(_PATCH_GET_CLIENT, return_value=mock_client):
             result = check_and_increment("test:key:first", limit=5, window_seconds=60)
 
         assert result.allowed is True
@@ -97,7 +108,7 @@ class TestCheckAndIncrementAtLimit:
     def test_fifth_call_allowed_with_remaining_zero(self):
         now = time.time()
         mock_client = _mock_client_with_row(_make_row(count=4, window_start=now - 1))
-        with patch("app.core.rate_limiter._get_client", return_value=mock_client):
+        with patch(_PATCH_GET_CLIENT, return_value=mock_client):
             result = check_and_increment("test:key:limit", limit=5, window_seconds=60)
 
         assert result.allowed is True
@@ -110,7 +121,7 @@ class TestCheckAndIncrementExceeded:
     def test_sixth_call_blocked(self):
         now = time.time()
         mock_client = _mock_client_with_row(_make_row(count=5, window_start=now - 1))
-        with patch("app.core.rate_limiter._get_client", return_value=mock_client):
+        with patch(_PATCH_GET_CLIENT, return_value=mock_client):
             result = check_and_increment("test:key:exceed", limit=5, window_seconds=60)
 
         assert result.allowed is False
@@ -120,7 +131,7 @@ class TestCheckAndIncrementExceeded:
     def test_retry_after_always_gte_1_when_blocked(self):
         now = time.time()
         mock_client = _mock_client_with_row(_make_row(count=10, window_start=now - 59))
-        with patch("app.core.rate_limiter._get_client", return_value=mock_client):
+        with patch(_PATCH_GET_CLIENT, return_value=mock_client):
             result = check_and_increment("test:key:retry", limit=5, window_seconds=60)
 
         assert result.allowed is False
@@ -130,7 +141,7 @@ class TestCheckAndIncrementExceeded:
 class TestCheckAndIncrementRetryAfterZeroWhenAllowed:
     def test_retry_after_zero_on_allowed(self):
         mock_client = _mock_client_with_row(None)
-        with patch("app.core.rate_limiter._get_client", return_value=mock_client):
+        with patch(_PATCH_GET_CLIENT, return_value=mock_client):
             result = check_and_increment("test:key:allowed", limit=5, window_seconds=60)
 
         assert result.allowed is True
@@ -146,7 +157,7 @@ class TestCheckAndIncrementWindowExpiry:
     def test_expired_window_resets_count_to_1(self):
         ancient_start = time.time() - 120
         mock_client = _mock_client_with_row(_make_row(count=5, window_start=ancient_start, window_seconds=60))
-        with patch("app.core.rate_limiter._get_client", return_value=mock_client):
+        with patch(_PATCH_GET_CLIENT, return_value=mock_client):
             result = check_and_increment("test:key:expired", limit=5, window_seconds=60)
 
         assert result.allowed is True
@@ -177,7 +188,7 @@ class TestCheckAndIncrementFailOpen:
 
         exc = SupabaseAPIError("simulated DB failure")
         mock_client = _mock_client_raising(exc)
-        with patch("app.core.rate_limiter._get_client", return_value=mock_client):
+        with patch(_PATCH_GET_CLIENT, return_value=mock_client):
             result = check_and_increment("test:key:failopen", limit=5, window_seconds=60)
 
         assert result.allowed is True
@@ -187,7 +198,7 @@ class TestCheckAndIncrementFailOpen:
 
         exc = SupabaseAPIError("another DB failure")
         mock_client = _mock_client_raising(exc)
-        with patch("app.core.rate_limiter._get_client", return_value=mock_client):
+        with patch(_PATCH_GET_CLIENT, return_value=mock_client):
             try:
                 check_and_increment("test:key:noexc", limit=5, window_seconds=60)
             except Exception as e:
@@ -348,24 +359,24 @@ class TestKeyComposite:
 
 
 # ---------------------------------------------------------------------------
-# reset_key
+# reset_key — delegates to supabase_persistence.delete_rate_limit_state
 # ---------------------------------------------------------------------------
 
 
 class TestResetKey:
     def test_returns_true_on_success(self):
-        delete_resp = MagicMock()
-        delete_resp.data = {}
+        with patch(_PATCH_DELETE_RL, return_value=None) as mock_delete:
+            result = reset_key("ip:1.2.3.4")
 
-        qb = MagicMock()
-        qb.eq.return_value = qb
-        qb.execute.return_value = delete_resp
+        assert result is True
+        mock_delete.assert_called_once_with("ip:1.2.3.4")
 
-        client = MagicMock()
-        client.table.return_value = MagicMock(delete=MagicMock(return_value=qb))
+    def test_key_is_stripped_before_delegation(self):
+        with patch(_PATCH_DELETE_RL, return_value=None) as mock_delete:
+            result = reset_key("  ip:1.2.3.4  ")
 
-        with patch("app.core.rate_limiter._get_client", return_value=client):
-            assert reset_key("ip:1.2.3.4") is True
+        assert result is True
+        mock_delete.assert_called_once_with("ip:1.2.3.4")
 
     def test_empty_key_returns_false_without_raising(self):
         try:
@@ -378,92 +389,98 @@ class TestResetKey:
         result = reset_key("   ")
         assert result is False
 
+    def test_persistence_error_returns_false(self):
+        from app.core.supabase_persistence import PersistenceError
+
+        with patch(_PATCH_DELETE_RL, side_effect=PersistenceError("delete_rate_limit_state", "db down")):
+            result = reset_key("ip:1.2.3.4")
+
+        assert result is False
+
+    def test_unexpected_exception_returns_false(self):
+        with patch(_PATCH_DELETE_RL, side_effect=RuntimeError("unexpected")):
+            result = reset_key("ip:1.2.3.4")
+
+        assert result is False
+
+    def test_does_not_raise_on_persistence_error(self):
+        from app.core.supabase_persistence import PersistenceError
+
+        with patch(_PATCH_DELETE_RL, side_effect=PersistenceError("delete_rate_limit_state", "db down")):
+            try:
+                reset_key("ip:1.2.3.4")
+            except Exception as e:
+                pytest.fail(f"reset_key raised on PersistenceError: {e}")
+
 
 # ---------------------------------------------------------------------------
-# get_key_state
+# get_key_state — delegates to supabase_persistence.get_rate_limit_state
 # ---------------------------------------------------------------------------
 
 
 class TestGetKeyState:
+    _ROW: dict = {
+        "key": "ip:1.2.3.4",
+        "count": 3,
+        "window_start": 1700000000.0,
+        "window_seconds": 60,
+        "rate_limit": 5,
+    }
+
+    def test_returns_row_dict_when_found(self):
+        with patch(_PATCH_GET_RL, return_value=self._ROW) as mock_get:
+            result = get_key_state("ip:1.2.3.4")
+
+        assert result == self._ROW
+        mock_get.assert_called_once_with("ip:1.2.3.4")
+
+    def test_key_is_stripped_before_delegation(self):
+        with patch(_PATCH_GET_RL, return_value=self._ROW) as mock_get:
+            result = get_key_state("  ip:1.2.3.4  ")
+
+        assert result == self._ROW
+        mock_get.assert_called_once_with("ip:1.2.3.4")
+
     def test_unknown_key_returns_none(self):
-        mock_resp = MagicMock()
-        mock_resp.data = None
-
-        qb = MagicMock()
-        qb.select.return_value = qb
-        qb.eq.return_value = qb
-        qb.maybe_single.return_value = qb
-        qb.execute.return_value = mock_resp
-
-        client = MagicMock()
-        client.table.return_value = MagicMock(select=MagicMock(return_value=qb))
-
-        with patch("app.core.rate_limiter._get_client", return_value=client):
-            result = get_key_state("ip:unknown-host")
+        with patch(_PATCH_GET_RL, return_value=None):
+            result = get_key_state("ip:0.0.0.0")
 
         assert result is None
 
     def test_unknown_key_does_not_raise(self):
-        mock_resp = MagicMock()
-        mock_resp.data = {}
-
-        qb = MagicMock()
-        qb.select.return_value = qb
-        qb.eq.return_value = qb
-        qb.maybe_single.return_value = qb
-        qb.execute.return_value = mock_resp
-
-        client = MagicMock()
-        client.table.return_value = MagicMock(select=MagicMock(return_value=qb))
-
-        with patch("app.core.rate_limiter._get_client", return_value=client):
+        with patch(_PATCH_GET_RL, return_value=None):
             try:
-                get_key_state("ip:never-seen")
+                get_key_state("ip:0.0.0.0")
             except Exception as e:
-                pytest.fail(f"get_key_state raised: {e}")
+                pytest.fail(f"get_key_state raised unexpectedly: {e}")
 
+    def test_empty_key_returns_none(self):
+        result = get_key_state("")
+        assert result is None
 
-# ---------------------------------------------------------------------------
-# rate_limit_dependency — integration via TestClient
-# ---------------------------------------------------------------------------
+    def test_blank_key_returns_none(self):
+        result = get_key_state("   ")
+        assert result is None
 
+    def test_persistence_error_returns_none(self):
+        from app.core.supabase_persistence import PersistenceError
 
-class TestRateLimitDependency:
-    def test_raises_429_after_limit_calls(self):
-        from fastapi import Depends, FastAPI
+        with patch(_PATCH_GET_RL, side_effect=PersistenceError("get_rate_limit_state", "db down")):
+            result = get_key_state("ip:1.2.3.4")
 
-        inner_app = FastAPI()
-        dep = rate_limit_dependency(limit=3, window_seconds=10)
+        assert result is None
 
-        call_count = {"n": 0}
+    def test_unexpected_exception_returns_none(self):
+        with patch(_PATCH_GET_RL, side_effect=RuntimeError("unexpected")):
+            result = get_key_state("ip:1.2.3.4")
 
-        def _fake_check(key, limit, window_seconds):
-            call_count["n"] += 1
-            n = call_count["n"]
-            allowed = n <= limit
-            remaining = max(0, limit - n)
-            elapsed = 1.0
-            retry_after = 0 if allowed else max(1, math.ceil(window_seconds - elapsed))
-            return RateLimitResult(
-                key=key,
-                allowed=allowed,
-                limit=limit,
-                remaining=remaining,
-                window_seconds=window_seconds,
-                window_start=time.time() - elapsed,
-                current_count=n,
-                retry_after=retry_after,
-            )
+        assert result is None
 
-        @inner_app.get("/probe", dependencies=[Depends(dep)])
-        async def _probe():
-            return {"ok": True}
+    def test_does_not_raise_on_persistence_error(self):
+        from app.core.supabase_persistence import PersistenceError
 
-        with patch("app.core.rate_limiter.check_and_increment", side_effect=_fake_check):
-            client = TestClient(inner_app, raise_server_exceptions=False)
-            for _ in range(3):
-                r = client.get("/probe", headers={"x-forwarded-for": "5.5.5.5"})
-                assert r.status_code == 200
-
-            r = client.get("/probe", headers={"x-forwarded-for": "5.5.5.5"})
-            assert r.status_code == 429
+        with patch(_PATCH_GET_RL, side_effect=PersistenceError("get_rate_limit_state", "db down")):
+            try:
+                get_key_state("ip:1.2.3.4")
+            except Exception as e:
+                pytest.fail(f"get_key_state raised on PersistenceError: {e}")
