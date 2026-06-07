@@ -9,15 +9,9 @@ from typing import Any, Literal
 import uuid
 
 from app.core.logging import get_logger
+from app.core.supabase_persistence import _T_AGENT_TRUST_PROFILES, _T_TRUST_EVENTS
 
 _logger: logging.Logger = get_logger("ironclaw.trust_engine")
-
-# ---------------------------------------------------------------------------
-# Table names — single source of truth for this module
-# ---------------------------------------------------------------------------
-
-_T_TRUST_PROFILES = "agent_trust_profiles"
-_T_TRUST_EVENTS = "trust_events"
 
 # ---------------------------------------------------------------------------
 # Trust event types
@@ -159,7 +153,7 @@ def _supabase_errors():
 def _fetch_profile_from_db(agent_id: str) -> dict[str, Any] | None:
     try:
         client = _get_client()
-        resp = client.table(_T_TRUST_PROFILES).select("*").eq("agent_id", agent_id).maybe_single().execute()
+        resp = client.table(_T_AGENT_TRUST_PROFILES).select("*").eq("agent_id", agent_id).maybe_single().execute()
         data = resp.data
         if isinstance(data, dict) and data:
             return data
@@ -221,7 +215,7 @@ def _upsert_profile_to_db(profile: TrustProfile) -> None:
     }
     try:
         client = _get_client()
-        client.table(_T_TRUST_PROFILES).upsert(record, on_conflict="agent_id", returning="minimal").execute()
+        client.table(_T_AGENT_TRUST_PROFILES).upsert(record, on_conflict="agent_id", returning="minimal").execute()
     except Exception as exc:  # noqa: BLE001
         _logger.error("trust_engine: failed to upsert profile for agent %r: %s", profile.agent_id, exc)
         raise
