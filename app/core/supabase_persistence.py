@@ -27,6 +27,8 @@ _T_POLICY_RULES = "policy_rules"
 _T_POLICY_SET_MEMBERSHIPS = "policy_set_memberships"
 _T_TOOL_CALL_LOG = "tool_call_log"
 _T_SANDBOX_EXECUTION_LOG = "sandbox_execution_log"
+_T_AGENT_TRUST_PROFILES = "agent_trust_profiles"
+_T_TRUST_EVENTS = "trust_events"
 
 
 # ---------------------------------------------------------------------------
@@ -412,6 +414,133 @@ def log_sandbox_execution(record: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Agent Trust Profiles
+# ---------------------------------------------------------------------------
+
+
+def get_agent_trust_profile(agent_id: str) -> dict[str, Any] | None:
+    """Return the agent_trust_profiles row for ``agent_id``, or None if not found.
+
+    Callers that need a TrustProfile dataclass should use trust_engine.get_trust()
+    directly. This function exists so the rest of the system can optionally read
+    raw trust profile rows through the canonical persistence adapter — e.g. for
+    admin inspection, test fixtures, or cross-service reads — without importing
+    trust_engine internals.
+    """
+    operation = "get_agent_trust_profile"
+    if not agent_id or not agent_id.strip():
+        raise PersistenceError(operation, "agent_id is required")
+    try:
+        client = get_supabase_service_client()
+        resp = client.table(_T_AGENT_TRUST_PROFILES).select("*").eq("agent_id", agent_id.strip()).maybe_single().execute()
+        data = resp.data
+        if isinstance(data, dict) and data:
+            return data
+        if isinstance(data, list):
+            return data[0] if data else None
+        return None
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+def upsert_agent_trust_profile(record: dict[str, Any]) -> dict[str, Any]:
+    """Upsert an agent_trust_profiles row.
+
+    ``record`` must include ``agent_id`` as the conflict key.
+
+    Note: trust_engine.py is the authoritative mutation path for trust profiles
+    during live scoring. This function exists for seeding, test setup, admin
+    overrides, and cross-service writes that bypass the trust engine's cache.
+    Callers that go through this path should call trust_engine.invalidate_cache()
+    for the affected agent_id after writing.
+    """
+    operation = "upsert_agent_trust_profile"
+    if not record.get("agent_id"):
+        raise PersistenceError(operation, "record must include agent_id")
+    try:
+        client = get_supabase_service_client()
+        if "updated_at" not in record:
+            record = {**record, "updated_at": _now_utc()}
+        resp = client.table(_T_AGENT_TRUST_PROFILES).upsert(record, on_conflict="agent_id", returning="representation").execute()
+        data = resp.data
+        if isinstance(data, list):
+            return data[0] if data else record
+        if isinstance(data, dict):
+            return data
+        return record
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+# ---------------------------------------------------------------------------
+# Trust Events
+# ---------------------------------------------------------------------------
+
+
+def insert_trust_event(record: dict[str, Any]) -> dict[str, Any]:
+    """Insert a trust_events row.
+
+    ``record`` must include ``event_id``, ``agent_id``, and ``event_type``.
+    If ``event_id`` is present it is used as the upsert conflict key to make
+    the call idempotent; otherwise a plain insert is performed.
+
+    Note: trust_engine.record_event() is the authoritative mutation path for
+    trust events during live scoring. This function exists for replay, test
+    fixtures, and administrative back-fills that need to write event rows
+    directly through the canonical persistence adapter.
+    """
+    operation = "insert_trust_event"
+    if not record.get("agent_id"):
+        raise PersistenceError(operation, "record must include agent_id")
+    if not record.get("event_type"):
+        raise PersistenceError(operation, "record must include event_type")
+    try:
+        client = get_supabase_service_client()
+        if "recorded_at" not in record:
+            record = {**record, "recorded_at": _now_utc()}
+        if "event_id" in record:
+            resp = client.table(_T_TRUST_EVENTS).upsert(record, on_conflict="event_id", returning="representation").execute()
+        else:
+            resp = client.table(_T_TRUST_EVENTS).insert(record, returning="representation").execute()
+        data = resp.data
+        if isinstance(data, list):
+            return data[0] if data else record
+        if isinstance(data, dict):
+            return data
+        return record
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+def list_trust_events(
+    agent_id: str,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """Return trust_events rows for ``agent_id`` ordered by recorded_at desc.
+
+    Mirrors trust_engine.list_trust_events() but routes through the canonical
+    persistence adapter so callers that already depend on supabase_persistence
+    do not need to import the trust engine for read-only event listing.
+    """
+    operation = "list_trust_events"
+    if not agent_id or not agent_id.strip():
+        raise PersistenceError(operation, "agent_id is required")
+    try:
+        client = get_supabase_service_client()
+        resp = client.table(_T_TRUST_EVENTS).select("*").eq("agent_id", agent_id.strip()).order("recorded_at", desc=True).range(offset, offset + limit - 1).execute()
+        data = resp.data
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            return [data]
+        return []
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+# ---------------------------------------------------------------------------
 # Public surface
 # ---------------------------------------------------------------------------
 
@@ -429,4 +558,8 @@ __all__ = [
     "get_policy_set",
     "log_tool_call",
     "log_sandbox_execution",
+    "get_agent_trust_profile",
+    "upsert_agent_trust_profile",
+    "insert_trust_event",
+    "list_trust_events",
 ]
