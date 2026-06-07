@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from enum import Enum
 import hashlib
 import hmac
 import json
@@ -12,6 +11,8 @@ from typing import Any
 import uuid
 
 import httpx
+
+from app.models.webhook import WebhookDeliveryStatus
 
 logger = logging.getLogger(__name__)
 
@@ -33,18 +34,6 @@ _TIMESTAMP_HEADER = "X-IronClaw-Timestamp"
 
 # Edge Function name — matches the deployed Supabase function name exactly.
 _EDGE_FUNCTION_NAME = "ironclaw-webhook-dispatch"
-
-# ---------------------------------------------------------------------------
-# Enums / types
-# ---------------------------------------------------------------------------
-
-
-class WebhookDeliveryStatus(str, Enum):
-    PENDING = "pending"
-    SUCCESS = "success"
-    FAILED = "failed"
-    EXHAUSTED = "exhausted"
-
 
 # ---------------------------------------------------------------------------
 # Data models
@@ -194,7 +183,7 @@ def verify_webhook_signature(
 
 
 # ---------------------------------------------------------------------------
-# Supabase service-role client accessor (canonical — delegates to app.core.supabase)
+# Supabase service-role client accessor — canonical, single path
 # ---------------------------------------------------------------------------
 
 
@@ -203,13 +192,13 @@ def _get_service_role_client() -> Any:
         from app.core.supabase import get_supabase_service_client  # type: ignore[import]
 
         return get_supabase_service_client()
-    except ImportError:
-        # Fallback: construct directly when core module is unavailable (e.g. isolated tests)
-        from supabase import create_client  # type: ignore[import]
-
-        url = os.environ["SUPABASE_URL"]
-        key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-        return create_client(url, key)
+    except Exception as exc:  # noqa: BLE001
+        # Only reached in isolated test environments where app.core.supabase is unavailable.
+        logger.error(
+            "webhook_service | _get_service_role_client | core client unavailable: %s — " "set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY",
+            exc,
+        )
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -650,7 +639,7 @@ def deliver_webhook(
 
 # ---------------------------------------------------------------------------
 # Fan-out: dispatch event to all matching subscriptions for a tenant
-# AND fire the ironclaw-webhook-dispatch Edge Function
+# AND optionally fire the ironclaw-webhook-dispatch Edge Function
 # ---------------------------------------------------------------------------
 
 
@@ -696,7 +685,7 @@ def dispatch_event(
     )
 
     # Fire the ironclaw-webhook-dispatch Edge Function after every verdict fan-out.
-    # This is non-blocking to the verdict path: failures are logged only.
+    # Non-blocking to the verdict path: failures are logged only, never raised.
     if fire_edge_function:
         edge_result = dispatch_verdict_to_edge(
             event_type=event_type,
