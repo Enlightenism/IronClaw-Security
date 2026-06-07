@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 import httpx
 from pydantic import BaseModel, Field
@@ -12,7 +11,6 @@ from pydantic import BaseModel, Field
 from app.dependencies.rate_limit import limit_guard_routes
 
 router = APIRouter(prefix="/claude-guard-router", tags=["claude-guard-router"])
-
 
 GuardMode = Literal["assist", "enforce"]
 VerdictType = Literal["allow", "warn", "quarantine", "block"]
@@ -87,10 +85,6 @@ async def scan_with_policy_guard(
     guard_base_url: str,
     payload: dict[str, Any],
 ) -> GuardBundleVerdict:
-    """Call the policy guard bundle route once per request using the shared AsyncClient.
-    This function is intentionally small; tests monkeypatch httpx.AsyncClient to
-    intercept POSTs to the guard bundle URL.
-    """
     client = _guard_http_client.client
     url = guard_base_url.rstrip("/") + "/policy/guard-bundle"
 
@@ -120,9 +114,6 @@ async def _stream_upstream(
     upstream_url: str,
     payload: dict[str, Any],
 ) -> AsyncIterator[bytes]:
-    """Minimal upstream streaming helper; tests will usually mock this path, so we
-    keep behavior simple and predictable.
-    """
     async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
         async with client.stream("POST", upstream_url, json=payload) as response:
             async for chunk in response.aiter_bytes():
@@ -131,57 +122,24 @@ async def _stream_upstream(
                 yield chunk
 
 
-async def _guarded_upstream_stream(
-    cfg: GuardedStreamConfig,
-    upstreampayload: dict[str, Any],
-    guard_payload: dict[str, Any],
-) -> AsyncIterator[bytes]:
-    """Wrap the upstream stream with a policy guard decision.
+def _get_rate_limit_dep() -> Any:
+    """Indirection wrapper so tests can monkeypatch limit_guard_routes at call time."""
+    import app.guard_router as _self  # noqa: PLC0415
 
-    - assist mode: never truncates the upstream; just annotates metadata.
-    - enforce mode: if guard verdict is block, truncate the stream and yield
-      a short blocked message instead of the full upstream payload.
-    """
-    verdict = await scan_with_policy_guard(cfg.guard_base_url, guard_payload)
-    mode = cfg.guard_mode
-
-    if mode == "enforce" and verdict.verdict == "block":
-        message = verdict.reason or "Request blocked by policy guard."
-        yield message.encode("utf-8")
-        return
-
-    async for chunk in _stream_upstream(cfg.upstream_url, upstreampayload):
-        yield chunk
-
-
-@asynccontextmanager
-async def _guarded_stream_context(
-    cfg: GuardedStreamConfig,
-    upstreampayload: dict[str, Any],
-    guard_payload: dict[str, Any],
-) -> AsyncIterator[AsyncIterator[bytes]]:
-    """Async context manager to provide a guarded upstream stream suitable for use
-    in StreamingResponse, while making it easy to reason about lifecycle in tests.
-    """
-    gen = _guarded_upstream_stream(cfg, upstreampayload, guard_payload)
-    try:
-        yield gen
-    finally:
-        await gen.aclose()
+    return _self.limit_guard_routes(None)  # type: ignore[arg-type]
 
 
 @router.post(
     "/proxy",
     response_model=GuardProxyResponse,
-    dependencies=[Depends(limit_guard_routes)],
 )
 async def guard_proxy_summary(
     payload: GuardProxyRequest,
     request: Request,
 ) -> GuardProxyResponse:
-    """Non-streaming summary endpoint that simply calls the guard bundle and
-    returns the decision in a structured response.
-    """
+    # Resolved at call-time so tests can monkeypatch limit_guard_routes.
+    limit_guard_routes(request)
+
     verdict = await scan_with_policy_guard(payload.guard_base_url, payload.guard_payload)
 
     truncated = verdict.truncated or (payload.guard_mode == "enforce" and verdict.verdict == "block")
@@ -199,34 +157,36 @@ async def guard_proxy_summary(
 @router.post(
     "/proxy-stream",
     response_class=StreamingResponse,
-    dependencies=[Depends(limit_guard_routes)],
 )
 async def guard_proxy_stream(
     payload: GuardProxyRequest,
     request: Request,
 ) -> StreamingResponse:
-    """Streaming proxy endpoint used by tests:
+    # Resolved at call-time so tests can monkeypatch limit_guard_routes.
+    limit_guard_routes(request)
 
-    - Calls the guard bundle first to get a verdict.
-    - In enforce mode, truncates the upstream stream on block.
-    - In assist mode, always passes through the upstream stream.
-    """
     cfg = GuardedStreamConfig(
         upstream_url=payload.upstream_url,
         guard_base_url=payload.guard_base_url,
         guard_mode=payload.guard_mode,
     )
 
-    stream_cm = _guarded_stream_context(cfg, payload.upstreampayload, payload.guard_payload)
+    # Eagerly evaluate the guard verdict BEFORE entering StreamingResponse so
+    # HTTPException(502) propagates correctly to FastAPI's exception handlers.
+    verdict = await scan_with_policy_guard(cfg.guard_base_url, payload.guard_payload)
+
+    if cfg.guard_mode == "enforce" and verdict.verdict == "block":
+        message = verdict.reason or "Request blocked by policy guard."
+
+        async def _blocked_stream() -> AsyncIterator[bytes]:
+            yield message.encode("utf-8")
+
+        return StreamingResponse(_blocked_stream(), media_type="application/json")
 
     async def event_stream() -> AsyncIterator[bytes]:
-        async with stream_cm as guarded_stream:
-            async for chunk in guarded_stream:
-                if await request.is_disconnected():
-                    break
-                yield chunk
+        async for chunk in _stream_upstream(cfg.upstream_url, payload.upstreampayload):
+            if await request.is_disconnected():
+                break
+            yield chunk
 
-    return StreamingResponse(
-        event_stream(),
-        media_type="application/json",
-    )
+    return StreamingResponse(event_stream(), media_type="application/json")
