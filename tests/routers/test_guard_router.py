@@ -1,11 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Generator
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-# ---------------------------------------------------------------------------
-# App fixture
-# ---------------------------------------------------------------------------
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 import pytest
@@ -21,7 +19,7 @@ _app.include_router(router)
 
 
 @pytest.fixture()
-def client() -> TestClient:
+def client() -> Generator[TestClient, None, None]:
     with TestClient(_app, raise_server_exceptions=False) as c:
         yield c
 
@@ -142,7 +140,6 @@ class TestGuardProxySummary502:
 
 class TestGuardProxySummaryRateLimit:
     def test_429_when_rate_limit_exceeded(self, client: TestClient):
-
         def _rate_limit_exceeded(request):
             raise HTTPException(status_code=429, detail="Rate limit exceeded")
 
@@ -218,7 +215,6 @@ class TestGuardProxyStreamAssistPassthrough:
         assert resp.content == b"chunk1chunk2"
 
     def test_assist_mode_block_still_passes_upstream(self, client: TestClient):
-        """In assist mode a block verdict must NOT truncate the stream."""
         payload = {**_BASE_PAYLOAD, "guard_mode": "assist"}
 
         async def _fake_stream(url: str, p: dict):
