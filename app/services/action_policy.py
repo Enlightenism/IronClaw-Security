@@ -139,9 +139,23 @@ _RULE_TYPE_TO_SET: dict[str, str] = {
 }
 
 # Canonical column in policy_set_memberships that references a policy rule.
-# supabase_persistence._COL_POLICY_RULE_ID == "policy_rule_id".
-# The old alias "rule_id" is NOT present in the schema.
 _COL_POLICY_RULE_ID = "policy_rule_id"
+
+
+def _invalidate_policy_engine_cache() -> None:
+    """
+    Notify policy_engine that its rule cache is stale after a DB reload.
+    Imported lazily to avoid circular imports at module load time.
+    Failures are swallowed — action_policy must never crash due to a
+    cache-sync side-effect.
+    """
+    try:
+        from app.core.policy_engine import invalidate_policy_cache  # noqa: PLC0415
+
+        invalidate_policy_cache()
+        logger.debug("action_policy: policy_engine cache invalidated after rule reload")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("action_policy: could not invalidate policy_engine cache: %s", exc)
 
 
 def load_builtin_policy_rules_from_db(
@@ -155,6 +169,9 @@ def load_builtin_policy_rules_from_db(
       1. Tenant-specific set identified by `tenant_key` (when provided).
       2. `ironclaw_default` set as the authoritative fallback.
       3. Python cold-start constants when the DB is unavailable or returns nothing.
+
+    On successful hydration, invalidates policy_engine's rule cache so both
+    caches stay synchronized with the same DB state.
 
     Returns True if rules were successfully loaded from the DB, False otherwise.
     """
@@ -258,6 +275,10 @@ def load_builtin_policy_rules_from_db(
             len(HIGH_REVIEW_TARGETS),
             len(ELEVATED_REVIEW_ACTIONS),
         )
+
+        # Synchronize policy_engine's cache so both caches reflect the same DB state.
+        _invalidate_policy_engine_cache()
+
         return True
 
     except Exception as exc:  # noqa: BLE001
