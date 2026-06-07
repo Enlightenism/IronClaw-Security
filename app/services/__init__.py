@@ -23,6 +23,14 @@ from .stix_adapter import (
     ingest_stix_bundle_bytes,
     parse_stix_bundle,
 )
+from .telemetry_service import (
+    TelemetryBatchResult,
+    TelemetryEventInput,
+    build_agent_event,
+    build_event_key,
+    post_telemetry_batch,
+    post_telemetry_batch_async,
+)
 from .threat_alerts import (
     emit_detection_alert,
     emit_hunt_alert,
@@ -52,6 +60,13 @@ __all__ = [
     "SnapshotProvider",
     "build_default_backup_service",
     "default_backup_targets_from_env",
+    # Telemetry service
+    "TelemetryBatchResult",
+    "TelemetryEventInput",
+    "build_agent_event",
+    "build_event_key",
+    "post_telemetry_batch",
+    "post_telemetry_batch_async",
     # Threat scoring
     "ScoreResult",
     "ThreatScoringEngine",

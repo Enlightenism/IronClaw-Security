@@ -6,14 +6,16 @@ import logging
 import os
 import secrets
 from typing import Any
+import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 
 from app.core.auth import AuthContext, get_auth_context
 from app.models.webhook import (
     WebhookCreateResponse,
     WebhookDeliveryLogEntry,
+    WebhookEventType,
     WebhookSubscriptionCreate,
     WebhookSubscriptionResponse,
     WebhookSubscriptionUpdateRequest,
@@ -30,20 +32,20 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 _WEBHOOK_SUBSCRIPTIONS_TABLE = "webhook_subscriptions"
 
-_SUPPORTED_EVENTS: set[str] = {e.value for e in __import__("app.models.webhook", fromlist=["WebhookEventType"]).WebhookEventType if e.value != "*"}
+_SUPPORTED_EVENTS: set[str] = {e.value for e in WebhookEventType if e.value != "*"}
 
 
 # ---------------------------------------------------------------------------
-# Supabase client accessor
+# Supabase client accessor — delegates to canonical core module
 # ---------------------------------------------------------------------------
 
 
 def _get_supabase_client() -> Any:
     try:
-        from app.clients.supabase import get_supabase_client as _get
+        from app.core.supabase import get_supabase_service_client  # type: ignore[import]
 
-        return _get()
-    except Exception:
+        return get_supabase_service_client()
+    except ImportError:
         pass
     try:
         from supabase import create_client  # type: ignore[import]
@@ -58,8 +60,12 @@ def _get_supabase_client() -> Any:
 
 
 # ---------------------------------------------------------------------------
-# Secret helpers
+# Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _generate_id() -> str:
+    return str(uuid.uuid4())
 
 
 def _generate_raw_secret() -> str:
@@ -74,25 +80,36 @@ def _key_prefix_hint(raw: str) -> str:
     return raw[:8] + "..."
 
 
-# ---------------------------------------------------------------------------
-# Response redaction — never expose secret_hash
-# ---------------------------------------------------------------------------
-
-
 def _redact_subscription(row: dict[str, Any]) -> dict[str, Any]:
     row = dict(row)
     row.pop("secret_hash", None)
     return row
 
 
-# ---------------------------------------------------------------------------
-# Tenant ID resolution
-# ---------------------------------------------------------------------------
-
-
 def _resolve_tenant_id(auth: AuthContext) -> str:
     tid = getattr(auth, "tenant_id", None) or getattr(auth, "org_id", None) or ""
     return str(tid)
+
+
+def _build_list_item(row: dict[str, Any]) -> dict[str, Any]:
+    raw_hash = row.get("secret_hash", "")
+    hint = raw_hash[:8] + "..." if raw_hash else "unknown..."
+    item = _redact_subscription(row)
+    item["secret_hint"] = hint
+    return item
+
+
+def _fetch_subscription(client: Any, subscription_id: str, tenant_id: str) -> dict[str, Any] | None:
+    try:
+        query = client.table(_WEBHOOK_SUBSCRIPTIONS_TABLE).select("*").eq("id", subscription_id)
+        if tenant_id:
+            query = query.eq("tenant_id", tenant_id)
+        resp = query.limit(1).execute()
+        rows: list[dict[str, Any]] = resp.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.error("webhooks._fetch_subscription id=%s tenant_id=%s error=%s", subscription_id, tenant_id, exc)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -202,14 +219,6 @@ async def list_webhook_subscriptions(
         status_code=status.HTTP_200_OK,
         content={"count": len(safe_rows), "subscriptions": safe_rows},
     )
-
-
-def _build_list_item(row: dict[str, Any]) -> dict[str, Any]:
-    raw_hash = row.get("secret_hash", "")
-    hint = raw_hash[:8] + "..." if raw_hash else "unknown..."
-    item = _redact_subscription(row)
-    item["secret_hint"] = hint
-    return item
 
 
 # ---------------------------------------------------------------------------
@@ -385,7 +394,6 @@ async def rotate_webhook_secret(
     description="Dispatches a synthetic 'webhook.test' event to verify endpoint reachability. Returns one dispatch result per active subscription.",
 )
 async def test_webhook_dispatch(
-    background_tasks: BackgroundTasks,
     auth: AuthContext = Depends(get_auth_context),
 ) -> JSONResponse:
     tenant_id = _resolve_tenant_id(auth)
@@ -399,7 +407,8 @@ async def test_webhook_dispatch(
     }
 
     try:
-        results = dispatch_event(tenant_id, "webhook.test", test_payload)
+        # Normal flow — fire edge function so downstream consumers see the test event.
+        results = dispatch_event(tenant_id, "webhook.test", test_payload, fire_edge_function=True)
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={
@@ -531,6 +540,7 @@ async def retry_webhook_delivery(
         )
 
     try:
+        # Admin retry path — skip edge function call; the original event already fired it.
         result = retry_failed_delivery(
             delivery_id=delivery_id,
             subscription_id=record["subscription_id"],
@@ -564,27 +574,3 @@ async def list_supported_events(
         status_code=status.HTTP_200_OK,
         content={"events": sorted(_SUPPORTED_EVENTS)},
     )
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _generate_id() -> str:
-    import uuid
-
-    return str(uuid.uuid4())
-
-
-def _fetch_subscription(client: Any, subscription_id: str, tenant_id: str) -> dict[str, Any] | None:
-    try:
-        query = client.table(_WEBHOOK_SUBSCRIPTIONS_TABLE).select("*").eq("id", subscription_id)
-        if tenant_id:
-            query = query.eq("tenant_id", tenant_id)
-        resp = query.limit(1).execute()
-        rows: list[dict[str, Any]] = resp.data or []
-        return rows[0] if rows else None
-    except Exception as exc:
-        logger.error("webhooks._fetch_subscription id=%s tenant_id=%s error=%s", subscription_id, tenant_id, exc)
-        return None
