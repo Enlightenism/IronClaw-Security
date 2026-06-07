@@ -4,10 +4,12 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 import httpx
 from pydantic import BaseModel, Field
+
+from app.dependencies.rate_limit import limit_guard_routes
 
 router = APIRouter(prefix="/claude-guard-router", tags=["claude-guard-router"])
 
@@ -144,7 +146,6 @@ async def _guarded_upstream_stream(
     mode = cfg.guard_mode
 
     if mode == "enforce" and verdict.verdict == "block":
-        # Enforce truncation: yield a short blocked message for the stream.
         message = verdict.reason or "Request blocked by policy guard."
         yield message.encode("utf-8")
         return
@@ -166,15 +167,18 @@ async def _guarded_stream_context(
     try:
         yield gen
     finally:
-        # Make sure the async generator is fully closed even on error.
         await gen.aclose()
 
 
 @router.post(
     "/proxy",
     response_model=GuardProxyResponse,
+    dependencies=[Depends(limit_guard_routes)],
 )
-async def guard_proxy_summary(payload: GuardProxyRequest) -> GuardProxyResponse:
+async def guard_proxy_summary(
+    payload: GuardProxyRequest,
+    request: Request,
+) -> GuardProxyResponse:
     """Non-streaming summary endpoint that simply calls the guard bundle and
     returns the decision in a structured response.
     """
@@ -195,6 +199,7 @@ async def guard_proxy_summary(payload: GuardProxyRequest) -> GuardProxyResponse:
 @router.post(
     "/proxy-stream",
     response_class=StreamingResponse,
+    dependencies=[Depends(limit_guard_routes)],
 )
 async def guard_proxy_stream(
     payload: GuardProxyRequest,
@@ -217,7 +222,6 @@ async def guard_proxy_stream(
     async def event_stream() -> AsyncIterator[bytes]:
         async with stream_cm as guarded_stream:
             async for chunk in guarded_stream:
-                # Allow client disconnects to gracefully stop iteration
                 if await request.is_disconnected():
                     break
                 yield chunk
