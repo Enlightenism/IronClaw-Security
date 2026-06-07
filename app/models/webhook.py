@@ -32,10 +32,15 @@ class WebhookEventType(StrEnum):
     REVIEW_APPROVED = "review.approved"
     REVIEW_REJECTED = "review.rejected"
     REVIEW_ESCALATED = "review.escalated"
+    REVIEW_REQUESTED = "review.requested"
+    REVIEW_RESOLVED = "review.resolved"
 
     # Policy events
     POLICY_UPDATED = "policy.updated"
     POLICY_VIOLATION = "policy.violation"
+    POLICY_BLOCK = "policy.block"
+    POLICY_WARN = "policy.warn"
+    POLICY_ALLOW = "policy.allow"
 
     # Alert events
     ALERT_CREATED = "alert.created"
@@ -43,36 +48,39 @@ class WebhookEventType(StrEnum):
 
     # Audit events
     AUDIT_EXPORTED = "audit.exported"
+    AUDIT_ENTRY = "audit.entry"
 
     # Session events
     SESSION_STARTED = "session.started"
     SESSION_ENDED = "session.ended"
     SESSION_FLAGGED = "session.flagged"
 
+    # Agent session events
+    AGENT_SESSION_STARTED = "agent.session.started"
+    AGENT_SESSION_ENDED = "agent.session.ended"
+
     # Hardening events
     HARDENING_FAIL = "hardening.fail"
     HARDENING_WARN = "hardening.warn"
 
-    # Router-native IronClaw event types (aligned with app/routers/webhooks.py)
-    POLICY_BLOCK = "policy.block"
-    POLICY_WARN = "policy.warn"
-    POLICY_ALLOW = "policy.allow"
+    # Threat events
     THREAT_DETECTED = "threat.detected"
     THREAT_BLOCKED = "threat.blocked"
     THREAT_FEED_REFRESHED = "threat.feed.refreshed"
     THREAT_HUNT_COMPLETED = "threat.hunt.completed"
+
+    # Quarantine events
     QUARANTINE_CREATED = "quarantine.created"
     QUARANTINE_RELEASED = "quarantine.released"
+
+    # Incident events
     INCIDENT_CREATED = "incident.created"
     INCIDENT_ESCALATED = "incident.escalated"
-    AUDIT_ENTRY = "audit.entry"
-    AGENT_SESSION_STARTED = "agent.session.started"
-    AGENT_SESSION_ENDED = "agent.session.ended"
-    REVIEW_REQUESTED = "review.requested"
-    REVIEW_RESOLVED = "review.resolved"
+
+    # Webhook lifecycle
     WEBHOOK_TEST = "webhook.test"
 
-    # Catch-all for internal use
+    # Catch-all for internal use only — never accepted in subscription create/update
     ALL = "*"
 
 
@@ -83,6 +91,11 @@ class WebhookStatus(StrEnum):
 
 
 class WebhookDeliveryStatus(StrEnum):
+    """
+    Canonical delivery status enum — single source of truth.
+    app/services/webhook_service.py imports this directly.
+    """
+
     PENDING = "pending"
     SUCCESS = "success"
     FAILED = "failed"
@@ -96,12 +109,35 @@ class WebhookSigningAlgorithm(StrEnum):
 
 
 # ---------------------------------------------------------------------------
-# Shared timestamp factory
+# Shared helpers
 # ---------------------------------------------------------------------------
 
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _validate_https_url(v: Any) -> Any:
+    """Shared HTTPS enforcer — used by multiple request models."""
+    if v is None:
+        return v
+    url = str(v)
+    if not url.startswith("https://"):
+        raise ValueError("target_url must use HTTPS.")
+    return v
+
+
+def _validate_event_list(v: list[str] | None) -> list[str] | None:
+    """Validate that all event strings are known WebhookEventType values (excluding '*')."""
+    if v is None:
+        return v
+    valid = {e.value for e in WebhookEventType if e.value != "*"}
+    unknown = [e for e in v if e not in valid]
+    if unknown:
+        raise ValueError(f"Unsupported event types: {unknown}. " f"Supported: {sorted(valid)}")
+    if "*" in v:
+        raise ValueError("The '*' wildcard is not accepted in subscription event lists. " "Enumerate the specific event types you want to receive.")
+    return v
 
 
 # ---------------------------------------------------------------------------
@@ -118,8 +154,19 @@ class WebhookBaseModel(BaseModel):
     )
 
 
+class _SecretExcludingMixin(WebhookBaseModel):
+    """Mixin that strips secret_hash (and secret) from serialized output."""
+
+    @model_serializer(mode="wrap")
+    def _exclude_secret_fields(self, handler: Any) -> dict[str, Any]:
+        result: dict[str, Any] = handler(self)
+        result.pop("secret_hash", None)
+        result.pop("secret", None)
+        return result
+
+
 # ---------------------------------------------------------------------------
-# Webhook registration — request / response
+# Webhook registration — request / response (legacy full-options model)
 # ---------------------------------------------------------------------------
 
 
@@ -139,12 +186,7 @@ class WebhookCreateRequest(WebhookBaseModel):
         min_length=1,
         description="Ordered list of event types this webhook subscribes to. Use '*' for all events.",
     )
-    org_id: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=128,
-        description="Optional organisation scope.",
-    )
+    org_id: str | None = Field(default=None, min_length=1, max_length=128, description="Optional organisation scope.")
     signing_algorithm: WebhookSigningAlgorithm = Field(
         default=WebhookSigningAlgorithm.HMAC_SHA256,
         description="Algorithm used for payload signature.",
@@ -157,10 +199,7 @@ class WebhookCreateRequest(WebhookBaseModel):
     @field_validator("target_url", mode="before")
     @classmethod
     def _require_https(cls, v: Any) -> Any:
-        url = str(v)
-        if not url.startswith("https://"):
-            raise ValueError("target_url must use HTTPS.")
-        return v
+        return _validate_https_url(v)
 
     @field_validator("event_types")
     @classmethod
@@ -192,13 +231,14 @@ class WebhookSubscriptionCreate(WebhookBaseModel):
     Canonical create request for POST /webhooks/subscriptions.
     Aligns with the router's Supabase row schema (tenant-scoped, auto-generated secret).
     secret_hash is server-generated and write-only — never accepted from the caller.
+    The '*' wildcard is rejected; callers must enumerate specific event types.
     """
 
     target_url: AnyHttpUrl = Field(..., description="HTTPS endpoint to receive deliveries.")
     events: list[str] = Field(
         ...,
         min_length=1,
-        description="List of IronClaw event types to subscribe to.",
+        description="List of IronClaw event types to subscribe to. '*' is not accepted.",
     )
     max_attempts: int = Field(default=5, ge=1, le=10, description="Maximum delivery retry attempts.")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary caller-supplied metadata.")
@@ -206,19 +246,12 @@ class WebhookSubscriptionCreate(WebhookBaseModel):
     @field_validator("target_url", mode="before")
     @classmethod
     def _require_https(cls, v: Any) -> Any:
-        url = str(v)
-        if not url.startswith("https://"):
-            raise ValueError("target_url must use HTTPS.")
-        return v
+        return _validate_https_url(v)
 
     @field_validator("events")
     @classmethod
     def _validate_events(cls, v: list[str]) -> list[str]:
-        valid = {e.value for e in WebhookEventType}
-        unknown = [e for e in v if e not in valid]
-        if unknown:
-            raise ValueError(f"Unsupported event types: {unknown}. " f"Supported: {sorted(valid)}")
-        return v
+        return _validate_event_list(v) or v
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +259,7 @@ class WebhookSubscriptionCreate(WebhookBaseModel):
 # ---------------------------------------------------------------------------
 
 
-class WebhookSubscriptionResponse(WebhookBaseModel):
+class WebhookSubscriptionResponse(_SecretExcludingMixin):
     """
     Read response for webhook subscription records.
     secret_hash is permanently excluded — only secret_hint is surfaced.
@@ -248,12 +281,6 @@ class WebhookSubscriptionResponse(WebhookBaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: str
     secret_hint: str = Field(..., description="First 8 chars of the signing secret prefix — key never re-exposed.")
-
-    @model_serializer(mode="wrap")
-    def _exclude_secret_hash(self, handler: Any) -> dict[str, Any]:
-        result: dict[str, Any] = handler(self)
-        result.pop("secret_hash", None)
-        return result
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +319,7 @@ class WebhookDeliveryLogEntry(WebhookBaseModel):
 # ---------------------------------------------------------------------------
 
 
-class WebhookCreateResponse(WebhookBaseModel):
+class WebhookCreateResponse(_SecretExcludingMixin):
     """
     Response for POST /webhooks/subscriptions.
     signing_secret is returned exactly once — store it securely.
@@ -315,15 +342,9 @@ class WebhookCreateResponse(WebhookBaseModel):
         description="Full HMAC-SHA256 signing secret — only returned once at creation. Store securely.",
     )
 
-    @model_serializer(mode="wrap")
-    def _exclude_secret_hash(self, handler: Any) -> dict[str, Any]:
-        result: dict[str, Any] = handler(self)
-        result.pop("secret_hash", None)
-        return result
-
 
 # ---------------------------------------------------------------------------
-# WebhookUpdateRequest
+# WebhookUpdateRequest — legacy full-options partial update
 # ---------------------------------------------------------------------------
 
 
@@ -344,12 +365,7 @@ class WebhookUpdateRequest(WebhookBaseModel):
     @field_validator("target_url", mode="before")
     @classmethod
     def _require_https(cls, v: Any) -> Any:
-        if v is None:
-            return v
-        url = str(v)
-        if not url.startswith("https://"):
-            raise ValueError("target_url must use HTTPS.")
-        return v
+        return _validate_https_url(v)
 
     @field_validator("event_types")
     @classmethod
@@ -376,6 +392,7 @@ class WebhookSubscriptionUpdateRequest(WebhookBaseModel):
     Partial update for PATCH /webhooks/subscriptions/{id}.
     Aligns with router field names (events, active, max_attempts, metadata).
     secret_hash is never accepted from the caller.
+    The '*' wildcard is rejected; callers must enumerate specific event types.
     """
 
     active: bool | None = Field(default=None, description="Enable or disable the subscription.")
@@ -386,13 +403,7 @@ class WebhookSubscriptionUpdateRequest(WebhookBaseModel):
     @field_validator("events")
     @classmethod
     def _validate_events(cls, v: list[str] | None) -> list[str] | None:
-        if v is None:
-            return v
-        valid = {e.value for e in WebhookEventType}
-        unknown = [e for e in v if e not in valid]
-        if unknown:
-            raise ValueError(f"Unsupported event types: {unknown}. " f"Supported: {sorted(valid)}")
-        return v
+        return _validate_event_list(v)
 
 
 # ---------------------------------------------------------------------------
@@ -400,7 +411,7 @@ class WebhookSubscriptionUpdateRequest(WebhookBaseModel):
 # ---------------------------------------------------------------------------
 
 
-class WebhookResponse(WebhookBaseModel):
+class WebhookResponse(_SecretExcludingMixin):
     """Public webhook record — secret is never included."""
 
     webhook_id: str
@@ -418,13 +429,6 @@ class WebhookResponse(WebhookBaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=_utc_now_iso)
     updated_at: str = Field(default_factory=_utc_now_iso)
-
-    @model_serializer(mode="wrap")
-    def _exclude_secret_fields(self, handler: Any) -> dict[str, Any]:
-        result: dict[str, Any] = handler(self)
-        result.pop("secret", None)
-        result.pop("secret_hash", None)
-        return result
 
 
 # ---------------------------------------------------------------------------
@@ -568,18 +572,11 @@ class WebhookRotateSecretRequest(WebhookBaseModel):
     )
 
 
-class WebhookRotateSecretResponse(WebhookBaseModel):
+class WebhookRotateSecretResponse(_SecretExcludingMixin):
     webhook_id: str
     signing_algorithm: str
     rotated_at: str = Field(default_factory=_utc_now_iso)
     message: str = "Secret rotated successfully. Update your receiver immediately."
-
-    @model_serializer(mode="wrap")
-    def _exclude_secret_fields(self, handler: Any) -> dict[str, Any]:
-        result: dict[str, Any] = handler(self)
-        result.pop("secret", None)
-        result.pop("secret_hash", None)
-        return result
 
 
 # ---------------------------------------------------------------------------
