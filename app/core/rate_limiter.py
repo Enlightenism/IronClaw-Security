@@ -305,14 +305,22 @@ def reset_key(key: str) -> bool:
     """Delete the rate_limit_state row for ``key``.
 
     Returns True on success, False on error.
-    Used by admin endpoints and tests to clear rate limit state.
+
+    .. deprecated::
+        Admin-facing callers and routers should call
+        ``supabase_persistence.delete_rate_limit_state(key)`` directly.
+        That function raises ``PersistenceError`` on failure and stays within
+        the canonical persistence boundary.  This wrapper is retained for
+        internal use by ``check_and_increment`` and any existing test fixtures
+        that depend on the bool return contract.
     """
-    key = key.strip()
+    key = key.strip() if key else ""
     if not key:
         return False
     try:
-        client = _get_client()
-        client.table(_T_RATE_LIMIT_STATE).delete().eq("key", key).execute()
+        from app.core.supabase_persistence import delete_rate_limit_state  # noqa: PLC0415
+
+        delete_rate_limit_state(key)
         return True
     except Exception as exc:  # noqa: BLE001
         _logger.error("rate_limiter.reset_key error for key=%r: %s", key, exc)
@@ -322,20 +330,21 @@ def reset_key(key: str) -> bool:
 def get_key_state(key: str) -> dict[str, Any] | None:
     """Return the raw rate_limit_state row for ``key``, or None if not found.
 
-    Used by admin endpoints and health checks to inspect current window state.
+    .. deprecated::
+        Admin-facing callers and routers should call
+        ``supabase_persistence.get_rate_limit_state(key)`` directly.
+        That function raises ``PersistenceError`` on failure and stays within
+        the canonical persistence boundary.  This wrapper is retained for
+        internal health-check callers and existing test fixtures that depend
+        on the None-on-error contract.
     """
-    key = key.strip()
+    key = key.strip() if key else ""
     if not key:
         return None
     try:
-        client = _get_client()
-        resp = client.table(_T_RATE_LIMIT_STATE).select("*").eq("key", key).maybe_single().execute()
-        raw = resp.data
-        if isinstance(raw, dict) and raw:
-            return raw
-        if isinstance(raw, list) and raw:
-            return raw[0]
-        return None
+        from app.core.supabase_persistence import get_rate_limit_state  # noqa: PLC0415
+
+        return get_rate_limit_state(key)
     except Exception as exc:  # noqa: BLE001
         _logger.error("rate_limiter.get_key_state error for key=%r: %s", key, exc)
         return None
