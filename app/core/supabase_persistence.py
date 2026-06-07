@@ -29,6 +29,13 @@ _T_TOOL_CALL_LOG = "tool_call_log"
 _T_SANDBOX_EXECUTION_LOG = "sandbox_execution_log"
 _T_AGENT_TRUST_PROFILES = "agent_trust_profiles"
 _T_TRUST_EVENTS = "trust_events"
+_T_SCAN_PATTERNS = "scan_patterns"
+_T_RATE_LIMIT_STATE = "rate_limit_state"
+
+# Canonical column name in policy_set_memberships that references a policy rule.
+# action_policy.py previously used the alias column "rule_id"; the authoritative
+# column is "policy_rule_id" (indexed as idx_psm_policy_rule_id in migrations).
+_COL_POLICY_RULE_ID = "policy_rule_id"
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +321,11 @@ def get_policy_set(set_key: str) -> dict[str, Any] | None:
     Returns a dict with keys ``policy_set`` (the set row) and ``rules``
     (list of policy_rules rows that belong to the set), or None if the set
     does not exist.
+
+    The canonical column used to join policy_set_memberships → policy_rules
+    is ``policy_rule_id`` (``_COL_POLICY_RULE_ID``).  action_policy.py's
+    older ``rule_id`` alias is NOT used here; that caller must be updated to
+    read ``policy_rule_id`` from rows returned by this function.
     """
     operation = "get_policy_set"
     if not set_key or not set_key.strip():
@@ -332,12 +344,12 @@ def get_policy_set(set_key: str) -> dict[str, Any] | None:
 
         rules: list[dict[str, Any]] = []
         if policy_set_id:
-            membership_resp = client.table(_T_POLICY_SET_MEMBERSHIPS).select("policy_rule_id").eq("policy_set_id", str(policy_set_id)).execute()
+            membership_resp = client.table(_T_POLICY_SET_MEMBERSHIPS).select(_COL_POLICY_RULE_ID).eq("policy_set_id", str(policy_set_id)).execute()
             memberships = membership_resp.data or []
             if isinstance(memberships, dict):
                 memberships = [memberships]
 
-            rule_ids: list[str] = [str(m["policy_rule_id"]) for m in memberships if isinstance(m, dict) and m.get("policy_rule_id")]
+            rule_ids: list[str] = [str(m[_COL_POLICY_RULE_ID]) for m in memberships if isinstance(m, dict) and m.get(_COL_POLICY_RULE_ID)]
 
             if rule_ids:
                 rules_resp = client.table(_T_POLICY_RULES).select("*").in_("id", rule_ids).execute()
@@ -345,6 +357,87 @@ def get_policy_set(set_key: str) -> dict[str, Any] | None:
                 rules = raw_rules if isinstance(raw_rules, list) else [raw_rules]
 
         return {"policy_set": set_data, "rules": rules}
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+# ---------------------------------------------------------------------------
+# Scan Patterns
+# ---------------------------------------------------------------------------
+
+
+def get_scan_patterns(
+    *,
+    is_active: bool | None = True,
+    pattern_type: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return rows from the scan_patterns table.
+
+    By default only active patterns are returned (``is_active=True``).
+    Pass ``is_active=None`` to return all rows regardless of active status.
+    Optionally filter by ``pattern_type`` (e.g. ``"regex"``, ``"keyword"``).
+
+    Used by pattern_registry.py as the single DB source for scan patterns.
+    """
+    operation = "get_scan_patterns"
+    try:
+        client = get_supabase_service_client()
+        q = client.table(_T_SCAN_PATTERNS).select("*")
+        if is_active is not None:
+            q = q.eq("is_active", is_active)
+        if pattern_type:
+            q = q.eq("pattern_type", pattern_type)
+        resp = q.execute()
+        data = resp.data
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            return [data]
+        return []
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+# ---------------------------------------------------------------------------
+# Rate Limit State — admin / tooling access layer
+# ---------------------------------------------------------------------------
+
+
+def get_rate_limit_state(key: str) -> dict[str, Any] | None:
+    """Return the rate_limit_state row for ``key``, or None if not found.
+
+    Routes through the canonical persistence adapter so admin tooling,
+    health checks, and tests do not need to import rate_limiter directly.
+    """
+    operation = "get_rate_limit_state"
+    if not key or not key.strip():
+        raise PersistenceError(operation, "key is required")
+    try:
+        client = get_supabase_service_client()
+        resp = client.table(_T_RATE_LIMIT_STATE).select("*").eq("key", key.strip()).maybe_single().execute()
+        data = resp.data
+        if isinstance(data, dict) and data:
+            return data
+        if isinstance(data, list):
+            return data[0] if data else None
+        return None
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+def delete_rate_limit_state(key: str) -> None:
+    """Delete the rate_limit_state row for ``key``.
+
+    Raises PersistenceError on DB failure.  Admin tooling and tests should
+    call this instead of rate_limiter.reset_key() to stay within the
+    canonical persistence boundary.
+    """
+    operation = "delete_rate_limit_state"
+    if not key or not key.strip():
+        raise PersistenceError(operation, "key is required")
+    try:
+        client = get_supabase_service_client()
+        client.table(_T_RATE_LIMIT_STATE).delete().eq("key", key.strip()).execute()
     except (SupabaseAPIError, SupabaseClientError) as exc:
         raise _wrap(operation, exc) from exc
 
@@ -556,6 +649,9 @@ __all__ = [
     "upsert_ioc",
     "upsert_threat_detection",
     "get_policy_set",
+    "get_scan_patterns",
+    "get_rate_limit_state",
+    "delete_rate_limit_state",
     "log_tool_call",
     "log_sandbox_execution",
     "get_agent_trust_profile",
