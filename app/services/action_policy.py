@@ -138,6 +138,11 @@ _RULE_TYPE_TO_SET: dict[str, str] = {
     "elevated_review_action": "elevated_action",
 }
 
+# Canonical column in policy_set_memberships that references a policy rule.
+# supabase_persistence._COL_POLICY_RULE_ID == "policy_rule_id".
+# The old alias "rule_id" is NOT present in the schema.
+_COL_POLICY_RULE_ID = "policy_rule_id"
+
 
 def load_builtin_policy_rules_from_db(
     tenant_key: str | None = None,
@@ -173,7 +178,6 @@ def load_builtin_policy_rules_from_db(
         # --- resolve policy_set id by set_key, fall back to ironclaw_default ---
         set_rows = client.table("policy_sets").select("id, set_key").eq("set_key", set_key).eq("is_active", True).limit(1).execute().data
 
-        # If tenant set not found and we were looking for a tenant, fall back to default
         if not set_rows and tenant_key and set_key != DEFAULT_POLICY_SET_KEY:
             logger.info(
                 "action_policy: tenant set %r not found — falling back to %r",
@@ -192,8 +196,8 @@ def load_builtin_policy_rules_from_db(
         policy_set_id: str = set_rows[0]["id"]
         resolved_key: str = set_rows[0]["set_key"]
 
-        # --- fetch rule IDs belonging to the resolved set via membership table ---
-        membership_rows = client.table("policy_set_memberships").select("rule_id").eq("set_id", policy_set_id).execute().data
+        # --- fetch rule IDs via policy_rule_id (canonical column) ---
+        membership_rows = client.table("policy_set_memberships").select(_COL_POLICY_RULE_ID).eq("set_id", policy_set_id).execute().data
 
         if not membership_rows:
             logger.warning(
@@ -202,11 +206,11 @@ def load_builtin_policy_rules_from_db(
             )
             return False
 
-        rule_ids: list[str] = [row["rule_id"] for row in membership_rows if row.get("rule_id")]
+        rule_ids: list[str] = [row[_COL_POLICY_RULE_ID] for row in membership_rows if isinstance(row, dict) and row.get(_COL_POLICY_RULE_ID)]
 
         if not rule_ids:
             logger.warning(
-                "action_policy: no rule_ids from memberships for set %r — using cold-start defaults",
+                "action_policy: no policy_rule_ids from memberships for set %r — using cold-start defaults",
                 resolved_key,
             )
             return False
