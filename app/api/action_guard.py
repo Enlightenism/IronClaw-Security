@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 
 from app.dependencies.rate_limit import limit_guard_routes
 from app.models.action_guard import (
@@ -20,6 +20,11 @@ from app.services.action_policy import (
 )
 from app.services.behavioral_baseline import get_behavioral_baseline_store
 from app.services.telemetry import append_telemetry_event
+from app.services.telemetry_service import (
+    TelemetryEventInput,
+    build_agent_event,
+    post_telemetry_batch_async,
+)
 from app.services.verdict_enforcer import EnforcedVerdict
 
 router = APIRouter(dependencies=[Depends(limit_guard_routes)])
@@ -173,8 +178,74 @@ def _run_threat_screen(
         return current_verdict, []
 
 
+async def _flush_guard_events_async(events: list[TelemetryEventInput]) -> None:
+    try:
+        await post_telemetry_batch_async(events)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _build_guard_decision_event(
+    payload: ActionGuardRequest,
+    verdict: str,
+    risk_score: int | float | None,
+    reason_count: int,
+    agent_id: str | None,
+    extra_key_seed: str,
+) -> TelemetryEventInput:
+    return build_agent_event(
+        source="ironclaw.action_guard",
+        metric_name="action_guard_decision",
+        metric_type="event",
+        org_id=str(payload.client_id) if payload.client_id else None,
+        value_text=verdict,
+        value_numeric=float(risk_score) if risk_score is not None else None,
+        dimensions={
+            "action_type": payload.action_type,
+            "target": payload.target,
+            "client_id": payload.client_id,
+            "session_id": payload.session_id,
+            "agent_id": agent_id,
+            "verdict": verdict,
+            "reason_count": reason_count,
+        },
+        extra_key_seed=extra_key_seed,
+    )
+
+
+def _build_prompt_injection_event(
+    payload: ActionGuardRequest,
+    verdict: str,
+    risk_score: int | float | None,
+    caller_context: str,
+    extra_key_seed: str,
+) -> TelemetryEventInput:
+    return build_agent_event(
+        source="ironclaw.action_guard",
+        metric_name="prompt_injection_detected",
+        metric_type="event",
+        org_id=str(payload.client_id) if payload.client_id else None,
+        value_text=verdict,
+        value_numeric=float(risk_score) if risk_score is not None else None,
+        dimensions={
+            "action_type": payload.action_type,
+            "target": payload.target,
+            "client_id": payload.client_id,
+            "session_id": payload.session_id,
+            "agent_id": getattr(payload, "agent_id", None),
+            "verdict": verdict,
+            "caller_context": caller_context,
+        },
+        extra_key_seed=extra_key_seed,
+    )
+
+
 @router.post("/action", response_model=ActionGuardResponse)
-def guard_action(payload: ActionGuardRequest, request: Request) -> ActionGuardResponse:
+def guard_action(
+    payload: ActionGuardRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> ActionGuardResponse:
     append_telemetry_event(
         "guard_action_requested",
         _request_context(payload, request),
@@ -202,11 +273,10 @@ def guard_action(payload: ActionGuardRequest, request: Request) -> ActionGuardRe
 
     response = ActionGuardResponse(**result)
 
-    _record_baseline_observation(
-        payload,
-        risk_score=int(getattr(response, "risk_score", 0) or 0),
-        matched_patterns=[str(r.get("label", "")) for r in result.get("reasons", []) if isinstance(r, dict) and r.get("label")],
-    )
+    risk_score = int(getattr(response, "risk_score", 0) or 0)
+    matched_patterns = [str(r.get("label", "")) for r in result.get("reasons", []) if isinstance(r, dict) and r.get("label")]
+
+    _record_baseline_observation(payload, risk_score=risk_score, matched_patterns=matched_patterns)
 
     append_telemetry_event(
         "guard_action_completed",
@@ -218,11 +288,37 @@ def guard_action(payload: ActionGuardRequest, request: Request) -> ActionGuardRe
         },
     )
 
+    events: list[TelemetryEventInput] = [
+        _build_guard_decision_event(
+            payload,
+            verdict=escalated_verdict,
+            risk_score=risk_score,
+            reason_count=len(result.get("reasons", [])),
+            agent_id=getattr(payload, "agent_id", None),
+            extra_key_seed=f"action:{payload.action_type}:{payload.client_id}:{escalated_verdict}",
+        )
+    ]
+    if escalated_verdict in ("block", "quarantine") and any("injection" in str(r.get("label", "")).lower() for r in result.get("reasons", []) if isinstance(r, dict)):
+        events.append(
+            _build_prompt_injection_event(
+                payload,
+                verdict=escalated_verdict,
+                risk_score=risk_score,
+                caller_context="action_guard",
+                extra_key_seed=f"injection:action:{payload.action_type}:{payload.client_id}:{escalated_verdict}",
+            )
+        )
+    background_tasks.add_task(_flush_guard_events_async, events)
+
     return response
 
 
 @router.post("/action-policy", response_model=ActionPolicyResponse)
-def guard_action_policy(payload: ActionGuardRequest, request: Request) -> ActionPolicyResponse:
+def guard_action_policy(
+    payload: ActionGuardRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> ActionPolicyResponse:
     append_telemetry_event(
         "guard_action_policy_requested",
         _request_context(payload, request),
@@ -249,11 +345,10 @@ def guard_action_policy(payload: ActionGuardRequest, request: Request) -> Action
 
     response = ActionPolicyResponse(**result)
 
-    _record_baseline_observation(
-        payload,
-        risk_score=int(getattr(response, "risk_score", 0) or 0),
-        matched_patterns=[str(r.get("label", "")) for r in result.get("reasons", []) if isinstance(r, dict) and r.get("label")],
-    )
+    risk_score = int(getattr(response, "risk_score", 0) or 0)
+    matched_patterns = [str(r.get("label", "")) for r in result.get("reasons", []) if isinstance(r, dict) and r.get("label")]
+
+    _record_baseline_observation(payload, risk_score=risk_score, matched_patterns=matched_patterns)
 
     append_telemetry_event(
         "guard_action_policy_completed",
@@ -264,11 +359,37 @@ def guard_action_policy(payload: ActionGuardRequest, request: Request) -> Action
         },
     )
 
+    events: list[TelemetryEventInput] = [
+        _build_guard_decision_event(
+            payload,
+            verdict=escalated_verdict,
+            risk_score=risk_score,
+            reason_count=len(result.get("reasons", [])),
+            agent_id=getattr(payload, "agent_id", None),
+            extra_key_seed=f"policy:{payload.action_type}:{payload.client_id}:{escalated_verdict}",
+        )
+    ]
+    if escalated_verdict in ("block", "quarantine") and any("injection" in str(r.get("label", "")).lower() for r in result.get("reasons", []) if isinstance(r, dict)):
+        events.append(
+            _build_prompt_injection_event(
+                payload,
+                verdict=escalated_verdict,
+                risk_score=risk_score,
+                caller_context="action_guard_policy",
+                extra_key_seed=f"injection:policy:{payload.action_type}:{payload.client_id}:{escalated_verdict}",
+            )
+        )
+    background_tasks.add_task(_flush_guard_events_async, events)
+
     return response
 
 
 @router.post("/action-decision", response_model=ActionDecisionResponse)
-def guard_action_decision(payload: ActionGuardRequest, request: Request) -> ActionDecisionResponse:
+def guard_action_decision(
+    payload: ActionGuardRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> ActionDecisionResponse:
     append_telemetry_event(
         "guard_action_decision_requested",
         _request_context(payload, request),
@@ -297,11 +418,11 @@ def guard_action_decision(payload: ActionGuardRequest, request: Request) -> Acti
 
     response = ActionDecisionResponse(**result)
 
-    _record_baseline_observation(
-        payload,
-        risk_score=int(getattr(response, "risk_score", 0) or 0),
-        matched_patterns=[str(r.get("label", "")) for r in result.get("reasons", []) if isinstance(r, dict) and r.get("label")],
-    )
+    risk_score = int(getattr(response, "risk_score", 0) or 0)
+    agent_id = getattr(response, "agent_id", None) or getattr(payload, "agent_id", None)
+    matched_patterns = [str(r.get("label", "")) for r in result.get("reasons", []) if isinstance(r, dict) and r.get("label")]
+
+    _record_baseline_observation(payload, risk_score=risk_score, matched_patterns=matched_patterns)
 
     append_telemetry_event(
         "guard_action_decision_completed",
@@ -311,7 +432,7 @@ def guard_action_decision(payload: ActionGuardRequest, request: Request) -> Acti
             "verdict": getattr(response, "verdict", None),
             "reason_count": len(getattr(response, "reasons", [])),
             "categories": getattr(response, "categories", []),
-            "agent_id": getattr(response, "agent_id", None),
+            "agent_id": agent_id,
             "groq_verdict": getattr(response, "groq_verdict", None),
             "groq_risk_score": getattr(response, "groq_risk_score", None),
             "groq_confidence": getattr(response, "groq_confidence", None),
@@ -321,5 +442,27 @@ def guard_action_decision(payload: ActionGuardRequest, request: Request) -> Acti
             "drift_detected": getattr(response, "drift_report", None) is not None,
         },
     )
+
+    events: list[TelemetryEventInput] = [
+        _build_guard_decision_event(
+            payload,
+            verdict=escalated_verdict,
+            risk_score=risk_score,
+            reason_count=len(result.get("reasons", [])),
+            agent_id=agent_id,
+            extra_key_seed=f"decision:{payload.action_type}:{payload.client_id}:{escalated_verdict}",
+        )
+    ]
+    if escalated_verdict in ("block", "quarantine") and any("injection" in str(r.get("label", "")).lower() for r in result.get("reasons", []) if isinstance(r, dict)):
+        events.append(
+            _build_prompt_injection_event(
+                payload,
+                verdict=escalated_verdict,
+                risk_score=risk_score,
+                caller_context="action_guard_decision",
+                extra_key_seed=f"injection:decision:{payload.action_type}:{payload.client_id}:{escalated_verdict}",
+            )
+        )
+    background_tasks.add_task(_flush_guard_events_async, events)
 
     return response
