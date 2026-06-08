@@ -35,15 +35,34 @@ BILLING_TIER_60K_PRICE_USD: int = 180
 # ---------------------------------------------------------------------------
 IRONCLAW_TABLES: frozenset[str] = frozenset(
     {
+        # Core scan pipeline
         "scan_history",
         "scan_patterns",
+        # Policy engine
         "policy_rules",
         "policy_sets",
         "policy_set_memberships",
+        # Agents
         "agents",
+        "agent_trust_profiles",
+        "trust_events",
+        # Telemetry & observability
         "telemetry_events",
+        "audit_events",
+        # Threat intelligence
+        "iocs",
+        "threat_detections",
+        # Quarantine & review
+        "quarantine_items",
+        "review_queue",
+        # Rate limiting
+        "rate_limit_state",
+        # Tool execution & sandbox
+        "tool_call_log",
+        "sandbox_execution_log",
+        # Webhooks
         "webhook_subscriptions",
-        "webhook_delivery_log",
+        "webhook_deliveries",
     }
 )
 
@@ -686,11 +705,7 @@ class SupabaseClient:
         return self.select("policy_rules", filters=filters or None)
 
     def fetch_policy_set(self, set_key: str) -> dict[str, Any] | None:
-        """Return the policy_sets row matching set_key, or None if absent.
-
-        set_key is the unique string key used at runtime to identify the active
-        rule set (e.g. "default", "strict", "permissive").
-        """
+        """Return the policy_sets row matching set_key, or None if absent."""
         if not set_key or not set_key.strip():
             raise ValueError("set_key is required")
 
@@ -702,11 +717,7 @@ class SupabaseClient:
         return rows[0] if rows else None
 
     def fetch_policy_set_memberships(self, policy_set_id: str) -> list[dict[str, Any]]:
-        """Return all policy_set_memberships rows for the given policy_set_id.
-
-        Each membership row links a policy_set to a policy_rule.  Use the
-        returned list to resolve which rules are active for a given set.
-        """
+        """Return all policy_set_memberships rows for the given policy_set_id."""
         if not policy_set_id or not policy_set_id.strip():
             raise ValueError("policy_set_id is required")
 
@@ -732,7 +743,7 @@ class SupabaseClient:
         subscription_id: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        """Return rows from webhook_delivery_log.
+        """Return rows from webhook_deliveries.
 
         Optionally scoped to a single subscription_id and bounded by limit.
         """
@@ -740,7 +751,7 @@ class SupabaseClient:
         if subscription_id:
             filters["subscription_id"] = f"eq.{subscription_id}"
         return self.select(
-            "webhook_delivery_log",
+            "webhook_deliveries",
             filters=filters or None,
             limit=limit,
             order="created_at",
