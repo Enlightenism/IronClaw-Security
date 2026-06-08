@@ -7,6 +7,7 @@ import os
 from typing import Any, Protocol, runtime_checkable
 
 from app.supabaseclient import (
+    IRONCLAW_TABLES,
     SupabaseClient,
     SupabaseConfigurationError,
     create_supabase_client,
@@ -18,6 +19,52 @@ logger = logging.getLogger(__name__)
 DEFAULT_PERSISTENCE_MODE = "auto"
 MEMORY_MODE = "memory"
 SUPABASE_MODE = "supabase"
+
+# DDL bootstrap — one entry per canonical IronClaw table.
+# Entries are advisory: they document required schema and are used by
+# startup health checks and migration helpers. They do NOT execute DDL
+# directly against Supabase (managed via migrations); they exist so the
+# bootstrap layer can assert that every expected table is accounted for.
+_IRONCLAW_DDL_TABLE_REGISTRY: frozenset[str] = frozenset(
+    {
+        # core scan pipeline
+        "scan_history",
+        "scan_patterns",
+        # policy engine
+        "policy_rules",
+        "policy_sets",
+        "policy_set_memberships",
+        # agents + trust
+        "agents",
+        "agent_trust_profiles",
+        "trust_events",
+        # telemetry + audit
+        "telemetry_events",
+        "audit_events",
+        # threat intelligence
+        "iocs",
+        "threat_detections",
+        # quarantine + review
+        "quarantine_items",
+        "review_queue",
+        # rate limiting (runtime state)
+        "rate_limit_state",
+        # tool + sandbox execution logs
+        "tool_call_log",
+        "sandbox_execution_log",
+        # webhooks
+        "webhook_subscriptions",
+        "webhook_deliveries",
+    }
+)
+
+# Verify at import time that DDL registry stays in sync with IRONCLAW_TABLES.
+_missing_from_registry = IRONCLAW_TABLES - _IRONCLAW_DDL_TABLE_REGISTRY
+_extra_in_registry = _IRONCLAW_DDL_TABLE_REGISTRY - IRONCLAW_TABLES
+if _missing_from_registry:
+    raise RuntimeError(f"persistencebootstrap DDL registry is missing tables: {sorted(_missing_from_registry)}")
+if _extra_in_registry:
+    raise RuntimeError(f"persistencebootstrap DDL registry has unknown tables: {sorted(_extra_in_registry)}")
 
 
 class PersistenceBootstrapError(RuntimeError):
@@ -123,7 +170,7 @@ class InMemoryPersistenceStore:
             "backend": backend_name,
             "fallback_reason": fallback_reason,
         }
-        self._tables: dict[str, list[dict[str, Any]]] = {}
+        self._tables: dict[str, list[dict[str, Any]]] = {table: [] for table in IRONCLAW_TABLES}
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -407,6 +454,21 @@ def build_store(
     raise PersistenceBootstrapError(f"unhandled persistence mode: {requested_mode}")
 
 
+# ---------------------------------------------------------------------------
+# Canonical top-level accessor — imported by name across the service layer
+# ---------------------------------------------------------------------------
+
+
+def get_persistence_store(**kwargs: Any) -> StoreType:
+    """Primary accessor used by all service-layer imports."""
+    return build_store(**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Aliased factory surface — preserve all existing call sites
+# ---------------------------------------------------------------------------
+
+
 def create_store(**kwargs: Any) -> StoreType:
     return build_store(**kwargs)
 
@@ -487,6 +549,29 @@ def get_checkpoint_store(**kwargs: Any) -> StoreType:
     return build_store(**kwargs)
 
 
+# ---------------------------------------------------------------------------
+# Domain-scoped rate-limit store accessor
+# ---------------------------------------------------------------------------
+
+
+def get_rate_limit_store(**kwargs: Any) -> StoreType:
+    """Accessor for the rate_limit_state table layer."""
+    return build_store(**kwargs)
+
+
+def build_rate_limit_store(**kwargs: Any) -> StoreType:
+    return build_store(**kwargs)
+
+
+def create_rate_limit_store(**kwargs: Any) -> StoreType:
+    return build_store(**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap state introspection
+# ---------------------------------------------------------------------------
+
+
 def get_persistence_bootstrap_state(
     *,
     mode: str | None = None,
@@ -512,3 +597,13 @@ def get_persistence_bootstrap_state(
         fallback_enabled=fallback_enabled,
         fallback_reason=fallback_reason,
     )
+
+
+# ---------------------------------------------------------------------------
+# Schema registry introspection helper
+# ---------------------------------------------------------------------------
+
+
+def get_registered_tables() -> frozenset[str]:
+    """Return the canonical DDL registry; used by startup health checks."""
+    return _IRONCLAW_DDL_TABLE_REGISTRY
