@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import hashlib
 import logging
-import os
 import secrets
 from typing import Any
 import uuid
@@ -12,6 +11,30 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 
 from app.core.auth import AuthContext, get_auth_context
+from app.core.supabase_persistence import (
+    PersistenceError,
+)
+from app.core.supabase_persistence import (
+    create_webhook_subscription as _persist_create_subscription,
+)
+from app.core.supabase_persistence import (
+    delete_webhook_subscription as _persist_delete_subscription,
+)
+from app.core.supabase_persistence import (
+    get_webhook_delivery_log as _persist_get_delivery_log,
+)
+from app.core.supabase_persistence import (
+    get_webhook_delivery_record as _persist_get_delivery_record,
+)
+from app.core.supabase_persistence import (
+    get_webhook_subscription as _persist_get_subscription,
+)
+from app.core.supabase_persistence import (
+    list_webhook_subscriptions as _persist_list_subscriptions,
+)
+from app.core.supabase_persistence import (
+    update_webhook_subscription as _persist_update_subscription,
+)
 from app.models.webhook import (
     WebhookCreateResponse,
     WebhookDeliveryLogEntry,
@@ -30,33 +53,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
-_WEBHOOK_SUBSCRIPTIONS_TABLE = "webhook_subscriptions"
-
 _SUPPORTED_EVENTS: set[str] = {e.value for e in WebhookEventType if e.value != "*"}
-
-
-# ---------------------------------------------------------------------------
-# Supabase client accessor — delegates to canonical core module
-# ---------------------------------------------------------------------------
-
-
-def _get_supabase_client() -> Any:
-    try:
-        from app.core.supabase import get_supabase_service_client  # type: ignore[import]
-
-        return get_supabase_service_client()
-    except ImportError:
-        pass
-    try:
-        from supabase import create_client  # type: ignore[import]
-
-        return create_client(
-            os.environ["SUPABASE_URL"],
-            os.environ["SUPABASE_SERVICE_ROLE_KEY"],
-        )
-    except Exception as exc:
-        logger.error("webhooks: supabase client unavailable: %s", exc)
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -99,19 +96,6 @@ def _build_list_item(row: dict[str, Any]) -> dict[str, Any]:
     return item
 
 
-def _fetch_subscription(client: Any, subscription_id: str, tenant_id: str) -> dict[str, Any] | None:
-    try:
-        query = client.table(_WEBHOOK_SUBSCRIPTIONS_TABLE).select("*").eq("id", subscription_id)
-        if tenant_id:
-            query = query.eq("tenant_id", tenant_id)
-        resp = query.limit(1).execute()
-        rows: list[dict[str, Any]] = resp.data or []
-        return rows[0] if rows else None
-    except Exception as exc:
-        logger.error("webhooks._fetch_subscription id=%s tenant_id=%s error=%s", subscription_id, tenant_id, exc)
-        return None
-
-
 # ---------------------------------------------------------------------------
 # POST /webhooks/subscriptions
 # ---------------------------------------------------------------------------
@@ -128,10 +112,6 @@ async def create_webhook_subscription(
     payload: WebhookSubscriptionCreate,
     auth: AuthContext = Depends(get_auth_context),
 ) -> JSONResponse:
-    client = _get_supabase_client()
-    if client is None:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="storage_unavailable")
-
     tenant_id = _resolve_tenant_id(auth)
     if not tenant_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="tenant_id could not be resolved from auth context")
@@ -155,8 +135,8 @@ async def create_webhook_subscription(
     }
 
     try:
-        client.table(_WEBHOOK_SUBSCRIPTIONS_TABLE).insert(row).execute()
-    except Exception as exc:
+        _persist_create_subscription(row)
+    except PersistenceError as exc:
         logger.error("webhooks.create_subscription tenant_id=%s error=%s", tenant_id, exc)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="subscription_create_failed") from exc
 
@@ -196,21 +176,18 @@ async def list_webhook_subscriptions(
     offset: int = Query(default=0, ge=0),
     auth: AuthContext = Depends(get_auth_context),
 ) -> JSONResponse:
-    client = _get_supabase_client()
-    if client is None:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="storage_unavailable")
-
     tenant_id = _resolve_tenant_id(auth)
     if not tenant_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="tenant_id could not be resolved from auth context")
 
     try:
-        query = client.table(_WEBHOOK_SUBSCRIPTIONS_TABLE).select("id,tenant_id,target_url,events,active,max_attempts,metadata,created_at,secret_hash").eq("tenant_id", tenant_id).order("created_at", desc=True).range(offset, offset + limit - 1)
-        if active_only:
-            query = query.eq("active", True)
-        resp = query.execute()
-        rows: list[dict[str, Any]] = resp.data or []
-    except Exception as exc:
+        rows = _persist_list_subscriptions(
+            tenant_id=tenant_id,
+            active_only=active_only,
+            limit=limit,
+            offset=offset,
+        )
+    except PersistenceError as exc:
         logger.error("webhooks.list_subscriptions tenant_id=%s error=%s", tenant_id, exc)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="list_failed") from exc
 
@@ -236,12 +213,14 @@ async def get_webhook_subscription(
     subscription_id: str,
     auth: AuthContext = Depends(get_auth_context),
 ) -> JSONResponse:
-    client = _get_supabase_client()
-    if client is None:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="storage_unavailable")
-
     tenant_id = _resolve_tenant_id(auth)
-    row = _fetch_subscription(client, subscription_id, tenant_id)
+
+    try:
+        row = _persist_get_subscription(subscription_id=subscription_id, tenant_id=tenant_id)
+    except PersistenceError as exc:
+        logger.error("webhooks.get_subscription id=%s tenant_id=%s error=%s", subscription_id, tenant_id, exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="fetch_failed") from exc
+
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="subscription_not_found")
 
@@ -264,12 +243,14 @@ async def update_webhook_subscription(
     payload: WebhookSubscriptionUpdateRequest,
     auth: AuthContext = Depends(get_auth_context),
 ) -> JSONResponse:
-    client = _get_supabase_client()
-    if client is None:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="storage_unavailable")
-
     tenant_id = _resolve_tenant_id(auth)
-    existing = _fetch_subscription(client, subscription_id, tenant_id)
+
+    try:
+        existing = _persist_get_subscription(subscription_id=subscription_id, tenant_id=tenant_id)
+    except PersistenceError as exc:
+        logger.error("webhooks.update_subscription fetch id=%s tenant_id=%s error=%s", subscription_id, tenant_id, exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="fetch_failed") from exc
+
     if existing is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="subscription_not_found")
 
@@ -287,12 +268,21 @@ async def update_webhook_subscription(
         return JSONResponse(status_code=status.HTTP_200_OK, content=_build_list_item(existing))
 
     try:
-        client.table(_WEBHOOK_SUBSCRIPTIONS_TABLE).update(updates).eq("id", subscription_id).eq("tenant_id", tenant_id).execute()
-    except Exception as exc:
+        _persist_update_subscription(
+            subscription_id=subscription_id,
+            tenant_id=tenant_id,
+            updates=updates,
+        )
+    except PersistenceError as exc:
         logger.error("webhooks.update_subscription id=%s tenant_id=%s error=%s", subscription_id, tenant_id, exc)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="update_failed") from exc
 
-    updated = _fetch_subscription(client, subscription_id, tenant_id)
+    try:
+        updated = _persist_get_subscription(subscription_id=subscription_id, tenant_id=tenant_id)
+    except PersistenceError as exc:
+        logger.error("webhooks.update_subscription post_fetch id=%s tenant_id=%s error=%s", subscription_id, tenant_id, exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="post_update_fetch_failed") from exc
+
     if updated is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="post_update_fetch_failed")
 
@@ -314,18 +304,20 @@ async def delete_webhook_subscription(
     subscription_id: str,
     auth: AuthContext = Depends(get_auth_context),
 ) -> JSONResponse:
-    client = _get_supabase_client()
-    if client is None:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="storage_unavailable")
-
     tenant_id = _resolve_tenant_id(auth)
-    existing = _fetch_subscription(client, subscription_id, tenant_id)
+
+    try:
+        existing = _persist_get_subscription(subscription_id=subscription_id, tenant_id=tenant_id)
+    except PersistenceError as exc:
+        logger.error("webhooks.delete_subscription fetch id=%s tenant_id=%s error=%s", subscription_id, tenant_id, exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="fetch_failed") from exc
+
     if existing is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="subscription_not_found")
 
     try:
-        client.table(_WEBHOOK_SUBSCRIPTIONS_TABLE).delete().eq("id", subscription_id).eq("tenant_id", tenant_id).execute()
-    except Exception as exc:
+        _persist_delete_subscription(subscription_id=subscription_id, tenant_id=tenant_id)
+    except PersistenceError as exc:
         logger.error("webhooks.delete_subscription id=%s tenant_id=%s error=%s", subscription_id, tenant_id, exc)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="delete_failed") from exc
 
@@ -351,12 +343,14 @@ async def rotate_webhook_secret(
     subscription_id: str,
     auth: AuthContext = Depends(get_auth_context),
 ) -> JSONResponse:
-    client = _get_supabase_client()
-    if client is None:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="storage_unavailable")
-
     tenant_id = _resolve_tenant_id(auth)
-    existing = _fetch_subscription(client, subscription_id, tenant_id)
+
+    try:
+        existing = _persist_get_subscription(subscription_id=subscription_id, tenant_id=tenant_id)
+    except PersistenceError as exc:
+        logger.error("webhooks.rotate_secret fetch id=%s tenant_id=%s error=%s", subscription_id, tenant_id, exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="fetch_failed") from exc
+
     if existing is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="subscription_not_found")
 
@@ -365,8 +359,12 @@ async def rotate_webhook_secret(
     hint = _key_prefix_hint(raw_secret)
 
     try:
-        client.table(_WEBHOOK_SUBSCRIPTIONS_TABLE).update({"secret_hash": new_hash}).eq("id", subscription_id).eq("tenant_id", tenant_id).execute()
-    except Exception as exc:
+        _persist_update_subscription(
+            subscription_id=subscription_id,
+            tenant_id=tenant_id,
+            updates={"secret_hash": new_hash},
+        )
+    except PersistenceError as exc:
         logger.error("webhooks.rotate_secret id=%s tenant_id=%s error=%s", subscription_id, tenant_id, exc)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="rotate_failed") from exc
 
@@ -407,7 +405,6 @@ async def test_webhook_dispatch(
     }
 
     try:
-        # Normal flow — fire edge function so downstream consumers see the test event.
         results = dispatch_event(tenant_id, "webhook.test", test_payload, fire_edge_function=True)
         return JSONResponse(
             status_code=status.HTTP_200_OK,
@@ -440,25 +437,20 @@ async def list_webhook_deliveries(
     offset: int = Query(default=0, ge=0),
     auth: AuthContext = Depends(get_auth_context),
 ) -> JSONResponse:
-    client = _get_supabase_client()
-    if client is None:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="storage_unavailable")
-
     tenant_id = _resolve_tenant_id(auth)
     if not tenant_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="tenant_id could not be resolved from auth context")
 
     try:
-        query = client.table("webhook_delivery_log").select("id,subscription_id,tenant_id,event_type,status,attempts,http_status,error_detail,delivered_at,next_attempt_at,created_at").eq("tenant_id", tenant_id).order("created_at", desc=True).range(offset, offset + limit - 1)
-        if subscription_id:
-            query = query.eq("subscription_id", subscription_id)
-        if event_type:
-            query = query.eq("event_type", event_type)
-        if delivery_status:
-            query = query.eq("status", delivery_status)
-        resp = query.execute()
-        rows: list[dict[str, Any]] = resp.data or []
-    except Exception as exc:
+        rows = _persist_get_delivery_log(
+            tenant_id=tenant_id,
+            subscription_id=subscription_id,
+            event_type=event_type,
+            delivery_status=delivery_status,
+            limit=limit,
+            offset=offset,
+        )
+    except PersistenceError as exc:
         logger.error("webhooks.list_deliveries tenant_id=%s error=%s", tenant_id, exc)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="list_failed") from exc
 
@@ -510,23 +502,16 @@ async def retry_webhook_delivery(
     delivery_id: str,
     auth: AuthContext = Depends(get_auth_context),
 ) -> JSONResponse:
-    client = _get_supabase_client()
-    if client is None:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="storage_unavailable")
-
     tenant_id = _resolve_tenant_id(auth)
 
     try:
-        resp = client.table("webhook_delivery_log").select("*").eq("id", delivery_id).limit(1).execute()
-        rows: list[dict[str, Any]] = resp.data or []
-    except Exception as exc:
+        record = _persist_get_delivery_record(delivery_id=delivery_id)
+    except PersistenceError as exc:
         logger.error("webhooks.retry_delivery fetch delivery_id=%s error=%s", delivery_id, exc)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="fetch_failed") from exc
 
-    if not rows:
+    if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="delivery_not_found")
-
-    record = rows[0]
 
     record_tenant = record.get("tenant_id", "")
     if tenant_id and record_tenant and record_tenant != tenant_id:
@@ -540,7 +525,6 @@ async def retry_webhook_delivery(
         )
 
     try:
-        # Admin retry path — skip edge function call; the original event already fired it.
         result = retry_failed_delivery(
             delivery_id=delivery_id,
             subscription_id=record["subscription_id"],
