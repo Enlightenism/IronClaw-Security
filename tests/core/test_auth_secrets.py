@@ -3,8 +3,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest
-
 from app.core.auth import _get_jwt_secret, _get_secret_key
 
 # ---------------------------------------------------------------------------

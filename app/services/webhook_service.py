@@ -13,6 +13,7 @@ import uuid
 import httpx
 
 from app.models.webhook import WebhookDeliveryStatus
+from app.persistencebootstrap import PersistenceStore
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,6 @@ _DELIVERY_ID_HEADER = "X-IronClaw-Delivery"
 _EVENT_HEADER = "X-IronClaw-Event"
 _TIMESTAMP_HEADER = "X-IronClaw-Timestamp"
 
-# Edge Function name — matches the deployed Supabase function name exactly.
 _EDGE_FUNCTION_NAME = "ironclaw-webhook-dispatch"
 
 # ---------------------------------------------------------------------------
@@ -183,19 +183,23 @@ def verify_webhook_signature(
 
 
 # ---------------------------------------------------------------------------
-# Supabase service-role client accessor — canonical, single path
+# Persistence adapter — single canonical path, no raw Supabase client access
 # ---------------------------------------------------------------------------
 
 
-def _get_service_role_client() -> Any:
+def _get_persistence_store() -> PersistenceStore:
+    """
+    Returns the active persistence store via the IronClaw bootstrap layer.
+    All table access in this module must go through this store — never call
+    get_supabase_service_client() directly.
+    """
     try:
-        from app.core.supabase import get_supabase_service_client  # type: ignore[import]
+        from app.persistencebootstrap import get_persistence_store  # type: ignore[import]
 
-        return get_supabase_service_client()
+        return get_persistence_store()
     except Exception as exc:  # noqa: BLE001
-        # Only reached in isolated test environments where app.core.supabase is unavailable.
         logger.error(
-            "webhook_service | _get_service_role_client | core client unavailable: %s — " "set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY",
+            "webhook_service | _get_persistence_store | bootstrap unavailable: %s",
             exc,
         )
         raise
@@ -207,12 +211,6 @@ def _get_service_role_client() -> Any:
 
 
 def _edge_function_url(function_name: str) -> str:
-    """
-    Constructs the Supabase Edge Function URL:
-      {SUPABASE_URL}/functions/v1/{function_name}
-
-    Raises ValueError if SUPABASE_URL is not set.
-    """
     base = os.environ.get("SUPABASE_URL", "").rstrip("/")
     if not base:
         raise ValueError("SUPABASE_URL environment variable is not set.")
@@ -220,7 +218,7 @@ def _edge_function_url(function_name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Edge Function caller — POST verdict event to ironclaw-webhook-dispatch
+# Edge Function caller
 # ---------------------------------------------------------------------------
 
 
@@ -235,9 +233,8 @@ def dispatch_verdict_to_edge(
     POST {event_type, payload, tenant_id} to the ironclaw-webhook-dispatch
     Supabase Edge Function using the service-role Bearer token.
 
-    Called after every verdict is issued. Failures are logged and returned
-    as a failed EdgeDispatchResult — they never raise so the verdict path
-    is never blocked.
+    Failures are logged and returned as a failed EdgeDispatchResult — they
+    never raise so the verdict path is never blocked.
     """
     service_role_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
     if not service_role_key:
@@ -352,7 +349,7 @@ def dispatch_verdict_to_edge(
 
 
 # ---------------------------------------------------------------------------
-# Subscription queries
+# Subscription queries — via persistence adapter
 # ---------------------------------------------------------------------------
 
 
@@ -360,13 +357,17 @@ def _query_subscriptions_for_event(
     tenant_id: str,
     event_type: str,
     *,
-    client: Any = None,
+    store: PersistenceStore | None = None,
 ) -> list[WebhookSubscription]:
-    sb = client or _get_service_role_client()
+    ps = store or _get_persistence_store()
     try:
-        resp = sb.table(_WEBHOOK_SUBSCRIPTIONS_TABLE).select("*").eq("tenant_id", tenant_id).eq("active", True).filter("events", "cs", json.dumps([event_type])).execute()
-        rows: list[dict[str, Any]] = resp.data or []
-        return [WebhookSubscription.from_row(r) for r in rows]
+        rows = ps.select(
+            _WEBHOOK_SUBSCRIPTIONS_TABLE,
+            filters={"tenant_id": tenant_id, "active": True},
+        )
+        # Filter for event membership in application layer (adapter-agnostic)
+        matching = [r for r in rows if event_type in (r.get("events") or [])]
+        return [WebhookSubscription.from_row(r) for r in matching]
     except Exception as exc:  # noqa: BLE001
         logger.error(
             "webhook_service | query_subscriptions | tenant_id=%s event_type=%s error=%s",
@@ -378,23 +379,27 @@ def _query_subscriptions_for_event(
 
 
 # ---------------------------------------------------------------------------
-# Delivery log writes (service_role)
+# Delivery log writes — via persistence adapter
 # ---------------------------------------------------------------------------
 
 
 def _write_delivery_log(
     record: WebhookDeliveryRecord,
     *,
-    client: Any = None,
+    store: PersistenceStore | None = None,
     upsert: bool = False,
 ) -> None:
-    sb = client or _get_service_role_client()
+    ps = store or _get_persistence_store()
     try:
         row = record.to_dict()
         if upsert:
-            sb.table(_WEBHOOK_DELIVERY_TABLE).upsert(row).execute()
+            ps.update(
+                _WEBHOOK_DELIVERY_TABLE,
+                row,
+                filters={"id": record.id},
+            )
         else:
-            sb.table(_WEBHOOK_DELIVERY_TABLE).insert(row).execute()
+            ps.insert(_WEBHOOK_DELIVERY_TABLE, row)
     except Exception as exc:  # noqa: BLE001
         logger.error(
             "webhook_service | write_delivery_log | delivery_id=%s error=%s",
@@ -413,11 +418,12 @@ def _update_delivery_log_attempt(
     error_detail: str | None,
     delivered_at: str | None,
     next_attempt_at: str | None,
-    client: Any = None,
+    store: PersistenceStore | None = None,
 ) -> None:
-    sb = client or _get_service_role_client()
+    ps = store or _get_persistence_store()
     try:
-        sb.table(_WEBHOOK_DELIVERY_TABLE).update(
+        ps.update(
+            _WEBHOOK_DELIVERY_TABLE,
             {
                 "status": status.value,
                 "attempts": attempts,
@@ -426,8 +432,9 @@ def _update_delivery_log_attempt(
                 "error_detail": error_detail,
                 "delivered_at": delivered_at,
                 "next_attempt_at": next_attempt_at,
-            }
-        ).eq("id", delivery_id).execute()
+            },
+            filters={"id": delivery_id},
+        )
     except Exception as exc:  # noqa: BLE001
         logger.error(
             "webhook_service | update_delivery_log | delivery_id=%s error=%s",
@@ -535,7 +542,7 @@ def _should_retry(http_status: int | None) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Core delivery logic — one subscription, with retry tracking
+# Core delivery logic
 # ---------------------------------------------------------------------------
 
 
@@ -546,7 +553,7 @@ def deliver_webhook(
     *,
     existing_delivery_id: str | None = None,
     current_attempts: int = 0,
-    client: Any = None,
+    store: PersistenceStore | None = None,
 ) -> WebhookDispatchResult:
     delivery_id = existing_delivery_id or str(uuid.uuid4())
     attempt_number = current_attempts + 1
@@ -578,7 +585,7 @@ def deliver_webhook(
             next_attempt_at=None,
             created_at=now_iso,
         )
-        _write_delivery_log(initial_record, client=client)
+        _write_delivery_log(initial_record, store=store)
 
     http_status, response_body, error_detail = _dispatch_http_post(
         subscription,
@@ -612,7 +619,7 @@ def deliver_webhook(
         error_detail=error_detail,
         delivered_at=delivered_at,
         next_attempt_at=next_attempt_at,
-        client=client,
+        store=store,
     )
 
     logger.info(
@@ -638,8 +645,7 @@ def deliver_webhook(
 
 
 # ---------------------------------------------------------------------------
-# Fan-out: dispatch event to all matching subscriptions for a tenant
-# AND optionally fire the ironclaw-webhook-dispatch Edge Function
+# Fan-out dispatch
 # ---------------------------------------------------------------------------
 
 
@@ -648,7 +654,7 @@ def dispatch_event(
     event_type: str,
     payload: dict[str, Any],
     *,
-    client: Any = None,
+    store: PersistenceStore | None = None,
     fire_edge_function: bool = True,
 ) -> list[WebhookDispatchResult]:
     """
@@ -659,7 +665,7 @@ def dispatch_event(
     `fire_edge_function=False` disables the edge call for tests or environments
     where the Edge Function is not deployed.
     """
-    subscriptions = _query_subscriptions_for_event(tenant_id, event_type, client=client)
+    subscriptions = _query_subscriptions_for_event(tenant_id, event_type, store=store)
 
     if not subscriptions:
         logger.debug(
@@ -670,7 +676,7 @@ def dispatch_event(
 
     results: list[WebhookDispatchResult] = []
     for sub in subscriptions:
-        result = deliver_webhook(sub, event_type, payload, client=client)
+        result = deliver_webhook(sub, event_type, payload, store=store)
         results.append(result)
 
     succeeded = sum(1 for r in results if r.succeeded)
@@ -684,8 +690,6 @@ def dispatch_event(
         failed,
     )
 
-    # Fire the ironclaw-webhook-dispatch Edge Function after every verdict fan-out.
-    # Non-blocking to the verdict path: failures are logged only, never raised.
     if fire_edge_function:
         edge_result = dispatch_verdict_to_edge(
             event_type=event_type,
@@ -704,7 +708,7 @@ def dispatch_event(
 
 
 # ---------------------------------------------------------------------------
-# Retry runner — for background task / queue-driven retries
+# Retry runner
 # ---------------------------------------------------------------------------
 
 
@@ -716,13 +720,16 @@ def retry_failed_delivery(
     payload_json: str,
     current_attempts: int,
     *,
-    client: Any = None,
+    store: PersistenceStore | None = None,
 ) -> WebhookDispatchResult:
-    sb = client or _get_service_role_client()
+    ps = store or _get_persistence_store()
 
     try:
-        resp = sb.table(_WEBHOOK_SUBSCRIPTIONS_TABLE).select("*").eq("id", subscription_id).eq("tenant_id", tenant_id).eq("active", True).limit(1).execute()
-        rows: list[dict[str, Any]] = resp.data or []
+        rows = ps.select(
+            _WEBHOOK_SUBSCRIPTIONS_TABLE,
+            filters={"id": subscription_id, "tenant_id": tenant_id, "active": True},
+            limit=1,
+        )
         if not rows:
             error_msg = f"Subscription {subscription_id} not found or inactive for retry."
             logger.warning("webhook_service | retry_failed_delivery | %s", error_msg)
@@ -767,24 +774,27 @@ def retry_failed_delivery(
         payload.get("data", payload),
         existing_delivery_id=delivery_id,
         current_attempts=current_attempts,
-        client=client,
+        store=store,
     )
 
 
 # ---------------------------------------------------------------------------
-# Delivery log query helpers (read-only, service_role)
+# Delivery log query helpers (read-only)
 # ---------------------------------------------------------------------------
 
 
 def get_delivery_log(
     delivery_id: str,
     *,
-    client: Any = None,
+    store: PersistenceStore | None = None,
 ) -> dict[str, Any] | None:
-    sb = client or _get_service_role_client()
+    ps = store or _get_persistence_store()
     try:
-        resp = sb.table(_WEBHOOK_DELIVERY_TABLE).select("*").eq("id", delivery_id).limit(1).execute()
-        rows = resp.data or []
+        rows = ps.select(
+            _WEBHOOK_DELIVERY_TABLE,
+            filters={"id": delivery_id},
+            limit=1,
+        )
         return rows[0] if rows else None
     except Exception as exc:  # noqa: BLE001
         logger.error(
@@ -801,18 +811,16 @@ def list_delivery_logs_for_tenant(
     event_type: str | None = None,
     status: WebhookDeliveryStatus | str | None = None,
     limit: int = 100,
-    client: Any = None,
+    store: PersistenceStore | None = None,
 ) -> list[dict[str, Any]]:
-    sb = client or _get_service_role_client()
+    ps = store or _get_persistence_store()
     try:
-        query = sb.table(_WEBHOOK_DELIVERY_TABLE).select("*").eq("tenant_id", tenant_id).order("created_at", desc=True).limit(limit)
+        filters: dict[str, Any] = {"tenant_id": tenant_id}
         if event_type:
-            query = query.eq("event_type", event_type)
+            filters["event_type"] = event_type
         if status is not None:
-            status_val = status.value if isinstance(status, WebhookDeliveryStatus) else status
-            query = query.eq("status", status_val)
-        resp = query.execute()
-        return resp.data or []
+            filters["status"] = status.value if isinstance(status, WebhookDeliveryStatus) else status
+        return ps.select(_WEBHOOK_DELIVERY_TABLE, filters=filters, limit=limit)
     except Exception as exc:  # noqa: BLE001
         logger.error(
             "webhook_service | list_delivery_logs | tenant_id=%s error=%s",
@@ -825,17 +833,21 @@ def list_delivery_logs_for_tenant(
 def list_retryable_deliveries(
     *,
     limit: int = 50,
-    client: Any = None,
+    store: PersistenceStore | None = None,
 ) -> list[dict[str, Any]]:
     """
     Returns delivery log rows with status='failed' and next_attempt_at <= now.
     Consumed by the webhooks router retry worker only.
     """
-    sb = client or _get_service_role_client()
-    now_iso = datetime.now(UTC).isoformat()
+    ps = store or _get_persistence_store()
     try:
-        resp = sb.table(_WEBHOOK_DELIVERY_TABLE).select("*").eq("status", WebhookDeliveryStatus.FAILED.value).lte("next_attempt_at", now_iso).order("next_attempt_at", desc=False).limit(limit).execute()
-        return resp.data or []
+        rows = ps.select(
+            _WEBHOOK_DELIVERY_TABLE,
+            filters={"status": WebhookDeliveryStatus.FAILED.value},
+            limit=limit,
+        )
+        now_iso = datetime.now(UTC).isoformat()
+        return [r for r in rows if r.get("next_attempt_at") and r["next_attempt_at"] <= now_iso]
     except Exception as exc:  # noqa: BLE001
         logger.error("webhook_service | list_retryable_deliveries | error=%s", exc)
         return []
