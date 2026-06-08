@@ -75,19 +75,6 @@ def _patched_no_db(agent_id: str | None = None):
     )
 
 
-def _mock_db_unavailable() -> MagicMock:
-    qb = MagicMock()
-    qb.select.return_value = qb
-    qb.eq.return_value = qb
-    qb.maybe_single.return_value = qb
-    qb.order.return_value = qb
-    qb.range.return_value = qb
-    qb.execute.side_effect = Exception("DB unavailable")
-    client = MagicMock()
-    client.table.return_value = qb
-    return client
-
-
 # ---------------------------------------------------------------------------
 # _clamp
 # ---------------------------------------------------------------------------
@@ -644,24 +631,30 @@ class TestRestoreAgent:
 
 
 # ---------------------------------------------------------------------------
-# list_trust_events
+# list_trust_events — patching _persistence_list_trust_events
 # ---------------------------------------------------------------------------
 
 
 class TestListTrustEvents:
-    def test_returns_empty_list_when_db_unavailable(self):
-        with patch("app.core.trust_engine._get_client", return_value=_mock_db_unavailable()):
+    def test_returns_empty_list_when_persistence_raises(self):
+        with patch(
+            "app.core.trust_engine._persistence_list_trust_events",
+            side_effect=Exception("DB unavailable"),
+        ):
             result = list_trust_events("agent-list-test")
         assert result == []
 
-    def test_does_not_raise_when_db_unavailable(self):
-        with patch("app.core.trust_engine._get_client", return_value=_mock_db_unavailable()):
+    def test_does_not_raise_when_persistence_raises(self):
+        with patch(
+            "app.core.trust_engine._persistence_list_trust_events",
+            side_effect=Exception("DB unavailable"),
+        ):
             try:
                 list_trust_events("agent-noexc")
             except Exception as e:
                 pytest.fail(f"list_trust_events raised: {e}")
 
-    def test_returns_list_from_db_rows(self):
+    def test_returns_list_from_persistence(self):
         now = "2025-01-01T00:00:00+00:00"
         rows = [
             {
@@ -675,39 +668,34 @@ class TestListTrustEvents:
                 "recorded_at": now,
             }
         ]
-        qb = MagicMock()
-        qb.select.return_value = qb
-        qb.eq.return_value = qb
-        qb.order.return_value = qb
-        qb.range.return_value = qb
-        resp = MagicMock()
-        resp.data = rows
-        qb.execute.return_value = resp
-        client = MagicMock()
-        client.table.return_value = qb
-
-        with patch("app.core.trust_engine._get_client", return_value=client):
+        with patch(
+            "app.core.trust_engine._persistence_list_trust_events",
+            return_value=rows,
+        ):
             result = list_trust_events("agent-list-rows")
 
         assert isinstance(result, list)
         assert len(result) == 1
+        assert result[0]["event_id"] == "e1"
 
     def test_returns_empty_list_when_no_rows(self):
-        qb = MagicMock()
-        qb.select.return_value = qb
-        qb.eq.return_value = qb
-        qb.order.return_value = qb
-        qb.range.return_value = qb
-        resp = MagicMock()
-        resp.data = []
-        qb.execute.return_value = resp
-        client = MagicMock()
-        client.table.return_value = qb
-
-        with patch("app.core.trust_engine._get_client", return_value=client):
+        with patch(
+            "app.core.trust_engine._persistence_list_trust_events",
+            return_value=[],
+        ):
             result = list_trust_events("agent-no-rows")
 
         assert result == []
+
+    def test_passes_limit_and_offset_to_persistence(self):
+        persistence_mock = MagicMock(return_value=[])
+        with patch(
+            "app.core.trust_engine._persistence_list_trust_events",
+            persistence_mock,
+        ):
+            list_trust_events("agent-pagination", limit=10, offset=20)
+
+        persistence_mock.assert_called_once_with("agent-pagination", limit=10, offset=20)
 
 
 # ---------------------------------------------------------------------------
