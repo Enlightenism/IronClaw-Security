@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from time import perf_counter
 from typing import Any
 from uuid import uuid4
@@ -7,6 +8,15 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 
 from app.core.settings import get_settings
+from app.persistencebootstrap import (
+    StoreType,
+    get_persistence_store,
+    get_registered_tables,
+)
+
+_log = logging.getLogger(__name__)
+
+_EXPECTED_TABLE_COUNT = 19
 
 
 class InMemoryHistoryService:
@@ -46,11 +56,42 @@ class DefaultActionDecisionService:
         return {}
 
 
+def assert_schema_completeness() -> frozenset[str]:
+    """Assert all 19 DDL-registered tables are present before accepting traffic.
+
+    Raises RuntimeError if the registry count is wrong or any expected table
+    is missing. Returns the verified table set on success.
+    """
+    registered = get_registered_tables()
+    count = len(registered)
+    if count != _EXPECTED_TABLE_COUNT:
+        raise RuntimeError(f"IronClaw schema completeness check failed: expected " f"{_EXPECTED_TABLE_COUNT} tables, registry has {count}. " f"Tables present: {sorted(registered)}")
+    _log.info(
+        "bootstrap: schema completeness check passed — %d tables registered: %s",
+        count,
+        sorted(registered),
+    )
+    return registered
+
+
 def configure_app_state(app: FastAPI) -> FastAPI:
     settings = get_settings()
 
     if not hasattr(app.state, "settings"):
         app.state.settings = settings
+
+    if not hasattr(app.state, "persistence_store"):
+        try:
+            store: StoreType = get_persistence_store()
+            app.state.persistence_store = store
+            _log.info(
+                "bootstrap: persistence store ready — backend=%s ready=%s",
+                store.backend_name,
+                store.ready,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log.error("bootstrap: persistence store init failed: %s", exc)
+            app.state.persistence_store = None
 
     if not hasattr(app.state, "scanner_service"):
         app.state.scanner_service = DefaultScannerService()
@@ -136,10 +177,15 @@ def add_security_middleware(app: FastAPI) -> FastAPI:
 
 def bootstrap_app(app: FastAPI) -> FastAPI:
     """Entry point to configure global app state and middleware.
-    Call this once, right after creating the FastAPI() instance.
+
+    Performs schema completeness check (all 19 DDL-registered tables must be
+    present), configures app state, and installs request tracing and security
+    middleware. Call this once, right after creating the FastAPI() instance.
     """
     if getattr(app.state, "_bootstrap_installed", False):
         return app
+
+    assert_schema_completeness()
 
     app = configure_app_state(app)
     app = add_request_tracing_middleware(app)
