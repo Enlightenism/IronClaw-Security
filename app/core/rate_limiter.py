@@ -50,7 +50,6 @@ def _build_429_headers(result: RateLimitResult) -> dict[str, str]:
 
 
 def raise_429(result: RateLimitResult) -> None:
-    """Raise HTTPException 429 with Retry-After and X-RateLimit-* headers."""
     headers = _build_429_headers(result)
     raise HTTPException(
         status_code=429,
@@ -66,11 +65,6 @@ def raise_429(result: RateLimitResult) -> None:
 
 
 def build_429_response(result: RateLimitResult) -> JSONResponse:
-    """Return a JSONResponse 429 with Retry-After and X-RateLimit-* headers.
-
-    Use this variant when you need to return a response without raising
-    (e.g. in middleware where raising is not appropriate).
-    """
     headers = _build_429_headers(result)
     return JSONResponse(
         status_code=429,
@@ -98,16 +92,6 @@ def check_and_increment(
     limit: int = DEFAULT_LIMIT,
     window_seconds: int = DEFAULT_WINDOW_SECONDS,
 ) -> RateLimitResult:
-    """Sliding-window rate check and increment for ``key``.
-
-    Returns a ``RateLimitResult`` describing the current window state.
-    The caller is responsible for calling ``raise_429(result)`` or
-    ``build_429_response(result)`` when ``result.allowed`` is False.
-
-    This function never raises on persistence errors — it fails open
-    (allowed=True) and logs the error, so a DB outage does not block
-    legitimate traffic.
-    """
     if not key or not key.strip():
         raise ValueError("rate limiter key must be a non-empty string")
 
@@ -135,16 +119,23 @@ def check_and_increment(
             window_start = now
             count = 1
 
-        _persistence_upsert_rate_limit_state(
-            {
-                "key": key,
-                "count": count,
-                "window_start": window_start,
-                "window_seconds": window_seconds,
-                "rate_limit": limit,
-                "updated_at": _iso_now(),
-            }
-        )
+        # Determine allowed before deciding whether to write.
+        # Do not increment the persisted count when already exceeded —
+        # this keeps window_start stable for accurate retry_after and
+        # avoids a redundant DB write on every rejected request.
+        allowed = count <= limit
+
+        if allowed:
+            _persistence_upsert_rate_limit_state(
+                {
+                    "key": key,
+                    "count": count,
+                    "window_start": window_start,
+                    "window_seconds": window_seconds,
+                    "rate_limit": limit,
+                    "updated_at": _iso_now(),
+                }
+            )
 
     except Exception as exc:  # noqa: BLE001
         _logger.error(
@@ -163,7 +154,6 @@ def check_and_increment(
             retry_after=0,
         )
 
-    allowed = count <= limit
     remaining = max(0, limit - count)
 
     if allowed:
@@ -209,7 +199,6 @@ def check_and_increment(
 
 
 def key_for_ip(request: Request) -> str:
-    """Build a rate limit key from the client IP address."""
     forwarded_for = request.headers.get("X-Forwarded-For")
     if forwarded_for:
         ip = forwarded_for.split(",")[0].strip()
@@ -219,24 +208,18 @@ def key_for_ip(request: Request) -> str:
 
 
 def key_for_agent(agent_id: str) -> str:
-    """Build a rate limit key scoped to an agent_id."""
     if not agent_id or not agent_id.strip():
         return "agent:unknown"
     return f"agent:{agent_id.strip()}"
 
 
 def key_for_api_key(api_key: str) -> str:
-    """Build a rate limit key scoped to an API key (last 8 chars only — never log full key)."""
     if not api_key or len(api_key) < 4:
         return "apikey:unknown"
     return f"apikey:{api_key[-8:]}"
 
 
 def key_composite(prefix: str, *parts: str) -> str:
-    """Build a composite rate limit key from arbitrary string parts.
-
-    Example: key_composite("scan", agent_id, endpoint)
-    """
     clean = ":".join(p.strip() for p in parts if p and p.strip())
     return f"{prefix.strip()}:{clean}" if clean else prefix.strip()
 
@@ -245,14 +228,6 @@ def rate_limit_dependency(
     limit: int = DEFAULT_LIMIT,
     window_seconds: int = DEFAULT_WINDOW_SECONDS,
 ):
-    """Return a FastAPI dependency that enforces a per-IP sliding window limit.
-
-    Usage:
-        @router.post("/scan", dependencies=[Depends(rate_limit_dependency(60, 60))])
-
-    The dependency raises HTTP 429 with Retry-After when the limit is exceeded.
-    """
-
     async def _dep(request: Request) -> RateLimitResult:
         key = key_for_ip(request)
         result = check_and_increment(key, limit=limit, window_seconds=window_seconds)
@@ -268,14 +243,6 @@ def agent_rate_limit_dependency(
     limit: int = DEFAULT_LIMIT,
     window_seconds: int = DEFAULT_WINDOW_SECONDS,
 ):
-    """Return a FastAPI dependency that enforces a per-agent sliding window limit.
-
-    Usage:
-        @router.post("/scan", dependencies=[Depends(agent_rate_limit_dependency("agent_id", 100, 60))])
-
-    ``agent_id_param`` is the name of the path or query parameter carrying the agent_id.
-    """
-
     async def _dep(request: Request) -> RateLimitResult:
         agent_id = request.path_params.get(agent_id_param) or request.query_params.get(agent_id_param) or "unknown"
         key = key_for_agent(str(agent_id))
@@ -288,10 +255,6 @@ def agent_rate_limit_dependency(
 
 
 def reset_key(key: str) -> bool:
-    """Delete the rate_limit_state row for ``key``.
-
-    Returns True on success, False on error.
-    """
     key = key.strip() if key else ""
     if not key:
         return False
@@ -304,7 +267,6 @@ def reset_key(key: str) -> bool:
 
 
 def get_key_state(key: str) -> dict[str, Any] | None:
-    """Return the raw rate_limit_state row for ``key``, or None if not found."""
     key = key.strip() if key else ""
     if not key:
         return None

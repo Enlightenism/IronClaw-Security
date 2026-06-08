@@ -359,6 +359,25 @@ def get_rate_limit_state(key: str) -> dict[str, Any] | None:
         raise _wrap(operation, exc) from exc
 
 
+def upsert_rate_limit_state(record: dict[str, Any]) -> dict[str, Any]:
+    operation = "upsert_rate_limit_state"
+    if not record.get("key"):
+        raise PersistenceError(operation, "record must include key")
+    try:
+        client = get_supabase_service_client()
+        if "updated_at" not in record:
+            record = {**record, "updated_at": _now_utc()}
+        resp = client.table(_T_RATE_LIMIT_STATE).upsert(record, on_conflict="key", returning="representation").execute()
+        data = resp.data
+        if isinstance(data, list):
+            return data[0] if data else record
+        if isinstance(data, dict):
+            return data
+        return record
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
 def delete_rate_limit_state(key: str) -> None:
     operation = "delete_rate_limit_state"
     if not key or not key.strip():
@@ -618,8 +637,7 @@ def delete_webhook_subscription(subscription_id: str, tenant_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Webhook Deliveries  (table: webhook_deliveries)
-# Single source of truth for all delivery operations and delivery log queries.
+# Webhook Deliveries
 # ---------------------------------------------------------------------------
 
 
@@ -801,6 +819,7 @@ __all__ = [
     "get_policy_set",
     "get_scan_patterns",
     "get_rate_limit_state",
+    "upsert_rate_limit_state",
     "delete_rate_limit_state",
     "log_tool_call",
     "log_sandbox_execution",

@@ -24,14 +24,10 @@ from app.core.rate_limiter import (
 # Patch targets
 # ---------------------------------------------------------------------------
 
-# check_and_increment owns its own DB path via _get_client
-_PATCH_GET_CLIENT = "app.core.rate_limiter._get_client"
-
-# reset_key and get_key_state use lazy imports inside the function body —
-# the names are never module-level attributes on app.core.rate_limiter.
-# Patch the canonical persistence module directly.
-_PATCH_DELETE_RL = "app.core.supabase_persistence.delete_rate_limit_state"
-_PATCH_GET_RL = "app.core.supabase_persistence.get_rate_limit_state"
+_PATCH_GET_RL_STATE = "app.core.rate_limiter._persistence_get_rate_limit_state"
+_PATCH_UPSERT_RL_STATE = "app.core.rate_limiter._persistence_upsert_rate_limit_state"
+_PATCH_DELETE_RL = "app.core.rate_limiter._persistence_delete_rate_limit_state"
+_PATCH_GET_RL = "app.core.rate_limiter._persistence_get_rate_limit_state"
 
 
 # ---------------------------------------------------------------------------
@@ -48,45 +44,6 @@ def _make_row(count: int, window_start: float, window_seconds: int = 60, rate_li
     }
 
 
-def _mock_client_with_row(row: dict | None):
-    mock_resp = MagicMock()
-    mock_resp.data = row
-
-    qb = MagicMock()
-    qb.select.return_value = qb
-    qb.eq.return_value = qb
-    qb.maybe_single.return_value = qb
-    qb.execute.return_value = mock_resp
-
-    upsert_resp = MagicMock()
-    upsert_resp.data = {}
-    upsert_qb = MagicMock()
-    upsert_qb.execute.return_value = upsert_resp
-
-    def _table_side_effect(name):
-        tb = MagicMock()
-        tb.select.return_value = qb
-        tb.upsert.return_value = upsert_qb
-        tb.delete.return_value = qb
-        return tb
-
-    client = MagicMock()
-    client.table.side_effect = _table_side_effect
-    return client
-
-
-def _mock_client_raising(exc: Exception):
-    qb = MagicMock()
-    qb.select.return_value = qb
-    qb.eq.return_value = qb
-    qb.maybe_single.return_value = qb
-    qb.execute.side_effect = exc
-
-    client = MagicMock()
-    client.table.return_value = qb
-    return client
-
-
 # ---------------------------------------------------------------------------
 # check_and_increment — happy path
 # ---------------------------------------------------------------------------
@@ -94,21 +51,27 @@ def _mock_client_raising(exc: Exception):
 
 class TestCheckAndIncrementFirstCall:
     def test_allowed_true_and_remaining_4(self):
-        mock_client = _mock_client_with_row(None)
-        with patch(_PATCH_GET_CLIENT, return_value=mock_client):
+        with (
+            patch(_PATCH_GET_RL_STATE, return_value=None),
+            patch(_PATCH_UPSERT_RL_STATE, return_value={}) as mock_upsert,
+        ):
             result = check_and_increment("test:key:first", limit=5, window_seconds=60)
 
         assert result.allowed is True
         assert result.remaining == 4
         assert result.current_count == 1
         assert result.retry_after == 0
+        mock_upsert.assert_called_once()
 
 
 class TestCheckAndIncrementAtLimit:
     def test_fifth_call_allowed_with_remaining_zero(self):
         now = time.time()
-        mock_client = _mock_client_with_row(_make_row(count=4, window_start=now - 1))
-        with patch(_PATCH_GET_CLIENT, return_value=mock_client):
+        row = _make_row(count=4, window_start=now - 1)
+        with (
+            patch(_PATCH_GET_RL_STATE, return_value=row),
+            patch(_PATCH_UPSERT_RL_STATE, return_value={}),
+        ):
             result = check_and_increment("test:key:limit", limit=5, window_seconds=60)
 
         assert result.allowed is True
@@ -120,8 +83,11 @@ class TestCheckAndIncrementAtLimit:
 class TestCheckAndIncrementExceeded:
     def test_sixth_call_blocked(self):
         now = time.time()
-        mock_client = _mock_client_with_row(_make_row(count=5, window_start=now - 1))
-        with patch(_PATCH_GET_CLIENT, return_value=mock_client):
+        row = _make_row(count=5, window_start=now - 1)
+        with (
+            patch(_PATCH_GET_RL_STATE, return_value=row),
+            patch(_PATCH_UPSERT_RL_STATE, return_value={}),
+        ):
             result = check_and_increment("test:key:exceed", limit=5, window_seconds=60)
 
         assert result.allowed is False
@@ -130,18 +96,35 @@ class TestCheckAndIncrementExceeded:
 
     def test_retry_after_always_gte_1_when_blocked(self):
         now = time.time()
-        mock_client = _mock_client_with_row(_make_row(count=10, window_start=now - 59))
-        with patch(_PATCH_GET_CLIENT, return_value=mock_client):
+        row = _make_row(count=10, window_start=now - 59)
+        with (
+            patch(_PATCH_GET_RL_STATE, return_value=row),
+            patch(_PATCH_UPSERT_RL_STATE, return_value={}),
+        ):
             result = check_and_increment("test:key:retry", limit=5, window_seconds=60)
 
         assert result.allowed is False
         assert result.retry_after >= 1
 
+    def test_upsert_not_called_when_blocked(self):
+        now = time.time()
+        row = _make_row(count=5, window_start=now - 1)
+        with (
+            patch(_PATCH_GET_RL_STATE, return_value=row),
+            patch(_PATCH_UPSERT_RL_STATE, return_value={}) as mock_upsert,
+        ):
+            result = check_and_increment("test:key:no_upsert", limit=5, window_seconds=60)
+
+        assert result.allowed is False
+        mock_upsert.assert_not_called()
+
 
 class TestCheckAndIncrementRetryAfterZeroWhenAllowed:
     def test_retry_after_zero_on_allowed(self):
-        mock_client = _mock_client_with_row(None)
-        with patch(_PATCH_GET_CLIENT, return_value=mock_client):
+        with (
+            patch(_PATCH_GET_RL_STATE, return_value=None),
+            patch(_PATCH_UPSERT_RL_STATE, return_value={}),
+        ):
             result = check_and_increment("test:key:allowed", limit=5, window_seconds=60)
 
         assert result.allowed is True
@@ -156,13 +139,18 @@ class TestCheckAndIncrementRetryAfterZeroWhenAllowed:
 class TestCheckAndIncrementWindowExpiry:
     def test_expired_window_resets_count_to_1(self):
         ancient_start = time.time() - 120
-        mock_client = _mock_client_with_row(_make_row(count=5, window_start=ancient_start, window_seconds=60))
-        with patch(_PATCH_GET_CLIENT, return_value=mock_client):
+        row = _make_row(count=5, window_start=ancient_start, window_seconds=60)
+        with (
+            patch(_PATCH_GET_RL_STATE, return_value=row),
+            patch(_PATCH_UPSERT_RL_STATE, return_value={}) as mock_upsert,
+        ):
             result = check_and_increment("test:key:expired", limit=5, window_seconds=60)
 
         assert result.allowed is True
         assert result.current_count == 1
         assert result.remaining == 4
+        upsert_record = mock_upsert.call_args[0][0]
+        assert upsert_record["count"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -178,27 +166,53 @@ class TestCheckAndIncrementEmptyKey:
 
 
 # ---------------------------------------------------------------------------
-# check_and_increment — fail-open on Supabase error
+# check_and_increment — fail-open on persistence error
 # ---------------------------------------------------------------------------
 
 
 class TestCheckAndIncrementFailOpen:
-    def test_supabase_api_error_returns_allowed_true(self):
-        from app.supabaseclient import SupabaseAPIError
+    def test_persistence_error_on_get_returns_allowed_true(self):
+        from app.core.supabase_persistence import PersistenceError
 
-        exc = SupabaseAPIError("simulated DB failure")
-        mock_client = _mock_client_raising(exc)
-        with patch(_PATCH_GET_CLIENT, return_value=mock_client):
+        with (
+            patch(_PATCH_GET_RL_STATE, side_effect=PersistenceError("get_rate_limit_state", "db down")),
+            patch(_PATCH_UPSERT_RL_STATE, return_value={}),
+        ):
             result = check_and_increment("test:key:failopen", limit=5, window_seconds=60)
 
         assert result.allowed is True
 
-    def test_supabase_api_error_does_not_raise(self):
+    def test_persistence_error_on_upsert_returns_allowed_true(self):
+        from app.core.supabase_persistence import PersistenceError
+
+        now = time.time()
+        row = _make_row(count=1, window_start=now - 1)
+        with (
+            patch(_PATCH_GET_RL_STATE, return_value=row),
+            patch(_PATCH_UPSERT_RL_STATE, side_effect=PersistenceError("upsert_rate_limit_state", "db down")),
+        ):
+            result = check_and_increment("test:key:upsert_fail", limit=5, window_seconds=60)
+
+        assert result.allowed is True
+
+    def test_supabase_api_error_on_get_returns_allowed_true(self):
         from app.supabaseclient import SupabaseAPIError
 
-        exc = SupabaseAPIError("another DB failure")
-        mock_client = _mock_client_raising(exc)
-        with patch(_PATCH_GET_CLIENT, return_value=mock_client):
+        with (
+            patch(_PATCH_GET_RL_STATE, side_effect=SupabaseAPIError("simulated DB failure")),
+            patch(_PATCH_UPSERT_RL_STATE, return_value={}),
+        ):
+            result = check_and_increment("test:key:apierror", limit=5, window_seconds=60)
+
+        assert result.allowed is True
+
+    def test_fail_open_does_not_raise(self):
+        from app.core.supabase_persistence import PersistenceError
+
+        with (
+            patch(_PATCH_GET_RL_STATE, side_effect=PersistenceError("get_rate_limit_state", "db down")),
+            patch(_PATCH_UPSERT_RL_STATE, return_value={}),
+        ):
             try:
                 check_and_increment("test:key:noexc", limit=5, window_seconds=60)
             except Exception as e:
@@ -235,6 +249,19 @@ class TestRaise429:
             raise_429(result)
 
         assert exc_info.value.headers["Retry-After"] == str(result.retry_after)
+
+    def test_detail_contains_error_key(self):
+        with pytest.raises(HTTPException) as exc_info:
+            raise_429(self._blocked_result())
+
+        assert exc_info.value.detail["error"] == "rate_limit_exceeded"
+
+    def test_x_ratelimit_limit_header_present(self):
+        result = self._blocked_result()
+        with pytest.raises(HTTPException) as exc_info:
+            raise_429(result)
+
+        assert exc_info.value.headers["X-RateLimit-Limit"] == str(result.limit)
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +302,11 @@ class TestBuild429Response:
         result = self._blocked_result(retry_after=45)
         resp = build_429_response(result)
         assert resp.headers["retry-after"] == "45"
+
+    def test_x_ratelimit_remaining_is_zero(self):
+        result = self._blocked_result()
+        resp = build_429_response(result)
+        assert resp.headers["x-ratelimit-remaining"] == "0"
 
 
 # ---------------------------------------------------------------------------
@@ -359,7 +391,7 @@ class TestKeyComposite:
 
 
 # ---------------------------------------------------------------------------
-# reset_key — delegates to supabase_persistence.delete_rate_limit_state
+# reset_key — delegates to _persistence_delete_rate_limit_state
 # ---------------------------------------------------------------------------
 
 
@@ -414,7 +446,7 @@ class TestResetKey:
 
 
 # ---------------------------------------------------------------------------
-# get_key_state — delegates to supabase_persistence.get_rate_limit_state
+# get_key_state — delegates to _persistence_get_rate_limit_state
 # ---------------------------------------------------------------------------
 
 
