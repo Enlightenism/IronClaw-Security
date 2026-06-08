@@ -12,8 +12,7 @@ _logger: logging.Logger = get_logger("ironclaw.persistence")
 
 
 # ---------------------------------------------------------------------------
-# Single source of truth for persistence table names used by this adapter.
-# Never hardcode table strings outside this module.
+# Table names
 # ---------------------------------------------------------------------------
 _T_SCAN_HISTORY = "scan_history"
 _T_AUDIT_EVENTS = "audit_events"
@@ -31,26 +30,23 @@ _T_AGENT_TRUST_PROFILES = "agent_trust_profiles"
 _T_TRUST_EVENTS = "trust_events"
 _T_SCAN_PATTERNS = "scan_patterns"
 _T_RATE_LIMIT_STATE = "rate_limit_state"
+_T_WEBHOOK_SUBSCRIPTIONS = "webhook_subscriptions"
+_T_WEBHOOK_DELIVERIES = "webhook_deliveries"
 
-# Canonical column name in policy_set_memberships that references a policy rule.
-# action_policy.py previously used the alias column "rule_id"; the authoritative
-# column is "policy_rule_id" (indexed as idx_psm_policy_rule_id in migrations).
+
 _COL_POLICY_RULE_ID = "policy_rule_id"
 
 
 # ---------------------------------------------------------------------------
-# PersistenceError — the only error type this module raises to callers.
-# All SupabaseAPIError / SupabaseClientError are caught here and re-raised
-# as PersistenceError. No caller outside this module should import or catch
-# Supabase-specific exceptions directly.
+# PersistenceError
 # ---------------------------------------------------------------------------
 
 
 class PersistenceError(RuntimeError):
     """Raised when any Supabase persistence operation fails."""
 
-    def __init__(self, operation: str, message: str, *, cause: BaseException | None = None) -> None:
-        super().__init__(f"[{operation}] {message}")
+    def __init__(self, operation: str, message: str = "", *, cause: BaseException | None = None) -> None:
+        super().__init__(f"[{operation}] {message}" if message else operation)
         self.operation = operation
         self.cause = cause
 
@@ -74,11 +70,6 @@ def _wrap(operation: str, exc: BaseException) -> PersistenceError:
 
 
 def upsert_scan(record: dict[str, Any]) -> dict[str, Any]:
-    """Upsert a scan record into scan_history.
-
-    ``record`` must include ``scan_id`` (used as the conflict key).
-    Returns the upserted row.
-    """
     operation = "upsert_scan"
     try:
         client = get_supabase_service_client()
@@ -94,7 +85,6 @@ def upsert_scan(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_scan_by_id(scan_id: str) -> dict[str, Any] | None:
-    """Return the scan_history row for ``scan_id``, or None if not found."""
     operation = "get_scan_by_id"
     try:
         client = get_supabase_service_client()
@@ -116,10 +106,6 @@ def list_scans(
     limit: int = 100,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
-    """Return scan_history rows ordered by created_at desc.
-
-    Optionally filtered by ``agent_id`` and/or ``verdict``.
-    """
     operation = "list_scans"
     try:
         client = get_supabase_service_client()
@@ -146,11 +132,6 @@ def list_scans(
 
 
 def upsert_audit_event(record: dict[str, Any]) -> dict[str, Any]:
-    """Insert or upsert an audit_event row.
-
-    ``record`` should include ``event_id`` for idempotent upserts.
-    If ``event_id`` is absent, a plain insert is performed.
-    """
     operation = "upsert_audit_event"
     try:
         client = get_supabase_service_client()
@@ -176,10 +157,6 @@ def upsert_audit_event(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def upsert_telemetry(record: dict[str, Any]) -> dict[str, Any]:
-    """Upsert a telemetry_events row.
-
-    ``record`` must include ``telemetry_id`` as the conflict key.
-    """
     operation = "upsert_telemetry"
     try:
         client = get_supabase_service_client()
@@ -202,10 +179,6 @@ def upsert_telemetry(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def upsert_quarantine_item(record: dict[str, Any]) -> dict[str, Any]:
-    """Upsert a quarantine_items row.
-
-    ``record`` must include ``quarantine_id`` as the conflict key.
-    """
     operation = "upsert_quarantine_item"
     try:
         client = get_supabase_service_client()
@@ -234,10 +207,6 @@ def get_review_queue(
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
-    """Return review_queue rows ordered by created_at asc.
-
-    Optionally filtered by ``status`` (e.g. ``"pending"``) and/or ``agent_id``.
-    """
     operation = "get_review_queue"
     try:
         client = get_supabase_service_client()
@@ -259,15 +228,11 @@ def get_review_queue(
 
 
 # ---------------------------------------------------------------------------
-# IOCs (Indicators of Compromise)
+# IOCs
 # ---------------------------------------------------------------------------
 
 
 def upsert_ioc(record: dict[str, Any]) -> dict[str, Any]:
-    """Upsert an iocs row.
-
-    ``record`` must include ``ioc_id`` as the conflict key.
-    """
     operation = "upsert_ioc"
     try:
         client = get_supabase_service_client()
@@ -290,10 +255,6 @@ def upsert_ioc(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def upsert_threat_detection(record: dict[str, Any]) -> dict[str, Any]:
-    """Upsert a threat_detections row.
-
-    ``record`` must include ``detection_id`` as the conflict key.
-    """
     operation = "upsert_threat_detection"
     try:
         client = get_supabase_service_client()
@@ -316,23 +277,11 @@ def upsert_threat_detection(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_policy_set(set_key: str) -> dict[str, Any] | None:
-    """Return the policy_sets row for ``set_key`` with its member rules.
-
-    Returns a dict with keys ``policy_set`` (the set row) and ``rules``
-    (list of policy_rules rows that belong to the set), or None if the set
-    does not exist.
-
-    The canonical column used to join policy_set_memberships → policy_rules
-    is ``policy_rule_id`` (``_COL_POLICY_RULE_ID``).  action_policy.py's
-    older ``rule_id`` alias is NOT used here; that caller must be updated to
-    read ``policy_rule_id`` from rows returned by this function.
-    """
     operation = "get_policy_set"
     if not set_key or not set_key.strip():
         raise PersistenceError(operation, "set_key is required")
     try:
         client = get_supabase_service_client()
-
         set_resp = client.table(_T_POLICY_SETS).select("*").eq("set_key", set_key).maybe_single().execute()
         set_data = set_resp.data
         if not set_data:
@@ -348,9 +297,7 @@ def get_policy_set(set_key: str) -> dict[str, Any] | None:
             memberships = membership_resp.data or []
             if isinstance(memberships, dict):
                 memberships = [memberships]
-
             rule_ids: list[str] = [str(m[_COL_POLICY_RULE_ID]) for m in memberships if isinstance(m, dict) and m.get(_COL_POLICY_RULE_ID)]
-
             if rule_ids:
                 rules_resp = client.table(_T_POLICY_RULES).select("*").in_("id", rule_ids).execute()
                 raw_rules = rules_resp.data or []
@@ -371,14 +318,6 @@ def get_scan_patterns(
     is_active: bool | None = True,
     pattern_type: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Return rows from the scan_patterns table.
-
-    By default only active patterns are returned (``is_active=True``).
-    Pass ``is_active=None`` to return all rows regardless of active status.
-    Optionally filter by ``pattern_type`` (e.g. ``"regex"``, ``"keyword"``).
-
-    Used by pattern_registry.py as the single DB source for scan patterns.
-    """
     operation = "get_scan_patterns"
     try:
         client = get_supabase_service_client()
@@ -399,16 +338,11 @@ def get_scan_patterns(
 
 
 # ---------------------------------------------------------------------------
-# Rate Limit State — admin / tooling access layer
+# Rate Limit State
 # ---------------------------------------------------------------------------
 
 
 def get_rate_limit_state(key: str) -> dict[str, Any] | None:
-    """Return the rate_limit_state row for ``key``, or None if not found.
-
-    Routes through the canonical persistence adapter so admin tooling,
-    health checks, and tests do not need to import rate_limiter directly.
-    """
     operation = "get_rate_limit_state"
     if not key or not key.strip():
         raise PersistenceError(operation, "key is required")
@@ -426,12 +360,6 @@ def get_rate_limit_state(key: str) -> dict[str, Any] | None:
 
 
 def delete_rate_limit_state(key: str) -> None:
-    """Delete the rate_limit_state row for ``key``.
-
-    Raises PersistenceError on DB failure.  Admin tooling and tests should
-    call this instead of rate_limiter.reset_key() to stay within the
-    canonical persistence boundary.
-    """
     operation = "delete_rate_limit_state"
     if not key or not key.strip():
         raise PersistenceError(operation, "key is required")
@@ -448,13 +376,6 @@ def delete_rate_limit_state(key: str) -> None:
 
 
 def log_tool_call(record: dict[str, Any]) -> dict[str, Any]:
-    """Insert a tool_call_log row.
-
-    ``record`` should include ``tool_call_id``, ``tool_name``, ``agent_id``,
-    ``verdict``, and ``payload`` (serializable dict). If ``tool_call_id`` is
-    present it is used as the upsert conflict key; otherwise a plain insert
-    is performed.
-    """
     operation = "log_tool_call"
     try:
         client = get_supabase_service_client()
@@ -480,13 +401,6 @@ def log_tool_call(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def log_sandbox_execution(record: dict[str, Any]) -> dict[str, Any]:
-    """Insert a sandbox_execution_log row.
-
-    ``record`` should include ``execution_id``, ``agent_id``, ``sandbox_type``,
-    ``verdict``, ``exit_code``, and ``stdout``/``stderr`` (truncated strings).
-    If ``execution_id`` is present it is used as the upsert conflict key;
-    otherwise a plain insert is performed.
-    """
     operation = "log_sandbox_execution"
     try:
         client = get_supabase_service_client()
@@ -512,14 +426,6 @@ def log_sandbox_execution(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_agent_trust_profile(agent_id: str) -> dict[str, Any] | None:
-    """Return the agent_trust_profiles row for ``agent_id``, or None if not found.
-
-    Callers that need a TrustProfile dataclass should use trust_engine.get_trust()
-    directly. This function exists so the rest of the system can optionally read
-    raw trust profile rows through the canonical persistence adapter — e.g. for
-    admin inspection, test fixtures, or cross-service reads — without importing
-    trust_engine internals.
-    """
     operation = "get_agent_trust_profile"
     if not agent_id or not agent_id.strip():
         raise PersistenceError(operation, "agent_id is required")
@@ -537,16 +443,6 @@ def get_agent_trust_profile(agent_id: str) -> dict[str, Any] | None:
 
 
 def upsert_agent_trust_profile(record: dict[str, Any]) -> dict[str, Any]:
-    """Upsert an agent_trust_profiles row.
-
-    ``record`` must include ``agent_id`` as the conflict key.
-
-    Note: trust_engine.py is the authoritative mutation path for trust profiles
-    during live scoring. This function exists for seeding, test setup, admin
-    overrides, and cross-service writes that bypass the trust engine's cache.
-    Callers that go through this path should call trust_engine.invalidate_cache()
-    for the affected agent_id after writing.
-    """
     operation = "upsert_agent_trust_profile"
     if not record.get("agent_id"):
         raise PersistenceError(operation, "record must include agent_id")
@@ -571,17 +467,6 @@ def upsert_agent_trust_profile(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def insert_trust_event(record: dict[str, Any]) -> dict[str, Any]:
-    """Insert a trust_events row.
-
-    ``record`` must include ``event_id``, ``agent_id``, and ``event_type``.
-    If ``event_id`` is present it is used as the upsert conflict key to make
-    the call idempotent; otherwise a plain insert is performed.
-
-    Note: trust_engine.record_event() is the authoritative mutation path for
-    trust events during live scoring. This function exists for replay, test
-    fixtures, and administrative back-fills that need to write event rows
-    directly through the canonical persistence adapter.
-    """
     operation = "insert_trust_event"
     if not record.get("agent_id"):
         raise PersistenceError(operation, "record must include agent_id")
@@ -611,12 +496,6 @@ def list_trust_events(
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
-    """Return trust_events rows for ``agent_id`` ordered by recorded_at desc.
-
-    Mirrors trust_engine.list_trust_events() but routes through the canonical
-    persistence adapter so callers that already depend on supabase_persistence
-    do not need to import the trust engine for read-only event listing.
-    """
     operation = "list_trust_events"
     if not agent_id or not agent_id.strip():
         raise PersistenceError(operation, "agent_id is required")
@@ -634,8 +513,278 @@ def list_trust_events(
 
 
 # ---------------------------------------------------------------------------
+# Webhook Subscriptions
+# ---------------------------------------------------------------------------
+
+
+def create_webhook_subscription(record: dict[str, Any]) -> dict[str, Any]:
+    operation = "create_webhook_subscription"
+    if not record.get("tenant_id"):
+        raise PersistenceError(operation, "record must include tenant_id")
+    if not record.get("target_url"):
+        raise PersistenceError(operation, "record must include target_url")
+    try:
+        client = get_supabase_service_client()
+        if "created_at" not in record:
+            record = {**record, "created_at": _now_utc()}
+        resp = client.table(_T_WEBHOOK_SUBSCRIPTIONS).insert(record, returning="representation").execute()
+        data = resp.data
+        if isinstance(data, list):
+            return data[0] if data else record
+        if isinstance(data, dict):
+            return data
+        return record
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+def list_webhook_subscriptions(
+    tenant_id: str,
+    *,
+    active_only: bool = False,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    operation = "list_webhook_subscriptions"
+    if not tenant_id:
+        raise PersistenceError(operation, "tenant_id is required")
+    try:
+        client = get_supabase_service_client()
+        q = client.table(_T_WEBHOOK_SUBSCRIPTIONS).select("*").eq("tenant_id", tenant_id)
+        if active_only:
+            q = q.eq("active", True)
+        q = q.order("created_at", desc=True).range(offset, offset + limit - 1)
+        resp = q.execute()
+        data = resp.data
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            return [data]
+        return []
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+def get_webhook_subscription(subscription_id: str, tenant_id: str) -> dict[str, Any] | None:
+    operation = "get_webhook_subscription"
+    if not subscription_id:
+        raise PersistenceError(operation, "subscription_id is required")
+    if not tenant_id:
+        raise PersistenceError(operation, "tenant_id is required")
+    try:
+        client = get_supabase_service_client()
+        resp = client.table(_T_WEBHOOK_SUBSCRIPTIONS).select("*").eq("id", subscription_id).eq("tenant_id", tenant_id).maybe_single().execute()
+        data = resp.data
+        if isinstance(data, dict) and data:
+            return data
+        if isinstance(data, list):
+            return data[0] if data else None
+        return None
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+def update_webhook_subscription(subscription_id: str, tenant_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    operation = "update_webhook_subscription"
+    if not subscription_id:
+        raise PersistenceError(operation, "subscription_id is required")
+    if not tenant_id:
+        raise PersistenceError(operation, "tenant_id is required")
+    try:
+        client = get_supabase_service_client()
+        updates = {**updates, "updated_at": _now_utc()}
+        resp = client.table(_T_WEBHOOK_SUBSCRIPTIONS).update(updates, returning="representation").eq("id", subscription_id).eq("tenant_id", tenant_id).execute()
+        data = resp.data
+        if isinstance(data, list):
+            return data[0] if data else None
+        if isinstance(data, dict) and data:
+            return data
+        return None
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+def delete_webhook_subscription(subscription_id: str, tenant_id: str) -> None:
+    operation = "delete_webhook_subscription"
+    if not subscription_id:
+        raise PersistenceError(operation, "subscription_id is required")
+    if not tenant_id:
+        raise PersistenceError(operation, "tenant_id is required")
+    try:
+        client = get_supabase_service_client()
+        client.table(_T_WEBHOOK_SUBSCRIPTIONS).delete().eq("id", subscription_id).eq("tenant_id", tenant_id).execute()
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+# ---------------------------------------------------------------------------
+# Webhook Deliveries
+# ---------------------------------------------------------------------------
+
+
+def list_webhook_deliveries(
+    tenant_id: str,
+    *,
+    subscription_id: str | None = None,
+    status: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    operation = "list_webhook_deliveries"
+    if not tenant_id:
+        raise PersistenceError(operation, "tenant_id is required")
+    try:
+        client = get_supabase_service_client()
+        q = client.table(_T_WEBHOOK_DELIVERIES).select("*").eq("tenant_id", tenant_id)
+        if subscription_id:
+            q = q.eq("subscription_id", subscription_id)
+        if status:
+            q = q.eq("status", status)
+        q = q.order("created_at", desc=True).range(offset, offset + limit - 1)
+        resp = q.execute()
+        data = resp.data
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            return [data]
+        return []
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+def get_webhook_delivery_log(
+    tenant_id: str,
+    *,
+    subscription_id: str | None = None,
+    event_type: str | None = None,
+    delivery_status: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    operation = "get_webhook_delivery_log"
+    if not tenant_id:
+        raise PersistenceError(operation, "tenant_id is required")
+    try:
+        client = get_supabase_service_client()
+        q = client.table(_T_WEBHOOK_DELIVERIES).select("*").eq("tenant_id", tenant_id)
+        if subscription_id:
+            q = q.eq("subscription_id", subscription_id)
+        if event_type:
+            q = q.eq("event_type", event_type)
+        if delivery_status:
+            q = q.eq("status", delivery_status)
+        q = q.order("created_at", desc=True).range(offset, offset + limit - 1)
+        resp = q.execute()
+        data = resp.data
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            return [data]
+        return []
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+def get_webhook_delivery_record(delivery_id: str) -> dict[str, Any] | None:
+    operation = "get_webhook_delivery_record"
+    if not delivery_id:
+        raise PersistenceError(operation, "delivery_id is required")
+    try:
+        client = get_supabase_service_client()
+        resp = client.table(_T_WEBHOOK_DELIVERIES).select("*").eq("id", delivery_id).maybe_single().execute()
+        data = resp.data
+        if isinstance(data, dict) and data:
+            return data
+        if isinstance(data, list):
+            return data[0] if data else None
+        return None
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+def list_retryable_webhook_deliveries(
+    tenant_id: str,
+    *,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    operation = "list_retryable_webhook_deliveries"
+    if not tenant_id:
+        raise PersistenceError(operation, "tenant_id is required")
+    try:
+        client = get_supabase_service_client()
+        resp = client.table(_T_WEBHOOK_DELIVERIES).select("*").eq("tenant_id", tenant_id).eq("status", "failed").order("created_at", desc=True).range(offset, offset + limit - 1).execute()
+        data = resp.data
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            return [data]
+        return []
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+def get_webhook_delivery(delivery_id: str, tenant_id: str) -> dict[str, Any] | None:
+    operation = "get_webhook_delivery"
+    if not delivery_id:
+        raise PersistenceError(operation, "delivery_id is required")
+    if not tenant_id:
+        raise PersistenceError(operation, "tenant_id is required")
+    try:
+        client = get_supabase_service_client()
+        resp = client.table(_T_WEBHOOK_DELIVERIES).select("*").eq("id", delivery_id).eq("tenant_id", tenant_id).maybe_single().execute()
+        data = resp.data
+        if isinstance(data, dict) and data:
+            return data
+        if isinstance(data, list):
+            return data[0] if data else None
+        return None
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+def upsert_webhook_delivery(record: dict[str, Any]) -> dict[str, Any]:
+    operation = "upsert_webhook_delivery"
+    if not record.get("id"):
+        raise PersistenceError(operation, "record must include id")
+    if not record.get("tenant_id"):
+        raise PersistenceError(operation, "record must include tenant_id")
+    try:
+        client = get_supabase_service_client()
+        if "created_at" not in record:
+            record = {**record, "created_at": _now_utc()}
+        resp = client.table(_T_WEBHOOK_DELIVERIES).upsert(record, on_conflict="id", returning="representation").execute()
+        data = resp.data
+        if isinstance(data, list):
+            return data[0] if data else record
+        if isinstance(data, dict):
+            return data
+        return record
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+def update_webhook_delivery(delivery_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    operation = "update_webhook_delivery"
+    if not delivery_id:
+        raise PersistenceError(operation, "delivery_id is required")
+    try:
+        client = get_supabase_service_client()
+        resp = client.table(_T_WEBHOOK_DELIVERIES).update(updates, returning="representation").eq("id", delivery_id).execute()
+        data = resp.data
+        if isinstance(data, list):
+            return data[0] if data else None
+        if isinstance(data, dict) and data:
+            return data
+        return None
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+# ---------------------------------------------------------------------------
 # Public surface
 # ---------------------------------------------------------------------------
+
 
 __all__ = [
     "PersistenceError",
@@ -658,4 +807,18 @@ __all__ = [
     "upsert_agent_trust_profile",
     "insert_trust_event",
     "list_trust_events",
+    # Webhook Subscriptions
+    "create_webhook_subscription",
+    "list_webhook_subscriptions",
+    "get_webhook_subscription",
+    "update_webhook_subscription",
+    "delete_webhook_subscription",
+    # Webhook Deliveries
+    "list_webhook_deliveries",
+    "get_webhook_delivery_log",
+    "get_webhook_delivery_record",
+    "list_retryable_webhook_deliveries",
+    "get_webhook_delivery",
+    "upsert_webhook_delivery",
+    "update_webhook_delivery",
 ]
