@@ -21,6 +21,7 @@ from app.core.supabase_persistence import (
     update_webhook_delivery,
     update_webhook_subscription,
     upsert_audit_event,
+    upsert_rate_limit_state,
     upsert_scan,
     upsert_webhook_delivery,
 )
@@ -146,6 +147,15 @@ _RATE_LIMIT_ROW: dict = {
     "count": 5,
     "window_start": "2026-06-07T11:00:00+00:00",
     "expires_at": "2026-06-07T12:00:00+00:00",
+}
+
+_RATE_LIMIT_STATE_ROW: dict = {
+    "key": "ip:127.0.0.1",
+    "count": 3,
+    "window_start": 1780000000.0,
+    "window_seconds": 60,
+    "rate_limit": 60,
+    "updated_at": "2026-06-08T00:00:00+00:00",
 }
 
 _SCAN_ROW: dict = {
@@ -792,6 +802,108 @@ class TestGetRateLimitState:
             with pytest.raises(PersistenceError) as exc_info:
                 get_rate_limit_state("agent:agent-001:scan")
 
+        assert exc_info.value.cause is original
+
+
+# ===========================================================================
+# upsert_rate_limit_state
+# ===========================================================================
+
+
+class TestUpsertRateLimitState:
+
+    def test_success_returns_upserted_row(self):
+        client = _make_client([_RATE_LIMIT_STATE_ROW])
+        with patch(_PATCH_TARGET, return_value=client):
+            result = upsert_rate_limit_state(_RATE_LIMIT_STATE_ROW)
+        assert result["key"] == "ip:127.0.0.1"
+        assert result["count"] == 3
+
+    def test_returns_dict_response_directly(self):
+        client = _make_client(_RATE_LIMIT_STATE_ROW)
+        with patch(_PATCH_TARGET, return_value=client):
+            result = upsert_rate_limit_state(_RATE_LIMIT_STATE_ROW)
+        assert result["key"] == "ip:127.0.0.1"
+
+    def test_returns_input_record_when_data_is_empty_list(self):
+        client = _make_client([])
+        with patch(_PATCH_TARGET, return_value=client):
+            result = upsert_rate_limit_state(_RATE_LIMIT_STATE_ROW)
+        assert result is _RATE_LIMIT_STATE_ROW
+
+    def test_missing_key_raises_persistence_error(self):
+        record = {k: v for k, v in _RATE_LIMIT_STATE_ROW.items() if k != "key"}
+        with pytest.raises(PersistenceError, match="key"):
+            upsert_rate_limit_state(record)
+
+    def test_persistence_error_operation_is_upsert_rate_limit_state(self):
+        record = {k: v for k, v in _RATE_LIMIT_STATE_ROW.items() if k != "key"}
+        with pytest.raises(PersistenceError) as exc_info:
+            upsert_rate_limit_state(record)
+        assert exc_info.value.operation == "upsert_rate_limit_state"
+
+    def test_updated_at_injected_when_absent(self):
+        record = {k: v for k, v in _RATE_LIMIT_STATE_ROW.items() if k != "updated_at"}
+        qb = _make_qb([_RATE_LIMIT_STATE_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            upsert_rate_limit_state(record)
+        passed_record = qb.upsert.call_args.args[0]
+        assert "updated_at" in passed_record
+
+    def test_updated_at_not_overwritten_when_present(self):
+        qb = _make_qb([_RATE_LIMIT_STATE_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            upsert_rate_limit_state(_RATE_LIMIT_STATE_ROW)
+        passed_record = qb.upsert.call_args.args[0]
+        assert passed_record["updated_at"] == "2026-06-08T00:00:00+00:00"
+
+    def test_rate_limit_state_table_queried(self):
+        qb = _make_qb([_RATE_LIMIT_STATE_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            upsert_rate_limit_state(_RATE_LIMIT_STATE_ROW)
+        client.table.assert_called_once_with("rate_limit_state")
+
+    def test_upsert_conflicts_on_key(self):
+        qb = _make_qb([_RATE_LIMIT_STATE_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            upsert_rate_limit_state(_RATE_LIMIT_STATE_ROW)
+        call_kwargs = qb.upsert.call_args
+        assert call_kwargs.kwargs.get("on_conflict") == "key"
+
+    def test_supabase_api_error_wrapped_as_persistence_error(self):
+        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
+
+        client = _make_client(side_effect=SupabaseAPIError("write failed"))
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                upsert_rate_limit_state(_RATE_LIMIT_STATE_ROW)
+        assert exc_info.value.operation == "upsert_rate_limit_state"
+
+    def test_supabase_client_error_wrapped_as_persistence_error(self):
+        from app.supabaseclient import SupabaseClientError  # noqa: PLC0415
+
+        client = _make_client(side_effect=SupabaseClientError("timeout"))
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                upsert_rate_limit_state(_RATE_LIMIT_STATE_ROW)
+        assert exc_info.value.operation == "upsert_rate_limit_state"
+
+    def test_persistence_error_cause_is_original_exception(self):
+        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
+
+        original = SupabaseAPIError("conflict")
+        client = _make_client(side_effect=original)
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                upsert_rate_limit_state(_RATE_LIMIT_STATE_ROW)
         assert exc_info.value.cause is original
 
 
