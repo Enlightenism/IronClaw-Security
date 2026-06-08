@@ -446,7 +446,6 @@ def _shutdown_trust_engine_cache() -> None:
         except Exception as exc:  # noqa: BLE001
             _log.error("main.lifespan: trust_engine.invalidate_all_cache failed: %s", exc)
     else:
-        # Fallback: directly clear the module-level cache dict under its lock.
         try:
             trust_engine_mod = _optional_module("app.core.trust_engine")
             if trust_engine_mod is not None:
@@ -540,8 +539,16 @@ async def lifespan(app: FastAPI):
     _initialize_scan_history_repository()
     await _initialize_policy_rules()
     await _initialize_scanner_rule_index()
-    _initialize_pattern_registry()
-    _initialize_notification_engine()
+
+    try:
+        _initialize_pattern_registry()
+    except Exception as exc:  # noqa: BLE001
+        _log.error("main.lifespan: _initialize_pattern_registry raised unexpectedly: %s", exc)
+
+    try:
+        _initialize_notification_engine()
+    except Exception as exc:  # noqa: BLE001
+        _log.error("main.lifespan: _initialize_notification_engine raised unexpectedly: %s", exc)
 
     if callable(initialize_secure_runtime_pipeline):
         try:
@@ -558,8 +565,15 @@ async def lifespan(app: FastAPI):
     if pipeline is not None and callable(set_action_execute_pipeline):
         set_action_execute_pipeline(pipeline)
 
-    _start_threat_feed_scheduler()
-    _start_remediation_scheduler()
+    try:
+        _start_threat_feed_scheduler()
+    except Exception as exc:  # noqa: BLE001
+        _log.error("main.lifespan: _start_threat_feed_scheduler raised unexpectedly: %s", exc)
+
+    try:
+        _start_remediation_scheduler()
+    except Exception as exc:  # noqa: BLE001
+        _log.error("main.lifespan: _start_remediation_scheduler raised unexpectedly: %s", exc)
 
     _log.info("main.lifespan: startup complete")
 
@@ -567,8 +581,17 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         _log.info("main.lifespan: shutdown begin")
-        _stop_remediation_scheduler()
-        _stop_threat_feed_scheduler()
+
+        try:
+            _stop_remediation_scheduler()
+        except Exception as exc:  # noqa: BLE001
+            _log.error("main.lifespan: _stop_remediation_scheduler raised unexpectedly: %s", exc)
+
+        try:
+            _stop_threat_feed_scheduler()
+        except Exception as exc:  # noqa: BLE001
+            _log.error("main.lifespan: _stop_threat_feed_scheduler raised unexpectedly: %s", exc)
+
         try:
             close = getattr(pipeline, "close", None)
             if callable(close):
@@ -577,15 +600,32 @@ async def lifespan(app: FastAPI):
                     await result
         except Exception as exc:  # noqa: BLE001
             _log.error("main.lifespan: pipeline close failed: %s", exc)
-        finally:
+
+        try:
             _shutdown_trust_engine_cache()
+        except Exception as exc:  # noqa: BLE001
+            _log.error("main.lifespan: _shutdown_trust_engine_cache raised unexpectedly: %s", exc)
+
+        try:
             _shutdown_pattern_registry()
-            app.state.action_execute_pipeline = None
-            if callable(reset_action_execute_pipeline):
+        except Exception as exc:  # noqa: BLE001
+            _log.error("main.lifespan: _shutdown_pattern_registry raised unexpectedly: %s", exc)
+
+        app.state.action_execute_pipeline = None
+
+        if callable(reset_action_execute_pipeline):
+            try:
                 reset_action_execute_pipeline()
-            if callable(reset_scan_history_repository):
+            except Exception as exc:  # noqa: BLE001
+                _log.error("main.lifespan: reset_action_execute_pipeline failed: %s", exc)
+
+        if callable(reset_scan_history_repository):
+            try:
                 reset_scan_history_repository()
-            _log.info("main.lifespan: shutdown complete")
+            except Exception as exc:  # noqa: BLE001
+                _log.error("main.lifespan: reset_scan_history_repository failed: %s", exc)
+
+        _log.info("main.lifespan: shutdown complete")
 
 
 def create_app() -> FastAPI:
