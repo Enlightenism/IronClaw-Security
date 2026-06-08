@@ -32,7 +32,6 @@ _T_SCAN_PATTERNS = "scan_patterns"
 _T_RATE_LIMIT_STATE = "rate_limit_state"
 _T_WEBHOOK_SUBSCRIPTIONS = "webhook_subscriptions"
 _T_WEBHOOK_DELIVERIES = "webhook_deliveries"
-_T_WEBHOOK_DELIVERY_LOG = "webhook_delivery_log"
 
 
 _COL_POLICY_RULE_ID = "policy_rule_id"
@@ -619,8 +618,8 @@ def delete_webhook_subscription(subscription_id: str, tenant_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Webhook Delivery Log  (table: webhook_delivery_log)
-# Used by webhook_service and webhooks router for delivery tracking.
+# Webhook Deliveries  (table: webhook_deliveries)
+# Single source of truth for all delivery operations and delivery log queries.
 # ---------------------------------------------------------------------------
 
 
@@ -638,7 +637,7 @@ def get_webhook_delivery_log(
         raise PersistenceError(operation, "tenant_id is required")
     try:
         client = get_supabase_service_client()
-        q = client.table(_T_WEBHOOK_DELIVERY_LOG).select("*").eq("tenant_id", tenant_id)
+        q = client.table(_T_WEBHOOK_DELIVERIES).select("*").eq("tenant_id", tenant_id)
         if subscription_id:
             q = q.eq("subscription_id", subscription_id)
         if event_type:
@@ -663,7 +662,7 @@ def get_webhook_delivery_record(delivery_id: str) -> dict[str, Any] | None:
         raise PersistenceError(operation, "delivery_id is required")
     try:
         client = get_supabase_service_client()
-        resp = client.table(_T_WEBHOOK_DELIVERY_LOG).select("*").eq("id", delivery_id).maybe_single().execute()
+        resp = client.table(_T_WEBHOOK_DELIVERIES).select("*").eq("id", delivery_id).maybe_single().execute()
         data = resp.data
         if isinstance(data, dict) and data:
             return data
@@ -672,12 +671,6 @@ def get_webhook_delivery_record(delivery_id: str) -> dict[str, Any] | None:
         return None
     except (SupabaseAPIError, SupabaseClientError) as exc:
         raise _wrap(operation, exc) from exc
-
-
-# ---------------------------------------------------------------------------
-# Webhook Deliveries  (table: webhook_deliveries)
-# Used for full delivery CRUD / upsert operations by webhook_service.
-# ---------------------------------------------------------------------------
 
 
 def list_webhook_deliveries(
@@ -821,10 +814,9 @@ __all__ = [
     "get_webhook_subscription",
     "update_webhook_subscription",
     "delete_webhook_subscription",
-    # Webhook Delivery Log
+    # Webhook Deliveries
     "get_webhook_delivery_log",
     "get_webhook_delivery_record",
-    # Webhook Deliveries
     "list_webhook_deliveries",
     "list_retryable_webhook_deliveries",
     "get_webhook_delivery",
