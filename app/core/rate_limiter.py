@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 import logging
 import math
 import time
@@ -10,10 +11,17 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.core.logging import get_logger
+from app.core.supabase_persistence import (
+    delete_rate_limit_state as _persistence_delete_rate_limit_state,
+)
+from app.core.supabase_persistence import (
+    get_rate_limit_state as _persistence_get_rate_limit_state,
+)
+from app.core.supabase_persistence import (
+    upsert_rate_limit_state as _persistence_upsert_rate_limit_state,
+)
 
 _logger: logging.Logger = get_logger("ironclaw.rate_limiter")
-
-_T_RATE_LIMIT_STATE = "rate_limit_state"
 
 DEFAULT_LIMIT: int = 60
 DEFAULT_WINDOW_SECONDS: int = 60
@@ -77,20 +85,12 @@ def build_429_response(result: RateLimitResult) -> JSONResponse:
     )
 
 
-def _get_client():
-    from app.core.supabase import get_supabase_service_client  # noqa: PLC0415
-
-    return get_supabase_service_client()
-
-
-def _supabase_errors() -> tuple[type[Exception], type[Exception]]:
-    from app.supabaseclient import SupabaseAPIError, SupabaseClientError  # noqa: PLC0415
-
-    return SupabaseAPIError, SupabaseClientError
-
-
 def _now_ts() -> float:
     return time.time()
+
+
+def _iso_now() -> str:
+    return datetime.now(UTC).isoformat()
 
 
 def check_and_increment(
@@ -104,7 +104,7 @@ def check_and_increment(
     The caller is responsible for calling ``raise_429(result)`` or
     ``build_429_response(result)`` when ``result.allowed`` is False.
 
-    This function never raises on Supabase errors — it fails open
+    This function never raises on persistence errors — it fails open
     (allowed=True) and logs the error, so a DB outage does not block
     legitimate traffic.
     """
@@ -117,15 +117,7 @@ def check_and_increment(
     count = 1
 
     try:
-        client = _get_client()
-
-        fetch_resp = client.table(_T_RATE_LIMIT_STATE).select("count, window_start, window_seconds, rate_limit").eq("key", key).maybe_single().execute()
-        row: dict[str, Any] | None = None
-        raw = fetch_resp.data
-        if isinstance(raw, dict) and raw:
-            row = raw
-        elif isinstance(raw, list) and raw:
-            row = raw[0]
+        row: dict[str, Any] | None = _persistence_get_rate_limit_state(key)
 
         if row is not None:
             stored_window_start = float(row.get("window_start") or now)
@@ -143,28 +135,22 @@ def check_and_increment(
             window_start = now
             count = 1
 
-        upsert_record: dict[str, Any] = {
-            "key": key,
-            "count": count,
-            "window_start": window_start,
-            "window_seconds": window_seconds,
-            "rate_limit": limit,
-            "updated_at": _iso_now(),
-        }
-
-        client.table(_T_RATE_LIMIT_STATE).upsert(
-            upsert_record,
-            on_conflict="key",
-            returning="minimal",
-        ).execute()
+        _persistence_upsert_rate_limit_state(
+            {
+                "key": key,
+                "count": count,
+                "window_start": window_start,
+                "window_seconds": window_seconds,
+                "rate_limit": limit,
+                "updated_at": _iso_now(),
+            }
+        )
 
     except Exception as exc:  # noqa: BLE001
-        SupabaseAPIError, SupabaseClientError = _supabase_errors()
         _logger.error(
-            "rate_limiter: DB error for key=%r: %s",
+            "rate_limiter: persistence error for key=%r: %s",
             key,
             exc,
-            exc_info=isinstance(exc, (SupabaseAPIError, SupabaseClientError)),
         )
         return RateLimitResult(
             key=key,
@@ -305,22 +291,12 @@ def reset_key(key: str) -> bool:
     """Delete the rate_limit_state row for ``key``.
 
     Returns True on success, False on error.
-
-    .. deprecated::
-        Admin-facing callers and routers should call
-        ``supabase_persistence.delete_rate_limit_state(key)`` directly.
-        That function raises ``PersistenceError`` on failure and stays within
-        the canonical persistence boundary.  This wrapper is retained for
-        internal use by ``check_and_increment`` and any existing test fixtures
-        that depend on the bool return contract.
     """
     key = key.strip() if key else ""
     if not key:
         return False
     try:
-        from app.core.supabase_persistence import delete_rate_limit_state  # noqa: PLC0415
-
-        delete_rate_limit_state(key)
+        _persistence_delete_rate_limit_state(key)
         return True
     except Exception as exc:  # noqa: BLE001
         _logger.error("rate_limiter.reset_key error for key=%r: %s", key, exc)
@@ -328,32 +304,15 @@ def reset_key(key: str) -> bool:
 
 
 def get_key_state(key: str) -> dict[str, Any] | None:
-    """Return the raw rate_limit_state row for ``key``, or None if not found.
-
-    .. deprecated::
-        Admin-facing callers and routers should call
-        ``supabase_persistence.get_rate_limit_state(key)`` directly.
-        That function raises ``PersistenceError`` on failure and stays within
-        the canonical persistence boundary.  This wrapper is retained for
-        internal health-check callers and existing test fixtures that depend
-        on the None-on-error contract.
-    """
+    """Return the raw rate_limit_state row for ``key``, or None if not found."""
     key = key.strip() if key else ""
     if not key:
         return None
     try:
-        from app.core.supabase_persistence import get_rate_limit_state  # noqa: PLC0415
-
-        return get_rate_limit_state(key)
+        return _persistence_get_rate_limit_state(key)
     except Exception as exc:  # noqa: BLE001
         _logger.error("rate_limiter.get_key_state error for key=%r: %s", key, exc)
         return None
-
-
-def _iso_now() -> str:
-    from datetime import UTC, datetime  # noqa: PLC0415
-
-    return datetime.now(UTC).isoformat()
 
 
 __all__ = [
