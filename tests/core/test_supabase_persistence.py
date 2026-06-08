@@ -26,15 +26,13 @@ from app.core.supabase_persistence import (
 )
 
 # ---------------------------------------------------------------------------
-# Patch target — canonical module-level import; never patch supabaseclient
-# directly. All tests in this file mock at the consumption site.
+# Patch target
 # ---------------------------------------------------------------------------
 _PATCH_TARGET = "app.core.supabase_persistence.get_supabase_service_client"
 
 
 # ---------------------------------------------------------------------------
-# Query-builder mock factory — mirrors test_supabase_persistence_trust.py
-# so the entire test/core suite uses one consistent mock shape.
+# Query-builder mock factory
 # ---------------------------------------------------------------------------
 
 
@@ -81,8 +79,7 @@ def _make_client(
 
 
 # ---------------------------------------------------------------------------
-# Multi-table client factory for get_policy_set which calls .table() three
-# times in sequence: policy_sets → policy_set_memberships → policy_rules.
+# Multi-table client factory for get_policy_set
 # ---------------------------------------------------------------------------
 
 
@@ -92,7 +89,6 @@ def _make_policy_client(
     membership_data: object,
     rules_data: object,
 ) -> MagicMock:
-    """Return a client where each successive .table() call gets its own qb."""
     set_qb = _make_qb(set_data)
     membership_qb = _make_qb(membership_data)
     rules_qb = _make_qb(rules_data)
@@ -273,10 +269,6 @@ class TestWrap:
 
 class TestGetPolicySet:
 
-    # -----------------------------------------------------------------------
-    # Happy path — set found with rules via policy_rule_id column
-    # -----------------------------------------------------------------------
-
     def test_returns_dict_with_policy_set_and_rules_keys(self):
         client = _make_policy_client(
             set_data=_POLICY_SET_ROW,
@@ -315,10 +307,6 @@ class TestGetPolicySet:
         assert len(result["rules"]) == 2
         rule_ids = {r["id"] for r in result["rules"]}
         assert rule_ids == {"rule-001", "rule-002"}
-
-    # -----------------------------------------------------------------------
-    # policy_rule_id column normalization
-    # -----------------------------------------------------------------------
 
     def test_membership_rows_keyed_on_policy_rule_id_are_resolved(self):
         memberships = [
@@ -429,10 +417,6 @@ class TestGetPolicySet:
         membership_qb.eq.assert_called_once_with("policy_set_id", "pset-alt-key")
         assert result is not None
 
-    # -----------------------------------------------------------------------
-    # Not-found cases
-    # -----------------------------------------------------------------------
-
     def test_returns_none_when_set_not_found_data_is_none(self):
         client = _make_client(None)
         with patch(_PATCH_TARGET, return_value=client):
@@ -453,10 +437,6 @@ class TestGetPolicySet:
             result = get_policy_set("nonexistent")
 
         assert result is None
-
-    # -----------------------------------------------------------------------
-    # Empty memberships — no rules fetched
-    # -----------------------------------------------------------------------
 
     def test_rules_empty_when_no_memberships(self):
         set_qb = _make_qb(_POLICY_SET_ROW)
@@ -494,10 +474,6 @@ class TestGetPolicySet:
 
         assert client.table.call_count == 2
 
-    # -----------------------------------------------------------------------
-    # Validation guards
-    # -----------------------------------------------------------------------
-
     def test_empty_set_key_raises_persistence_error(self):
         with pytest.raises(PersistenceError, match="set_key is required"):
             get_policy_set("")
@@ -510,10 +486,6 @@ class TestGetPolicySet:
         with pytest.raises(PersistenceError) as exc_info:
             get_policy_set("")
         assert exc_info.value.operation == "get_policy_set"
-
-    # -----------------------------------------------------------------------
-    # PersistenceError wrapping
-    # -----------------------------------------------------------------------
 
     def test_supabase_api_error_raises_persistence_error(self):
         from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
@@ -554,10 +526,6 @@ class TestGetPolicySet:
 
 class TestGetScanPatterns:
 
-    # -----------------------------------------------------------------------
-    # Default behaviour — is_active=True filter applied
-    # -----------------------------------------------------------------------
-
     def test_returns_list_of_patterns(self):
         client = _make_client([_SCAN_PATTERN_ROW])
         with patch(_PATCH_TARGET, return_value=client):
@@ -587,10 +555,6 @@ class TestGetScanPatterns:
 
         client.table.assert_called_once_with("scan_patterns")
 
-    # -----------------------------------------------------------------------
-    # is_active filter variants
-    # -----------------------------------------------------------------------
-
     def test_is_active_false_filter_applied_when_passed(self):
         qb = _make_qb([])
         client = MagicMock()
@@ -613,10 +577,6 @@ class TestGetScanPatterns:
         assert ("is_active", True) not in called_args
         assert ("is_active", False) not in called_args
         assert ("is_active", None) not in called_args
-
-    # -----------------------------------------------------------------------
-    # pattern_type filter
-    # -----------------------------------------------------------------------
 
     def test_pattern_type_filter_applied_when_passed(self):
         qb = _make_qb([_SCAN_PATTERN_ROW])
@@ -651,10 +611,6 @@ class TestGetScanPatterns:
         assert ("is_active", True) in called_args
         assert ("pattern_type", "keyword") in called_args
 
-    # -----------------------------------------------------------------------
-    # Response normalization
-    # -----------------------------------------------------------------------
-
     def test_empty_list_returned_when_no_patterns(self):
         client = _make_client([])
         with patch(_PATCH_TARGET, return_value=client):
@@ -685,10 +641,6 @@ class TestGetScanPatterns:
             result = get_scan_patterns()
 
         assert len(result) == 2
-
-    # -----------------------------------------------------------------------
-    # PersistenceError wrapping
-    # -----------------------------------------------------------------------
 
     def test_supabase_api_error_raises_persistence_error(self):
         from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
@@ -728,10 +680,6 @@ class TestGetScanPatterns:
 
 
 class TestGetRateLimitState:
-
-    # -----------------------------------------------------------------------
-    # Happy path — row found
-    # -----------------------------------------------------------------------
 
     def test_returns_dict_when_row_found(self):
         client = _make_client(_RATE_LIMIT_ROW)
@@ -781,10 +729,6 @@ class TestGetRateLimitState:
 
         qb.eq.assert_called_once_with("key", "agent:agent-001:scan")
 
-    # -----------------------------------------------------------------------
-    # Not-found — returns None
-    # -----------------------------------------------------------------------
-
     def test_returns_none_when_data_is_none(self):
         client = _make_client(None)
         with patch(_PATCH_TARGET, return_value=client):
@@ -806,10 +750,6 @@ class TestGetRateLimitState:
 
         assert result is None
 
-    # -----------------------------------------------------------------------
-    # Validation guards
-    # -----------------------------------------------------------------------
-
     def test_empty_key_raises_persistence_error(self):
         with pytest.raises(PersistenceError, match="key is required"):
             get_rate_limit_state("")
@@ -822,10 +762,6 @@ class TestGetRateLimitState:
         with pytest.raises(PersistenceError) as exc_info:
             get_rate_limit_state("")
         assert exc_info.value.operation == "get_rate_limit_state"
-
-    # -----------------------------------------------------------------------
-    # PersistenceError wrapping
-    # -----------------------------------------------------------------------
 
     def test_supabase_api_error_raises_persistence_error(self):
         from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
@@ -865,10 +801,6 @@ class TestGetRateLimitState:
 
 
 class TestDeleteRateLimitState:
-
-    # -----------------------------------------------------------------------
-    # Success path
-    # -----------------------------------------------------------------------
 
     def test_success_returns_none(self):
         qb = _make_qb(None)
@@ -930,10 +862,6 @@ class TestDeleteRateLimitState:
 
         qb.execute.assert_called_once()
 
-    # -----------------------------------------------------------------------
-    # Validation guards
-    # -----------------------------------------------------------------------
-
     def test_empty_key_raises_persistence_error(self):
         with pytest.raises(PersistenceError, match="key is required"):
             delete_rate_limit_state("")
@@ -946,10 +874,6 @@ class TestDeleteRateLimitState:
         with pytest.raises(PersistenceError) as exc_info:
             delete_rate_limit_state("")
         assert exc_info.value.operation == "delete_rate_limit_state"
-
-    # -----------------------------------------------------------------------
-    # PersistenceError on DB failure
-    # -----------------------------------------------------------------------
 
     def test_supabase_api_error_raises_persistence_error(self):
         from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
@@ -1145,7 +1069,7 @@ class TestGetScanById:
 
 class TestListScans:
 
-    def test_returns_list_of_scans(self):
+    def test_returns_list_of_scan_rows(self):
         client = _make_client([_SCAN_ROW])
         with patch(_PATCH_TARGET, return_value=client):
             result = list_scans()
@@ -1169,9 +1093,17 @@ class TestListScans:
         with patch(_PATCH_TARGET, return_value=client):
             result = list_scans()
         assert isinstance(result, list)
-        assert len(result) == 1
+        assert result[0]["scan_id"] == "scan-001"
 
-    def test_agent_id_filter_applied_when_provided(self):
+    def test_scan_history_table_queried(self):
+        qb = _make_qb([_SCAN_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            list_scans()
+        client.table.assert_called_once_with("scan_history")
+
+    def test_agent_id_filter_applied_when_passed(self):
         qb = _make_qb([_SCAN_ROW])
         client = MagicMock()
         client.table.return_value = qb
@@ -1189,7 +1121,7 @@ class TestListScans:
         called_args = [c.args for c in qb.eq.call_args_list]
         assert all(a[0] != "agent_id" for a in called_args)
 
-    def test_verdict_filter_applied_when_provided(self):
+    def test_verdict_filter_applied_when_passed(self):
         qb = _make_qb([_SCAN_ROW])
         client = MagicMock()
         client.table.return_value = qb
@@ -1207,7 +1139,7 @@ class TestListScans:
         called_args = [c.args for c in qb.eq.call_args_list]
         assert all(a[0] != "verdict" for a in called_args)
 
-    def test_order_desc_by_created_at(self):
+    def test_order_by_created_at_desc(self):
         qb = _make_qb([_SCAN_ROW])
         client = MagicMock()
         client.table.return_value = qb
@@ -1215,13 +1147,21 @@ class TestListScans:
             list_scans()
         qb.order.assert_called_once_with("created_at", desc=True)
 
-    def test_range_applied_with_offset_and_limit(self):
+    def test_range_applied_with_default_limit_and_offset(self):
         qb = _make_qb([_SCAN_ROW])
         client = MagicMock()
         client.table.return_value = qb
         with patch(_PATCH_TARGET, return_value=client):
-            list_scans(limit=10, offset=5)
-        qb.range.assert_called_once_with(5, 14)
+            list_scans()
+        qb.range.assert_called_once_with(0, 99)
+
+    def test_range_applied_with_custom_limit_and_offset(self):
+        qb = _make_qb([_SCAN_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            list_scans(limit=10, offset=20)
+        qb.range.assert_called_once_with(20, 29)
 
     def test_api_error_raises_persistence_error(self):
         from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
@@ -1241,15 +1181,51 @@ class TestListScans:
                 list_scans()
         assert exc_info.value.operation == "list_scans"
 
+    def test_persistence_error_cause_is_original_exception(self):
+        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
+
+        original = SupabaseAPIError("db gone")
+        client = _make_client(side_effect=original)
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                list_scans()
+        assert exc_info.value.cause is original
+
 
 # ===========================================================================
-# upsert_audit_event — branching on event_id presence
+# upsert_audit_event
 # ===========================================================================
 
 
 class TestUpsertAuditEvent:
 
-    def test_upsert_path_taken_when_event_id_present(self):
+    def test_returns_first_element_of_list_response(self):
+        client = _make_client([_AUDIT_ROW])
+        with patch(_PATCH_TARGET, return_value=client):
+            result = upsert_audit_event(_AUDIT_ROW)
+        assert result["event_id"] == "evt-001"
+
+    def test_returns_dict_response_directly(self):
+        client = _make_client(_AUDIT_ROW)
+        with patch(_PATCH_TARGET, return_value=client):
+            result = upsert_audit_event(_AUDIT_ROW)
+        assert result["event_id"] == "evt-001"
+
+    def test_returns_input_record_when_data_is_empty_list(self):
+        client = _make_client([])
+        with patch(_PATCH_TARGET, return_value=client):
+            result = upsert_audit_event(_AUDIT_ROW)
+        assert result is _AUDIT_ROW
+
+    def test_audit_events_table_queried(self):
+        qb = _make_qb([_AUDIT_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            upsert_audit_event(_AUDIT_ROW)
+        client.table.assert_called_once_with("audit_events")
+
+    def test_upsert_used_when_event_id_present(self):
         qb = _make_qb([_AUDIT_ROW])
         client = MagicMock()
         client.table.return_value = qb
@@ -1258,7 +1234,7 @@ class TestUpsertAuditEvent:
         qb.upsert.assert_called_once()
         qb.insert.assert_not_called()
 
-    def test_insert_path_taken_when_event_id_absent(self):
+    def test_insert_used_when_event_id_absent(self):
         record = {k: v for k, v in _AUDIT_ROW.items() if k != "event_id"}
         qb = _make_qb([record])
         client = MagicMock()
@@ -1277,14 +1253,6 @@ class TestUpsertAuditEvent:
         call_kwargs = qb.upsert.call_args
         assert call_kwargs.kwargs.get("on_conflict") == "event_id"
 
-    def test_audit_events_table_queried(self):
-        qb = _make_qb([_AUDIT_ROW])
-        client = MagicMock()
-        client.table.return_value = qb
-        with patch(_PATCH_TARGET, return_value=client):
-            upsert_audit_event(_AUDIT_ROW)
-        client.table.assert_called_once_with("audit_events")
-
     def test_created_at_injected_when_absent(self):
         record = {k: v for k, v in _AUDIT_ROW.items() if k != "created_at"}
         qb = _make_qb([_AUDIT_ROW])
@@ -1292,8 +1260,8 @@ class TestUpsertAuditEvent:
         client.table.return_value = qb
         with patch(_PATCH_TARGET, return_value=client):
             upsert_audit_event(record)
-        written = qb.upsert.call_args.args[0]
-        assert "created_at" in written
+        passed_record = qb.upsert.call_args.args[0]
+        assert "created_at" in passed_record
 
     def test_created_at_not_overwritten_when_present(self):
         qb = _make_qb([_AUDIT_ROW])
@@ -1301,26 +1269,8 @@ class TestUpsertAuditEvent:
         client.table.return_value = qb
         with patch(_PATCH_TARGET, return_value=client):
             upsert_audit_event(_AUDIT_ROW)
-        written = qb.upsert.call_args.args[0]
-        assert written["created_at"] == _AUDIT_ROW["created_at"]
-
-    def test_returns_first_list_element(self):
-        client = _make_client([_AUDIT_ROW])
-        with patch(_PATCH_TARGET, return_value=client):
-            result = upsert_audit_event(_AUDIT_ROW)
-        assert result["event_id"] == "evt-001"
-
-    def test_returns_dict_data_directly(self):
-        client = _make_client(_AUDIT_ROW)
-        with patch(_PATCH_TARGET, return_value=client):
-            result = upsert_audit_event(_AUDIT_ROW)
-        assert result["event_id"] == "evt-001"
-
-    def test_returns_input_record_when_data_empty_list(self):
-        client = _make_client([])
-        with patch(_PATCH_TARGET, return_value=client):
-            result = upsert_audit_event(_AUDIT_ROW)
-        assert result is _AUDIT_ROW
+        passed_record = qb.upsert.call_args.args[0]
+        assert passed_record["created_at"] == "2026-06-08T00:00:00+00:00"
 
     def test_api_error_raises_persistence_error(self):
         from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
@@ -1340,6 +1290,16 @@ class TestUpsertAuditEvent:
                 upsert_audit_event(_AUDIT_ROW)
         assert exc_info.value.operation == "upsert_audit_event"
 
+    def test_persistence_error_cause_is_original_exception(self):
+        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
+
+        original = SupabaseAPIError("conflict")
+        client = _make_client(side_effect=original)
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                upsert_audit_event(_AUDIT_ROW)
+        assert exc_info.value.cause is original
+
 
 # ===========================================================================
 # create_webhook_subscription
@@ -1348,19 +1308,19 @@ class TestUpsertAuditEvent:
 
 class TestCreateWebhookSubscription:
 
-    def test_returns_first_list_element_on_success(self):
+    def test_returns_first_element_of_list_response(self):
         client = _make_client([_WEBHOOK_SUB_ROW])
         with patch(_PATCH_TARGET, return_value=client):
             result = create_webhook_subscription(_WEBHOOK_SUB_ROW)
         assert result["id"] == "sub-001"
 
-    def test_returns_dict_data_directly(self):
+    def test_returns_dict_response_directly(self):
         client = _make_client(_WEBHOOK_SUB_ROW)
         with patch(_PATCH_TARGET, return_value=client):
             result = create_webhook_subscription(_WEBHOOK_SUB_ROW)
         assert result["id"] == "sub-001"
 
-    def test_returns_input_record_when_data_empty_list(self):
+    def test_returns_input_record_when_data_is_empty_list(self):
         client = _make_client([])
         with patch(_PATCH_TARGET, return_value=client):
             result = create_webhook_subscription(_WEBHOOK_SUB_ROW)
@@ -1374,14 +1334,32 @@ class TestCreateWebhookSubscription:
             create_webhook_subscription(_WEBHOOK_SUB_ROW)
         client.table.assert_called_once_with("webhook_subscriptions")
 
-    def test_insert_called_not_upsert(self):
+    def test_insert_called_on_query_builder(self):
         qb = _make_qb([_WEBHOOK_SUB_ROW])
         client = MagicMock()
         client.table.return_value = qb
         with patch(_PATCH_TARGET, return_value=client):
             create_webhook_subscription(_WEBHOOK_SUB_ROW)
         qb.insert.assert_called_once()
-        qb.upsert.assert_not_called()
+
+    def test_created_at_injected_when_absent(self):
+        record = {k: v for k, v in _WEBHOOK_SUB_ROW.items() if k != "created_at"}
+        qb = _make_qb([_WEBHOOK_SUB_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            create_webhook_subscription(record)
+        passed_record = qb.insert.call_args.args[0]
+        assert "created_at" in passed_record
+
+    def test_created_at_not_overwritten_when_present(self):
+        qb = _make_qb([_WEBHOOK_SUB_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            create_webhook_subscription(_WEBHOOK_SUB_ROW)
+        passed_record = qb.insert.call_args.args[0]
+        assert passed_record["created_at"] == "2026-06-08T00:00:00+00:00"
 
     def test_missing_tenant_id_raises_persistence_error(self):
         record = {k: v for k, v in _WEBHOOK_SUB_ROW.items() if k != "tenant_id"}
@@ -1393,21 +1371,11 @@ class TestCreateWebhookSubscription:
         with pytest.raises(PersistenceError, match="target_url"):
             create_webhook_subscription(record)
 
-    def test_guard_raises_persistence_error_operation(self):
+    def test_persistence_error_operation_is_create_webhook_subscription(self):
         record = {k: v for k, v in _WEBHOOK_SUB_ROW.items() if k != "tenant_id"}
         with pytest.raises(PersistenceError) as exc_info:
             create_webhook_subscription(record)
         assert exc_info.value.operation == "create_webhook_subscription"
-
-    def test_created_at_injected_when_absent(self):
-        record = {k: v for k, v in _WEBHOOK_SUB_ROW.items() if k != "created_at"}
-        qb = _make_qb([_WEBHOOK_SUB_ROW])
-        client = MagicMock()
-        client.table.return_value = qb
-        with patch(_PATCH_TARGET, return_value=client):
-            create_webhook_subscription(record)
-        written = qb.insert.call_args.args[0]
-        assert "created_at" in written
 
     def test_api_error_raises_persistence_error(self):
         from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
@@ -1427,6 +1395,16 @@ class TestCreateWebhookSubscription:
                 create_webhook_subscription(_WEBHOOK_SUB_ROW)
         assert exc_info.value.operation == "create_webhook_subscription"
 
+    def test_persistence_error_cause_is_original_exception(self):
+        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
+
+        original = SupabaseAPIError("duplicate key")
+        client = _make_client(side_effect=original)
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                create_webhook_subscription(_WEBHOOK_SUB_ROW)
+        assert exc_info.value.cause is original
+
 
 # ===========================================================================
 # list_webhook_subscriptions
@@ -1435,7 +1413,7 @@ class TestCreateWebhookSubscription:
 
 class TestListWebhookSubscriptions:
 
-    def test_returns_list_of_subscriptions(self):
+    def test_returns_list_of_subscription_rows(self):
         client = _make_client([_WEBHOOK_SUB_ROW])
         with patch(_PATCH_TARGET, return_value=client):
             result = list_webhook_subscriptions("tenant-001")
@@ -1459,7 +1437,15 @@ class TestListWebhookSubscriptions:
         with patch(_PATCH_TARGET, return_value=client):
             result = list_webhook_subscriptions("tenant-001")
         assert isinstance(result, list)
-        assert len(result) == 1
+        assert result[0]["id"] == "sub-001"
+
+    def test_webhook_subscriptions_table_queried(self):
+        qb = _make_qb([_WEBHOOK_SUB_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            list_webhook_subscriptions("tenant-001")
+        client.table.assert_called_once_with("webhook_subscriptions")
 
     def test_tenant_id_filter_applied(self):
         qb = _make_qb([_WEBHOOK_SUB_ROW])
@@ -1486,30 +1472,54 @@ class TestListWebhookSubscriptions:
         with patch(_PATCH_TARGET, return_value=client):
             list_webhook_subscriptions("tenant-001", active_only=False)
         called_args = [c.args for c in qb.eq.call_args_list]
-        assert ("active", True) not in called_args
+        assert all(a[0] != "active" for a in called_args)
 
-    def test_missing_tenant_id_raises_persistence_error(self):
-        with pytest.raises(PersistenceError, match="tenant_id"):
-            list_webhook_subscriptions("")
+    def test_order_by_created_at_desc(self):
+        qb = _make_qb([_WEBHOOK_SUB_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            list_webhook_subscriptions("tenant-001")
+        qb.order.assert_called_once_with("created_at", desc=True)
 
-    def test_guard_operation_is_list_webhook_subscriptions(self):
-        with pytest.raises(PersistenceError) as exc_info:
-            list_webhook_subscriptions("")
-        assert exc_info.value.operation == "list_webhook_subscriptions"
+    def test_range_applied_with_default_limit_and_offset(self):
+        qb = _make_qb([_WEBHOOK_SUB_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            list_webhook_subscriptions("tenant-001")
+        qb.range.assert_called_once_with(0, 99)
 
-    def test_order_and_range_applied(self):
+    def test_range_applied_with_custom_limit_and_offset(self):
         qb = _make_qb([_WEBHOOK_SUB_ROW])
         client = MagicMock()
         client.table.return_value = qb
         with patch(_PATCH_TARGET, return_value=client):
             list_webhook_subscriptions("tenant-001", limit=5, offset=10)
-        qb.order.assert_called_once_with("created_at", desc=True)
         qb.range.assert_called_once_with(10, 14)
+
+    def test_empty_tenant_id_raises_persistence_error(self):
+        with pytest.raises(PersistenceError, match="tenant_id"):
+            list_webhook_subscriptions("")
+
+    def test_persistence_error_operation_is_list_webhook_subscriptions(self):
+        with pytest.raises(PersistenceError) as exc_info:
+            list_webhook_subscriptions("")
+        assert exc_info.value.operation == "list_webhook_subscriptions"
 
     def test_api_error_raises_persistence_error(self):
         from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
 
         client = _make_client(side_effect=SupabaseAPIError("fail"))
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                list_webhook_subscriptions("tenant-001")
+        assert exc_info.value.operation == "list_webhook_subscriptions"
+
+    def test_client_error_raises_persistence_error(self):
+        from app.supabaseclient import SupabaseClientError  # noqa: PLC0415
+
+        client = _make_client(side_effect=SupabaseClientError("timeout"))
         with patch(_PATCH_TARGET, return_value=client):
             with pytest.raises(PersistenceError) as exc_info:
                 list_webhook_subscriptions("tenant-001")
@@ -1529,18 +1539,12 @@ class TestGetWebhookSubscription:
             result = get_webhook_subscription("sub-001", "tenant-001")
         assert result["id"] == "sub-001"
 
-    def test_returns_first_list_element(self):
+    def test_returns_first_element_when_data_is_list(self):
         client = _make_client([_WEBHOOK_SUB_ROW])
         with patch(_PATCH_TARGET, return_value=client):
             result = get_webhook_subscription("sub-001", "tenant-001")
         assert result is not None
         assert result["id"] == "sub-001"
-
-    def test_returns_none_when_data_is_none(self):
-        client = _make_client(None)
-        with patch(_PATCH_TARGET, return_value=client):
-            result = get_webhook_subscription("sub-missing", "tenant-001")
-        assert result is None
 
     def test_returns_none_when_data_is_empty_list(self):
         client = _make_client([])
@@ -1548,7 +1552,21 @@ class TestGetWebhookSubscription:
             result = get_webhook_subscription("sub-missing", "tenant-001")
         assert result is None
 
-    def test_filters_by_id_and_tenant_id(self):
+    def test_returns_none_when_data_is_none(self):
+        client = _make_client(None)
+        with patch(_PATCH_TARGET, return_value=client):
+            result = get_webhook_subscription("sub-missing", "tenant-001")
+        assert result is None
+
+    def test_webhook_subscriptions_table_queried(self):
+        qb = _make_qb(_WEBHOOK_SUB_ROW)
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            get_webhook_subscription("sub-001", "tenant-001")
+        client.table.assert_called_once_with("webhook_subscriptions")
+
+    def test_query_filters_by_id_and_tenant_id(self):
         qb = _make_qb(_WEBHOOK_SUB_ROW)
         client = MagicMock()
         client.table.return_value = qb
@@ -1566,15 +1584,15 @@ class TestGetWebhookSubscription:
             get_webhook_subscription("sub-001", "tenant-001")
         qb.maybe_single.assert_called_once()
 
-    def test_missing_subscription_id_raises_persistence_error(self):
+    def test_empty_subscription_id_raises_persistence_error(self):
         with pytest.raises(PersistenceError, match="subscription_id"):
             get_webhook_subscription("", "tenant-001")
 
-    def test_missing_tenant_id_raises_persistence_error(self):
+    def test_empty_tenant_id_raises_persistence_error(self):
         with pytest.raises(PersistenceError, match="tenant_id"):
             get_webhook_subscription("sub-001", "")
 
-    def test_guard_operation_is_get_webhook_subscription(self):
+    def test_persistence_error_operation_is_get_webhook_subscription(self):
         with pytest.raises(PersistenceError) as exc_info:
             get_webhook_subscription("", "tenant-001")
         assert exc_info.value.operation == "get_webhook_subscription"
@@ -1588,6 +1606,25 @@ class TestGetWebhookSubscription:
                 get_webhook_subscription("sub-001", "tenant-001")
         assert exc_info.value.operation == "get_webhook_subscription"
 
+    def test_client_error_raises_persistence_error(self):
+        from app.supabaseclient import SupabaseClientError  # noqa: PLC0415
+
+        client = _make_client(side_effect=SupabaseClientError("timeout"))
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                get_webhook_subscription("sub-001", "tenant-001")
+        assert exc_info.value.operation == "get_webhook_subscription"
+
+    def test_persistence_error_cause_is_original_exception(self):
+        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
+
+        original = SupabaseAPIError("gone")
+        client = _make_client(side_effect=original)
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                get_webhook_subscription("sub-001", "tenant-001")
+        assert exc_info.value.cause is original
+
 
 # ===========================================================================
 # update_webhook_subscription
@@ -1596,14 +1633,21 @@ class TestGetWebhookSubscription:
 
 class TestUpdateWebhookSubscription:
 
-    def test_returns_updated_dict(self):
+    def test_returns_first_element_of_list_response(self):
         updated = {**_WEBHOOK_SUB_ROW, "active": False}
         client = _make_client([updated])
         with patch(_PATCH_TARGET, return_value=client):
             result = update_webhook_subscription("sub-001", "tenant-001", {"active": False})
         assert result["active"] is False
 
-    def test_returns_none_when_data_empty_list(self):
+    def test_returns_dict_response_directly(self):
+        updated = {**_WEBHOOK_SUB_ROW, "active": False}
+        client = _make_client(updated)
+        with patch(_PATCH_TARGET, return_value=client):
+            result = update_webhook_subscription("sub-001", "tenant-001", {"active": False})
+        assert result["active"] is False
+
+    def test_returns_none_when_data_is_empty_list(self):
         client = _make_client([])
         with patch(_PATCH_TARGET, return_value=client):
             result = update_webhook_subscription("sub-001", "tenant-001", {"active": False})
@@ -1615,23 +1659,21 @@ class TestUpdateWebhookSubscription:
             result = update_webhook_subscription("sub-001", "tenant-001", {"active": False})
         assert result is None
 
-    def test_update_called_not_upsert(self):
+    def test_webhook_subscriptions_table_queried(self):
+        qb = _make_qb([_WEBHOOK_SUB_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            update_webhook_subscription("sub-001", "tenant-001", {"active": False})
+        client.table.assert_called_once_with("webhook_subscriptions")
+
+    def test_update_called_on_query_builder(self):
         qb = _make_qb([_WEBHOOK_SUB_ROW])
         client = MagicMock()
         client.table.return_value = qb
         with patch(_PATCH_TARGET, return_value=client):
             update_webhook_subscription("sub-001", "tenant-001", {"active": False})
         qb.update.assert_called_once()
-        qb.upsert.assert_not_called()
-
-    def test_updated_at_injected_into_updates(self):
-        qb = _make_qb([_WEBHOOK_SUB_ROW])
-        client = MagicMock()
-        client.table.return_value = qb
-        with patch(_PATCH_TARGET, return_value=client):
-            update_webhook_subscription("sub-001", "tenant-001", {"active": False})
-        written = qb.update.call_args.args[0]
-        assert "updated_at" in written
 
     def test_filters_by_id_and_tenant_id(self):
         qb = _make_qb([_WEBHOOK_SUB_ROW])
@@ -1643,15 +1685,24 @@ class TestUpdateWebhookSubscription:
         assert ("id", "sub-001") in called_args
         assert ("tenant_id", "tenant-001") in called_args
 
-    def test_missing_subscription_id_raises_persistence_error(self):
+    def test_updated_at_injected_into_updates(self):
+        qb = _make_qb([_WEBHOOK_SUB_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            update_webhook_subscription("sub-001", "tenant-001", {"active": False})
+        passed_updates = qb.update.call_args.args[0]
+        assert "updated_at" in passed_updates
+
+    def test_empty_subscription_id_raises_persistence_error(self):
         with pytest.raises(PersistenceError, match="subscription_id"):
             update_webhook_subscription("", "tenant-001", {})
 
-    def test_missing_tenant_id_raises_persistence_error(self):
+    def test_empty_tenant_id_raises_persistence_error(self):
         with pytest.raises(PersistenceError, match="tenant_id"):
             update_webhook_subscription("sub-001", "", {})
 
-    def test_guard_operation_is_update_webhook_subscription(self):
+    def test_persistence_error_operation_is_update_webhook_subscription(self):
         with pytest.raises(PersistenceError) as exc_info:
             update_webhook_subscription("", "tenant-001", {})
         assert exc_info.value.operation == "update_webhook_subscription"
@@ -1664,6 +1715,25 @@ class TestUpdateWebhookSubscription:
             with pytest.raises(PersistenceError) as exc_info:
                 update_webhook_subscription("sub-001", "tenant-001", {"active": False})
         assert exc_info.value.operation == "update_webhook_subscription"
+
+    def test_client_error_raises_persistence_error(self):
+        from app.supabaseclient import SupabaseClientError  # noqa: PLC0415
+
+        client = _make_client(side_effect=SupabaseClientError("timeout"))
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                update_webhook_subscription("sub-001", "tenant-001", {"active": False})
+        assert exc_info.value.operation == "update_webhook_subscription"
+
+    def test_persistence_error_cause_is_original_exception(self):
+        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
+
+        original = SupabaseAPIError("conflict")
+        client = _make_client(side_effect=original)
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                update_webhook_subscription("sub-001", "tenant-001", {"active": False})
+        assert exc_info.value.cause is original
 
 
 # ===========================================================================
@@ -1680,6 +1750,14 @@ class TestDeleteWebhookSubscription:
         with patch(_PATCH_TARGET, return_value=client):
             result = delete_webhook_subscription("sub-001", "tenant-001")
         assert result is None
+
+    def test_webhook_subscriptions_table_queried(self):
+        qb = _make_qb(None)
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            delete_webhook_subscription("sub-001", "tenant-001")
+        client.table.assert_called_once_with("webhook_subscriptions")
 
     def test_delete_called_on_query_builder(self):
         qb = _make_qb(None)
@@ -1699,23 +1777,23 @@ class TestDeleteWebhookSubscription:
         assert ("id", "sub-001") in called_args
         assert ("tenant_id", "tenant-001") in called_args
 
-    def test_webhook_subscriptions_table_queried(self):
+    def test_execute_is_called(self):
         qb = _make_qb(None)
         client = MagicMock()
         client.table.return_value = qb
         with patch(_PATCH_TARGET, return_value=client):
             delete_webhook_subscription("sub-001", "tenant-001")
-        client.table.assert_called_once_with("webhook_subscriptions")
+        qb.execute.assert_called_once()
 
-    def test_missing_subscription_id_raises_persistence_error(self):
+    def test_empty_subscription_id_raises_persistence_error(self):
         with pytest.raises(PersistenceError, match="subscription_id"):
             delete_webhook_subscription("", "tenant-001")
 
-    def test_missing_tenant_id_raises_persistence_error(self):
+    def test_empty_tenant_id_raises_persistence_error(self):
         with pytest.raises(PersistenceError, match="tenant_id"):
             delete_webhook_subscription("sub-001", "")
 
-    def test_guard_operation_is_delete_webhook_subscription(self):
+    def test_persistence_error_operation_is_delete_webhook_subscription(self):
         with pytest.raises(PersistenceError) as exc_info:
             delete_webhook_subscription("", "tenant-001")
         assert exc_info.value.operation == "delete_webhook_subscription"
@@ -1738,15 +1816,329 @@ class TestDeleteWebhookSubscription:
                 delete_webhook_subscription("sub-001", "tenant-001")
         assert exc_info.value.operation == "delete_webhook_subscription"
 
+    def test_persistence_error_cause_is_original_exception(self):
+        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
+
+        original = SupabaseAPIError("gone")
+        client = _make_client(side_effect=original)
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                delete_webhook_subscription("sub-001", "tenant-001")
+        assert exc_info.value.cause is original
+
 
 # ===========================================================================
-# get_webhook_delivery_log — filter branching
+# upsert_webhook_delivery
+# ===========================================================================
+
+
+class TestUpsertWebhookDelivery:
+
+    def test_returns_first_element_of_list_response(self):
+        client = _make_client([_WEBHOOK_DELIVERY_ROW])
+        with patch(_PATCH_TARGET, return_value=client):
+            result = upsert_webhook_delivery(_WEBHOOK_DELIVERY_ROW)
+        assert result["id"] == "del-001"
+
+    def test_returns_dict_response_directly(self):
+        client = _make_client(_WEBHOOK_DELIVERY_ROW)
+        with patch(_PATCH_TARGET, return_value=client):
+            result = upsert_webhook_delivery(_WEBHOOK_DELIVERY_ROW)
+        assert result["id"] == "del-001"
+
+    def test_returns_input_record_when_data_is_empty_list(self):
+        client = _make_client([])
+        with patch(_PATCH_TARGET, return_value=client):
+            result = upsert_webhook_delivery(_WEBHOOK_DELIVERY_ROW)
+        assert result is _WEBHOOK_DELIVERY_ROW
+
+    def test_webhook_deliveries_table_queried(self):
+        qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            upsert_webhook_delivery(_WEBHOOK_DELIVERY_ROW)
+        client.table.assert_called_once_with("webhook_deliveries")
+
+    def test_upsert_called_on_query_builder(self):
+        qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            upsert_webhook_delivery(_WEBHOOK_DELIVERY_ROW)
+        qb.upsert.assert_called_once()
+
+    def test_upsert_conflicts_on_id(self):
+        qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            upsert_webhook_delivery(_WEBHOOK_DELIVERY_ROW)
+        call_kwargs = qb.upsert.call_args
+        assert call_kwargs.kwargs.get("on_conflict") == "id"
+
+    def test_created_at_injected_when_absent(self):
+        record = {k: v for k, v in _WEBHOOK_DELIVERY_ROW.items() if k != "created_at"}
+        qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            upsert_webhook_delivery(record)
+        passed_record = qb.upsert.call_args.args[0]
+        assert "created_at" in passed_record
+
+    def test_created_at_not_overwritten_when_present(self):
+        qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            upsert_webhook_delivery(_WEBHOOK_DELIVERY_ROW)
+        passed_record = qb.upsert.call_args.args[0]
+        assert passed_record["created_at"] == "2026-06-08T00:00:00+00:00"
+
+    def test_missing_id_raises_persistence_error(self):
+        record = {k: v for k, v in _WEBHOOK_DELIVERY_ROW.items() if k != "id"}
+        with pytest.raises(PersistenceError, match="id"):
+            upsert_webhook_delivery(record)
+
+    def test_missing_tenant_id_raises_persistence_error(self):
+        record = {k: v for k, v in _WEBHOOK_DELIVERY_ROW.items() if k != "tenant_id"}
+        with pytest.raises(PersistenceError, match="tenant_id"):
+            upsert_webhook_delivery(record)
+
+    def test_persistence_error_operation_is_upsert_webhook_delivery(self):
+        record = {k: v for k, v in _WEBHOOK_DELIVERY_ROW.items() if k != "id"}
+        with pytest.raises(PersistenceError) as exc_info:
+            upsert_webhook_delivery(record)
+        assert exc_info.value.operation == "upsert_webhook_delivery"
+
+    def test_api_error_raises_persistence_error(self):
+        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
+
+        client = _make_client(side_effect=SupabaseAPIError("fail"))
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                upsert_webhook_delivery(_WEBHOOK_DELIVERY_ROW)
+        assert exc_info.value.operation == "upsert_webhook_delivery"
+
+    def test_client_error_raises_persistence_error(self):
+        from app.supabaseclient import SupabaseClientError  # noqa: PLC0415
+
+        client = _make_client(side_effect=SupabaseClientError("timeout"))
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                upsert_webhook_delivery(_WEBHOOK_DELIVERY_ROW)
+        assert exc_info.value.operation == "upsert_webhook_delivery"
+
+    def test_persistence_error_cause_is_original_exception(self):
+        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
+
+        original = SupabaseAPIError("conflict")
+        client = _make_client(side_effect=original)
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                upsert_webhook_delivery(_WEBHOOK_DELIVERY_ROW)
+        assert exc_info.value.cause is original
+
+
+# ===========================================================================
+# update_webhook_delivery
+# ===========================================================================
+
+
+class TestUpdateWebhookDelivery:
+
+    def test_returns_first_element_of_list_response(self):
+        updated = {**_WEBHOOK_DELIVERY_ROW, "status": "failed"}
+        client = _make_client([updated])
+        with patch(_PATCH_TARGET, return_value=client):
+            result = update_webhook_delivery("del-001", {"status": "failed"})
+        assert result["status"] == "failed"
+
+    def test_returns_dict_response_directly(self):
+        updated = {**_WEBHOOK_DELIVERY_ROW, "status": "failed"}
+        client = _make_client(updated)
+        with patch(_PATCH_TARGET, return_value=client):
+            result = update_webhook_delivery("del-001", {"status": "failed"})
+        assert result["status"] == "failed"
+
+    def test_returns_none_when_data_is_empty_list(self):
+        client = _make_client([])
+        with patch(_PATCH_TARGET, return_value=client):
+            result = update_webhook_delivery("del-001", {"status": "failed"})
+        assert result is None
+
+    def test_returns_none_when_data_is_none(self):
+        client = _make_client(None)
+        with patch(_PATCH_TARGET, return_value=client):
+            result = update_webhook_delivery("del-001", {"status": "failed"})
+        assert result is None
+
+    def test_webhook_deliveries_table_queried(self):
+        qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            update_webhook_delivery("del-001", {"status": "failed"})
+        client.table.assert_called_once_with("webhook_deliveries")
+
+    def test_update_called_on_query_builder(self):
+        qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            update_webhook_delivery("del-001", {"status": "failed"})
+        qb.update.assert_called_once()
+
+    def test_filters_by_delivery_id(self):
+        qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            update_webhook_delivery("del-001", {"status": "failed"})
+        called_args = [c.args for c in qb.eq.call_args_list]
+        assert ("id", "del-001") in called_args
+
+    def test_empty_delivery_id_raises_persistence_error(self):
+        with pytest.raises(PersistenceError, match="delivery_id"):
+            update_webhook_delivery("", {"status": "failed"})
+
+    def test_persistence_error_operation_is_update_webhook_delivery(self):
+        with pytest.raises(PersistenceError) as exc_info:
+            update_webhook_delivery("", {"status": "failed"})
+        assert exc_info.value.operation == "update_webhook_delivery"
+
+    def test_api_error_raises_persistence_error(self):
+        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
+
+        client = _make_client(side_effect=SupabaseAPIError("fail"))
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                update_webhook_delivery("del-001", {"status": "failed"})
+        assert exc_info.value.operation == "update_webhook_delivery"
+
+    def test_client_error_raises_persistence_error(self):
+        from app.supabaseclient import SupabaseClientError  # noqa: PLC0415
+
+        client = _make_client(side_effect=SupabaseClientError("timeout"))
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                update_webhook_delivery("del-001", {"status": "failed"})
+        assert exc_info.value.operation == "update_webhook_delivery"
+
+    def test_persistence_error_cause_is_original_exception(self):
+        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
+
+        original = SupabaseAPIError("gone")
+        client = _make_client(side_effect=original)
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                update_webhook_delivery("del-001", {"status": "failed"})
+        assert exc_info.value.cause is original
+
+
+# ===========================================================================
+# get_webhook_delivery_record
+# ===========================================================================
+
+
+class TestGetWebhookDeliveryRecord:
+
+    def test_returns_dict_when_found(self):
+        client = _make_client(_WEBHOOK_DELIVERY_ROW)
+        with patch(_PATCH_TARGET, return_value=client):
+            result = get_webhook_delivery_record("del-001")
+        assert result["id"] == "del-001"
+
+    def test_returns_first_element_when_data_is_list(self):
+        client = _make_client([_WEBHOOK_DELIVERY_ROW])
+        with patch(_PATCH_TARGET, return_value=client):
+            result = get_webhook_delivery_record("del-001")
+        assert result is not None
+        assert result["id"] == "del-001"
+
+    def test_returns_none_when_data_is_empty_list(self):
+        client = _make_client([])
+        with patch(_PATCH_TARGET, return_value=client):
+            result = get_webhook_delivery_record("del-missing")
+        assert result is None
+
+    def test_returns_none_when_data_is_none(self):
+        client = _make_client(None)
+        with patch(_PATCH_TARGET, return_value=client):
+            result = get_webhook_delivery_record("del-missing")
+        assert result is None
+
+    def test_webhook_deliveries_table_queried(self):
+        qb = _make_qb(_WEBHOOK_DELIVERY_ROW)
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            get_webhook_delivery_record("del-001")
+        client.table.assert_called_once_with("webhook_deliveries")
+
+    def test_query_filters_by_id(self):
+        qb = _make_qb(_WEBHOOK_DELIVERY_ROW)
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            get_webhook_delivery_record("del-001")
+        qb.eq.assert_called_once_with("id", "del-001")
+
+    def test_maybe_single_called(self):
+        qb = _make_qb(_WEBHOOK_DELIVERY_ROW)
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            get_webhook_delivery_record("del-001")
+        qb.maybe_single.assert_called_once()
+
+    def test_empty_delivery_id_raises_persistence_error(self):
+        with pytest.raises(PersistenceError, match="delivery_id"):
+            get_webhook_delivery_record("")
+
+    def test_persistence_error_operation_is_get_webhook_delivery_record(self):
+        with pytest.raises(PersistenceError) as exc_info:
+            get_webhook_delivery_record("")
+        assert exc_info.value.operation == "get_webhook_delivery_record"
+
+    def test_api_error_raises_persistence_error(self):
+        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
+
+        client = _make_client(side_effect=SupabaseAPIError("fail"))
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                get_webhook_delivery_record("del-001")
+        assert exc_info.value.operation == "get_webhook_delivery_record"
+
+    def test_client_error_raises_persistence_error(self):
+        from app.supabaseclient import SupabaseClientError  # noqa: PLC0415
+
+        client = _make_client(side_effect=SupabaseClientError("timeout"))
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                get_webhook_delivery_record("del-001")
+        assert exc_info.value.operation == "get_webhook_delivery_record"
+
+    def test_persistence_error_cause_is_original_exception(self):
+        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
+
+        original = SupabaseAPIError("gone")
+        client = _make_client(side_effect=original)
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                get_webhook_delivery_record("del-001")
+        assert exc_info.value.cause is original
+
+
+# ===========================================================================
+# get_webhook_delivery_log
 # ===========================================================================
 
 
 class TestGetWebhookDeliveryLog:
 
-    def test_returns_list_of_delivery_records(self):
+    def test_returns_list_of_delivery_rows(self):
         client = _make_client([_WEBHOOK_DELIVERY_ROW])
         with patch(_PATCH_TARGET, return_value=client):
             result = get_webhook_delivery_log("tenant-001")
@@ -1770,7 +2162,15 @@ class TestGetWebhookDeliveryLog:
         with patch(_PATCH_TARGET, return_value=client):
             result = get_webhook_delivery_log("tenant-001")
         assert isinstance(result, list)
-        assert len(result) == 1
+        assert result[0]["id"] == "del-001"
+
+    def test_webhook_deliveries_table_queried(self):
+        qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            get_webhook_delivery_log("tenant-001")
+        client.table.assert_called_once_with("webhook_deliveries")
 
     def test_tenant_id_filter_applied(self):
         qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
@@ -1781,7 +2181,25 @@ class TestGetWebhookDeliveryLog:
         called_args = [c.args for c in qb.eq.call_args_list]
         assert ("tenant_id", "tenant-001") in called_args
 
-    def test_event_type_filter_applied_when_provided(self):
+    def test_subscription_id_filter_applied_when_passed(self):
+        qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            get_webhook_delivery_log("tenant-001", subscription_id="sub-001")
+        called_args = [c.args for c in qb.eq.call_args_list]
+        assert ("subscription_id", "sub-001") in called_args
+
+    def test_subscription_id_filter_not_applied_when_none(self):
+        qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            get_webhook_delivery_log("tenant-001", subscription_id=None)
+        called_args = [c.args for c in qb.eq.call_args_list]
+        assert all(a[0] != "subscription_id" for a in called_args)
+
+    def test_event_type_filter_applied_when_passed(self):
         qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
         client = MagicMock()
         client.table.return_value = qb
@@ -1799,7 +2217,7 @@ class TestGetWebhookDeliveryLog:
         called_args = [c.args for c in qb.eq.call_args_list]
         assert all(a[0] != "event_type" for a in called_args)
 
-    def test_delivery_status_filter_applied_when_provided(self):
+    def test_delivery_status_filter_applied_when_passed(self):
         qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
         client = MagicMock()
         client.table.return_value = qb
@@ -1817,32 +2235,38 @@ class TestGetWebhookDeliveryLog:
         called_args = [c.args for c in qb.eq.call_args_list]
         assert all(a[0] != "status" for a in called_args)
 
-    def test_subscription_id_filter_applied_when_provided(self):
+    def test_order_by_created_at_desc(self):
         qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
         client = MagicMock()
         client.table.return_value = qb
         with patch(_PATCH_TARGET, return_value=client):
-            get_webhook_delivery_log("tenant-001", subscription_id="sub-001")
-        called_args = [c.args for c in qb.eq.call_args_list]
-        assert ("subscription_id", "sub-001") in called_args
+            get_webhook_delivery_log("tenant-001")
+        qb.order.assert_called_once_with("created_at", desc=True)
 
-    def test_missing_tenant_id_raises_persistence_error(self):
+    def test_range_applied_with_default_limit_and_offset(self):
+        qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            get_webhook_delivery_log("tenant-001")
+        qb.range.assert_called_once_with(0, 99)
+
+    def test_range_applied_with_custom_limit_and_offset(self):
+        qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
+        client = MagicMock()
+        client.table.return_value = qb
+        with patch(_PATCH_TARGET, return_value=client):
+            get_webhook_delivery_log("tenant-001", limit=25, offset=50)
+        qb.range.assert_called_once_with(50, 74)
+
+    def test_empty_tenant_id_raises_persistence_error(self):
         with pytest.raises(PersistenceError, match="tenant_id"):
             get_webhook_delivery_log("")
 
-    def test_guard_operation_is_get_webhook_delivery_log(self):
+    def test_persistence_error_operation_is_get_webhook_delivery_log(self):
         with pytest.raises(PersistenceError) as exc_info:
             get_webhook_delivery_log("")
         assert exc_info.value.operation == "get_webhook_delivery_log"
-
-    def test_order_and_range_applied(self):
-        qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
-        client = MagicMock()
-        client.table.return_value = qb
-        with patch(_PATCH_TARGET, return_value=client):
-            get_webhook_delivery_log("tenant-001", limit=20, offset=0)
-        qb.order.assert_called_once_with("created_at", desc=True)
-        qb.range.assert_called_once_with(0, 19)
 
     def test_api_error_raises_persistence_error(self):
         from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
@@ -1853,261 +2277,21 @@ class TestGetWebhookDeliveryLog:
                 get_webhook_delivery_log("tenant-001")
         assert exc_info.value.operation == "get_webhook_delivery_log"
 
-
-# ===========================================================================
-# get_webhook_delivery_record
-# ===========================================================================
-
-
-class TestGetWebhookDeliveryRecord:
-
-    def test_returns_dict_when_found(self):
-        client = _make_client(_WEBHOOK_DELIVERY_ROW)
-        with patch(_PATCH_TARGET, return_value=client):
-            result = get_webhook_delivery_record("del-001")
-        assert result["id"] == "del-001"
-
-    def test_returns_first_list_element(self):
-        client = _make_client([_WEBHOOK_DELIVERY_ROW])
-        with patch(_PATCH_TARGET, return_value=client):
-            result = get_webhook_delivery_record("del-001")
-        assert result is not None
-        assert result["id"] == "del-001"
-
-    def test_returns_none_when_data_is_none(self):
-        client = _make_client(None)
-        with patch(_PATCH_TARGET, return_value=client):
-            result = get_webhook_delivery_record("del-missing")
-        assert result is None
-
-    def test_returns_none_when_data_is_empty_list(self):
-        client = _make_client([])
-        with patch(_PATCH_TARGET, return_value=client):
-            result = get_webhook_delivery_record("del-missing")
-        assert result is None
-
-    def test_webhook_deliveries_table_queried(self):
-        qb = _make_qb(_WEBHOOK_DELIVERY_ROW)
-        client = MagicMock()
-        client.table.return_value = qb
-        with patch(_PATCH_TARGET, return_value=client):
-            get_webhook_delivery_record("del-001")
-        client.table.assert_called_once_with("webhook_deliveries")
-
-    def test_filters_by_delivery_id(self):
-        qb = _make_qb(_WEBHOOK_DELIVERY_ROW)
-        client = MagicMock()
-        client.table.return_value = qb
-        with patch(_PATCH_TARGET, return_value=client):
-            get_webhook_delivery_record("del-001")
-        qb.eq.assert_called_once_with("id", "del-001")
-
-    def test_maybe_single_called(self):
-        qb = _make_qb(_WEBHOOK_DELIVERY_ROW)
-        client = MagicMock()
-        client.table.return_value = qb
-        with patch(_PATCH_TARGET, return_value=client):
-            get_webhook_delivery_record("del-001")
-        qb.maybe_single.assert_called_once()
-
-    def test_missing_delivery_id_raises_persistence_error(self):
-        with pytest.raises(PersistenceError, match="delivery_id"):
-            get_webhook_delivery_record("")
-
-    def test_guard_operation_is_get_webhook_delivery_record(self):
-        with pytest.raises(PersistenceError) as exc_info:
-            get_webhook_delivery_record("")
-        assert exc_info.value.operation == "get_webhook_delivery_record"
-
-    def test_api_error_raises_persistence_error(self):
-        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
-
-        client = _make_client(side_effect=SupabaseAPIError("fail"))
-        with patch(_PATCH_TARGET, return_value=client):
-            with pytest.raises(PersistenceError) as exc_info:
-                get_webhook_delivery_record("del-001")
-        assert exc_info.value.operation == "get_webhook_delivery_record"
-
     def test_client_error_raises_persistence_error(self):
         from app.supabaseclient import SupabaseClientError  # noqa: PLC0415
 
         client = _make_client(side_effect=SupabaseClientError("timeout"))
         with patch(_PATCH_TARGET, return_value=client):
             with pytest.raises(PersistenceError) as exc_info:
-                get_webhook_delivery_record("del-001")
-        assert exc_info.value.operation == "get_webhook_delivery_record"
+                get_webhook_delivery_log("tenant-001")
+        assert exc_info.value.operation == "get_webhook_delivery_log"
 
-
-# ===========================================================================
-# upsert_webhook_delivery — guard on missing id and tenant_id
-# ===========================================================================
-
-
-class TestUpsertWebhookDelivery:
-
-    def test_returns_first_list_element_on_success(self):
-        client = _make_client([_WEBHOOK_DELIVERY_ROW])
-        with patch(_PATCH_TARGET, return_value=client):
-            result = upsert_webhook_delivery(_WEBHOOK_DELIVERY_ROW)
-        assert result["id"] == "del-001"
-
-    def test_returns_dict_data_directly(self):
-        client = _make_client(_WEBHOOK_DELIVERY_ROW)
-        with patch(_PATCH_TARGET, return_value=client):
-            result = upsert_webhook_delivery(_WEBHOOK_DELIVERY_ROW)
-        assert result["id"] == "del-001"
-
-    def test_returns_input_record_when_data_empty_list(self):
-        client = _make_client([])
-        with patch(_PATCH_TARGET, return_value=client):
-            result = upsert_webhook_delivery(_WEBHOOK_DELIVERY_ROW)
-        assert result is _WEBHOOK_DELIVERY_ROW
-
-    def test_upsert_called_not_insert(self):
-        qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
-        client = MagicMock()
-        client.table.return_value = qb
-        with patch(_PATCH_TARGET, return_value=client):
-            upsert_webhook_delivery(_WEBHOOK_DELIVERY_ROW)
-        qb.upsert.assert_called_once()
-        qb.insert.assert_not_called()
-
-    def test_upsert_conflicts_on_id(self):
-        qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
-        client = MagicMock()
-        client.table.return_value = qb
-        with patch(_PATCH_TARGET, return_value=client):
-            upsert_webhook_delivery(_WEBHOOK_DELIVERY_ROW)
-        call_kwargs = qb.upsert.call_args
-        assert call_kwargs.kwargs.get("on_conflict") == "id"
-
-    def test_webhook_deliveries_table_queried(self):
-        qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
-        client = MagicMock()
-        client.table.return_value = qb
-        with patch(_PATCH_TARGET, return_value=client):
-            upsert_webhook_delivery(_WEBHOOK_DELIVERY_ROW)
-        client.table.assert_called_once_with("webhook_deliveries")
-
-    def test_missing_id_raises_persistence_error(self):
-        record = {k: v for k, v in _WEBHOOK_DELIVERY_ROW.items() if k != "id"}
-        with pytest.raises(PersistenceError, match="id"):
-            upsert_webhook_delivery(record)
-
-    def test_missing_tenant_id_raises_persistence_error(self):
-        record = {k: v for k, v in _WEBHOOK_DELIVERY_ROW.items() if k != "tenant_id"}
-        with pytest.raises(PersistenceError, match="tenant_id"):
-            upsert_webhook_delivery(record)
-
-    def test_guard_operation_is_upsert_webhook_delivery(self):
-        record = {k: v for k, v in _WEBHOOK_DELIVERY_ROW.items() if k != "id"}
-        with pytest.raises(PersistenceError) as exc_info:
-            upsert_webhook_delivery(record)
-        assert exc_info.value.operation == "upsert_webhook_delivery"
-
-    def test_created_at_injected_when_absent(self):
-        record = {k: v for k, v in _WEBHOOK_DELIVERY_ROW.items() if k != "created_at"}
-        qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
-        client = MagicMock()
-        client.table.return_value = qb
-        with patch(_PATCH_TARGET, return_value=client):
-            upsert_webhook_delivery(record)
-        written = qb.upsert.call_args.args[0]
-        assert "created_at" in written
-
-    def test_api_error_raises_persistence_error(self):
+    def test_persistence_error_cause_is_original_exception(self):
         from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
 
-        client = _make_client(side_effect=SupabaseAPIError("fail"))
+        original = SupabaseAPIError("db gone")
+        client = _make_client(side_effect=original)
         with patch(_PATCH_TARGET, return_value=client):
             with pytest.raises(PersistenceError) as exc_info:
-                upsert_webhook_delivery(_WEBHOOK_DELIVERY_ROW)
-        assert exc_info.value.operation == "upsert_webhook_delivery"
-
-    def test_client_error_raises_persistence_error(self):
-        from app.supabaseclient import SupabaseClientError  # noqa: PLC0415
-
-        client = _make_client(side_effect=SupabaseClientError("timeout"))
-        with patch(_PATCH_TARGET, return_value=client):
-            with pytest.raises(PersistenceError) as exc_info:
-                upsert_webhook_delivery(_WEBHOOK_DELIVERY_ROW)
-        assert exc_info.value.operation == "upsert_webhook_delivery"
-
-
-# ===========================================================================
-# update_webhook_delivery — delivery_id guard
-# ===========================================================================
-
-
-class TestUpdateWebhookDelivery:
-
-    def test_returns_updated_dict(self):
-        updated = {**_WEBHOOK_DELIVERY_ROW, "status": "failed"}
-        client = _make_client([updated])
-        with patch(_PATCH_TARGET, return_value=client):
-            result = update_webhook_delivery("del-001", {"status": "failed"})
-        assert result["status"] == "failed"
-
-    def test_returns_none_when_data_empty_list(self):
-        client = _make_client([])
-        with patch(_PATCH_TARGET, return_value=client):
-            result = update_webhook_delivery("del-001", {"status": "failed"})
-        assert result is None
-
-    def test_returns_none_when_data_is_none(self):
-        client = _make_client(None)
-        with patch(_PATCH_TARGET, return_value=client):
-            result = update_webhook_delivery("del-001", {"status": "failed"})
-        assert result is None
-
-    def test_update_called_not_upsert(self):
-        qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
-        client = MagicMock()
-        client.table.return_value = qb
-        with patch(_PATCH_TARGET, return_value=client):
-            update_webhook_delivery("del-001", {"status": "failed"})
-        qb.update.assert_called_once()
-        qb.upsert.assert_not_called()
-
-    def test_filters_by_delivery_id(self):
-        qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
-        client = MagicMock()
-        client.table.return_value = qb
-        with patch(_PATCH_TARGET, return_value=client):
-            update_webhook_delivery("del-001", {"status": "failed"})
-        qb.eq.assert_called_once_with("id", "del-001")
-
-    def test_webhook_deliveries_table_queried(self):
-        qb = _make_qb([_WEBHOOK_DELIVERY_ROW])
-        client = MagicMock()
-        client.table.return_value = qb
-        with patch(_PATCH_TARGET, return_value=client):
-            update_webhook_delivery("del-001", {"status": "failed"})
-        client.table.assert_called_once_with("webhook_deliveries")
-
-    def test_missing_delivery_id_raises_persistence_error(self):
-        with pytest.raises(PersistenceError, match="delivery_id"):
-            update_webhook_delivery("", {"status": "failed"})
-
-    def test_guard_operation_is_update_webhook_delivery(self):
-        with pytest.raises(PersistenceError) as exc_info:
-            update_webhook_delivery("", {"status": "failed"})
-        assert exc_info.value.operation == "update_webhook_delivery"
-
-    def test_api_error_raises_persistence_error(self):
-        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
-
-        client = _make_client(side_effect=SupabaseAPIError("fail"))
-        with patch(_PATCH_TARGET, return_value=client):
-            with pytest.raises(PersistenceError) as exc_info:
-                update_webhook_delivery("del-001", {"status": "failed"})
-        assert exc_info.value.operation == "update_webhook_delivery"
-
-    def test_client_error_raises_persistence_error(self):
-        from app.supabaseclient import SupabaseClientError  # noqa: PLC0415
-
-        client = _make_client(side_effect=SupabaseClientError("timeout"))
-        with patch(_PATCH_TARGET, return_value=client):
-            with pytest.raises(PersistenceError) as exc_info:
-                update_webhook_delivery("del-001", {"status": "failed"})
-        assert exc_info.value.operation == "update_webhook_delivery"
+                get_webhook_delivery_log("tenant-001")
+        assert exc_info.value.cause is original

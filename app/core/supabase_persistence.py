@@ -32,6 +32,7 @@ _T_SCAN_PATTERNS = "scan_patterns"
 _T_RATE_LIMIT_STATE = "rate_limit_state"
 _T_WEBHOOK_SUBSCRIPTIONS = "webhook_subscriptions"
 _T_WEBHOOK_DELIVERIES = "webhook_deliveries"
+_T_WEBHOOK_DELIVERY_LOG = "webhook_delivery_log"
 
 
 _COL_POLICY_RULE_ID = "policy_rule_id"
@@ -618,7 +619,64 @@ def delete_webhook_subscription(subscription_id: str, tenant_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Webhook Deliveries
+# Webhook Delivery Log  (table: webhook_delivery_log)
+# Used by webhook_service and webhooks router for delivery tracking.
+# ---------------------------------------------------------------------------
+
+
+def get_webhook_delivery_log(
+    tenant_id: str,
+    *,
+    subscription_id: str | None = None,
+    event_type: str | None = None,
+    delivery_status: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    operation = "get_webhook_delivery_log"
+    if not tenant_id:
+        raise PersistenceError(operation, "tenant_id is required")
+    try:
+        client = get_supabase_service_client()
+        q = client.table(_T_WEBHOOK_DELIVERY_LOG).select("*").eq("tenant_id", tenant_id)
+        if subscription_id:
+            q = q.eq("subscription_id", subscription_id)
+        if event_type:
+            q = q.eq("event_type", event_type)
+        if delivery_status:
+            q = q.eq("status", delivery_status)
+        q = q.order("created_at", desc=True).range(offset, offset + limit - 1)
+        resp = q.execute()
+        data = resp.data
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            return [data]
+        return []
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+def get_webhook_delivery_record(delivery_id: str) -> dict[str, Any] | None:
+    operation = "get_webhook_delivery_record"
+    if not delivery_id:
+        raise PersistenceError(operation, "delivery_id is required")
+    try:
+        client = get_supabase_service_client()
+        resp = client.table(_T_WEBHOOK_DELIVERY_LOG).select("*").eq("id", delivery_id).maybe_single().execute()
+        data = resp.data
+        if isinstance(data, dict) and data:
+            return data
+        if isinstance(data, list):
+            return data[0] if data else None
+        return None
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+# ---------------------------------------------------------------------------
+# Webhook Deliveries  (table: webhook_deliveries)
+# Used for full delivery CRUD / upsert operations by webhook_service.
 # ---------------------------------------------------------------------------
 
 
@@ -648,56 +706,6 @@ def list_webhook_deliveries(
         if isinstance(data, dict):
             return [data]
         return []
-    except (SupabaseAPIError, SupabaseClientError) as exc:
-        raise _wrap(operation, exc) from exc
-
-
-def get_webhook_delivery_log(
-    tenant_id: str,
-    *,
-    subscription_id: str | None = None,
-    event_type: str | None = None,
-    delivery_status: str | None = None,
-    limit: int = 100,
-    offset: int = 0,
-) -> list[dict[str, Any]]:
-    operation = "get_webhook_delivery_log"
-    if not tenant_id:
-        raise PersistenceError(operation, "tenant_id is required")
-    try:
-        client = get_supabase_service_client()
-        q = client.table(_T_WEBHOOK_DELIVERIES).select("*").eq("tenant_id", tenant_id)
-        if subscription_id:
-            q = q.eq("subscription_id", subscription_id)
-        if event_type:
-            q = q.eq("event_type", event_type)
-        if delivery_status:
-            q = q.eq("status", delivery_status)
-        q = q.order("created_at", desc=True).range(offset, offset + limit - 1)
-        resp = q.execute()
-        data = resp.data
-        if isinstance(data, list):
-            return data
-        if isinstance(data, dict):
-            return [data]
-        return []
-    except (SupabaseAPIError, SupabaseClientError) as exc:
-        raise _wrap(operation, exc) from exc
-
-
-def get_webhook_delivery_record(delivery_id: str) -> dict[str, Any] | None:
-    operation = "get_webhook_delivery_record"
-    if not delivery_id:
-        raise PersistenceError(operation, "delivery_id is required")
-    try:
-        client = get_supabase_service_client()
-        resp = client.table(_T_WEBHOOK_DELIVERIES).select("*").eq("id", delivery_id).maybe_single().execute()
-        data = resp.data
-        if isinstance(data, dict) and data:
-            return data
-        if isinstance(data, list):
-            return data[0] if data else None
-        return None
     except (SupabaseAPIError, SupabaseClientError) as exc:
         raise _wrap(operation, exc) from exc
 
@@ -813,10 +821,11 @@ __all__ = [
     "get_webhook_subscription",
     "update_webhook_subscription",
     "delete_webhook_subscription",
-    # Webhook Deliveries
-    "list_webhook_deliveries",
+    # Webhook Delivery Log
     "get_webhook_delivery_log",
     "get_webhook_delivery_record",
+    # Webhook Deliveries
+    "list_webhook_deliveries",
     "list_retryable_webhook_deliveries",
     "get_webhook_delivery",
     "upsert_webhook_delivery",
