@@ -111,6 +111,23 @@ def _protected_dependencies() -> list[Any]:
     return [Depends(require_api_key)]
 
 
+def _agent_rate_limit_dep(agent_id_param: str = "agent_id") -> Any | None:
+    """Return a Depends-wrapped agent rate limit dependency, or None if unavailable."""
+    agent_rate_limit_dependency = _optional_attr("app.core.rate_limiter", "agent_rate_limit_dependency")
+    if not callable(agent_rate_limit_dependency):
+        return None
+    return Depends(agent_rate_limit_dependency(agent_id_param))
+
+
+def _agent_protected_dependencies(agent_id_param: str = "agent_id") -> list[Any]:
+    """Return auth + per-agent rate limit dependencies for agent-payload endpoints."""
+    deps = _protected_dependencies()
+    agent_rl = _agent_rate_limit_dep(agent_id_param)
+    if agent_rl is not None:
+        deps = deps + [agent_rl]
+    return deps
+
+
 def _public_router_configs() -> list[tuple[Any, dict[str, Any]]]:
     scan_router = _optional_router("app.api.scan")
     return [
@@ -128,6 +145,7 @@ def _public_router_configs() -> list[tuple[Any, dict[str, Any]]]:
 
 def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
     dependencies = _protected_dependencies()
+    agent_dependencies = _agent_protected_dependencies("agent_id")
     action_execute_router = _optional_router("app.api.action_execute")
     return [
         (_optional_router("app.api.requestcontext"), {"dependencies": dependencies}),
@@ -141,15 +159,15 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         ),
         (
             _optional_router("app.api.action_guard"),
-            {"prefix": "/guard", "dependencies": dependencies},
+            {"prefix": "/guard", "dependencies": agent_dependencies},
         ),
         (
             action_execute_router,
-            {"prefix": "/guard", "dependencies": dependencies},
+            {"prefix": "/guard", "dependencies": agent_dependencies},
         ),
         (
             action_execute_router,
-            {"prefix": "/execute", "dependencies": dependencies},
+            {"prefix": "/execute", "dependencies": agent_dependencies},
         ),
         (
             _optional_router("app.api.review_queue"),
@@ -161,7 +179,7 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         ),
         (
             _optional_router("app.api.behavioral_baseline"),
-            {"prefix": "/guard", "dependencies": dependencies},
+            {"prefix": "/guard", "dependencies": agent_dependencies},
         ),
         (
             _optional_router("app.api.policy"),
@@ -394,6 +412,54 @@ async def _initialize_scanner_rule_index() -> None:
         _log.error("main.lifespan: scanner RULE_INDEX hydration failed: %s", exc)
 
 
+def _initialize_pattern_registry() -> None:
+    """Call pattern_registry.load() at startup so DB patterns are available before the first request."""
+    load = _optional_attr("app.core.pattern_registry", "load")
+    if not callable(load):
+        _log.debug("main.lifespan: pattern_registry.load not available, skipping")
+        return
+    try:
+        load(force=True)
+        _log.info("main.lifespan: pattern_registry loaded from db")
+    except Exception as exc:  # noqa: BLE001
+        _log.error("main.lifespan: pattern_registry.load failed: %s", exc)
+
+
+def _shutdown_pattern_registry() -> None:
+    """Invalidate pattern_registry cache on shutdown to prevent stale state across restarts."""
+    invalidate = _optional_attr("app.core.pattern_registry", "invalidate")
+    if callable(invalidate):
+        try:
+            invalidate()
+            _log.info("main.lifespan: pattern_registry cache invalidated on shutdown")
+        except Exception as exc:  # noqa: BLE001
+            _log.error("main.lifespan: pattern_registry.invalidate failed: %s", exc)
+
+
+def _shutdown_trust_engine_cache() -> None:
+    """Clear trust_engine in-process profile cache on shutdown to prevent stale state."""
+    invalidate_all_cache = _optional_attr("app.core.trust_engine", "invalidate_all_cache")
+    if callable(invalidate_all_cache):
+        try:
+            invalidate_all_cache()
+            _log.info("main.lifespan: trust_engine cache invalidated on shutdown")
+        except Exception as exc:  # noqa: BLE001
+            _log.error("main.lifespan: trust_engine.invalidate_all_cache failed: %s", exc)
+    else:
+        # Fallback: directly clear the module-level cache dict under its lock.
+        try:
+            trust_engine_mod = _optional_module("app.core.trust_engine")
+            if trust_engine_mod is not None:
+                cache: dict | None = getattr(trust_engine_mod, "_profile_cache", None)
+                lock = getattr(trust_engine_mod, "_lock", None)
+                if isinstance(cache, dict) and lock is not None:
+                    with lock:
+                        cache.clear()
+                    _log.info("main.lifespan: trust_engine._profile_cache cleared on shutdown")
+        except Exception as exc:  # noqa: BLE001
+            _log.error("main.lifespan: trust_engine cache clear failed: %s", exc)
+
+
 def _initialize_notification_engine() -> None:
     get_notification_engine = _optional_attr(
         "app.services.notification_engine",
@@ -474,6 +540,7 @@ async def lifespan(app: FastAPI):
     _initialize_scan_history_repository()
     await _initialize_policy_rules()
     await _initialize_scanner_rule_index()
+    _initialize_pattern_registry()
     _initialize_notification_engine()
 
     if callable(initialize_secure_runtime_pipeline):
@@ -511,6 +578,8 @@ async def lifespan(app: FastAPI):
         except Exception as exc:  # noqa: BLE001
             _log.error("main.lifespan: pipeline close failed: %s", exc)
         finally:
+            _shutdown_trust_engine_cache()
+            _shutdown_pattern_registry()
             app.state.action_execute_pipeline = None
             if callable(reset_action_execute_pipeline):
                 reset_action_execute_pipeline()
@@ -532,9 +601,6 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Store settings on app.state so _get_settings(request) always returns
-    # the instance that was active when the app was constructed — this is the
-    # correct settings object for the current process/test environment.
     app.state.settings = settings
 
     _install_openapi_factory(app)
