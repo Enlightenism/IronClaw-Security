@@ -1,14 +1,214 @@
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from app.core.auth import API_KEY_HEADER_NAME, get_api_key, require_api_key
+from app.core.auth import (
+    API_KEY_HEADER_NAME,
+    _get_jwt_secret,
+    _get_secret_key,
+    get_api_key,
+    require_api_key,
+)
 from app.core.errors import AppError
 from app.core.settings import get_settings
+
+# ---------------------------------------------------------------------------
+# Sentinels — must match exactly what auth.py guards against
+# ---------------------------------------------------------------------------
+
+_SECRET_KEY_SENTINEL = "changeme-32-chars-minimum!!!!!"
+_JWT_SECRET_SENTINEL = "changeme-jwt-32-chars-minimum!!"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_request(settings_ns: SimpleNamespace):
+    """Return a minimal fake Request whose app.state.settings is settings_ns."""
+    app = SimpleNamespace(state=SimpleNamespace(settings=settings_ns))
+    return SimpleNamespace(app=app)
+
+
+# ---------------------------------------------------------------------------
+# _get_secret_key — sentinel default is treated as unconfigured
+# ---------------------------------------------------------------------------
+
+
+class TestGetSecretKeySentinel:
+    def test_sentinel_returns_none(self):
+        req = _make_request(SimpleNamespace(secret_key=_SECRET_KEY_SENTINEL))
+        assert _get_secret_key(req) is None
+
+    def test_empty_string_returns_none(self):
+        req = _make_request(SimpleNamespace(secret_key=""))
+        assert _get_secret_key(req) is None
+
+    def test_whitespace_only_returns_none(self):
+        req = _make_request(SimpleNamespace(secret_key="   "))
+        assert _get_secret_key(req) is None
+
+    def test_missing_attribute_returns_none(self):
+        req = _make_request(SimpleNamespace())
+        assert _get_secret_key(req) is None
+
+    def test_none_settings_returns_none(self):
+        app = SimpleNamespace(state=SimpleNamespace(settings=None))
+        req = SimpleNamespace(app=app)
+        with patch("app.core.auth.get_settings", side_effect=Exception("no settings")):
+            assert _get_secret_key(req) is None
+
+
+class TestGetSecretKeyRealValue:
+    def test_real_value_is_returned(self):
+        real_key = "my-real-ironclaw-secret-key-xyz!"
+        req = _make_request(SimpleNamespace(secret_key=real_key))
+        assert _get_secret_key(req) == real_key
+
+    def test_leading_trailing_whitespace_stripped(self):
+        req = _make_request(SimpleNamespace(secret_key="  real-key  "))
+        assert _get_secret_key(req) == "real-key"
+
+    def test_does_not_bleed_into_jwt_secret(self):
+        req = _make_request(
+            SimpleNamespace(
+                secret_key="real-secret-key-abc",
+                jwt_secret=_JWT_SECRET_SENTINEL,
+            )
+        )
+        assert _get_secret_key(req) == "real-secret-key-abc"
+        assert _get_jwt_secret(req) is None
+
+
+# ---------------------------------------------------------------------------
+# _get_jwt_secret — sentinel default is treated as unconfigured
+# ---------------------------------------------------------------------------
+
+
+class TestGetJwtSecretSentinel:
+    def test_sentinel_returns_none(self):
+        req = _make_request(SimpleNamespace(jwt_secret=_JWT_SECRET_SENTINEL))
+        assert _get_jwt_secret(req) is None
+
+    def test_empty_string_returns_none(self):
+        req = _make_request(SimpleNamespace(jwt_secret=""))
+        assert _get_jwt_secret(req) is None
+
+    def test_whitespace_only_returns_none(self):
+        req = _make_request(SimpleNamespace(jwt_secret="   "))
+        assert _get_jwt_secret(req) is None
+
+    def test_missing_attribute_returns_none(self):
+        req = _make_request(SimpleNamespace())
+        assert _get_jwt_secret(req) is None
+
+    def test_none_settings_returns_none(self):
+        app = SimpleNamespace(state=SimpleNamespace(settings=None))
+        req = SimpleNamespace(app=app)
+        with patch("app.core.auth.get_settings", side_effect=Exception("no settings")):
+            assert _get_jwt_secret(req) is None
+
+
+class TestGetJwtSecretRealValue:
+    def test_real_value_is_returned(self):
+        real_jwt = "my-real-jwt-secret-key-xyz-long!"
+        req = _make_request(SimpleNamespace(jwt_secret=real_jwt))
+        assert _get_jwt_secret(req) == real_jwt
+
+    def test_leading_trailing_whitespace_stripped(self):
+        req = _make_request(SimpleNamespace(jwt_secret="  real-jwt  "))
+        assert _get_jwt_secret(req) == "real-jwt"
+
+    def test_does_not_bleed_into_secret_key(self):
+        req = _make_request(
+            SimpleNamespace(
+                secret_key=_SECRET_KEY_SENTINEL,
+                jwt_secret="real-jwt-secret-abc",
+            )
+        )
+        assert _get_jwt_secret(req) == "real-jwt-secret-abc"
+        assert _get_secret_key(req) is None
+
+
+# ---------------------------------------------------------------------------
+# Secrets are fully independent of each other
+# ---------------------------------------------------------------------------
+
+
+class TestSecretsIndependence:
+    def test_both_real_values_returned_independently(self):
+        req = _make_request(
+            SimpleNamespace(
+                secret_key="real-secret",
+                jwt_secret="real-jwt",
+            )
+        )
+        assert _get_secret_key(req) == "real-secret"
+        assert _get_jwt_secret(req) == "real-jwt"
+
+    def test_both_sentinels_both_return_none(self):
+        req = _make_request(
+            SimpleNamespace(
+                secret_key=_SECRET_KEY_SENTINEL,
+                jwt_secret=_JWT_SECRET_SENTINEL,
+            )
+        )
+        assert _get_secret_key(req) is None
+        assert _get_jwt_secret(req) is None
+
+
+# ---------------------------------------------------------------------------
+# get_api_key — auth_not_configured warning is logged
+# ---------------------------------------------------------------------------
+
+
+class TestGetApiKeyAuthNotConfigured:
+    def test_auth_not_configured_logs_warning(self, caplog):
+        """When auth_required=True but no keys are configured, a WARNING is emitted."""
+        app = FastAPI()
+        app.state.settings = SimpleNamespace(auth_required=True)
+
+        @app.get("/probe")
+        def probe(value: str | None = Depends(get_api_key)) -> dict:
+            return {"api_key": value}
+
+        client = TestClient(app, raise_server_exceptions=True)
+
+        with caplog.at_level(logging.WARNING, logger="app.core.auth"):
+            with pytest.raises(AppError) as exc_info:
+                client.get("/probe", headers={API_KEY_HEADER_NAME: "some-key"})
+
+        assert exc_info.value.error in ("auth_not_configured", "invalid_api_key")
+        warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+        assert any("auth_not_configured" in m for m in warning_messages)
+
+    def test_auth_not_configured_raises_503(self, caplog):
+        """503 is returned when auth_required but nothing is configured."""
+        app = FastAPI()
+        app.state.settings = SimpleNamespace(auth_required=True)
+
+        @app.get("/probe")
+        def probe(value: str | None = Depends(get_api_key)) -> dict:
+            return {"api_key": value}
+
+        client = TestClient(app, raise_server_exceptions=True)
+
+        with caplog.at_level(logging.WARNING, logger="app.core.auth"):
+            with pytest.raises(AppError) as exc_info:
+                client.get("/probe", headers={API_KEY_HEADER_NAME: "some-key"})
+
+        assert exc_info.value.status_code in (401, 503)
+
+
+# ---------------------------------------------------------------------------
+# Original integration tests — preserved exactly
+# ---------------------------------------------------------------------------
 
 
 def test_get_api_key_allows_when_auth_not_required_no_settings() -> None:

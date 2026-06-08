@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import hmac
+import logging
 from typing import Any
 
 from fastapi import Depends, Request, status
@@ -16,10 +17,11 @@ from app.core.apikeys import (
 from app.core.errors import AppError
 from app.core.settings import get_settings
 
+_logger = logging.getLogger(__name__)
+
 API_KEY_HEADER_NAME = "X-API-Key"
 SESSION_ID_HEADER_NAME = "X-Session-Id"
 ORG_ID_HEADER_NAME = "X-Org-Id"
-
 
 api_key_header = APIKeyHeader(name=API_KEY_HEADER_NAME, auto_error=False)
 session_id_header = APIKeyHeader(name=SESSION_ID_HEADER_NAME, auto_error=False)
@@ -63,6 +65,8 @@ def _extract_configured_api_key(request: Request) -> str | None:
     if settings is None:
         return None
 
+    # Priority order matches settings.py field precedence.
+    # All api_key fields are now `str` with default="" — never str | None.
     for attr_name in (
         "internal_platform_api_key",
         "platform_api_key",
@@ -77,6 +81,31 @@ def _extract_configured_api_key(request: Request) -> str | None:
     return _clean_optional_string(
         getattr(settings, "effective_platform_api_key", None),
     )
+
+
+def _get_secret_key(request: Request) -> str | None:
+    """Return settings.secret_key (alias IRONCLAW_SECRET_KEY) if non-empty."""
+    settings = _get_settings(request)
+    if settings is None:
+        return None
+    # settings.secret_key is str with default "changeme-32-chars-minimum!!!!!"
+    # Treat the shipped default as unconfigured so callers don't accidentally
+    # accept the sentinel value as a real secret.
+    value = _clean_optional_string(getattr(settings, "secret_key", None))
+    if value and value != "changeme-32-chars-minimum!!!!!":
+        return value
+    return None
+
+
+def _get_jwt_secret(request: Request) -> str | None:
+    """Return settings.jwt_secret (alias JWT_SECRET) if non-empty."""
+    settings = _get_settings(request)
+    if settings is None:
+        return None
+    value = _clean_optional_string(getattr(settings, "jwt_secret", None))
+    if value and value != "changeme-jwt-32-chars-minimum!!":
+        return value
+    return None
 
 
 def _touch_record_if_possible(record: APIKeyRecord) -> APIKeyRecord:
@@ -280,7 +309,6 @@ def get_api_key(
     normalized_api_key = _clean_optional_string(provided_api_key)
     auth_required = _is_auth_required(request)
 
-    # No key provided
     if normalized_api_key is None:
         if auth_required:
             raise AppError(
@@ -291,24 +319,22 @@ def get_api_key(
             )
         return None
 
-    # Key provided — check configured key
     configured_api_key = _extract_configured_api_key(request)
 
     if _constant_time_match(configured_api_key, normalized_api_key):
         return normalized_api_key
 
-    # Check registry
     registry_record = _resolve_registry_api_key(normalized_api_key)
     if registry_record is not None:
         return normalized_api_key
 
-    # Key provided but matched nothing
     if not auth_required:
-        # Auth is optional — pass the key through as-is
         return normalized_api_key
 
-    # Auth required and no keys configured anywhere → service misconfiguration
     if configured_api_key is None and not _has_registry_keys():
+        _logger.warning(
+            "auth_not_configured: auth_required=True but no API keys are configured",
+        )
         raise AppError(
             error="auth_not_configured",
             message="Authentication is required but no API keys are configured",
