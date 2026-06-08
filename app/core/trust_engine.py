@@ -9,7 +9,17 @@ from typing import Any, Literal
 import uuid
 
 from app.core.logging import get_logger
-from app.core.supabase_persistence import _T_AGENT_TRUST_PROFILES, _T_TRUST_EVENTS
+from app.core.supabase_persistence import (
+    PersistenceError,
+    get_agent_trust_profile,
+    upsert_agent_trust_profile,
+)
+from app.core.supabase_persistence import (
+    insert_trust_event as _persistence_insert_trust_event,
+)
+from app.core.supabase_persistence import (
+    list_trust_events as _persistence_list_trust_events,
+)
 
 _logger: logging.Logger = get_logger("ironclaw.trust_engine")
 
@@ -143,35 +153,19 @@ def _clamp(value: float) -> float:
     return max(_SCORE_FLOOR, min(_SCORE_CEILING, value))
 
 
-def _get_client():
-    from app.core.supabase import get_supabase_service_client  # noqa: PLC0415
-
-    return get_supabase_service_client()
-
-
-def _supabase_errors():
-    from app.supabaseclient import SupabaseAPIError, SupabaseClientError  # noqa: PLC0415
-
-    return SupabaseAPIError, SupabaseClientError
-
-
 # ---------------------------------------------------------------------------
-# DB read — agent_trust_profiles
+# DB read — agent_trust_profiles (via canonical persistence)
 # ---------------------------------------------------------------------------
 
 
 def _fetch_profile_from_db(agent_id: str) -> dict[str, Any] | None:
     try:
-        client = _get_client()
-        resp = client.table(_T_AGENT_TRUST_PROFILES).select("*").eq("agent_id", agent_id).maybe_single().execute()
-        data = resp.data
-        if isinstance(data, dict) and data:
-            return data
-        if isinstance(data, list):
-            return data[0] if data else None
+        return get_agent_trust_profile(agent_id)
+    except PersistenceError as exc:
+        _logger.error("trust_engine: failed to fetch profile for agent %r: %s", agent_id, exc)
         return None
     except Exception as exc:  # noqa: BLE001
-        _logger.error("trust_engine: failed to fetch profile for agent %r: %s", agent_id, exc)
+        _logger.error("trust_engine: unexpected error fetching profile for agent %r: %s", agent_id, exc)
         return None
 
 
@@ -207,7 +201,7 @@ def _default_profile(agent_id: str) -> TrustProfile:
 
 
 # ---------------------------------------------------------------------------
-# DB write — agent_trust_profiles
+# DB write — agent_trust_profiles (via canonical persistence)
 # ---------------------------------------------------------------------------
 
 
@@ -224,15 +218,17 @@ def _upsert_profile_to_db(profile: TrustProfile) -> None:
         "metadata": profile.metadata,
     }
     try:
-        client = _get_client()
-        client.table(_T_AGENT_TRUST_PROFILES).upsert(record, on_conflict="agent_id", returning="minimal").execute()
-    except Exception as exc:  # noqa: BLE001
+        upsert_agent_trust_profile(record)
+    except PersistenceError as exc:
         _logger.error("trust_engine: failed to upsert profile for agent %r: %s", profile.agent_id, exc)
+        raise
+    except Exception as exc:  # noqa: BLE001
+        _logger.error("trust_engine: unexpected error upserting profile for agent %r: %s", profile.agent_id, exc)
         raise
 
 
 # ---------------------------------------------------------------------------
-# DB write — trust_events
+# DB write — trust_events (via canonical persistence)
 # ---------------------------------------------------------------------------
 
 
@@ -248,10 +244,11 @@ def _insert_trust_event_to_db(event: TrustEvent) -> None:
         "recorded_at": event.recorded_at,
     }
     try:
-        client = _get_client()
-        client.table(_T_TRUST_EVENTS).insert(record, returning="minimal").execute()
-    except Exception as exc:  # noqa: BLE001
+        _persistence_insert_trust_event(record)
+    except PersistenceError as exc:
         _logger.error("trust_engine: failed to insert trust_event for agent %r: %s", event.agent_id, exc)
+    except Exception as exc:  # noqa: BLE001
+        _logger.error("trust_engine: unexpected error inserting trust_event for agent %r: %s", event.agent_id, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +298,7 @@ def get_trust(agent_id: str) -> TrustProfile:
 
     Resolution order:
       1. In-process TTL cache.
-      2. Supabase agent_trust_profiles table.
+      2. Supabase agent_trust_profiles table (via canonical persistence).
       3. Default profile (trust_score=0.75) — never fails.
 
     This function is safe to call from policy_engine.evaluate() on every
@@ -340,8 +337,8 @@ def record_event(
       1. Load the current TrustProfile (cache → DB → default).
       2. Compute the new trust_score via _apply_decay.
       3. Evaluate suspension criteria.
-      4. Upsert the updated profile to Supabase.
-      5. Insert a trust_events row.
+      4. Upsert the updated profile to Supabase (via canonical persistence).
+      5. Insert a trust_events row (via canonical persistence).
       6. Invalidate the cache for this agent.
       7. Return a TrustEvent with before/after scores and delta.
 
@@ -543,19 +540,15 @@ def list_trust_events(
 ) -> list[dict[str, Any]]:
     """Return trust_events rows for agent_id ordered by recorded_at desc.
 
-    Read-only. Does not mutate cache or profile state.
+    Read-only. Delegates to canonical persistence. Does not mutate cache or profile state.
     """
     try:
-        client = _get_client()
-        resp = client.table(_T_TRUST_EVENTS).select("*").eq("agent_id", agent_id).order("recorded_at", desc=True).range(offset, offset + limit - 1).execute()
-        data = resp.data
-        if isinstance(data, list):
-            return data
-        if isinstance(data, dict):
-            return [data]
+        return _persistence_list_trust_events(agent_id, limit=limit, offset=offset)
+    except PersistenceError as exc:
+        _logger.error("trust_engine: failed to list trust_events for agent %r: %s", agent_id, exc)
         return []
     except Exception as exc:  # noqa: BLE001
-        _logger.error("trust_engine: failed to list trust_events for agent %r: %s", agent_id, exc)
+        _logger.error("trust_engine: unexpected error listing trust_events for agent %r: %s", agent_id, exc)
         return []
 
 
