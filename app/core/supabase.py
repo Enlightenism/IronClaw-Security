@@ -27,21 +27,26 @@ __all__ = [
     "SupabaseAPIError",
     "get_supabase_client",
     "get_supabase_service_client",
+    "is_supabase_configured",
     "create_supabase_client",
     "get_supabase_config",
 ]
 
 
 def _clean_env(value: str | None) -> str | None:
-    """Strip whitespace and surrounding quotes from an env string.
-
-    Returns None if the cleaned value is empty so callers can use a
-    simple truthiness check without worrying about blank-string env vars.
-    """
     if value is None:
         return None
     cleaned = value.strip().strip('"').strip("'")
     return cleaned or None
+
+
+def is_supabase_configured() -> bool:
+    """Return True if both SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are present."""
+    settings = get_settings()
+    raw_url: str | None = settings.supabase_url or os.getenv("IRONCLAW_SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL") or None
+    url = _clean_env(raw_url)
+    key = _clean_env(os.getenv("SUPABASE_SERVICE_ROLE_KEY"))
+    return bool(url and key and url.startswith(("http://", "https://")))
 
 
 def get_supabase_service_client(
@@ -67,14 +72,9 @@ def get_supabase_service_client(
     """
     settings = get_settings()
 
-    # Prefer settings-resolved value; fall back to raw env for edge cases.
     raw_url: str | None = settings.supabase_url or os.getenv("IRONCLAW_SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL") or None
     url = _clean_env(raw_url)
 
-    # Service-role key is not surfaced through Settings (intentional —
-    # Settings.supabase_service_role_key exists but may be empty in
-    # environments that inject it only at runtime). Always read from env
-    # so the key is never accidentally logged via Settings.__repr__.
     raw_key: str | None = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
     key = _clean_env(raw_key)
 

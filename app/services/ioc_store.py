@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from app.core.supabase import get_supabase_service_client
 from app.schemas.threat_detection import (
     IOCTypeEnum,
     ThreatFeedSourceEnum,
@@ -10,7 +11,6 @@ from app.schemas.threat_detection import (
 )
 
 logger = logging.getLogger(__name__)
-
 
 from app.services.threat_feed_ingestion import (  # noqa: E402
     FeedIngestResult,
@@ -24,41 +24,12 @@ from app.services.threat_feed_ingestion import (  # noqa: E402
 _MAX_BULK_UPSERT_BATCH = 500
 _TTL_PRUNE_BATCH = 1000
 
-
 _TABLE_IOCS = "ioc_records"
 _TABLE_INGEST_LOG = "feed_ingest_log"
 
 
 def _get_client():
-    try:
-        from app.clients.supabase import get_supabase_client
-
-        return get_supabase_client()
-    except ImportError:
-        pass
-    try:
-        from app.core.supabase import get_supabase_client
-
-        return get_supabase_client()
-    except ImportError:
-        pass
-    raise RuntimeError("ioc_store: cannot resolve Supabase client — " "expected get_supabase_client() at app.clients.supabase or app.core.supabase")
-
-
-def _is_supabase_configured() -> bool:
-    try:
-        from app.clients.supabase import is_supabase_configured
-
-        return is_supabase_configured()
-    except ImportError:
-        pass
-    try:
-        from app.core.supabase import is_supabase_configured
-
-        return is_supabase_configured()
-    except ImportError:
-        pass
-    return False
+    return get_supabase_service_client()
 
 
 def _record_to_row(record: IOCRecord) -> dict[str, Any]:
@@ -733,5 +704,6 @@ CREATE INDEX IF NOT EXISTS idx_feed_ingest_log_org_id     ON feed_ingest_log (or
 __all__ = [
     "IOC_STORE_MIGRATION_SQL",
     "IOCStore",
+    "_get_client",
     "get_ioc_store",
 ]

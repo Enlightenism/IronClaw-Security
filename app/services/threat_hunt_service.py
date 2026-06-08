@@ -6,6 +6,7 @@ import time
 from typing import Any
 import uuid
 
+from app.core.supabase import get_supabase_service_client
 from app.schemas.threat_detection import (
     DetectionVerdict,
     HuntMatch,
@@ -17,7 +18,6 @@ from app.schemas.threat_detection import (
 
 logger = logging.getLogger(__name__)
 
-
 _TABLE_DETECTIONS = "threat_detections"
 
 
@@ -25,20 +25,8 @@ def _utcnow_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _get_supabase_client():
-    try:
-        from app.clients.supabase import get_supabase_client
-
-        return get_supabase_client()
-    except ImportError:
-        pass
-    try:
-        from app.core.supabase import get_supabase_client
-
-        return get_supabase_client()
-    except ImportError:
-        pass
-    return None
+def _get_supabase_client() -> Any:
+    return get_supabase_service_client()
 
 
 class ThreatHuntService:
@@ -58,9 +46,31 @@ class ThreatHuntService:
         t0 = time.monotonic()
         errors: list[str] = []
 
-        client = _get_supabase_client()
+        try:
+            client = _get_supabase_client()
+        except Exception as exc:
+            logger.warning(
+                "threat_hunt_service.run_hunt: supabase client unavailable hunt_id=%s: %s",
+                hunt_id,
+                exc,
+            )
+            return HuntResult(
+                hunt_id=hunt_id,
+                org_id=effective_org_id,
+                status=HuntStatusEnum.FAILED,
+                total_matches=0,
+                matches=[],
+                query_summary=self._build_query_summary(query),
+                executed_at=started_at,
+                duration_ms=0,
+                errors=["Supabase client unavailable."],
+            )
+
         if client is None:
-            logger.warning("threat_hunt_service.run_hunt: supabase client unavailable hunt_id=%s", hunt_id)
+            logger.warning(
+                "threat_hunt_service.run_hunt: supabase client unavailable hunt_id=%s",
+                hunt_id,
+            )
             return HuntResult(
                 hunt_id=hunt_id,
                 org_id=effective_org_id,
@@ -248,8 +258,6 @@ def get_hunt_service() -> ThreatHuntService:
     return _hunt_service_instance
 
 
-# Alias for callers that import by the full name
 get_threat_hunt_service = get_hunt_service
 
-
-__all__ = ["ThreatHuntService", "get_hunt_service", "get_threat_hunt_service"]
+__all__ = ["ThreatHuntService", "get_hunt_service", "get_threat_hunt_service", "_get_supabase_client"]
