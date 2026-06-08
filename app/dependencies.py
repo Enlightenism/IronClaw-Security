@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.clients.release_policy_client import ReleasePolicyClient
+from app.persistencebootstrap import StoreType, get_persistence_store
 from app.providers.service_registry import ServiceRegistry, build_service_registry
 
 # Module-level singleton registry used across the app.
@@ -31,6 +32,15 @@ def get_release_policy_client() -> ReleasePolicyClient:
 def get_auth_service():
     """Return the shared auth service from the canonical service registry."""
     return get_service_registry().get_auth_service()
+
+
+def get_store() -> StoreType:
+    """FastAPI-injectable persistence store accessor.
+
+    Routes and background tasks should declare this as a Depends()
+    parameter rather than calling get_persistence_store() directly.
+    """
+    return get_persistence_store()
 
 
 def _reset_dependencies_for_tests() -> None:
