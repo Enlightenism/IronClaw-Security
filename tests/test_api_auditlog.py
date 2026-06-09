@@ -16,15 +16,14 @@ os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
 os.environ["SUPABASE_KEY"] = ""
 os.environ["SUPABASE_ANON_KEY"] = ""
 
-from app.core.auth import AuthContext, require_auth_context
 from app.core.settings import get_settings
 from app.main import app
 from app.services.audit_log_service import reset_audit_log
 
 _VALID_KEY = os.environ["IRONCLAW_API_KEY"]
-_BAD_KEY = "ic-bad-key-000"
 
-# Actual route that exists in app/api/audit.py (prefix=/audit, route=/event)
+# Route declared in app/api/audit.py: prefix="/audit", route="/event"
+# Mounted in main.py via _protected_router_configs with prefix="/api"
 _AUDIT_EVENT_ROUTE = "/api/audit/event"
 
 _VALID_PAYLOAD = {
@@ -35,23 +34,6 @@ _VALID_PAYLOAD = {
     "clientid": "test-client-001",
     "sessionid": "test-session-001",
 }
-
-_TEST_AUTH_CONTEXT = AuthContext(
-    api_key=_VALID_KEY,
-    principal_type="api_key",
-    principal_id="test-principal",
-    session_id=None,
-    org_id="test-org",
-    permissions=(),
-    roles=(),
-    authenticated=True,
-    auth_source="test",
-    auth_method="api_key",
-)
-
-
-def _override_require_auth_context() -> AuthContext:
-    return _TEST_AUTH_CONTEXT
 
 
 def _auth(key: str = _VALID_KEY) -> dict[str, str]:
@@ -76,13 +58,6 @@ def _reset_state() -> Iterator[None]:
     reset_audit_log()
     yield
     reset_audit_log()
-
-
-@pytest.fixture(autouse=True)
-def override_auth() -> Iterator[None]:
-    app.dependency_overrides[require_auth_context] = _override_require_auth_context
-    yield
-    app.dependency_overrides.pop(require_auth_context, None)
 
 
 @pytest.fixture()

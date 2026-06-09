@@ -4,10 +4,11 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.api.actiondecision import decideaction
+from app.core.auth import require_auth_context
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
@@ -169,7 +170,10 @@ def createauditevent(
     response_model=AuditResponse,
     summary="Create an audit event from the secured action decision path.",
 )
-def auditevent(payload: AuditRequest) -> AuditResponse:
+def auditevent(
+    payload: AuditRequest,
+    _auth: dict = Depends(require_auth_context),
+) -> AuditResponse:
     result = createauditevent(
         actiontype=payload.actiontype,
         target=payload.target,
