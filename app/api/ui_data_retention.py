@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-# Route ownership for GET /ui/data-retention lives exclusively in
-# app/api/uidataretention.py. This module is retained as a stub so
-# main.py can import it without error. It registers no routes.
-from fastapi import APIRouter
+# This module is the canonical mount point used by main.py.
+# The route implementation lives in app.api.uidataretention.
+# Re-export its router so main.py picks up GET /ui/data-retention.
+from app.api.uidataretention import router as router  # noqa: PLC0414
 
-router = APIRouter(
-    prefix="/ui",
-    tags=["ui-data-retention"],
-)
+__all__ = ["router"]

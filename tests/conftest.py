@@ -12,6 +12,7 @@ os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
 os.environ["SUPABASE_KEY"] = ""
 os.environ["SUPABASE_ANON_KEY"] = ""
 
+
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
@@ -29,10 +30,12 @@ from ironclaw_sdk.models import ScanResponse as SDKScanResponse
 
 
 @pytest.fixture(scope="function", autouse=True)
-def _refresh_app_settings() -> None:
+def _refresh_app_settings() -> Generator[None, None, None]:
     get_settings.cache_clear()
     settings = get_settings()
     _app.state.settings = settings
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture(scope="function", autouse=True)
@@ -51,14 +54,14 @@ def reset_audit_state() -> Generator[None, None, None]:
 
 
 @pytest.fixture(scope="function")
-def test_client() -> Generator[TestClient, None, None]:
+def test_client(_refresh_app_settings: None) -> Generator[TestClient, None, None]:
     with TestClient(_app, raise_server_exceptions=True) as client:
         client.headers.update({"X-API-Key": os.environ["IRONCLAW_API_KEY"]})
         yield client
 
 
 @pytest.fixture(scope="function")
-def sdk_client() -> Generator[IronclawClient, None, None]:
+def sdk_client(_refresh_app_settings: None) -> Generator[IronclawClient, None, None]:
     tc = TestClient(_app, raise_server_exceptions=False)
     client = IronclawClient(
         api_key=os.environ["IRONCLAW_API_KEY"],
