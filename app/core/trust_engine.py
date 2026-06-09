@@ -565,6 +565,18 @@ def invalidate_cache(agent_id: str | None = None) -> None:
             _evict_cached(agent_id.strip())
 
 
+def invalidate_all_cache() -> None:
+    """Clear the entire in-process trust profile cache under lock.
+
+    Named entry point for lifespan shutdown. Preferred over direct access to
+    _profile_cache. Called by main.lifespan._shutdown_trust_engine_cache on
+    application shutdown to prevent stale trust state across restarts.
+    """
+    with _lock:
+        _profile_cache.clear()
+    _logger.debug("trust_engine: full profile cache invalidated")
+
+
 def trust_stats() -> dict[str, Any]:
     """Return a snapshot of trust engine cache state for health/diagnostic use."""
     with _lock:
@@ -596,5 +608,6 @@ __all__ = [
     "reset_trust",
     "list_trust_events",
     "invalidate_cache",
+    "invalidate_all_cache",
     "trust_stats",
 ]
