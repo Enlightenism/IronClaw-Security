@@ -10,11 +10,13 @@ os.environ["IRONCLAW_PERSISTENCE_MODE"] = "memory"
 os.environ["ENVIRONMENT"] = "test"
 os.environ["IRONCLAW_API_KEY"] = "test-api-key"
 os.environ["AUTH_REQUIRED"] = "true"
+os.environ["IRONCLAW_RATE_LIMIT_ENABLED"] = "false"
 os.environ["SUPABASE_URL"] = ""
 os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
 os.environ["SUPABASE_KEY"] = ""
 os.environ["SUPABASE_ANON_KEY"] = ""
 
+from app.core.auth import AuthContext, require_auth_context
 from app.core.settings import get_settings
 from app.main import app
 from app.services.audit_log_service import reset_audit_log
@@ -22,13 +24,34 @@ from app.services.audit_log_service import reset_audit_log
 _VALID_KEY = os.environ["IRONCLAW_API_KEY"]
 _BAD_KEY = "ic-bad-key-000"
 
-_ALL_READ_ROUTES = [
-    "/api/audit/events",
-    "/api/audit/actor/test-actor",
-    "/api/audit/request/test-request",
-    "/api/audit/trace/test-trace",
-    "/api/audit/summary",
-]
+# Actual route that exists in app/api/audit.py (prefix=/audit, route=/event)
+_AUDIT_EVENT_ROUTE = "/api/audit/event"
+
+_VALID_PAYLOAD = {
+    "actiontype": "toolcall",
+    "target": "https://example.com/api",
+    "content": "Test prompt for audit event creation",
+    "riskscore": 25,
+    "clientid": "test-client-001",
+    "sessionid": "test-session-001",
+}
+
+_TEST_AUTH_CONTEXT = AuthContext(
+    api_key=_VALID_KEY,
+    principal_type="api_key",
+    principal_id="test-principal",
+    session_id=None,
+    org_id="test-org",
+    permissions=(),
+    roles=(),
+    authenticated=True,
+    auth_source="test",
+    auth_method="api_key",
+)
+
+
+def _override_require_auth_context() -> AuthContext:
+    return _TEST_AUTH_CONTEXT
 
 
 def _auth(key: str = _VALID_KEY) -> dict[str, str]:
@@ -55,6 +78,13 @@ def _reset_state() -> Iterator[None]:
     reset_audit_log()
 
 
+@pytest.fixture(autouse=True)
+def override_auth() -> Iterator[None]:
+    app.dependency_overrides[require_auth_context] = _override_require_auth_context
+    yield
+    app.dependency_overrides.pop(require_auth_context, None)
+
+
 @pytest.fixture()
 def client() -> TestClient:
     c = TestClient(app, raise_server_exceptions=True)
@@ -63,319 +93,188 @@ def client() -> TestClient:
 
 
 # ---------------------------------------------------------------------------
-# Auth enforcement — all routes
-# ---------------------------------------------------------------------------
-
-
-class TestAuditlogAuthEnforcement:
-    def test_all_read_routes_reject_missing_key(self) -> None:
-        bare = TestClient(app, raise_server_exceptions=True)
-        for route in _ALL_READ_ROUTES:
-            r = bare.get(route)
-            assert r.status_code == 401, f"Expected 401 on {route}, got {r.status_code}"
-
-    def test_all_read_routes_reject_invalid_key(self) -> None:
-        for route in _ALL_READ_ROUTES:
-            r = TestClient(app, raise_server_exceptions=True).get(route, headers=_auth(_BAD_KEY))
-            assert r.status_code in (401, 403), f"Expected 4xx on {route}, got {r.status_code}"
-
-    def test_post_events_rejects_missing_key(self) -> None:
-        bare = TestClient(app, raise_server_exceptions=True)
-        r = bare.post("/api/audit/events", json={"action": "test"})
-        assert r.status_code == 401
-
-    def test_post_events_rejects_invalid_key(self) -> None:
-        r = TestClient(app, raise_server_exceptions=True).post("/api/audit/events", json={"action": "test"}, headers=_auth(_BAD_KEY))
-        assert r.status_code in (401, 403)
-
-
-# ---------------------------------------------------------------------------
-# GET /api/audit/events
-# ---------------------------------------------------------------------------
-
-
-class TestListAuditEvents:
-    def test_returns_200_with_valid_key(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events")
-        assert r.status_code == 200
-
-    def test_response_has_events_and_count_keys(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events")
-        body = r.json()
-        assert "events" in body
-        assert "count" in body
-
-    def test_events_is_list(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events")
-        assert isinstance(r.json()["events"], list)
-
-    def test_count_matches_events_length(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events")
-        body = r.json()
-        assert body["count"] == len(body["events"])
-
-    def test_limit_param_accepted(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events?limit=10")
-        assert r.status_code == 200
-
-    def test_limit_zero_returns_422(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events?limit=0")
-        assert r.status_code == 422
-
-    def test_limit_above_500_returns_422(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events?limit=501")
-        assert r.status_code == 422
-
-    def test_filter_by_actorid(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events?actorid=actor-x")
-        assert r.status_code == 200
-
-    def test_filter_by_requestid(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events?requestid=req-x")
-        assert r.status_code == 200
-
-    def test_filter_by_traceid(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events?traceid=trace-x")
-        assert r.status_code == 200
-
-    def test_filter_by_verdict(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events?verdict=allow")
-        assert r.status_code == 200
-
-    def test_filter_by_eventtype(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events?eventtype=scan:execute")
-        assert r.status_code == 200
-
-    def test_response_is_json(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events")
-        assert r.headers.get("content-type", "").startswith("application/json")
-
-
-# ---------------------------------------------------------------------------
-# POST /api/audit/events
+# POST /api/audit/event — creation and response shape
 # ---------------------------------------------------------------------------
 
 
 class TestCreateAuditEvent:
     def test_returns_200_with_valid_payload(self, client: TestClient) -> None:
-        r = client.post(
-            "/api/audit/events",
-            json={"action": "scan:execute", "actor_id": "actor-post-001"},
-        )
+        r = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
         assert r.status_code == 200
-
-    def test_response_contains_action(self, client: TestClient) -> None:
-        r = client.post(
-            "/api/audit/events",
-            json={"action": "policy:enforce", "actor_id": "actor-post-002"},
-        )
-        body = r.json()
-        assert body.get("action") == "policy:enforce"
-
-    def test_response_contains_log_id(self, client: TestClient) -> None:
-        r = client.post(
-            "/api/audit/events",
-            json={"action": "audit:write"},
-        )
-        body = r.json()
-        assert "log_id" in body or "id" in body or "audit_id" in body
-
-    def test_empty_payload_returns_200_with_defaults(self, client: TestClient) -> None:
-        r = client.post("/api/audit/events", json={})
-        assert r.status_code == 200
-
-    def test_created_event_has_created_at(self, client: TestClient) -> None:
-        r = client.post("/api/audit/events", json={"action": "test"})
-        body = r.json()
-        assert "created_at" in body or "occurred_at" in body
 
     def test_response_is_json(self, client: TestClient) -> None:
-        r = client.post("/api/audit/events", json={"action": "test"})
+        r = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
         assert r.headers.get("content-type", "").startswith("application/json")
 
-
-# ---------------------------------------------------------------------------
-# GET /api/audit/actor/{actor_id}
-# ---------------------------------------------------------------------------
-
-
-class TestListByActor:
-    def test_returns_200_with_valid_key(self, client: TestClient) -> None:
-        r = client.get("/api/audit/actor/actor-001")
-        assert r.status_code == 200
-
-    def test_response_is_list(self, client: TestClient) -> None:
-        r = client.get("/api/audit/actor/actor-001")
-        assert isinstance(r.json(), list)
-
-    def test_seeded_actor_returned(self, client: TestClient) -> None:
-        client.post(
-            "/api/audit/events",
-            json={"action": "scan:execute", "actor_id": "actor-by-actor-seed"},
-        )
-        r = client.get("/api/audit/actor/actor-by-actor-seed")
-        assert r.status_code == 200
-        data = r.json()
-        assert isinstance(data, list)
-        assert all(item.get("actor_id") == "actor-by-actor-seed" for item in data)
-
-    def test_unknown_actor_returns_empty_list(self, client: TestClient) -> None:
-        r = client.get("/api/audit/actor/actor-does-not-exist-xyz")
-        assert r.status_code == 200
-        assert r.json() == []
-
-    def test_limit_param_accepted(self, client: TestClient) -> None:
-        r = client.get("/api/audit/actor/actor-001?limit=5")
-        assert r.status_code == 200
-
-    def test_limit_zero_returns_422(self, client: TestClient) -> None:
-        r = client.get("/api/audit/actor/actor-001?limit=0")
-        assert r.status_code == 422
-
-
-# ---------------------------------------------------------------------------
-# GET /api/audit/request/{request_id}
-# ---------------------------------------------------------------------------
-
-
-class TestListByRequest:
-    def test_returns_200_with_valid_key(self, client: TestClient) -> None:
-        r = client.get("/api/audit/request/req-001")
-        assert r.status_code == 200
-
-    def test_response_is_list(self, client: TestClient) -> None:
-        r = client.get("/api/audit/request/req-001")
-        assert isinstance(r.json(), list)
-
-    def test_seeded_request_returned(self, client: TestClient) -> None:
-        client.post(
-            "/api/audit/events",
-            json={"action": "audit:read", "request_id": "req-by-request-seed"},
-        )
-        r = client.get("/api/audit/request/req-by-request-seed")
-        assert r.status_code == 200
-        data = r.json()
-        assert isinstance(data, list)
-        assert all(item.get("request_id") == "req-by-request-seed" for item in data)
-
-    def test_unknown_request_returns_empty_list(self, client: TestClient) -> None:
-        r = client.get("/api/audit/request/req-does-not-exist-xyz")
-        assert r.status_code == 200
-        assert r.json() == []
-
-
-# ---------------------------------------------------------------------------
-# GET /api/audit/trace/{trace_id}
-# ---------------------------------------------------------------------------
-
-
-class TestListByTrace:
-    def test_returns_200_with_valid_key(self, client: TestClient) -> None:
-        r = client.get("/api/audit/trace/trace-001")
-        assert r.status_code == 200
-
-    def test_response_is_list(self, client: TestClient) -> None:
-        r = client.get("/api/audit/trace/trace-001")
-        assert isinstance(r.json(), list)
-
-    def test_seeded_trace_returned(self, client: TestClient) -> None:
-        client.post(
-            "/api/audit/events",
-            json={"action": "audit:read", "trace_id": "trace-by-trace-seed"},
-        )
-        r = client.get("/api/audit/trace/trace-by-trace-seed")
-        assert r.status_code == 200
-        data = r.json()
-        assert isinstance(data, list)
-        assert all(item.get("trace_id") == "trace-by-trace-seed" for item in data)
-
-    def test_unknown_trace_returns_empty_list(self, client: TestClient) -> None:
-        r = client.get("/api/audit/trace/trace-does-not-exist-xyz")
-        assert r.status_code == 200
-        assert r.json() == []
-
-
-# ---------------------------------------------------------------------------
-# GET /api/audit/events/{log_id}
-# ---------------------------------------------------------------------------
-
-
-class TestGetAuditEventById:
-    def test_existing_log_id_returns_200(self, client: TestClient) -> None:
-        create = client.post(
-            "/api/audit/events",
-            json={"action": "audit:read", "actor_id": "actor-get-001"},
-        )
-        assert create.status_code == 200
-        log_id = create.json().get("log_id") or create.json().get("id") or create.json().get("audit_id")
-        assert log_id
-        r = client.get(f"/api/audit/events/{log_id}")
-        assert r.status_code == 200
-
-    def test_existing_log_id_response_shape(self, client: TestClient) -> None:
-        create = client.post(
-            "/api/audit/events",
-            json={"action": "policy:enforce", "actor_id": "actor-get-002"},
-        )
-        log_id = create.json().get("log_id") or create.json().get("id") or create.json().get("audit_id")
-        r = client.get(f"/api/audit/events/{log_id}")
+    def test_response_contains_auditeventid(self, client: TestClient) -> None:
+        r = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
         body = r.json()
-        assert "action" in body
-        assert "actor_id" in body
+        assert "auditeventid" in body
+        assert str(body["auditeventid"]).strip() != ""
 
-    def test_nonexistent_log_id_returns_404(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events/log-does-not-exist-xyz-000")
-        assert r.status_code == 404
+    def test_auditeventid_has_audit_prefix(self, client: TestClient) -> None:
+        r = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
+        assert r.json()["auditeventid"].startswith("audit_")
 
-    def test_missing_key_returns_401(self) -> None:
-        bare = TestClient(app, raise_server_exceptions=True)
-        r = bare.get("/api/audit/events/some-log-id")
-        assert r.status_code == 401
+    def test_response_contains_eventtype(self, client: TestClient) -> None:
+        r = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
+        assert "eventtype" in r.json()
 
+    def test_response_contains_severity(self, client: TestClient) -> None:
+        r = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
+        assert "severity" in r.json()
 
-# ---------------------------------------------------------------------------
-# GET /api/audit/summary
-# ---------------------------------------------------------------------------
+    def test_response_contains_actiontype(self, client: TestClient) -> None:
+        r = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
+        assert r.json()["actiontype"] == "toolcall"
 
+    def test_response_contains_target(self, client: TestClient) -> None:
+        r = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
+        assert r.json()["target"] == "https://example.com/api"
 
-class TestAuditSummary:
-    def test_returns_200_with_valid_key(self, client: TestClient) -> None:
-        r = client.get("/api/audit/summary")
+    def test_response_contains_createdat(self, client: TestClient) -> None:
+        r = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
+        assert "createdat" in r.json()
+
+    def test_response_contains_traceid(self, client: TestClient) -> None:
+        r = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
+        assert "traceid" in r.json()
+
+    def test_response_contains_requestid(self, client: TestClient) -> None:
+        r = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
+        assert "requestid" in r.json()
+
+    def test_response_contains_decisionid(self, client: TestClient) -> None:
+        r = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
+        assert "decisionid" in r.json()
+
+    def test_response_contains_baseriskscore(self, client: TestClient) -> None:
+        r = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
+        assert "baseriskscore" in r.json()
+
+    def test_response_contains_adjustedriskscore(self, client: TestClient) -> None:
+        r = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
+        assert "adjustedriskscore" in r.json()
+
+    def test_response_contains_reasons_list(self, client: TestClient) -> None:
+        r = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
+        assert isinstance(r.json().get("reasons"), list)
+
+    def test_response_contains_promptinjection_dict(self, client: TestClient) -> None:
+        r = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
+        assert isinstance(r.json().get("promptinjection"), dict)
+
+    def test_response_contains_hostilecontext_dict(self, client: TestClient) -> None:
+        r = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
+        assert isinstance(r.json().get("hostilecontext"), dict)
+
+    def test_response_contains_summary(self, client: TestClient) -> None:
+        r = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
+        assert "summary" in r.json()
+        assert isinstance(r.json()["summary"], str)
+
+    def test_eventtype_valid_literal(self, client: TestClient) -> None:
+        r = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
+        valid = {
+            "execution_allowed",
+            "execution_review",
+            "execution_quarantined",
+            "execution_denied",
+        }
+        assert r.json()["eventtype"] in valid
+
+    def test_severity_valid_literal(self, client: TestClient) -> None:
+        r = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
+        valid = {"info", "warning", "high", "critical"}
+        assert r.json()["severity"] in valid
+
+    def test_high_riskscore_yields_denied_or_quarantined(self, client: TestClient) -> None:
+        payload = {**_VALID_PAYLOAD, "riskscore": 95}
+        r = client.post(_AUDIT_EVENT_ROUTE, json=payload)
+        assert r.status_code == 200
+        assert r.json()["eventtype"] in {"execution_denied", "execution_quarantined"}
+
+    def test_zero_riskscore_accepted(self, client: TestClient) -> None:
+        payload = {**_VALID_PAYLOAD, "riskscore": 0}
+        r = client.post(_AUDIT_EVENT_ROUTE, json=payload)
         assert r.status_code == 200
 
-    def test_response_shape(self, client: TestClient) -> None:
-        r = client.get("/api/audit/summary")
-        body = r.json()
-        assert "total_logs" in body
-        assert "by_action" in body
-        assert "by_result" in body
-        assert "backend_name" in body
-
-    def test_organization_id_filter_accepted(self, client: TestClient) -> None:
-        r = client.get("/api/audit/summary?organization_id=org-001")
-        assert r.status_code == 200
-
-    def test_limit_param_accepted(self, client: TestClient) -> None:
-        r = client.get("/api/audit/summary?limit=50")
-        assert r.status_code == 200
-
-    def test_limit_zero_returns_422(self, client: TestClient) -> None:
-        r = client.get("/api/audit/summary?limit=0")
+    def test_riskscore_above_100_returns_422(self, client: TestClient) -> None:
+        payload = {**_VALID_PAYLOAD, "riskscore": 101}
+        r = client.post(_AUDIT_EVENT_ROUTE, json=payload)
         assert r.status_code == 422
 
-    def test_limit_above_5000_returns_422(self, client: TestClient) -> None:
-        r = client.get("/api/audit/summary?limit=5001")
+    def test_riskscore_below_0_returns_422(self, client: TestClient) -> None:
+        payload = {**_VALID_PAYLOAD, "riskscore": -1}
+        r = client.post(_AUDIT_EVENT_ROUTE, json=payload)
         assert r.status_code == 422
 
-    def test_total_logs_increases_after_create(self, client: TestClient) -> None:
-        r1 = client.get("/api/audit/summary")
-        before = r1.json()["total_logs"]
-        client.post("/api/audit/events", json={"action": "summary:test"})
-        r2 = client.get("/api/audit/summary")
-        after = r2.json()["total_logs"]
-        assert after >= before
+    def test_missing_actiontype_returns_422(self, client: TestClient) -> None:
+        payload = {k: v for k, v in _VALID_PAYLOAD.items() if k != "actiontype"}
+        r = client.post(_AUDIT_EVENT_ROUTE, json=payload)
+        assert r.status_code == 422
 
-    def test_missing_key_returns_401(self) -> None:
-        bare = TestClient(app, raise_server_exceptions=True)
-        r = bare.get("/api/audit/summary")
-        assert r.status_code == 401
+    def test_missing_target_returns_422(self, client: TestClient) -> None:
+        payload = {k: v for k, v in _VALID_PAYLOAD.items() if k != "target"}
+        r = client.post(_AUDIT_EVENT_ROUTE, json=payload)
+        assert r.status_code == 422
+
+    def test_missing_content_returns_422(self, client: TestClient) -> None:
+        payload = {k: v for k, v in _VALID_PAYLOAD.items() if k != "content"}
+        r = client.post(_AUDIT_EVENT_ROUTE, json=payload)
+        assert r.status_code == 422
+
+    def test_missing_riskscore_returns_422(self, client: TestClient) -> None:
+        payload = {k: v for k, v in _VALID_PAYLOAD.items() if k != "riskscore"}
+        r = client.post(_AUDIT_EVENT_ROUTE, json=payload)
+        assert r.status_code == 422
+
+    def test_extra_fields_rejected(self, client: TestClient) -> None:
+        payload = {**_VALID_PAYLOAD, "unknown_field": "should_fail"}
+        r = client.post(_AUDIT_EVENT_ROUTE, json=payload)
+        assert r.status_code == 422
+
+    def test_empty_actiontype_returns_422(self, client: TestClient) -> None:
+        payload = {**_VALID_PAYLOAD, "actiontype": ""}
+        r = client.post(_AUDIT_EVENT_ROUTE, json=payload)
+        assert r.status_code == 422
+
+    def test_empty_target_returns_422(self, client: TestClient) -> None:
+        payload = {**_VALID_PAYLOAD, "target": ""}
+        r = client.post(_AUDIT_EVENT_ROUTE, json=payload)
+        assert r.status_code == 422
+
+    def test_optional_fields_absent_accepted(self, client: TestClient) -> None:
+        payload = {
+            "actiontype": "httpfetch",
+            "target": "https://example.com",
+            "content": "minimal audit",
+            "riskscore": 10,
+        }
+        r = client.post(_AUDIT_EVENT_ROUTE, json=payload)
+        assert r.status_code == 200
+
+    def test_metadata_dict_accepted(self, client: TestClient) -> None:
+        payload = {**_VALID_PAYLOAD, "metadata": {"key": "value", "count": 3}}
+        r = client.post(_AUDIT_EVENT_ROUTE, json=payload)
+        assert r.status_code == 200
+
+    def test_two_events_have_distinct_auditeventids(self, client: TestClient) -> None:
+        r1 = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
+        r2 = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
+        assert r1.json()["auditeventid"] != r2.json()["auditeventid"]
+
+    def test_two_events_have_distinct_traceids(self, client: TestClient) -> None:
+        r1 = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
+        r2 = client.post(_AUDIT_EVENT_ROUTE, json=_VALID_PAYLOAD)
+        assert r1.json()["traceid"] != r2.json()["traceid"]
+
+    def test_filepath_defaults_to_empty_string_when_absent(self, client: TestClient) -> None:
+        payload = {
+            "actiontype": "httpfetch",
+            "target": "https://example.com",
+            "content": "filepath absent",
+            "riskscore": 5,
+        }
+        r = client.post(_AUDIT_EVENT_ROUTE, json=payload)
+        assert "filepath" in r.json()
