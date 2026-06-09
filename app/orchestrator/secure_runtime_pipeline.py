@@ -262,6 +262,27 @@ def summarize_secure_runtime_result(result: SecureRuntimeResult) -> dict[str, An
     }
 
 
+def get_secure_runtime_health_snapshot(pipeline: SecureRuntimePipeline) -> dict[str, Any]:
+    """Return a compact health dict for app.api.health component reporting."""
+    try:
+        policy_rule_count = len(getattr(pipeline.policy_engine, "rules", []))
+        audit_event_count = len(getattr(pipeline.audit_log, "events", []))
+        review_queue_size = len(getattr(pipeline.review_queue, "items", []))
+        return {
+            "status": "ok",
+            "policy_engine": "ready",
+            "policy_rule_count": policy_rule_count,
+            "audit_event_count": audit_event_count,
+            "review_queue_size": review_queue_size,
+            "tool_call_actions_registered": len(TOOL_CALL_ACTIONS),
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "error": repr(exc),
+        }
+
+
 def _is_tool_call_action(action_type: str) -> bool:
     return action_type in TOOL_CALL_ACTIONS
 

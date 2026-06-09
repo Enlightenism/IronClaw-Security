@@ -17,10 +17,12 @@ os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
 os.environ["SUPABASE_KEY"] = ""
 os.environ["SUPABASE_ANON_KEY"] = ""
 
+
 from app.core.settings import get_settings  # noqa: E402
 
 get_settings.cache_clear()
 _settings = get_settings()
+
 
 from fastapi.testclient import TestClient  # noqa: E402
 import pytest  # noqa: E402
@@ -43,6 +45,13 @@ def client() -> Generator[TestClient, None, None]:
 
 @pytest.fixture(scope="function")
 def fresh_client() -> Generator[TestClient, None, None]:
+    _patch_app_state(app)
+    with TestClient(app, raise_server_exceptions=False) as c:
+        yield c
+
+
+@pytest.fixture(scope="function")
+def test_client() -> Generator[TestClient, None, None]:
     _patch_app_state(app)
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c

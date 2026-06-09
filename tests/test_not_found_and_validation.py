@@ -140,7 +140,7 @@ def test_history_review_non_quarantine_scan_returns_400(test_client: TestClient)
     """Attempting to review a scan that is not in quarantine must return 400."""
     scan_resp = test_client.post(
         "/scan",
-        json={"content": "hello world", "context": "test"},
+        json={"target_type": "prompt", "target_value": "hello world"},
     )
     if scan_resp.status_code not in {200, 201}:
         pytest.skip("scan endpoint unavailable in this fixture configuration")

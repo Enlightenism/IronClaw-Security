@@ -347,13 +347,23 @@ class ScanHistoryRepository:
             _translate_error(exc)
 
 
-def build_scan_history_repository() -> ScanHistoryRepository:
+def _is_memory_mode() -> bool:
+    import os
+
+    return os.environ.get("IRONCLAW_PERSISTENCE_MODE", "").strip().lower() == "memory"
+
+
+def build_scan_history_repository():
+    if _is_memory_mode():
+        from app.services.history import _InMemoryScanHistoryRepository  # noqa: PLC0415
+
+        return _InMemoryScanHistoryRepository()
     return ScanHistoryRepository()
 
 
-def create_scan_history_repository() -> ScanHistoryRepository:
+def create_scan_history_repository():
     return build_scan_history_repository()
 
 
-def get_scan_history_repository() -> ScanHistoryRepository:
+def get_scan_history_repository():
     return build_scan_history_repository()

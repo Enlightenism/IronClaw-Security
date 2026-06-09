@@ -211,9 +211,40 @@ class RestoreService:
         self,
         executor: RestoreExecutor | None = None,
         now: datetime | None = None,
+        targets: list[dict[str, Any]] | None = None,
     ) -> None:
         self._executor = executor or FilesystemRestoreExecutor()
         self._now = now or _utc_now()
+        self._targets: list[dict[str, Any]] = targets or []
+
+    # ------------------------------------------------------------------ #
+    # Target registry (used by API layer)
+    # ------------------------------------------------------------------ #
+
+    def list_targets(self) -> list[dict[str, Any]]:
+        return list(self._targets)
+
+    def validate(self, target_name: str) -> dict[str, Any]:
+        target = self._find_target(target_name)
+        manifest_path = Path(target["source_path"])
+        result = self.validate_manifest(manifest_path)
+        return result.to_dict()
+
+    def run_restore(self, target_name: str, *, dry_run: bool = False) -> RestoreManifest:
+        target = self._find_target(target_name)
+        manifest_path = Path(target["source_path"])
+        restore_root = Path(target["restore_path"])
+        if dry_run:
+            result = self.dry_run_restore(manifest_path, restore_root)
+        else:
+            result = self.restore(manifest_path, restore_root)
+        return result.validation.manifest
+
+    def _find_target(self, target_name: str) -> dict[str, Any]:
+        for target in self._targets:
+            if target.get("name") == target_name:
+                return target
+        raise KeyError(f"restore target not found: {target_name!r}")
 
     # ------------------------------------------------------------------ #
     # Manifest loading and validation
@@ -412,9 +443,7 @@ class RestoreService:
             )
 
     def replay_with_rollback_safety(self, manifest_path: Path, restore_root: Path) -> RestoreResult:
-        """Higher-level helper for explicit rollback-safe replay.
-        Equivalent to restore(), but named for orchestration clarity.
-        """
+        """Higher-level helper for explicit rollback-safe replay."""
         return self.restore(manifest_path, restore_root)
 
     def rollback(self, restore_root: Path, rollback_checkpoint: Path) -> RestoreResult:
@@ -514,3 +543,8 @@ class RestoreService:
 
 def resolve_manifest_sidecar(backup_path: Path) -> Path:
     return backup_path.with_name(f"{backup_path.name}.manifest.json")
+
+
+def build_default_restore_service() -> RestoreService:
+    """Factory used by app.api.restore as a FastAPI dependency."""
+    return RestoreService()
