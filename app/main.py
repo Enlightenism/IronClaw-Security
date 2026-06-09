@@ -15,7 +15,6 @@ from app.core.settings import get_settings
 
 ProtectedDependencyFactory = Callable[[], Any]
 
-
 _log = logging.getLogger(__name__)
 
 
@@ -176,6 +175,10 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (
             _optional_router("app.api.audit_log"),
             {"prefix": "/guard", "dependencies": dependencies},
+        ),
+        (
+            _optional_router("app.api.auditlog"),
+            {"dependencies": dependencies},
         ),
         (
             _optional_router("app.api.behavioral_baseline"),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -10,14 +11,10 @@ from app.services.auditlogservice import AuditLogService, build_audit_log_servic
 _audit_read_dep = require_access_dependency(action="audit:read", permission="audit:read")
 _audit_write_dep = require_access_dependency(action="audit:write", permission="audit:write")
 
-_SERVICE_SINGLETON: AuditLogService | None = None
 
-
+@lru_cache(maxsize=1)
 def _get_service() -> AuditLogService:
-    global _SERVICE_SINGLETON
-    if _SERVICE_SINGLETON is None:
-        _SERVICE_SINGLETON = build_audit_log_service()
-    return _SERVICE_SINGLETON
+    return build_audit_log_service()
 
 
 router = APIRouter(
@@ -71,48 +68,6 @@ def create_audit_event(
 
 
 @router.get(
-    "/events/by-actor/{actorid}",
-    summary="List Audit Events By Actor",
-    response_model=list,
-    dependencies=[Depends(_audit_read_dep)],
-)
-def list_audit_events_by_actor(
-    actorid: str,
-    limit: int = Query(default=100, ge=1, le=500),
-    service: AuditLogService = Depends(_get_service),
-) -> list[dict[str, Any]]:
-    return service.list_logs(actor_id=actorid, limit=limit)
-
-
-@router.get(
-    "/events/by-request/{requestid}",
-    summary="List Audit Events By Request",
-    response_model=list,
-    dependencies=[Depends(_audit_read_dep)],
-)
-def list_audit_events_by_request(
-    requestid: str,
-    limit: int = Query(default=100, ge=1, le=500),
-    service: AuditLogService = Depends(_get_service),
-) -> list[dict[str, Any]]:
-    return service.list_logs(request_id=requestid, limit=limit)
-
-
-@router.get(
-    "/events/by-trace/{traceid}",
-    summary="List Audit Events By Trace",
-    response_model=list,
-    dependencies=[Depends(_audit_read_dep)],
-)
-def list_audit_events_by_trace(
-    traceid: str,
-    limit: int = Query(default=100, ge=1, le=500),
-    service: AuditLogService = Depends(_get_service),
-) -> list[dict[str, Any]]:
-    return service.list_logs(filters={"trace_id": traceid}, limit=limit)
-
-
-@router.get(
     "/events/{log_id}",
     summary="Get Audit Event By ID",
     response_model=dict,
@@ -126,6 +81,48 @@ def get_audit_event(
     if record is None:
         raise HTTPException(status_code=404, detail="Audit event not found")
     return record
+
+
+@router.get(
+    "/actor/{actor_id}",
+    summary="List Audit Events By Actor",
+    response_model=list,
+    dependencies=[Depends(_audit_read_dep)],
+)
+def list_audit_events_by_actor(
+    actor_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    service: AuditLogService = Depends(_get_service),
+) -> list[dict[str, Any]]:
+    return service.list_logs(filters={"actor_id": actor_id}, limit=limit)
+
+
+@router.get(
+    "/request/{request_id}",
+    summary="List Audit Events By Request",
+    response_model=list,
+    dependencies=[Depends(_audit_read_dep)],
+)
+def list_audit_events_by_request(
+    request_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    service: AuditLogService = Depends(_get_service),
+) -> list[dict[str, Any]]:
+    return service.list_logs(filters={"request_id": request_id}, limit=limit)
+
+
+@router.get(
+    "/trace/{trace_id}",
+    summary="List Audit Events By Trace",
+    response_model=list,
+    dependencies=[Depends(_audit_read_dep)],
+)
+def list_audit_events_by_trace(
+    trace_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    service: AuditLogService = Depends(_get_service),
+) -> list[dict[str, Any]]:
+    return service.list_logs(filters={"trace_id": trace_id}, limit=limit)
 
 
 @router.get(
