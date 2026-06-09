@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import logging
 import time
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
@@ -21,22 +21,27 @@ from app.services.threat_detection_engine import get_detection_engine
 
 logger = logging.getLogger(__name__)
 
+
 # ---------------------------------------------------------------------------
 # Router — prefix /threat/detect (single detection entry point)
 # Distinct from app.routers.threat_detection which owns /threat/feeds,
 # /threat/hunt, /threat/detections, and /threat/correlations.
 # ---------------------------------------------------------------------------
 
+
 router = APIRouter(
     prefix="/threat",
     tags=["threat-detection-core"],
 )
 
+
 _TABLE_DETECTIONS = "threat_detections"
+
 
 # ---------------------------------------------------------------------------
 # Module-level constants
 # ---------------------------------------------------------------------------
+
 
 _BLOCK_STATUSES: frozenset[str] = frozenset({DetectionVerdict.BLOCK.value, DetectionVerdict.REVIEW.value})
 
@@ -204,11 +209,13 @@ def run_detection(
     """
     Synchronous detection dispatcher.
 
+
     Called by:
       - POST /threat/detect (this router)
       - app.api.action_guard — pre-execution threat screening
       - app.api.action_execute — post-plan threat screening
       - app.api.actionguard — legacy guard path
+
 
     Parameters
     ----------
@@ -220,6 +227,7 @@ def run_detection(
         Human-readable label identifying the caller (e.g. 'action_guard',
         'action_execute') — attached to telemetry and logs.
 
+
     Returns
     -------
     DetectionResult
@@ -229,7 +237,6 @@ def run_detection(
 
     effective_request = payload
     if org_id and org_id != payload.org_id:
-        # Rebuild with caller-supplied org_id override
         effective_request = payload.model_copy(update={"org_id": org_id})
 
     start = time.monotonic()
@@ -521,11 +528,12 @@ async def list_correlation_signals(
         return []
 
     try:
-        return list_signals(
+        raw = list_signals(
             org_id=effective_org_id,
             pattern_type=pattern_type,
             limit=limit,
         )
+        return cast(list[CorrelationSignal], raw)
     except Exception as exc:
         logger.error("threat_detection.list_correlation_signals error: %s", exc)
         return []
@@ -585,6 +593,7 @@ async def detection_health(
 # ---------------------------------------------------------------------------
 # __all__
 # ---------------------------------------------------------------------------
+
 
 __all__ = [
     "router",
