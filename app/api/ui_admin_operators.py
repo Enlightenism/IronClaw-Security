@@ -6,12 +6,12 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from app.dependencies.auth import require_api_key
+from app.core.auth import AuthContext, require_auth_context
 
 router = APIRouter(
     prefix="/ui/admin",
     tags=["operator-management"],
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(require_auth_context)],
 )
 
 
@@ -97,7 +97,9 @@ def _build_operator_items() -> list[OperatorItemView]:
 @router.get("/operators", response_model=OperatorManagementResponse)
 def get_operator_management(
     requested_by: str = Query("ui-operator-management", min_length=1),
+    context: AuthContext = Depends(require_auth_context),
 ) -> OperatorManagementResponse:
+    caller = context.principal_id or requested_by
     items = _build_operator_items()
     active_count = sum(1 for item in items if item.status == "active")
     suspended_count = sum(1 for item in items if item.status == "suspended")
@@ -106,10 +108,10 @@ def get_operator_management(
         status="ok",
         service="IronClaw-Security",
         timestamp=_utc_now_iso(),
-        requested_by=requested_by,
+        requested_by=caller,
         total=len(items),
         active_count=active_count,
         suspended_count=suspended_count,
         items=items,
-        metadata={"requested_by": requested_by},
+        metadata={"requested_by": caller},
     )

@@ -12,7 +12,7 @@ from app.core.apikeys import (
     get_api_key_registry,
     mask_api_key,
 )
-from app.core.auth import require_api_key
+from app.dependencies.auth import require_api_key
 
 router = APIRouter(
     prefix="/customer-keys",
@@ -64,20 +64,12 @@ def _utc_now_iso() -> str:
 
 
 def _normalize_iso(value: str | None) -> str | None:
-    """Normalise an ISO string from APIKeyRecord (already a str) to Z-suffix form."""
     if value is None:
         return None
     return value.replace("+00:00", "Z")
 
 
 def _to_view(record: APIKeyRecord, *, raw_key: str | None = None) -> CustomerKeyView:
-    """
-    Build a CustomerKeyView from an APIKeyRecord.
-
-    When raw_key is provided (create path) we mask it directly so the
-    masked preview matches the just-issued key.  On the list/revoke path
-    we fall back to record.masked_key which is set at creation time.
-    """
     masked = mask_api_key(raw_key) if raw_key else record.masked_key
     return CustomerKeyView(
         key_id=record.key_id,

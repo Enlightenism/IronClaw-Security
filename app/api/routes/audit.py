@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from app.core.auth import require_api_key
+from app.dependencies.auth import require_api_key
 from app.services.audit_store import (
     AuditEventRecord as StoredAuditEventRecord,
 )

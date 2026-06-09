@@ -6,14 +6,13 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from app.core.auth import require_api_key
+from app.dependencies.auth import require_api_key
 
 router = APIRouter(
     prefix="/deployment",
     tags=["deployment"],
     dependencies=[Depends(require_api_key)],
 )
-
 
 DeploymentStatus = Literal["ready", "warning", "blocked"]
 

@@ -6,7 +6,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from app.core.auth import require_api_key
+from app.dependencies.auth import require_api_key
 from app.services.alert_store import (
     AlertEndpointRecord as StoredAlertEndpointRecord,
 )
@@ -19,7 +19,6 @@ router = APIRouter(
     tags=["alerts"],
     dependencies=[Depends(require_api_key)],
 )
-
 
 AlertChannel = Literal["email", "webhook", "slack"]
 AlertEventType = Literal["incident_created", "incident_updated", "quarantine_created", "policy_changed"]

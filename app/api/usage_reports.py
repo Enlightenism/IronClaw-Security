@@ -6,8 +6,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from app.core.auth import require_api_key
 from app.core.usage_metering import UsageEvent, UsageSummary, get_usage_metering_registry
+from app.dependencies.auth import require_api_key
 
 router = APIRouter(
     prefix="/usage-reports",

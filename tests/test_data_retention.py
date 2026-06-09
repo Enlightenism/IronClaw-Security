@@ -6,6 +6,7 @@ from typing import Any, Final
 from fastapi.testclient import TestClient
 import pytest
 
+from app.core.auth import AuthContext, require_auth_context
 from app.core.settings import get_settings
 from app.main import app
 
@@ -14,14 +15,33 @@ API_KEY_HEADER: Final[dict[str, str]] = {"X-API-Key": "test-api-key"}
 
 EXPECTED_RULE_IDS: Final[frozenset[str]] = frozenset({"requests", "telemetry", "review-queue", "audit-log"})
 
+_STUB_CONTEXT = AuthContext(
+    api_key="test-api-key",
+    principal_type="platform",
+    principal_id=None,
+    session_id=None,
+    org_id=None,
+    permissions=(),
+    roles=(),
+    authenticated=True,
+    auth_source="test",
+    auth_method="api_key",
+)
+
+
+def _stub_require_auth_context() -> AuthContext:
+    return _STUB_CONTEXT
+
 
 @pytest.fixture(scope="function")
 def client() -> Generator[TestClient, None, None]:
     get_settings.cache_clear()
     settings = get_settings()
     app.state.settings = settings
+    app.dependency_overrides[require_auth_context] = _stub_require_auth_context
     with TestClient(app, raise_server_exceptions=True) as c:
         yield c
+    app.dependency_overrides.pop(require_auth_context, None)
 
 
 @pytest.fixture(scope="function")
@@ -33,12 +53,20 @@ def retention_payload(client: TestClient) -> dict[str, Any]:
 
 class TestDataRetentionAuth:
     def test_missing_api_key_returns_401_or_403(self, client: TestClient) -> None:
-        response = client.get(UI_DATA_RETENTION_PATH)
-        assert response.status_code in (401, 403)
+        app.dependency_overrides.pop(require_auth_context, None)
+        try:
+            response = client.get(UI_DATA_RETENTION_PATH)
+            assert response.status_code in (401, 403)
+        finally:
+            app.dependency_overrides[require_auth_context] = _stub_require_auth_context
 
     def test_invalid_api_key_returns_401_or_403(self, client: TestClient) -> None:
-        response = client.get(UI_DATA_RETENTION_PATH, headers={"X-API-Key": "invalid-key"})
-        assert response.status_code in (401, 403)
+        app.dependency_overrides.pop(require_auth_context, None)
+        try:
+            response = client.get(UI_DATA_RETENTION_PATH, headers={"X-API-Key": "invalid-key"})
+            assert response.status_code in (401, 403)
+        finally:
+            app.dependency_overrides[require_auth_context] = _stub_require_auth_context
 
     def test_valid_api_key_returns_200(self, client: TestClient) -> None:
         response = client.get(UI_DATA_RETENTION_PATH, headers=API_KEY_HEADER)
@@ -235,11 +263,13 @@ class TestDataRetentionRequestedBy:
     def test_default_requested_by(self, client: TestClient) -> None:
         response = client.get(UI_DATA_RETENTION_PATH, headers=API_KEY_HEADER)
         data = response.json()
+        # principal_id is None on stub → falls back to query param default
         assert data["requested_by"] == "ui-data-retention"
 
     def test_custom_requested_by(self, client: TestClient) -> None:
         response = client.get(UI_DATA_RETENTION_PATH, params={"requested_by": "security-analyst"}, headers=API_KEY_HEADER)
         data = response.json()
+        # principal_id is None on stub → query param is used
         assert data["requested_by"] == "security-analyst"
 
     def test_metadata_contains_requested_by(self, client: TestClient) -> None:

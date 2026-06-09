@@ -53,6 +53,7 @@ def reset_audit_state() -> Generator[None, None, None]:
 @pytest.fixture(scope="function")
 def test_client() -> Generator[TestClient, None, None]:
     with TestClient(_app, raise_server_exceptions=True) as client:
+        client.headers.update({"X-API-Key": os.environ["IRONCLAW_API_KEY"]})
         yield client
 
 

@@ -6,7 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Header, Request, status
 from pydantic import BaseModel, Field
 
-from app.core.auth import require_api_key
+from app.dependencies.auth import require_api_key
 
 router = APIRouter(
     prefix="/claude/bootstrap",

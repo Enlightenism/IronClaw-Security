@@ -19,9 +19,11 @@ from app.core.settings import get_settings
 
 _logger = logging.getLogger(__name__)
 
+
 API_KEY_HEADER_NAME = "X-API-Key"
 SESSION_ID_HEADER_NAME = "X-Session-Id"
 ORG_ID_HEADER_NAME = "X-Org-Id"
+
 
 api_key_header = APIKeyHeader(name=API_KEY_HEADER_NAME, auto_error=False)
 session_id_header = APIKeyHeader(name=SESSION_ID_HEADER_NAME, auto_error=False)
@@ -44,9 +46,14 @@ class AuthContext:
 
 
 def _get_settings(request: Request) -> Any | None:
-    settings = getattr(request.app.state, "settings", None)
-    if settings is not None:
-        return settings
+    # Prefer request.app.state.settings so test fixtures can inject a fresh
+    # Settings instance without fighting the lru_cache on get_settings().
+    try:
+        state_settings = getattr(request.app.state, "settings", None)
+        if state_settings is not None:
+            return state_settings
+    except Exception:
+        pass
     try:
         return get_settings()
     except Exception:
@@ -65,13 +72,11 @@ def _extract_configured_api_key(request: Request) -> str | None:
     if settings is None:
         return None
 
-    # Priority order matches settings.py field precedence.
-    # All api_key fields are now `str` with default="" — never str | None.
     for attr_name in (
+        "ironclaw_api_key",
         "internal_platform_api_key",
         "platform_api_key",
         "admin_api_key",
-        "ironclaw_api_key",
         "api_key",
     ):
         value = _clean_optional_string(getattr(settings, attr_name, None))
@@ -83,22 +88,21 @@ def _extract_configured_api_key(request: Request) -> str | None:
     )
 
 
-def _get_secret_key(request: Request) -> str | None:
-    """Return settings.secret_key (alias IRONCLAW_SECRET_KEY) if non-empty."""
+def get_secret_key(request: Request) -> str | None:
     settings = _get_settings(request)
     if settings is None:
         return None
-    # settings.secret_key is str with default "changeme-32-chars-minimum!!!!!"
-    # Treat the shipped default as unconfigured so callers don't accidentally
-    # accept the sentinel value as a real secret.
     value = _clean_optional_string(getattr(settings, "secret_key", None))
     if value and value != "changeme-32-chars-minimum!!!!!":
         return value
     return None
 
 
-def _get_jwt_secret(request: Request) -> str | None:
-    """Return settings.jwt_secret (alias JWT_SECRET) if non-empty."""
+# Internal alias — kept so any existing internal callers resolve correctly.
+_get_secret_key = get_secret_key
+
+
+def get_jwt_secret(request: Request) -> str | None:
     settings = _get_settings(request)
     if settings is None:
         return None
@@ -106,6 +110,10 @@ def _get_jwt_secret(request: Request) -> str | None:
     if value and value != "changeme-jwt-32-chars-minimum!!":
         return value
     return None
+
+
+# Internal alias — kept so any existing internal callers resolve correctly.
+_get_jwt_secret = get_jwt_secret
 
 
 def _touch_record_if_possible(record: APIKeyRecord) -> APIKeyRecord:
@@ -311,6 +319,7 @@ def get_api_key(
 
     if normalized_api_key is None:
         if auth_required:
+            _logger.warning("Missing API key")
             raise AppError(
                 error="missing_api_key",
                 message="Missing API key",
@@ -342,6 +351,7 @@ def get_api_key(
             details={"header": API_KEY_HEADER_NAME},
         )
 
+    _logger.warning("Invalid API key")
     raise AppError(
         error="invalid_api_key",
         message="Invalid API key",

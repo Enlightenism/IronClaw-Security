@@ -1,92 +1,115 @@
 from __future__ import annotations
 
-from typing import Literal
+from datetime import UTC, datetime
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.dependencies.auth import require_api_key
+from app.core.auth import AuthContext, require_auth_context
 
 router = APIRouter(prefix="/ui", tags=["admin-data-retention"])
 
 
-class DataRetentionPolicyItem(BaseModel):
+def _utc_now_iso() -> str:
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+class DataRetentionRuleMetadata(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    contains_content: bool
+    compliance_scope: str | None = None
+
+
+class DataRetentionRuleItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    domain: str = Field(min_length=1)
-    retention_days: int = Field(ge=0)
-    storage_class: Literal["standard", "hot", "protected", "archive"]
-    status: Literal["active", "review_required"]
-
-
-class DataRetentionSummary(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    total_policies: int = Field(ge=0)
-    active: int = Field(ge=0)
-    review_required: int = Field(ge=0)
+    rule_id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    category: str = Field(min_length=1)
+    retention_days: int = Field(gt=0)
+    storage_scope: str = Field(min_length=1)
+    purge_behavior: Literal["rolling-window", "archive-then-purge", "immediate-purge"]
+    description: str = Field(min_length=1)
+    metadata: DataRetentionRuleMetadata
 
 
 class AdminDataRetentionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    title: str
     status: Literal["ok"]
-    summary: DataRetentionSummary
-    policies: list[DataRetentionPolicyItem]
-    request_id: str | None = None
+    service: str
+    timestamp: str
+    requested_by: str
+    total_rules: int = Field(ge=0)
+    rules: list[DataRetentionRuleItem]
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-_POLICIES: tuple[DataRetentionPolicyItem, ...] = (
-    DataRetentionPolicyItem(
-        domain="audit_logs",
-        retention_days=365,
-        storage_class="standard",
-        status="active",
-    ),
-    DataRetentionPolicyItem(
-        domain="request_stream",
+_RULES: tuple[DataRetentionRuleItem, ...] = (
+    DataRetentionRuleItem(
+        rule_id="requests",
+        name="Request Stream",
+        category="operational",
         retention_days=30,
-        storage_class="hot",
-        status="active",
+        storage_scope="hot",
+        purge_behavior="rolling-window",
+        description="Retain raw request/response stream data for short-term operational review.",
+        metadata=DataRetentionRuleMetadata(contains_content=False, compliance_scope=None),
     ),
-    DataRetentionPolicyItem(
-        domain="detonation_artifacts",
+    DataRetentionRuleItem(
+        rule_id="telemetry",
+        name="Telemetry Rollups",
+        category="observability",
+        retention_days=14,
+        storage_scope="standard",
+        purge_behavior="rolling-window",
+        description="Aggregated telemetry signals retained for observability dashboards.",
+        metadata=DataRetentionRuleMetadata(contains_content=False, compliance_scope=None),
+    ),
+    DataRetentionRuleItem(
+        rule_id="review-queue",
+        name="Review Queue Items",
+        category="security-review",
         retention_days=90,
-        storage_class="protected",
-        status="active",
+        storage_scope="protected",
+        purge_behavior="archive-then-purge",
+        description="Flagged items pending or completed human review; retained for audit trail.",
+        metadata=DataRetentionRuleMetadata(contains_content=True, compliance_scope="security-ops"),
     ),
-    DataRetentionPolicyItem(
-        domain="telemetry_rollups",
+    DataRetentionRuleItem(
+        rule_id="audit-log",
+        name="Audit Log",
+        category="audit",
         retention_days=180,
-        storage_class="archive",
-        status="active",
+        storage_scope="archive",
+        purge_behavior="archive-then-purge",
+        description="Full audit event log retained for compliance and forensic investigation.",
+        metadata=DataRetentionRuleMetadata(contains_content=True, compliance_scope="compliance"),
     ),
 )
 
 
 @router.get(
-    "/admin/data-retention",
+    "/data-retention",
     response_model=AdminDataRetentionResponse,
     summary="Get Admin Data Retention Policies",
 )
 def get_data_retention_settings(
     request: Request,
-    _: str | None = Depends(require_api_key),
+    requested_by: str = Query("ui-data-retention", min_length=1),
+    context: AuthContext = Depends(require_auth_context),
 ) -> AdminDataRetentionResponse:
-    request_id = getattr(request.state, "request_id", None)
-
-    policies = list(_POLICIES)
-    summary = DataRetentionSummary(
-        total_policies=len(policies),
-        active=sum(1 for policy in policies if policy.status == "active"),
-        review_required=sum(1 for policy in policies if policy.status == "review_required"),
-    )
+    caller = context.principal_id or requested_by
+    rules = list(_RULES)
 
     return AdminDataRetentionResponse(
-        title="Data Retention",
         status="ok",
-        summary=summary,
-        policies=policies,
-        request_id=request_id,
+        service="IronClaw-Security",
+        timestamp=_utc_now_iso(),
+        requested_by=caller,
+        total_rules=len(rules),
+        rules=rules,
+        metadata={"requested_by": caller},
     )

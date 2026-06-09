@@ -5,6 +5,15 @@ import functools
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
+SECRET_KEY_SENTINEL = "changeme-32-chars-minimum!!!!!"
+JWT_SECRET_SENTINEL = "changeme-jwt-32-chars-minimum!!"
+
+
+def _normalize_string(value: str | None) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.strip()
+
 
 class Settings(BaseSettings):
     # ------------------------------------------------------------------
@@ -39,8 +48,8 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Auth / JWT
     # ------------------------------------------------------------------
-    secret_key: str = Field(default="changeme-32-chars-minimum!!!!!", alias="IRONCLAW_SECRET_KEY")
-    jwt_secret: str = Field(default="changeme-jwt-32-chars-minimum!!", alias="JWT_SECRET")
+    secret_key: str = Field(default=SECRET_KEY_SENTINEL, alias="IRONCLAW_SECRET_KEY")
+    jwt_secret: str = Field(default=JWT_SECRET_SENTINEL, alias="JWT_SECRET")
     jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
     access_token_expire_minutes: int = Field(default=30, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
 
@@ -119,6 +128,38 @@ class Settings(BaseSettings):
     engine_base_url: str = Field(default="http://127.0.0.1:8010", alias="ENGINE_BASE_URL")
 
     model_config = {"populate_by_name": True, "extra": "ignore"}
+
+    @property
+    def effective_api_key(self) -> str:
+        for value in (
+            self.ironclaw_api_key,
+            self.internal_platform_api_key,
+            self.platform_api_key,
+            self.admin_api_key,
+            self.api_key,
+        ):
+            normalized = _normalize_string(value)
+            if normalized:
+                return normalized
+        return ""
+
+    @property
+    def effective_platform_api_key(self) -> str:
+        return self.effective_api_key
+
+    @property
+    def effective_secret_key(self) -> str:
+        value = _normalize_string(self.secret_key)
+        if not value or value == SECRET_KEY_SENTINEL:
+            return ""
+        return value
+
+    @property
+    def effective_jwt_secret(self) -> str:
+        value = _normalize_string(self.jwt_secret)
+        if not value or value == JWT_SECRET_SENTINEL:
+            return ""
+        return value
 
 
 @functools.lru_cache(maxsize=1)
