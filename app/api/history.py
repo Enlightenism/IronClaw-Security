@@ -66,43 +66,24 @@ def _is_repository_connection_error(exc: Exception) -> bool:
     return type(exc).__name__ in _REPO_CONNECTION_ERROR_NAMES
 
 
-def _handle_repository_error(exc: Exception, context: str) -> None:
-    """Normalize repository exceptions to typed AppErrors.
+def _to_503(exc: Exception, context: str) -> AppError:
+    """Build a 503 AppError from any repository-layer exception.
 
-    - Known connection-error class names  → 503 AppError.
-    - AppError / HTTPException already typed → re-raise unchanged so their
-      registered handlers fire correctly.
-    - Any other unexpected exception       → 503 AppError (broad fallback so
-      mock side-effects and unknown adapter errors never surface as 500).
+    Always returns an AppError so callers can ``raise _to_503(exc, ctx)``
+    with no ambiguity about control flow.
     """
-    # Already a typed application error — let registered handlers deal with it.
-    if isinstance(exc, (AppError, HTTPException)):
-        raise
-
-    # Named connection-error classes (Supabase adapter, etc.)
-    if _is_repository_connection_error(exc):
-        _log.error("history: repository connection error in %s: %s", context, exc)
-        raise AppError(
-            error="repository_unavailable",
-            message="Scan history repository is temporarily unavailable",
-            status_code=503,
-            details={"context": context},
-        ) from exc
-
-    # Broad fallback: any unexpected exception from the repository layer maps
-    # to 503 so it never bubbles through as an unhandled 500.
     _log.error(
-        "history: unexpected repository error in %s (%s): %s",
+        "history: repository error in %s (%s): %s",
         context,
         type(exc).__name__,
         exc,
     )
-    raise AppError(
+    return AppError(
         error="repository_unavailable",
         message="Scan history repository is temporarily unavailable",
         status_code=503,
         details={"context": context, "exc_type": type(exc).__name__},
-    ) from exc
+    )
 
 
 def _coerce_list(value: Any) -> list[Any]:
@@ -237,8 +218,10 @@ def get_scan_history(
     """Return recent scan history records, normalized for UI consumption."""
     try:
         history = read_scan_history(limit=limit)
+    except (AppError, HTTPException):
+        raise
     except Exception as exc:
-        _handle_repository_error(exc, "get_scan_history")
+        raise _to_503(exc, "get_scan_history") from exc
 
     items = history.get("items", [])
     normalized_items = [_normalize_history_item(item) for item in items]
@@ -254,8 +237,10 @@ def get_scan_record(scan_id: str) -> ScanHistoryItem:
     """Return a single normalized scan history record by its identifier."""
     try:
         item = get_scan_by_id(scan_id)
+    except (AppError, HTTPException):
+        raise
     except Exception as exc:
-        _handle_repository_error(exc, "get_scan_record")
+        raise _to_503(exc, "get_scan_record") from exc
 
     if not item:
         raise NotFoundError(
@@ -273,8 +258,10 @@ def review_scan_record(scan_id: str, request: ReviewRequest) -> ScanHistoryItem:
     """
     try:
         item = get_scan_by_id(scan_id)
+    except (AppError, HTTPException):
+        raise
     except Exception as exc:
-        _handle_repository_error(exc, "review_scan_record.get")
+        raise _to_503(exc, "review_scan_record.get") from exc
 
     if not item:
         raise NotFoundError(
@@ -306,8 +293,10 @@ def review_scan_record(scan_id: str, request: ReviewRequest) -> ScanHistoryItem:
 
     try:
         updated = update_scan_by_id(scan_id, updates)
+    except (AppError, HTTPException):
+        raise
     except Exception as exc:
-        _handle_repository_error(exc, "review_scan_record.update")
+        raise _to_503(exc, "review_scan_record.update") from exc
 
     if not updated:
         raise NotFoundError(

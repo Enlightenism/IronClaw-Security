@@ -13,8 +13,38 @@ from app.api.scan import (
     _enforce_scan_rate_limit,
     _rate_limit_buckets,
 )
+from app.core.auth import AuthContext, require_auth_context
 from app.core.errors import AppError
 from app.main import app
+
+# ---------------------------------------------------------------------------
+# Auth override — bypass require_auth_context for all HTTP tests
+# ---------------------------------------------------------------------------
+
+_TEST_AUTH_CONTEXT = AuthContext(
+    api_key="test-rate-limit-key",
+    principal_type="api_key",
+    principal_id="test-principal",
+    session_id=None,
+    org_id="test-org",
+    permissions=(),
+    roles=(),
+    authenticated=True,
+    auth_source="test",
+    auth_method="api_key",
+)
+
+
+def _override_require_auth_context() -> AuthContext:
+    return _TEST_AUTH_CONTEXT
+
+
+@pytest.fixture(autouse=True)
+def override_auth():
+    app.dependency_overrides[require_auth_context] = _override_require_auth_context
+    yield
+    app.dependency_overrides.pop(require_auth_context, None)
+
 
 client = TestClient(app)
 
@@ -175,7 +205,6 @@ def test_expired_requests_are_evicted():
     _clear_bucket(key)
     expired_ts = time.time() - (_RATE_LIMIT_WINDOW_SECONDS + 5)
     _fill_bucket(key, _RATE_LIMIT_MAX_REQUESTS, at=expired_ts)
-    # All entries are outside the window — should be evicted, request allowed
     limit, remaining = _enforce_scan_rate_limit(key)
     assert limit == _RATE_LIMIT_MAX_REQUESTS
     assert remaining == _RATE_LIMIT_MAX_REQUESTS - 1
@@ -238,7 +267,6 @@ def test_client_id_key_isolated_from_ip_key():
     _fill_bucket(key_ip, _RATE_LIMIT_MAX_REQUESTS)
     with pytest.raises(AppError):
         _enforce_scan_rate_limit(key_ip)
-    # client key is untouched
     _, remaining = _enforce_scan_rate_limit(key_client)
     assert remaining == _RATE_LIMIT_MAX_REQUESTS - 1
 
@@ -463,13 +491,11 @@ def test_two_clients_have_independent_quotas():
         with patch("app.api.scan._client_rate_limit_key", return_value=k):
             return client.post("/api/scan/", json=SAFE_PAYLOAD)
 
-    # Exhaust key_a
     for _ in range(_RATE_LIMIT_MAX_REQUESTS):
         post_with_key(key_a)
     blocked = post_with_key(key_a)
     assert blocked.status_code == 429
 
-    # key_b still has full quota
     ok = post_with_key(key_b)
     assert ok.status_code == 200
 
@@ -508,12 +534,10 @@ def test_batch_and_single_share_bucket_for_same_key():
     key = "batch:shared-bucket"
     _clear_bucket(key)
     _fill_bucket(key, _RATE_LIMIT_MAX_REQUESTS - 1)
-    # Single scan consumes the last slot
     with patch("app.api.scan._client_rate_limit_key", return_value=key):
         single = client.post("/api/scan/", json=SAFE_PAYLOAD)
     assert single.status_code == 200
     assert int(single.headers["x-ratelimit-remaining"]) == 0
-    # Batch now blocked
     with patch("app.api.scan._client_rate_limit_key", return_value=key):
         batch = client.post("/api/scan/batch", json={"items": [SAFE_PAYLOAD]})
     assert batch.status_code == 429

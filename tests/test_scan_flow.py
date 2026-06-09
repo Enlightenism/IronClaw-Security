@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
@@ -13,8 +14,45 @@ from app.api.scan import (
     _primary_category,
     _rate_limit_buckets,
 )
+from app.core.auth import AuthContext, require_auth_context
 from app.main import app
 from ironclaw_sdk.models import ScanRequest, ScanResponse
+
+# ---------------------------------------------------------------------------
+# Auth override — bypass require_auth_context for all HTTP tests
+# ---------------------------------------------------------------------------
+
+_TEST_AUTH_CONTEXT = AuthContext(
+    api_key="test-scan-flow-key",
+    principal_type="api_key",
+    principal_id="test-principal",
+    session_id=None,
+    org_id="test-org",
+    permissions=(),
+    roles=(),
+    authenticated=True,
+    auth_source="test",
+    auth_method="api_key",
+)
+
+
+def _override_require_auth_context() -> AuthContext:
+    return _TEST_AUTH_CONTEXT
+
+
+@pytest.fixture(autouse=True)
+def override_auth():
+    app.dependency_overrides[require_auth_context] = _override_require_auth_context
+    yield
+    app.dependency_overrides.pop(require_auth_context, None)
+
+
+@pytest.fixture(autouse=True)
+def clear_rate_limit_buckets():
+    _rate_limit_buckets.clear()
+    yield
+    _rate_limit_buckets.clear()
+
 
 client = TestClient(app)
 
@@ -33,10 +71,6 @@ BATCH_PAYLOAD = {
         {"target_type": "prompt", "target_value": "Normal safe request"},
     ]
 }
-
-
-def setup_function() -> None:
-    _rate_limit_buckets.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -393,17 +427,13 @@ def test_build_explanation_verdict_always_present():
 
 
 def test_rate_limit_allows_under_threshold():
-    _rate_limit_buckets.clear()
     for _ in range(5):
         _enforce_scan_rate_limit("test-unit-key-allow")
 
 
 def test_rate_limit_raises_on_exceeded():
-    import time
-
     from app.core.errors import AppError
 
-    _rate_limit_buckets.clear()
     key = "test-unit-key-exceed"
     for _ in range(30):
         _rate_limit_buckets[key].append(time.time())
@@ -414,7 +444,6 @@ def test_rate_limit_raises_on_exceeded():
 
 
 def test_rate_limit_returns_limit_and_remaining():
-    _rate_limit_buckets.clear()
     limit, remaining = _enforce_scan_rate_limit("test-unit-key-values")
     assert limit == 30
     assert remaining == 29
