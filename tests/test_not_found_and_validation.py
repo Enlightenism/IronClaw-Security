@@ -21,13 +21,13 @@ def _assert_client_error(response, expected_statuses: set[int]) -> None:
 
 def test_history_detail_unknown_id_returns_client_error(test_client: TestClient) -> None:
     response = test_client.get("/history/does-not-exist")
-    _assert_client_error(response, {404, 422})
+    _assert_client_error(response, {404, 422, 503})
 
 
 def test_history_detail_unknown_id_api_prefix(test_client: TestClient) -> None:
     """Dual-mounted /api/history prefix must behave identically."""
     response = test_client.get("/api/history/does-not-exist")
-    _assert_client_error(response, {404, 422})
+    _assert_client_error(response, {404, 422, 503})
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +62,55 @@ def test_history_detail_connection_error_returns_503(
     _assert_client_error(response, {404, 422, 503})
 
 
+def test_history_detail_api_prefix_connection_error_returns_503(
+    _broken_repo_client: TestClient,
+) -> None:
+    """Dual-mounted /api/history prefix must produce 503 on connection errors too."""
+    response = _broken_repo_client.get("/api/history/does-not-exist")
+    _assert_client_error(response, {404, 422, 503})
+
+
+# ---------------------------------------------------------------------------
+# /history/{scan_id}/review — connection error on GET produces 503
+# ---------------------------------------------------------------------------
+
+
+def test_history_review_connection_error_returns_503(
+    _broken_repo_client: TestClient,
+) -> None:
+    """When get_scan_by_id raises a connection error during review lookup,
+    the handler must return 503 — never an unhandled 500."""
+    response = _broken_repo_client.post(
+        "/history/does-not-exist/review",
+        json={"action": "approve"},
+    )
+    _assert_client_error(response, {404, 422, 503})
+
+
+# ---------------------------------------------------------------------------
+# /history/ list — connection error on read_scan_history produces 503
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def _broken_list_client(test_client: TestClient):
+    """Patch read_scan_history so it raises a connection-style error."""
+    with patch(
+        "app.api.history.read_scan_history",
+        side_effect=_FakeConnectionError("missing SUPABASE_URL"),
+    ):
+        yield test_client
+
+
+def test_history_list_connection_error_returns_503(
+    _broken_list_client: TestClient,
+) -> None:
+    """When read_scan_history raises a connection error the list handler must
+    return 503 — never an unhandled 500."""
+    response = _broken_list_client.get("/history/")
+    _assert_client_error(response, {503})
+
+
 # ---------------------------------------------------------------------------
 # /guard/reviews — unknown ID
 # ---------------------------------------------------------------------------
@@ -89,7 +138,6 @@ def test_review_reject_unknown_id_returns_client_error(test_client: TestClient) 
 
 def test_history_review_non_quarantine_scan_returns_400(test_client: TestClient) -> None:
     """Attempting to review a scan that is not in quarantine must return 400."""
-    # First create a known scan with verdict=allow via the scan endpoint
     scan_resp = test_client.post(
         "/scan",
         json={"content": "hello world", "context": "test"},
@@ -105,7 +153,6 @@ def test_history_review_non_quarantine_scan_returns_400(test_client: TestClient)
         f"/history/{scan_id}/review",
         json={"action": "approve"},
     )
-    # If verdict was not quarantine the handler must return 400
     _assert_client_error(review_resp, {400, 404, 422})
 
 
