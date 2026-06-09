@@ -24,9 +24,9 @@ _BAD_KEY = "ic-bad-key-000"
 
 _ALL_READ_ROUTES = [
     "/api/audit/events",
-    "/api/audit/events/by-actor/test-actor",
-    "/api/audit/events/by-request/test-request",
-    "/api/audit/events/by-trace/test-trace",
+    "/api/audit/actor/test-actor",
+    "/api/audit/request/test-request",
+    "/api/audit/trace/test-trace",
     "/api/audit/summary",
 ]
 
@@ -195,17 +195,17 @@ class TestCreateAuditEvent:
 
 
 # ---------------------------------------------------------------------------
-# GET /api/audit/events/by-actor/{actorid}
+# GET /api/audit/actor/{actor_id}
 # ---------------------------------------------------------------------------
 
 
 class TestListByActor:
     def test_returns_200_with_valid_key(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events/by-actor/actor-001")
+        r = client.get("/api/audit/actor/actor-001")
         assert r.status_code == 200
 
     def test_response_is_list(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events/by-actor/actor-001")
+        r = client.get("/api/audit/actor/actor-001")
         assert isinstance(r.json(), list)
 
     def test_seeded_actor_returned(self, client: TestClient) -> None:
@@ -213,38 +213,38 @@ class TestListByActor:
             "/api/audit/events",
             json={"action": "scan:execute", "actor_id": "actor-by-actor-seed"},
         )
-        r = client.get("/api/audit/events/by-actor/actor-by-actor-seed")
+        r = client.get("/api/audit/actor/actor-by-actor-seed")
         assert r.status_code == 200
         data = r.json()
         assert isinstance(data, list)
         assert all(item.get("actor_id") == "actor-by-actor-seed" for item in data)
 
     def test_unknown_actor_returns_empty_list(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events/by-actor/actor-does-not-exist-xyz")
+        r = client.get("/api/audit/actor/actor-does-not-exist-xyz")
         assert r.status_code == 200
         assert r.json() == []
 
     def test_limit_param_accepted(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events/by-actor/actor-001?limit=5")
+        r = client.get("/api/audit/actor/actor-001?limit=5")
         assert r.status_code == 200
 
     def test_limit_zero_returns_422(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events/by-actor/actor-001?limit=0")
+        r = client.get("/api/audit/actor/actor-001?limit=0")
         assert r.status_code == 422
 
 
 # ---------------------------------------------------------------------------
-# GET /api/audit/events/by-request/{requestid}
+# GET /api/audit/request/{request_id}
 # ---------------------------------------------------------------------------
 
 
 class TestListByRequest:
     def test_returns_200_with_valid_key(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events/by-request/req-001")
+        r = client.get("/api/audit/request/req-001")
         assert r.status_code == 200
 
     def test_response_is_list(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events/by-request/req-001")
+        r = client.get("/api/audit/request/req-001")
         assert isinstance(r.json(), list)
 
     def test_seeded_request_returned(self, client: TestClient) -> None:
@@ -252,30 +252,30 @@ class TestListByRequest:
             "/api/audit/events",
             json={"action": "audit:read", "request_id": "req-by-request-seed"},
         )
-        r = client.get("/api/audit/events/by-request/req-by-request-seed")
+        r = client.get("/api/audit/request/req-by-request-seed")
         assert r.status_code == 200
         data = r.json()
         assert isinstance(data, list)
         assert all(item.get("request_id") == "req-by-request-seed" for item in data)
 
     def test_unknown_request_returns_empty_list(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events/by-request/req-does-not-exist-xyz")
+        r = client.get("/api/audit/request/req-does-not-exist-xyz")
         assert r.status_code == 200
         assert r.json() == []
 
 
 # ---------------------------------------------------------------------------
-# GET /api/audit/events/by-trace/{traceid}
+# GET /api/audit/trace/{trace_id}
 # ---------------------------------------------------------------------------
 
 
 class TestListByTrace:
     def test_returns_200_with_valid_key(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events/by-trace/trace-001")
+        r = client.get("/api/audit/trace/trace-001")
         assert r.status_code == 200
 
     def test_response_is_list(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events/by-trace/trace-001")
+        r = client.get("/api/audit/trace/trace-001")
         assert isinstance(r.json(), list)
 
     def test_seeded_trace_returned(self, client: TestClient) -> None:
@@ -283,14 +283,14 @@ class TestListByTrace:
             "/api/audit/events",
             json={"action": "audit:read", "trace_id": "trace-by-trace-seed"},
         )
-        r = client.get("/api/audit/events/by-trace/trace-by-trace-seed")
+        r = client.get("/api/audit/trace/trace-by-trace-seed")
         assert r.status_code == 200
         data = r.json()
         assert isinstance(data, list)
         assert all(item.get("trace_id") == "trace-by-trace-seed" for item in data)
 
     def test_unknown_trace_returns_empty_list(self, client: TestClient) -> None:
-        r = client.get("/api/audit/events/by-trace/trace-does-not-exist-xyz")
+        r = client.get("/api/audit/trace/trace-does-not-exist-xyz")
         assert r.status_code == 200
         assert r.json() == []
 

@@ -3,8 +3,9 @@ from __future__ import annotations
 from collections import defaultdict, deque
 import time
 
-from fastapi import APIRouter, BackgroundTasks, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
 
+from app.core.auth import AuthContext, require_auth_context
 from app.core.errors import AppError
 from app.schemas.scan import (
     BatchScanRequest,
@@ -278,6 +279,7 @@ def create_scan(
     http_request: Request,
     response: Response,
     background_tasks: BackgroundTasks,
+    _auth: AuthContext = Depends(require_auth_context),
 ):
     key = _client_rate_limit_key(http_request, request)
     limit, remaining = _enforce_scan_rate_limit(key)
@@ -305,6 +307,7 @@ def create_scan_batch(
     http_request: Request,
     response: Response,
     background_tasks: BackgroundTasks,
+    _auth: AuthContext = Depends(require_auth_context),
 ):
     key = _client_rate_limit_key(http_request)
     limit, remaining = _enforce_scan_rate_limit(key)
