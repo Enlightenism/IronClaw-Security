@@ -15,6 +15,7 @@ from app.core.settings import get_settings
 
 ProtectedDependencyFactory = Callable[[], Any]
 
+
 _log = logging.getLogger(__name__)
 
 
@@ -111,7 +112,6 @@ def _protected_dependencies() -> list[Any]:
 
 
 def _agent_rate_limit_dep(agent_id_param: str = "agent_id") -> Any | None:
-    """Return a Depends-wrapped agent rate limit dependency, or None if unavailable."""
     agent_rate_limit_dependency = _optional_attr("app.core.rate_limiter", "agent_rate_limit_dependency")
     if not callable(agent_rate_limit_dependency):
         return None
@@ -119,7 +119,6 @@ def _agent_rate_limit_dep(agent_id_param: str = "agent_id") -> Any | None:
 
 
 def _agent_protected_dependencies(agent_id_param: str = "agent_id") -> list[Any]:
-    """Return auth + per-agent rate limit dependencies for agent-payload endpoints."""
     deps = _protected_dependencies()
     agent_rl = _agent_rate_limit_dep(agent_id_param)
     if agent_rl is not None:
@@ -153,12 +152,16 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
             {"prefix": "/history", "dependencies": dependencies},
         ),
         (
-            _optional_router("app.api.history"),
-            {"prefix": "/api/history", "dependencies": dependencies},
-        ),
-        (
             _optional_router("app.api.action_guard"),
             {"prefix": "/guard", "dependencies": agent_dependencies},
+        ),
+        (
+            _optional_router("app.api.guard"),
+            {"dependencies": agent_dependencies},
+        ),
+        (
+            _optional_router("app.api.guard_action"),
+            {"dependencies": agent_dependencies},
         ),
         (
             action_execute_router,
@@ -167,6 +170,10 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (
             action_execute_router,
             {"prefix": "/execute", "dependencies": agent_dependencies},
+        ),
+        (
+            _optional_router("app.api.execute"),
+            {"dependencies": agent_dependencies},
         ),
         (
             _optional_router("app.api.review_queue"),
@@ -192,6 +199,10 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
             _optional_router("app.api.policy"),
             {"prefix": "/policy", "dependencies": dependencies},
         ),
+        (_optional_router("app.api.actionpolicy"), {"dependencies": dependencies}),
+        (_optional_router("app.api.actiondecision"), {"dependencies": dependencies}),
+        (_optional_router("app.api.actionguard"), {"dependencies": agent_dependencies}),
+        (_optional_router("app.api.actionexecute"), {"dependencies": agent_dependencies}),
         (_optional_router("app.api.release_policy_routes"), {"dependencies": dependencies}),
         (_optional_router("app.api.integrations"), {"dependencies": dependencies}),
         (_optional_router("app.api.customer_keys"), {}),
@@ -215,7 +226,7 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (_optional_router("app.api.review"), {"dependencies": dependencies}),
         (_optional_router("app.api.reviews"), {"dependencies": dependencies}),
         (_optional_router("app.api.health"), {"dependencies": dependencies}),
-        (_optional_router("app.api.health_probes"), {"dependencies": dependencies}),
+        (_optional_router("app.api.prompt_guard"), {"dependencies": dependencies}),
         (_optional_router("app.api.claude_bootstrap"), {"dependencies": dependencies}),
         (_optional_router("app.api.claude_guard_router"), {"dependencies": dependencies}),
         (_optional_router("app.api.claude_stream_guard"), {"dependencies": dependencies}),
@@ -412,7 +423,7 @@ async def _initialize_policy_rules() -> None:
         if isawaitable(result):
             await result
         _log.info("main.lifespan: policy rules hydrated from db")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _log.error("main.lifespan: policy rules hydration failed: %s", exc)
 
 
@@ -429,12 +440,11 @@ async def _initialize_scanner_rule_index() -> None:
         if isawaitable(result):
             await result
         _log.info("main.lifespan: scanner RULE_INDEX hydrated from db")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _log.error("main.lifespan: scanner RULE_INDEX hydration failed: %s", exc)
 
 
 def _initialize_pattern_registry() -> None:
-    """Call pattern_registry.load() at startup so DB patterns are available before the first request."""
     load = _optional_attr("app.core.pattern_registry", "load")
     if not callable(load):
         _log.debug("main.lifespan: pattern_registry.load not available, skipping")
@@ -442,29 +452,27 @@ def _initialize_pattern_registry() -> None:
     try:
         load(force=True)
         _log.info("main.lifespan: pattern_registry loaded from db")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _log.error("main.lifespan: pattern_registry.load failed: %s", exc)
 
 
 def _shutdown_pattern_registry() -> None:
-    """Invalidate pattern_registry cache on shutdown to prevent stale state across restarts."""
     invalidate = _optional_attr("app.core.pattern_registry", "invalidate")
     if callable(invalidate):
         try:
             invalidate()
             _log.info("main.lifespan: pattern_registry cache invalidated on shutdown")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             _log.error("main.lifespan: pattern_registry.invalidate failed: %s", exc)
 
 
 def _shutdown_trust_engine_cache() -> None:
-    """Clear trust_engine in-process profile cache on shutdown to prevent stale state."""
     invalidate_all_cache = _optional_attr("app.core.trust_engine", "invalidate_all_cache")
     if callable(invalidate_all_cache):
         try:
             invalidate_all_cache()
             _log.info("main.lifespan: trust_engine cache invalidated on shutdown")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             _log.error("main.lifespan: trust_engine.invalidate_all_cache failed: %s", exc)
     else:
         try:
@@ -476,7 +484,7 @@ def _shutdown_trust_engine_cache() -> None:
                     with lock:
                         cache.clear()
                     _log.info("main.lifespan: trust_engine._profile_cache cleared on shutdown")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             _log.error("main.lifespan: trust_engine cache clear failed: %s", exc)
 
 
@@ -491,7 +499,7 @@ def _initialize_notification_engine() -> None:
     try:
         get_notification_engine()
         _log.info("main.lifespan: notification_engine singleton pre-warmed")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _log.error("main.lifespan: notification_engine pre-warm failed: %s", exc)
 
 
@@ -501,7 +509,7 @@ def _start_threat_feed_scheduler() -> None:
 
         start_scheduler()
         _log.info("main.lifespan: threat_feed_scheduler started")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _log.error("main.lifespan: threat_feed_scheduler failed to start: %s", exc)
 
 
@@ -511,7 +519,7 @@ def _stop_threat_feed_scheduler() -> None:
 
         stop_scheduler()
         _log.info("main.lifespan: threat_feed_scheduler stopped")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _log.error("main.lifespan: threat_feed_scheduler failed to stop: %s", exc)
 
 
@@ -521,7 +529,7 @@ def _start_remediation_scheduler() -> None:
 
         start_remediation_scheduler()
         _log.info("main.lifespan: remediation_scheduler started")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _log.error("main.lifespan: remediation_scheduler failed to start: %s", exc)
 
 
@@ -531,7 +539,7 @@ def _stop_remediation_scheduler() -> None:
 
         stop_remediation_scheduler()
         _log.info("main.lifespan: remediation_scheduler stopped")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _log.error("main.lifespan: remediation_scheduler failed to stop: %s", exc)
 
 
@@ -563,12 +571,12 @@ async def lifespan(app: FastAPI):
 
     try:
         _initialize_pattern_registry()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _log.error("main.lifespan: _initialize_pattern_registry raised unexpectedly: %s", exc)
 
     try:
         _initialize_notification_engine()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _log.error("main.lifespan: _initialize_notification_engine raised unexpectedly: %s", exc)
 
     if callable(initialize_secure_runtime_pipeline):
@@ -579,7 +587,7 @@ async def lifespan(app: FastAPI):
             else:
                 pipeline = result
             _log.info("main.lifespan: secure_runtime_pipeline initialized")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             _log.error("main.lifespan: secure_runtime_pipeline init failed: %s", exc)
 
     app.state.action_execute_pipeline = pipeline
@@ -588,12 +596,12 @@ async def lifespan(app: FastAPI):
 
     try:
         _start_threat_feed_scheduler()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _log.error("main.lifespan: _start_threat_feed_scheduler raised unexpectedly: %s", exc)
 
     try:
         _start_remediation_scheduler()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _log.error("main.lifespan: _start_remediation_scheduler raised unexpectedly: %s", exc)
 
     _log.info("main.lifespan: startup complete")
@@ -605,12 +613,12 @@ async def lifespan(app: FastAPI):
 
         try:
             _stop_remediation_scheduler()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             _log.error("main.lifespan: _stop_remediation_scheduler raised unexpectedly: %s", exc)
 
         try:
             _stop_threat_feed_scheduler()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             _log.error("main.lifespan: _stop_threat_feed_scheduler raised unexpectedly: %s", exc)
 
         try:
@@ -619,17 +627,17 @@ async def lifespan(app: FastAPI):
                 result = close()
                 if isawaitable(result):
                     await result
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             _log.error("main.lifespan: pipeline close failed: %s", exc)
 
         try:
             _shutdown_trust_engine_cache()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             _log.error("main.lifespan: _shutdown_trust_engine_cache raised unexpectedly: %s", exc)
 
         try:
             _shutdown_pattern_registry()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             _log.error("main.lifespan: _shutdown_pattern_registry raised unexpectedly: %s", exc)
 
         app.state.action_execute_pipeline = None
@@ -637,13 +645,13 @@ async def lifespan(app: FastAPI):
         if callable(reset_action_execute_pipeline):
             try:
                 reset_action_execute_pipeline()
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 _log.error("main.lifespan: reset_action_execute_pipeline failed: %s", exc)
 
         if callable(reset_scan_history_repository):
             try:
                 reset_scan_history_repository()
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 _log.error("main.lifespan: reset_scan_history_repository failed: %s", exc)
 
         _log.info("main.lifespan: shutdown complete")

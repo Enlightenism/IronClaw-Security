@@ -3,8 +3,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, model_validator
 
+from app.core.auth import require_api_key
 from app.orchestrator.policy_engine import (
     PolicyContext,
     PolicyEvaluation,
@@ -30,10 +32,6 @@ _log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["policy"])
 
-# ---------------------------------------------------------------------------
-# In-process policy store (replaced by DB layer when available)
-# ---------------------------------------------------------------------------
-
 _active_ruleset: dict[str, Any] | None = None
 _engine_rules: list[EngineRule] = build_default_policy_rules()
 _policy_config: dict[str, Any] = {
@@ -48,7 +46,6 @@ _policy_config: dict[str, Any] = {
 
 
 def _schema_rule_to_engine_rule(rule: PolicyRule) -> EngineRule:
-    """Convert a schema PolicyRule into the engine dataclass PolicyRule."""
     return EngineRule(
         rule_id=rule.rule_id,
         name=rule.name,
@@ -63,7 +60,6 @@ def _engine_eval_to_schema_result(
     evaluation: PolicyEvaluation,
     policy_version: str | None = None,
 ) -> PolicyEvaluationResult:
-    """Convert a PolicyEvaluation dataclass to the schema response model."""
     try:
         verdict = PolicyEnforcementMode(evaluation.final_effect)
     except ValueError:
@@ -88,9 +84,30 @@ def _engine_eval_to_schema_result(
     )
 
 
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
+class GuardBundleRequest(BaseModel):
+    user_prompt: str | None = None
+    retrieved_doc: str | None = None
+    tool_output: str | None = None
+    model_output: str | None = None
+
+    @model_validator(mode="after")
+    def _at_least_one_non_empty(self) -> GuardBundleRequest:
+        fields = [self.user_prompt, self.retrieved_doc, self.tool_output, self.model_output]
+        if not any(f is not None and f.strip() for f in fields):
+            raise ValueError("At least one field (user_prompt, retrieved_doc, tool_output, model_output) " "must be a non-empty, non-whitespace string.")
+        return self
+
+
+class GuardBundleResponse(BaseModel):
+    highest_verdict: str
+    should_halt: bool
+    should_warn: bool
+    user_prompt: str | None = None
+    retrieved_doc: str | None = None
+    tool_output: str | None = None
+    model_output: str | None = None
+    risk_score: int = 0
+    reasoning: str | None = None
 
 
 @router.get(
@@ -134,6 +151,28 @@ def get_policy_status() -> PolicyStatus:
         category_counts=category_counts,
         tags_index=tags_union,
     )
+
+
+@router.get(
+    "/system-status",
+    summary="Get combined policy and review queue system status",
+    tags=["policy"],
+)
+def get_system_status() -> dict[str, Any]:
+    policy_status = get_policy_status()
+
+    review_summary: dict[str, Any] = {}
+    try:
+        from app.services.review_queue import get_review_queue_summary  # noqa: PLC0415
+
+        review_summary = get_review_queue_summary()
+    except Exception:
+        review_summary = {"pending": 0, "total": 0}
+
+    return {
+        "policy": policy_status.model_dump(),
+        "review_summary": review_summary,
+    }
 
 
 @router.post(
@@ -221,7 +260,6 @@ def update_policy(body: PolicyUpdateRequest) -> PolicyStatus:
             _active_ruleset["updated_at"] = datetime.utcnow().isoformat()
 
     _log.info("policy.update_policy: updated fields applied")
-
     return get_policy_status()
 
 
@@ -308,3 +346,77 @@ def reset_policy() -> PolicyStatus:
 
     _log.info("policy.reset_policy: policy reset to system defaults")
     return get_policy_status()
+
+
+@router.post(
+    "/guard-bundle",
+    response_model=GuardBundleResponse,
+    summary="Guard a multi-source content bundle against the active policy",
+    tags=["policy"],
+    dependencies=[Depends(require_api_key)],
+)
+def guard_bundle(request: Request, body: GuardBundleRequest) -> GuardBundleResponse:
+    global _engine_rules, _policy_config
+
+    fields = [body.user_prompt, body.retrieved_doc, body.tool_output, body.model_output]
+    if not any(f is not None and f.strip() for f in fields):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one non-empty field is required.",
+        )
+
+    sources: dict[str, str] = {}
+    for field in ("user_prompt", "retrieved_doc", "tool_output", "model_output"):
+        val = getattr(body, field)
+        if val is not None and val.strip():
+            sources[field] = val.strip()
+
+    verdicts: list[PolicyEvaluationResult] = []
+    for field, _text in sources.items():
+        context = PolicyContext(
+            agent_id="guard-bundle",
+            file_path=field,
+            action_type="inspect",
+            target=field,
+            risk_score=0,
+            lane="default",
+            verdict="allow",
+            matched_patterns=[],
+            metadata={},
+        )
+        try:
+            evaluation = evaluate_policy(
+                context,
+                _engine_rules,
+                mode=str(_policy_config.get("enforcement_mode", "enforce")),
+            )
+            verdicts.append(_engine_eval_to_schema_result(evaluation, policy_version=_policy_config.get("version")))
+        except Exception as exc:
+            _log.error("policy.guard_bundle: engine error on field=%s: %s", field, exc)
+
+    if not verdicts:
+        highest_verdict = "allow"
+        should_halt = False
+        should_warn = False
+        risk_score = 0
+        reasoning = "no evaluable content"
+    else:
+        risk_score = max(v.risk_score for v in verdicts)
+        halt_verdicts = {PolicyEnforcementMode.block}
+        warn_verdicts = {PolicyEnforcementMode.warn}
+        should_halt = any(v.verdict in halt_verdicts for v in verdicts)
+        should_warn = any(v.verdict in warn_verdicts for v in verdicts)
+        highest_verdict = "block" if should_halt else ("warn" if should_warn else "allow")
+        reasoning = "; ".join(v.reasoning for v in verdicts if v.reasoning)
+
+    return GuardBundleResponse(
+        highest_verdict=highest_verdict,
+        should_halt=should_halt,
+        should_warn=should_warn,
+        user_prompt=body.user_prompt,
+        retrieved_doc=body.retrieved_doc,
+        tool_output=body.tool_output,
+        model_output=body.model_output,
+        risk_score=risk_score,
+        reasoning=reasoning or None,
+    )

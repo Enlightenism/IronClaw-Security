@@ -10,16 +10,7 @@ def guardandexecuteaction(
     request: ExecuteRequest,
     pipeline: SecureRuntimePipeline | None = None,
 ) -> ActionExecuteResult:
-    """High-level facade to guard and execute an action in one step.
-
-    This is the primary entrypoint used by HTTP handlers and other callers
-    that already have an ExecuteRequest payload.
-
-    ``pipeline`` is intentionally positional-or-keyword so call sites may
-    pass it either way:
-        guardandexecuteaction(payload, pipeline)          # positional
-        guardandexecuteaction(payload, pipeline=pipeline) # keyword
-    """
+    """High-level facade to guard and execute an action in one step."""
     return executeguardedaction(
         action_type=request.action_type,
         target=request.target,
@@ -43,9 +34,7 @@ def guardandexecuteraw(
     file_path: str | None = None,
     pipeline: SecureRuntimePipeline | None = None,
 ) -> ActionExecuteResult:
-    """Convenience facade for callers that want to pass raw parameters instead
-    of constructing an ExecuteRequest object.
-    """
+    """Convenience facade for callers that pass raw parameters."""
     request = ExecuteRequest(
         action_type=action_type,
         target=target,
@@ -55,5 +44,67 @@ def guardandexecuteraw(
         session_id=session_id,
         file_path=file_path,
     )
-
     return guardandexecuteaction(request, pipeline=pipeline)
+
+
+def guardaction(
+    action_type: str,
+    target: str,
+    content: str,
+    risk_score: int = 0,
+    client_id: str | None = None,
+    session_id: str | None = None,
+    pipeline: SecureRuntimePipeline | None = None,
+) -> ActionExecuteResult:
+    """Facade entry for guard-only action evaluation (no execute step)."""
+    return executeguardedaction(
+        action_type=action_type,
+        target=target,
+        content=content,
+        risk_score=risk_score,
+        client_id=client_id,
+        session_id=session_id,
+        pipeline=pipeline,
+    )
+
+
+def guardactiondecision(
+    action_type: str,
+    target: str,
+    content: str,
+    risk_score: int = 0,
+    client_id: str | None = None,
+    session_id: str | None = None,
+    pipeline: SecureRuntimePipeline | None = None,
+) -> ActionExecuteResult:
+    """Facade entry for guard action decision evaluation."""
+    return executeguardedaction(
+        action_type=action_type,
+        target=target,
+        content=content,
+        risk_score=risk_score,
+        client_id=client_id,
+        session_id=session_id,
+        pipeline=pipeline,
+    )
+
+
+def guardactionpolicy(
+    action_type: str,
+    target: str,
+    content: str,
+    risk_score: int = 0,
+    client_id: str | None = None,
+    session_id: str | None = None,
+    pipeline: SecureRuntimePipeline | None = None,
+) -> ActionExecuteResult:
+    """Facade entry for guard action policy enforcement."""
+    return executeguardedaction(
+        action_type=action_type,
+        target=target,
+        content=content,
+        risk_score=risk_score,
+        client_id=client_id,
+        session_id=session_id,
+        pipeline=pipeline,
+    )

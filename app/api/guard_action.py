@@ -28,7 +28,7 @@ def _request_meta(request: Request) -> dict[str, str | None]:
     }
 
 
-@router.post("", response_model=ActionGuardResponse)
+@router.post("", response_model=ActionGuardResponse, operation_id="guard_action_facade")
 def guard_action(
     payload: ActionGuardRequest,
     request: Request,
@@ -71,7 +71,7 @@ def guard_action(
     return response
 
 
-@router.post("/policy", response_model=ActionPolicyResponse)
+@router.post("/policy", response_model=ActionPolicyResponse, operation_id="guard_action_policy_facade")
 def guard_action_policy(
     payload: ActionGuardRequest,
     request: Request,
@@ -114,7 +114,7 @@ def guard_action_policy(
     return response
 
 
-@router.post("/decision", response_model=ActionDecisionResponse)
+@router.post("/decision", response_model=ActionDecisionResponse, operation_id="guard_action_decision_facade")
 def guard_action_decision(
     payload: ActionGuardRequest,
     request: Request,

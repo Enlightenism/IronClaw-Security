@@ -17,7 +17,7 @@ from app.services.action_policy import evaluate_action_policy
 router = APIRouter(prefix="/guard", tags=["guard"])
 
 
-@router.post("/action", response_model=GuardActionResponse)
+@router.post("/action", response_model=GuardActionResponse, operation_id="guard_action_legacy")
 def guard_action(payload: GuardActionRequest) -> GuardActionResponse:
     result = analyze_action(
         action_type=payload.action_type,
@@ -29,7 +29,7 @@ def guard_action(payload: GuardActionRequest) -> GuardActionResponse:
     return GuardActionResponse(**result)
 
 
-@router.post("/action-policy", response_model=ActionPolicyResponse)
+@router.post("/action-policy", response_model=ActionPolicyResponse, operation_id="action_policy_legacy")
 def action_policy(payload: ActionPolicyRequest) -> ActionPolicyResponse:
     result = evaluate_action_policy(
         action_type=payload.action_type,
@@ -40,7 +40,7 @@ def action_policy(payload: ActionPolicyRequest) -> ActionPolicyResponse:
     return ActionPolicyResponse(**result)
 
 
-@router.post("/action-decision", response_model=ActionDecisionResponse)
+@router.post("/action-decision", response_model=ActionDecisionResponse, operation_id="action_decision_legacy")
 def action_decision(payload: ActionDecisionRequest) -> ActionDecisionResponse:
     result = evaluate_action_execution(
         action_type=payload.action_type,

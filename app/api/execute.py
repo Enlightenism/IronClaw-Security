@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from app.api.executeresult import ExecuteRequest, ExecuteResponse
 from app.executeservice import get_action_execute_pipeline, guard_and_execute_action
+from app.models.action_execute import ExecuteRequest
+from app.models.action_execute_result import ActionExecuteResult as ExecuteResponse
 
 router = APIRouter(prefix="/guard", tags=["guard"])
 
@@ -31,7 +32,7 @@ def _ensure_filepath(summary: dict) -> dict:
     return summary
 
 
-@router.post("/execute", response_model=ExecuteResponse)
+@router.post("/execute", response_model=ExecuteResponse, operation_id="guarded_execute_action")
 def guarded_execute(
     payload: ExecuteRequest,
     pipeline=Depends(get_action_execute_pipeline),

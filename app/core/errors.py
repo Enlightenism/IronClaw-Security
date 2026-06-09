@@ -85,11 +85,6 @@ def _request_id_from_request(request: Request) -> str | None:
 
 
 def _sanitize_validation_errors(errors: list[Any]) -> list[dict[str, Any]]:
-    """
-    Pydantic v2 includes raw Exception objects inside the 'ctx' dict of
-    value_error entries.  Serialize them to strings so json.dumps never
-    encounters a non-serializable type.
-    """
     sanitized: list[dict[str, Any]] = []
     for err in errors:
         if not isinstance(err, dict):
@@ -105,6 +100,13 @@ def _sanitize_validation_errors(errors: list[Any]) -> list[dict[str, Any]]:
                 clean[k] = v
         sanitized.append(clean)
     return sanitized
+
+
+def _is_value_error(errors: list[Any]) -> bool:
+    """Return True if ALL errors are model-level value_error (model_validator failures)."""
+    if not errors:
+        return False
+    return all(isinstance(e, dict) and e.get("type") in ("value_error", "missing") and e.get("type") == "value_error" for e in errors)
 
 
 def build_error_response(
@@ -208,28 +210,38 @@ async def validation_exception_handler(
     exc: RequestValidationError,
 ) -> JSONResponse:
     logger = get_logger("ironclaw.errors")
-    sanitized_errors = _sanitize_validation_errors(exc.errors())
+    raw_errors = exc.errors()
+    sanitized_errors = _sanitize_validation_errors(raw_errors)
     details: dict[str, Any] = {"errors": sanitized_errors}
+
+    # Model-validator failures (value_error) are client logic errors → 400.
+    # Field-type / missing-field errors are malformed requests → 422.
+    if _is_value_error(raw_errors):
+        response_status = status.HTTP_400_BAD_REQUEST
+        error_code = "bad_request"
+        message = "Bad request"
+    else:
+        response_status = status.HTTP_422_UNPROCESSABLE_ENTITY
+        error_code = "validation_error"
+        message = "Request validation failed"
+
     _log_exception(
         logger,
         level=logging.WARNING,
         event="validation_error",
         request=request,
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-        message="Request validation failed",
-        error="validation_error",
+        status_code=response_status,
+        message=message,
+        error=error_code,
         details=details,
     )
     payload = build_error_response(
-        error="validation_error",
-        message="Request validation failed",
+        error=error_code,
+        message=message,
         request_id=_request_id_from_request(request),
         details=details,
     )
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-        content=payload.model_dump(),
-    )
+    return JSONResponse(status_code=response_status, content=payload.model_dump())
 
 
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
