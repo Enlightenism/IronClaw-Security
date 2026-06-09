@@ -6,15 +6,15 @@ import threading
 
 import pytest
 
-os.environ.setdefault("IRONCLAW_PERSISTENCE_MODE", "memory")
-os.environ.setdefault("ENVIRONMENT", "test")
-os.environ.setdefault("IRONCLAW_API_KEY", "test-api-key")
-os.environ.setdefault("API_KEY", "test-api-key")
-os.environ.setdefault("AUTH_REQUIRED", "true")
-os.environ.setdefault("SUPABASE_URL", "")
-os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
-os.environ.setdefault("SUPABASE_KEY", "")
-os.environ.setdefault("SUPABASE_ANON_KEY", "")
+os.environ["IRONCLAW_PERSISTENCE_MODE"] = "memory"
+os.environ["ENVIRONMENT"] = "test"
+os.environ["IRONCLAW_API_KEY"] = "test-api-key"
+os.environ["API_KEY"] = "test-api-key"
+os.environ["AUTH_REQUIRED"] = "true"
+os.environ["SUPABASE_URL"] = ""
+os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
+os.environ["SUPABASE_KEY"] = ""
+os.environ["SUPABASE_ANON_KEY"] = ""
 
 from fastapi.testclient import TestClient
 
@@ -31,13 +31,15 @@ from app.api.onboarding import (
 from app.main import app
 
 # ---------------------------------------------------------------------------
-# Constants
+# Constants — all key references read from the single env source of truth
 # ---------------------------------------------------------------------------
 
-_AUTH_HEADERS = {"X-API-Key": "test-api-key", "X-Organization-Id": "org-test-001"}
+_VALID_API_KEY = os.environ["IRONCLAW_API_KEY"]
+
+_AUTH_HEADERS = {"X-API-Key": _VALID_API_KEY, "X-Organization-Id": "org-test-001"}
 _ORG_A = "org-alpha"
 _ORG_B = "org-beta"
-_HEADERS_A = {"X-API-Key": "test-api-key", "X-Organization-Id": _ORG_A}
+_HEADERS_A = {"X-API-Key": _VALID_API_KEY, "X-Organization-Id": _ORG_A}
 
 _REQUIRED_STEP_KEYS = {s["key"] for s in _DEFAULT_STEPS if s["required"]}
 _OPTIONAL_STEP_KEYS = {s["key"] for s in _DEFAULT_STEPS if not s["required"]}
@@ -63,7 +65,9 @@ def svc() -> OnboardingService:
 
 @pytest.fixture()
 def client() -> TestClient:
-    return TestClient(app, raise_server_exceptions=True)
+    c = TestClient(app, raise_server_exceptions=True)
+    c.headers.update({"X-API-Key": _VALID_API_KEY})
+    return c
 
 
 @pytest.fixture()
@@ -478,7 +482,7 @@ class TestOnboardingAPI:
         resp = client.post(
             "/onboarding/start",
             json={"org_id": "custom-org"},
-            headers={"X-API-Key": "test-api-key"},
+            headers={"X-API-Key": _VALID_API_KEY},
         )
         assert resp.status_code == 201
         data = resp.json()
@@ -490,7 +494,8 @@ class TestOnboardingAPI:
         assert ac["status"] == "completed"
 
     def test_unauthenticated_start_rejected(self, client: TestClient) -> None:
-        resp = client.post("/onboarding/start", json={})
+        bare_client = TestClient(app, raise_server_exceptions=True)
+        resp = bare_client.post("/onboarding/start", json={})
         assert resp.status_code in (401, 403, 422)
 
     def test_list_step_definitions(self, client: TestClient) -> None:
@@ -723,7 +728,7 @@ class TestOnboardingOwnership:
         created = _start(client, headers=_HEADERS_A)
         resp = client.get(
             f"/onboarding/{created['session_id']}",
-            headers={"X-API-Key": "test-api-key", "X-Organization-Id": _ORG_B},
+            headers={"X-API-Key": _VALID_API_KEY, "X-Organization-Id": _ORG_B},
         )
         assert resp.status_code == 200
 
@@ -736,7 +741,7 @@ class TestOnboardingOwnership:
         created = _start(client, headers=_HEADERS_A, org_id=_ORG_A)
         resp = client.get(
             f"/onboarding/{created['session_id']}",
-            headers={"X-API-Key": "test-api-key", "X-Organization-Id": _ORG_A},
+            headers={"X-API-Key": _VALID_API_KEY, "X-Organization-Id": _ORG_A},
         )
         assert resp.status_code == 200
 
