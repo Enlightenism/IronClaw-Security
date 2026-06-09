@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from functools import lru_cache
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -12,7 +11,6 @@ _audit_read_dep = require_access_dependency(action="audit:read", permission="aud
 _audit_write_dep = require_access_dependency(action="audit:write", permission="audit:write")
 
 
-@lru_cache(maxsize=1)
 def _get_service() -> AuditLogService:
     return build_audit_log_service()
 
