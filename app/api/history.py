@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import logging
 from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Query
@@ -17,6 +18,8 @@ from app.services.history import get_scan_by_id, read_scan_history, update_scan_
 
 router = APIRouter()
 
+_log = logging.getLogger(__name__)
+
 _HISTORY_EVENTS_LIMIT_DEFAULT = 100
 _HISTORY_EVENTS_LIMIT_MAX = 1000
 _SCAN_HISTORY_LIMIT_DEFAULT = 20
@@ -30,6 +33,17 @@ _VERDICT_ALLOW = "allow"
 _VERDICT_BLOCK = "block"
 _DEFAULT_SAFE_SUMMARY = "No risky patterns detected."
 
+# Exception base names that indicate a repository connectivity failure.
+# Checked by name so this module never imports Supabase-specific packages.
+_REPO_CONNECTION_ERROR_NAMES = frozenset(
+    {
+        "ScanHistoryRepositoryConnectionError",
+        "RepositoryConnectionError",
+        "ConnectionError",
+        "OperationalError",
+    }
+)
+
 
 class ReviewRequest(BaseModel):
     """Request body for reviewing a quarantined scan record."""
@@ -37,6 +51,34 @@ class ReviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: Literal["approve", "reject"]
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _is_repository_connection_error(exc: Exception) -> bool:
+    """Return True if *exc* looks like a repository connectivity failure.
+
+    Checked by class-name only so this module remains free of Supabase imports.
+    """
+    return type(exc).__name__ in _REPO_CONNECTION_ERROR_NAMES
+
+
+def _handle_repository_error(exc: Exception, context: str) -> None:
+    """Re-raise *exc* as a 503 AppError if it is a known connection error,
+    otherwise re-raise the original exception unchanged.
+    """
+    if _is_repository_connection_error(exc):
+        _log.error("history: repository connection error in %s: %s", context, exc)
+        raise AppError(
+            error="repository_unavailable",
+            message="Scan history repository is temporarily unavailable",
+            status_code=503,
+            details={"context": context},
+        ) from exc
+    raise
 
 
 def _coerce_list(value: Any) -> list[Any]:
@@ -111,6 +153,11 @@ def _normalize_history_item(item: Mapping[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+
 @router.get("/events")
 def get_history_events(
     limit: int = Query(
@@ -164,7 +211,11 @@ def get_scan_history(
     ),
 ) -> ScanHistoryResponse:
     """Return recent scan history records, normalized for UI consumption."""
-    history = read_scan_history(limit=limit)
+    try:
+        history = read_scan_history(limit=limit)
+    except Exception as exc:
+        _handle_repository_error(exc, "get_scan_history")
+
     items = history.get("items", [])
     normalized_items = [_normalize_history_item(item) for item in items]
 
@@ -177,7 +228,11 @@ def get_scan_history(
 @router.get("/{scan_id}", response_model=ScanHistoryItem)
 def get_scan_record(scan_id: str) -> ScanHistoryItem:
     """Return a single normalized scan history record by its identifier."""
-    item = get_scan_by_id(scan_id)
+    try:
+        item = get_scan_by_id(scan_id)
+    except Exception as exc:
+        _handle_repository_error(exc, "get_scan_record")
+
     if not item:
         raise NotFoundError(
             message="Scan not found",
@@ -192,7 +247,11 @@ def review_scan_record(scan_id: str, request: ReviewRequest) -> ScanHistoryItem:
 
     Only scans with verdict == "quarantine" are eligible for review.
     """
-    item = get_scan_by_id(scan_id)
+    try:
+        item = get_scan_by_id(scan_id)
+    except Exception as exc:
+        _handle_repository_error(exc, "review_scan_record.get")
+
     if not item:
         raise NotFoundError(
             message="Scan not found",
@@ -221,7 +280,11 @@ def review_scan_record(scan_id: str, request: ReviewRequest) -> ScanHistoryItem:
         "summary": _build_review_summary(item.get("summary"), request.action),
     }
 
-    updated = update_scan_by_id(scan_id, updates)
+    try:
+        updated = update_scan_by_id(scan_id, updates)
+    except Exception as exc:
+        _handle_repository_error(exc, "review_scan_record.update")
+
     if not updated:
         raise NotFoundError(
             message="Scan not found",
