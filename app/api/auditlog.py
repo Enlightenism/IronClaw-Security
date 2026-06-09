@@ -2,13 +2,23 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.dependencies.auth import require_access_dependency
-from app.services.auditlogservice import AuditLogService, get_audit_log_service
+from app.services.auditlogservice import AuditLogService, build_audit_log_service
 
 _audit_read_dep = require_access_dependency(action="audit:read", permission="audit:read")
 _audit_write_dep = require_access_dependency(action="audit:write", permission="audit:write")
+
+_SERVICE_SINGLETON: AuditLogService | None = None
+
+
+def _get_service() -> AuditLogService:
+    global _SERVICE_SINGLETON
+    if _SERVICE_SINGLETON is None:
+        _SERVICE_SINGLETON = build_audit_log_service()
+    return _SERVICE_SINGLETON
+
 
 router = APIRouter(
     prefix="/api/audit",
@@ -29,7 +39,7 @@ def list_audit_events(
     verdict: str | None = Query(default=None, alias="verdict"),
     eventtype: str | None = Query(default=None, alias="eventtype"),
     limit: int = Query(default=100, ge=1, le=500),
-    service: AuditLogService = Depends(get_audit_log_service),
+    service: AuditLogService = Depends(_get_service),
 ) -> dict[str, Any]:
     filters: dict[str, Any] = {}
     if actorid:
@@ -55,7 +65,7 @@ def list_audit_events(
 )
 def create_audit_event(
     payload: dict[str, Any],
-    service: AuditLogService = Depends(get_audit_log_service),
+    service: AuditLogService = Depends(_get_service),
 ) -> dict[str, Any]:
     return service.write_log(payload)
 
@@ -69,7 +79,7 @@ def create_audit_event(
 def list_audit_events_by_actor(
     actorid: str,
     limit: int = Query(default=100, ge=1, le=500),
-    service: AuditLogService = Depends(get_audit_log_service),
+    service: AuditLogService = Depends(_get_service),
 ) -> list[dict[str, Any]]:
     return service.list_logs(actor_id=actorid, limit=limit)
 
@@ -83,7 +93,7 @@ def list_audit_events_by_actor(
 def list_audit_events_by_request(
     requestid: str,
     limit: int = Query(default=100, ge=1, le=500),
-    service: AuditLogService = Depends(get_audit_log_service),
+    service: AuditLogService = Depends(_get_service),
 ) -> list[dict[str, Any]]:
     return service.list_logs(request_id=requestid, limit=limit)
 
@@ -97,7 +107,7 @@ def list_audit_events_by_request(
 def list_audit_events_by_trace(
     traceid: str,
     limit: int = Query(default=100, ge=1, le=500),
-    service: AuditLogService = Depends(get_audit_log_service),
+    service: AuditLogService = Depends(_get_service),
 ) -> list[dict[str, Any]]:
     return service.list_logs(filters={"trace_id": traceid}, limit=limit)
 
@@ -110,12 +120,10 @@ def list_audit_events_by_trace(
 )
 def get_audit_event(
     log_id: str,
-    service: AuditLogService = Depends(get_audit_log_service),
+    service: AuditLogService = Depends(_get_service),
 ) -> dict[str, Any]:
     record = service.get_log(log_id)
     if record is None:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=404, detail="Audit event not found")
     return record
 
@@ -129,6 +137,6 @@ def get_audit_event(
 def get_audit_summary(
     organization_id: str | None = Query(default=None),
     limit: int = Query(default=1000, ge=1, le=5000),
-    service: AuditLogService = Depends(get_audit_log_service),
+    service: AuditLogService = Depends(_get_service),
 ) -> dict[str, Any]:
     return service.summarize(organization_id=organization_id, limit=limit)
