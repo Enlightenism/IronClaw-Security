@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 import pytest
 
+from app.core.auth import AuthContext, require_auth_context
 from app.core.settings import get_settings
 import app.core.unit_wallet as _unit_wallet_module
 from app.core.unit_wallet import UnitWalletRegistry
@@ -17,14 +18,45 @@ from ironclaw_sdk.exceptions import IronclawAPIError, IronclawAuthError
 from ironclaw_sdk.models import ScanRequest as SDKScanRequest
 from ironclaw_sdk.models import ScanResponse as SDKScanResponse
 
+# ---------------------------------------------------------------------------
+# Test environment baseline
+# ---------------------------------------------------------------------------
+
 os.environ["IRONCLAW_PERSISTENCE_MODE"] = "memory"
 os.environ["ENVIRONMENT"] = "test"
 os.environ["IRONCLAW_API_KEY"] = "test-api-key"
 os.environ["AUTH_REQUIRED"] = "true"
+os.environ["IRONCLAW_RATE_LIMIT_ENABLED"] = "false"
 os.environ["SUPABASE_URL"] = ""
 os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
 os.environ["SUPABASE_KEY"] = ""
 os.environ["SUPABASE_ANON_KEY"] = ""
+
+# ---------------------------------------------------------------------------
+# Shared auth context used by all override fixtures
+# ---------------------------------------------------------------------------
+
+_TEST_AUTH_CONTEXT = AuthContext(
+    api_key="test-api-key",
+    principal_type="api_key",
+    principal_id="test-principal",
+    session_id=None,
+    org_id="test-org",
+    permissions=(),
+    roles=(),
+    authenticated=True,
+    auth_source="test",
+    auth_method="api_key",
+)
+
+
+def _override_require_auth_context() -> AuthContext:
+    return _TEST_AUTH_CONTEXT
+
+
+# ---------------------------------------------------------------------------
+# Autouse fixtures
+# ---------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="function", autouse=True)
@@ -51,15 +83,28 @@ def reset_audit_state() -> Generator[None, None, None]:
     reset_audit_log()
 
 
+# ---------------------------------------------------------------------------
+# HTTP client fixtures
+# ---------------------------------------------------------------------------
+
+
 @pytest.fixture(scope="function")
 def test_client(_refresh_app_settings: None) -> Generator[TestClient, None, None]:
+    _app.dependency_overrides[require_auth_context] = _override_require_auth_context
     with TestClient(_app, raise_server_exceptions=True) as client:
         client.headers.update({"X-API-Key": os.environ["IRONCLAW_API_KEY"]})
         yield client
+    _app.dependency_overrides.pop(require_auth_context, None)
+
+
+# ---------------------------------------------------------------------------
+# SDK client fixture
+# ---------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="function")
 def sdk_client(_refresh_app_settings: None) -> Generator[IronclawClient, None, None]:
+    _app.dependency_overrides[require_auth_context] = _override_require_auth_context
     tc = TestClient(_app, raise_server_exceptions=False)
     client = IronclawClient(
         api_key=os.environ["IRONCLAW_API_KEY"],
@@ -89,6 +134,12 @@ def sdk_client(_refresh_app_settings: None) -> Generator[IronclawClient, None, N
 
     client.scan = _patched_scan
     yield client
+    _app.dependency_overrides.pop(require_auth_context, None)
+
+
+# ---------------------------------------------------------------------------
+# Mock Supabase / hunt client fixture
+# ---------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="function")
@@ -98,12 +149,29 @@ def mock_hunt_client() -> MagicMock:
     mock_response.data = []
 
     query_builder = MagicMock()
-    query_builder.select.return_value = query_builder
-    query_builder.eq.return_value = query_builder
-    query_builder.gte.return_value = query_builder
-    query_builder.lte.return_value = query_builder
-    query_builder.order.return_value = query_builder
-    query_builder.range.return_value = query_builder
+    for method in (
+        "select",
+        "eq",
+        "neq",
+        "gte",
+        "lte",
+        "gt",
+        "lt",
+        "in_",
+        "contains",
+        "order",
+        "range",
+        "limit",
+        "insert",
+        "update",
+        "upsert",
+        "delete",
+        "filter",
+        "match",
+        "not_",
+        "or_",
+    ):
+        getattr(query_builder, method).return_value = query_builder
     query_builder.execute.return_value = mock_response
 
     mock_client.table.return_value = query_builder
