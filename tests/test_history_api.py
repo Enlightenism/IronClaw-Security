@@ -2,22 +2,11 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from app.dependencies.action_execute import reset_action_execute_pipeline
-from app.main import app
 from app.orchestrator.security_audit_log import (
     initialize_security_audit_log,
     record_policy_decision,
 )
-from app.services.audit_log_service import reset_audit_log, set_audit_log
-from app.services.review_queue_service import reset_review_queue
-
-client = TestClient(app)
-
-
-def setup_function() -> None:
-    reset_review_queue()
-    reset_action_execute_pipeline()
-    reset_audit_log()
+from app.services.audit_log_service import set_audit_log
 
 
 def _seed_history_event(
@@ -31,9 +20,6 @@ def _seed_history_event(
     verdict: str = "allow",
     risk_score: int = 0,
 ) -> None:
-    """Seed a single audit event that will appear in the history API.
-    The history API is backed by the same audit log storage.
-    """
     audit_log = initialize_security_audit_log("output/security-events.jsonl")
     audit_log = record_policy_decision(
         audit_log,
@@ -56,7 +42,7 @@ def _seed_history_event(
     set_audit_log(audit_log)
 
 
-def test_history_endpoint_returns_recent_events():
+def test_history_endpoint_returns_recent_events(test_client: TestClient) -> None:
     _seed_history_event(
         actor_id="history-actor-001",
         session_id="history-session-001",
@@ -64,10 +50,7 @@ def test_history_endpoint_returns_recent_events():
         trace_id="trace-history-001",
     )
 
-    response = client.get(
-        "/history/events",
-        headers={"x-api-key": "test-api-key"},
-    )
+    response = test_client.get("/history/events")
     assert response.status_code == 200
     data = response.json()
 
@@ -81,7 +64,7 @@ def test_history_endpoint_returns_recent_events():
     assert first["trace_id"] == "trace-history-001"
 
 
-def test_history_endpoint_honors_limit():
+def test_history_endpoint_honors_limit(test_client: TestClient) -> None:
     _seed_history_event(
         actor_id="history-actor-001",
         session_id="history-session-001",
@@ -95,10 +78,7 @@ def test_history_endpoint_honors_limit():
         trace_id="trace-history-002",
     )
 
-    response = client.get(
-        "/history/events?limit=1",
-        headers={"x-api-key": "test-api-key"},
-    )
+    response = test_client.get("/history/events?limit=1")
     assert response.status_code == 200
     data = response.json()
 
@@ -107,7 +87,7 @@ def test_history_endpoint_honors_limit():
     assert data[0]["actor_id"] == "history-actor-002"
 
 
-def test_history_events_can_be_filtered_by_session():
+def test_history_events_can_be_filtered_by_session(test_client: TestClient) -> None:
     _seed_history_event(
         actor_id="history-actor-010",
         session_id="history-session-010",
@@ -121,10 +101,7 @@ def test_history_events_can_be_filtered_by_session():
         trace_id="trace-history-011",
     )
 
-    response = client.get(
-        "/history/events/by-session/history-session-011",
-        headers={"x-api-key": "test-api-key"},
-    )
+    response = test_client.get("/history/events/by-session/history-session-011")
     assert response.status_code == 200
     data = response.json()
 
@@ -133,7 +110,7 @@ def test_history_events_can_be_filtered_by_session():
     assert all(item["session_id"] == "history-session-011" for item in data)
 
 
-def test_history_events_can_be_filtered_by_actor():
+def test_history_events_can_be_filtered_by_actor(test_client: TestClient) -> None:
     _seed_history_event(
         actor_id="history-actor-filter",
         session_id="history-session-020",
@@ -147,10 +124,7 @@ def test_history_events_can_be_filtered_by_actor():
         trace_id="trace-history-021",
     )
 
-    response = client.get(
-        "/history/events/by-actor/history-actor-filter",
-        headers={"x-api-key": "test-api-key"},
-    )
+    response = test_client.get("/history/events/by-actor/history-actor-filter")
     assert response.status_code == 200
     data = response.json()
 
@@ -159,19 +133,11 @@ def test_history_events_can_be_filtered_by_actor():
     assert all(item["actor_id"] == "history-actor-filter" for item in data)
 
 
-def test_history_events_allows_access_with_api_key():
-    response = client.get(
-        "/history/events",
-        headers={"x-api-key": "test-api-key"},
-    )
-
+def test_history_events_allows_access_with_api_key(test_client: TestClient) -> None:
+    response = test_client.get("/history/events")
     assert response.status_code == 200
 
 
-def test_history_events_rejects_invalid_limit():
-    response = client.get(
-        "/history/events?limit=0",
-        headers={"x-api-key": "test-api-key"},
-    )
-
+def test_history_events_rejects_invalid_limit(test_client: TestClient) -> None:
+    response = test_client.get("/history/events?limit=0")
     assert response.status_code == 422
