@@ -14,13 +14,13 @@ os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
 os.environ["SUPABASE_KEY"] = ""
 os.environ["SUPABASE_ANON_KEY"] = ""
 
-from app.api.scan import _rate_limit_buckets
-from app.core.settings import get_settings
-from app.dependencies.action_execute import reset_action_execute_pipeline
-from app.main import app
-from app.services.audit_log_service import reset_audit_log
-from app.services.history import reset_scan_history
-from app.services.review_queue_service import reset_review_queue
+from app.api.scan import _rate_limit_buckets  # noqa: E402
+from app.core.settings import get_settings  # noqa: E402
+from app.dependencies.action_execute import reset_action_execute_pipeline  # noqa: E402
+from app.main import app  # noqa: E402
+from app.services.audit_log_service import reset_audit_log  # noqa: E402
+from app.services.history import reset_scan_history  # noqa: E402
+from app.services.review_queue_service import reset_review_queue  # noqa: E402
 
 _VALID_API_KEY = os.environ["IRONCLAW_API_KEY"]
 _AUTH_HEADERS = {"X-API-Key": _VALID_API_KEY}
@@ -61,6 +61,18 @@ def client() -> TestClient:
     c = TestClient(app, raise_server_exceptions=True)
     c.headers.update(_AUTH_HEADERS)
     return c
+
+
+@pytest.fixture()
+def bare_client() -> TestClient:
+    """Unauthenticated client — no X-API-Key header.
+
+    Cache is cleared so auth enforcement is evaluated against the current
+    env (AUTH_REQUIRED=true) rather than a stale cached value.
+    """
+    get_settings.cache_clear()
+    app.state.settings = get_settings()
+    return TestClient(app, raise_server_exceptions=False)
 
 
 # ===========================================================================
@@ -219,23 +231,39 @@ def test_scan_batch_basic_ok(client: TestClient) -> None:
 
 
 # ===========================================================================
-# /api/scan/ — auth
+# /api/scan/ — auth enforcement
 # ===========================================================================
 
 
-def test_scan_unauthenticated_rejected() -> None:
-    bare = TestClient(app, raise_server_exceptions=True)
-    response = bare.post(
+def test_scan_unauthenticated_rejected(bare_client: TestClient) -> None:
+    response = bare_client.post(
         "/api/scan/",
         json={"target_type": "prompt", "target_value": "hello"},
     )
     assert response.status_code in (401, 403)
 
 
-def test_scan_batch_unauthenticated_rejected() -> None:
-    bare = TestClient(app, raise_server_exceptions=True)
-    response = bare.post(
+def test_scan_batch_unauthenticated_rejected(bare_client: TestClient) -> None:
+    response = bare_client.post(
         "/api/scan/batch",
+        json={"items": [{"target_type": "prompt", "target_value": "hello"}]},
+    )
+    assert response.status_code in (401, 403)
+
+
+def test_scan_invalid_api_key_rejected(bare_client: TestClient) -> None:
+    response = bare_client.post(
+        "/api/scan/",
+        headers={"X-API-Key": "invalid-key"},
+        json={"target_type": "prompt", "target_value": "hello"},
+    )
+    assert response.status_code in (401, 403)
+
+
+def test_scan_batch_invalid_api_key_rejected(bare_client: TestClient) -> None:
+    response = bare_client.post(
+        "/api/scan/batch",
+        headers={"X-API-Key": "invalid-key"},
         json={"items": [{"target_type": "prompt", "target_value": "hello"}]},
     )
     assert response.status_code in (401, 403)
