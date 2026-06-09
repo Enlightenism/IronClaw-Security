@@ -6,9 +6,9 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from app.orchestrator.checkpointstore import build_checkpoint_store
-from app.orchestrator.decisiontrace import build_decision_trace_store
-from app.orchestrator.executionplan import ExecutionPlan
+from app.orchestrator.checkpoint_store import build_checkpoint_store
+from app.orchestrator.decision_trace import build_decision_trace_store
+from app.orchestrator.execution_plan import ExecutionPlan
 from app.orchestrator.executorboundary import (
     ExecutionRequestBoundary,
     ExecutionResultBoundary,
@@ -75,7 +75,7 @@ def _merge_metadata(*parts: Any) -> dict[str, Any]:
     return merged
 
 
-@dataclass(slots=True)  # slots keep these data containers lean [web:121][web:124]
+@dataclass(slots=True)
 class RuntimeSession:
     session_id: str
     request_id: str | None = None
