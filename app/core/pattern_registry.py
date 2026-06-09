@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
+import os
 import re
 import threading
 import time
@@ -437,11 +438,17 @@ def _build_db_entries(raw_patterns: list[dict[str, Any]]) -> list[_CompiledEntry
 
 
 # ---------------------------------------------------------------------------
-# DB loader
+# DB loader — skipped entirely in memory persistence mode
 # ---------------------------------------------------------------------------
 
 
+def _is_memory_mode() -> bool:
+    return os.environ.get("IRONCLAW_PERSISTENCE_MODE", "").lower() == "memory"
+
+
 def _load_db_patterns() -> list[dict[str, Any]]:
+    if _is_memory_mode():
+        return []
     try:
         from app.core.supabase_persistence import get_scan_patterns  # noqa: PLC0415
 
