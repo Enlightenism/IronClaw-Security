@@ -2,17 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Generator
 import os
-
-os.environ["IRONCLAW_PERSISTENCE_MODE"] = "memory"
-os.environ["ENVIRONMENT"] = "test"
-os.environ["IRONCLAW_API_KEY"] = "test-api-key"
-os.environ["AUTH_REQUIRED"] = "true"
-os.environ["SUPABASE_URL"] = ""
-os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
-os.environ["SUPABASE_KEY"] = ""
-os.environ["SUPABASE_ANON_KEY"] = ""
-
-
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
@@ -27,6 +16,15 @@ from ironclaw_sdk.client import IronclawClient
 from ironclaw_sdk.exceptions import IronclawAPIError, IronclawAuthError
 from ironclaw_sdk.models import ScanRequest as SDKScanRequest
 from ironclaw_sdk.models import ScanResponse as SDKScanResponse
+
+os.environ["IRONCLAW_PERSISTENCE_MODE"] = "memory"
+os.environ["ENVIRONMENT"] = "test"
+os.environ["IRONCLAW_API_KEY"] = "test-api-key"
+os.environ["AUTH_REQUIRED"] = "true"
+os.environ["SUPABASE_URL"] = ""
+os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
+os.environ["SUPABASE_KEY"] = ""
+os.environ["SUPABASE_ANON_KEY"] = ""
 
 
 @pytest.fixture(scope="function", autouse=True)

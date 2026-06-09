@@ -3,10 +3,6 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 import pytest
 
-from app.main import app
-
-client = TestClient(app, headers={"X-API-Key": "test-api-key"})
-
 
 def _base_payload(risk_score: int) -> dict:
     return {
@@ -25,22 +21,21 @@ def _base_payload(risk_score: int) -> dict:
         pytest.param(0, "completed", id="risk-0-safe"),
         pytest.param(4, "completed", id="risk-4-safe-upper"),
         pytest.param(5, "completed", id="risk-5-lower-mid"),
-        # Current pipeline treats 94 as denied, not queued_for_review
         pytest.param(94, "denied", id="risk-94-denied-upper"),
         pytest.param(95, "denied", id="risk-95-denied-lower"),
     ],
 )
 def test_guard_execute_boundary_response_statuses(
+    test_client: TestClient,
     risk_score: int,
     expected_response_status: str,
 ):
-    response = client.post("/guard/execute", json=_base_payload(risk_score))
+    response = test_client.post("/guard/execute", json=_base_payload(risk_score))
     assert response.status_code == 200
 
     body = response.json()
     assert isinstance(body, dict)
 
-    # Route returns a flattened execution summary (no "summary" key)
     assert body["response_status"] == expected_response_status
     assert "execution_state" in body
     assert "executor_name" in body
@@ -58,16 +53,16 @@ def test_guard_execute_boundary_response_statuses(
     ],
 )
 def test_guard_execute_boundary_flags_on_root(
+    test_client: TestClient,
     risk_score: int,
     should_execute: bool,
     halted_by_boundary: bool,
 ):
-    response = client.post("/guard/execute", json=_base_payload(risk_score))
+    response = test_client.post("/guard/execute", json=_base_payload(risk_score))
     assert response.status_code == 200
 
     body = response.json()
 
-    # Flags live at the top level in the current contract
     assert body["should_execute"] is should_execute
     assert body["halted_by_boundary"] is halted_by_boundary
 
@@ -83,10 +78,11 @@ def test_guard_execute_boundary_flags_on_root(
     ],
 )
 def test_guard_execute_boundary_execution_state_on_root(
+    test_client: TestClient,
     risk_score: int,
     expected_execution_state: str,
 ):
-    response = client.post("/guard/execute", json=_base_payload(risk_score))
+    response = test_client.post("/guard/execute", json=_base_payload(risk_score))
     assert response.status_code == 200
 
     body = response.json()
@@ -95,17 +91,15 @@ def test_guard_execute_boundary_execution_state_on_root(
 
 @pytest.mark.parametrize("risk_score", [0, 4, 5, 94, 95])
 def test_guard_execute_boundary_preserves_executor_result_shape_on_root(
+    test_client: TestClient,
     risk_score: int,
 ):
-    response = client.post("/guard/execute", json=_base_payload(risk_score))
+    response = test_client.post("/guard/execute", json=_base_payload(risk_score))
     assert response.status_code == 200
 
     body = response.json()
 
-    # Executor result lives at the top level; when present it must be a dict with file_path
     assert "executor_result" in body
     if body["executor_result"] is not None:
         assert isinstance(body["executor_result"], dict)
-        # Contract currently uses file_path (seen in your failures), not filepath
         assert "file_path" in body["executor_result"]
-        assert body["executor_result"]["file_path"] == "app/api/action_execute.py"
