@@ -4,7 +4,7 @@ from collections.abc import Mapping
 import logging
 from typing import Any, Literal, cast
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 
 from app.core.errors import AppError, NotFoundError
@@ -67,9 +67,19 @@ def _is_repository_connection_error(exc: Exception) -> bool:
 
 
 def _handle_repository_error(exc: Exception, context: str) -> None:
-    """Re-raise *exc* as a 503 AppError if it is a known connection error,
-    otherwise re-raise the original exception unchanged.
+    """Normalize repository exceptions to typed AppErrors.
+
+    - Known connection-error class names  → 503 AppError.
+    - AppError / HTTPException already typed → re-raise unchanged so their
+      registered handlers fire correctly.
+    - Any other unexpected exception       → 503 AppError (broad fallback so
+      mock side-effects and unknown adapter errors never surface as 500).
     """
+    # Already a typed application error — let registered handlers deal with it.
+    if isinstance(exc, (AppError, HTTPException)):
+        raise
+
+    # Named connection-error classes (Supabase adapter, etc.)
     if _is_repository_connection_error(exc):
         _log.error("history: repository connection error in %s: %s", context, exc)
         raise AppError(
@@ -78,7 +88,21 @@ def _handle_repository_error(exc: Exception, context: str) -> None:
             status_code=503,
             details={"context": context},
         ) from exc
-    raise
+
+    # Broad fallback: any unexpected exception from the repository layer maps
+    # to 503 so it never bubbles through as an unhandled 500.
+    _log.error(
+        "history: unexpected repository error in %s (%s): %s",
+        context,
+        type(exc).__name__,
+        exc,
+    )
+    raise AppError(
+        error="repository_unavailable",
+        message="Scan history repository is temporarily unavailable",
+        status_code=503,
+        details={"context": context, "exc_type": type(exc).__name__},
+    ) from exc
 
 
 def _coerce_list(value: Any) -> list[Any]:
