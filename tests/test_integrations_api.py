@@ -2,22 +2,9 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from app.core.auth import API_KEY_HEADER_NAME
-from app.main import create_app
 
-
-def _client() -> TestClient:
-    return TestClient(create_app())
-
-
-def _auth_headers() -> dict[str, str]:
-    return {API_KEY_HEADER_NAME: "test-api-key"}
-
-
-def test_integrations_list_returns_registry_items():
-    client = _client()
-
-    response = client.get("/integrations", headers=_auth_headers())
+def test_integrations_list_returns_registry_items(test_client: TestClient) -> None:
+    response = test_client.get("/integrations")
 
     assert response.status_code == 200
     payload = response.json()
@@ -29,10 +16,8 @@ def test_integrations_list_returns_registry_items():
     assert any(item["slug"] == "generic-agent" for item in payload["items"])
 
 
-def test_integrations_summary_returns_expected_shape():
-    client = _client()
-
-    response = client.get("/integrations/summary", headers=_auth_headers())
+def test_integrations_summary_returns_expected_shape(test_client: TestClient) -> None:
+    response = test_client.get("/integrations/summary")
 
     assert response.status_code == 200
     payload = response.json()
@@ -44,13 +29,8 @@ def test_integrations_summary_returns_expected_shape():
     assert "claude-code" in payload["one_command_ready_targets"]
 
 
-def test_integrations_detail_returns_known_integration():
-    client = _client()
-
-    response = client.get(
-        "/integrations/integration-claude-code",
-        headers=_auth_headers(),
-    )
+def test_integrations_detail_returns_known_integration(test_client: TestClient) -> None:
+    response = test_client.get("/integrations/integration-claude-code")
 
     assert response.status_code == 200
     payload = response.json()
@@ -61,13 +41,8 @@ def test_integrations_detail_returns_known_integration():
     assert payload["integration_type"] == "adapter"
 
 
-def test_integrations_detail_returns_404_for_unknown_id():
-    client = _client()
-
-    response = client.get(
-        "/integrations/integration-does-not-exist",
-        headers=_auth_headers(),
-    )
+def test_integrations_detail_returns_404_for_unknown_id(test_client: TestClient) -> None:
+    response = test_client.get("/integrations/integration-does-not-exist")
 
     assert response.status_code == 404
     payload = response.json()
@@ -75,14 +50,8 @@ def test_integrations_detail_returns_404_for_unknown_id():
     assert any(key in payload for key in ("detail", "message", "error"))
 
 
-def test_integrations_list_can_filter_by_platform():
-    client = _client()
-
-    response = client.get(
-        "/integrations",
-        params={"platform": "openclaw"},
-        headers=_auth_headers(),
-    )
+def test_integrations_list_can_filter_by_platform(test_client: TestClient) -> None:
+    response = test_client.get("/integrations", params={"platform": "openclaw"})
 
     assert response.status_code == 200
     payload = response.json()
@@ -91,14 +60,8 @@ def test_integrations_list_can_filter_by_platform():
     assert payload["items"][0]["slug"] == "openclaw"
 
 
-def test_integrations_list_can_filter_by_capability():
-    client = _client()
-
-    response = client.get(
-        "/integrations",
-        params={"capability": "groq_assist"},
-        headers=_auth_headers(),
-    )
+def test_integrations_list_can_filter_by_capability(test_client: TestClient) -> None:
+    response = test_client.get("/integrations", params={"capability": "groq_assist"})
 
     assert response.status_code == 200
     payload = response.json()
