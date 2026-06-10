@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import logging
 import time
-from typing import Any
+from typing import Any, cast
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
@@ -50,11 +50,6 @@ _EVENT_HUNT_COMPLETED = "threat.hunt.completed"
 
 
 def _get_optional_notification_engine():
-    """
-    Returns a NotificationEngine instance if available, else None.
-    Injected as an optional dependency so routes degrade gracefully
-    when the notification subsystem is not yet initialised.
-    """
     try:
         from app.services.notification_engine import get_notification_engine
 
@@ -134,12 +129,6 @@ def _persist_detection_result(result: DetectionResult) -> None:
 
 
 def _dispatch_detection_webhook(result: DetectionResult, tenant_id: str) -> None:
-    """
-    Fire-and-forget webhook dispatch for detection verdict events.
-    tenant_id is injected into the payload body so the Edge Function
-    and all downstream fan-out consumers can route per-tenant without
-    relying on the top-level dispatch_verdict_to_edge wrapper alone.
-    """
     try:
         event_type = _EVENT_THREAT_BLOCKED if result.verdict == DetectionVerdict.BLOCK else _EVENT_THREAT_DETECTED
         payload: dict[str, Any] = {
@@ -274,9 +263,6 @@ async def detect_threat(
     result = engine.run(effective_request)
     _persist_detection_result(result)
 
-    # Resolve tenant_id — prefer org_id, fall back to auth.tenant_id.
-    # Both must be checked for None/empty before dispatching so we never
-    # fire a webhook with an empty tenant_id that would fail Edge fan-out.
     tenant_id: str = (effective_org_id or auth.tenant_id or "").strip()
     if tenant_id:
         background_tasks.add_task(_dispatch_detection_webhook, result, tenant_id)
@@ -710,11 +696,12 @@ async def list_correlations(
         corr_engine = get_correlation_engine()
         list_signals = getattr(corr_engine, "list_signals", None)
         if callable(list_signals):
-            return list_signals(
+            raw = list_signals(
                 org_id=effective_org_id,
                 pattern_type=pattern_type,
                 limit=limit,
             )
+            return cast(list[CorrelationSignal], raw)
         return []
     except Exception as exc:
         logger.error("threat_detection.list_correlations error: %s", exc)
@@ -723,7 +710,6 @@ async def list_correlations(
 
 # ---------------------------------------------------------------------------
 # POST /threat/webhooks/retry  — DEPRECATED (410 Gone)
-# Canonical endpoint: POST /webhooks/deliveries/{delivery_id}/retry
 # ---------------------------------------------------------------------------
 
 
@@ -749,7 +735,6 @@ async def retry_webhook_delivery_deprecated(
 
 # ---------------------------------------------------------------------------
 # GET /threat/webhooks/retryable  — DEPRECATED (410 Gone)
-# Canonical endpoint: GET /webhooks/deliveries/retryable
 # ---------------------------------------------------------------------------
 
 
