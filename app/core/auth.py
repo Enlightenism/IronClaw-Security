@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import hmac
 import logging
-from typing import Any
+from typing import Any, cast
 
 from fastapi import Depends, Request, status
 from fastapi.security import APIKeyHeader
@@ -46,8 +46,6 @@ class AuthContext:
 
 
 def _get_settings(request: Request) -> Any | None:
-    # Prefer request.app.state.settings so test fixtures can inject a fresh
-    # Settings instance without fighting the lru_cache on get_settings().
     try:
         state_settings = getattr(request.app.state, "settings", None)
         if state_settings is not None:
@@ -98,7 +96,6 @@ def get_secret_key(request: Request) -> str | None:
     return None
 
 
-# Internal alias — kept so any existing internal callers resolve correctly.
 _get_secret_key = get_secret_key
 
 
@@ -112,7 +109,6 @@ def get_jwt_secret(request: Request) -> str | None:
     return None
 
 
-# Internal alias — kept so any existing internal callers resolve correctly.
 _get_jwt_secret = get_jwt_secret
 
 
@@ -122,7 +118,7 @@ def _touch_record_if_possible(record: APIKeyRecord) -> APIKeyRecord:
         return record
 
     try:
-        updated = touch()
+        updated = cast(APIKeyRecord | None, touch())
     except Exception:
         return record
 
