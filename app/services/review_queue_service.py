@@ -145,4 +145,4 @@ def count_reviews_by_priority() -> dict[str, int]:
 def _coerce_review_item(item: ReviewItem | dict[str, Any]) -> dict[str, Any]:
     if hasattr(item, "to_dict"):
         return item.to_dict()
-    return dict(item)
+    return {(k.decode() if isinstance(k, bytes) else k): (v.decode() if isinstance(v, bytes) else v) for k, v in dict(item).items()}
