@@ -879,7 +879,6 @@ _LOGIN_HTML = textwrap.dedent(
           x: rand(0, W),
           y: rand(0, H),
           r: rand(0.4, type < 0.6 ? 1.2 : 2.2),
-          // gold or platinum or sky
           hue: type < 0.55 ? rand(42, 52) : type < 0.8 ? rand(195, 215) : rand(0, 360),
           sat: type < 0.55 ? rand(80, 100) : type < 0.8 ? rand(5, 20) : rand(60, 90),
           lum: type < 0.55 ? rand(65, 85) : type < 0.8 ? rand(75, 90) : rand(55, 75),
@@ -916,7 +915,6 @@ _LOGIN_HTML = textwrap.dedent(
           ctx.save();
           ctx.globalAlpha = fadeAlpha;
 
-          // Draw star shape for larger particles
           if (p.r > 1.5) {
             var spikes = 4, outerR = p.r, innerR = p.r * 0.4;
             ctx.fillStyle = 'hsl(' + p.hue + ',' + p.sat + '%,' + p.lum + '%)';
@@ -930,7 +928,6 @@ _LOGIN_HTML = textwrap.dedent(
             ctx.closePath();
             ctx.fill();
 
-            // Glow for sparkle
             ctx.shadowBlur = 8;
             ctx.shadowColor = 'hsl(' + p.hue + ',' + p.sat + '%,' + p.lum + '%)';
             ctx.fill();
@@ -948,7 +945,6 @@ _LOGIN_HTML = textwrap.dedent(
         requestAnimationFrame(drawParticles);
       }
 
-      // Only run particle animation if not reduced motion
       var prefersReduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       if (!prefersReduced) {
         requestAnimationFrame(drawParticles);
@@ -1015,14 +1011,13 @@ _LOGIN_HTML = textwrap.dedent(
 async def login_get(
     request: Request,
     current_user: OptionalUser,
-) -> HTMLResponse:
+) -> HTMLResponse | RedirectResponse:
     """
     Render the login page.
     If the user is already authenticated, redirect straight to /dashboard.
     """
     if current_user is not None:
         next_path = request.query_params.get("next", "/dashboard")
-        # Sanitise next — only allow relative paths inside the app
         if not next_path.startswith("/") or next_path.startswith("//"):
             next_path = "/dashboard"
         return RedirectResponse(url=next_path, status_code=status.HTTP_303_SEE_OTHER)
@@ -1043,7 +1038,6 @@ async def login_post(
     On success: write session cookie and redirect to ?next or /dashboard.
     On failure: re-render form with an error message.
     """
-    # Sanitise redirect target — only internal relative paths
     next_path = next.strip() if next.strip() else "/dashboard"
     if not next_path.startswith("/") or next_path.startswith("//"):
         next_path = "/dashboard"
@@ -1094,7 +1088,6 @@ def _render_login_html(*, error: str | None, next_value: str) -> str:
     else:
         error_block = ""
 
-    # Safe next query string for the form action
     next_query = f"?next={_escape_html(next_value)}" if next_value and next_value != "/dashboard" else ""
 
     return _LOGIN_HTML.replace("{ERROR_BLOCK}", error_block).replace("{NEXT_QUERY}", next_query).replace("{NEXT_VALUE}", _escape_html(next_value))
