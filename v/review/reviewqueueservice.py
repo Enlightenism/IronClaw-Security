@@ -303,7 +303,7 @@ class ReviewQueueService:
     def _remove_from_pending(self, review_id: str) -> None:
         self._pending_order = deque(existing_id for existing_id in self._pending_order if existing_id != review_id)
 
-    def _sort_key(self, item: ReviewQueueItem) -> tuple[int, str, str]:
+    def _sort_key(self, item: ReviewQueueItem) -> tuple[int, int, str]:
         priority_rank = {
             ReviewPriority.CRITICAL: 0,
             ReviewPriority.HIGH: 1,
