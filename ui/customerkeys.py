@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 
 from api.customerkeys import (
+    CustomerApiKeyCreatedResponse,
     CustomerApiKeyCreateRequest,
     CustomerApiKeyListResponse,
     CustomerApiKeyResponse,
@@ -384,8 +385,8 @@ def customer_keys_list() -> CustomerApiKeyListResponse:
     return list_customer_keys()
 
 
-@router.post("/create", response_model=CustomerApiKeyResponse)
-def customer_keys_create(body: CustomerApiKeyCreateRequest) -> CustomerApiKeyResponse:
+@router.post("/create", response_model=CustomerApiKeyCreatedResponse)
+def customer_keys_create(body: CustomerApiKeyCreateRequest) -> CustomerApiKeyCreatedResponse:
     return create_customer_key(body)
 
 
