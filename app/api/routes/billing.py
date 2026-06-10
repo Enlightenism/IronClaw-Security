@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-import math
 from typing import Any
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from app.core.auth import require_api_key
-from app.core.unit_wallet import UNIT_PACKAGE_CATALOG, get_unit_wallet_registry
+from app.core.unit_wallet import (
+    TOKEN_CHUNK_SIZE,
+    UNIT_PACKAGE_CATALOG,
+    InsufficientUnitsError,
+    get_unit_wallet_registry,
+    units_required_for_tokens,
+)
 
 router = APIRouter(
     prefix="/billing",
@@ -18,35 +24,18 @@ router = APIRouter(
 
 # ---------------------------------------------------------------------------
 # Token-to-unit coverage constants
+# TOKEN_CHUNK_SIZE and units_required_for_tokens are imported from
+# app.core.unit_wallet — that module is the single source of truth.
 # Each protection unit covers one inspection window of up to TOKEN_CHUNK_SIZE
-# tokens. Requests exceeding that boundary consume one additional unit per
-# additional chunk (ceiling division).
+# (25,000) tokens. Scans are UNLIMITED — units auto-deduct in 25,000-token
+# chunks with no ceiling. Partial chunks consume a full unit (ceiling division).
 # ---------------------------------------------------------------------------
 
-TOKEN_CHUNK_SIZE: int = 25_000  # tokens covered per unit
-
-
-def units_required_for_tokens(token_count: int) -> int:
-    """Return the number of protection units required to cover *token_count* tokens.
-
-    Coverage model: 1 unit = 1 inspection window of up to TOKEN_CHUNK_SIZE tokens.
-    Any partial chunk above the boundary consumes a full additional unit.
-
-    Examples:
-        1 token       → 1 unit
-        25_000 tokens → 1 unit
-        25_001 tokens → 2 units
-        50_000 tokens → 2 units
-        50_001 tokens → 3 units
-    """
-    if token_count <= 0:
-        return 0
-    return math.ceil(token_count / TOKEN_CHUNK_SIZE)
-
+_PURCHASES_MAX_SIZE: int = 1_000
 
 # ---------------------------------------------------------------------------
 # Canonical package catalog — single source of truth is UNIT_PACKAGE_CATALOG
-# from unit_wallet.py.  The local PACKAGE_CATALOG below is derived from it
+# from unit_wallet.py. The local PACKAGE_CATALOG below is derived from it
 # at import time and must never be maintained separately.
 #
 # Package IDs and pricing (authoritative):
@@ -217,8 +206,53 @@ class BillingLedgerResponse(BaseModel):
     entries: list[WalletLedgerEntryView] = Field(default_factory=list)
 
 
+class WalletDebitRequest(BaseModel):
+    units: int | None = Field(default=None, ge=1)
+    token_count: int | None = Field(default=None, ge=1)
+    reason: str = Field(default="api_debit", min_length=1, max_length=120)
+    reference_id: str | None = Field(default=None, max_length=255)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WalletDebitResponse(BaseModel):
+    status: str
+    service: str
+    timestamp: str
+    owner_key: str
+    units_debited: int
+    token_count: int | None
+    wallet: WalletBalanceView
+
+
+class WalletRefundRequest(BaseModel):
+    units: int = Field(ge=1)
+    reason: str = Field(default="api_refund", min_length=1, max_length=120)
+    reference_id: str | None = Field(default=None, max_length=255)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WalletRefundResponse(BaseModel):
+    status: str
+    service: str
+    timestamp: str
+    owner_key: str
+    units_refunded: int
+    wallet: WalletBalanceView
+
+
+class InsufficientUnitsErrorResponse(BaseModel):
+    status: str
+    error: str
+    owner_key: str
+    have: int
+    need: int
+    tokens_per_unit: int
+    timestamp: str
+
+
 # ---------------------------------------------------------------------------
 # In-process purchase log (audit trail supplement — not a database substitute)
+# Capped at _PURCHASES_MAX_SIZE to prevent unbounded memory growth.
 # ---------------------------------------------------------------------------
 
 _PURCHASES: list[BillingPackagePurchaseView] = []
@@ -230,6 +264,10 @@ _PURCHASES: list[BillingPackagePurchaseView] = []
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _new_purchase_id() -> str:
+    return f"purch_{uuid.uuid4().hex[:16]}"
 
 
 def _package_to_view(pkg_id: str, pkg: dict[str, Any]) -> BillingPackageView:
@@ -260,7 +298,7 @@ def _require_known_package(package_id: str) -> tuple[str, dict[str, Any]]:
 
 def _build_unit_policy() -> UnitPolicyView:
     return UnitPolicyView(
-        unit_definition=(f"1 protection unit = 1 IronClaw inspection window covering up to " f"{TOKEN_CHUNK_SIZE:,} tokens. Requests exceeding that boundary " f"consume one additional unit per {TOKEN_CHUNK_SIZE:,}-token chunk."),
+        unit_definition=(f"1 protection unit = 1 IronClaw inspection window covering up to " f"{TOKEN_CHUNK_SIZE:,} tokens. Requests exceeding that boundary " f"consume one additional unit per {TOKEN_CHUNK_SIZE:,}-token chunk. " f"Scans are unlimited — units auto-deduct with no ceiling."),
         token_chunk_size=TOKEN_CHUNK_SIZE,
         delivery_model="All packages are prepaid unit bundles with no recurring subscription requirement.",
         buyer_positioning=("Customers are buying protected AI usage, not raw API calls. Each unit funds layered " "security checks around prompts, tool activity, returned content, and release decisions."),
@@ -291,6 +329,7 @@ def _build_unit_policy() -> UnitPolicyView:
             "Prompt-injection attacks target AI systems specifically because they can redirect tools, leak data, or manipulate autonomous workflows.",
             "IronClaw protection units are designed to add security coverage around every stage where hostile content can enter or spread.",
             f"Each unit covers up to {TOKEN_CHUNK_SIZE:,} tokens; larger payloads automatically consume the correct number of units via ceiling division.",
+            "Scans have no upper token ceiling — units simply deduct in 25,000-token chunks for any payload size.",
         ],
     )
 
@@ -319,6 +358,44 @@ def _ledger_entry_to_view(entry: Any) -> WalletLedgerEntryView:
         created_at=entry.created_at.isoformat().replace("+00:00", "Z"),
         metadata=entry.metadata,
     )
+
+
+def _insufficient_units_response(
+    owner_key: str,
+    exc: InsufficientUnitsError,
+) -> HTTPException:
+    """
+    Build a 402 Payment Required HTTPException for InsufficientUnitsError.
+    Returns a structured body with have/need/owner_key so callers can
+    trigger a top-up flow without parsing an error string.
+    """
+    return HTTPException(
+        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+        detail={
+            "status": "insufficient_units",
+            "error": str(exc),
+            "owner_key": owner_key,
+            "have": getattr(exc, "args", [None])[0] if False else _parse_insufficient_have(exc),
+            "need": _parse_insufficient_need(exc),
+            "tokens_per_unit": TOKEN_CHUNK_SIZE,
+            "timestamp": _utc_now_iso(),
+        },
+    )
+
+
+def _parse_insufficient_have(exc: InsufficientUnitsError) -> int:
+    """
+    InsufficientUnitsError from unit_wallet raises with message only.
+    We parse wallet state from the registry at raise time, so the route
+    that catches the error must supply have/need from its own context.
+    This helper exists so the 402 body is always structurally complete.
+    Returns -1 when the value is not derivable from the exception alone.
+    """
+    return -1
+
+
+def _parse_insufficient_need(exc: InsufficientUnitsError) -> int:
+    return -1
 
 
 # ---------------------------------------------------------------------------
@@ -351,7 +428,7 @@ def purchase_billing_package(
     token_coverage = granted_units * TOKEN_CHUNK_SIZE
 
     purchase = BillingPackagePurchaseView(
-        purchase_id=f"purch_{len(_PURCHASES) + 1}",
+        purchase_id=_new_purchase_id(),
         package_id=package_id,
         package_name=str(package["name"]),
         buyer_name=payload.buyer_name.strip(),
@@ -363,23 +440,47 @@ def purchase_billing_package(
         created_at=_utc_now_iso(),
         metadata=payload.metadata,
     )
+
+    global _PURCHASES
     _PURCHASES.append(purchase)
+    if len(_PURCHASES) > _PURCHASES_MAX_SIZE:
+        _PURCHASES = _PURCHASES[-_PURCHASES_MAX_SIZE:]
 
     wallet_registry = get_unit_wallet_registry()
-    wallet = wallet_registry.credit_units(
-        owner_key=purchase.buyer_email,
-        units=granted_units,
-        metadata={
-            "source": "billing_package_purchase",
-            "purchase_id": purchase.purchase_id,
-            "package_id": package_id,
-            "package_name": purchase.package_name,
-            "buyer_name": purchase.buyer_name,
-            "token_coverage": token_coverage,
-            "tokens_per_unit": TOKEN_CHUNK_SIZE,
-            **payload.metadata,
-        },
-    )
+
+    try:
+        wallet = wallet_registry.credit_units(
+            owner_key=purchase.buyer_email,
+            units=granted_units,
+            metadata={
+                "source": "billing_package_purchase",
+                "purchase_id": purchase.purchase_id,
+                "package_id": package_id,
+                "package_name": purchase.package_name,
+                "buyer_name": purchase.buyer_name,
+                "token_coverage": token_coverage,
+                "tokens_per_unit": TOKEN_CHUNK_SIZE,
+                **payload.metadata,
+            },
+        )
+    except InsufficientUnitsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "status": "insufficient_units",
+                "error": str(exc),
+                "owner_key": purchase.buyer_email,
+                "have": -1,
+                "need": granted_units,
+                "tokens_per_unit": TOKEN_CHUNK_SIZE,
+                "timestamp": _utc_now_iso(),
+            },
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Wallet credit failed: {exc}",
+        ) from exc
 
     return BillingPackagePurchaseResponse(
         status="ok",
@@ -402,6 +503,132 @@ def get_billing_wallet_balance(owner_key: str) -> BillingWalletBalanceResponse:
         status="ok",
         service="IronClaw-Security",
         timestamp=_utc_now_iso(),
+        wallet=_wallet_to_view(wallet),
+    )
+
+
+@router.post(
+    "/wallet/{owner_key}/debit",
+    response_model=WalletDebitResponse,
+    status_code=status.HTTP_200_OK,
+)
+def debit_billing_wallet(
+    owner_key: str,
+    payload: WalletDebitRequest,
+) -> WalletDebitResponse:
+    """
+    Debit protection units from a wallet.
+
+    Supply either:
+    - ``units``: an exact unit count to debit, OR
+    - ``token_count``: a raw token count; units are computed via ceiling division
+      against TOKEN_CHUNK_SIZE (25,000). Any partial chunk consumes a full unit.
+
+    Returns 402 Payment Required with structured {have, need, owner_key} body
+    if the wallet has insufficient balance. The calling pipeline may catch the
+    402 to trigger an auto-purchase / top-up flow before retrying the scan.
+    Scans themselves have no token ceiling — only wallet balance constrains them.
+    """
+    if payload.units is None and payload.token_count is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Provide either 'units' or 'token_count'.",
+        )
+
+    wallet_registry = get_unit_wallet_registry()
+    normalized_owner = owner_key.strip().lower()
+
+    # Determine units to debit
+    if payload.token_count is not None:
+        units_to_debit = units_required_for_tokens(payload.token_count)
+    else:
+        units_to_debit = payload.units  # type: ignore[assignment]
+
+    debit_metadata: dict[str, Any] = {
+        "reason": payload.reason,
+        "tokens_per_unit": TOKEN_CHUNK_SIZE,
+        **({"token_count": payload.token_count} if payload.token_count is not None else {}),
+        **({"reference_id": payload.reference_id} if payload.reference_id else {}),
+        **payload.metadata,
+    }
+
+    # Pre-fetch balance for 402 body accuracy
+    wallet_before = wallet_registry.get_wallet(normalized_owner)
+    have = wallet_before.balance_units if wallet_before is not None else 0
+
+    try:
+        wallet = wallet_registry.debit_units(
+            owner_key=normalized_owner,
+            units=units_to_debit,
+            metadata=debit_metadata,
+        )
+    except InsufficientUnitsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "status": "insufficient_units",
+                "error": str(exc),
+                "owner_key": normalized_owner,
+                "have": have,
+                "need": units_to_debit,
+                "tokens_per_unit": TOKEN_CHUNK_SIZE,
+                "timestamp": _utc_now_iso(),
+            },
+        ) from exc
+
+    return WalletDebitResponse(
+        status="ok",
+        service="IronClaw-Security",
+        timestamp=_utc_now_iso(),
+        owner_key=normalized_owner,
+        units_debited=units_to_debit,
+        token_count=payload.token_count,
+        wallet=_wallet_to_view(wallet),
+    )
+
+
+@router.post(
+    "/wallet/{owner_key}/refund",
+    response_model=WalletRefundResponse,
+    status_code=status.HTTP_200_OK,
+)
+def refund_billing_wallet(
+    owner_key: str,
+    payload: WalletRefundRequest,
+) -> WalletRefundResponse:
+    """
+    Refund protection units back to a wallet.
+    Tracked separately from purchases in the ledger (entry_type=refund).
+    Used for policy reversals, scan cancellations, or manual adjustments.
+    """
+    wallet_registry = get_unit_wallet_registry()
+    normalized_owner = owner_key.strip().lower()
+
+    refund_metadata: dict[str, Any] = {
+        "reason": payload.reason,
+        "tokens_per_unit": TOKEN_CHUNK_SIZE,
+        **({"reference_id": payload.reference_id} if payload.reference_id else {}),
+        **payload.metadata,
+    }
+
+    try:
+        wallet = wallet_registry.refund_units(
+            owner_key=normalized_owner,
+            units=payload.units,
+            metadata=refund_metadata,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Wallet refund failed: {exc}",
+        ) from exc
+
+    return WalletRefundResponse(
+        status="ok",
+        service="IronClaw-Security",
+        timestamp=_utc_now_iso(),
+        owner_key=normalized_owner,
+        units_refunded=payload.units,
         wallet=_wallet_to_view(wallet),
     )
 
