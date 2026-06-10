@@ -80,7 +80,6 @@ const Dashboard = () => {
           toast.success(
             `Payment confirmed — ${status.units.toLocaleString()} units added!`,
           );
-          // Re-fetch dashboard to sync wallet balance from Supabase source of truth
           await fetchDashboard();
           return;
         }
@@ -109,9 +108,9 @@ const Dashboard = () => {
   }, [location.search, pollPayment, navigate]);
 
   const handlePurchase = async (packageId) => {
-    // Guard: only accept known tier IDs — base tier is now tier_10k
-    const validTiers = ["tier_10k", "tier_50k", "tier_100k"];
-    if (!validTiers.includes(packageId)) {
+    // Guard: only accept known package IDs — must match WalletCard TIERS catalogue
+    const validPackages = ["pkg_5000", "pkg_25000", "pkg_60000"];
+    if (!validPackages.includes(packageId)) {
       toast.error("Invalid package selected.");
       return;
     }
@@ -146,6 +145,7 @@ const Dashboard = () => {
       <nav className="sticky top-0 z-40 border-b border-white/10 bg-[#050607]/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <button
+            type="button"
             onClick={() => navigate("/")}
             className="flex items-center gap-2.5"
             data-testid="dashboard-logo"
@@ -181,6 +181,7 @@ const Dashboard = () => {
               {user?.email}
             </span>
             <button
+              type="button"
               onClick={handleSignOut}
               data-testid="signout-btn"
               className="flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2 text-sm text-white/90 transition hover:border-[#EF4444]/50 hover:text-[#EF4444]"
@@ -203,6 +204,7 @@ const Dashboard = () => {
             </p>
           </div>
           <button
+            type="button"
             onClick={fetchDashboard}
             data-testid="refresh-btn"
             className="hidden items-center gap-2 rounded-lg border border-white/15 px-4 py-2 text-sm text-[#BFC1C2] transition hover:text-white sm:flex"
