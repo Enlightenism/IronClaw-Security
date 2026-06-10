@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
+import threading
 from typing import Any
 
 from app.core.supabase import get_supabase_service_client
@@ -9,10 +11,7 @@ from app.schemas.threat_detection import (
     ThreatFeedSourceEnum,
     ThreatSeverityLevel,
 )
-
-logger = logging.getLogger(__name__)
-
-from app.services.threat_feed_ingestion import (  # noqa: E402
+from app.services.threat_feed_ingestion import (
     FeedIngestResult,
     IOCFilterRequest,
     IOCRecord,
@@ -21,11 +20,18 @@ from app.services.threat_feed_ingestion import (  # noqa: E402
     _utcnow_iso,
 )
 
+logger = logging.getLogger(__name__)
+
+
 _MAX_BULK_UPSERT_BATCH = 500
 _TTL_PRUNE_BATCH = 1000
 
+
 _TABLE_IOCS = "ioc_records"
 _TABLE_INGEST_LOG = "feed_ingest_log"
+
+
+_STORE_LOCK = threading.Lock()
 
 
 def _get_client():
@@ -58,19 +64,15 @@ def _record_to_row(record: IOCRecord) -> dict[str, Any]:
 def _row_to_record(row: dict[str, Any]) -> IOCRecord:
     tags = row.get("tags") or []
     if isinstance(tags, str):
-        import json as _json
-
         try:
-            tags = _json.loads(tags)
+            tags = json.loads(tags)
         except Exception:
             tags = [t.strip() for t in tags.split(",") if t.strip()]
 
     extra = row.get("extra") or {}
     if isinstance(extra, str):
-        import json as _json
-
         try:
-            extra = _json.loads(extra)
+            extra = json.loads(extra)
         except Exception:
             extra = {}
 
@@ -117,10 +119,8 @@ def _parse_tags(raw: Any) -> list[str]:
     if isinstance(raw, list):
         return [str(t) for t in raw]
     if isinstance(raw, str):
-        import json as _j
-
         try:
-            parsed = _j.loads(raw)
+            parsed = json.loads(raw)
             if isinstance(parsed, list):
                 return [str(t) for t in parsed]
         except Exception:
@@ -133,10 +133,8 @@ def _parse_extra(raw: Any) -> dict[str, Any]:
     if isinstance(raw, dict):
         return raw
     if isinstance(raw, str):
-        import json as _j
-
         try:
-            parsed = _j.loads(raw)
+            parsed = json.loads(raw)
             if isinstance(parsed, dict):
                 return parsed
         except Exception:
@@ -159,6 +157,27 @@ def _merge_record_update(existing: dict[str, Any], record: IOCRecord) -> dict[st
         "active": True,
         "feed_ingest_id": record.feed_ingest_id,
         "extra": merged_extra,
+    }
+
+
+def _overwrite_record_update(record: IOCRecord) -> dict[str, Any]:
+    return {
+        "ioc_type": record.ioc_type,
+        "value": record.value,
+        "source": record.source,
+        "severity": record.severity,
+        "confidence": float(record.confidence),
+        "tags": list(record.tags),
+        "description": record.description,
+        "org_id": record.org_id,
+        "mitre_technique_id": record.mitre_technique_id,
+        "mitre_tactic": record.mitre_tactic,
+        "cve_id": record.cve_id,
+        "last_seen": record.last_seen,
+        "expiry": record.expiry,
+        "active": record.active,
+        "feed_ingest_id": record.feed_ingest_id,
+        "extra": record.extra,
     }
 
 
@@ -231,7 +250,7 @@ class IOCStore:
                 for record in batch:
                     if record.ioc_id in existing_map:
                         if overwrite:
-                            rows_to_update.append((record.ioc_id, _record_to_row(record)))
+                            rows_to_update.append((record.ioc_id, _overwrite_record_update(record)))
                         else:
                             rows_to_update.append((record.ioc_id, _merge_record_update(existing_map[record.ioc_id], record)))
                         updated += 1
@@ -628,9 +647,10 @@ _IOC_STORE: IOCStore | None = None
 
 def get_ioc_store() -> IOCStore:
     global _IOC_STORE  # noqa: PLW0603
-    if _IOC_STORE is None:
-        _IOC_STORE = IOCStore()
-    return _IOC_STORE
+    with _STORE_LOCK:
+        if _IOC_STORE is None:
+            _IOC_STORE = IOCStore()
+        return _IOC_STORE
 
 
 IOC_STORE_MIGRATION_SQL = """
@@ -659,7 +679,6 @@ CREATE TABLE IF NOT EXISTS ioc_records (
 );
 
 
-
 CREATE INDEX IF NOT EXISTS idx_ioc_records_value       ON ioc_records (value);
 CREATE INDEX IF NOT EXISTS idx_ioc_records_ioc_type    ON ioc_records (ioc_type);
 CREATE INDEX IF NOT EXISTS idx_ioc_records_source      ON ioc_records (source);
@@ -671,7 +690,6 @@ CREATE INDEX IF NOT EXISTS idx_ioc_records_cve_id      ON ioc_records (cve_id);
 CREATE INDEX IF NOT EXISTS idx_ioc_records_expiry      ON ioc_records (expiry) WHERE expiry IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_ioc_records_ingest_id   ON ioc_records (feed_ingest_id);
 CREATE INDEX IF NOT EXISTS idx_ioc_records_tags        ON ioc_records USING GIN (tags);
-
 
 
 -- ============================================================
@@ -693,7 +711,6 @@ CREATE TABLE IF NOT EXISTS feed_ingest_log (
 );
 
 
-
 CREATE INDEX IF NOT EXISTS idx_feed_ingest_log_source     ON feed_ingest_log (source);
 CREATE INDEX IF NOT EXISTS idx_feed_ingest_log_status     ON feed_ingest_log (status);
 CREATE INDEX IF NOT EXISTS idx_feed_ingest_log_started_at ON feed_ingest_log (started_at DESC);
@@ -703,6 +720,7 @@ CREATE INDEX IF NOT EXISTS idx_feed_ingest_log_org_id     ON feed_ingest_log (or
 
 __all__ = [
     "IOC_STORE_MIGRATION_SQL",
+    "IOCFilterRequest",
     "IOCStore",
     "_get_client",
     "get_ioc_store",
