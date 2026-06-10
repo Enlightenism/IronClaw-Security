@@ -27,6 +27,15 @@ PromptGuardCategory = Literal[
 ]
 PromptGuardAction = Literal["allow", "warn", "block", "quarantine"]
 
+# Maps every GroqMode value to the closest PolicyMode equivalent.
+# "strict" has no direct PolicyMode counterpart — "enforce" is the correct semantic mapping.
+_GROQ_MODE_TO_POLICY_MODE: dict[GroqMode, PolicyMode] = {
+    "disabled": "disabled",
+    "assist": "assist",
+    "enforce": "enforce",
+    "strict": "enforce",
+}
+
 
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
@@ -126,7 +135,7 @@ class PromptGuardPolicyResponse(BaseModel):
 
 
 def _coerce_policy_mode(mode: GroqMode) -> PolicyMode:
-    return mode
+    return _GROQ_MODE_TO_POLICY_MODE.get(mode, "enforce")
 
 
 def _health_from_mode_and_rules(
