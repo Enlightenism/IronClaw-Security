@@ -27,7 +27,6 @@ const TIERS = [
     name: "Team",
     units: "25,000",
     price: "$90",
-    popular: true,
     tokensPerUnit: TOKENS_PER_UNIT,
   },
   {
@@ -35,9 +34,40 @@ const TIERS = [
     name: "Enterprise",
     units: "60,000",
     price: "$180",
+    bestDeal: true,
     tokensPerUnit: TOKENS_PER_UNIT,
   },
 ];
+
+// ---------------------------------------------------------------------------
+// EnterpriseBadge — floats above the Enterprise card, never inside it.
+// Gold shimmer pulse matching IronClaw brand style.
+// ---------------------------------------------------------------------------
+const EnterpriseBadge = () => (
+  <div className="flex justify-center">
+    <span
+      className="relative inline-flex items-center gap-1 rounded-full border border-[#FFD700]/50 bg-gradient-to-r from-[#C9A84C] to-[#FFD700] px-3 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-black shadow-[0_0_12px_rgba(255,215,0,0.45)]"
+      style={{ animation: "ic-badge-pulse 2.4s ease-in-out infinite" }}
+    >
+      <span
+        className="absolute inset-0 rounded-full"
+        style={{ animation: "ic-badge-shimmer 2.4s ease-in-out infinite" }}
+      />
+      ★ Best Deal
+    </span>
+    <style>{`
+      @keyframes ic-badge-pulse {
+        0%, 100% { box-shadow: 0 0 10px rgba(255,215,0,0.40); }
+        50%       { box-shadow: 0 0 22px rgba(255,215,0,0.75), 0 0 6px rgba(255,215,0,0.30); }
+      }
+      @keyframes ic-badge-shimmer {
+        0%   { background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.18) 50%, transparent 100%); background-size: 200% 100%; background-position: -100% 0; }
+        60%  { background-position: 200% 0; }
+        100% { background-position: 200% 0; }
+      }
+    `}</style>
+  </div>
+);
 
 const WalletCard = ({
   balance = 0,
@@ -80,36 +110,41 @@ const WalletCard = ({
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {TIERS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => onPurchase(t.id)}
-            disabled={!!purchasingId}
-            data-testid={`purchase-${t.id}`}
-            className="btn-shimmer relative flex flex-col items-center justify-center rounded-xl border border-[#E5E4E2]/25 bg-white/5 px-3 py-4 text-center transition hover:border-[#FFD700]/60 hover:bg-white/[0.08] disabled:opacity-60"
-          >
-            {t.popular && (
-              <span className="absolute -top-2 rounded-full bg-gradient-to-r from-[#C9A84C] to-[#FFD700] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-black">
-                Best value
-              </span>
+          <div key={t.id} className="flex flex-col">
+            {t.bestDeal ? (
+              <div className="mb-1.5">
+                <EnterpriseBadge />
+              </div>
+            ) : (
+              /* Reserve same vertical space so all three cards align */
+              <div className="mb-1.5 h-[22px]" />
             )}
-            <span className="font-tech text-[11px] font-semibold uppercase tracking-widest text-[#BFC1C2]">
-              {t.name}
-            </span>
-            <span className="font-tech text-base font-bold text-white">
-              {t.units}
-            </span>
-            <span className="text-[11px] text-[#BFC1C2]">units</span>
-            <span className="mt-1 text-[10px] text-[#737373]">
-              {t.tokensPerUnit.toLocaleString()} tokens / unit
-            </span>
-            <span className="mt-2 flex items-center gap-1 text-lg font-semibold text-[#FFD700]">
-              {purchasingId === t.id ? (
-                <Loader2 size={16} className="animate-spin" />
-              ) : (
-                t.price
-              )}
-            </span>
-          </button>
+            <button
+              type="button"
+              onClick={() => onPurchase(t.id)}
+              disabled={!!purchasingId}
+              data-testid={`purchase-${t.id}`}
+              className="btn-shimmer flex flex-col items-center justify-center rounded-xl border border-[#E5E4E2]/25 bg-white/5 px-3 py-4 text-center transition hover:border-[#FFD700]/60 hover:bg-white/[0.08] disabled:opacity-60"
+            >
+              <span className="font-tech text-[11px] font-semibold uppercase tracking-widest text-[#BFC1C2]">
+                {t.name}
+              </span>
+              <span className="font-tech text-base font-bold text-white">
+                {t.units}
+              </span>
+              <span className="text-[11px] text-[#BFC1C2]">units</span>
+              <span className="mt-1 text-[10px] text-[#737373]">
+                {t.tokensPerUnit.toLocaleString()} tokens / unit
+              </span>
+              <span className="mt-2 flex items-center gap-1 text-lg font-semibold text-[#FFD700]">
+                {purchasingId === t.id ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  t.price
+                )}
+              </span>
+            </button>
+          </div>
         ))}
       </div>
 
@@ -137,6 +172,7 @@ const WalletCard = ({
               </div>
             </div>
             <button
+              type="button"
               onClick={() => onPurchase("pkg_5000")}
               data-testid="update-card-btn"
               className="rounded-lg border border-[#E5E4E2]/25 px-3 py-1.5 text-xs text-[#E5E4E2] transition hover:border-[#FFD700]/50 hover:text-white"

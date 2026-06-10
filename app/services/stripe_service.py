@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
@@ -40,6 +41,7 @@ _SCHEMA_VERSION = "1.0"
 # Enterprise: 60,000 units → $180 USD
 # Each protection unit covers up to 25,000 tokens.
 # TOKENS_PER_UNIT = 25_000  (imported above)
+# Scans are UNLIMITED — units auto-deduct in TOKENS_PER_UNIT chunks with no ceiling.
 # ---------------------------------------------------------------------------
 
 PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
@@ -48,21 +50,21 @@ PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
         "units": BILLING_TIER_5K_UNITS,
         "price_usd": BILLING_TIER_5K_PRICE_USD,
         "tokens_per_unit": TOKENS_PER_UNIT,
-        "notes": f"{BILLING_TIER_5K_UNITS:,} units · ${BILLING_TIER_5K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens",
+        "notes": f"{BILLING_TIER_5K_UNITS:,} units · ${BILLING_TIER_5K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens · no scan ceiling",
     },
     "team": {
         "label": "Team",
         "units": BILLING_TIER_25K_UNITS,
         "price_usd": BILLING_TIER_25K_PRICE_USD,
         "tokens_per_unit": TOKENS_PER_UNIT,
-        "notes": f"{BILLING_TIER_25K_UNITS:,} units · ${BILLING_TIER_25K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens",
+        "notes": f"{BILLING_TIER_25K_UNITS:,} units · ${BILLING_TIER_25K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens · no scan ceiling",
     },
     "enterprise": {
         "label": "Enterprise",
         "units": BILLING_TIER_60K_UNITS,
         "price_usd": BILLING_TIER_60K_PRICE_USD,
         "tokens_per_unit": TOKENS_PER_UNIT,
-        "notes": f"{BILLING_TIER_60K_UNITS:,} units · ${BILLING_TIER_60K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens",
+        "notes": f"{BILLING_TIER_60K_UNITS:,} units · ${BILLING_TIER_60K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens · no scan ceiling",
     },
 }
 
@@ -71,13 +73,14 @@ def units_for_tokens(token_count: int) -> int:
     """
     Return the number of protection units required to cover token_count tokens.
     Each unit covers up to TOKENS_PER_UNIT (25,000) tokens.
-    Partial chunks consume a full unit.
+    Partial chunks consume a full unit. No ceiling — scales to any token count.
 
     Examples:
-        units_for_tokens(1)       → 1
-        units_for_tokens(25_000)  → 1
-        units_for_tokens(25_001)  → 2
-        units_for_tokens(75_000)  → 3
+        units_for_tokens(1)         → 1
+        units_for_tokens(25_000)    → 1
+        units_for_tokens(25_001)    → 2
+        units_for_tokens(75_000)    → 3
+        units_for_tokens(1_000_000) → 40
     """
     if token_count <= 0:
         return 0
@@ -547,6 +550,21 @@ class StripeSubscriptionNotFoundError(StripeServiceError):
     """Raised when a subscription is not found."""
 
 
+class StripeInsufficientUnitsError(StripeServiceError):
+    """
+    Raised when an org has insufficient unit balance for a debit.
+    Callers may catch this to trigger an auto-purchase / top-up flow
+    rather than hard-failing the scan. Scans themselves have no ceiling —
+    units must simply be available (or topped up) before the debit.
+    """
+
+    def __init__(self, org_id: str, have: int, need: int) -> None:
+        super().__init__(f"insufficient unit balance for org={org_id}: have={have} need={need}")
+        self.org_id = org_id
+        self.have = have
+        self.need = need
+
+
 # ---------------------------------------------------------------------------
 # StripeService
 # ---------------------------------------------------------------------------
@@ -567,14 +585,28 @@ class StripeService:
 
     Unit model:
     - Each protection unit covers up to TOKENS_PER_UNIT (25,000) tokens.
+    - Scans are UNLIMITED — units auto-deduct in 25,000-token chunks with no ceiling.
     - Packages: Starter 5,000 units/$20 · Team 25,000 units/$90 · Enterprise 60,000 units/$180.
     - Use units_for_tokens(n) to convert a raw token count to required unit debit.
+    - StripeInsufficientUnitsError is raised (not a generic error) so callers can
+      trigger auto-purchase flows instead of hard-failing.
 
     All network calls are isolated through _StripeHTTPClient so they can be
     patched in tests without monkey-patching urllib directly.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        on_insufficient_units: Callable[[str, int, int], None] | None = None,
+    ) -> None:
+        """
+        Args:
+            on_insufficient_units: Optional callback invoked when a debit would
+                exceed the org's balance. Signature: (org_id, have, need) -> None.
+                Useful for triggering auto-purchase / alerting pipelines without
+                coupling billing logic to the calling layer.
+        """
         self._lock = Lock()
         self._checkout_sessions: dict[str, _CheckoutSessionRecord] = {}
         self._subscriptions: dict[str, _SubscriptionRecord] = {}
@@ -584,6 +616,7 @@ class StripeService:
         self._org_customer_map: dict[str, str] = {}
         self._customer_org_map: dict[str, str] = {}
         self._client: _StripeHTTPClient | None = None
+        self._on_insufficient_units = on_insufficient_units
 
     # ------------------------------------------------------------------
     # Config / client
@@ -689,13 +722,13 @@ class StripeService:
         - mode=payment: one-time purchase that grants unit_credits on completion.
         - mode=subscription: recurring subscription with optional metered usage.
         - unit_credits: number of IronClaw units to credit on checkout.session.completed.
-          Each unit protects up to TOKENS_PER_UNIT (25,000) tokens.
+          Each unit protects up to TOKENS_PER_UNIT (25,000) tokens with no scan ceiling.
           Use units_for_tokens(n) to derive the correct unit_credits from a token budget.
 
         Package reference (from PACKAGE_CATALOGUE):
-          Starter:    5,000 units / $20 USD  — each unit ≤ 25,000 tokens
-          Team:      25,000 units / $90 USD  — each unit ≤ 25,000 tokens
-          Enterprise: 60,000 units / $180 USD — each unit ≤ 25,000 tokens
+          Starter:    5,000 units / $20 USD  — each unit ≤ 25,000 tokens · unlimited scans
+          Team:      25,000 units / $90 USD  — each unit ≤ 25,000 tokens · unlimited scans
+          Enterprise: 60,000 units / $180 USD — each unit ≤ 25,000 tokens · unlimited scans
         """
         if quantity < 1:
             raise StripeServiceError("quantity must be >= 1")
@@ -818,6 +851,7 @@ class StripeService:
         Credit units to an org's balance and record a ledger entry.
         Thread-safe; safe to call from webhook handlers.
         Each unit protects up to TOKENS_PER_UNIT (25,000) tokens.
+        Scans have no ceiling — units simply accumulate and deduct as needed.
         """
         if amount <= 0:
             raise StripeServiceError("credit amount must be > 0")
@@ -863,8 +897,13 @@ class StripeService:
         reference_id: str | None = None,
     ) -> UnitBalanceResponse:
         """
-        Debit units from an org's balance. Raises StripeServiceError on
-        insufficient balance.
+        Debit units from an org's balance.
+
+        Raises StripeInsufficientUnitsError (a subclass of StripeServiceError) when
+        the org has insufficient balance. Callers may catch StripeInsufficientUnitsError
+        specifically to trigger an auto-purchase / top-up flow rather than hard-failing
+        the scan. The on_insufficient_units callback (if set at init) is also fired.
+
         Each unit covers up to TOKENS_PER_UNIT (25,000) tokens.
         Use units_for_tokens(token_count) to compute the correct debit amount.
         """
@@ -874,7 +913,12 @@ class StripeService:
         with self._lock:
             current = self._unit_balances.get(org_id, 0)
             if amount > current:
-                raise StripeServiceError(f"insufficient unit balance for org={org_id}: " f"have={current} need={amount}")
+                if self._on_insufficient_units is not None:
+                    try:
+                        self._on_insufficient_units(org_id, current, amount)
+                    except Exception:  # noqa: BLE001
+                        logger.warning("stripe.on_insufficient_units_callback_error org=%s", org_id)
+                raise StripeInsufficientUnitsError(org_id=org_id, have=current, need=amount)
             new_balance = current - amount
             self._unit_balances[org_id] = new_balance
 
@@ -915,10 +959,20 @@ class StripeService:
         """
         Debit the exact number of units required to cover token_count tokens.
         Each unit covers up to TOKENS_PER_UNIT (25,000) tokens.
-        Partial chunks consume a full unit (ceiling division).
+        Partial chunks consume a full unit (ceiling division). No scan ceiling.
 
-        Raises StripeServiceError if the org has insufficient balance.
+        Raises StripeInsufficientUnitsError if the org has insufficient balance.
+        Callers may catch that specific error to trigger a top-up instead of
+        hard-failing the scan.
         """
+        if token_count < 0:
+            logger.warning(
+                "stripe.debit_units_for_tokens called with negative token_count=%d org=%s — treating as 0",
+                token_count,
+                org_id,
+            )
+            token_count = 0
+
         units_needed = units_for_tokens(token_count)
         if units_needed == 0:
             with self._lock:
@@ -1483,36 +1537,65 @@ class StripeService:
 
         org_id = self.resolve_org_from_customer(customer_id) or obj.get("metadata", {}).get("org_id", "")
 
+        renewal_units_credited: int = 0
+
         if subscription_id:
             with self._lock:
                 record = self._subscriptions.get(subscription_id)
-            if record and record.status in (
-                StripeSubscriptionStatus.PAST_DUE.value,
-                StripeSubscriptionStatus.UNPAID.value,
-            ):
-                with self._lock:
-                    updated = _SubscriptionRecord(
-                        subscription_id=record.subscription_id,
-                        org_id=record.org_id,
-                        customer_id=record.customer_id,
-                        price_id=record.price_id,
-                        status=StripeSubscriptionStatus.ACTIVE.value,
-                        billing_interval=record.billing_interval,
-                        current_period_start=record.current_period_start,
-                        current_period_end=record.current_period_end,
-                        cancel_at_period_end=record.cancel_at_period_end,
-                        metered_price_id=record.metered_price_id,
-                        metadata=record.metadata,
-                        created_at=record.created_at,
-                        updated_at=_utcnow_iso(),
+
+            if record:
+                # Re-activate if past_due or unpaid
+                if record.status in (
+                    StripeSubscriptionStatus.PAST_DUE.value,
+                    StripeSubscriptionStatus.UNPAID.value,
+                ):
+                    with self._lock:
+                        updated = _SubscriptionRecord(
+                            subscription_id=record.subscription_id,
+                            org_id=record.org_id,
+                            customer_id=record.customer_id,
+                            price_id=record.price_id,
+                            status=StripeSubscriptionStatus.ACTIVE.value,
+                            billing_interval=record.billing_interval,
+                            current_period_start=record.current_period_start,
+                            current_period_end=record.current_period_end,
+                            cancel_at_period_end=record.cancel_at_period_end,
+                            metered_price_id=record.metered_price_id,
+                            metadata=record.metadata,
+                            created_at=record.created_at,
+                            updated_at=_utcnow_iso(),
+                        )
+                        self._subscriptions[subscription_id] = updated
+
+                # Credit renewal units from invoice metadata if present
+                # This covers subscription renewals that carry unit_credits in metadata.
+                renewal_units_raw = obj.get("metadata", {}).get("unit_credits", "0")
+                try:
+                    renewal_units = int(renewal_units_raw)
+                except (ValueError, TypeError):
+                    renewal_units = 0
+
+                if org_id and renewal_units > 0:
+                    self.credit_units(
+                        org_id,
+                        renewal_units,
+                        StripeUnitEventReason.SUBSCRIPTION_RENEWED,
+                        reference_id=invoice_id,
                     )
-                    self._subscriptions[subscription_id] = updated
+                    renewal_units_credited = renewal_units
+                    logger.info(
+                        "stripe.subscription_renewal_units_credited org=%s units=%d invoice=%s",
+                        org_id,
+                        renewal_units,
+                        invoice_id,
+                    )
 
         return {
             "invoice_id": invoice_id,
             "org_id": org_id,
             "subscription_id": subscription_id,
             "amount_paid": amount_paid,
+            "renewal_units_credited": renewal_units_credited,
         }
 
     def _handle_invoice_payment_failed(self, obj: dict[str, Any], _event: dict[str, Any]) -> dict[str, Any]:
