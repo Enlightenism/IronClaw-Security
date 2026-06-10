@@ -10,7 +10,7 @@ from .adapterclaude import adaptclauderequest, adaptclauderesponse
 from .adapteropenclaw import adaptopenclawrequest, adaptopenclawresponse
 from .billing import BillingResult, chargeunits, createbillinghook
 from .config import IronClawSkillConfig, loadconfig
-from .contracts import SkillExecutionRequest, SkillResponseEnvelope
+from .contracts import SkillResponseEnvelope
 from .router import IronClawSkillRouter
 from .runtime import runtimesnapshot
 
@@ -140,7 +140,7 @@ def loadskillconfig(configpath: str | None) -> IronClawSkillConfig:
     return loadconfig(configpath=configpath) if configpath else loadconfig()
 
 
-def adaptrequest(provider: CliProvider, payload: dict[str, Any]) -> SkillExecutionRequest:
+def adaptrequest(provider: CliProvider, payload: dict[str, Any]) -> Any:  # cross-package nominal boundary: ironclaw_skill vs ironclawskill
     if provider == "openclaw":
         return adaptopenclawrequest(payload)
     if provider == "claude":
@@ -156,10 +156,10 @@ def adaptresponse(provider: CliProvider, response: SkillResponseEnvelope) -> dic
     raise IronClawSkillCliError(f"Unsupported provider: {provider}")
 
 
-def assertrequestoperation(request: SkillExecutionRequest, expected: CliOperation | None) -> None:
+def assertrequestoperation(request: Any, expected: CliOperation | None) -> None:
     if expected is None:
         return
-    actual = getattr(request, "operation", None)
+    actual = getattr(request, "operation", None) if not isinstance(request, dict) else request.get("operation")
     if actual != expected:
         raise IronClawSkillCliError(
             f"Request operation mismatch: expected {expected}, received {actual}.",
@@ -194,8 +194,8 @@ def renderpayload(payload: Any, *, outputformat: CliFormat) -> str:
     return json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=False)
 
 
-def billingoperationfromrequest(request: SkillExecutionRequest) -> CliOperation:
-    operation = getattr(request, "operation", None)
+def billingoperationfromrequest(request: Any) -> CliOperation:
+    operation = getattr(request, "operation", None) if not isinstance(request, dict) else request.get("operation")
     if operation in {"scan", "actionpolicy", "actiondecision", "execute"}:
         return operation  # type: ignore[return-value]
     raise IronClawSkillCliError(f"Unsupported billing operation: {operation}")
@@ -351,6 +351,7 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
 __all__ = [
     "DEFAULT_INPUT_FILE",
