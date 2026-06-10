@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import TypedDict, cast
 
 from app.services.action_decision import evaluate_action_execution
 from app.services.action_guard import ActionType
@@ -26,7 +26,6 @@ class ActionExecuteResult(TypedDict):
     execution_status: str
     execution_message: str
     reasons: list[dict[str, object]]
-    # Groq telemetry — propagated from EnforcedVerdict to callers and review records
     groq_verdict: str | None
     groq_risk_score: int | None
     groq_confidence: float | None
@@ -66,32 +65,32 @@ def execute_guarded_action(
         execution_message = "Action passed guard checks and is eligible for execution."
         executed = True
 
-    return {
-        "action_type": decision["action_type"],
-        "target": decision["target"],
-        "content": decision["content"],
-        "policy_mode": decision["policy_mode"],
-        "verdict": decision["verdict"],
-        "summary": decision["summary"],
-        "risk_score": decision["risk_score"],
-        "matched_patterns": decision["matched_patterns"],
-        "scan_id": decision["scan_id"],
-        "should_halt": decision["should_halt"],
-        "should_warn": decision["should_warn"],
-        "decision_source": decision["decision_source"],
-        "client_id": decision["client_id"],
-        "session_id": decision["session_id"],
-        "executed": executed,
-        "execution_status": execution_status,
-        "execution_message": execution_message,
-        "reasons": decision["reasons"],
-        "groq_verdict": decision["groq_verdict"],
-        "groq_risk_score": decision["groq_risk_score"],
-        "groq_confidence": decision["groq_confidence"],
-        "groq_latency_ms": decision["groq_latency_ms"],
-        "groq_model_name": decision["groq_model_name"],
-        "groq_signals": decision["groq_signals"],
-        "groq_summary": decision["groq_summary"],
-        "groq_decided_at": decision["groq_decided_at"],
-        "enforced_at": decision["enforced_at"],
-    }
+    return ActionExecuteResult(
+        action_type=cast(ActionType, decision["action_type"]),
+        target=decision["target"],
+        content=decision["content"],
+        policy_mode=decision["policy_mode"],
+        verdict=decision["verdict"],
+        summary=decision["summary"],
+        risk_score=decision["risk_score"],
+        matched_patterns=decision["matched_patterns"],
+        scan_id=decision["scan_id"],
+        should_halt=decision["should_halt"],
+        should_warn=decision["should_warn"],
+        decision_source=decision["decision_source"],
+        client_id=decision["client_id"],
+        session_id=decision["session_id"],
+        executed=executed,
+        execution_status=execution_status,
+        execution_message=execution_message,
+        reasons=decision["reasons"],
+        groq_verdict=decision["groq_verdict"],
+        groq_risk_score=decision["groq_risk_score"],
+        groq_confidence=decision["groq_confidence"],
+        groq_latency_ms=decision["groq_latency_ms"],
+        groq_model_name=decision["groq_model_name"],
+        groq_signals=decision["groq_signals"],
+        groq_summary=decision["groq_summary"],
+        groq_decided_at=decision["groq_decided_at"],
+        enforced_at=decision["enforced_at"],
+    )
