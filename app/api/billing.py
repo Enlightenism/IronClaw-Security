@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.core.auth import require_api_key
@@ -19,20 +19,20 @@ PACKAGE_CATALOG: dict[str, dict[str, Any]] = {
     "single-user": {
         "name": "Single User",
         "price_usd": 20,
-        "included_units": 20_000,
-        "description": ("Prepaid protection units for individual builders who want guarded prompt handling, tool-call review, source inspection, and safe response release."),
+        "included_units": 5_000,
+        "description": ("Prepaid protection units for individual builders who want guarded prompt handling, " "tool-call review, source inspection, and safe response release."),
     },
     "team-security": {
         "name": "Team Security",
         "price_usd": 90,
-        "included_units": 100_000,
-        "description": ("Prepaid protection units for teams running higher volumes of AI-assisted development, research, and guarded agent workflows."),
+        "included_units": 25_000,
+        "description": ("Prepaid protection units for teams running higher volumes of AI-assisted development, " "research, and guarded agent workflows."),
     },
     "enterprise-security": {
         "name": "Enterprise Security",
-        "price_usd": 150,
-        "included_units": 200_000,
-        "description": ("Prepaid protection units for organizations protecting large-scale agent operations, sensitive workflows, and high-frequency prompt activity."),
+        "price_usd": 180,
+        "included_units": 60_000,
+        "description": ("Prepaid protection units for organizations protecting large-scale agent operations, " "sensitive workflows, and high-frequency prompt activity."),
     },
 }
 
@@ -107,7 +107,10 @@ def _require_known_package(package_id: str) -> tuple[str, dict[str, Any]]:
     normalized = package_id.strip().lower()
     package = PACKAGE_CATALOG.get(normalized)
     if package is None:
-        raise ValueError(f"Unknown billing package: {package_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown billing package: {package_id!r}",
+        )
     return normalized, package
 
 
@@ -115,7 +118,7 @@ def _build_unit_policy() -> UnitPolicyView:
     return UnitPolicyView(
         unit_definition="1 protection unit = 1 IronClaw protection event.",
         delivery_model="All packages are prepaid unit bundles with no recurring subscription requirement.",
-        buyer_positioning=("Customers are buying protected AI usage, not raw API calls. Each unit funds layered security checks around prompts, tool activity, returned content, and release decisions."),
+        buyer_positioning=("Customers are buying protected AI usage, not raw API calls. Each unit funds layered " "security checks around prompts, tool activity, returned content, and release decisions."),
         protection_layers=[
             ProtectionValueView(
                 title="Prompt ingress protection",
@@ -149,7 +152,6 @@ def _build_unit_policy() -> UnitPolicyView:
 @router.get("/packages", response_model=BillingPackagesResponse)
 def list_billing_packages() -> BillingPackagesResponse:
     packages = [_package_to_view(package_id, package_data) for package_id, package_data in PACKAGE_CATALOG.items()]
-
     return BillingPackagesResponse(
         status="ok",
         service="IronClaw-Security",
