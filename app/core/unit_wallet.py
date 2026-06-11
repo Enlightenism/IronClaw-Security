@@ -11,9 +11,48 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "TOKEN_CHUNK_SIZE",
+    "InsufficientUnitsError",
+    "units_required_for_tokens",
+    "UNIT_PACKAGE_CATALOG",
+    "UnitWalletTransaction",
+    "UnitLedgerEntry",
+    "UnitWallet",
+    "RegistryUnitWallet",
+    "RegistryUnitLedgerEntry",
+    "SupabaseUnitWalletRepository",
+    "MemoryUnitWalletRepository",
+    "UnitWalletRegistry",
+    "get_unit_wallet_registry",
+]
+
+# ---------------------------------------------------------------------------
+# Structured insufficient-units exception
+# ---------------------------------------------------------------------------
+
 
 class InsufficientUnitsError(ValueError):
-    pass
+    """Raised when a wallet debit cannot be satisfied.
+
+    Attributes:
+        have      — units currently in the wallet
+        need      — units required for the operation
+        owner_key — normalized wallet owner key
+    """
+
+    def __init__(
+        self,
+        message: str = "Insufficient protection units",
+        *,
+        have: int = 0,
+        need: int = 0,
+        owner_key: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.have = int(have)
+        self.need = int(need)
+        self.owner_key = str(owner_key)
 
 
 # ---------------------------------------------------------------------------
@@ -21,7 +60,8 @@ class InsufficientUnitsError(ValueError):
 #
 # Each protection unit covers one inspection window of up to TOKEN_CHUNK_SIZE
 # tokens. Any request exceeding the boundary consumes one additional unit
-# per additional chunk (ceiling division).
+# per additional chunk (ceiling division).  Scans are UNLIMITED — units
+# auto-deduct in 25,000-token chunks with no ceiling.
 #
 # Coverage rule:
 #   units_required = ceil(token_count / TOKEN_CHUNK_SIZE)
@@ -34,7 +74,6 @@ class InsufficientUnitsError(ValueError):
 #   50_001 tokens → 3 units
 # ---------------------------------------------------------------------------
 
-
 TOKEN_CHUNK_SIZE: int = 25_000
 
 
@@ -42,7 +81,8 @@ def units_required_for_tokens(token_count: int) -> int:
     """Return the number of protection units required to cover *token_count* tokens.
 
     Uses ceiling division so any partial chunk above a boundary consumes a
-    full additional unit. Returns 0 for non-positive token counts.
+    full additional unit.  Returns 0 for non-positive token counts.
+    No maximum is imposed — scans are unlimited.
     """
     if token_count <= 0:
         return 0
@@ -149,18 +189,15 @@ def _build_package_catalog() -> dict[str, dict[str, Any]]:
 
 UNIT_PACKAGE_CATALOG: dict[str, dict[str, Any]] = _build_package_catalog()
 
-
 # ---------------------------------------------------------------------------
 # Module-level integrity assertion — catches catalog drift at startup
 # ---------------------------------------------------------------------------
-
 
 _EXPECTED_PACKAGES = {
     "pkg_5000": (5_000, 20.00),
     "pkg_25000": (25_000, 90.00),
     "pkg_60000": (60_000, 180.00),
 }
-
 
 for _pkg_id, (_expected_units, _expected_price) in _EXPECTED_PACKAGES.items():
     _entry = UNIT_PACKAGE_CATALOG.get(_pkg_id)
@@ -169,6 +206,12 @@ for _pkg_id, (_expected_units, _expected_price) in _EXPECTED_PACKAGES.items():
     assert _entry["price_usd"] == _expected_price, f"unit_wallet: {_pkg_id} price_usd mismatch: got {_entry['price_usd']}, expected {_expected_price}"
     assert _entry["tokens_per_unit"] == TOKEN_CHUNK_SIZE, f"unit_wallet: {_pkg_id} tokens_per_unit mismatch: got {_entry['tokens_per_unit']}, expected {TOKEN_CHUNK_SIZE}"
 
+# ---------------------------------------------------------------------------
+# In-memory cache and ledger size guards
+# ---------------------------------------------------------------------------
+
+_WALLET_CACHE_MAX: int = 5_000
+_LEDGER_MAX_SIZE: int = 10_000
 
 # ---------------------------------------------------------------------------
 # Domain dataclasses
@@ -236,7 +279,12 @@ class UnitWallet:
     ) -> UnitWalletTransaction:
         safe_units = max(0, int(units))
         if safe_units > self.balance_units:
-            raise InsufficientUnitsError("Insufficient protection units")
+            raise InsufficientUnitsError(
+                "Insufficient protection units",
+                have=self.balance_units,
+                need=safe_units,
+                owner_key=self.owner_id,
+            )
         self.balance_units -= safe_units
         self.total_consumed_units += safe_units
         transaction = UnitWalletTransaction(
@@ -262,8 +310,9 @@ class UnitWallet:
         """Consume the correct number of units to cover *token_count* tokens.
 
         Calculates required units via ceiling division against TOKEN_CHUNK_SIZE
-        then delegates to consume_units. Raises InsufficientUnitsError if
+        then delegates to consume_units.  Raises InsufficientUnitsError if
         the wallet does not have enough units to cover the full token payload.
+        No maximum token count is enforced — scans are unlimited.
         """
         required = units_required_for_tokens(token_count)
         combined_metadata = {
@@ -453,6 +502,9 @@ class MemoryUnitWalletRepository:
     def append_ledger_entry(self, entry: RegistryUnitLedgerEntry) -> None:
         with self._lock:
             self._ledger.append(entry)
+            if len(self._ledger) > _LEDGER_MAX_SIZE:
+                # Trim oldest entries to stay within memory bound
+                self._ledger = self._ledger[-_LEDGER_MAX_SIZE:]
 
     def fetch_ledger_entries(
         self,
@@ -502,8 +554,12 @@ class UnitWalletRegistry:
     - creating or resolving a wallet for an owner,
     - crediting units after a package purchase,
     - debiting units as protection events are consumed,
-    - debiting the correct number of units for a given token count,
+    - debiting the correct number of units for a given token count (unlimited),
+    - returning units to a wallet as a refund,
     - returning a compact ledger for UI and billing routes.
+
+    Token scans are UNLIMITED — units auto-deduct in TOKEN_CHUNK_SIZE chunks
+    with no ceiling imposed by this module.
     """
 
     def __init__(self) -> None:
@@ -511,6 +567,20 @@ class UnitWalletRegistry:
         self._wallets: dict[str, RegistryUnitWallet] = {}
         self._wallets_by_owner: dict[str, str] = {}
         self._repo: SupabaseUnitWalletRepository | MemoryUnitWalletRepository = _make_repo()
+
+    def _evict_cache_if_needed(self) -> None:
+        """Trim the in-memory wallet cache when it exceeds _WALLET_CACHE_MAX.
+
+        Evicts the oldest half of entries by insertion order.
+        Must be called while self._lock is held.
+        """
+        if len(self._wallets_by_owner) > _WALLET_CACHE_MAX:
+            evict_count = _WALLET_CACHE_MAX // 2
+            evict_owners = list(self._wallets_by_owner.keys())[:evict_count]
+            for owner in evict_owners:
+                wid = self._wallets_by_owner.pop(owner, None)
+                if wid is not None:
+                    self._wallets.pop(wid, None)
 
     def get_or_create_wallet(
         self,
@@ -529,6 +599,7 @@ class UnitWalletRegistry:
             with self._lock:
                 self._wallets[existing.wallet_id] = existing
                 self._wallets_by_owner[normalized_owner] = existing.wallet_id
+                self._evict_cache_if_needed()
             return existing
 
         with self._lock:
@@ -544,6 +615,7 @@ class UnitWalletRegistry:
             )
             self._wallets[new_wallet_id] = wallet
             self._wallets_by_owner[normalized_owner] = new_wallet_id
+            self._evict_cache_if_needed()
 
         self._repo.upsert_wallet(wallet)
         return wallet
@@ -587,7 +659,12 @@ class UnitWalletRegistry:
 
         with self._lock:
             if safe_units > wallet.balance_units:
-                raise InsufficientUnitsError("Insufficient protection units")
+                raise InsufficientUnitsError(
+                    "Insufficient protection units",
+                    have=wallet.balance_units,
+                    need=safe_units,
+                    owner_key=wallet.owner_key,
+                )
 
             wallet.balance_units -= safe_units
             wallet.total_consumed_units += safe_units
@@ -615,11 +692,11 @@ class UnitWalletRegistry:
     ) -> tuple[RegistryUnitWallet, int]:
         """Debit the correct number of units to cover *token_count* tokens.
 
-        Uses ceiling division against TOKEN_CHUNK_SIZE. Returns the updated
-        wallet and the number of units actually debited.
+        Uses ceiling division against TOKEN_CHUNK_SIZE with no upper bound.
+        Returns the updated wallet and the number of units actually debited.
 
-        Raises InsufficientUnitsError if the wallet cannot cover the full
-        token payload.
+        Raises InsufficientUnitsError (with have/need/owner_key) if the
+        wallet cannot cover the full token payload.
         """
         required = units_required_for_tokens(token_count)
         combined_metadata = {
@@ -683,7 +760,6 @@ class UnitWalletRegistry:
 # ---------------------------------------------------------------------------
 # Module-level singleton
 # ---------------------------------------------------------------------------
-
 
 _unit_wallet_registry = UnitWalletRegistry()
 

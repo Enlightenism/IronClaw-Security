@@ -13,6 +13,9 @@ from app.core.unit_wallet import (
     TOKEN_CHUNK_SIZE,
     UNIT_PACKAGE_CATALOG,
     InsufficientUnitsError,
+    MemoryUnitWalletRepository,
+    RegistryUnitLedgerEntry,
+    RegistryUnitWallet,
     UnitLedgerEntry,
     UnitWallet,
     UnitWalletRegistry,
@@ -162,6 +165,20 @@ def test_consume_units_raises_when_balance_is_insufficient() -> None:
     assert len(wallet.transactions) == 1
 
 
+def test_consume_units_insufficient_error_carries_have_need_owner() -> None:
+    """InsufficientUnitsError must expose .have, .need, and .owner_key."""
+    wallet = UnitWallet(owner_id="owner-err-001")
+    wallet.purchase_units(units=5, source="stripe_checkout", reference_id="chk-err")
+
+    with pytest.raises(InsufficientUnitsError) as exc_info:
+        wallet.consume_units(units=20, source="usage_metering")
+
+    err = exc_info.value
+    assert err.have == 5
+    assert err.need == 20
+    assert err.owner_key == "owner-err-001"
+
+
 def test_transaction_history_preserves_order() -> None:
     wallet = UnitWallet(owner_id="owner-001")
 
@@ -291,6 +308,7 @@ class TestUnitsRequiredForTokens:
     Coverage rule: units = ceil(token_count / TOKEN_CHUNK_SIZE)
     TOKEN_CHUNK_SIZE = 25_000
     Returns 0 for non-positive inputs.
+    No upper bound — arbitrarily large token counts must compute correctly.
     """
 
     def test_zero_tokens_returns_zero(self) -> None:
@@ -356,6 +374,22 @@ class TestUnitsRequiredForTokens:
     def test_enterprise_package_one_over_ceiling(self) -> None:
         max_tokens = _PKG_ENTERPRISE_UNITS * _TOKENS_PER_UNIT
         assert units_required_for_tokens(max_tokens + 1) == _PKG_ENTERPRISE_UNITS + 1
+
+    def test_one_million_tokens_is_40_units(self) -> None:
+        """1,000,000 tokens ÷ 25,000 = exactly 40 units — no ceiling cap."""
+        assert units_required_for_tokens(1_000_000) == 40
+
+    def test_ten_million_tokens_is_400_units_no_cap(self) -> None:
+        """10,000,000 tokens must return 400 — function has no upper bound."""
+        result = units_required_for_tokens(10_000_000)
+        assert result == 400
+        assert result == math.ceil(10_000_000 / _TOKENS_PER_UNIT)
+
+    def test_arbitrarily_large_token_count_matches_formula(self) -> None:
+        """No AssertionError, no cap — pure ceiling division at any scale."""
+        for n in [500_000, 1_000_000, 5_000_000, 10_000_000, 100_000_000]:
+            expected = math.ceil(n / _TOKENS_PER_UNIT)
+            assert units_required_for_tokens(n) == expected
 
 
 # ===========================================================================
@@ -459,6 +493,23 @@ class TestConsumeUnitsForTokens:
         )
         assert txn.reference_id == "ref-abc"
 
+    def test_large_token_count_consumes_correct_units(self) -> None:
+        """1,000,000 tokens requires 40 units — wallet must have enough."""
+        wallet = self._funded_wallet(units=100)
+        txn = wallet.consume_units_for_tokens(token_count=1_000_000, source="usage_metering")
+        assert txn.units == 40
+        assert wallet.balance_units == 60
+
+    def test_large_token_count_insufficient_error_carries_need(self) -> None:
+        """debit for 1,000,000 tokens on empty wallet raises with need=40, have=0."""
+        wallet = UnitWallet(owner_id="owner-large-broke")
+        wallet.purchase_units(units=0, source="stripe_checkout", reference_id="chk-lb")
+        with pytest.raises(InsufficientUnitsError) as exc_info:
+            wallet.consume_units_for_tokens(token_count=1_000_000, source="usage_metering")
+        err = exc_info.value
+        assert err.need == 40
+        assert err.have == 0
+
 
 # ===========================================================================
 # Section 5 — UnitWalletRegistry.debit_units_for_tokens() boundary conditions
@@ -538,6 +589,28 @@ class TestRegistryDebitUnitsForTokens:
         assert wallet is not None
         assert wallet.balance_units == 1
 
+    def test_insufficient_error_carries_have_need_owner_key(self) -> None:
+        """debit_units raised from registry must carry .have, .need, .owner_key."""
+        owner = "owner-reg-err-attrs"
+        registry = self._registry_with_balance(owner, 10)
+        with pytest.raises(InsufficientUnitsError) as exc_info:
+            registry.debit_units(owner_key=owner, units=99)
+        err = exc_info.value
+        assert err.have == 10
+        assert err.need == 99
+        assert err.owner_key == owner
+
+    def test_large_token_count_computes_40_units_and_raises_with_need(self) -> None:
+        """1,000,000 tokens on a zero-balance wallet must raise with need=40, have=0."""
+        owner = "owner-reg-large-broke"
+        registry = UnitWalletRegistry()
+        registry.get_or_create_wallet(owner_key=owner)
+        with pytest.raises(InsufficientUnitsError) as exc_info:
+            registry.debit_units_for_tokens(owner_key=owner, token_count=1_000_000)
+        err = exc_info.value
+        assert err.need == 40
+        assert err.have == 0
+
     def test_balance_decremented_by_correct_unit_count(self) -> None:
         owner = "owner-reg-balance"
         registry = self._registry_with_balance(owner, _PKG_ENTERPRISE_UNITS)
@@ -554,3 +627,112 @@ class TestRegistryDebitUnitsForTokens:
         wallet = registry.get_wallet(owner)
         assert wallet is not None
         assert wallet.balance_units == _PKG_STARTER_UNITS
+
+
+# ===========================================================================
+# Section 6 — MemoryUnitWalletRepository ledger trim (_LEDGER_MAX_SIZE)
+# ===========================================================================
+
+
+class TestMemoryLedgerTrim:
+    """
+    MemoryUnitWalletRepository must trim _ledger to _LEDGER_MAX_SIZE after
+    overflow so memory is bounded. The oldest entries are dropped first.
+    """
+
+    def test_ledger_trim_at_overflow(self) -> None:
+        from app.core.unit_wallet import _LEDGER_MAX_SIZE  # type: ignore[attr-defined]
+
+        repo = MemoryUnitWalletRepository()
+        wallet = RegistryUnitWallet(
+            wallet_id="wallet-trim-test",
+            owner_key="owner-trim",
+        )
+        repo.upsert_wallet(wallet)
+
+        overflow_count = _LEDGER_MAX_SIZE + 50
+        for i in range(overflow_count):
+            import uuid as _uuid
+
+            repo.append_ledger_entry(
+                RegistryUnitLedgerEntry(
+                    entry_id=f"ledger_{_uuid.uuid4().hex}",
+                    wallet_id=wallet.wallet_id,
+                    owner_key=wallet.owner_key,
+                    entry_type="credit",
+                    units=1,
+                    balance_after=i + 1,
+                )
+            )
+
+        assert len(repo._ledger) <= _LEDGER_MAX_SIZE
+
+    def test_ledger_below_max_is_not_trimmed(self) -> None:
+        from app.core.unit_wallet import _LEDGER_MAX_SIZE  # type: ignore[attr-defined]
+
+        repo = MemoryUnitWalletRepository()
+        wallet = RegistryUnitWallet(
+            wallet_id="wallet-notrim-test",
+            owner_key="owner-notrim",
+        )
+        repo.upsert_wallet(wallet)
+
+        count = min(10, _LEDGER_MAX_SIZE - 1)
+        for i in range(count):
+            import uuid as _uuid
+
+            repo.append_ledger_entry(
+                RegistryUnitLedgerEntry(
+                    entry_id=f"ledger_{_uuid.uuid4().hex}",
+                    wallet_id=wallet.wallet_id,
+                    owner_key=wallet.owner_key,
+                    entry_type="credit",
+                    units=1,
+                    balance_after=i + 1,
+                )
+            )
+
+        assert len(repo._ledger) == count
+
+
+# ===========================================================================
+# Section 7 — UnitWalletRegistry cache eviction (_WALLET_CACHE_MAX)
+# ===========================================================================
+
+
+class TestRegistryCacheEviction:
+    """
+    UnitWalletRegistry must evict in-memory wallet cache entries when the
+    cache exceeds _WALLET_CACHE_MAX. Evicted wallets must still be
+    retrievable from the persistence layer via get_wallet().
+    """
+
+    def test_cache_eviction_does_not_lose_wallet_from_persistence(self) -> None:
+        from app.core.unit_wallet import _WALLET_CACHE_MAX  # type: ignore[attr-defined]
+
+        registry = UnitWalletRegistry()
+
+        # Fill the cache past its eviction threshold.
+        overflow_count = _WALLET_CACHE_MAX + 10
+        owners = [f"owner-evict-{i:05d}" for i in range(overflow_count)]
+        for owner in owners:
+            registry.credit_units(owner_key=owner, units=1)
+
+        # The first wallet created must still be fetchable from persistence
+        # even if it was evicted from the in-memory cache.
+        first_owner = owners[0]
+        wallet = registry.get_wallet(first_owner)
+        assert wallet is not None
+        assert wallet.owner_key == first_owner
+        assert wallet.balance_units == 1
+
+    def test_cache_size_bounded_after_overflow(self) -> None:
+        from app.core.unit_wallet import _WALLET_CACHE_MAX  # type: ignore[attr-defined]
+
+        registry = UnitWalletRegistry()
+
+        overflow_count = _WALLET_CACHE_MAX + 20
+        for i in range(overflow_count):
+            registry.get_or_create_wallet(owner_key=f"owner-cache-{i:05d}")
+
+        assert len(registry._wallets) <= _WALLET_CACHE_MAX
