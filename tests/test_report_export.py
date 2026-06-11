@@ -30,7 +30,7 @@ def _make_subscription(
     org_id: str = "org-test-001",
     plan_name: str = "pro",
     status: str = "active",
-    included_units: int = 10_000,
+    included_units: int = 25_000,
     used_units: int = 2_500,
     overage_units: int = 0,
 ) -> SubscriptionRecord:
@@ -218,7 +218,7 @@ def test_subscriptions_csv_headers() -> None:
 
 
 def test_subscriptions_csv_row_values() -> None:
-    sub = _make_subscription(org_id="org-z", plan_name="enterprise", used_units=9_999)
+    sub = _make_subscription(org_id="org-z", plan_name="enterprise", included_units=60_000, used_units=9_999)
     svc = _build_service(subs=[sub])
     payload, _ = svc.export(report_type="subscriptions", fmt="csv")
     _, rows = _parse_csv(payload)
@@ -249,6 +249,20 @@ def test_subscriptions_csv_multiple_orgs() -> None:
     assert len(rows) == 3
     org_ids = {r["org_id"] for r in rows}
     assert org_ids == {"org-1", "org-2", "org-3"}
+
+
+def test_subscriptions_csv_included_units_reflects_plan_tier() -> None:
+    """Verify that included_units in the CSV output matches the plan tier written in."""
+    sub_free = _make_subscription(org_id="org-free", plan_name="free", included_units=5_000)
+    sub_pro = _make_subscription(org_id="org-pro", plan_name="pro", included_units=25_000)
+    sub_ent = _make_subscription(org_id="org-ent", plan_name="enterprise", included_units=60_000)
+    svc = _build_service(subs=[sub_free, sub_pro, sub_ent])
+    payload, _ = svc.export(report_type="subscriptions", fmt="csv")
+    _, rows = _parse_csv(payload)
+    by_org = {r["org_id"]: r for r in rows}
+    assert by_org["org-free"]["included_units"] == "5000"
+    assert by_org["org-pro"]["included_units"] == "25000"
+    assert by_org["org-ent"]["included_units"] == "60000"
 
 
 # ---------------------------------------------------------------------------
@@ -338,6 +352,27 @@ def test_usage_summary_csv_contains_report_generated_at() -> None:
     headers, rows = _parse_csv(payload)
     assert "report_generated_at" in headers
     assert rows[0]["report_generated_at"] != ""
+
+
+def test_usage_summary_all_meter_event_types_present() -> None:
+    """Verify all five MeterEventType values appear as columns in usage_summary."""
+    subs = [_make_subscription(org_id="org-all")]
+    events = [
+        _make_meter_event(org_id="org-all", event_type="scan", quantity=10),
+        _make_meter_event(org_id="org-all", event_type="guard_request", quantity=5),
+        _make_meter_event(org_id="org-all", event_type="execution", quantity=3),
+        _make_meter_event(org_id="org-all", event_type="incident", quantity=1),
+        _make_meter_event(org_id="org-all", event_type="quarantine", quantity=2),
+    ]
+    svc = _build_service(subs=subs, events=events)
+    payload, _ = svc.export(report_type="usage_summary", fmt="csv")
+    _, rows = _parse_csv(payload)
+    row = rows[0]
+    assert row["scans"] == "10"
+    assert row["guard_requests"] == "5"
+    assert row["executions"] == "3"
+    assert row["incidents"] == "1"
+    assert row["quarantines"] == "2"
 
 
 # ---------------------------------------------------------------------------

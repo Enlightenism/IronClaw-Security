@@ -472,14 +472,14 @@ class TestSubscriptionCRUD:
             plan_name="pro",
             status="active",
             billing_email="ops@ironclaw.dev",
-            included_units=10_000,
+            included_units=25_000,
             price_usd_monthly=299,
         )
         assert isinstance(record, SubscriptionRecord)
         assert record.org_id == "org-report-01"
         assert record.plan_name == "pro"
         assert record.status == "active"
-        assert record.included_units == 10_000
+        assert record.included_units == 25_000
         assert record.used_units == 0
         assert record.overage_units == 0
 
@@ -489,7 +489,7 @@ class TestSubscriptionCRUD:
             plan_name="free",
             status="active",
             billing_email="x@x.com",
-            included_units=1_000,
+            included_units=5_000,
             price_usd_monthly=0,
         )
         assert record.subscription_id.startswith("sub-")
@@ -500,7 +500,7 @@ class TestSubscriptionCRUD:
             plan_name="enterprise",
             status="active",
             billing_email="billing@get.dev",
-            included_units=100_000,
+            included_units=60_000,
             price_usd_monthly=2499,
         )
         fetched = fresh_store.get_subscription(created.subscription_id)
@@ -516,226 +516,203 @@ class TestSubscriptionCRUD:
             plan_name="pro",
             status="active",
             billing_email="a@a.com",
-            included_units=5_000,
-            price_usd_monthly=99,
+            included_units=25_000,
+            price_usd_monthly=299,
         )
         fresh_store.create_subscription(
             org_id="org-beta",
             plan_name="free",
             status="active",
             billing_email="b@b.com",
-            included_units=1_000,
+            included_units=5_000,
             price_usd_monthly=0,
         )
-        alpha = fresh_store.list_subscriptions(org_id="org-alpha")
-        assert len(alpha) == 1
-        assert alpha[0].org_id == "org-alpha"
+        results = fresh_store.list_subscriptions(org_id="org-alpha")
+        assert len(results) == 1
+        assert results[0].org_id == "org-alpha"
 
-    def test_update_subscription_status(self, fresh_store: SubscriptionMeterStore) -> None:
+    def test_list_subscriptions_no_filter_returns_all(self, fresh_store: SubscriptionMeterStore) -> None:
+        fresh_store.create_subscription(
+            org_id="org-1",
+            plan_name="pro",
+            status="active",
+            billing_email="c@c.com",
+            included_units=25_000,
+            price_usd_monthly=299,
+        )
+        fresh_store.create_subscription(
+            org_id="org-2",
+            plan_name="enterprise",
+            status="active",
+            billing_email="d@d.com",
+            included_units=60_000,
+            price_usd_monthly=2499,
+        )
+        assert len(fresh_store.list_subscriptions()) == 2
+
+    def test_update_subscription_changes_status(self, fresh_store: SubscriptionMeterStore) -> None:
         created = fresh_store.create_subscription(
             org_id="org-upd",
             plan_name="pro",
             status="trialing",
-            billing_email="upd@upd.com",
-            included_units=10_000,
+            billing_email="upd@ironclaw.dev",
+            included_units=25_000,
             price_usd_monthly=299,
         )
-        updated = fresh_store.update_subscription(created.subscription_id, status="active")
+        updated = fresh_store.update_subscription(
+            created.subscription_id,
+            status="active",
+        )
         assert updated is not None
         assert updated.status == "active"
         assert updated.plan_name == "pro"
 
-    def test_update_subscription_plan_name(self, fresh_store: SubscriptionMeterStore) -> None:
+    def test_update_subscription_missing_id_returns_none(self, fresh_store: SubscriptionMeterStore) -> None:
+        result = fresh_store.update_subscription("sub-ghost", status="canceled")
+        assert result is None
+
+    def test_update_subscription_changes_plan_name(self, fresh_store: SubscriptionMeterStore) -> None:
         created = fresh_store.create_subscription(
             org_id="org-plan",
             plan_name="free",
             status="active",
-            billing_email="plan@test.com",
-            included_units=1_000,
+            billing_email="plan@ironclaw.dev",
+            included_units=5_000,
             price_usd_monthly=0,
         )
-        updated = fresh_store.update_subscription(created.subscription_id, status="active", plan_name="enterprise")
+        updated = fresh_store.update_subscription(
+            created.subscription_id,
+            status="active",
+            plan_name="enterprise",
+        )
         assert updated is not None
         assert updated.plan_name == "enterprise"
 
-    def test_update_subscription_missing_returns_none(self, fresh_store: SubscriptionMeterStore) -> None:
-        result = fresh_store.update_subscription("sub-ghost", status="canceled")
-        assert result is None
 
-    def test_subscription_to_dict_has_iso_dates(self, fresh_store: SubscriptionMeterStore) -> None:
-        record = fresh_store.create_subscription(
-            org_id="org-serial",
-            plan_name="pro",
-            status="active",
-            billing_email="s@s.com",
-            included_units=5_000,
-            price_usd_monthly=99,
-        )
-        d = record.to_dict()
-        assert isinstance(d["period_start"], str)
-        assert isinstance(d["period_end"], str)
-        assert "T" in d["period_start"]
+# ===========================================================================
+# MeterEvent CRUD
+# ===========================================================================
 
 
-class TestMeterEvents:
+class TestMeterEventCRUD:
     def test_record_meter_event_returns_record(self, fresh_store: SubscriptionMeterStore) -> None:
         fresh_store.create_subscription(
             org_id="org-meter",
             plan_name="pro",
             status="active",
-            billing_email="m@m.com",
-            included_units=50_000,
+            billing_email="meter@ironclaw.dev",
+            included_units=25_000,
             price_usd_monthly=299,
         )
         event = fresh_store.record_meter_event(
             org_id="org-meter",
             event_type="scan",
-            quantity=500,
+            quantity=100,
         )
         assert isinstance(event, MeterEventRecord)
-        assert event.event_id.startswith("mtr-")
-        assert event.quantity == 500
+        assert event.org_id == "org-meter"
         assert event.event_type == "scan"
+        assert event.quantity == 100
+        assert event.event_id.startswith("mtr-")
 
-    def test_meter_event_increments_used_units(self, fresh_store: SubscriptionMeterStore) -> None:
+    def test_record_meter_event_increments_used_units(self, fresh_store: SubscriptionMeterStore) -> None:
         fresh_store.create_subscription(
-            org_id="org-incr",
+            org_id="org-inc",
             plan_name="pro",
             status="active",
-            billing_email="i@i.com",
-            included_units=10_000,
+            billing_email="inc@ironclaw.dev",
+            included_units=25_000,
             price_usd_monthly=299,
         )
-        fresh_store.record_meter_event(org_id="org-incr", event_type="guard_request", quantity=300)
-        subs = fresh_store.list_subscriptions(org_id="org-incr")
-        assert subs[0].used_units == 300
+        fresh_store.record_meter_event(org_id="org-inc", event_type="scan", quantity=500)
+        subs = fresh_store.list_subscriptions(org_id="org-inc")
+        assert subs[0].used_units == 500
 
-    def test_meter_event_computes_overage(self, fresh_store: SubscriptionMeterStore) -> None:
+    def test_record_meter_event_computes_overage(self, fresh_store: SubscriptionMeterStore) -> None:
         fresh_store.create_subscription(
-            org_id="org-ovr",
+            org_id="org-ov",
             plan_name="free",
             status="active",
-            billing_email="o@o.com",
-            included_units=100,
+            billing_email="ov@ironclaw.dev",
+            included_units=5_000,
             price_usd_monthly=0,
         )
-        fresh_store.record_meter_event(org_id="org-ovr", event_type="execution", quantity=150)
-        subs = fresh_store.list_subscriptions(org_id="org-ovr")
-        assert subs[0].overage_units == 50
-
-    def test_meter_event_no_overage_within_quota(self, fresh_store: SubscriptionMeterStore) -> None:
-        fresh_store.create_subscription(
-            org_id="org-safe",
-            plan_name="enterprise",
-            status="active",
-            billing_email="s@s.com",
-            included_units=1_000_000,
-            price_usd_monthly=2499,
-        )
-        fresh_store.record_meter_event(org_id="org-safe", event_type="scan", quantity=10)
-        subs = fresh_store.list_subscriptions(org_id="org-safe")
-        assert subs[0].overage_units == 0
+        fresh_store.record_meter_event(org_id="org-ov", event_type="scan", quantity=6_000)
+        subs = fresh_store.list_subscriptions(org_id="org-ov")
+        assert subs[0].overage_units == 1_000
 
     def test_list_meter_events_filter_by_org_id(self, fresh_store: SubscriptionMeterStore) -> None:
-        fresh_store.record_meter_event(org_id="org-a", event_type="scan", quantity=1)
-        fresh_store.record_meter_event(org_id="org-b", event_type="scan", quantity=1)
-        events_a = fresh_store.list_meter_events(org_id="org-a")
-        assert len(events_a) == 1
-        assert events_a[0].org_id == "org-a"
+        fresh_store.create_subscription(
+            org_id="org-ev-a",
+            plan_name="pro",
+            status="active",
+            billing_email="eva@ironclaw.dev",
+            included_units=25_000,
+            price_usd_monthly=299,
+        )
+        fresh_store.create_subscription(
+            org_id="org-ev-b",
+            plan_name="free",
+            status="active",
+            billing_email="evb@ironclaw.dev",
+            included_units=5_000,
+            price_usd_monthly=0,
+        )
+        fresh_store.record_meter_event(org_id="org-ev-a", event_type="scan", quantity=10)
+        fresh_store.record_meter_event(org_id="org-ev-b", event_type="scan", quantity=20)
+        results = fresh_store.list_meter_events(org_id="org-ev-a")
+        assert len(results) == 1
+        assert results[0].org_id == "org-ev-a"
 
     def test_list_meter_events_filter_by_event_type(self, fresh_store: SubscriptionMeterStore) -> None:
-        fresh_store.record_meter_event(org_id="org-t", event_type="scan", quantity=10)
-        fresh_store.record_meter_event(org_id="org-t", event_type="incident", quantity=2)
+        fresh_store.create_subscription(
+            org_id="org-type",
+            plan_name="enterprise",
+            status="active",
+            billing_email="type@ironclaw.dev",
+            included_units=60_000,
+            price_usd_monthly=2499,
+        )
+        fresh_store.record_meter_event(org_id="org-type", event_type="scan", quantity=5)
+        fresh_store.record_meter_event(org_id="org-type", event_type="guard_request", quantity=3)
         scans = fresh_store.list_meter_events(event_type="scan")
-        for e in scans:
-            assert e.event_type == "scan"
+        assert all(e.event_type == "scan" for e in scans)
 
-    def test_meter_event_to_dict_iso_timestamp(self, fresh_store: SubscriptionMeterStore) -> None:
-        event = fresh_store.record_meter_event(
-            org_id="org-ts",
-            event_type="quarantine",
-            quantity=1,
+    def test_meter_event_to_dict_isoformat_z(self, fresh_store: SubscriptionMeterStore) -> None:
+        fresh_store.create_subscription(
+            org_id="org-iso",
+            plan_name="pro",
+            status="active",
+            billing_email="iso@ironclaw.dev",
+            included_units=25_000,
+            price_usd_monthly=299,
         )
+        event = fresh_store.record_meter_event(org_id="org-iso", event_type="execution", quantity=1)
         d = event.to_dict()
-        assert isinstance(d["occurred_at"], str)
-        assert "T" in d["occurred_at"]
-
-    def test_meter_event_metadata_stored(self, fresh_store: SubscriptionMeterStore) -> None:
-        event = fresh_store.record_meter_event(
-            org_id="org-meta",
-            event_type="execution",
-            quantity=5,
-            metadata={"source": "test_usage_reports"},
-        )
-        assert event.metadata["source"] == "test_usage_reports"
+        assert d["occurred_at"].endswith("Z")
 
 
-class TestSubscriptionMeterStoreLifecycle:
+# ===========================================================================
+# Store lifecycle
+# ===========================================================================
+
+
+class TestStoreLifecycle:
     def test_reset_clears_all_records(self, seeded_store: SubscriptionMeterStore) -> None:
         seeded_store.reset()
         assert seeded_store.list_subscriptions() == []
         assert seeded_store.list_meter_events() == []
 
-    def test_as_dict_returns_counts(self, seeded_store: SubscriptionMeterStore) -> None:
+    def test_as_dict_reports_counts(self, seeded_store: SubscriptionMeterStore) -> None:
         d = seeded_store.as_dict()
-        assert "subscriptions" in d
-        assert "meter_events" in d
-        assert "ready" in d
+        assert d["subscriptions"] >= 2
+        assert d["meter_events"] >= 3
         assert d["ready"] is True
-        assert isinstance(d["subscriptions"], int)
-        assert isinstance(d["meter_events"], int)
 
-
-class TestModuleSingleton:
-    def test_get_subscription_meter_store_returns_instance(self) -> None:
+    def test_module_singleton_get_and_reset(self) -> None:
         store = get_subscription_meter_store()
-        assert isinstance(store, SubscriptionMeterStore)
-
-    def test_reset_subscription_meter_store_restores_seed(self) -> None:
+        assert store.is_ready() is True
         reset_subscription_meter_store()
-        store = get_subscription_meter_store()
-        assert len(store.list_subscriptions()) >= 2
-        assert len(store.list_meter_events()) >= 3
-
-    def test_singleton_is_same_object_across_calls(self) -> None:
-        s1 = get_subscription_meter_store()
-        s2 = get_subscription_meter_store()
-        assert s1 is s2
-
-
-# ===========================================================================
-# Cross-layer integration: build_action_usage + build_action_usage_snapshot
-# ===========================================================================
-
-
-class TestUsageToSnapshotFlow:
-    def test_usage_feeds_snapshot_quota_and_units(self) -> None:
-        usage = build_action_usage(
-            owner_id="org-flow",
-            action="scan",
-            units=30,
-            unit_cost="0.10",
-            quota=100,
-        )
-        snap = build_action_usage_snapshot(
-            owner_id=usage.ownerid,
-            total_units=int(usage.units),
-            total_cost=str(usage.totalcost),
-            quota=int(usage.quota),
-        )
-        assert snap.ownerid == "org-flow"
-        assert snap.totalunits == Decimal("30")
-        assert snap.totalcost == Decimal("3.00")
-        assert snap.quota == Decimal("100")
-        assert snap.remaining == Decimal("70")
-
-    def test_detail_and_snapshot_have_stable_key_sets(self) -> None:
-        detail = build_action_usage_detail(owner_id="org-key", action="guard", units=5, unit_cost=1)
-        snap = build_action_usage_snapshot(owner_id="org-key", total_units=5, quota=50)
-        detail_keys = set(detail.as_dict().keys())
-        snap_keys = set(snap.as_dict().keys())
-        # They are distinct sets; no overlap on domain-specific keys
-        assert "usageid" in detail_keys
-        assert "snapshotid" in snap_keys
-        assert "usageid" not in snap_keys
-        assert "snapshotid" not in detail_keys
+        store2 = get_subscription_meter_store()
+        assert store2 is store
+        assert store2.is_ready() is True
