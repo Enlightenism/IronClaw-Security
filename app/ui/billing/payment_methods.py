@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-import math
 import os
 from typing import Any
 
@@ -54,41 +53,30 @@ PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
         "label": "Starter",
         "units": BILLING_TIER_5K_UNITS,
         "price_usd": BILLING_TIER_5K_PRICE_USD,
+        "price_cents": BILLING_TIER_5K_PRICE_USD * 100,
         "tokens_per_unit": TOKENS_PER_UNIT,
+        "token_coverage": BILLING_TIER_5K_UNITS * TOKENS_PER_UNIT,
         "notes": (f"{BILLING_TIER_5K_UNITS:,} units · ${BILLING_TIER_5K_PRICE_USD} USD" f" · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
     },
     "team": {
         "label": "Team",
         "units": BILLING_TIER_25K_UNITS,
         "price_usd": BILLING_TIER_25K_PRICE_USD,
+        "price_cents": BILLING_TIER_25K_PRICE_USD * 100,
         "tokens_per_unit": TOKENS_PER_UNIT,
+        "token_coverage": BILLING_TIER_25K_UNITS * TOKENS_PER_UNIT,
         "notes": (f"{BILLING_TIER_25K_UNITS:,} units · ${BILLING_TIER_25K_PRICE_USD} USD" f" · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
     },
     "enterprise": {
         "label": "Enterprise",
         "units": BILLING_TIER_60K_UNITS,
         "price_usd": BILLING_TIER_60K_PRICE_USD,
+        "price_cents": BILLING_TIER_60K_PRICE_USD * 100,
         "tokens_per_unit": TOKENS_PER_UNIT,
+        "token_coverage": BILLING_TIER_60K_UNITS * TOKENS_PER_UNIT,
         "notes": (f"{BILLING_TIER_60K_UNITS:,} units · ${BILLING_TIER_60K_PRICE_USD} USD" f" · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
     },
 }
-
-
-def units_for_tokens(token_count: int) -> int:
-    """
-    Return the number of protection units required to cover token_count tokens.
-    Each unit covers up to TOKENS_PER_UNIT (25,000) tokens.
-    Partial chunks consume a full unit (ceiling division).
-
-    Examples:
-        units_for_tokens(1)       -> 1
-        units_for_tokens(25_000)  -> 1
-        units_for_tokens(25_001)  -> 2
-        units_for_tokens(75_000)  -> 3
-    """
-    if token_count <= 0:
-        return 0
-    return math.ceil(token_count / TOKENS_PER_UNIT)
 
 
 def _get_environment() -> str:
@@ -121,7 +109,9 @@ class PackageCatalogueEntry(BaseModel):
     label: str
     units: int
     price_usd: int
+    price_cents: int
     tokens_per_unit: int
+    token_coverage: int
     notes: str
 
 
@@ -282,12 +272,9 @@ def get_payment_methods(
 ) -> BillingPaymentMethodsResponse | BillingPaymentMethodsNotFoundResponse:
     env = _get_environment()
 
-    # Attempt live Supabase lookup
     sb_methods = _fetch_org_payment_methods(organizationid)
     sb_org_name = _fetch_org_name(organizationid)
 
-    # If Supabase returned an empty list the org exists but has no methods;
-    # if it returned None, Supabase is unconfigured — treat as not found.
     if sb_methods is None and not is_supabase_configured():
         return BillingPaymentMethodsNotFoundResponse(
             status="not_found",
