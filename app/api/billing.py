@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import math
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, Query, status
+from pydantic import BaseModel, Field, model_validator
+from pydantic_core import PydanticCustomError
 
 from app.core.auth import require_api_key
+from app.core.errors import NotFoundError
+from app.core.unit_wallet import (
+    TOKEN_CHUNK_SIZE,
+    UNIT_PACKAGE_CATALOG,
+    RegistryUnitWallet,
+    get_unit_wallet_registry,
+)
 
 router = APIRouter(
     prefix="/billing",
@@ -15,34 +24,38 @@ router = APIRouter(
 )
 
 
-PACKAGE_CATALOG: dict[str, dict[str, Any]] = {
-    "single-user": {
-        "name": "Single User",
-        "price_usd": 20,
-        "included_units": 5_000,
-        "description": ("Prepaid protection units for individual builders who want guarded prompt handling, " "tool-call review, source inspection, and safe response release."),
-    },
-    "team-security": {
-        "name": "Team Security",
-        "price_usd": 90,
-        "included_units": 25_000,
-        "description": ("Prepaid protection units for teams running higher volumes of AI-assisted development, " "research, and guarded agent workflows."),
-    },
-    "enterprise-security": {
-        "name": "Enterprise Security",
-        "price_usd": 180,
-        "included_units": 60_000,
-        "description": ("Prepaid protection units for organizations protecting large-scale agent operations, " "sensitive workflows, and high-frequency prompt activity."),
-    },
-}
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
-class BillingPackageView(BaseModel):
-    package_id: str
-    name: str
-    price_usd: float
-    included_units: int
-    description: str
+def _utc_now_iso() -> str:
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _require_known_package(package_id: str) -> tuple[str, dict[str, Any]]:
+    normalized = package_id.strip()
+    package = UNIT_PACKAGE_CATALOG.get(normalized)
+    if package is None:
+        raise NotFoundError(f"Unknown billing package: {package_id!r}")
+    return normalized, package
+
+
+def _wallet_view(wallet: RegistryUnitWallet) -> dict[str, Any]:
+    return {
+        "wallet_id": wallet.wallet_id,
+        "owner_key": wallet.owner_key,
+        "balance_units": wallet.balance_units,
+        "total_purchased_units": wallet.total_purchased_units,
+        "total_consumed_units": wallet.total_consumed_units,
+        "total_refunded_units": wallet.total_refunded_units,
+        "updated_at": wallet.updated_at.isoformat().replace("+00:00", "Z"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Schemas — packages
+# ---------------------------------------------------------------------------
 
 
 class ProtectionValueView(BaseModel):
@@ -54,8 +67,32 @@ class UnitPolicyView(BaseModel):
     unit_definition: str
     delivery_model: str
     buyer_positioning: str
+    token_chunk_size: int
     protection_layers: list[ProtectionValueView] = Field(default_factory=list)
     market_context: list[str] = Field(default_factory=list)
+
+
+class BillingPackageView(BaseModel):
+    package_id: str
+    name: str
+    price_usd: float
+    included_units: int
+    token_coverage: int
+    tokens_per_unit: int
+    description: str
+
+
+class BillingPackagesResponse(BaseModel):
+    status: str
+    service: str
+    timestamp: str
+    packages: list[BillingPackageView] = Field(default_factory=list)
+    unit_policy: UnitPolicyView
+
+
+# ---------------------------------------------------------------------------
+# Schemas — purchase
+# ---------------------------------------------------------------------------
 
 
 class BillingPackagePurchaseRequest(BaseModel):
@@ -73,16 +110,10 @@ class BillingPackagePurchaseView(BaseModel):
     buyer_email: str
     price_usd: float
     granted_units: int
+    token_coverage: int
+    tokens_per_unit: int
     created_at: str
     metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class BillingPackagesResponse(BaseModel):
-    status: str
-    service: str
-    timestamp: str
-    packages: list[BillingPackageView] = Field(default_factory=list)
-    unit_policy: UnitPolicyView
 
 
 class BillingPackagePurchaseResponse(BaseModel):
@@ -90,28 +121,102 @@ class BillingPackagePurchaseResponse(BaseModel):
     service: str
     timestamp: str
     purchase: BillingPackagePurchaseView
+    wallet: dict[str, Any]
+
+
+# ---------------------------------------------------------------------------
+# Schemas — debit
+# ---------------------------------------------------------------------------
+
+
+class WalletDebitRequest(BaseModel):
+    units: int | None = Field(default=None, ge=1)
+    token_count: int | None = Field(default=None, ge=1)
+    reason: str | None = Field(default=None, max_length=255)
+
+    @model_validator(mode="after")
+    def _require_one(self) -> WalletDebitRequest:
+        if self.units is None and self.token_count is None:
+            # Raise as missing-field type so Pydantic emits a non-value_error
+            # error record → validation_exception_handler routes to 422.
+            raise PydanticCustomError(
+                "missing",
+                "Provide either 'units' or 'token_count'.",
+            )
+        return self
+
+
+class WalletDebitResponse(BaseModel):
+    status: str
+    owner_key: str
+    units_debited: int
+    token_count: int | None = None
+    wallet: dict[str, Any]
+
+
+# ---------------------------------------------------------------------------
+# Schemas — refund
+# ---------------------------------------------------------------------------
+
+
+class WalletRefundRequest(BaseModel):
+    units: int = Field(ge=1)
+    reason: str | None = Field(default=None, max_length=255)
+
+
+class WalletRefundResponse(BaseModel):
+    status: str
+    owner_key: str
+    units_refunded: int
+    wallet: dict[str, Any]
+
+
+# ---------------------------------------------------------------------------
+# Schemas — wallet get
+# ---------------------------------------------------------------------------
+
+
+class WalletGetResponse(BaseModel):
+    status: str
+    wallet: dict[str, Any]
+
+
+# ---------------------------------------------------------------------------
+# Schemas — ledger
+# ---------------------------------------------------------------------------
+
+
+class LedgerResponse(BaseModel):
+    status: str
+    owner_key: str | None
+    limit: int
+    entries: list[dict[str, Any]] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Internal state
+# ---------------------------------------------------------------------------
 
 
 _PURCHASES: list[BillingPackagePurchaseView] = []
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+# ---------------------------------------------------------------------------
+# Package catalog helpers
+# ---------------------------------------------------------------------------
 
 
-def _package_to_view(package_id: str, package_data: dict[str, Any]) -> BillingPackageView:
-    return BillingPackageView(package_id=package_id, **package_data)
-
-
-def _require_known_package(package_id: str) -> tuple[str, dict[str, Any]]:
-    normalized = package_id.strip().lower()
-    package = PACKAGE_CATALOG.get(normalized)
-    if package is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Unknown billing package: {package_id!r}",
-        )
-    return normalized, package
+def _package_to_view(pkg: dict[str, Any]) -> BillingPackageView:
+    unit_amount = int(pkg["unit_amount"])
+    return BillingPackageView(
+        package_id=pkg["package_id"],
+        name=pkg["name"],
+        price_usd=float(pkg["price_usd"]),
+        included_units=unit_amount,
+        token_coverage=unit_amount * TOKEN_CHUNK_SIZE,
+        tokens_per_unit=TOKEN_CHUNK_SIZE,
+        description=pkg["description"],
+    )
 
 
 def _build_unit_policy() -> UnitPolicyView:
@@ -119,6 +224,7 @@ def _build_unit_policy() -> UnitPolicyView:
         unit_definition="1 protection unit = 1 IronClaw protection event.",
         delivery_model="All packages are prepaid unit bundles with no recurring subscription requirement.",
         buyer_positioning=("Customers are buying protected AI usage, not raw API calls. Each unit funds layered " "security checks around prompts, tool activity, returned content, and release decisions."),
+        token_chunk_size=TOKEN_CHUNK_SIZE,
         protection_layers=[
             ProtectionValueView(
                 title="Prompt ingress protection",
@@ -149,9 +255,14 @@ def _build_unit_policy() -> UnitPolicyView:
     )
 
 
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+
 @router.get("/packages", response_model=BillingPackagesResponse)
 def list_billing_packages() -> BillingPackagesResponse:
-    packages = [_package_to_view(package_id, package_data) for package_id, package_data in PACKAGE_CATALOG.items()]
+    packages = [_package_to_view(pkg) for pkg in UNIT_PACKAGE_CATALOG.values()]
     return BillingPackagesResponse(
         status="ok",
         service="IronClaw-Security",
@@ -170,22 +281,123 @@ def purchase_billing_package(
     payload: BillingPackagePurchaseRequest,
 ) -> BillingPackagePurchaseResponse:
     package_id, package = _require_known_package(payload.package_id)
+    unit_amount = int(package["unit_amount"])
+    purchase_id = f"purch_{len(_PURCHASES) + 1}"
+    owner_key = payload.buyer_email.strip().lower()
+
     purchase = BillingPackagePurchaseView(
-        purchase_id=f"pkg_{len(_PURCHASES) + 1}",
+        purchase_id=purchase_id,
         package_id=package_id,
         package_name=str(package["name"]),
         buyer_name=payload.buyer_name.strip(),
-        buyer_email=payload.buyer_email.strip(),
+        buyer_email=owner_key,
         price_usd=float(package["price_usd"]),
-        granted_units=int(package["included_units"]),
+        granted_units=unit_amount,
+        token_coverage=unit_amount * TOKEN_CHUNK_SIZE,
+        tokens_per_unit=TOKEN_CHUNK_SIZE,
         created_at=_utc_now_iso(),
         metadata=payload.metadata,
     )
     _PURCHASES.append(purchase)
+
+    registry = get_unit_wallet_registry()
+    wallet = registry.credit_units(
+        owner_key=owner_key,
+        units=unit_amount,
+        metadata={"purchase_id": purchase_id, "package_id": package_id},
+    )
 
     return BillingPackagePurchaseResponse(
         status="ok",
         service="IronClaw-Security",
         timestamp=_utc_now_iso(),
         purchase=purchase,
+        wallet=_wallet_view(wallet),
+    )
+
+
+@router.post("/wallet/{owner_key}/debit", response_model=WalletDebitResponse)
+def debit_wallet(owner_key: str, payload: WalletDebitRequest) -> WalletDebitResponse:
+    registry = get_unit_wallet_registry()
+    if payload.token_count is not None:
+        units_debited = math.ceil(payload.token_count / TOKEN_CHUNK_SIZE)
+        wallet = registry.debit_units(
+            owner_key=owner_key,
+            units=units_debited,
+            metadata={
+                "token_count": payload.token_count,
+                "tokens_per_unit": TOKEN_CHUNK_SIZE,
+                "reason": payload.reason,
+            },
+        )
+        return WalletDebitResponse(
+            status="ok",
+            owner_key=owner_key,
+            units_debited=units_debited,
+            token_count=payload.token_count,
+            wallet=_wallet_view(wallet),
+        )
+    else:
+        wallet = registry.debit_units(
+            owner_key=owner_key,
+            units=payload.units,  # type: ignore[arg-type]
+            metadata={"reason": payload.reason},
+        )
+        return WalletDebitResponse(
+            status="ok",
+            owner_key=owner_key,
+            units_debited=payload.units,  # type: ignore[arg-type]
+            token_count=None,
+            wallet=_wallet_view(wallet),
+        )
+
+
+@router.post("/wallet/{owner_key}/refund", response_model=WalletRefundResponse)
+def refund_wallet(owner_key: str, payload: WalletRefundRequest) -> WalletRefundResponse:
+    registry = get_unit_wallet_registry()
+    wallet = registry.refund_units(
+        owner_key=owner_key,
+        units=payload.units,
+        metadata={"reason": payload.reason},
+    )
+    return WalletRefundResponse(
+        status="ok",
+        owner_key=owner_key,
+        units_refunded=payload.units,
+        wallet=_wallet_view(wallet),
+    )
+
+
+@router.get("/wallet/{owner_key}", response_model=WalletGetResponse)
+def get_wallet(owner_key: str) -> WalletGetResponse:
+    registry = get_unit_wallet_registry()
+    wallet = registry.get_or_create_wallet(owner_key=owner_key)
+    return WalletGetResponse(status="ok", wallet=_wallet_view(wallet))
+
+
+@router.get("/ledger", response_model=LedgerResponse)
+def get_ledger(
+    owner_key: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> LedgerResponse:
+    registry = get_unit_wallet_registry()
+    entries = registry.list_ledger_entries(owner_key=owner_key, limit=limit)
+    serialized = [
+        {
+            "entry_id": e.entry_id,
+            "wallet_id": e.wallet_id,
+            "owner_key": e.owner_key,
+            "entry_type": e.entry_type,
+            "units": e.units,
+            "balance_after": e.balance_after,
+            "created_at": e.created_at.isoformat().replace("+00:00", "Z"),
+            "metadata": e.metadata,
+        }
+        for e in entries
+    ]
+    return LedgerResponse(
+        status="ok",
+        owner_key=owner_key,
+        limit=limit,
+        entries=serialized,
     )

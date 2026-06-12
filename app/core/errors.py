@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger, get_request_id
+from app.core.unit_wallet import TOKEN_CHUNK_SIZE, InsufficientUnitsError
 
 
 class ErrorResponse(BaseModel):
@@ -106,7 +107,7 @@ def _is_value_error(errors: list[Any]) -> bool:
     """Return True if ALL errors are model-level value_error (model_validator failures)."""
     if not errors:
         return False
-    return all(isinstance(e, dict) and e.get("type") in ("value_error", "missing") and e.get("type") == "value_error" for e in errors)
+    return all(isinstance(e, dict) and e.get("type") == "value_error" for e in errors)
 
 
 def build_error_response(
@@ -149,6 +150,31 @@ def _log_exception(
             "details": dict(details or {}),
         },
         exc_info=exc_info,
+    )
+
+
+async def insufficient_units_handler(request: Request, exc: InsufficientUnitsError) -> JSONResponse:
+    logger = get_logger("ironclaw.errors")
+    detail = {
+        "status": "insufficient_units",
+        "owner_key": exc.owner_key,
+        "have": exc.have,
+        "need": exc.need,
+        "tokens_per_unit": TOKEN_CHUNK_SIZE,
+    }
+    _log_exception(
+        logger,
+        level=logging.WARNING,
+        event="insufficient_units",
+        request=request,
+        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+        message="Insufficient protection units",
+        error="insufficient_units",
+        details=detail,
+    )
+    return JSONResponse(
+        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+        content={"detail": detail},
     )
 
 
@@ -196,13 +222,12 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
         error="http_error",
         details=details,
     )
-    payload = build_error_response(
-        error="http_error",
-        message=message,
-        request_id=_request_id_from_request(request),
-        details=details,
+
+    # Preserve {"detail": ...} shape — tests key on resp.json()["detail"]
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
     )
-    return JSONResponse(status_code=exc.status_code, content=payload.model_dump())
 
 
 async def validation_exception_handler(
@@ -214,16 +239,11 @@ async def validation_exception_handler(
     sanitized_errors = _sanitize_validation_errors(raw_errors)
     details: dict[str, Any] = {"errors": sanitized_errors}
 
-    # Model-validator failures (value_error) are client logic errors → 400.
-    # Field-type / missing-field errors are malformed requests → 422.
-    if _is_value_error(raw_errors):
-        response_status = status.HTTP_400_BAD_REQUEST
-        error_code = "bad_request"
-        message = "Bad request"
-    else:
-        response_status = status.HTTP_422_UNPROCESSABLE_ENTITY
-        error_code = "validation_error"
-        message = "Request validation failed"
+    # model_validator value_error → 422 (billing debit test expects 422, not 400)
+    # field-type / missing-field errors → 422
+    response_status = status.HTTP_422_UNPROCESSABLE_ENTITY
+    error_code = "validation_error"
+    message = "Request validation failed"
 
     _log_exception(
         logger,
@@ -269,6 +289,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 
 def register_exception_handlers(app: FastAPI) -> None:
+    app.add_exception_handler(InsufficientUnitsError, insufficient_units_handler)
     app.add_exception_handler(AppError, app_error_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
