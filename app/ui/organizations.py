@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
-from app.core.unit_wallet import UNIT_PACKAGE_CATALOG
+from app.core.unit_wallet import TOKEN_CHUNK_SIZE, UNIT_PACKAGE_CATALOG
 from app.services.organization_store import OrganizationStore, get_store
 
 router = APIRouter(tags=["ui-organizations"])
@@ -29,9 +29,10 @@ except Exception:
     _SUPABASE_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
-# Canonical package/pricing constants — single source of truth
+# Canonical package/pricing constants — TOKEN_CHUNK_SIZE is the single source
+# of truth (app.core.unit_wallet.TOKEN_CHUNK_SIZE).
 # ---------------------------------------------------------------------------
-_TOKENS_PER_UNIT = 25_000
+_TOKENS_PER_UNIT = TOKEN_CHUNK_SIZE
 _ORDERED_PACKAGE_IDS = ["pkg_5000", "pkg_25000", "pkg_60000"]
 _FEATURED_PACKAGE_ID = "pkg_25000"
 
@@ -57,18 +58,6 @@ _PRICING_FALLBACK: dict[str, tuple[int, float, str, str]] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Token → unit consumption logic
-# 1 unit covers up to _TOKENS_PER_UNIT (25,000) tokens.
-# Any overflow consumes one additional unit per 25,000-token chunk.
-# ---------------------------------------------------------------------------
-def _units_required_for_tokens(token_count: int) -> int:
-    if token_count <= 0:
-        return 0
-    full_chunks, remainder = divmod(token_count, _TOKENS_PER_UNIT)
-    return full_chunks + (1 if remainder > 0 else 0)
-
-
 def _get_package_metadata(package_id: str) -> dict[str, Any]:
     package = UNIT_PACKAGE_CATALOG.get(package_id)
     if package is not None:
@@ -92,7 +81,9 @@ def _get_package_metadata(package_id: str) -> dict[str, Any]:
         "included_units": included_units,
         "units_display": f"{included_units:,} units",
         "tokens_per_unit": _TOKENS_PER_UNIT,
-        "max_tokens_covered": included_units * _TOKENS_PER_UNIT,
+        # Renamed from max_tokens_covered: communicates tokens paid for in this
+        # package, not a scan ceiling. Scans are unlimited; units auto-deduct.
+        "tokens_in_wallet": included_units * _TOKENS_PER_UNIT,
         "effective_price_per_1k_units": price_per_1k,
         "featured": package_id == _FEATURED_PACKAGE_ID,
     }
@@ -132,7 +123,9 @@ def _fetch_owner_wallet(owner_email: str) -> dict[str, Any]:
             "has_paid": has_paid,
             "active_package_id": active_package_id,
             "active_package": _get_package_metadata(active_package_id),
-            "max_tokens_covered": wallet_units * _TOKENS_PER_UNIT,
+            # Renamed from max_tokens_covered: current token-equivalent balance
+            # in the wallet, not a scan ceiling.
+            "tokens_in_wallet": wallet_units * _TOKENS_PER_UNIT,
             "tokens_per_unit": _TOKENS_PER_UNIT,
         }
     except Exception:

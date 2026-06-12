@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Path
 from pydantic import BaseModel, Field
 
-from app.core.unit_wallet import UNIT_PACKAGE_CATALOG
+from app.core.unit_wallet import TOKEN_CHUNK_SIZE, UNIT_PACKAGE_CATALOG, units_required_for_tokens
 
 router = APIRouter(prefix="/usage-events/detail", tags=["usage-event-detail"])
 
@@ -23,7 +23,8 @@ except Exception:
     _supabase = None
     _SUPABASE_AVAILABLE = False
 
-_TOKENS_PER_UNIT = 25_000
+# Single source of truth — TOKEN_CHUNK_SIZE from app.core.unit_wallet
+_TOKENS_PER_UNIT = TOKEN_CHUNK_SIZE
 _ORDERED_PACKAGE_IDS = ["pkg_5000", "pkg_25000", "pkg_60000"]
 _FEATURED_PACKAGE_ID = "pkg_25000"
 
@@ -54,13 +55,6 @@ _PRICING_FALLBACK: dict[str, tuple[int, float, str, str, str]] = {
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
-
-def _units_required_for_tokens(token_count: int) -> int:
-    if token_count <= 0:
-        return 0
-    full_chunks, remainder = divmod(token_count, _TOKENS_PER_UNIT)
-    return full_chunks + (1 if remainder > 0 else 0)
 
 
 def _package_snapshot(package_id: str | None) -> dict[str, Any]:
@@ -370,7 +364,7 @@ def get_usage_event_detail(
     )
 
     token_count = _coerce_int(payload.get("token_count"), default=0)
-    computed_units = _units_required_for_tokens(token_count)
+    computed_units = units_required_for_tokens(token_count)
 
     billing = UsageEventBillingView(
         units_consumed=payload.get("units_consumed", 0),
@@ -379,7 +373,7 @@ def get_usage_event_detail(
         wallet_id=payload.get("wallet_id"),
         metadata={
             "billing_state": payload["metadata"]["billing_state"],
-            "description": "Each unit covers up to 25,000 tokens and additional units are consumed in 25,000-token chunks.",
+            "description": (f"Each unit covers up to {_TOKENS_PER_UNIT:,} tokens and additional units " f"are consumed in {_TOKENS_PER_UNIT:,}-token chunks."),
             "tokens_per_unit": _TOKENS_PER_UNIT,
             "token_count": token_count,
             "computed_units_for_tokens": computed_units,
@@ -418,7 +412,7 @@ def get_usage_event_detail(
         notes=[
             "Usage event detail provides a focused view of a single metered security event.",
             "Billing package catalog uses Starter at $20 for 5,000 units, Team at $90 for 25,000 units, and Enterprise at $180 for 60,000 units.",
-            "Each protection unit covers up to 25,000 tokens, and token volumes above that consume additional units in 25,000-token chunks.",
+            f"Each protection unit covers up to {_TOKENS_PER_UNIT:,} tokens, and token volumes above that consume additional units in {_TOKENS_PER_UNIT:,}-token chunks.",
             "Package metadata now surfaces tokens_per_unit for every package and the event billing block includes token-based unit calculation details.",
             "When a matching Supabase security event exists, this view hydrates from security_events and users data; otherwise it returns a safe default detail view.",
         ],

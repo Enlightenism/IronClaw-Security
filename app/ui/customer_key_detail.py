@@ -7,7 +7,19 @@ from typing import Any
 from fastapi import APIRouter, Path
 from pydantic import BaseModel, Field
 
-from app.core.unit_wallet import UNIT_PACKAGE_CATALOG
+try:
+    from app.core.unit_wallet import TOKEN_CHUNK_SIZE, UNIT_PACKAGE_CATALOG, units_required_for_tokens
+except Exception:
+    UNIT_PACKAGE_CATALOG: dict[str, Any] = {}
+    TOKEN_CHUNK_SIZE: int = 25_000
+
+    def units_required_for_tokens(token_count: int) -> int:
+        if token_count <= 0:
+            return 0
+        import math
+
+        return math.ceil(token_count / TOKEN_CHUNK_SIZE)
+
 
 router = APIRouter(prefix="/customer-keys/detail", tags=["customer-key-detail"])
 
@@ -27,9 +39,11 @@ except Exception:
     _SUPABASE_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
-# Canonical package/pricing constants — single source of truth
+# Canonical package/pricing constants — TOKEN_CHUNK_SIZE is the single source
+# of truth (app.core.unit_wallet.TOKEN_CHUNK_SIZE). Local alias kept for
+# backwards-compat with existing serialisation field names.
 # ---------------------------------------------------------------------------
-_TOKENS_PER_UNIT = 25_000
+_TOKENS_PER_UNIT = TOKEN_CHUNK_SIZE
 _ORDERED_PACKAGE_IDS = ["pkg_5000", "pkg_25000", "pkg_60000"]
 _FEATURED_PACKAGE_ID = "pkg_25000"
 
@@ -59,24 +73,13 @@ def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
-# ---------------------------------------------------------------------------
-# Token → unit consumption logic
-# 1 unit covers up to _TOKENS_PER_UNIT (25,000) tokens.
-# Any overflow consumes one additional unit per 25,000-token chunk.
-# ---------------------------------------------------------------------------
-def _units_required_for_tokens(token_count: int) -> int:
-    if token_count <= 0:
-        return 0
-    full_chunks, remainder = divmod(token_count, _TOKENS_PER_UNIT)
-    return full_chunks + (1 if remainder > 0 else 0)
-
-
 def _token_coverage_metadata(wallet_units: int) -> dict[str, Any]:
-    max_tokens = wallet_units * _TOKENS_PER_UNIT
+    # tokens_in_wallet: token-equivalent balance for the units currently in
+    # the wallet.  Scans are unlimited; units auto-deduct — this is NOT a cap.
     return {
         "tokens_per_unit": _TOKENS_PER_UNIT,
         "wallet_units": wallet_units,
-        "max_tokens_covered": max_tokens,
+        "tokens_in_wallet": wallet_units * _TOKENS_PER_UNIT,
         "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; " "additional units are consumed in 25,000-token chunks."),
     }
 
@@ -98,7 +101,6 @@ def _get_package_metadata(package_id: str) -> dict[str, Any]:
         included_units, price_usd, name, display_label = fallback
 
     price_per_1k = round((price_usd / included_units) * 1_000, 4) if included_units > 0 else 0.0
-    max_tokens = included_units * _TOKENS_PER_UNIT
 
     return {
         "package_id": package_id,
@@ -109,7 +111,10 @@ def _get_package_metadata(package_id: str) -> dict[str, Any]:
         "included_units": included_units,
         "units_display": f"{included_units:,} units",
         "tokens_per_unit": _TOKENS_PER_UNIT,
-        "max_tokens_covered": max_tokens,
+        # Renamed from max_tokens_covered: communicates "tokens paid for in
+        # this package" not a scan ceiling. Scans are unlimited; units
+        # auto-deduct in TOKEN_CHUNK_SIZE chunks with no ceiling.
+        "tokens_in_wallet": included_units * _TOKENS_PER_UNIT,
         "effective_price_per_1k_units": price_per_1k,
         "featured": package_id == _FEATURED_PACKAGE_ID,
     }
@@ -301,7 +306,7 @@ def get_customer_key_detail(
         )
     )
 
-    units_required_example = _units_required_for_tokens(50_000)
+    units_required_example = units_required_for_tokens(50_000)
 
     return CustomerKeyDetailResponse(
         status="ok",
