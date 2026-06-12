@@ -16,30 +16,17 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
 os.environ.setdefault("SUPABASE_KEY", "")
 os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
-from app.core.auth import AuthContext, require_auth_context
+from app.core.auth import require_api_key
 import app.core.unit_wallet as _unit_wallet_module
 from app.core.unit_wallet import TOKEN_CHUNK_SIZE, UNIT_PACKAGE_CATALOG, UnitWalletRegistry
 from app.main import app as _app
-
-_TEST_AUTH_CONTEXT = AuthContext(
-    api_key="test-api-key",
-    principal_type="api_key",
-    principal_id="test-principal",
-    session_id=None,
-    org_id="test-org",
-    permissions=(),
-    roles=(),
-    authenticated=True,
-    auth_source="test",
-    auth_method="api_key",
-)
 
 _MOCK_API_KEY = "test-api-key"
 _AUTH_HEADERS = {"X-API-Key": _MOCK_API_KEY}
 
 
-def _override_require_auth_context() -> AuthContext:
-    return _TEST_AUTH_CONTEXT
+def _override_require_api_key() -> str:
+    return _MOCK_API_KEY
 
 
 @pytest.fixture(autouse=True)
@@ -52,11 +39,11 @@ def _reset_wallet_registry():
 
 @pytest.fixture()
 def client(_reset_wallet_registry):
-    _app.dependency_overrides[require_auth_context] = _override_require_auth_context
+    _app.dependency_overrides[require_api_key] = _override_require_api_key
     with TestClient(_app, raise_server_exceptions=True) as c:
         c.headers.update(_AUTH_HEADERS)
         yield c
-    _app.dependency_overrides.pop(require_auth_context, None)
+    _app.dependency_overrides.pop(require_api_key, None)
 
 
 # ---------------------------------------------------------------------------
