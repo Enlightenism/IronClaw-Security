@@ -8,9 +8,18 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
 try:
-    from app.core.unit_wallet import UNIT_PACKAGE_CATALOG
+    from app.core.unit_wallet import TOKEN_CHUNK_SIZE, UNIT_PACKAGE_CATALOG, units_required_for_tokens
 except Exception:
     UNIT_PACKAGE_CATALOG: dict[str, Any] = {}
+    TOKEN_CHUNK_SIZE: int = 25_000
+
+    def units_required_for_tokens(token_count: int) -> int:
+        if token_count <= 0:
+            return 0
+        import math
+
+        return math.ceil(token_count / TOKEN_CHUNK_SIZE)
+
 
 router = APIRouter(prefix="/usage-reports", tags=["usage-reports"])
 
@@ -30,9 +39,11 @@ except Exception:
     _SUPABASE_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
-# Canonical package/pricing constants — single source of truth
+# Canonical package/pricing constants — TOKEN_CHUNK_SIZE is the single source
+# of truth (app.core.unit_wallet.TOKEN_CHUNK_SIZE).  Local alias kept for
+# backwards-compat with existing serialisation field names.
 # ---------------------------------------------------------------------------
-_TOKENS_PER_UNIT = 25_000
+_TOKENS_PER_UNIT = TOKEN_CHUNK_SIZE
 _ORDERED_PACKAGE_IDS = ["pkg_5000", "pkg_25000", "pkg_60000"]
 _FEATURED_PACKAGE_ID = "pkg_25000"
 
@@ -58,18 +69,6 @@ _PRICING_FALLBACK: dict[str, tuple[int, float, str, str]] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Token → unit consumption logic
-# 1 unit covers up to _TOKENS_PER_UNIT (25,000) tokens.
-# Any overflow consumes one additional unit per 25,000-token chunk.
-# ---------------------------------------------------------------------------
-def _units_required_for_tokens(token_count: int) -> int:
-    if token_count <= 0:
-        return 0
-    full_chunks, remainder = divmod(token_count, _TOKENS_PER_UNIT)
-    return full_chunks + (1 if remainder > 0 else 0)
-
-
 def _get_package_metadata(package_id: str) -> dict[str, Any]:
     package = UNIT_PACKAGE_CATALOG.get(package_id)
     if package is not None:
@@ -93,7 +92,10 @@ def _get_package_metadata(package_id: str) -> dict[str, Any]:
         "included_units": included_units,
         "units_display": f"{included_units:,} units",
         "tokens_per_unit": _TOKENS_PER_UNIT,
-        "max_tokens_covered": included_units * _TOKENS_PER_UNIT,
+        # Renamed from max_tokens_covered: communicates "tokens currently paid
+        # for in this package" not a ceiling.  Scans are unlimited; this is
+        # a wallet balance expressed in token-equivalents, not a cap.
+        "tokens_in_wallet": included_units * _TOKENS_PER_UNIT,
         "effective_price_per_1k_units": price_per_1k,
         "featured": package_id == _FEATURED_PACKAGE_ID,
     }
@@ -156,7 +158,9 @@ def _fetch_usage_summary(rows: list[dict[str, Any]], period: str, limit: int) ->
             "limit": limit,
             "source": "supabase",
             "total_units_consumed": total_units,
-            "total_tokens_covered": total_units * _TOKENS_PER_UNIT,
+            # Renamed from total_tokens_covered: this is the token-equivalent
+            # balance consumed, not a ceiling.  Scans are unlimited.
+            "tokens_in_wallet": total_units * _TOKENS_PER_UNIT,
             "tokens_per_unit": _TOKENS_PER_UNIT,
             "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; " "additional units consumed in 25,000-token chunks."),
             "billing_catalog": _billing_catalog(),
@@ -182,7 +186,9 @@ def _build_events_from_rows(rows: list[dict[str, Any]], limit: int) -> UsageEven
     events: list[UsageEventView] = []
     for row in rows[:limit]:
         units_consumed = int(row.get("units_used") or 0)
-        token_count = units_consumed * _TOKENS_PER_UNIT
+        # tokens_in_wallet: token-equivalent balance represented by these units,
+        # not a scan ceiling.  Scans are unlimited; units auto-deduct.
+        tokens_in_wallet = units_consumed * _TOKENS_PER_UNIT
         events.append(
             UsageEventView(
                 event_id=str(row.get("id") or "unknown"),
@@ -194,7 +200,7 @@ def _build_events_from_rows(rows: list[dict[str, Any]], limit: int) -> UsageEven
                 units_consumed=units_consumed,
                 metadata={
                     "source": "supabase",
-                    "tokens_covered": token_count,
+                    "tokens_in_wallet": tokens_in_wallet,
                     "tokens_per_unit": _TOKENS_PER_UNIT,
                     "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; " "additional units consumed in 25,000-token chunks."),
                 },
