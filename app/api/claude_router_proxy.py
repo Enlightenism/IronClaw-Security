@@ -3,12 +3,13 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import PlainTextResponse, StreamingResponse
 import httpx
 from starlette.background import BackgroundTask
 
 from app.core.auth import require_api_key
+from app.core.errors import AppError
 
 router = APIRouter(
     prefix="/claude/router-proxy",
@@ -47,9 +48,10 @@ async def claude_router_proxy(
     upstream_payload = body.get("upstream_payload") or {}
 
     if not upstream_url:
-        raise HTTPException(
+        raise AppError(
+            error="http_error",
+            message="Missing 'upstream_url' in request body.",
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing 'upstream_url' in request body.",
         )
 
     client = httpx.AsyncClient(timeout=None)
@@ -80,7 +82,8 @@ async def claude_router_proxy(
         )
     except httpx.HTTPError as exc:
         await client.aclose()
-        raise HTTPException(
+        raise AppError(
+            error="http_error",
+            message=f"Upstream proxy error: {exc!r}",
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Upstream proxy error: {exc!r}",
         ) from exc

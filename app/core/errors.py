@@ -239,11 +239,17 @@ async def validation_exception_handler(
     sanitized_errors = _sanitize_validation_errors(raw_errors)
     details: dict[str, Any] = {"errors": sanitized_errors}
 
-    # model_validator value_error → 422 (billing debit test expects 422, not 400)
-    # field-type / missing-field errors → 422
-    response_status = status.HTTP_422_UNPROCESSABLE_ENTITY
-    error_code = "validation_error"
-    message = "Request validation failed"
+    # model_validator raises ValueError → Pydantic wraps as value_error type.
+    # These are semantic business-rule rejections → 400 Bad Request.
+    # All other validation errors (missing fields, wrong types, etc.) → 422.
+    if _is_value_error(raw_errors):
+        response_status = status.HTTP_400_BAD_REQUEST
+        error_code = "bad_request"
+        message = "Request validation failed"
+    else:
+        response_status = status.HTTP_422_UNPROCESSABLE_ENTITY
+        error_code = "validation_error"
+        message = "Request validation failed"
 
     _log_exception(
         logger,

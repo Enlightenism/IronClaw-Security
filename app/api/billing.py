@@ -4,12 +4,11 @@ from datetime import UTC, datetime
 import math
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, model_validator
 from pydantic_core import PydanticCustomError
 
 from app.core.auth import require_api_key
-from app.core.errors import NotFoundError
 from app.core.unit_wallet import (
     TOKEN_CHUNK_SIZE,
     UNIT_PACKAGE_CATALOG,
@@ -37,7 +36,10 @@ def _require_known_package(package_id: str) -> tuple[str, dict[str, Any]]:
     normalized = package_id.strip()
     package = UNIT_PACKAGE_CATALOG.get(normalized)
     if package is None:
-        raise NotFoundError(f"Unknown billing package: {package_id!r}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown billing package: {package_id!r}",
+        )
     return normalized, package
 
 
@@ -137,8 +139,6 @@ class WalletDebitRequest(BaseModel):
     @model_validator(mode="after")
     def _require_one(self) -> WalletDebitRequest:
         if self.units is None and self.token_count is None:
-            # Raise as missing-field type so Pydantic emits a non-value_error
-            # error record → validation_exception_handler routes to 422.
             raise PydanticCustomError(
                 "missing",
                 "Provide either 'units' or 'token_count'.",

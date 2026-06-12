@@ -7,6 +7,7 @@ os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("AUTH_REQUIRED", "true")
 os.environ.setdefault("IRONCLAW_API_KEY", "test-key")
 
+
 from collections.abc import AsyncIterator
 
 from fastapi import FastAPI, Request
@@ -60,7 +61,8 @@ def test_proxy_requires_upstream_url() -> None:
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Missing 'upstream_url' in request body."
+    assert response.json()["error"] == "http_error"
+    assert response.json()["message"] == "Missing 'upstream_url' in request body."
 
 
 def test_proxy_streams_upstream_response(monkeypatch) -> None:
