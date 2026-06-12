@@ -22,6 +22,7 @@ from app.core.unit_wallet import (
     UnitWalletTransaction,
     units_required_for_tokens,
 )
+from app.supabaseclient import TOKENS_PER_UNIT as _SUPABASE_TOKENS_PER_UNIT
 
 # ---------------------------------------------------------------------------
 # Package-tier constants — derived from UNIT_PACKAGE_CATALOG, never hardcoded.
@@ -44,6 +45,23 @@ _PKG_ENTERPRISE_PRICE_USD: float = UNIT_PACKAGE_CATALOG["pkg_60000"]["price_usd"
 _PKG_ENTERPRISE_LABEL: str = UNIT_PACKAGE_CATALOG["pkg_60000"]["display_label"]
 
 _TOKENS_PER_UNIT: int = TOKEN_CHUNK_SIZE  # 25_000
+
+
+# ===========================================================================
+# Section 0 — Cross-module constant sync guard
+# Ensures TOKEN_CHUNK_SIZE (unit_wallet) and TOKENS_PER_UNIT (supabaseclient)
+# never drift from each other. A mismatch here is a billing integrity failure.
+# ===========================================================================
+
+
+def test_token_chunk_size_matches_supabase_tokens_per_unit() -> None:
+    """TOKEN_CHUNK_SIZE and supabaseclient.TOKENS_PER_UNIT must always be equal.
+
+    Both constants represent the number of tokens covered by one protection unit.
+    If they ever diverge, billing metering and stripe checkout will compute
+    different unit prices — a silent revenue and security contract violation.
+    """
+    assert TOKEN_CHUNK_SIZE == _SUPABASE_TOKENS_PER_UNIT, f"Billing integrity failure: TOKEN_CHUNK_SIZE={TOKEN_CHUNK_SIZE} != " f"TOKENS_PER_UNIT={_SUPABASE_TOKENS_PER_UNIT}. " "These constants must always be equal. Update the diverged module."
 
 
 # ===========================================================================

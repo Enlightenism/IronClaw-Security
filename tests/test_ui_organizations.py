@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 import pytest
 
+from app.core.unit_wallet import TOKEN_CHUNK_SIZE
 from app.main import app as _app
 from app.services.organization_store import OrganizationStore, reset_organization_store
-from app.ui.organizations import get_store
+from app.ui.organizations import (
+    _ORDERED_PACKAGE_IDS,
+    _fetch_owner_wallet,
+    _get_package_metadata,
+    get_store,
+)
 
 _BASE = "/ui/organizations"
-
 
 _VALID_PAYLOAD: dict[str, object] = {
     "name": "Acme Corp",
@@ -36,6 +42,121 @@ def client(_isolated_store: OrganizationStore) -> Generator[TestClient, None, No
 
 
 # ---------------------------------------------------------------------------
+# _get_package_metadata — unit tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("pkg_id", _ORDERED_PACKAGE_IDS)
+def test_get_package_metadata_tokens_in_wallet(pkg_id: str) -> None:
+    """tokens_in_wallet == included_units * TOKEN_CHUNK_SIZE for every package."""
+    meta = _get_package_metadata(pkg_id)
+    assert "tokens_in_wallet" in meta, f"{pkg_id}: key 'tokens_in_wallet' missing"
+    assert "max_tokens_covered" not in meta, f"{pkg_id}: obsolete key 'max_tokens_covered' present"
+    included_units = meta["included_units"]
+    assert meta["tokens_in_wallet"] == included_units * TOKEN_CHUNK_SIZE
+
+
+@pytest.mark.parametrize("pkg_id", _ORDERED_PACKAGE_IDS)
+def test_get_package_metadata_base_fields(pkg_id: str) -> None:
+    meta = _get_package_metadata(pkg_id)
+    for key in ("package_id", "name", "price_usd", "included_units", "tokens_per_unit", "featured"):
+        assert key in meta, f"{pkg_id}: missing field '{key}'"
+
+
+def test_get_package_metadata_unknown_returns_empty() -> None:
+    assert _get_package_metadata("pkg_unknown_xyz") == {}
+
+
+# ---------------------------------------------------------------------------
+# _fetch_owner_wallet — unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_owner_wallet_supabase_unavailable_returns_empty() -> None:
+    """Returns {} when Supabase is unavailable (_SUPABASE_AVAILABLE=False)."""
+    import app.ui.organizations as _mod
+
+    orig = _mod._SUPABASE_AVAILABLE
+    try:
+        _mod._SUPABASE_AVAILABLE = False
+        result = _fetch_owner_wallet("owner@acme.com")
+        assert result == {}
+    finally:
+        _mod._SUPABASE_AVAILABLE = orig
+
+
+def test_fetch_owner_wallet_empty_email_returns_empty() -> None:
+    assert _fetch_owner_wallet("") == {}
+
+
+def test_fetch_owner_wallet_supabase_valid_row_tokens_in_wallet() -> None:
+    """tokens_in_wallet == wallet_units * TOKEN_CHUNK_SIZE when Supabase returns a row."""
+    wallet_units = 500
+    mock_result = MagicMock()
+    mock_result.data = [
+        {
+            "id": "user-uuid-123",
+            "email": "owner@acme.com",
+            "wallet_units": wallet_units,
+            "has_paid": True,
+            "last_payment": {"package_id": "pkg_5000"},
+        }
+    ]
+
+    mock_supabase = MagicMock()
+    mock_supabase.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = mock_result
+
+    import app.ui.organizations as _mod
+
+    with (
+        patch.object(_mod, "_supabase", mock_supabase),
+        patch.object(_mod, "_SUPABASE_AVAILABLE", True),
+    ):
+        result = _fetch_owner_wallet("owner@acme.com")
+
+    assert "tokens_in_wallet" in result, "key 'tokens_in_wallet' missing from wallet result"
+    assert "max_tokens_covered" not in result, "obsolete key 'max_tokens_covered' present"
+    assert result["tokens_in_wallet"] == wallet_units * TOKEN_CHUNK_SIZE
+    assert result["wallet_units"] == wallet_units
+    assert result["has_paid"] is True
+
+
+def test_fetch_owner_wallet_supabase_no_rows_returns_empty() -> None:
+    """Returns {} when Supabase returns no rows for the email."""
+    mock_result = MagicMock()
+    mock_result.data = []
+
+    mock_supabase = MagicMock()
+    mock_supabase.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = mock_result
+
+    import app.ui.organizations as _mod
+
+    with (
+        patch.object(_mod, "_supabase", mock_supabase),
+        patch.object(_mod, "_SUPABASE_AVAILABLE", True),
+    ):
+        result = _fetch_owner_wallet("nobody@example.com")
+
+    assert result == {}
+
+
+def test_fetch_owner_wallet_supabase_exception_returns_empty() -> None:
+    """Returns {} when Supabase raises an exception (non-blocking)."""
+    mock_supabase = MagicMock()
+    mock_supabase.table.side_effect = RuntimeError("DB down")
+
+    import app.ui.organizations as _mod
+
+    with (
+        patch.object(_mod, "_supabase", mock_supabase),
+        patch.object(_mod, "_SUPABASE_AVAILABLE", True),
+    ):
+        result = _fetch_owner_wallet("owner@acme.com")
+
+    assert result == {}
+
+
+# ---------------------------------------------------------------------------
 # GET /ui/organizations — list
 # ---------------------------------------------------------------------------
 
@@ -47,10 +168,15 @@ def test_list_organizations_empty_returns_200(client: TestClient) -> None:
 
 def test_list_organizations_empty_shape(client: TestClient) -> None:
     body = client.get(_BASE).json()
-    assert "status" in body
-    assert "items" in body
+    assert body["status"] == "ok"
+    assert "billing_catalog" in body
+    assert body["items"] == []
+
+
+def test_list_organizations_empty_summary(client: TestClient) -> None:
+    body = client.get(_BASE).json()
     assert "summary" in body
-    assert "total" in body["summary"]
+    assert body["summary"]["total"] == 0
 
 
 def test_list_organizations_after_create(client: TestClient) -> None:
@@ -91,6 +217,32 @@ def test_list_organizations_status_is_ok(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
+# billing_catalog — field contract
+# ---------------------------------------------------------------------------
+
+
+def test_billing_catalog_present_on_empty_list(client: TestClient) -> None:
+    body = client.get(_BASE).json()
+    assert "billing_catalog" in body
+
+
+def test_billing_catalog_packages_tokens_in_wallet(client: TestClient) -> None:
+    """Every package in billing_catalog uses tokens_in_wallet, not max_tokens_covered."""
+    catalog = client.get(_BASE).json()["billing_catalog"]
+    packages = catalog["packages"]
+    assert len(packages) == 3
+    for pkg_id, pkg in packages.items():
+        assert "tokens_in_wallet" in pkg, f"{pkg_id}: 'tokens_in_wallet' missing from billing_catalog package"
+        assert "max_tokens_covered" not in pkg, f"{pkg_id}: obsolete 'max_tokens_covered' present"
+        assert pkg["tokens_in_wallet"] == pkg["included_units"] * TOKEN_CHUNK_SIZE
+
+
+def test_billing_catalog_tokens_per_unit(client: TestClient) -> None:
+    catalog = client.get(_BASE).json()["billing_catalog"]
+    assert catalog["tokens_per_unit"] == TOKEN_CHUNK_SIZE
+
+
+# ---------------------------------------------------------------------------
 # POST /ui/organizations — create
 # ---------------------------------------------------------------------------
 
@@ -98,6 +250,12 @@ def test_list_organizations_status_is_ok(client: TestClient) -> None:
 def test_create_organization_returns_201(client: TestClient) -> None:
     response = client.post(_BASE, json=_VALID_PAYLOAD)
     assert response.status_code == 201
+
+
+def test_create_organization_response_has_organization_key(client: TestClient) -> None:
+    response = client.post(_BASE, json=_VALID_PAYLOAD)
+    assert response.status_code == 201
+    assert "organization" in response.json()
 
 
 def test_create_organization_response_shape(client: TestClient) -> None:
