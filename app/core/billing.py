@@ -28,6 +28,7 @@ __all__ = [
     "BillingCustomer",
     "BillingRegistry",
     "BillingSubscription",
+    "BillingUsageError",
     "PlanCode",
     "PlanDefinition",
     "PLAN_DEFINITIONS",
@@ -86,6 +87,30 @@ _CUSTOMERS_TABLE = "billing_customers"
 _SUBSCRIPTIONS_TABLE = "billing_subscriptions"
 
 
+class BillingUsageError(Exception):
+    """Raised when a usage record operation is rejected.
+
+    Carries structured context for auditability.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        customer_id: str,
+        subscription_id: str,
+        units_requested: int,
+        units_consumed: int,
+        unit_limit: int,
+    ) -> None:
+        super().__init__(message)
+        self.customer_id = customer_id
+        self.subscription_id = subscription_id
+        self.units_requested = units_requested
+        self.units_consumed = units_consumed
+        self.unit_limit = unit_limit
+
+
 @dataclass
 class BillingCustomer:
     customer_id: str
@@ -95,6 +120,12 @@ class BillingCustomer:
     active: bool = True
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.email or "@" not in self.email:
+            raise ValueError(f"Invalid email: {self.email!r}")
+        if self.plan not in PLAN_DEFINITIONS:
+            raise ValueError(f"Unknown plan code: {self.plan!r}")
 
 
 @dataclass
@@ -108,6 +139,12 @@ class BillingSubscription:
     current_period_end: datetime = field(default_factory=lambda: datetime.now(UTC))
     units_consumed: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.plan not in PLAN_DEFINITIONS:
+            raise ValueError(f"Unknown plan code: {self.plan!r}")
+        if self.units_consumed < 0:
+            raise ValueError("units_consumed cannot be negative")
 
     @property
     def plan_definition(self) -> PlanDefinition:
@@ -138,8 +175,15 @@ class BillingSubscription:
         return self.remaining_units * self.tokens_per_unit
 
     @property
+    def is_period_active(self) -> bool:
+        """True when the current wall-clock time is within the billing period."""
+        now = datetime.now(UTC)
+        return self.current_period_start <= now <= self.current_period_end
+
+    @property
     def is_active(self) -> bool:
-        return self.status == "active" and self.remaining_units > 0
+        """True when status is active, units remain, and the period has not expired."""
+        return self.status == "active" and self.remaining_units > 0 and self.is_period_active
 
 
 def _customer_from_row(row: dict[str, Any]) -> BillingCustomer:
@@ -196,6 +240,8 @@ class BillingRegistry:
         self._store: StoreType = store if store is not None else build_store()
         self._customers: dict[str, BillingCustomer] = {}
         self._subscriptions: dict[str, BillingSubscription] = {}
+        # customer_id -> list[subscription_id] index for O(1) lookup
+        self._customer_sub_index: dict[str, list[str]] = {}
         self._loaded = False
 
     def _ensure_loaded(self) -> None:
@@ -208,6 +254,7 @@ class BillingRegistry:
             for row in self._store.select(_SUBSCRIPTIONS_TABLE):
                 s = _subscription_from_row(row)
                 self._subscriptions[s.subscription_id] = s
+                self._customer_sub_index.setdefault(s.customer_id, []).append(s.subscription_id)
         except Exception:
             logger.exception("billing: failed to load from store; continuing with empty state")
         self._loaded = True
@@ -219,10 +266,29 @@ class BillingRegistry:
         return plan_code  # type: ignore[return-value]
 
     def _get_active_subscription_unlocked(self, customer_id: str) -> BillingSubscription | None:
-        for sub in self._subscriptions.values():
-            if sub.customer_id == customer_id and sub.is_active:
+        for sub_id in self._customer_sub_index.get(customer_id, []):
+            sub = self._subscriptions.get(sub_id)
+            if sub is not None and sub.is_active:
                 return sub
         return None
+
+    def _cancel_all_active_subscriptions_unlocked(self, customer_id: str) -> None:
+        """Cancel every active subscription for a customer (handles data-corruption duplicates)."""
+        for sub_id in list(self._customer_sub_index.get(customer_id, [])):
+            sub = self._subscriptions.get(sub_id)
+            if sub is not None and sub.status == "active":
+                sub.status = "cancelled"
+                try:
+                    self._store.update(
+                        _SUBSCRIPTIONS_TABLE,
+                        {"status": "cancelled"},
+                        filters={"subscription_id": sub_id},
+                    )
+                except Exception:
+                    logger.exception(
+                        "billing: failed to persist cancellation for subscription %s",
+                        sub_id,
+                    )
 
     def create_customer(
         self,
@@ -286,21 +352,11 @@ class BillingRegistry:
                     filters={"customer_id": customer_id},
                 )
             except Exception:
-                logger.exception("billing: failed to persist deactivation for customer %s", customer_id)
-            sub = self._get_active_subscription_unlocked(customer_id)
-            if sub is not None:
-                sub.status = "cancelled"
-                try:
-                    self._store.update(
-                        _SUBSCRIPTIONS_TABLE,
-                        {"status": "cancelled"},
-                        filters={"subscription_id": sub.subscription_id},
-                    )
-                except Exception:
-                    logger.exception(
-                        "billing: failed to persist cancellation for subscription %s",
-                        sub.subscription_id,
-                    )
+                logger.exception(
+                    "billing: failed to persist deactivation for customer %s",
+                    customer_id,
+                )
+            self._cancel_all_active_subscriptions_unlocked(customer_id)
             return customer
 
     def create_subscription(
@@ -309,6 +365,7 @@ class BillingRegistry:
         customer_id: str,
         plan: str,
         status: str = "active",
+        period_end: datetime | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> BillingSubscription:
         with self._lock:
@@ -326,7 +383,7 @@ class BillingRegistry:
                 status=status,
                 created_at=now,
                 current_period_start=now,
-                current_period_end=now,
+                current_period_end=period_end if period_end is not None else now,
                 units_consumed=0,
                 metadata=metadata or {},
             )
@@ -346,6 +403,7 @@ class BillingRegistry:
             except Exception:
                 logger.exception("billing: failed to persist subscription %s", subscription_id)
             self._subscriptions[subscription_id] = subscription
+            self._customer_sub_index.setdefault(customer_id, []).append(subscription_id)
             return subscription
 
     def list_subscriptions(self) -> list[BillingSubscription]:
@@ -381,6 +439,94 @@ class BillingRegistry:
                 )
             return sub
 
+    def upgrade_plan(
+        self,
+        *,
+        customer_id: str,
+        new_plan: str,
+    ) -> tuple[BillingCustomer, BillingSubscription]:
+        """Change the active plan for a customer.
+
+        Cancels the existing active subscription, updates the customer's
+        plan field, and creates a new active subscription on the new plan.
+        Raises KeyError if customer not found or no active subscription exists.
+        """
+        with self._lock:
+            self._ensure_loaded()
+            customer = self._customers.get(customer_id)
+            if customer is None:
+                raise KeyError(f"Unknown customer_id: {customer_id!r}")
+            plan_code = self._require_valid_plan(new_plan)
+            old_sub = self._get_active_subscription_unlocked(customer_id)
+            if old_sub is not None:
+                old_sub.status = "upgraded"
+                try:
+                    self._store.update(
+                        _SUBSCRIPTIONS_TABLE,
+                        {"status": "upgraded"},
+                        filters={"subscription_id": old_sub.subscription_id},
+                    )
+                except Exception:
+                    logger.exception(
+                        "billing: failed to persist upgrade for subscription %s",
+                        old_sub.subscription_id,
+                    )
+            customer.plan = plan_code
+            try:
+                self._store.update(
+                    _CUSTOMERS_TABLE,
+                    {"plan": plan_code},
+                    filters={"customer_id": customer_id},
+                )
+            except Exception:
+                logger.exception(
+                    "billing: failed to persist plan upgrade for customer %s",
+                    customer_id,
+                )
+        # create_subscription acquires its own lock
+        new_sub = self.create_subscription(
+            customer_id=customer_id,
+            plan=plan_code,
+            status="active",
+        )
+        return customer, new_sub
+
+    def reset_period(
+        self,
+        *,
+        subscription_id: str,
+        new_period_end: datetime,
+    ) -> BillingSubscription:
+        """Reset units_consumed to zero and advance the billing period.
+
+        Used by period rollover jobs. Raises KeyError if subscription not found.
+        """
+        with self._lock:
+            self._ensure_loaded()
+            sub = self._subscriptions.get(subscription_id)
+            if sub is None:
+                raise KeyError(f"Unknown subscription_id: {subscription_id!r}")
+            now = datetime.now(UTC)
+            sub.units_consumed = 0
+            sub.current_period_start = now
+            sub.current_period_end = new_period_end
+            try:
+                self._store.update(
+                    _SUBSCRIPTIONS_TABLE,
+                    {
+                        "units_consumed": 0,
+                        "current_period_start": now.isoformat(),
+                        "current_period_end": new_period_end.isoformat(),
+                    },
+                    filters={"subscription_id": subscription_id},
+                )
+            except Exception:
+                logger.exception(
+                    "billing: failed to persist period reset for subscription %s",
+                    subscription_id,
+                )
+            return sub
+
     def record_usage(
         self,
         *,
@@ -398,8 +544,13 @@ class BillingRegistry:
 
             projected = subscription.units_consumed + units
             if projected > subscription.unit_limit:
-                raise ValueError(
+                raise BillingUsageError(
                     f"Usage would exceed plan limit: {projected} > {subscription.unit_limit}",
+                    customer_id=customer_id,
+                    subscription_id=subscription.subscription_id,
+                    units_requested=units,
+                    units_consumed=subscription.units_consumed,
+                    unit_limit=subscription.unit_limit,
                 )
 
             subscription.units_consumed = projected
@@ -455,8 +606,14 @@ class BillingRegistry:
         return dict(PLAN_DEFINITIONS)
 
 
-_billing_registry = BillingRegistry()
+_billing_registry: BillingRegistry | None = None
+_billing_registry_lock = Lock()
 
 
 def get_billing_registry() -> BillingRegistry:
+    global _billing_registry
+    if _billing_registry is None:
+        with _billing_registry_lock:
+            if _billing_registry is None:
+                _billing_registry = BillingRegistry()
     return _billing_registry

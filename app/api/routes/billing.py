@@ -22,27 +22,7 @@ router = APIRouter(
     dependencies=[Depends(require_api_key)],
 )
 
-# ---------------------------------------------------------------------------
-# Token-to-unit coverage constants
-# TOKEN_CHUNK_SIZE and units_required_for_tokens are imported from
-# app.core.unit_wallet — that module is the single source of truth.
-# Each protection unit covers one inspection window of up to TOKEN_CHUNK_SIZE
-# (25,000) tokens. Scans are UNLIMITED — units auto-deduct in 25,000-token
-# chunks with no ceiling. Partial chunks consume a full unit (ceiling division).
-# ---------------------------------------------------------------------------
-
 _PURCHASES_MAX_SIZE: int = 1_000
-
-# ---------------------------------------------------------------------------
-# Canonical package catalog — single source of truth is UNIT_PACKAGE_CATALOG
-# from unit_wallet.py. The local PACKAGE_CATALOG below is derived from it
-# at import time and must never be maintained separately.
-#
-# Package IDs and pricing (authoritative):
-#   pkg_5000   — Starter    —  5,000 units — $20.00
-#   pkg_25000  — Team       — 25,000 units — $90.00
-#   pkg_60000  — Enterprise — 60,000 units — $180.00
-# ---------------------------------------------------------------------------
 
 _BILLING_PACKAGE_FALLBACK: dict[str, dict[str, Any]] = {
     "pkg_5000": {
@@ -73,15 +53,8 @@ _BILLING_PACKAGE_FALLBACK: dict[str, dict[str, Any]] = {
 
 
 def _derive_package_catalog() -> dict[str, dict[str, Any]]:
-    """Build the billing-route package catalog from UNIT_PACKAGE_CATALOG.
-
-    Maps the catalog's ``unit_amount`` key to ``included_units`` for API
-    response consistency and normalises the shape expected by this module.
-    Falls back to hardcoded values if the catalog is missing any required ID.
-    """
     required_ids = set(_BILLING_PACKAGE_FALLBACK)
     catalog: dict[str, dict[str, Any]] = {}
-
     for pkg_id in required_ids:
         source = UNIT_PACKAGE_CATALOG.get(pkg_id)
         if source is not None:
@@ -95,11 +68,11 @@ def _derive_package_catalog() -> dict[str, dict[str, Any]]:
             }
         else:
             catalog[pkg_id] = _BILLING_PACKAGE_FALLBACK[pkg_id]
-
     return catalog
 
 
 PACKAGE_CATALOG: dict[str, dict[str, Any]] = _derive_package_catalog()
+
 
 # ---------------------------------------------------------------------------
 # Response / request schemas
@@ -251,11 +224,11 @@ class InsufficientUnitsErrorResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# In-process purchase log (audit trail supplement — not a database substitute)
-# Capped at _PURCHASES_MAX_SIZE to prevent unbounded memory growth.
+# In-process purchase log
 # ---------------------------------------------------------------------------
 
 _PURCHASES: list[BillingPackagePurchaseView] = []
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -360,42 +333,17 @@ def _ledger_entry_to_view(entry: Any) -> WalletLedgerEntryView:
     )
 
 
-def _insufficient_units_response(
-    owner_key: str,
-    exc: InsufficientUnitsError,
-) -> HTTPException:
-    """
-    Build a 402 Payment Required HTTPException for InsufficientUnitsError.
-    Returns a structured body with have/need/owner_key so callers can
-    trigger a top-up flow without parsing an error string.
-    """
-    return HTTPException(
-        status_code=status.HTTP_402_PAYMENT_REQUIRED,
-        detail={
-            "status": "insufficient_units",
-            "error": str(exc),
-            "owner_key": owner_key,
-            "have": getattr(exc, "args", [None])[0] if False else _parse_insufficient_have(exc),
-            "need": _parse_insufficient_need(exc),
-            "tokens_per_unit": TOKEN_CHUNK_SIZE,
-            "timestamp": _utc_now_iso(),
-        },
-    )
-
-
-def _parse_insufficient_have(exc: InsufficientUnitsError) -> int:
-    """
-    InsufficientUnitsError from unit_wallet raises with message only.
-    We parse wallet state from the registry at raise time, so the route
-    that catches the error must supply have/need from its own context.
-    This helper exists so the 402 body is always structurally complete.
-    Returns -1 when the value is not derivable from the exception alone.
-    """
-    return -1
-
-
-def _parse_insufficient_need(exc: InsufficientUnitsError) -> int:
-    return -1
+def _build_insufficient_units_detail(exc: InsufficientUnitsError) -> dict[str, Any]:
+    """Build the structured 402 detail body directly from exception fields."""
+    return {
+        "status": "insufficient_units",
+        "error": str(exc),
+        "owner_key": exc.owner_key,
+        "have": exc.have,
+        "need": exc.need,
+        "tokens_per_unit": TOKEN_CHUNK_SIZE,
+        "timestamp": _utc_now_iso(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -466,15 +414,7 @@ def purchase_billing_package(
     except InsufficientUnitsError as exc:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail={
-                "status": "insufficient_units",
-                "error": str(exc),
-                "owner_key": purchase.buyer_email,
-                "have": -1,
-                "need": granted_units,
-                "tokens_per_unit": TOKEN_CHUNK_SIZE,
-                "timestamp": _utc_now_iso(),
-            },
+            detail=_build_insufficient_units_detail(exc),
         ) from exc
     except Exception as exc:
         raise HTTPException(
@@ -525,9 +465,7 @@ def debit_billing_wallet(
       against TOKEN_CHUNK_SIZE (25,000). Any partial chunk consumes a full unit.
 
     Returns 402 Payment Required with structured {have, need, owner_key} body
-    if the wallet has insufficient balance. The calling pipeline may catch the
-    402 to trigger an auto-purchase / top-up flow before retrying the scan.
-    Scans themselves have no token ceiling — only wallet balance constrains them.
+    if the wallet has insufficient balance.
     """
     if payload.units is None and payload.token_count is None:
         raise HTTPException(
@@ -538,7 +476,6 @@ def debit_billing_wallet(
     wallet_registry = get_unit_wallet_registry()
     normalized_owner = owner_key.strip().lower()
 
-    # Determine units to debit
     if payload.token_count is not None:
         units_to_debit = units_required_for_tokens(payload.token_count)
     else:
@@ -547,14 +484,10 @@ def debit_billing_wallet(
     debit_metadata: dict[str, Any] = {
         "reason": payload.reason,
         "tokens_per_unit": TOKEN_CHUNK_SIZE,
-        **({"token_count": payload.token_count} if payload.token_count is not None else {}),
-        **({"reference_id": payload.reference_id} if payload.reference_id else {}),
+        **({("token_count"): payload.token_count} if payload.token_count is not None else {}),
+        **({("reference_id"): payload.reference_id} if payload.reference_id else {}),
         **payload.metadata,
     }
-
-    # Pre-fetch balance for 402 body accuracy
-    wallet_before = wallet_registry.get_wallet(normalized_owner)
-    have = wallet_before.balance_units if wallet_before is not None else 0
 
     try:
         wallet = wallet_registry.debit_units(
@@ -565,15 +498,7 @@ def debit_billing_wallet(
     except InsufficientUnitsError as exc:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail={
-                "status": "insufficient_units",
-                "error": str(exc),
-                "owner_key": normalized_owner,
-                "have": have,
-                "need": units_to_debit,
-                "tokens_per_unit": TOKEN_CHUNK_SIZE,
-                "timestamp": _utc_now_iso(),
-            },
+            detail=_build_insufficient_units_detail(exc),
         ) from exc
 
     return WalletDebitResponse(
@@ -599,7 +524,6 @@ def refund_billing_wallet(
     """
     Refund protection units back to a wallet.
     Tracked separately from purchases in the ledger (entry_type=refund).
-    Used for policy reversals, scan cancellations, or manual adjustments.
     """
     wallet_registry = get_unit_wallet_registry()
     normalized_owner = owner_key.strip().lower()
@@ -607,7 +531,7 @@ def refund_billing_wallet(
     refund_metadata: dict[str, Any] = {
         "reason": payload.reason,
         "tokens_per_unit": TOKEN_CHUNK_SIZE,
-        **({"reference_id": payload.reference_id} if payload.reference_id else {}),
+        **({("reference_id"): payload.reference_id} if payload.reference_id else {}),
         **payload.metadata,
     }
 
