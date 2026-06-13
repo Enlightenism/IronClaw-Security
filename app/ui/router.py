@@ -72,7 +72,6 @@ UI_ROUTERS: Final[tuple[APIRouter, ...]] = (
             _optional_router("app.ui.billing_summary"),
             _optional_router("app.ui.billing_wallet"),
             _optional_router("app.ui.billing_purchase"),
-            _optional_router("app.ui.billing.overview"),
             _optional_router("app.ui.billing.invoices"),
             _optional_router("app.ui.billing.invoice_detail"),
             _optional_router("app.ui.billing.payment_methods"),
@@ -130,8 +129,6 @@ def _router_label(ui_router: APIRouter) -> str:
 
 
 def _route_key(route: object) -> tuple[str, tuple[str, ...]]:
-    """Collision key: (path, sorted_methods). Handler name is intentionally excluded
-    so two handlers at the same path+methods are always caught as duplicates."""
     path = str(getattr(route, "path", ""))
     methods = tuple(sorted(cast("set[str]", getattr(route, "methods", set()) or set())))
     return (path, methods)

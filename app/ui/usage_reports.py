@@ -21,7 +21,8 @@ except Exception:
         return math.ceil(token_count / TOKEN_CHUNK_SIZE)
 
 
-router = APIRouter(prefix="/usage-reports", tags=["usage-reports"])
+router = APIRouter(prefix="/ui/usage-reports", tags=["usage-reports"])
+
 
 # ---------------------------------------------------------------------------
 # Supabase client (service-role, read-only — non-blocking)
@@ -38,34 +39,18 @@ except Exception:
     _supabase = None
     _SUPABASE_AVAILABLE = False
 
+
 # ---------------------------------------------------------------------------
-# Canonical package/pricing constants — TOKEN_CHUNK_SIZE is the single source
-# of truth (app.core.unit_wallet.TOKEN_CHUNK_SIZE).  Local alias kept for
-# backwards-compat with existing serialisation field names.
+# Canonical package/pricing constants
 # ---------------------------------------------------------------------------
 _TOKENS_PER_UNIT = TOKEN_CHUNK_SIZE
 _ORDERED_PACKAGE_IDS = ["pkg_5000", "pkg_25000", "pkg_60000"]
 _FEATURED_PACKAGE_ID = "pkg_25000"
 
 _PRICING_FALLBACK: dict[str, tuple[int, float, str, str]] = {
-    "pkg_5000": (
-        5_000,
-        20.00,
-        "Starter",
-        "5,000 units — $20.00",
-    ),
-    "pkg_25000": (
-        25_000,
-        90.00,
-        "Team",
-        "25,000 units — $90.00",
-    ),
-    "pkg_60000": (
-        60_000,
-        180.00,
-        "Enterprise",
-        "60,000 units — $180.00",
-    ),
+    "pkg_5000": (5_000, 20.00, "Starter", "5,000 units — $20.00"),
+    "pkg_25000": (25_000, 90.00, "Team", "25,000 units — $90.00"),
+    "pkg_60000": (60_000, 180.00, "Enterprise", "60,000 units — $180.00"),
 }
 
 
@@ -92,9 +77,6 @@ def _get_package_metadata(package_id: str) -> dict[str, Any]:
         "included_units": included_units,
         "units_display": f"{included_units:,} units",
         "tokens_per_unit": _TOKENS_PER_UNIT,
-        # Renamed from max_tokens_covered: communicates "tokens currently paid
-        # for in this package" not a ceiling.  Scans are unlimited; this is
-        # a wallet balance expressed in token-equivalents, not a cap.
         "tokens_in_wallet": included_units * _TOKENS_PER_UNIT,
         "effective_price_per_1k_units": price_per_1k,
         "featured": package_id == _FEATURED_PACKAGE_ID,
@@ -112,7 +94,7 @@ def _billing_catalog() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Supabase data fetchers — all non-blocking, return safe defaults on failure
+# Supabase data fetchers
 # ---------------------------------------------------------------------------
 def _fetch_security_events(limit: int) -> list[dict[str, Any]]:
     if not _SUPABASE_AVAILABLE or _supabase is None:
@@ -158,8 +140,6 @@ def _fetch_usage_summary(rows: list[dict[str, Any]], period: str, limit: int) ->
             "limit": limit,
             "source": "supabase",
             "total_units_consumed": total_units,
-            # Renamed from total_tokens_covered: this is the token-equivalent
-            # balance consumed, not a ceiling.  Scans are unlimited.
             "tokens_in_wallet": total_units * _TOKENS_PER_UNIT,
             "tokens_per_unit": _TOKENS_PER_UNIT,
             "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; " "additional units consumed in 25,000-token chunks."),
@@ -186,8 +166,6 @@ def _build_events_from_rows(rows: list[dict[str, Any]], limit: int) -> UsageEven
     events: list[UsageEventView] = []
     for row in rows[:limit]:
         units_consumed = int(row.get("units_used") or 0)
-        # tokens_in_wallet: token-equivalent balance represented by these units,
-        # not a scan ceiling.  Scans are unlimited; units auto-deduct.
         tokens_in_wallet = units_consumed * _TOKENS_PER_UNIT
         events.append(
             UsageEventView(
@@ -221,7 +199,7 @@ def _build_events_from_rows(rows: list[dict[str, Any]], limit: int) -> UsageEven
 
 
 # ---------------------------------------------------------------------------
-# Fallback builders (preserved for zero-row path)
+# Fallback builders
 # ---------------------------------------------------------------------------
 def _build_empty_summaries(period: str, limit: int) -> UsageSummaryListView:
     items: list[UsageSummaryItemView] = [
@@ -279,7 +257,7 @@ def _build_empty_events(limit: int) -> UsageEventListView:
 
 
 # ---------------------------------------------------------------------------
-# Pydantic view models (all shapes preserved exactly)
+# Pydantic view models
 # ---------------------------------------------------------------------------
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
@@ -341,7 +319,7 @@ class UsageReportsResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Route (path, query params, and response_model shape preserved exactly)
+# Route
 # ---------------------------------------------------------------------------
 @router.get("", response_model=UsageReportsResponse)
 def get_usage_reports(
