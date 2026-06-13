@@ -72,6 +72,7 @@ UI_ROUTERS: Final[tuple[APIRouter, ...]] = (
             _optional_router("app.ui.billing_summary"),
             _optional_router("app.ui.billing_wallet"),
             _optional_router("app.ui.billing_purchase"),
+            _optional_router("app.ui.billing.overview"),
             _optional_router("app.ui.billing.invoices"),
             _optional_router("app.ui.billing.invoice_detail"),
             _optional_router("app.ui.billing.payment_methods"),
