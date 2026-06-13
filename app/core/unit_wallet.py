@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "TOKEN_CHUNK_SIZE",
+    "ORG_KEY_PREFIX",
+    "is_org_key",
     "InsufficientUnitsError",
     "units_required_for_tokens",
     "UNIT_PACKAGE_CATALOG",
@@ -26,6 +28,32 @@ __all__ = [
     "UnitWalletRegistry",
     "get_unit_wallet_registry",
 ]
+
+# ---------------------------------------------------------------------------
+# Org-key convention
+#
+# When owner_key is prefixed with ORG_KEY_PREFIX ("ic_org_"), the wallet is
+# org-scoped: all team members who share the same org key consume units from
+# the same wallet.  The key is typically set by the billing or auth layer as
+# "ic_org_<org_id>" and passed directly into get_or_create_wallet().
+#
+# No wallet mechanics change — owner_key is already a freeform string.
+# get_or_create_wallet() is idempotent for org keys exactly as it is for
+# individual keys: first call creates the wallet, subsequent calls return the
+# same wallet_id.
+# ---------------------------------------------------------------------------
+
+ORG_KEY_PREFIX: str = "ic_org_"
+
+
+def is_org_key(owner_key: str) -> bool:
+    """Return True if *owner_key* is an org-scoped wallet key.
+
+    Org keys are prefixed with ORG_KEY_PREFIX (``"ic_org_"``).  All team
+    members that share the same org key debit from a single shared wallet.
+    """
+    return owner_key.strip().lower().startswith(ORG_KEY_PREFIX)
+
 
 # ---------------------------------------------------------------------------
 # Structured insufficient-units exception
@@ -560,6 +588,20 @@ class UnitWalletRegistry:
 
     Token scans are UNLIMITED — units auto-deduct in TOKEN_CHUNK_SIZE chunks
     with no ceiling imposed by this module.
+
+    Org-scoped wallets
+    ------------------
+    owner_key is a freeform string.  When prefixed with ORG_KEY_PREFIX
+    (``"ic_org_"``), the wallet is shared across an entire organization: all
+    team members who pass the same org key consume units from one wallet.
+    The caller (billing router, auth layer) is responsible for constructing
+    the org key as ``f"ic_org_{org_id}"``.
+
+    get_or_create_wallet() is fully idempotent for org keys — the first call
+    creates the wallet and all subsequent calls return the same wallet_id,
+    whether the lookup hits the in-memory cache or falls through to the
+    persistence backend.  No special handling is required for org keys vs
+    individual keys.
     """
 
     def __init__(self) -> None:
