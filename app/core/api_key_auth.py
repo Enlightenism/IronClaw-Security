@@ -5,15 +5,18 @@ import logging
 from typing import Any
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 import httpx
 
+from app.core.apikeys import APIKeyRecord, get_api_key_registry
+from app.core.auth import AuthContext
 from app.core.logging import get_logger
 from app.services.secrets_vault import vault
 
 _logger: logging.Logger = get_logger("ironclaw.api_key_auth")
 
 _bearer_scheme = HTTPBearer(auto_error=False)
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 _DEFAULT_EDGE_PATH = "/functions/v1/ironclaw-auth"
 
@@ -136,29 +139,93 @@ async def _call_edge_auth(bearer_token: str) -> EdgeAuthContext:
     )
 
 
+def _build_auth_context_from_record(api_key: str, record: APIKeyRecord) -> AuthContext:
+    """Build a full AuthContext from an authenticated APIKeyRecord.
+
+    Plumbs record.key_type and record.org_id into AuthContext so that
+    org-shared keys carry their org_id and key_type through every
+    downstream policy check and audit event.
+    """
+    return AuthContext(
+        api_key=api_key,
+        principal_type="api_key",
+        principal_id=record.key_id,
+        session_id=None,
+        org_id=record.org_id,
+        permissions=tuple(record.scopes),
+        roles=(),
+        authenticated=True,
+        auth_source="api_key_registry",
+        auth_method="api_key",
+        key_type=record.key_type,
+        metadata=dict(record.metadata),
+    )
+
+
 async def require_api_key(
+    x_api_key: str | None = Depends(_api_key_header),
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
-) -> EdgeAuthContext:
-    if credentials is None or not credentials.credentials:
+) -> AuthContext:
+    """FastAPI dependency: authenticate via local APIKeyRegistry (X-API-Key header).
+
+    Resolves the APIKeyRecord, extracts key_type and org_id, and returns
+    a fully-populated AuthContext owned by auth.py. Org keys and personal
+    keys are both handled here — the difference is surfaced via key_type
+    and org_id on the returned context.
+
+    Falls back to a 401 if neither header is present or the key is not
+    found/active in the registry.
+    """
+    raw_key: str | None = x_api_key
+    if not raw_key and credentials is not None:
+        raw_key = credentials.credentials or None
+
+    if not raw_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing Authorization: Bearer token",
+            detail="Missing API key — provide X-API-Key header",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return await _call_edge_auth(credentials.credentials)
+
+    registry = get_api_key_registry()
+    record: APIKeyRecord | None = registry.authenticate(raw_key, touch=True)
+
+    if record is None:
+        _logger.warning(
+            "api_key_auth_failed",
+            extra={"masked": raw_key[:6] + "..." if len(raw_key) > 6 else "***"},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or revoked API key",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    _logger.debug(
+        "api_key_auth_ok",
+        extra={
+            "key_id": record.key_id,
+            "key_type": record.key_type,
+            "org_id": record.org_id,
+            "owner_key": record.owner_key,
+        },
+    )
+
+    return _build_auth_context_from_record(raw_key, record)
 
 
 def require_scope(scope: str):
     async def _inner(
         auth: EdgeAuthContext = Depends(require_api_key),
     ) -> EdgeAuthContext:
-        if not auth.has_scope(scope):
+        granted = getattr(auth, "scopes", None) or getattr(auth, "permissions", ())
+        if scope not in granted and "admin" not in granted:
             _logger.warning(
                 "scope_denied",
                 extra={
-                    "tenant_id": auth.tenant_id,
+                    "principal_id": getattr(auth, "principal_id", None),
                     "required_scope": scope,
-                    "granted_scopes": list(auth.scopes),
+                    "granted_scopes": list(granted),
                 },
             )
             raise HTTPException(
