@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import math
 import os
+import uuid
 
 import pytest
 
@@ -32,16 +33,16 @@ from app.supabaseclient import TOKENS_PER_UNIT as _SUPABASE_TOKENS_PER_UNIT
 # Each unit covers TOKEN_CHUNK_SIZE (25,000) tokens (ceiling division).
 # ---------------------------------------------------------------------------
 
-_PKG_STARTER_UNITS: int = UNIT_PACKAGE_CATALOG["pkg_5000"]["unit_amount"]  # 5_000
-_PKG_STARTER_PRICE_USD: float = UNIT_PACKAGE_CATALOG["pkg_5000"]["price_usd"]  # 20.00
+_PKG_STARTER_UNITS: int = UNIT_PACKAGE_CATALOG["pkg_5000"]["unit_amount"]
+_PKG_STARTER_PRICE_USD: float = UNIT_PACKAGE_CATALOG["pkg_5000"]["price_usd"]
 _PKG_STARTER_LABEL: str = UNIT_PACKAGE_CATALOG["pkg_5000"]["display_label"]
 
-_PKG_TEAM_UNITS: int = UNIT_PACKAGE_CATALOG["pkg_25000"]["unit_amount"]  # 25_000
-_PKG_TEAM_PRICE_USD: float = UNIT_PACKAGE_CATALOG["pkg_25000"]["price_usd"]  # 90.00
+_PKG_TEAM_UNITS: int = UNIT_PACKAGE_CATALOG["pkg_25000"]["unit_amount"]
+_PKG_TEAM_PRICE_USD: float = UNIT_PACKAGE_CATALOG["pkg_25000"]["price_usd"]
 _PKG_TEAM_LABEL: str = UNIT_PACKAGE_CATALOG["pkg_25000"]["display_label"]
 
-_PKG_ENTERPRISE_UNITS: int = UNIT_PACKAGE_CATALOG["pkg_60000"]["unit_amount"]  # 60_000
-_PKG_ENTERPRISE_PRICE_USD: float = UNIT_PACKAGE_CATALOG["pkg_60000"]["price_usd"]  # 180.00
+_PKG_ENTERPRISE_UNITS: int = UNIT_PACKAGE_CATALOG["pkg_60000"]["unit_amount"]
+_PKG_ENTERPRISE_PRICE_USD: float = UNIT_PACKAGE_CATALOG["pkg_60000"]["price_usd"]
 _PKG_ENTERPRISE_LABEL: str = UNIT_PACKAGE_CATALOG["pkg_60000"]["display_label"]
 
 _TOKENS_PER_UNIT: int = TOKEN_CHUNK_SIZE  # 25_000
@@ -49,18 +50,11 @@ _TOKENS_PER_UNIT: int = TOKEN_CHUNK_SIZE  # 25_000
 
 # ===========================================================================
 # Section 0 — Cross-module constant sync guard
-# Ensures TOKEN_CHUNK_SIZE (unit_wallet) and TOKENS_PER_UNIT (supabaseclient)
-# never drift from each other. A mismatch here is a billing integrity failure.
 # ===========================================================================
 
 
 def test_token_chunk_size_matches_supabase_tokens_per_unit() -> None:
-    """TOKEN_CHUNK_SIZE and supabaseclient.TOKENS_PER_UNIT must always be equal.
-
-    Both constants represent the number of tokens covered by one protection unit.
-    If they ever diverge, billing metering and stripe checkout will compute
-    different unit prices — a silent revenue and security contract violation.
-    """
+    """TOKEN_CHUNK_SIZE and supabaseclient.TOKENS_PER_UNIT must always be equal."""
     assert TOKEN_CHUNK_SIZE == _SUPABASE_TOKENS_PER_UNIT, f"Billing integrity failure: TOKEN_CHUNK_SIZE={TOKEN_CHUNK_SIZE} != " f"TOKENS_PER_UNIT={_SUPABASE_TOKENS_PER_UNIT}. " "These constants must always be equal. Update the diverged module."
 
 
@@ -71,7 +65,6 @@ def test_token_chunk_size_matches_supabase_tokens_per_unit() -> None:
 
 def test_wallet_starts_with_zero_balance() -> None:
     wallet = UnitWallet(owner_id="owner-001")
-
     assert wallet.owner_id == "owner-001"
     assert wallet.balance_units == 0
     assert wallet.total_purchased_units == 0
@@ -82,14 +75,12 @@ def test_wallet_starts_with_zero_balance() -> None:
 
 def test_purchase_units_increases_balance_and_totals() -> None:
     wallet = UnitWallet(owner_id="owner-001")
-
     transaction = wallet.purchase_units(
         units=_PKG_STARTER_UNITS,
         source="stripe_checkout",
         reference_id="checkout-001",
         metadata={"plan": "starter"},
     )
-
     assert isinstance(transaction, UnitWalletTransaction)
     assert transaction.owner_id == "owner-001"
     assert transaction.transaction_type == "purchase"
@@ -97,7 +88,6 @@ def test_purchase_units_increases_balance_and_totals() -> None:
     assert transaction.source == "stripe_checkout"
     assert transaction.reference_id == "checkout-001"
     assert transaction.metadata == {"plan": "starter"}
-
     assert wallet.balance_units == _PKG_STARTER_UNITS
     assert wallet.total_purchased_units == _PKG_STARTER_UNITS
     assert wallet.total_consumed_units == 0
@@ -107,12 +97,7 @@ def test_purchase_units_increases_balance_and_totals() -> None:
 
 def test_consume_units_reduces_balance_and_increases_consumed_total() -> None:
     wallet = UnitWallet(owner_id="owner-001")
-    wallet.purchase_units(
-        units=_PKG_TEAM_UNITS,
-        source="stripe_checkout",
-        reference_id="checkout-001",
-    )
-
+    wallet.purchase_units(units=_PKG_TEAM_UNITS, source="stripe_checkout", reference_id="checkout-001")
     consume_amount = _PKG_STARTER_UNITS
     transaction = wallet.consume_units(
         units=consume_amount,
@@ -120,14 +105,12 @@ def test_consume_units_reduces_balance_and_increases_consumed_total() -> None:
         reference_id="usage-001",
         metadata={"route": "/guard/execute"},
     )
-
     assert isinstance(transaction, UnitWalletTransaction)
     assert transaction.transaction_type == "consume"
     assert transaction.units == consume_amount
     assert transaction.source == "usage_metering"
     assert transaction.reference_id == "usage-001"
     assert transaction.metadata == {"route": "/guard/execute"}
-
     assert wallet.balance_units == _PKG_TEAM_UNITS - consume_amount
     assert wallet.total_purchased_units == _PKG_TEAM_UNITS
     assert wallet.total_consumed_units == consume_amount
@@ -137,29 +120,22 @@ def test_consume_units_reduces_balance_and_increases_consumed_total() -> None:
 
 def test_refund_units_increases_balance_and_refunded_total() -> None:
     wallet = UnitWallet(owner_id="owner-001")
-    wallet.purchase_units(
-        units=_PKG_TEAM_UNITS,
-        source="stripe_checkout",
-        reference_id="checkout-001",
-    )
+    wallet.purchase_units(units=_PKG_TEAM_UNITS, source="stripe_checkout", reference_id="checkout-001")
     consume_amount = _PKG_STARTER_UNITS
     refund_amount = 100
     wallet.consume_units(units=consume_amount, source="usage_metering", reference_id="usage-001")
-
     transaction = wallet.refund_units(
         units=refund_amount,
         source="manual_adjustment",
         reference_id="refund-001",
         metadata={"reason": "support_credit"},
     )
-
     assert isinstance(transaction, UnitWalletTransaction)
     assert transaction.transaction_type == "refund"
     assert transaction.units == refund_amount
     assert transaction.source == "manual_adjustment"
     assert transaction.reference_id == "refund-001"
     assert transaction.metadata == {"reason": "support_credit"}
-
     assert wallet.balance_units == _PKG_TEAM_UNITS - consume_amount + refund_amount
     assert wallet.total_purchased_units == _PKG_TEAM_UNITS
     assert wallet.total_consumed_units == consume_amount
@@ -170,27 +146,18 @@ def test_refund_units_increases_balance_and_refunded_total() -> None:
 def test_consume_units_raises_when_balance_is_insufficient() -> None:
     wallet = UnitWallet(owner_id="owner-001")
     wallet.purchase_units(units=40, source="stripe_checkout", reference_id="checkout-001")
-
     with pytest.raises(InsufficientUnitsError):
-        wallet.consume_units(
-            units=100,
-            source="usage_metering",
-            reference_id="usage-001",
-        )
-
+        wallet.consume_units(units=100, source="usage_metering", reference_id="usage-001")
     assert wallet.balance_units == 40
     assert wallet.total_consumed_units == 0
     assert len(wallet.transactions) == 1
 
 
 def test_consume_units_insufficient_error_carries_have_need_owner() -> None:
-    """InsufficientUnitsError must expose .have, .need, and .owner_key."""
     wallet = UnitWallet(owner_id="owner-err-001")
     wallet.purchase_units(units=5, source="stripe_checkout", reference_id="chk-err")
-
     with pytest.raises(InsufficientUnitsError) as exc_info:
         wallet.consume_units(units=20, source="usage_metering")
-
     err = exc_info.value
     assert err.have == 5
     assert err.need == 20
@@ -199,23 +166,9 @@ def test_consume_units_insufficient_error_carries_have_need_owner() -> None:
 
 def test_transaction_history_preserves_order() -> None:
     wallet = UnitWallet(owner_id="owner-001")
-
-    purchase = wallet.purchase_units(
-        units=_PKG_STARTER_UNITS,
-        source="stripe_checkout",
-        reference_id="checkout-001",
-    )
-    consume = wallet.consume_units(
-        units=20,
-        source="usage_metering",
-        reference_id="usage-001",
-    )
-    refund = wallet.refund_units(
-        units=5,
-        source="manual_adjustment",
-        reference_id="refund-001",
-    )
-
+    purchase = wallet.purchase_units(units=_PKG_STARTER_UNITS, source="stripe_checkout", reference_id="checkout-001")
+    consume = wallet.consume_units(units=20, source="usage_metering", reference_id="usage-001")
+    refund = wallet.refund_units(units=5, source="manual_adjustment", reference_id="refund-001")
     assert wallet.transactions == [purchase, consume, refund]
 
 
@@ -231,13 +184,11 @@ def test_ledger_entry_can_wrap_transaction_snapshot() -> None:
         created_at=datetime.now(UTC),
         metadata={"plan": "starter"},
     )
-
     entry = UnitLedgerEntry(
         owner_id="owner-001",
         transaction=transaction,
         recorded_at=datetime.now(UTC),
     )
-
     assert entry.owner_id == "owner-001"
     assert entry.transaction.transaction_id == "txn-001"
     assert entry.transaction.balance_after == _PKG_STARTER_UNITS
@@ -254,6 +205,13 @@ class TestPackageCatalog:
         assert "pkg_5000" in UNIT_PACKAGE_CATALOG
         assert "pkg_25000" in UNIT_PACKAGE_CATALOG
         assert "pkg_60000" in UNIT_PACKAGE_CATALOG
+
+    def test_catalog_contains_exactly_three_packages(self) -> None:
+        assert set(UNIT_PACKAGE_CATALOG.keys()) == {"pkg_5000", "pkg_25000", "pkg_60000"}
+
+    def test_no_max_tokens_covered_key_in_any_entry(self) -> None:
+        for pkg_id, pkg in UNIT_PACKAGE_CATALOG.items():
+            assert "max_tokens_covered" not in pkg, f"package {pkg_id!r} must not expose 'max_tokens_covered' — " "use token_coverage computed at the route layer instead"
 
     def test_starter_unit_amount(self) -> None:
         assert UNIT_PACKAGE_CATALOG["pkg_5000"]["unit_amount"] == 5_000
@@ -322,13 +280,6 @@ class TestPackageCatalog:
 
 
 class TestUnitsRequiredForTokens:
-    """
-    Coverage rule: units = ceil(token_count / TOKEN_CHUNK_SIZE)
-    TOKEN_CHUNK_SIZE = 25_000
-    Returns 0 for non-positive inputs.
-    No upper bound — arbitrarily large token counts must compute correctly.
-    """
-
     def test_zero_tokens_returns_zero(self) -> None:
         assert units_required_for_tokens(0) == 0
 
@@ -394,17 +345,14 @@ class TestUnitsRequiredForTokens:
         assert units_required_for_tokens(max_tokens + 1) == _PKG_ENTERPRISE_UNITS + 1
 
     def test_one_million_tokens_is_40_units(self) -> None:
-        """1,000,000 tokens ÷ 25,000 = exactly 40 units — no ceiling cap."""
         assert units_required_for_tokens(1_000_000) == 40
 
     def test_ten_million_tokens_is_400_units_no_cap(self) -> None:
-        """10,000,000 tokens must return 400 — function has no upper bound."""
         result = units_required_for_tokens(10_000_000)
         assert result == 400
         assert result == math.ceil(10_000_000 / _TOKENS_PER_UNIT)
 
     def test_arbitrarily_large_token_count_matches_formula(self) -> None:
-        """No AssertionError, no cap — pure ceiling division at any scale."""
         for n in [500_000, 1_000_000, 5_000_000, 10_000_000, 100_000_000]:
             expected = math.ceil(n / _TOKENS_PER_UNIT)
             assert units_required_for_tokens(n) == expected
@@ -416,12 +364,6 @@ class TestUnitsRequiredForTokens:
 
 
 class TestConsumeUnitsForTokens:
-    """
-    Exercises consume_units_for_tokens() on UnitWallet.
-    Verifies ceiling division, metadata injection, and
-    InsufficientUnitsError when wallet cannot cover the payload.
-    """
-
     def _funded_wallet(self, units: int = _PKG_ENTERPRISE_UNITS) -> UnitWallet:
         wallet = UnitWallet(owner_id="owner-token-test")
         wallet.purchase_units(units=units, source="stripe_checkout", reference_id="checkout-tok")
@@ -457,11 +399,7 @@ class TestConsumeUnitsForTokens:
 
     def test_metadata_contains_token_count(self) -> None:
         wallet = self._funded_wallet()
-        txn = wallet.consume_units_for_tokens(
-            token_count=37_500,
-            source="usage_metering",
-            reference_id="ref-meta",
-        )
+        txn = wallet.consume_units_for_tokens(token_count=37_500, source="usage_metering", reference_id="ref-meta")
         assert txn.metadata["token_count"] == 37_500
 
     def test_metadata_contains_tokens_per_unit(self) -> None:
@@ -504,22 +442,16 @@ class TestConsumeUnitsForTokens:
 
     def test_reference_id_propagated(self) -> None:
         wallet = self._funded_wallet()
-        txn = wallet.consume_units_for_tokens(
-            token_count=25_000,
-            source="usage_metering",
-            reference_id="ref-abc",
-        )
+        txn = wallet.consume_units_for_tokens(token_count=25_000, source="usage_metering", reference_id="ref-abc")
         assert txn.reference_id == "ref-abc"
 
     def test_large_token_count_consumes_correct_units(self) -> None:
-        """1,000,000 tokens requires 40 units — wallet must have enough."""
         wallet = self._funded_wallet(units=100)
         txn = wallet.consume_units_for_tokens(token_count=1_000_000, source="usage_metering")
         assert txn.units == 40
         assert wallet.balance_units == 60
 
     def test_large_token_count_insufficient_error_carries_need(self) -> None:
-        """debit for 1,000,000 tokens on empty wallet raises with need=40, have=0."""
         wallet = UnitWallet(owner_id="owner-large-broke")
         wallet.purchase_units(units=0, source="stripe_checkout", reference_id="chk-lb")
         with pytest.raises(InsufficientUnitsError) as exc_info:
@@ -530,17 +462,181 @@ class TestConsumeUnitsForTokens:
 
 
 # ===========================================================================
-# Section 5 — UnitWalletRegistry.debit_units_for_tokens() boundary conditions
+# Section 5 — MemoryUnitWalletRepository round-trip
+# ===========================================================================
+
+
+class TestMemoryRepository:
+    """
+    Direct repo layer tests: upsert_wallet/fetch_wallet round-trip,
+    fetch_wallet returns None for unknown owner, append_ledger_entry/
+    fetch_ledger_entries round-trip with limit enforcement.
+    """
+
+    def _make_wallet(self, owner: str = "owner-repo-001") -> RegistryUnitWallet:
+        return RegistryUnitWallet(
+            wallet_id=f"wallet-{uuid.uuid4().hex[:8]}",
+            owner_key=owner,
+        )
+
+    def _make_entry(self, wallet: RegistryUnitWallet, idx: int = 0) -> RegistryUnitLedgerEntry:
+        return RegistryUnitLedgerEntry(
+            entry_id=f"entry-{uuid.uuid4().hex}",
+            wallet_id=wallet.wallet_id,
+            owner_key=wallet.owner_key,
+            entry_type="credit",
+            units=1,
+            balance_after=idx + 1,
+        )
+
+    def test_upsert_then_fetch_returns_wallet(self) -> None:
+        repo = MemoryUnitWalletRepository()
+        wallet = self._make_wallet("owner-rt-001")
+        repo.upsert_wallet(wallet)
+        fetched = repo.fetch_wallet(owner_key="owner-rt-001")
+        assert fetched is not None
+        assert fetched.wallet_id == wallet.wallet_id
+        assert fetched.owner_key == "owner-rt-001"
+
+    def test_fetch_wallet_returns_none_for_unknown_owner(self) -> None:
+        repo = MemoryUnitWalletRepository()
+        assert repo.fetch_wallet(owner_key="ghost-owner-xyz") is None
+
+    def test_upsert_overwrites_existing_wallet(self) -> None:
+        repo = MemoryUnitWalletRepository()
+        wallet = self._make_wallet("owner-upsert-001")
+        repo.upsert_wallet(wallet)
+        updated = RegistryUnitWallet(
+            wallet_id=wallet.wallet_id,
+            owner_key=wallet.owner_key,
+            balance_units=999,
+        )
+        repo.upsert_wallet(updated)
+        fetched = repo.fetch_wallet(owner_key="owner-upsert-001")
+        assert fetched is not None
+        assert fetched.balance_units == 999
+
+    def test_append_then_fetch_ledger_entries_round_trip(self) -> None:
+        repo = MemoryUnitWalletRepository()
+        wallet = self._make_wallet("owner-ledger-001")
+        repo.upsert_wallet(wallet)
+        entries = [self._make_entry(wallet, i) for i in range(5)]
+        for e in entries:
+            repo.append_ledger_entry(e)
+        fetched = repo.fetch_ledger_entries(owner_key="owner-ledger-001")
+        assert len(fetched) == 5
+        fetched_ids = [e.entry_id for e in fetched]
+        for e in entries:
+            assert e.entry_id in fetched_ids
+
+    def test_fetch_ledger_entries_empty_for_unknown_owner(self) -> None:
+        repo = MemoryUnitWalletRepository()
+        assert repo.fetch_ledger_entries(owner_key="unknown-ledger-owner") == []
+
+    def test_fetch_ledger_entries_limit_respected(self) -> None:
+        repo = MemoryUnitWalletRepository()
+        wallet = self._make_wallet("owner-limit-001")
+        repo.upsert_wallet(wallet)
+        for i in range(10):
+            repo.append_ledger_entry(self._make_entry(wallet, i))
+        fetched = repo.fetch_ledger_entries(owner_key="owner-limit-001", limit=3)
+        assert len(fetched) <= 3
+
+    def test_fetch_ledger_entries_filters_by_owner(self) -> None:
+        repo = MemoryUnitWalletRepository()
+        wallet_a = self._make_wallet("owner-filter-a")
+        wallet_b = self._make_wallet("owner-filter-b")
+        repo.upsert_wallet(wallet_a)
+        repo.upsert_wallet(wallet_b)
+        repo.append_ledger_entry(self._make_entry(wallet_a))
+        repo.append_ledger_entry(self._make_entry(wallet_b))
+        fetched = repo.fetch_ledger_entries(owner_key="owner-filter-a")
+        assert all(e.owner_key == "owner-filter-a" for e in fetched)
+
+
+# ===========================================================================
+# Section 6 — UnitWalletRegistry operations
+# ===========================================================================
+
+
+class TestUnitWalletRegistry:
+    """
+    Registry-layer tests: get_or_create_wallet idempotency, credit_units,
+    debit_units, refund_units, get_wallet returns None for unknown owner,
+    list_ledger_entries insertion order.
+    """
+
+    def test_get_or_create_wallet_creates_and_caches(self) -> None:
+        registry = UnitWalletRegistry()
+        w1 = registry.get_or_create_wallet(owner_key="owner-gc-001")
+        w2 = registry.get_or_create_wallet(owner_key="owner-gc-001")
+        assert w1.wallet_id == w2.wallet_id
+
+    def test_get_wallet_returns_none_for_unknown_owner(self) -> None:
+        registry = UnitWalletRegistry()
+        assert registry.get_wallet("ghost-owner-registry-xyz") is None
+
+    def test_credit_units_increases_balance(self) -> None:
+        registry = UnitWalletRegistry()
+        registry.credit_units(owner_key="owner-credit-001", units=100)
+        wallet = registry.get_wallet("owner-credit-001")
+        assert wallet is not None
+        assert wallet.balance_units == 100
+
+    def test_debit_units_decreases_balance(self) -> None:
+        registry = UnitWalletRegistry()
+        registry.credit_units(owner_key="owner-debit-001", units=50)
+        registry.debit_units(owner_key="owner-debit-001", units=20)
+        wallet = registry.get_wallet("owner-debit-001")
+        assert wallet is not None
+        assert wallet.balance_units == 30
+
+    def test_debit_units_raises_on_zero_balance(self) -> None:
+        registry = UnitWalletRegistry()
+        registry.get_or_create_wallet(owner_key="owner-zero-001")
+        with pytest.raises(InsufficientUnitsError):
+            registry.debit_units(owner_key="owner-zero-001", units=1)
+
+    def test_refund_units_increments_balance(self) -> None:
+        registry = UnitWalletRegistry()
+        registry.credit_units(owner_key="owner-refund-001", units=100)
+        registry.debit_units(owner_key="owner-refund-001", units=50)
+        registry.refund_units(owner_key="owner-refund-001", units=25)
+        wallet = registry.get_wallet("owner-refund-001")
+        assert wallet is not None
+        assert wallet.balance_units == 75
+
+    def test_refund_units_increments_total_refunded(self) -> None:
+        registry = UnitWalletRegistry()
+        registry.credit_units(owner_key="owner-refund-002", units=100)
+        registry.debit_units(owner_key="owner-refund-002", units=50)
+        registry.refund_units(owner_key="owner-refund-002", units=30)
+        wallet = registry.get_wallet("owner-refund-002")
+        assert wallet is not None
+        assert wallet.total_refunded_units == 30
+
+    def test_list_ledger_entries_insertion_order(self) -> None:
+        """Entries must be returned in the order they were appended."""
+        registry = UnitWalletRegistry()
+        owner = "owner-order-001"
+        registry.credit_units(owner_key=owner, units=100)
+        registry.debit_units(owner_key=owner, units=10)
+        registry.refund_units(owner_key=owner, units=5)
+        entries = registry.list_ledger_entries(owner_key=owner)
+        types = [e.entry_type for e in entries]
+        assert types == ["credit", "debit", "refund"]
+
+    def test_list_ledger_entries_returns_empty_for_unknown_owner(self) -> None:
+        registry = UnitWalletRegistry()
+        assert registry.list_ledger_entries(owner_key="ghost-ledger-xyz") == []
+
+
+# ===========================================================================
+# Section 7 — UnitWalletRegistry.debit_units_for_tokens() boundary conditions
 # ===========================================================================
 
 
 class TestRegistryDebitUnitsForTokens:
-    """
-    Exercises UnitWalletRegistry.debit_units_for_tokens() via the in-memory
-    persistence backend. Verifies return tuple, balance deduction, metadata
-    propagation, and InsufficientUnitsError on under-funded wallets.
-    """
-
     def _registry_with_balance(self, owner: str, units: int) -> UnitWalletRegistry:
         registry = UnitWalletRegistry()
         registry.credit_units(owner_key=owner, units=units)
@@ -575,11 +671,7 @@ class TestRegistryDebitUnitsForTokens:
     def test_metadata_contains_token_count(self) -> None:
         owner = "owner-reg-meta-001"
         registry = self._registry_with_balance(owner, _PKG_ENTERPRISE_UNITS)
-        registry.debit_units_for_tokens(
-            owner_key=owner,
-            token_count=37_500,
-            metadata={"route": "/guard/execute"},
-        )
+        registry.debit_units_for_tokens(owner_key=owner, token_count=37_500, metadata={"route": "/guard/execute"})
         entries = registry.list_ledger_entries(owner_key=owner)
         debit_entry = next(e for e in entries if e.entry_type == "debit")
         assert debit_entry.metadata["token_count"] == 37_500
@@ -589,11 +681,7 @@ class TestRegistryDebitUnitsForTokens:
     def test_caller_metadata_merged_into_ledger(self) -> None:
         owner = "owner-reg-meta-002"
         registry = self._registry_with_balance(owner, _PKG_ENTERPRISE_UNITS)
-        registry.debit_units_for_tokens(
-            owner_key=owner,
-            token_count=25_000,
-            metadata={"pipeline": "agent-v2"},
-        )
+        registry.debit_units_for_tokens(owner_key=owner, token_count=25_000, metadata={"pipeline": "agent-v2"})
         entries = registry.list_ledger_entries(owner_key=owner)
         debit_entry = next(e for e in entries if e.entry_type == "debit")
         assert debit_entry.metadata["pipeline"] == "agent-v2"
@@ -608,7 +696,6 @@ class TestRegistryDebitUnitsForTokens:
         assert wallet.balance_units == 1
 
     def test_insufficient_error_carries_have_need_owner_key(self) -> None:
-        """debit_units raised from registry must carry .have, .need, .owner_key."""
         owner = "owner-reg-err-attrs"
         registry = self._registry_with_balance(owner, 10)
         with pytest.raises(InsufficientUnitsError) as exc_info:
@@ -619,7 +706,6 @@ class TestRegistryDebitUnitsForTokens:
         assert err.owner_key == owner
 
     def test_large_token_count_computes_40_units_and_raises_with_need(self) -> None:
-        """1,000,000 tokens on a zero-balance wallet must raise with need=40, have=0."""
         owner = "owner-reg-large-broke"
         registry = UnitWalletRegistry()
         registry.get_or_create_wallet(owner_key=owner)
@@ -648,33 +734,22 @@ class TestRegistryDebitUnitsForTokens:
 
 
 # ===========================================================================
-# Section 6 — MemoryUnitWalletRepository ledger trim (_LEDGER_MAX_SIZE)
+# Section 8 — MemoryUnitWalletRepository ledger trim (_LEDGER_MAX_SIZE)
 # ===========================================================================
 
 
 class TestMemoryLedgerTrim:
-    """
-    MemoryUnitWalletRepository must trim _ledger to _LEDGER_MAX_SIZE after
-    overflow so memory is bounded. The oldest entries are dropped first.
-    """
-
     def test_ledger_trim_at_overflow(self) -> None:
         from app.core.unit_wallet import _LEDGER_MAX_SIZE  # type: ignore[attr-defined]
 
         repo = MemoryUnitWalletRepository()
-        wallet = RegistryUnitWallet(
-            wallet_id="wallet-trim-test",
-            owner_key="owner-trim",
-        )
+        wallet = RegistryUnitWallet(wallet_id="wallet-trim-test", owner_key="owner-trim")
         repo.upsert_wallet(wallet)
 
-        overflow_count = _LEDGER_MAX_SIZE + 50
-        for i in range(overflow_count):
-            import uuid as _uuid
-
+        for i in range(_LEDGER_MAX_SIZE + 50):
             repo.append_ledger_entry(
                 RegistryUnitLedgerEntry(
-                    entry_id=f"ledger_{_uuid.uuid4().hex}",
+                    entry_id=f"ledger_{uuid.uuid4().hex}",
                     wallet_id=wallet.wallet_id,
                     owner_key=wallet.owner_key,
                     entry_type="credit",
@@ -689,19 +764,14 @@ class TestMemoryLedgerTrim:
         from app.core.unit_wallet import _LEDGER_MAX_SIZE  # type: ignore[attr-defined]
 
         repo = MemoryUnitWalletRepository()
-        wallet = RegistryUnitWallet(
-            wallet_id="wallet-notrim-test",
-            owner_key="owner-notrim",
-        )
+        wallet = RegistryUnitWallet(wallet_id="wallet-notrim-test", owner_key="owner-notrim")
         repo.upsert_wallet(wallet)
 
         count = min(10, _LEDGER_MAX_SIZE - 1)
         for i in range(count):
-            import uuid as _uuid
-
             repo.append_ledger_entry(
                 RegistryUnitLedgerEntry(
-                    entry_id=f"ledger_{_uuid.uuid4().hex}",
+                    entry_id=f"ledger_{uuid.uuid4().hex}",
                     wallet_id=wallet.wallet_id,
                     owner_key=wallet.owner_key,
                     entry_type="credit",
@@ -714,30 +784,20 @@ class TestMemoryLedgerTrim:
 
 
 # ===========================================================================
-# Section 7 — UnitWalletRegistry cache eviction (_WALLET_CACHE_MAX)
+# Section 9 — UnitWalletRegistry cache eviction (_WALLET_CACHE_MAX)
 # ===========================================================================
 
 
 class TestRegistryCacheEviction:
-    """
-    UnitWalletRegistry must evict in-memory wallet cache entries when the
-    cache exceeds _WALLET_CACHE_MAX. Evicted wallets must still be
-    retrievable from the persistence layer via get_wallet().
-    """
-
     def test_cache_eviction_does_not_lose_wallet_from_persistence(self) -> None:
         from app.core.unit_wallet import _WALLET_CACHE_MAX  # type: ignore[attr-defined]
 
         registry = UnitWalletRegistry()
-
-        # Fill the cache past its eviction threshold.
         overflow_count = _WALLET_CACHE_MAX + 10
         owners = [f"owner-evict-{i:05d}" for i in range(overflow_count)]
         for owner in owners:
             registry.credit_units(owner_key=owner, units=1)
 
-        # The first wallet created must still be fetchable from persistence
-        # even if it was evicted from the in-memory cache.
         first_owner = owners[0]
         wallet = registry.get_wallet(first_owner)
         assert wallet is not None
@@ -748,7 +808,6 @@ class TestRegistryCacheEviction:
         from app.core.unit_wallet import _WALLET_CACHE_MAX  # type: ignore[attr-defined]
 
         registry = UnitWalletRegistry()
-
         overflow_count = _WALLET_CACHE_MAX + 20
         for i in range(overflow_count):
             registry.get_or_create_wallet(owner_key=f"owner-cache-{i:05d}")
