@@ -42,6 +42,7 @@ class AuthContext:
     authenticated: bool = False
     auth_source: str = "none"
     auth_method: str | None = None
+    key_type: str = "personal"
     metadata: dict[str, str] = field(default_factory=dict)
 
 
@@ -153,26 +154,12 @@ def _resolve_registry_api_key(provided_api_key: str) -> APIKeyRecord | None:
         return None
 
     registry = get_api_key_registry()
+    fingerprint = fingerprint_api_key(normalized_api_key)
 
     resolver = getattr(registry, "get_by_fingerprint", None)
     if callable(resolver):
-        fingerprint = fingerprint_api_key(normalized_api_key)
         try:
             record = resolver(fingerprint)
-        except Exception:
-            record = None
-        if _record_is_usable(record):
-            return _touch_record_if_possible(record)
-
-    authenticate = getattr(registry, "authenticate", None)
-    if callable(authenticate):
-        try:
-            record = authenticate(normalized_api_key, touch=False)
-        except TypeError:
-            try:
-                record = authenticate(normalized_api_key)
-            except Exception:
-                record = None
         except Exception:
             record = None
         if _record_is_usable(record):
@@ -306,6 +293,13 @@ def _coerce_org_id(
     return None
 
 
+def _coerce_key_type(record: APIKeyRecord | None) -> str:
+    if record is None:
+        return "personal"
+    value = _clean_optional_string(getattr(record, "key_type", None))
+    return value if value else "personal"
+
+
 def get_api_key(
     request: Request,
     provided_api_key: str | None = Depends(api_key_header),
@@ -378,17 +372,26 @@ def get_auth_context(
         elif _is_auth_required(request):
             auth_source = "configured"
 
+        resolved_key_type = _coerce_key_type(registry_record)
+        resolved_org_id = _coerce_org_id(request, provided_org_id, registry_record)
+
+        # For org keys: principal_type reflects the org scope so downstream
+        # policy can distinguish shared-org access from personal key access.
+        if resolved_key_type == "org" and registry_record is not None:
+            principal_type = "org_key"
+
         return AuthContext(
             api_key=normalized_api_key,
             principal_type=principal_type,
             principal_id=_coerce_principal_id(registry_record),
             session_id=normalized_session_id,
-            org_id=_coerce_org_id(request, provided_org_id, registry_record),
+            org_id=resolved_org_id,
             permissions=_coerce_permissions(registry_record),
             roles=_coerce_roles(registry_record),
             authenticated=True,
             auth_source=auth_source,
             auth_method=auth_method,
+            key_type=resolved_key_type,
             metadata={"header": API_KEY_HEADER_NAME},
         )
 
@@ -409,6 +412,7 @@ def get_auth_context(
         authenticated=False,
         auth_source="disabled",
         auth_method=None,
+        key_type="personal",
     )
 
 
