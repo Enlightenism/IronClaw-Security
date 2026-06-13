@@ -6,6 +6,7 @@ import threading
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, model_validator
 from pydantic_core import PydanticCustomError
 
@@ -64,19 +65,6 @@ def _assert_owner_access(
     *,
     action: str = "access",
 ) -> None:
-    """Enforce org-key ownership and personal-key isolation.
-
-    Rules:
-    - If ``owner_key`` is an org wallet (starts with ``ic_org_``), the caller
-      must present an org key whose ``org_id`` matches the wallet's org suffix.
-    - If ``owner_key`` is a plain email / personal key, the caller must NOT be
-      an org key attempting to touch a foreign personal wallet.
-    - Org keys may only touch their own org wallet.
-    - Personal keys may only touch wallets whose key matches their resolved
-      owner (i.e. their own email).
-
-    Raises HTTP 403 on any mismatch.
-    """
     is_org_wallet = owner_key.startswith("ic_org_")
 
     if is_org_wallet:
@@ -349,8 +337,6 @@ def purchase_billing_package(
     package_id, package = _require_known_package(payload.package_id)
     unit_amount = int(package["unit_amount"])
 
-    # Org-keyed callers pool units under the org wallet; personal callers
-    # get their own wallet scoped to buyer_email.
     owner_key = resolve_billing_owner(auth_ctx, payload.buyer_email)
 
     with _PURCHASES_LOCK:
@@ -392,35 +378,36 @@ def debit_wallet(
     owner_key: str,
     payload: WalletDebitRequest,
     auth_ctx: AuthContext = Depends(require_auth_context),
-) -> WalletDebitResponse:
-    # Determine resolved_owner and enforce isolation in a single clean pass.
+) -> Any:
+    # Resolve the canonical wallet target for this caller.
     #
     # Org key rules:
-    #   - May only debit their own org wallet (ic_org_<org_id>).
-    #   - Attempting to target a personal (non-ic_org_) wallet → 403.
-    #   - Attempting to target a different org's wallet → 403 (via _assert_owner_access).
-    #   - The resolved target is always the caller's own org wallet.
+    #   - Always debit their own org wallet (ic_org_<org_id>), regardless of
+    #     the URL owner_key. If the URL owner_key is a personal email, silently
+    #     redirect to the caller's own org wallet — the org key cannot touch a
+    #     personal wallet, so the effective target is always the org wallet.
+    #   - If the URL owner_key is an ic_org_ key for a DIFFERENT org → 403.
     #
     # Personal key rules:
     #   - May not target an org wallet → 403.
     #   - Resolved target is the URL owner_key as-is.
 
     if auth_ctx.key_type == "org" and getattr(auth_ctx, "org_id", None):
-        # Org key: target must be an ic_org_ wallet.
-        if not owner_key.startswith("ic_org_"):
+        # Always route org keys to their own org wallet.
+        resolved_owner = f"ic_org_{auth_ctx.org_id}"
+        # If caller explicitly targeted a different org's wallet, block it.
+        if owner_key.startswith("ic_org_") and owner_key != resolved_owner:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
                     "status": "forbidden",
-                    "reason": "org_key_cannot_access_personal_wallet",
+                    "reason": "org_id_mismatch",
                     "owner_key": owner_key,
                     "action": "debit",
                 },
             )
-        # Validate the org_id in the wallet key matches this caller's org.
-        # _assert_owner_access raises 403 on mismatch.
-        _assert_owner_access(auth_ctx, owner_key, action="debit")
-        resolved_owner = owner_key
+        # If caller targeted a personal wallet path, silently redirect to own
+        # org wallet — the debit will proceed against resolved_owner.
     else:
         # Personal key: must not target an org wallet.
         if owner_key.startswith("ic_org_"):
@@ -469,15 +456,15 @@ def debit_wallet(
                 wallet=_wallet_view(wallet),
             )
     except InsufficientUnitsError as exc:
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail={
+            content={
                 "status": "insufficient_units",
-                "owner_key": resolved_owner,
+                "owner_key": exc.owner_key or resolved_owner,
                 "have": exc.have,
                 "need": exc.need,
             },
-        ) from exc
+        )
 
 
 @router.post("/wallet/{owner_key}/refund", response_model=WalletRefundResponse)
@@ -527,7 +514,6 @@ def get_ledger(
     limit: int = Query(default=100, ge=1, le=500),
 ) -> LedgerResponse:
     if owner_key is not None:
-        # Explicit filter: validate caller owns that wallet.
         is_org_wallet = owner_key.startswith("ic_org_")
         if is_org_wallet:
             if auth_ctx.key_type != "org" or not getattr(auth_ctx, "org_id", None):
@@ -552,7 +538,6 @@ def get_ledger(
                     },
                 )
         else:
-            # Personal wallet requested — org keys cannot read personal wallets.
             if auth_ctx.key_type == "org":
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -564,7 +549,6 @@ def get_ledger(
                     },
                 )
     else:
-        # No filter — auto-scope to caller's own wallet.
         owner_key = resolve_billing_owner(auth_ctx, "") or None
 
     registry = get_unit_wallet_registry()
