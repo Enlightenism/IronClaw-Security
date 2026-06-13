@@ -9,6 +9,7 @@ from threading import RLock
 from typing import Any
 
 _API_KEY_PREFIX = "ic_"
+_ORG_KEY_PREFIX = "ic_org_"
 _API_KEY_SECRET_BYTES = 24
 _DEFAULT_OWNER_KEY = "ironclaw-system"
 _DEFAULT_SCOPES = ("system",)
@@ -41,6 +42,11 @@ def generate_api_key(prefix: str = _API_KEY_PREFIX) -> str:
     return f"{prefix}{secrets.token_urlsafe(_API_KEY_SECRET_BYTES)}"
 
 
+def generate_org_api_key() -> str:
+    """Generate a new org-scoped API key using the org prefix."""
+    return generate_api_key(prefix=_ORG_KEY_PREFIX)
+
+
 def fingerprint_api_key(api_key: str) -> str:
     return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
 
@@ -71,6 +77,8 @@ class APIKeyRecord:
     revoked_by: str | None = None
     rate_plan: str = _DEFAULT_RATE_PLAN
     metadata: dict[str, Any] = field(default_factory=dict)
+    key_type: str = "personal"
+    org_id: str | None = None
 
     def touch(self, when: str | None = None) -> APIKeyRecord:
         return replace(self, last_used_at=when or utc_now_iso())
@@ -96,6 +104,8 @@ class APIKeyRecord:
             "scopes": list(self.scopes),
             "rate_plan": self.rate_plan,
             "metadata": dict(self.metadata),
+            "key_type": self.key_type,
+            "org_id": self.org_id,
         }
 
 
@@ -116,8 +126,11 @@ class APIKeyRegistry:
         rate_plan: str = _DEFAULT_RATE_PLAN,
         api_key: str | None = None,
         key_id: str | None = None,
+        prefix: str = _API_KEY_PREFIX,
+        key_type: str = "personal",
+        org_id: str | None = None,
     ) -> APIKeyRecord:
-        issued_key = api_key or generate_api_key()
+        issued_key = api_key or generate_api_key(prefix=prefix)
         issued_key_id = key_id or self._new_key_id()
         record = APIKeyRecord(
             key_id=issued_key_id,
@@ -130,6 +143,8 @@ class APIKeyRegistry:
             created_by=created_by.strip() or _DEFAULT_CREATED_BY,
             rate_plan=rate_plan.strip() or _DEFAULT_RATE_PLAN,
             metadata=_normalize_metadata(metadata),
+            key_type=key_type,
+            org_id=org_id,
         )
         with self._lock:
             self._records_by_id[record.key_id] = record
@@ -144,9 +159,25 @@ class APIKeyRegistry:
             items = [item for item in items if item.active]
         return items
 
+    def list_keys_by_org(self, org_id: str, *, active_only: bool = False) -> list[APIKeyRecord]:
+        """Return all keys belonging to a given org_id."""
+        with self._lock:
+            items = [r for r in self._records_by_id.values() if r.org_id == org_id]
+        items.sort(key=lambda item: item.created_at, reverse=True)
+        if active_only:
+            items = [item for item in items if item.active]
+        return items
+
     def get_by_id(self, key_id: str) -> APIKeyRecord | None:
         with self._lock:
             return self._records_by_id.get(key_id)
+
+    def get_by_fingerprint(self, fingerprint: str) -> APIKeyRecord | None:
+        with self._lock:
+            for record in self._records_by_id.values():
+                if record.fingerprint == fingerprint:
+                    return record
+        return None
 
     def resolve_api_key(self, api_key: str) -> APIKeyRecord | None:
         with self._lock:
@@ -190,7 +221,8 @@ class APIKeyRegistry:
             record = self._records_by_id.get(key_id)
             if record is None:
                 return None
-            new_secret = generate_api_key()
+            prefix = _ORG_KEY_PREFIX if record.key_type == "org" else _API_KEY_PREFIX
+            new_secret = generate_api_key(prefix=prefix)
             updated_metadata = dict(record.metadata)
             updated_metadata.update(_normalize_metadata(metadata))
             updated_metadata["rotated_by"] = rotated_by
@@ -238,10 +270,12 @@ class APIKeyRegistry:
             records = list(self._records_by_id.values())
         active = sum(1 for record in records if record.active)
         revoked = len(records) - active
+        org_keys = sum(1 for record in records if record.key_type == "org")
         return {
             "total": len(records),
             "active": active,
             "revoked": revoked,
+            "org_keys": org_keys,
         }
 
     @staticmethod
@@ -272,6 +306,30 @@ def create_api_key(
         metadata=metadata,
         created_by=created_by,
         rate_plan=rate_plan,
+    )
+
+
+def create_org_key(
+    org_id: str,
+    display_name: str,
+    *,
+    owner_key: str = _DEFAULT_OWNER_KEY,
+    scopes: list[str] | tuple[str, ...] | None = None,
+    metadata: dict[str, Any] | None = None,
+    created_by: str = _DEFAULT_CREATED_BY,
+    rate_plan: str = _DEFAULT_RATE_PLAN,
+) -> APIKeyRecord:
+    """Factory for org-scoped shared API keys. Uses the ic_org_ prefix and sets key_type='org'."""
+    return _registry.create_key(
+        display_name,
+        owner_key=owner_key,
+        scopes=scopes,
+        metadata=metadata,
+        created_by=created_by,
+        rate_plan=rate_plan,
+        prefix=_ORG_KEY_PREFIX,
+        key_type="org",
+        org_id=org_id,
     )
 
 
