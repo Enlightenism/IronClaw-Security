@@ -23,6 +23,7 @@ from app.supabaseclient import (
 
 logger = logging.getLogger(__name__)
 
+
 __all__ = [
     "BillingCustomer",
     "BillingRegistry",
@@ -36,6 +37,7 @@ __all__ = [
     "get_billing_registry",
     "resolve_billing_owner",
 ]
+
 
 TOKENS_PER_UNIT: Final[int] = 25_000
 _DEFAULT_PERIOD_DAYS: Final[int] = 30
@@ -57,28 +59,20 @@ def resolve_billing_owner(auth_ctx: Any, buyer_email: str) -> str:
 
     When the request is authenticated via an org API key
     (``auth_ctx.key_type == "org"`` and ``auth_ctx.org_id`` is set),
-    all unit consumption is pooled under the org ID so every team member
-    draws from the same shared wallet.
+    all unit consumption is pooled under ``ic_org_{org_id}`` so every team
+    member draws from the same shared wallet and the key format matches the
+    ``_assert_owner_access`` guard in ``app/api/billing.py``.
 
     For every other authentication type (personal API key, session, etc.),
     the wallet is scoped to the individual ``buyer_email``.
 
     This function is the **single source of truth** for org vs. personal
     wallet routing.  No other module should implement this decision.
-
-    Args:
-        auth_ctx: An ``AuthContext`` instance (typed as ``Any`` to avoid a
-            hard import cycle; duck-typed against ``.key_type`` and
-            ``.org_id``).
-        buyer_email: The email supplied by the caller in the request body.
-
-    Returns:
-        The owner key string to pass to ``UnitWalletRegistry`` operations.
     """
     key_type = getattr(auth_ctx, "key_type", None)
     org_id = getattr(auth_ctx, "org_id", None)
     if key_type == "org" and org_id:
-        return str(org_id)
+        return f"ic_org_{org_id}"
     return buyer_email.strip().lower()
 
 
@@ -117,15 +111,13 @@ PLAN_DEFINITIONS: Final[dict[PlanCode, PlanDefinition]] = {
     },
 }
 
+
 _CUSTOMERS_TABLE = "billing_customers"
 _SUBSCRIPTIONS_TABLE = "billing_subscriptions"
 
 
 class BillingUsageError(Exception):
-    """Raised when a usage record operation is rejected.
-
-    Carries structured context for auditability.
-    """
+    """Raised when a usage record operation is rejected."""
 
     def __init__(
         self,
@@ -210,13 +202,11 @@ class BillingSubscription:
 
     @property
     def is_period_active(self) -> bool:
-        """True when the current wall-clock time is within the billing period."""
         now = datetime.now(UTC)
         return self.current_period_start <= now <= self.current_period_end
 
     @property
     def is_active(self) -> bool:
-        """True when status is active, units remain, and the period has not expired."""
         return self.status == "active" and self.remaining_units > 0 and self.is_period_active
 
 
@@ -262,12 +252,7 @@ def _subscription_from_row(row: dict[str, Any]) -> BillingSubscription:
 
 
 class BillingRegistry:
-    """Billing foundation for IronClaw agentic systems.
-
-    Persists customers and subscriptions to Supabase via the canonical
-    StoreType interface. Falls back to in-memory when Supabase is unavailable.
-    IDs are uuid4-based — no sequential collision risk.
-    """
+    """Billing foundation for IronClaw agentic systems."""
 
     def __init__(self, *, store: StoreType | None = None) -> None:
         self._lock = Lock()
@@ -306,7 +291,6 @@ class BillingRegistry:
         return None
 
     def _cancel_all_active_subscriptions_unlocked(self, customer_id: str) -> None:
-        """Cancel every active subscription for a customer (handles data-corruption duplicates)."""
         for sub_id in list(self._customer_sub_index.get(customer_id, [])):
             sub = self._subscriptions.get(sub_id)
             if sub is not None and sub.status == "active":
@@ -479,12 +463,6 @@ class BillingRegistry:
         customer_id: str,
         new_plan: str,
     ) -> tuple[BillingCustomer, BillingSubscription]:
-        """Change the active plan for a customer.
-
-        Cancels the existing active subscription, updates the customer's
-        plan field, and creates a new active subscription on the new plan.
-        Raises KeyError if customer not found or no active subscription exists.
-        """
         with self._lock:
             self._ensure_loaded()
             customer = self._customers.get(customer_id)
@@ -530,10 +508,6 @@ class BillingRegistry:
         subscription_id: str,
         new_period_end: datetime,
     ) -> BillingSubscription:
-        """Reset units_consumed to zero and advance the billing period.
-
-        Used by period rollover jobs. Raises KeyError if subscription not found.
-        """
         with self._lock:
             self._ensure_loaded()
             sub = self._subscriptions.get(subscription_id)

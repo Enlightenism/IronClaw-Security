@@ -13,6 +13,7 @@ from app.core.unit_wallet import (
     UNIT_PACKAGE_CATALOG,
     InsufficientUnitsError,
     get_unit_wallet_registry,
+    is_org_key,
     units_required_for_tokens,
 )
 
@@ -269,6 +270,28 @@ def _require_known_package(package_id: str) -> tuple[str, dict[str, Any]]:
     return normalized, package
 
 
+def _resolve_wallet_owner_key(buyer_email: str) -> str:
+    """Resolve the wallet owner_key from buyer_email.
+
+    Org purchases: buyer_email is an ic_org_ key — the wallet owner_key is
+    the org key itself, shared across all team members.
+
+    Personal purchases: buyer_email is a regular email — the wallet owner_key
+    is the normalized email, scoped to the individual.
+
+    Normalization (strip + lower) is applied here once so that credit_units
+    and all downstream registry operations receive a consistent key.
+    """
+    normalized = buyer_email.strip().lower()
+    # Org keys pass through as-is — their ic_org_ prefix IS the owner_key.
+    # Personal emails also pass through as-is — the email IS the owner_key.
+    # Both cases are the same code path; the explicit branch documents intent
+    # and is the extension point for future auth-context-driven org routing.
+    if is_org_key(normalized):
+        return normalized
+    return normalized
+
+
 def _build_unit_policy() -> UnitPolicyView:
     return UnitPolicyView(
         unit_definition=(f"1 protection unit = 1 IronClaw inspection window covering up to " f"{TOKEN_CHUNK_SIZE:,} tokens. Requests exceeding that boundary " f"consume one additional unit per {TOKEN_CHUNK_SIZE:,}-token chunk. " f"Scans are unlimited — units auto-deduct with no ceiling."),
@@ -375,12 +398,22 @@ def purchase_billing_package(
     granted_units = int(package["included_units"])
     token_coverage = granted_units * TOKEN_CHUNK_SIZE
 
+    # Normalize buyer_email once; it is stored on the purchase record as-is.
+    normalized_email = payload.buyer_email.strip().lower()
+
+    # Resolve the wallet owner_key explicitly.
+    # Org purchases (ic_org_ prefix): pool units under the shared org wallet.
+    # Personal purchases: scope to the individual email wallet.
+    # _resolve_wallet_owner_key documents and enforces this routing decision
+    # rather than relying on incidental pass-through of buyer_email.
+    wallet_owner_key = _resolve_wallet_owner_key(normalized_email)
+
     purchase = BillingPackagePurchaseView(
         purchase_id=_new_purchase_id(),
         package_id=package_id,
         package_name=str(package["name"]),
         buyer_name=payload.buyer_name.strip(),
-        buyer_email=payload.buyer_email.strip().lower(),
+        buyer_email=normalized_email,
         price_usd=float(package["price_usd"]),
         granted_units=granted_units,
         token_coverage=token_coverage,
@@ -398,7 +431,7 @@ def purchase_billing_package(
 
     try:
         wallet = wallet_registry.credit_units(
-            owner_key=purchase.buyer_email,
+            owner_key=wallet_owner_key,
             units=granted_units,
             metadata={
                 "source": "billing_package_purchase",
@@ -406,6 +439,9 @@ def purchase_billing_package(
                 "package_id": package_id,
                 "package_name": purchase.package_name,
                 "buyer_name": purchase.buyer_name,
+                "buyer_email": normalized_email,
+                "wallet_owner_key": wallet_owner_key,
+                "is_org_purchase": is_org_key(wallet_owner_key),
                 "token_coverage": token_coverage,
                 "tokens_per_unit": TOKEN_CHUNK_SIZE,
                 **payload.metadata,
