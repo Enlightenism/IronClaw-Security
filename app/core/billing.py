@@ -34,6 +34,7 @@ __all__ = [
     "TOKENS_PER_UNIT",
     "units_required_for_tokens",
     "get_billing_registry",
+    "resolve_billing_owner",
 ]
 
 TOKENS_PER_UNIT: Final[int] = 25_000
@@ -44,6 +45,41 @@ def units_required_for_tokens(token_count: int) -> int:
     if token_count <= 0:
         return 0
     return math.ceil(token_count / TOKENS_PER_UNIT)
+
+
+# ---------------------------------------------------------------------------
+# Org wallet routing — single source of truth
+# ---------------------------------------------------------------------------
+
+
+def resolve_billing_owner(auth_ctx: Any, buyer_email: str) -> str:
+    """Return the canonical wallet owner key for a billing operation.
+
+    When the request is authenticated via an org API key
+    (``auth_ctx.key_type == "org"`` and ``auth_ctx.org_id`` is set),
+    all unit consumption is pooled under the org ID so every team member
+    draws from the same shared wallet.
+
+    For every other authentication type (personal API key, session, etc.),
+    the wallet is scoped to the individual ``buyer_email``.
+
+    This function is the **single source of truth** for org vs. personal
+    wallet routing.  No other module should implement this decision.
+
+    Args:
+        auth_ctx: An ``AuthContext`` instance (typed as ``Any`` to avoid a
+            hard import cycle; duck-typed against ``.key_type`` and
+            ``.org_id``).
+        buyer_email: The email supplied by the caller in the request body.
+
+    Returns:
+        The owner key string to pass to ``UnitWalletRegistry`` operations.
+    """
+    key_type = getattr(auth_ctx, "key_type", None)
+    org_id = getattr(auth_ctx, "org_id", None)
+    if key_type == "org" and org_id:
+        return str(org_id)
+    return buyer_email.strip().lower()
 
 
 PlanCode = Literal["starter-5k", "team-25k", "enterprise-60k"]
@@ -481,7 +517,6 @@ class BillingRegistry:
                     "billing: failed to persist plan upgrade for customer %s",
                     customer_id,
                 )
-        # create_subscription acquires its own lock; period_end defaults to +30 days
         new_sub = self.create_subscription(
             customer_id=customer_id,
             plan=plan_code,

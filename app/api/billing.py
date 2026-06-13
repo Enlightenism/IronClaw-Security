@@ -8,7 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, model_validator
 from pydantic_core import PydanticCustomError
 
-from app.core.auth import require_api_key
+from app.core.auth import AuthContext, require_auth_context
+from app.core.billing import resolve_billing_owner
 from app.core.unit_wallet import (
     TOKEN_CHUNK_SIZE,
     UNIT_PACKAGE_CATALOG,
@@ -19,7 +20,6 @@ from app.core.unit_wallet import (
 router = APIRouter(
     prefix="/billing",
     tags=["billing"],
-    dependencies=[Depends(require_api_key)],
 )
 
 
@@ -110,6 +110,7 @@ class BillingPackagePurchaseView(BaseModel):
     package_name: str
     buyer_name: str
     buyer_email: str
+    owner_key: str
     price_usd: float
     granted_units: int
     token_coverage: int
@@ -260,7 +261,11 @@ def _build_unit_policy() -> UnitPolicyView:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/packages", response_model=BillingPackagesResponse)
+@router.get(
+    "/packages",
+    response_model=BillingPackagesResponse,
+    dependencies=[Depends(require_auth_context)],
+)
 def list_billing_packages() -> BillingPackagesResponse:
     packages = [_package_to_view(pkg) for pkg in UNIT_PACKAGE_CATALOG.values()]
     return BillingPackagesResponse(
@@ -279,18 +284,23 @@ def list_billing_packages() -> BillingPackagesResponse:
 )
 def purchase_billing_package(
     payload: BillingPackagePurchaseRequest,
+    auth_ctx: AuthContext = Depends(require_auth_context),
 ) -> BillingPackagePurchaseResponse:
     package_id, package = _require_known_package(payload.package_id)
     unit_amount = int(package["unit_amount"])
     purchase_id = f"purch_{len(_PURCHASES) + 1}"
-    owner_key = payload.buyer_email.strip().lower()
+
+    # Org-keyed callers pool units under the org wallet; personal callers
+    # get their own wallet scoped to buyer_email.
+    owner_key = resolve_billing_owner(auth_ctx, payload.buyer_email)
 
     purchase = BillingPackagePurchaseView(
         purchase_id=purchase_id,
         package_id=package_id,
         package_name=str(package["name"]),
         buyer_name=payload.buyer_name.strip(),
-        buyer_email=owner_key,
+        buyer_email=payload.buyer_email.strip().lower(),
+        owner_key=owner_key,
         price_usd=float(package["price_usd"]),
         granted_units=unit_amount,
         token_coverage=unit_amount * TOKEN_CHUNK_SIZE,
@@ -317,12 +327,20 @@ def purchase_billing_package(
 
 
 @router.post("/wallet/{owner_key}/debit", response_model=WalletDebitResponse)
-def debit_wallet(owner_key: str, payload: WalletDebitRequest) -> WalletDebitResponse:
+def debit_wallet(
+    owner_key: str,
+    payload: WalletDebitRequest,
+    auth_ctx: AuthContext = Depends(require_auth_context),
+) -> WalletDebitResponse:
+    # Org-keyed callers override whatever path param was supplied so that
+    # all team members debit from the shared org wallet.
+    resolved_owner = resolve_billing_owner(auth_ctx, owner_key)
+
     registry = get_unit_wallet_registry()
     if payload.token_count is not None:
         units_debited = math.ceil(payload.token_count / TOKEN_CHUNK_SIZE)
         wallet = registry.debit_units(
-            owner_key=owner_key,
+            owner_key=resolved_owner,
             units=units_debited,
             metadata={
                 "token_count": payload.token_count,
@@ -332,20 +350,20 @@ def debit_wallet(owner_key: str, payload: WalletDebitRequest) -> WalletDebitResp
         )
         return WalletDebitResponse(
             status="ok",
-            owner_key=owner_key,
+            owner_key=resolved_owner,
             units_debited=units_debited,
             token_count=payload.token_count,
             wallet=_wallet_view(wallet),
         )
     else:
         wallet = registry.debit_units(
-            owner_key=owner_key,
+            owner_key=resolved_owner,
             units=payload.units,  # type: ignore[arg-type]
             metadata={"reason": payload.reason},
         )
         return WalletDebitResponse(
             status="ok",
-            owner_key=owner_key,
+            owner_key=resolved_owner,
             units_debited=payload.units,  # type: ignore[arg-type]
             token_count=None,
             wallet=_wallet_view(wallet),
@@ -353,29 +371,44 @@ def debit_wallet(owner_key: str, payload: WalletDebitRequest) -> WalletDebitResp
 
 
 @router.post("/wallet/{owner_key}/refund", response_model=WalletRefundResponse)
-def refund_wallet(owner_key: str, payload: WalletRefundRequest) -> WalletRefundResponse:
+def refund_wallet(
+    owner_key: str,
+    payload: WalletRefundRequest,
+    auth_ctx: AuthContext = Depends(require_auth_context),
+) -> WalletRefundResponse:
+    # Org-keyed callers refund back into the shared org wallet.
+    resolved_owner = resolve_billing_owner(auth_ctx, owner_key)
+
     registry = get_unit_wallet_registry()
     wallet = registry.refund_units(
-        owner_key=owner_key,
+        owner_key=resolved_owner,
         units=payload.units,
         metadata={"reason": payload.reason},
     )
     return WalletRefundResponse(
         status="ok",
-        owner_key=owner_key,
+        owner_key=resolved_owner,
         units_refunded=payload.units,
         wallet=_wallet_view(wallet),
     )
 
 
-@router.get("/wallet/{owner_key}", response_model=WalletGetResponse)
+@router.get(
+    "/wallet/{owner_key}",
+    response_model=WalletGetResponse,
+    dependencies=[Depends(require_auth_context)],
+)
 def get_wallet(owner_key: str) -> WalletGetResponse:
     registry = get_unit_wallet_registry()
     wallet = registry.get_or_create_wallet(owner_key=owner_key)
     return WalletGetResponse(status="ok", wallet=_wallet_view(wallet))
 
 
-@router.get("/ledger", response_model=LedgerResponse)
+@router.get(
+    "/ledger",
+    response_model=LedgerResponse,
+    dependencies=[Depends(require_auth_context)],
+)
 def get_ledger(
     owner_key: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
