@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import math
+import threading
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -53,6 +54,64 @@ def _wallet_view(wallet: RegistryUnitWallet) -> dict[str, Any]:
         "total_refunded_units": wallet.total_refunded_units,
         "updated_at": wallet.updated_at.isoformat().replace("+00:00", "Z"),
     }
+
+
+def _assert_owner_access(
+    auth_ctx: AuthContext,
+    owner_key: str,
+    *,
+    action: str = "access",
+) -> None:
+    """Enforce org-key ownership and personal-key isolation.
+
+    Rules:
+    - If ``owner_key`` is an org wallet (starts with ``ic_org_``), the caller
+      must present an org key whose ``org_id`` matches the wallet's org suffix.
+    - If ``owner_key`` is a plain email / personal key, the caller must NOT be
+      an org key attempting to touch a foreign personal wallet.
+    - Org keys may only touch their own org wallet.
+    - Personal keys may only touch wallets whose key matches their resolved
+      owner (i.e. their own email).
+
+    Raises HTTP 403 on any mismatch.
+    """
+    is_org_wallet = owner_key.startswith("ic_org_")
+
+    if is_org_wallet:
+        # Org wallets: caller must be an org key whose org_id matches.
+        if auth_ctx.key_type != "org" or not auth_ctx.org_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "status": "forbidden",
+                    "reason": "org_wallet_requires_org_key",
+                    "owner_key": owner_key,
+                    "action": action,
+                },
+            )
+        expected = f"ic_org_{auth_ctx.org_id}"
+        if owner_key != expected:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "status": "forbidden",
+                    "reason": "org_id_mismatch",
+                    "owner_key": owner_key,
+                    "action": action,
+                },
+            )
+    else:
+        # Personal wallets: org keys must not touch foreign personal wallets.
+        if auth_ctx.key_type == "org":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "status": "forbidden",
+                    "reason": "org_key_cannot_access_personal_wallet",
+                    "owner_key": owner_key,
+                    "action": action,
+                },
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -198,8 +257,8 @@ class LedgerResponse(BaseModel):
 # Internal state
 # ---------------------------------------------------------------------------
 
-
 _PURCHASES: list[BillingPackagePurchaseView] = []
+_PURCHASES_LOCK: threading.Lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -288,27 +347,28 @@ def purchase_billing_package(
 ) -> BillingPackagePurchaseResponse:
     package_id, package = _require_known_package(payload.package_id)
     unit_amount = int(package["unit_amount"])
-    purchase_id = f"purch_{len(_PURCHASES) + 1}"
 
     # Org-keyed callers pool units under the org wallet; personal callers
     # get their own wallet scoped to buyer_email.
     owner_key = resolve_billing_owner(auth_ctx, payload.buyer_email)
 
-    purchase = BillingPackagePurchaseView(
-        purchase_id=purchase_id,
-        package_id=package_id,
-        package_name=str(package["name"]),
-        buyer_name=payload.buyer_name.strip(),
-        buyer_email=payload.buyer_email.strip().lower(),
-        owner_key=owner_key,
-        price_usd=float(package["price_usd"]),
-        granted_units=unit_amount,
-        token_coverage=unit_amount * TOKEN_CHUNK_SIZE,
-        tokens_per_unit=TOKEN_CHUNK_SIZE,
-        created_at=_utc_now_iso(),
-        metadata=payload.metadata,
-    )
-    _PURCHASES.append(purchase)
+    with _PURCHASES_LOCK:
+        purchase_id = f"purch_{len(_PURCHASES) + 1}"
+        purchase = BillingPackagePurchaseView(
+            purchase_id=purchase_id,
+            package_id=package_id,
+            package_name=str(package["name"]),
+            buyer_name=payload.buyer_name.strip(),
+            buyer_email=payload.buyer_email.strip().lower(),
+            owner_key=owner_key,
+            price_usd=float(package["price_usd"]),
+            granted_units=unit_amount,
+            token_coverage=unit_amount * TOKEN_CHUNK_SIZE,
+            tokens_per_unit=TOKEN_CHUNK_SIZE,
+            created_at=_utc_now_iso(),
+            metadata=payload.metadata,
+        )
+        _PURCHASES.append(purchase)
 
     registry = get_unit_wallet_registry()
     wallet = registry.credit_units(
@@ -332,9 +392,12 @@ def debit_wallet(
     payload: WalletDebitRequest,
     auth_ctx: AuthContext = Depends(require_auth_context),
 ) -> WalletDebitResponse:
-    # Org-keyed callers override whatever path param was supplied so that
-    # all team members debit from the shared org wallet.
+    # Resolve the canonical wallet key for this caller (org or personal).
     resolved_owner = resolve_billing_owner(auth_ctx, owner_key)
+
+    # Enforce ownership: the resolved key must match what the caller is
+    # allowed to touch. This blocks cross-org debit attempts.
+    _assert_owner_access(auth_ctx, resolved_owner, action="debit")
 
     registry = get_unit_wallet_registry()
     if payload.token_count is not None:
@@ -376,8 +439,8 @@ def refund_wallet(
     payload: WalletRefundRequest,
     auth_ctx: AuthContext = Depends(require_auth_context),
 ) -> WalletRefundResponse:
-    # Org-keyed callers refund back into the shared org wallet.
     resolved_owner = resolve_billing_owner(auth_ctx, owner_key)
+    _assert_owner_access(auth_ctx, resolved_owner, action="refund")
 
     registry = get_unit_wallet_registry()
     wallet = registry.refund_units(
@@ -396,9 +459,12 @@ def refund_wallet(
 @router.get(
     "/wallet/{owner_key}",
     response_model=WalletGetResponse,
-    dependencies=[Depends(require_auth_context)],
 )
-def get_wallet(owner_key: str) -> WalletGetResponse:
+def get_wallet(
+    owner_key: str,
+    auth_ctx: AuthContext = Depends(require_auth_context),
+) -> WalletGetResponse:
+    _assert_owner_access(auth_ctx, owner_key, action="read_wallet")
     registry = get_unit_wallet_registry()
     wallet = registry.get_or_create_wallet(owner_key=owner_key)
     return WalletGetResponse(status="ok", wallet=_wallet_view(wallet))
@@ -407,12 +473,25 @@ def get_wallet(owner_key: str) -> WalletGetResponse:
 @router.get(
     "/ledger",
     response_model=LedgerResponse,
-    dependencies=[Depends(require_auth_context)],
 )
 def get_ledger(
+    auth_ctx: AuthContext = Depends(require_auth_context),
     owner_key: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
 ) -> LedgerResponse:
+    # When the caller supplies an explicit owner_key filter, enforce that
+    # they are only allowed to read their own org/personal wallet.
+    if owner_key is not None:
+        _assert_owner_access(auth_ctx, owner_key, action="read_ledger")
+    else:
+        # No filter supplied — scope the query to the caller's own wallet
+        # so org keys don't silently get the entire global ledger.
+        owner_key = resolve_billing_owner(auth_ctx, "")
+        # Empty string resolves to "" for personal key with no email — fall
+        # back to None (global) only for configured platform/admin keys.
+        if not owner_key:
+            owner_key = None
+
     registry = get_unit_wallet_registry()
     entries = registry.list_ledger_entries(owner_key=owner_key, limit=limit)
     serialized = [
