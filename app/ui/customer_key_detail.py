@@ -21,7 +21,8 @@ except Exception:
         return math.ceil(token_count / TOKEN_CHUNK_SIZE)
 
 
-router = APIRouter(prefix="/customer-keys/detail", tags=["customer-key-detail"])
+router = APIRouter(prefix="/ui/customer-keys", tags=["customer-key-detail"])
+
 
 # ---------------------------------------------------------------------------
 # Supabase client (service-role key, used only for server-side key lookup)
@@ -38,34 +39,19 @@ except Exception:
     _supabase = None  # type: ignore[assignment]
     _SUPABASE_AVAILABLE = False
 
+
 # ---------------------------------------------------------------------------
-# Canonical package/pricing constants — TOKEN_CHUNK_SIZE is the single source
-# of truth (app.core.unit_wallet.TOKEN_CHUNK_SIZE). Local alias kept for
-# backwards-compat with existing serialisation field names.
+# Canonical package/pricing constants
 # ---------------------------------------------------------------------------
 _TOKENS_PER_UNIT = TOKEN_CHUNK_SIZE
 _ORDERED_PACKAGE_IDS = ["pkg_5000", "pkg_25000", "pkg_60000"]
 _FEATURED_PACKAGE_ID = "pkg_25000"
 
+
 _PRICING_FALLBACK: dict[str, tuple[int, float, str, str]] = {
-    "pkg_5000": (
-        5_000,
-        20.00,
-        "Starter",
-        "5,000 units — $20.00",
-    ),
-    "pkg_25000": (
-        25_000,
-        90.00,
-        "Team",
-        "25,000 units — $90.00",
-    ),
-    "pkg_60000": (
-        60_000,
-        180.00,
-        "Enterprise",
-        "60,000 units — $180.00",
-    ),
+    "pkg_5000": (5_000, 20.00, "Starter", "5,000 units — $20.00"),
+    "pkg_25000": (25_000, 90.00, "Team", "25,000 units — $90.00"),
+    "pkg_60000": (60_000, 180.00, "Enterprise", "60,000 units — $180.00"),
 }
 
 
@@ -74,8 +60,6 @@ def _utc_now_iso() -> str:
 
 
 def _token_coverage_metadata(wallet_units: int) -> dict[str, Any]:
-    # tokens_in_wallet: token-equivalent balance for the units currently in
-    # the wallet.  Scans are unlimited; units auto-deduct — this is NOT a cap.
     return {
         "tokens_per_unit": _TOKENS_PER_UNIT,
         "wallet_units": wallet_units,
@@ -84,9 +68,6 @@ def _token_coverage_metadata(wallet_units: int) -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------
-# Package metadata helper
-# ---------------------------------------------------------------------------
 def _get_package_metadata(package_id: str) -> dict[str, Any]:
     package = UNIT_PACKAGE_CATALOG.get(package_id)
     if package is not None:
@@ -111,9 +92,6 @@ def _get_package_metadata(package_id: str) -> dict[str, Any]:
         "included_units": included_units,
         "units_display": f"{included_units:,} units",
         "tokens_per_unit": _TOKENS_PER_UNIT,
-        # Renamed from max_tokens_covered: communicates "tokens paid for in
-        # this package" not a scan ceiling. Scans are unlimited; units
-        # auto-deduct in TOKEN_CHUNK_SIZE chunks with no ceiling.
         "tokens_in_wallet": included_units * _TOKENS_PER_UNIT,
         "effective_price_per_1k_units": price_per_1k,
         "featured": package_id == _FEATURED_PACKAGE_ID,
@@ -205,7 +183,6 @@ def _build_actions(key_id: str) -> list[CustomerKeyDetailActionView]:
 
 
 def _lookup_key_record(key_id: str) -> dict[str, Any] | None:
-    """Query Supabase users table by user_token (key_id). Returns row dict or None."""
     if not _SUPABASE_AVAILABLE or _supabase is None:
         return None
     try:
@@ -217,7 +194,6 @@ def _lookup_key_record(key_id: str) -> dict[str, Any] | None:
 
 
 def _build_usage_from_supabase(user_id: str) -> CustomerKeyDetailUsageView:
-    """Query security_events for lifetime usage stats for the given user_id."""
     if not _SUPABASE_AVAILABLE or _supabase is None:
         return CustomerKeyDetailUsageView(
             last_used_at=None,
@@ -258,7 +234,7 @@ def _build_usage_from_supabase(user_id: str) -> CustomerKeyDetailUsageView:
 # ---------------------------------------------------------------------------
 # Route
 # ---------------------------------------------------------------------------
-@router.get("/{key_id}", response_model=CustomerKeyDetailResponse)
+@router.get("/detail/{key_id}", response_model=CustomerKeyDetailResponse)
 def get_customer_key_detail(
     key_id: str = Path(..., min_length=1, max_length=255),
 ) -> CustomerKeyDetailResponse:
@@ -285,7 +261,6 @@ def get_customer_key_detail(
         key_status = "active"
         source = "fallback"
 
-    # Determine active package from last_payment if present
     active_package_id: str = last_payment.get("package_id", _FEATURED_PACKAGE_ID)
     if active_package_id not in _ORDERED_PACKAGE_IDS:
         active_package_id = _FEATURED_PACKAGE_ID
