@@ -18,7 +18,7 @@ from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 import pytest
 
-from app.core.auth import AuthContext, get_auth_context, require_auth_context
+from app.core.auth import AuthContext, get_api_key, get_auth_context, require_auth_context
 from app.core.billing import resolve_billing_owner
 import app.core.unit_wallet as _unit_wallet_module
 from app.core.unit_wallet import (
@@ -122,14 +122,19 @@ def personal_auth_ctx() -> AuthContext:
 
 @contextmanager
 def _override_auth(app_instance, ctx: AuthContext):
-    def _return_ctx():
+    def _stub_api_key() -> str:
+        return ctx.api_key or "test-key"
+
+    def _stub_auth_ctx() -> AuthContext:
         return ctx
 
-    app_instance.dependency_overrides[get_auth_context] = _return_ctx
-    app_instance.dependency_overrides[require_auth_context] = _return_ctx
+    app_instance.dependency_overrides[get_api_key] = _stub_api_key
+    app_instance.dependency_overrides[get_auth_context] = _stub_auth_ctx
+    app_instance.dependency_overrides[require_auth_context] = _stub_auth_ctx
     try:
         yield TestClient(app_instance, raise_server_exceptions=True)
     finally:
+        app_instance.dependency_overrides.pop(get_api_key, None)
         app_instance.dependency_overrides.pop(get_auth_context, None)
         app_instance.dependency_overrides.pop(require_auth_context, None)
 
