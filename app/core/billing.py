@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import logging
 import math
 from threading import Lock
@@ -23,7 +23,6 @@ from app.supabaseclient import (
 
 logger = logging.getLogger(__name__)
 
-
 __all__ = [
     "BillingCustomer",
     "BillingRegistry",
@@ -37,8 +36,8 @@ __all__ = [
     "get_billing_registry",
 ]
 
-
 TOKENS_PER_UNIT: Final[int] = 25_000
+_DEFAULT_PERIOD_DAYS: Final[int] = 30
 
 
 def units_required_for_tokens(token_count: int) -> int:
@@ -81,7 +80,6 @@ PLAN_DEFINITIONS: Final[dict[PlanCode, PlanDefinition]] = {
         "tokens_per_unit": TOKENS_PER_UNIT,
     },
 }
-
 
 _CUSTOMERS_TABLE = "billing_customers"
 _SUBSCRIPTIONS_TABLE = "billing_subscriptions"
@@ -240,7 +238,6 @@ class BillingRegistry:
         self._store: StoreType = store if store is not None else build_store()
         self._customers: dict[str, BillingCustomer] = {}
         self._subscriptions: dict[str, BillingSubscription] = {}
-        # customer_id -> list[subscription_id] index for O(1) lookup
         self._customer_sub_index: dict[str, list[str]] = {}
         self._loaded = False
 
@@ -376,6 +373,7 @@ class BillingRegistry:
             plan_code = self._require_valid_plan(plan)
             subscription_id = f"sub_{uuid4().hex}"
             now = datetime.now(UTC)
+            resolved_period_end = period_end if period_end is not None else now + timedelta(days=_DEFAULT_PERIOD_DAYS)
             subscription = BillingSubscription(
                 subscription_id=subscription_id,
                 customer_id=customer_id,
@@ -383,7 +381,7 @@ class BillingRegistry:
                 status=status,
                 created_at=now,
                 current_period_start=now,
-                current_period_end=period_end if period_end is not None else now,
+                current_period_end=resolved_period_end,
                 units_consumed=0,
                 metadata=metadata or {},
             )
@@ -483,7 +481,7 @@ class BillingRegistry:
                     "billing: failed to persist plan upgrade for customer %s",
                     customer_id,
                 )
-        # create_subscription acquires its own lock
+        # create_subscription acquires its own lock; period_end defaults to +30 days
         new_sub = self.create_subscription(
             customer_id=customer_id,
             plan=plan_code,
