@@ -7,13 +7,13 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from app.core.auth import require_api_key
+from app.core.auth import AuthContext, require_api_key, require_auth_context
+from app.core.billing import resolve_billing_owner
 from app.core.unit_wallet import (
     TOKEN_CHUNK_SIZE,
     UNIT_PACKAGE_CATALOG,
     InsufficientUnitsError,
     get_unit_wallet_registry,
-    is_org_key,
     units_required_for_tokens,
 )
 
@@ -118,6 +118,7 @@ class BillingPackagePurchaseView(BaseModel):
     package_name: str
     buyer_name: str
     buyer_email: str
+    owner_key: str
     price_usd: float
     granted_units: int
     token_coverage: int
@@ -270,26 +271,28 @@ def _require_known_package(package_id: str) -> tuple[str, dict[str, Any]]:
     return normalized, package
 
 
-def _resolve_wallet_owner_key(buyer_email: str) -> str:
-    """Resolve the wallet owner_key from buyer_email.
+def _assert_owner_access(auth_ctx: AuthContext, requested_owner_key: str) -> None:
+    """Enforce that the authenticated caller may access the requested wallet.
 
-    Org purchases: buyer_email is an ic_org_ key — the wallet owner_key is
-    the org key itself, shared across all team members.
+    Org key: the caller may only access the wallet whose key is
+    ``ic_org_{auth_ctx.org_id}``.  Any other ``owner_key`` returns 403.
 
-    Personal purchases: buyer_email is a regular email — the wallet owner_key
-    is the normalized email, scoped to the individual.
-
-    Normalization (strip + lower) is applied here once so that credit_units
-    and all downstream registry operations receive a consistent key.
+    Personal key: the resolved owner_key is determined by
+    ``resolve_billing_owner``; callers must not access wallets belonging to
+    other principals.  Because personal-key routes derive ``owner_key`` from
+    ``buyer_email`` inside the handler, this guard is only enforced on the
+    path-param routes (debit / refund / wallet read / ledger).
     """
-    normalized = buyer_email.strip().lower()
-    # Org keys pass through as-is — their ic_org_ prefix IS the owner_key.
-    # Personal emails also pass through as-is — the email IS the owner_key.
-    # Both cases are the same code path; the explicit branch documents intent
-    # and is the extension point for future auth-context-driven org routing.
-    if is_org_key(normalized):
-        return normalized
-    return normalized
+    key_type = getattr(auth_ctx, "key_type", "personal")
+    org_id = getattr(auth_ctx, "org_id", None)
+
+    if key_type == "org" and org_id:
+        expected = f"ic_org_{org_id}"
+        if requested_owner_key.strip().lower() != expected:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(f"Org key for org '{org_id}' may only access wallet " f"'{expected}', not '{requested_owner_key}'."),
+            )
 
 
 def _build_unit_policy() -> UnitPolicyView:
@@ -357,7 +360,6 @@ def _ledger_entry_to_view(entry: Any) -> WalletLedgerEntryView:
 
 
 def _build_insufficient_units_detail(exc: InsufficientUnitsError) -> dict[str, Any]:
-    """Build the structured 402 detail body directly from exception fields."""
     return {
         "status": "insufficient_units",
         "error": str(exc),
@@ -393,20 +395,17 @@ def list_billing_packages() -> BillingPackagesResponse:
 )
 def purchase_billing_package(
     payload: BillingPackagePurchaseRequest,
+    auth_ctx: AuthContext = Depends(require_auth_context),
 ) -> BillingPackagePurchaseResponse:
     package_id, package = _require_known_package(payload.package_id)
     granted_units = int(package["included_units"])
     token_coverage = granted_units * TOKEN_CHUNK_SIZE
 
-    # Normalize buyer_email once; it is stored on the purchase record as-is.
     normalized_email = payload.buyer_email.strip().lower()
 
-    # Resolve the wallet owner_key explicitly.
-    # Org purchases (ic_org_ prefix): pool units under the shared org wallet.
-    # Personal purchases: scope to the individual email wallet.
-    # _resolve_wallet_owner_key documents and enforces this routing decision
-    # rather than relying on incidental pass-through of buyer_email.
-    wallet_owner_key = _resolve_wallet_owner_key(normalized_email)
+    # Single source of truth: org keys pool to ic_org_{org_id}, personal keys
+    # scope to the individual email.  resolve_billing_owner owns this decision.
+    wallet_owner_key = resolve_billing_owner(auth_ctx, normalized_email)
 
     purchase = BillingPackagePurchaseView(
         purchase_id=_new_purchase_id(),
@@ -414,6 +413,7 @@ def purchase_billing_package(
         package_name=str(package["name"]),
         buyer_name=payload.buyer_name.strip(),
         buyer_email=normalized_email,
+        owner_key=wallet_owner_key,
         price_usd=float(package["price_usd"]),
         granted_units=granted_units,
         token_coverage=token_coverage,
@@ -441,7 +441,6 @@ def purchase_billing_package(
                 "buyer_name": purchase.buyer_name,
                 "buyer_email": normalized_email,
                 "wallet_owner_key": wallet_owner_key,
-                "is_org_purchase": is_org_key(wallet_owner_key),
                 "token_coverage": token_coverage,
                 "tokens_per_unit": TOKEN_CHUNK_SIZE,
                 **payload.metadata,
@@ -468,12 +467,18 @@ def purchase_billing_package(
 
 
 @router.get("/wallet/{owner_key}", response_model=BillingWalletBalanceResponse)
-def get_billing_wallet_balance(owner_key: str) -> BillingWalletBalanceResponse:
+def get_billing_wallet_balance(
+    owner_key: str,
+    auth_ctx: AuthContext = Depends(require_auth_context),
+) -> BillingWalletBalanceResponse:
+    normalized_owner = owner_key.strip().lower()
+    _assert_owner_access(auth_ctx, normalized_owner)
+
     wallet_registry = get_unit_wallet_registry()
-    wallet = wallet_registry.get_wallet(owner_key)
+    wallet = wallet_registry.get_wallet(normalized_owner)
 
     if wallet is None:
-        wallet = wallet_registry.get_or_create_wallet(owner_key=owner_key)
+        wallet = wallet_registry.get_or_create_wallet(owner_key=normalized_owner)
 
     return BillingWalletBalanceResponse(
         status="ok",
@@ -491,6 +496,7 @@ def get_billing_wallet_balance(owner_key: str) -> BillingWalletBalanceResponse:
 def debit_billing_wallet(
     owner_key: str,
     payload: WalletDebitRequest,
+    auth_ctx: AuthContext = Depends(require_auth_context),
 ) -> WalletDebitResponse:
     """
     Debit protection units from a wallet.
@@ -509,8 +515,10 @@ def debit_billing_wallet(
             detail="Provide either 'units' or 'token_count'.",
         )
 
-    wallet_registry = get_unit_wallet_registry()
     normalized_owner = owner_key.strip().lower()
+    _assert_owner_access(auth_ctx, normalized_owner)
+
+    wallet_registry = get_unit_wallet_registry()
 
     if payload.token_count is not None:
         units_to_debit = units_required_for_tokens(payload.token_count)
@@ -556,13 +564,16 @@ def debit_billing_wallet(
 def refund_billing_wallet(
     owner_key: str,
     payload: WalletRefundRequest,
+    auth_ctx: AuthContext = Depends(require_auth_context),
 ) -> WalletRefundResponse:
     """
     Refund protection units back to a wallet.
     Tracked separately from purchases in the ledger (entry_type=refund).
     """
-    wallet_registry = get_unit_wallet_registry()
     normalized_owner = owner_key.strip().lower()
+    _assert_owner_access(auth_ctx, normalized_owner)
+
+    wallet_registry = get_unit_wallet_registry()
 
     refund_metadata: dict[str, Any] = {
         "reason": payload.reason,
@@ -595,11 +606,17 @@ def refund_billing_wallet(
 
 @router.get("/ledger", response_model=BillingLedgerResponse)
 def list_billing_ledger(
+    auth_ctx: AuthContext = Depends(require_auth_context),
     owner_key: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
 ) -> BillingLedgerResponse:
-    wallet_registry = get_unit_wallet_registry()
     normalized_owner = owner_key.strip().lower() if owner_key else None
+
+    # Org keys may only read their own org's ledger entries.
+    if normalized_owner is not None:
+        _assert_owner_access(auth_ctx, normalized_owner)
+
+    wallet_registry = get_unit_wallet_registry()
     entries = wallet_registry.list_ledger_entries(owner_key=normalized_owner, limit=limit)
 
     return BillingLedgerResponse(
