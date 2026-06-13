@@ -14,6 +14,7 @@ from app.core.billing import resolve_billing_owner
 from app.core.unit_wallet import (
     TOKEN_CHUNK_SIZE,
     UNIT_PACKAGE_CATALOG,
+    InsufficientUnitsError,
     RegistryUnitWallet,
     get_unit_wallet_registry,
 )
@@ -53,6 +54,7 @@ def _wallet_view(wallet: RegistryUnitWallet) -> dict[str, Any]:
         "total_consumed_units": wallet.total_consumed_units,
         "total_refunded_units": wallet.total_refunded_units,
         "updated_at": wallet.updated_at.isoformat().replace("+00:00", "Z"),
+        "metadata": getattr(wallet, "metadata", {}),
     }
 
 
@@ -78,7 +80,6 @@ def _assert_owner_access(
     is_org_wallet = owner_key.startswith("ic_org_")
 
     if is_org_wallet:
-        # Org wallets: caller must be an org key whose org_id matches.
         if auth_ctx.key_type != "org" or not auth_ctx.org_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -101,7 +102,6 @@ def _assert_owner_access(
                 },
             )
     else:
-        # Personal wallets: org keys must not touch foreign personal wallets.
         if auth_ctx.key_type == "org":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -257,6 +257,7 @@ class LedgerResponse(BaseModel):
 # Internal state
 # ---------------------------------------------------------------------------
 
+
 _PURCHASES: list[BillingPackagePurchaseView] = []
 _PURCHASES_LOCK: threading.Lock = threading.Lock()
 
@@ -392,45 +393,91 @@ def debit_wallet(
     payload: WalletDebitRequest,
     auth_ctx: AuthContext = Depends(require_auth_context),
 ) -> WalletDebitResponse:
-    # Resolve the canonical wallet key for this caller (org or personal).
-    resolved_owner = resolve_billing_owner(auth_ctx, owner_key)
+    # Determine resolved_owner and enforce isolation in a single clean pass.
+    #
+    # Org key rules:
+    #   - May only debit their own org wallet (ic_org_<org_id>).
+    #   - Attempting to target a personal (non-ic_org_) wallet → 403.
+    #   - Attempting to target a different org's wallet → 403 (via _assert_owner_access).
+    #   - The resolved target is always the caller's own org wallet.
+    #
+    # Personal key rules:
+    #   - May not target an org wallet → 403.
+    #   - Resolved target is the URL owner_key as-is.
 
-    # Enforce ownership: the resolved key must match what the caller is
-    # allowed to touch. This blocks cross-org debit attempts.
-    _assert_owner_access(auth_ctx, resolved_owner, action="debit")
+    if auth_ctx.key_type == "org" and getattr(auth_ctx, "org_id", None):
+        # Org key: target must be an ic_org_ wallet.
+        if not owner_key.startswith("ic_org_"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "status": "forbidden",
+                    "reason": "org_key_cannot_access_personal_wallet",
+                    "owner_key": owner_key,
+                    "action": "debit",
+                },
+            )
+        # Validate the org_id in the wallet key matches this caller's org.
+        # _assert_owner_access raises 403 on mismatch.
+        _assert_owner_access(auth_ctx, owner_key, action="debit")
+        resolved_owner = owner_key
+    else:
+        # Personal key: must not target an org wallet.
+        if owner_key.startswith("ic_org_"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "status": "forbidden",
+                    "reason": "personal_key_cannot_access_org_wallet",
+                    "owner_key": owner_key,
+                    "action": "debit",
+                },
+            )
+        resolved_owner = owner_key
 
     registry = get_unit_wallet_registry()
-    if payload.token_count is not None:
-        units_debited = math.ceil(payload.token_count / TOKEN_CHUNK_SIZE)
-        wallet = registry.debit_units(
-            owner_key=resolved_owner,
-            units=units_debited,
-            metadata={
-                "token_count": payload.token_count,
-                "tokens_per_unit": TOKEN_CHUNK_SIZE,
-                "reason": payload.reason,
+    try:
+        if payload.token_count is not None:
+            units_debited = math.ceil(payload.token_count / TOKEN_CHUNK_SIZE)
+            wallet = registry.debit_units(
+                owner_key=resolved_owner,
+                units=units_debited,
+                metadata={
+                    "token_count": payload.token_count,
+                    "tokens_per_unit": TOKEN_CHUNK_SIZE,
+                    "reason": payload.reason,
+                },
+            )
+            return WalletDebitResponse(
+                status="ok",
+                owner_key=resolved_owner,
+                units_debited=units_debited,
+                token_count=payload.token_count,
+                wallet=_wallet_view(wallet),
+            )
+        else:
+            wallet = registry.debit_units(
+                owner_key=resolved_owner,
+                units=payload.units,  # type: ignore[arg-type]
+                metadata={"reason": payload.reason},
+            )
+            return WalletDebitResponse(
+                status="ok",
+                owner_key=resolved_owner,
+                units_debited=payload.units,  # type: ignore[arg-type]
+                token_count=None,
+                wallet=_wallet_view(wallet),
+            )
+    except InsufficientUnitsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "status": "insufficient_units",
+                "owner_key": resolved_owner,
+                "have": exc.have,
+                "need": exc.need,
             },
-        )
-        return WalletDebitResponse(
-            status="ok",
-            owner_key=resolved_owner,
-            units_debited=units_debited,
-            token_count=payload.token_count,
-            wallet=_wallet_view(wallet),
-        )
-    else:
-        wallet = registry.debit_units(
-            owner_key=resolved_owner,
-            units=payload.units,  # type: ignore[arg-type]
-            metadata={"reason": payload.reason},
-        )
-        return WalletDebitResponse(
-            status="ok",
-            owner_key=resolved_owner,
-            units_debited=payload.units,  # type: ignore[arg-type]
-            token_count=None,
-            wallet=_wallet_view(wallet),
-        )
+        ) from exc
 
 
 @router.post("/wallet/{owner_key}/refund", response_model=WalletRefundResponse)
@@ -479,18 +526,46 @@ def get_ledger(
     owner_key: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
 ) -> LedgerResponse:
-    # When the caller supplies an explicit owner_key filter, enforce that
-    # they are only allowed to read their own org/personal wallet.
     if owner_key is not None:
-        _assert_owner_access(auth_ctx, owner_key, action="read_ledger")
+        # Explicit filter: validate caller owns that wallet.
+        is_org_wallet = owner_key.startswith("ic_org_")
+        if is_org_wallet:
+            if auth_ctx.key_type != "org" or not getattr(auth_ctx, "org_id", None):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "status": "forbidden",
+                        "reason": "org_wallet_requires_org_key",
+                        "owner_key": owner_key,
+                        "action": "read_ledger",
+                    },
+                )
+            expected = f"ic_org_{auth_ctx.org_id}"
+            if owner_key != expected:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "status": "forbidden",
+                        "reason": "org_id_mismatch",
+                        "owner_key": owner_key,
+                        "action": "read_ledger",
+                    },
+                )
+        else:
+            # Personal wallet requested — org keys cannot read personal wallets.
+            if auth_ctx.key_type == "org":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "status": "forbidden",
+                        "reason": "org_key_cannot_access_personal_wallet",
+                        "owner_key": owner_key,
+                        "action": "read_ledger",
+                    },
+                )
     else:
-        # No filter supplied — scope the query to the caller's own wallet
-        # so org keys don't silently get the entire global ledger.
-        owner_key = resolve_billing_owner(auth_ctx, "")
-        # Empty string resolves to "" for personal key with no email — fall
-        # back to None (global) only for configured platform/admin keys.
-        if not owner_key:
-            owner_key = None
+        # No filter — auto-scope to caller's own wallet.
+        owner_key = resolve_billing_owner(auth_ctx, "") or None
 
     registry = get_unit_wallet_registry()
     entries = registry.list_ledger_entries(owner_key=owner_key, limit=limit)
