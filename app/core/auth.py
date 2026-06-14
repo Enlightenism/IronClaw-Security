@@ -5,7 +5,7 @@ import hmac
 import logging
 from typing import Any, cast
 
-from fastapi import Depends, Request, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import APIKeyHeader
 
 from app.core.apikeys import (
@@ -14,7 +14,6 @@ from app.core.apikeys import (
     get_api_key_registry,
     is_api_key_expired,
 )
-from app.core.errors import AppError
 from app.core.settings import get_settings
 
 _logger = logging.getLogger(__name__)
@@ -310,11 +309,9 @@ def get_api_key(
     if normalized_api_key is None:
         if auth_required:
             _logger.warning("Missing API key")
-            raise AppError(
-                error="missing_api_key",
-                message="Missing API key",
+            raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                details={"header": API_KEY_HEADER_NAME},
+                detail="Missing API key — provide X-API-Key or Bearer token",
             )
         return None
 
@@ -334,19 +331,15 @@ def get_api_key(
         _logger.warning(
             "auth_not_configured: auth_required=True but no API keys are configured",
         )
-        raise AppError(
-            error="auth_not_configured",
-            message="Authentication is required but no API keys are configured",
+        raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            details={"header": API_KEY_HEADER_NAME},
+            detail="Authentication is required but no API keys are configured",
         )
 
     _logger.warning("Invalid API key")
-    raise AppError(
-        error="invalid_api_key",
-        message="Invalid API key",
+    raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        details={"header": API_KEY_HEADER_NAME},
+        detail="Invalid API key",
     )
 
 
@@ -396,11 +389,9 @@ def get_auth_context(
         )
 
     if _is_auth_required(request):
-        raise AppError(
-            error="missing_api_key",
-            message="Missing API key",
+        raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            details={"header": API_KEY_HEADER_NAME},
+            detail="Missing API key — provide X-API-Key or Bearer token",
         )
 
     return AuthContext(
@@ -427,11 +418,9 @@ def require_auth_context(
     context: AuthContext = Depends(get_auth_context),
 ) -> AuthContext:
     if not context.authenticated:
-        raise AppError(
-            error="authentication_required",
-            message="Authentication required",
+        raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            details={"header": API_KEY_HEADER_NAME},
+            detail="Authentication required",
         )
     return context
 
