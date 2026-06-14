@@ -12,7 +12,6 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
 os.environ.setdefault("SUPABASE_KEY", "")
 os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
-
 from contextlib import contextmanager
 
 from fastapi.testclient import TestClient
@@ -34,19 +33,16 @@ _MOCK_API_KEY = "test-api-key"
 _AUTH_HEADERS = {"X-API-Key": _MOCK_API_KEY}
 
 
-def _override_require_api_key() -> str:
-    return _MOCK_API_KEY
-
-
 def _make_personal_ctx(email: str = "test@ironclaw.test") -> AuthContext:
     return AuthContext(
         api_key=_MOCK_API_KEY,
         principal_type="api_key",
-        principal_id="test-principal",
+        principal_id=email,
         session_id=None,
         org_id=None,
         authenticated=True,
         auth_source="registry",
+        auth_method="api_key",
         key_type="personal",
     )
 
@@ -55,17 +51,31 @@ def _make_org_ctx(org_id: str) -> AuthContext:
     return AuthContext(
         api_key=_MOCK_API_KEY,
         principal_type="org_key",
-        principal_id="test-principal",
+        principal_id=f"ic_org_{org_id}",
         session_id=None,
         org_id=org_id,
         authenticated=True,
         auth_source="registry",
+        auth_method="api_key",
         key_type="org",
     )
 
 
+def _fresh_registry() -> UnitWalletRegistry:
+    """Create and install a fresh registry; return it for direct seeding."""
+    fresh = UnitWalletRegistry()
+    _unit_wallet_module._unit_wallet_registry = fresh
+    return fresh
+
+
 @contextmanager
 def _override_auth(ctx: AuthContext):
+    """
+    Override auth dependencies on the shared _app and install a fresh
+    wallet registry so org-isolation tests never share state.
+    """
+    registry = _fresh_registry()
+
     def _stub_api_key() -> str:
         return ctx.api_key or _MOCK_API_KEY
 
@@ -77,7 +87,7 @@ def _override_auth(ctx: AuthContext):
     _app.dependency_overrides[require_auth_context] = _stub_auth_ctx
     _app.dependency_overrides[require_api_key] = _stub_api_key
     try:
-        yield TestClient(_app, raise_server_exceptions=False)
+        yield TestClient(_app, raise_server_exceptions=False), registry
     finally:
         _app.dependency_overrides.pop(get_api_key, None)
         _app.dependency_overrides.pop(get_auth_context, None)
@@ -160,7 +170,7 @@ def test_packages_no_auth_header_returns_401() -> None:
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/packages/purchase
+# POST /billing/purchase  (canonical route — not /billing/packages/purchase)
 # ---------------------------------------------------------------------------
 
 
@@ -170,7 +180,7 @@ def test_purchase_starter_package_credits_wallet(client: TestClient) -> None:
         "buyer_name": "Test User",
         "buyer_email": "test@ironclaw.test",
     }
-    resp = client.post("/billing/packages/purchase", json=payload)
+    resp = client.post("/billing/purchase", json=payload)
     assert resp.status_code == 201
     body = resp.json()
     assert body["status"] == "ok"
@@ -184,7 +194,7 @@ def test_purchase_team_package_credits_wallet(client: TestClient) -> None:
         "buyer_name": "Team User",
         "buyer_email": "team@ironclaw.test",
     }
-    resp = client.post("/billing/packages/purchase", json=payload)
+    resp = client.post("/billing/purchase", json=payload)
     assert resp.status_code == 201
     body = resp.json()
     assert body["purchase"]["granted_units"] == 25_000
@@ -197,7 +207,7 @@ def test_purchase_enterprise_package_credits_wallet(client: TestClient) -> None:
         "buyer_name": "Ent User",
         "buyer_email": "ent@ironclaw.test",
     }
-    resp = client.post("/billing/packages/purchase", json=payload)
+    resp = client.post("/billing/purchase", json=payload)
     assert resp.status_code == 201
     body = resp.json()
     assert body["purchase"]["granted_units"] == 60_000
@@ -210,19 +220,19 @@ def test_purchase_unknown_package_returns_404(client: TestClient) -> None:
         "buyer_name": "X",
         "buyer_email": "x@x.test",
     }
-    resp = client.post("/billing/packages/purchase", json=payload)
+    resp = client.post("/billing/purchase", json=payload)
     assert resp.status_code == 404
 
 
 def test_purchase_org_key_pools_to_org_wallet() -> None:
     ctx = _make_org_ctx("org-abc")
-    with _override_auth(ctx) as c:
+    with _override_auth(ctx) as (c, _registry):
         payload = {
             "package_id": "pkg_5000",
             "buyer_name": "Org User",
             "buyer_email": "orguser@ironclaw.test",
         }
-        resp = c.post("/billing/packages/purchase", json=payload)
+        resp = c.post("/billing/purchase", json=payload)
     assert resp.status_code == 201
     body = resp.json()
     assert body["purchase"]["owner_key"] == "ic_org_org-abc"
@@ -235,7 +245,7 @@ def test_purchase_response_token_coverage_correct(client: TestClient) -> None:
         "buyer_name": "TC User",
         "buyer_email": "tc@ironclaw.test",
     }
-    resp = client.post("/billing/packages/purchase", json=payload)
+    resp = client.post("/billing/purchase", json=payload)
     assert resp.status_code == 201
     purchase = resp.json()["purchase"]
     assert purchase["token_coverage"] == 5_000 * TOKEN_CHUNK_SIZE
@@ -247,13 +257,14 @@ def test_purchase_response_token_coverage_correct(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _seed_wallet(owner_key: str, units: int = 500) -> None:
-    registry = _unit_wallet_module._unit_wallet_registry
+def _seed_wallet(registry: UnitWalletRegistry, owner_key: str, units: int = 500) -> None:
+    """Seed via the provided registry instance — never reads the module global directly."""
     registry.credit_units(owner_key=owner_key, units=units)
 
 
 def test_get_wallet_balance_returns_200(client: TestClient) -> None:
-    _seed_wallet("test@ironclaw.test", 100)
+    registry = _unit_wallet_module._unit_wallet_registry
+    _seed_wallet(registry, "test@ironclaw.test", 100)
     resp = client.get("/billing/wallet/test@ironclaw.test")
     assert resp.status_code == 200
     body = resp.json()
@@ -262,10 +273,12 @@ def test_get_wallet_balance_returns_200(client: TestClient) -> None:
     assert body["wallet"]["balance_units"] == 100
 
 
-def test_get_wallet_creates_wallet_if_absent(client: TestClient) -> None:
-    resp = client.get("/billing/wallet/newuser@ironclaw.test")
-    assert resp.status_code == 200
-    assert resp.json()["wallet"]["balance_units"] == 0
+def test_get_wallet_returns_404_for_unknown_owner(client: TestClient) -> None:
+    """
+    The route raises 404 for unknown wallets — it does NOT auto-create.
+    """
+    resp = client.get("/billing/wallet/nobody@ironclaw.test")
+    assert resp.status_code == 404
 
 
 def test_get_wallet_requires_auth_context() -> None:
@@ -281,7 +294,8 @@ def test_get_wallet_requires_auth_context() -> None:
 
 
 def test_debit_by_units_reduces_balance(client: TestClient) -> None:
-    _seed_wallet("debit@ironclaw.test", 200)
+    registry = _unit_wallet_module._unit_wallet_registry
+    _seed_wallet(registry, "debit@ironclaw.test", 200)
     resp = client.post(
         "/billing/wallet/debit@ironclaw.test/debit",
         json={"units": 50},
@@ -293,7 +307,8 @@ def test_debit_by_units_reduces_balance(client: TestClient) -> None:
 
 
 def test_debit_by_token_count_uses_ceiling_division(client: TestClient) -> None:
-    _seed_wallet("tokens@ironclaw.test", 200)
+    registry = _unit_wallet_module._unit_wallet_registry
+    _seed_wallet(registry, "tokens@ironclaw.test", 200)
     resp = client.post(
         "/billing/wallet/tokens@ironclaw.test/debit",
         json={"token_count": 25_001},
@@ -305,7 +320,8 @@ def test_debit_by_token_count_uses_ceiling_division(client: TestClient) -> None:
 
 
 def test_debit_exact_chunk_boundary_uses_one_unit(client: TestClient) -> None:
-    _seed_wallet("boundary@ironclaw.test", 10)
+    registry = _unit_wallet_module._unit_wallet_registry
+    _seed_wallet(registry, "boundary@ironclaw.test", 10)
     resp = client.post(
         "/billing/wallet/boundary@ironclaw.test/debit",
         json={"token_count": TOKEN_CHUNK_SIZE},
@@ -315,7 +331,8 @@ def test_debit_exact_chunk_boundary_uses_one_unit(client: TestClient) -> None:
 
 
 def test_debit_insufficient_units_returns_402(client: TestClient) -> None:
-    _seed_wallet("broke@ironclaw.test", 1)
+    registry = _unit_wallet_module._unit_wallet_registry
+    _seed_wallet(registry, "broke@ironclaw.test", 1)
     resp = client.post(
         "/billing/wallet/broke@ironclaw.test/debit",
         json={"units": 100},
@@ -328,7 +345,8 @@ def test_debit_insufficient_units_returns_402(client: TestClient) -> None:
 
 
 def test_debit_missing_units_and_token_count_returns_422(client: TestClient) -> None:
-    _seed_wallet("miss@ironclaw.test", 10)
+    registry = _unit_wallet_module._unit_wallet_registry
+    _seed_wallet(registry, "miss@ironclaw.test", 10)
     resp = client.post(
         "/billing/wallet/miss@ironclaw.test/debit",
         json={"reason": "test"},
@@ -352,7 +370,8 @@ def test_debit_requires_auth_context() -> None:
 
 
 def test_refund_increases_balance(client: TestClient) -> None:
-    _seed_wallet("refund@ironclaw.test", 100)
+    registry = _unit_wallet_module._unit_wallet_registry
+    _seed_wallet(registry, "refund@ironclaw.test", 100)
     resp = client.post(
         "/billing/wallet/refund@ironclaw.test/refund",
         json={"units": 25},
@@ -365,7 +384,8 @@ def test_refund_increases_balance(client: TestClient) -> None:
 
 
 def test_refund_zero_units_rejected_by_schema(client: TestClient) -> None:
-    _seed_wallet("rzero@ironclaw.test", 50)
+    registry = _unit_wallet_module._unit_wallet_registry
+    _seed_wallet(registry, "rzero@ironclaw.test", 50)
     resp = client.post(
         "/billing/wallet/rzero@ironclaw.test/refund",
         json={"units": 0},
@@ -384,31 +404,25 @@ def test_refund_requires_auth_context() -> None:
 
 
 # ---------------------------------------------------------------------------
-# GET /billing/ledger
+# GET /billing/wallet/{owner_key}/ledger  (canonical route)
 # ---------------------------------------------------------------------------
 
 
-def test_ledger_returns_entries_after_purchase(client: TestClient) -> None:
-    _seed_wallet("ledger@ironclaw.test", 50)
-    resp = client.get("/billing/ledger?owner_key=ledger@ironclaw.test")
+def test_ledger_returns_entries_after_credit(client: TestClient) -> None:
+    registry = _unit_wallet_module._unit_wallet_registry
+    _seed_wallet(registry, "ledger@ironclaw.test", 50)
+    resp = client.get("/billing/wallet/ledger@ironclaw.test/ledger")
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
     assert len(body["entries"]) >= 1
 
 
-def test_ledger_empty_without_owner_key_filter(client: TestClient) -> None:
-    resp = client.get("/billing/ledger")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["status"] == "ok"
-    assert isinstance(body["entries"], list)
-
-
 def test_ledger_limit_param_respected(client: TestClient) -> None:
-    for _i in range(5):
-        _seed_wallet("lim@ironclaw.test", 10)
-    resp = client.get("/billing/ledger?owner_key=lim@ironclaw.test&limit=2")
+    registry = _unit_wallet_module._unit_wallet_registry
+    for _ in range(5):
+        _seed_wallet(registry, "lim@ironclaw.test", 10)
+    resp = client.get("/billing/wallet/lim@ironclaw.test/ledger?limit=2")
     assert resp.status_code == 200
     assert len(resp.json()["entries"]) <= 2
 
@@ -416,7 +430,7 @@ def test_ledger_limit_param_respected(client: TestClient) -> None:
 def test_ledger_requires_auth_context() -> None:
     _app.dependency_overrides.clear()
     with TestClient(_app, raise_server_exceptions=False) as c:
-        resp = c.get("/billing/ledger")
+        resp = c.get("/billing/wallet/test@ironclaw.test/ledger")
     assert resp.status_code == 401
 
 
@@ -427,8 +441,8 @@ def test_ledger_requires_auth_context() -> None:
 
 def test_org_debit_wrong_org_key_returns_403() -> None:
     ctx = _make_org_ctx("org-alpha")
-    with _override_auth(ctx) as c:
-        _unit_wallet_module._unit_wallet_registry.credit_units(owner_key="ic_org_org-beta", units=500)
+    with _override_auth(ctx) as (c, registry):
+        registry.credit_units(owner_key="ic_org_org-beta", units=500)
         resp = c.post(
             "/billing/wallet/ic_org_org-beta/debit",
             json={"units": 10},
@@ -438,8 +452,8 @@ def test_org_debit_wrong_org_key_returns_403() -> None:
 
 def test_org_refund_wrong_org_key_returns_403() -> None:
     ctx = _make_org_ctx("org-alpha")
-    with _override_auth(ctx) as c:
-        _unit_wallet_module._unit_wallet_registry.credit_units(owner_key="ic_org_org-beta", units=500)
+    with _override_auth(ctx) as (c, registry):
+        registry.credit_units(owner_key="ic_org_org-beta", units=500)
         resp = c.post(
             "/billing/wallet/ic_org_org-beta/refund",
             json={"units": 10},
@@ -449,22 +463,23 @@ def test_org_refund_wrong_org_key_returns_403() -> None:
 
 def test_org_wallet_read_wrong_org_key_returns_403() -> None:
     ctx = _make_org_ctx("org-alpha")
-    with _override_auth(ctx) as c:
+    with _override_auth(ctx) as (c, _registry):
         resp = c.get("/billing/wallet/ic_org_org-beta")
     assert resp.status_code == 403
 
 
 def test_org_ledger_wrong_org_key_returns_403() -> None:
     ctx = _make_org_ctx("org-alpha")
-    with _override_auth(ctx) as c:
-        resp = c.get("/billing/ledger?owner_key=ic_org_org-beta")
+    with _override_auth(ctx) as (c, registry):
+        registry.credit_units(owner_key="ic_org_org-beta", units=100)
+        resp = c.get("/billing/wallet/ic_org_org-beta/ledger")
     assert resp.status_code == 403
 
 
 def test_org_debit_correct_org_key_succeeds() -> None:
     ctx = _make_org_ctx("org-alpha")
-    with _override_auth(ctx) as c:
-        _unit_wallet_module._unit_wallet_registry.credit_units(owner_key="ic_org_org-alpha", units=500)
+    with _override_auth(ctx) as (c, registry):
+        registry.credit_units(owner_key="ic_org_org-alpha", units=500)
         resp = c.post(
             "/billing/wallet/ic_org_org-alpha/debit",
             json={"units": 10},
@@ -475,8 +490,8 @@ def test_org_debit_correct_org_key_succeeds() -> None:
 
 def test_org_refund_correct_org_key_succeeds() -> None:
     ctx = _make_org_ctx("org-alpha")
-    with _override_auth(ctx) as c:
-        _unit_wallet_module._unit_wallet_registry.credit_units(owner_key="ic_org_org-alpha", units=100)
+    with _override_auth(ctx) as (c, registry):
+        registry.credit_units(owner_key="ic_org_org-alpha", units=100)
         resp = c.post(
             "/billing/wallet/ic_org_org-alpha/refund",
             json={"units": 5},
@@ -487,7 +502,8 @@ def test_org_refund_correct_org_key_succeeds() -> None:
 
 def test_org_wallet_read_correct_org_key_succeeds() -> None:
     ctx = _make_org_ctx("org-alpha")
-    with _override_auth(ctx) as c:
+    with _override_auth(ctx) as (c, registry):
+        registry.credit_units(owner_key="ic_org_org-alpha", units=50)
         resp = c.get("/billing/wallet/ic_org_org-alpha")
     assert resp.status_code == 200
     assert resp.json()["wallet"]["owner_key"] == "ic_org_org-alpha"
@@ -495,17 +511,17 @@ def test_org_wallet_read_correct_org_key_succeeds() -> None:
 
 def test_org_ledger_correct_org_key_succeeds() -> None:
     ctx = _make_org_ctx("org-alpha")
-    with _override_auth(ctx) as c:
-        _unit_wallet_module._unit_wallet_registry.credit_units(owner_key="ic_org_org-alpha", units=100)
-        resp = c.get("/billing/ledger?owner_key=ic_org_org-alpha")
+    with _override_auth(ctx) as (c, registry):
+        registry.credit_units(owner_key="ic_org_org-alpha", units=100)
+        resp = c.get("/billing/wallet/ic_org_org-alpha/ledger")
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
 
 
 def test_personal_key_debit_own_wallet_succeeds() -> None:
-    ctx = _make_personal_ctx()
-    with _override_auth(ctx) as c:
-        _unit_wallet_module._unit_wallet_registry.credit_units(owner_key="test@ironclaw.test", units=200)
+    ctx = _make_personal_ctx("test@ironclaw.test")
+    with _override_auth(ctx) as (c, registry):
+        registry.credit_units(owner_key="test@ironclaw.test", units=200)
         resp = c.post(
             "/billing/wallet/test@ironclaw.test/debit",
             json={"units": 50},
@@ -513,15 +529,19 @@ def test_personal_key_debit_own_wallet_succeeds() -> None:
     assert resp.status_code == 200
 
 
-def test_personal_key_not_blocked_by_org_guard() -> None:
-    ctx = _make_personal_ctx()
-    with _override_auth(ctx) as c:
-        _unit_wallet_module._unit_wallet_registry.credit_units(owner_key="ic_org_some-org", units=100)
+def test_personal_key_blocked_from_other_personal_wallet() -> None:
+    """
+    Personal key whose principal_id is 'owner-a@ironclaw.test' must not
+    access a wallet owned by 'owner-b@ironclaw.test'.
+    """
+    ctx = _make_personal_ctx("owner-a@ironclaw.test")
+    with _override_auth(ctx) as (c, registry):
+        registry.credit_units(owner_key="owner-b@ironclaw.test", units=100)
         resp = c.post(
-            "/billing/wallet/ic_org_some-org/debit",
+            "/billing/wallet/owner-b@ironclaw.test/debit",
             json={"units": 10},
         )
-    assert resp.status_code == 200
+    assert resp.status_code == 403
 
 
 # ---------------------------------------------------------------------------
