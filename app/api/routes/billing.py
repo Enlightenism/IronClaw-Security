@@ -13,7 +13,6 @@ from app.core.unit_wallet import (
     ORG_KEY_PREFIX,
     TOKEN_CHUNK_SIZE,
     UNIT_PACKAGE_CATALOG,
-    InsufficientUnitsError,
     get_unit_wallet_registry,
     units_required_for_tokens,
 )
@@ -278,13 +277,13 @@ def _assert_owner_access(auth_ctx: AuthContext, requested_owner_key: str) -> Non
     Rules:
     - org key (key_type == 'org'): may only access ``ic_org_{auth_ctx.org_id}``.
       Any other key → 403.
-    - personal key accessing a non-org wallet: no restriction.
+    - personal/session/None key_type: no restriction.
     - personal key accessing an org-prefixed wallet: allowed (admin/support path).
     """
-    key_type = getattr(auth_ctx, "key_type", "personal")
+    key_type = getattr(auth_ctx, "key_type", None) or "personal"
 
     if key_type != "org":
-        # Personal keys are never blocked by the org guard.
+        # Personal, session, or unknown key types are never blocked by the org guard.
         return
 
     org_id = getattr(auth_ctx, "org_id", None)
@@ -363,18 +362,6 @@ def _ledger_entry_to_view(entry: Any) -> WalletLedgerEntryView:
     )
 
 
-def _build_insufficient_units_detail(exc: InsufficientUnitsError) -> dict[str, Any]:
-    return {
-        "status": "insufficient_units",
-        "error": str(exc),
-        "owner_key": getattr(exc, "owner_key", ""),
-        "have": getattr(exc, "have", 0),
-        "need": getattr(exc, "need", 0),
-        "tokens_per_unit": TOKEN_CHUNK_SIZE,
-        "timestamp": _utc_now_iso(),
-    }
-
-
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -430,33 +417,25 @@ def purchase_billing_package(
 
     wallet_registry = get_unit_wallet_registry()
 
-    try:
-        wallet = wallet_registry.credit_units(
-            owner_key=wallet_owner_key,
-            units=granted_units,
-            metadata={
-                "source": "billing_package_purchase",
-                "purchase_id": purchase.purchase_id,
-                "package_id": package_id,
-                "package_name": purchase.package_name,
-                "buyer_name": purchase.buyer_name,
-                "buyer_email": normalized_email,
-                "wallet_owner_key": wallet_owner_key,
-                "token_coverage": token_coverage,
-                "tokens_per_unit": TOKEN_CHUNK_SIZE,
-                **payload.metadata,
-            },
-        )
-    except InsufficientUnitsError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=_build_insufficient_units_detail(exc),
-        ) from exc
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Wallet credit failed: {exc}",
-        ) from exc
+    # InsufficientUnitsError propagates to the centrally registered
+    # insufficient_units_handler which returns {"detail": {...}} at 402.
+    # Generic exceptions propagate to unhandled_exception_handler → 500.
+    wallet = wallet_registry.credit_units(
+        owner_key=wallet_owner_key,
+        units=granted_units,
+        metadata={
+            "source": "billing_package_purchase",
+            "purchase_id": purchase.purchase_id,
+            "package_id": package_id,
+            "package_name": purchase.package_name,
+            "buyer_name": purchase.buyer_name,
+            "buyer_email": normalized_email,
+            "wallet_owner_key": wallet_owner_key,
+            "token_coverage": token_coverage,
+            "tokens_per_unit": TOKEN_CHUNK_SIZE,
+            **payload.metadata,
+        },
+    )
 
     return BillingPackagePurchaseResponse(
         status="ok",
@@ -523,17 +502,13 @@ def debit_billing_wallet(
         **payload.metadata,
     }
 
-    try:
-        wallet = wallet_registry.debit_units(
-            owner_key=normalized_owner,
-            units=units_to_debit,
-            metadata=debit_metadata,
-        )
-    except InsufficientUnitsError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=_build_insufficient_units_detail(exc),
-        ) from exc
+    # InsufficientUnitsError propagates to the centrally registered
+    # insufficient_units_handler which returns {"detail": {...}} at 402.
+    wallet = wallet_registry.debit_units(
+        owner_key=normalized_owner,
+        units=units_to_debit,
+        metadata=debit_metadata,
+    )
 
     return WalletDebitResponse(
         status="ok",
@@ -568,17 +543,12 @@ def refund_billing_wallet(
         **payload.metadata,
     }
 
-    try:
-        wallet = wallet_registry.refund_units(
-            owner_key=normalized_owner,
-            units=payload.units,
-            metadata=refund_metadata,
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Wallet refund failed: {exc}",
-        ) from exc
+    # Generic exceptions propagate to unhandled_exception_handler → 500.
+    wallet = wallet_registry.refund_units(
+        owner_key=normalized_owner,
+        units=payload.units,
+        metadata=refund_metadata,
+    )
 
     return WalletRefundResponse(
         status="ok",
