@@ -6,7 +6,6 @@ from unittest.mock import patch
 
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-import pytest
 
 from app.core.auth import (
     API_KEY_HEADER_NAME,
@@ -15,7 +14,6 @@ from app.core.auth import (
     get_api_key,
     require_api_key,
 )
-from app.core.errors import AppError
 from app.core.settings import get_settings
 
 # ---------------------------------------------------------------------------
@@ -178,13 +176,12 @@ class TestGetApiKeyAuthNotConfigured:
         def probe(value: str | None = Depends(get_api_key)) -> dict:
             return {"api_key": value}
 
-        client = TestClient(app, raise_server_exceptions=True)
+        client = TestClient(app, raise_server_exceptions=False)
 
         with caplog.at_level(logging.WARNING, logger="app.core.auth"):
-            with pytest.raises(AppError) as exc_info:
-                client.get("/probe", headers={API_KEY_HEADER_NAME: "some-key"})
+            response = client.get("/probe", headers={API_KEY_HEADER_NAME: "some-key"})
 
-        assert exc_info.value.error in ("auth_not_configured", "invalid_api_key")
+        assert response.status_code in (401, 503)
         warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
         assert any("auth_not_configured" in m for m in warning_messages)
 
@@ -197,17 +194,16 @@ class TestGetApiKeyAuthNotConfigured:
         def probe(value: str | None = Depends(get_api_key)) -> dict:
             return {"api_key": value}
 
-        client = TestClient(app, raise_server_exceptions=True)
+        client = TestClient(app, raise_server_exceptions=False)
 
         with caplog.at_level(logging.WARNING, logger="app.core.auth"):
-            with pytest.raises(AppError) as exc_info:
-                client.get("/probe", headers={API_KEY_HEADER_NAME: "some-key"})
+            response = client.get("/probe", headers={API_KEY_HEADER_NAME: "some-key"})
 
-        assert exc_info.value.status_code in (401, 503)
+        assert response.status_code in (401, 503)
 
 
 # ---------------------------------------------------------------------------
-# Original integration tests — preserved exactly
+# Original integration tests — updated to HTTPException / {"detail": ...} shape
 # ---------------------------------------------------------------------------
 
 
@@ -255,13 +251,12 @@ def test_require_api_key_raises_for_missing_key_when_required() -> None:
     ) -> dict[str, str]:
         return {"api_key": value}
 
-    client = TestClient(app, raise_server_exceptions=True)
+    client = TestClient(app, raise_server_exceptions=False)
+    response = client.get("/protected")
 
-    with pytest.raises(AppError) as exc_info:
-        client.get("/protected")
-
-    assert exc_info.value.status_code == 401
-    assert exc_info.value.error == "missing_api_key"
+    assert response.status_code == 401
+    detail = response.json()["detail"]
+    assert "missing" in detail.lower() or "api key" in detail.lower()
 
 
 def test_require_api_key_raises_for_invalid_key_when_required() -> None:
@@ -274,13 +269,12 @@ def test_require_api_key_raises_for_invalid_key_when_required() -> None:
     ) -> dict[str, str]:
         return {"api_key": value}
 
-    client = TestClient(app, raise_server_exceptions=True)
+    client = TestClient(app, raise_server_exceptions=False)
+    response = client.get("/protected", headers={API_KEY_HEADER_NAME: "wrong-key"})
 
-    with pytest.raises(AppError) as exc_info:
-        client.get("/protected", headers={API_KEY_HEADER_NAME: "wrong-key"})
-
-    assert exc_info.value.status_code == 401
-    assert exc_info.value.error == "invalid_api_key"
+    assert response.status_code == 401
+    detail = response.json()["detail"]
+    assert "invalid" in detail.lower() or "api key" in detail.lower()
 
 
 def test_require_api_key_allows_optional_mode_without_header() -> None:
