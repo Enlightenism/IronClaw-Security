@@ -33,9 +33,11 @@ __all__ = [
     "PlanDefinition",
     "PLAN_DEFINITIONS",
     "TOKENS_PER_UNIT",
+    "UNIT_PACKAGE_CATALOG",
     "units_required_for_tokens",
     "get_billing_registry",
     "resolve_billing_owner",
+    "_reset_billing_registry_for_testing",
 ]
 
 
@@ -110,6 +112,54 @@ PLAN_DEFINITIONS: Final[dict[PlanCode, PlanDefinition]] = {
         "tokens_per_unit": TOKENS_PER_UNIT,
     },
 }
+
+
+# ---------------------------------------------------------------------------
+# Unit package catalog — ordered list used by purchase and UI surfaces.
+# Each entry mirrors the corresponding PLAN_DEFINITIONS entry and is the
+# single source of truth for the purchasable package list exposed by
+# app/api/billing.py and consumed by the billing test suite.
+# ---------------------------------------------------------------------------
+
+
+class _UnitPackageEntry(TypedDict):
+    code: PlanCode
+    name: str
+    units: int
+    price_usd: int
+    tokens_per_unit: int
+
+
+UNIT_PACKAGE_CATALOG: Final[list[_UnitPackageEntry]] = [
+    {
+        "code": "starter-5k",
+        "name": "Starter",
+        "units": BILLING_TIER_5K_UNITS,
+        "price_usd": BILLING_TIER_5K_PRICE_USD,
+        "tokens_per_unit": TOKENS_PER_UNIT,
+    },
+    {
+        "code": "team-25k",
+        "name": "Team",
+        "units": BILLING_TIER_25K_UNITS,
+        "price_usd": BILLING_TIER_25K_PRICE_USD,
+        "tokens_per_unit": TOKENS_PER_UNIT,
+    },
+    {
+        "code": "enterprise-60k",
+        "name": "Enterprise",
+        "units": BILLING_TIER_60K_UNITS,
+        "price_usd": BILLING_TIER_60K_PRICE_USD,
+        "tokens_per_unit": TOKENS_PER_UNIT,
+    },
+]
+
+# Integrity check: catalog must stay in sync with PLAN_DEFINITIONS.
+for _entry in UNIT_PACKAGE_CATALOG:
+    _plan = PLAN_DEFINITIONS[_entry["code"]]
+    assert _entry["units"] == _plan["unit_limit"], f"UNIT_PACKAGE_CATALOG units mismatch for {_entry['code']!r}"
+    assert _entry["price_usd"] == _plan["price_usd"], f"UNIT_PACKAGE_CATALOG price_usd mismatch for {_entry['code']!r}"
+del _entry, _plan
 
 
 _CUSTOMERS_TABLE = "billing_customers"
@@ -612,6 +662,9 @@ class BillingRegistry:
     def get_plan_definitions(self) -> dict[PlanCode, PlanDefinition]:
         return dict(PLAN_DEFINITIONS)
 
+    def get_unit_package_catalog(self) -> list[_UnitPackageEntry]:
+        return list(UNIT_PACKAGE_CATALOG)
+
 
 _billing_registry: BillingRegistry | None = None
 _billing_registry_lock = Lock()
@@ -624,3 +677,10 @@ def get_billing_registry() -> BillingRegistry:
             if _billing_registry is None:
                 _billing_registry = BillingRegistry()
     return _billing_registry
+
+
+def _reset_billing_registry_for_testing() -> None:
+    """Reset the module-level singleton. For use in pytest fixtures only."""
+    global _billing_registry
+    with _billing_registry_lock:
+        _billing_registry = None
