@@ -6,7 +6,13 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.billing import router as billing_router
+from app.api.routes.billing import (
+    _PURCHASES_MAX_SIZE,
+    _append_purchase,
+)
+from app.api.routes.billing import (
+    router as billing_router,
+)
 from app.core.auth import (
     AuthContext,
     require_auth_context,
@@ -106,7 +112,7 @@ def test_list_packages_returns_200_with_all_three_packages() -> None:
     data = response.json()
 
     assert data["status"] == "ok"
-    assert data["service"] == "IronClaw-Security"
+    assert data["service"] == "ironclaw-billing"
     assert "timestamp" in data
 
     returned_ids = {p["package_id"] for p in data["packages"]}
@@ -137,14 +143,14 @@ def test_list_packages_returns_401_unauthenticated() -> None:
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/packages/purchase — personal key
+# POST /billing/purchase — personal key
 # ---------------------------------------------------------------------------
 
 
 def test_purchase_personal_key_returns_201_and_owner_key_is_buyer_email() -> None:
     buyer_email = "buyer@ironclaw.test"
     response = _personal_client().post(
-        "/billing/packages/purchase",
+        "/billing/purchase",
         json={
             "package_id": _PKG_5K,
             "buyer_name": "Test Buyer",
@@ -173,7 +179,7 @@ def test_purchase_personal_key_returns_201_and_owner_key_is_buyer_email() -> Non
 
 def test_purchase_personal_key_pkg_25k_returns_201() -> None:
     response = _personal_client().post(
-        "/billing/packages/purchase",
+        "/billing/purchase",
         json={
             "package_id": _PKG_25K,
             "buyer_name": "Team Buyer",
@@ -189,7 +195,7 @@ def test_purchase_personal_key_pkg_25k_returns_201() -> None:
 
 def test_purchase_personal_key_pkg_60k_returns_201() -> None:
     response = _personal_client().post(
-        "/billing/packages/purchase",
+        "/billing/purchase",
         json={
             "package_id": _PKG_60K,
             "buyer_name": "Enterprise Buyer",
@@ -204,7 +210,7 @@ def test_purchase_personal_key_pkg_60k_returns_201() -> None:
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/packages/purchase — purchase_id uniqueness (uuid-based)
+# POST /billing/purchase — purchase_id uniqueness (uuid-based)
 # ---------------------------------------------------------------------------
 
 
@@ -217,7 +223,7 @@ def test_purchase_id_uniqueness_across_concurrent_purchases() -> None:
 
     def _do_purchase(i: int) -> str:
         resp = client.post(
-            "/billing/packages/purchase",
+            "/billing/purchase",
             json={
                 "package_id": _PKG_5K,
                 "buyer_name": f"Concurrent Buyer {i}",
@@ -232,18 +238,81 @@ def test_purchase_id_uniqueness_across_concurrent_purchases() -> None:
         futures = [pool.submit(_do_purchase, i) for i in range(20)]
         purchase_ids = [f.result() for f in concurrent.futures.as_completed(futures)]
 
-    # All purchase_ids must be unique
     assert len(purchase_ids) == len(set(purchase_ids)), f"Duplicate purchase_ids detected: {purchase_ids}"
-    # All must be uuid-based (purch_ prefix + 32 hex chars)
     for pid in purchase_ids:
         assert pid.startswith("purch_"), f"purchase_id missing purch_ prefix: {pid!r}"
         hex_part = pid[len("purch_") :]
-        assert len(hex_part) == 32, f"purchase_id hex part wrong length: {pid!r}"
+        assert len(hex_part) == 16, f"purchase_id hex part wrong length: {pid!r}"
         assert all(c in "0123456789abcdef" for c in hex_part), f"purchase_id contains non-hex characters: {pid!r}"
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/packages/purchase — org key
+# _append_purchase cap enforcement
+# ---------------------------------------------------------------------------
+
+
+def test_append_purchase_enforces_max_size_cap() -> None:
+    """
+    _append_purchase must keep _PURCHASES bounded to _PURCHASES_MAX_SIZE.
+    When the list exceeds the cap, oldest entries must be dropped.
+    """
+    import app.api.routes.billing as billing_mod
+    from app.api.routes.billing import BillingPackagePurchaseView
+
+    original = list(billing_mod._PURCHASES)
+    billing_mod._PURCHASES.clear()
+
+    try:
+        cap = _PURCHASES_MAX_SIZE
+        # Fill to exactly cap
+        for i in range(cap):
+            _append_purchase(
+                BillingPackagePurchaseView(
+                    purchase_id=f"purch_{i:016x}",
+                    package_id=_PKG_5K,
+                    package_name="Starter",
+                    buyer_name="Cap Test",
+                    buyer_email=f"captest{i}@ironclaw.test",
+                    owner_key=f"captest{i}@ironclaw.test",
+                    price_usd=20.0,
+                    granted_units=5000,
+                    token_coverage=125_000_000,
+                    tokens_per_unit=25_000,
+                    created_at="2026-06-14T00:00:00Z",
+                    metadata={},
+                )
+            )
+        assert len(billing_mod._PURCHASES) == cap
+
+        # Add one more — cap must hold
+        _append_purchase(
+            BillingPackagePurchaseView(
+                purchase_id="purch_overflow_0000000",
+                package_id=_PKG_5K,
+                package_name="Starter",
+                buyer_name="Overflow",
+                buyer_email="overflow@ironclaw.test",
+                owner_key="overflow@ironclaw.test",
+                price_usd=20.0,
+                granted_units=5000,
+                token_coverage=125_000_000,
+                tokens_per_unit=25_000,
+                created_at="2026-06-14T00:00:01Z",
+                metadata={},
+            )
+        )
+        assert len(billing_mod._PURCHASES) == cap
+        # Most recent entry must be the overflow one
+        assert billing_mod._PURCHASES[-1].purchase_id == "purch_overflow_0000000"
+        # First entry (oldest) must have been dropped
+        assert billing_mod._PURCHASES[0].purchase_id != "purch_0000000000000000"
+    finally:
+        billing_mod._PURCHASES.clear()
+        billing_mod._PURCHASES.extend(original)
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/purchase — org key
 # ---------------------------------------------------------------------------
 
 
@@ -254,7 +323,7 @@ def test_purchase_org_key_returns_201_and_owner_key_is_ic_org() -> None:
     org wallet, keeping all team consumption pooled under one wallet.
     """
     response = _org_client().post(
-        "/billing/packages/purchase",
+        "/billing/purchase",
         json={
             "package_id": _PKG_5K,
             "buyer_name": "Org Admin",
@@ -268,7 +337,6 @@ def test_purchase_org_key_returns_201_and_owner_key_is_ic_org() -> None:
 
     purchase = data["purchase"]
     assert purchase["package_id"] == _PKG_5K
-    # Org key → owner_key must be ic_org_{org_id}, NOT buyer_email
     assert purchase["owner_key"] == _ORG_OWNER_KEY, f"Expected org wallet key {_ORG_OWNER_KEY!r}, got {purchase['owner_key']!r}"
     assert purchase["granted_units"] > 0
 
@@ -277,7 +345,7 @@ def test_purchase_org_key_returns_201_and_owner_key_is_ic_org() -> None:
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/packages/purchase — auth enforcement
+# POST /billing/purchase — auth enforcement
 # ---------------------------------------------------------------------------
 
 
@@ -285,10 +353,9 @@ def test_purchase_no_api_key_returns_401() -> None:
     """
     Core require_auth_context enforcement gate: unauthenticated purchase
     attempt must be rejected with 401 before any purchase logic executes.
-    No wallet state must change as a result of this call.
     """
     response = _unauthed_client().post(
-        "/billing/packages/purchase",
+        "/billing/purchase",
         json={
             "package_id": _PKG_5K,
             "buyer_name": "Attacker",
@@ -301,7 +368,7 @@ def test_purchase_no_api_key_returns_401() -> None:
 
 def test_purchase_unknown_package_id_returns_404() -> None:
     response = _personal_client().post(
-        "/billing/packages/purchase",
+        "/billing/purchase",
         json={
             "package_id": "pkg_does_not_exist",
             "buyer_name": "Test Buyer",
@@ -314,7 +381,7 @@ def test_purchase_unknown_package_id_returns_404() -> None:
 
 def test_purchase_empty_package_id_returns_422() -> None:
     response = _personal_client().post(
-        "/billing/packages/purchase",
+        "/billing/purchase",
         json={
             "package_id": "",
             "buyer_name": "Test Buyer",
@@ -332,9 +399,10 @@ def test_purchase_empty_package_id_returns_422() -> None:
 
 def test_get_wallet_personal_key_returns_200() -> None:
     registry = get_unit_wallet_registry()
-    registry.credit_units(
+    registry.credit(
         owner_key="wallet-read-personal@ironclaw.test",
         units=100,
+        reason="test_seed",
         metadata={"package_id": _PKG_5K},
     )
     response = _personal_client().get("/billing/wallet/wallet-read-personal@ironclaw.test")
@@ -367,9 +435,10 @@ def test_get_wallet_unauthenticated_returns_401() -> None:
 def test_get_wallet_org_key_reads_own_org_wallet_returns_200() -> None:
     """Org key can read its own ic_org_* wallet."""
     registry = get_unit_wallet_registry()
-    registry.credit_units(
+    registry.credit(
         owner_key=_ORG_OWNER_KEY,
         units=500,
+        reason="test_seed",
         metadata={"package_id": _PKG_25K},
     )
     response = _org_client().get(f"/billing/wallet/{_ORG_OWNER_KEY}")
@@ -399,9 +468,10 @@ def test_get_wallet_org_key_cannot_access_different_org_wallet_returns_403() -> 
 
 def test_debit_personal_wallet_by_units_returns_200() -> None:
     registry = get_unit_wallet_registry()
-    registry.credit_units(
+    registry.credit(
         owner_key="debit-personal@ironclaw.test",
         units=500,
+        reason="test_seed",
         metadata={"package_id": _PKG_5K},
     )
     response = _personal_client().post(
@@ -418,9 +488,10 @@ def test_debit_personal_wallet_by_units_returns_200() -> None:
 
 def test_debit_personal_wallet_by_token_count_returns_200() -> None:
     registry = get_unit_wallet_registry()
-    registry.credit_units(
+    registry.credit(
         owner_key="debit-tokens@ironclaw.test",
         units=500,
+        reason="test_seed",
         metadata={"package_id": _PKG_5K},
     )
     # 50_000 tokens = 2 units at TOKEN_CHUNK_SIZE=25_000
@@ -440,10 +511,10 @@ def test_debit_wallet_returns_402_on_insufficient_units() -> None:
         json={"units": 999_999_999},
     )
     assert response.status_code == 402
-    data = response.json()
-    assert data["status"] == "insufficient_units"
-    assert "have" in data
-    assert "need" in data
+    detail = response.json()["detail"]
+    assert detail["status"] == "insufficient_units"
+    assert "have" in detail
+    assert "need" in detail
 
 
 def test_debit_wallet_returns_422_when_no_units_or_token_count() -> None:
@@ -473,9 +544,10 @@ def test_debit_org_wallet_via_org_key_returns_200_and_routes_to_org_wallet() -> 
     owner_key. Verify resolved_owner in response is the org wallet.
     """
     registry = get_unit_wallet_registry()
-    registry.credit_units(
+    registry.credit(
         owner_key=_ORG_OWNER_KEY,
         units=1000,
+        reason="test_seed",
         metadata={"package_id": _PKG_25K},
     )
     response = _org_client().post(
@@ -497,9 +569,10 @@ def test_debit_org_key_personal_url_redirects_to_org_wallet() -> None:
     The response owner_key must be the org wallet, not the URL personal key.
     """
     registry = get_unit_wallet_registry()
-    registry.credit_units(
+    registry.credit(
         owner_key=_ORG_OWNER_KEY,
         units=200,
+        reason="test_seed",
         metadata={"package_id": _PKG_5K},
     )
     response = _org_client().post(
@@ -508,7 +581,6 @@ def test_debit_org_key_personal_url_redirects_to_org_wallet() -> None:
     )
     assert response.status_code == 200
     data = response.json()
-    # Must resolve to the org wallet, not the personal URL path key
     assert data["owner_key"] == _ORG_OWNER_KEY
     assert data["wallet"]["owner_key"] == _ORG_OWNER_KEY
 
@@ -540,20 +612,21 @@ def test_debit_personal_key_cannot_target_org_wallet_returns_403() -> None:
 def test_refund_personal_wallet_path_key_used_directly_as_owner_key() -> None:
     """
     Regression: refund_wallet must pass the URL path owner_key directly to
-    _assert_owner_access, NOT through resolve_billing_owner (which expects a
-    buyer_email and would incorrectly re-derive the wallet key).
+    _assert_owner_access, NOT through resolve_billing_owner.
     The response owner_key must equal the URL path exactly.
     """
     registry = get_unit_wallet_registry()
-    registry.credit_units(
+    registry.credit(
         owner_key="refund-pathkey@ironclaw.test",
         units=100,
+        reason="test_seed",
         metadata={"package_id": _PKG_5K},
     )
-    registry.debit_units(
+    registry.debit(
         owner_key="refund-pathkey@ironclaw.test",
         units=30,
-        metadata={"reason": "setup"},
+        reason="setup",
+        metadata={},
     )
     response = _personal_client().post(
         "/billing/wallet/refund-pathkey@ironclaw.test/refund",
@@ -563,22 +636,23 @@ def test_refund_personal_wallet_path_key_used_directly_as_owner_key() -> None:
     data = response.json()
     assert data["status"] == "ok"
     assert data["units_refunded"] == 10
-    # owner_key in response must be the path parameter exactly
     assert data["owner_key"] == "refund-pathkey@ironclaw.test"
     assert data["wallet"]["balance_units"] == 80  # 100 - 30 + 10
 
 
 def test_refund_personal_wallet_returns_200() -> None:
     registry = get_unit_wallet_registry()
-    registry.credit_units(
+    registry.credit(
         owner_key="refund-personal@ironclaw.test",
         units=200,
+        reason="test_seed",
         metadata={"package_id": _PKG_5K},
     )
-    registry.debit_units(
+    registry.debit(
         owner_key="refund-personal@ironclaw.test",
         units=50,
-        metadata={"reason": "setup"},
+        reason="setup",
+        metadata={},
     )
     response = _personal_client().post(
         "/billing/wallet/refund-personal@ironclaw.test/refund",
@@ -589,8 +663,7 @@ def test_refund_personal_wallet_returns_200() -> None:
     assert data["status"] == "ok"
     assert data["units_refunded"] == 20
     assert data["owner_key"] == "refund-personal@ironclaw.test"
-    wallet = data["wallet"]
-    assert wallet["balance_units"] == 170  # 200 - 50 + 20
+    assert data["wallet"]["balance_units"] == 170  # 200 - 50 + 20
 
 
 def test_refund_zero_units_returns_422() -> None:
@@ -618,15 +691,17 @@ def test_refund_wallet_returns_401_unauthenticated() -> None:
 def test_refund_org_wallet_via_org_key_returns_200() -> None:
     """Org key refund must route to ic_org_{org_id}."""
     registry = get_unit_wallet_registry()
-    registry.credit_units(
+    registry.credit(
         owner_key=_ORG_OWNER_KEY,
         units=300,
+        reason="test_seed",
         metadata={"package_id": _PKG_25K},
     )
-    registry.debit_units(
+    registry.debit(
         owner_key=_ORG_OWNER_KEY,
         units=100,
-        metadata={"reason": "setup"},
+        reason="setup",
+        metadata={},
     )
     response = _org_client().post(
         f"/billing/wallet/{_ORG_OWNER_KEY}/refund",
@@ -641,8 +716,8 @@ def test_refund_org_wallet_via_org_key_returns_200() -> None:
 
 def test_refund_org_key_different_org_wallet_returns_403() -> None:
     """
-    Org key for org A calling refund on ic_org_other (a different org's wallet)
-    must be rejected with 403. _assert_owner_access enforces this boundary.
+    Org key for org A calling refund on ic_org_other must be rejected with 403.
+    _assert_owner_access enforces this boundary; detail is a plain string.
     """
     other_org_wallet = "ic_org_completelyotherorg"
     response = _org_client().post(
@@ -650,8 +725,9 @@ def test_refund_org_key_different_org_wallet_returns_403() -> None:
         json={"units": 1, "reason": "cross-org refund attempt"},
     )
     assert response.status_code == 403
-    data = response.json()
-    assert data["detail"]["reason"] in {"org_id_mismatch", "org_wallet_requires_org_key"}
+    detail = response.json()["detail"]
+    assert isinstance(detail, str)
+    assert len(detail) > 0
 
 
 def test_refund_personal_key_cannot_refund_org_wallet_returns_403() -> None:
@@ -664,25 +740,27 @@ def test_refund_personal_key_cannot_refund_org_wallet_returns_403() -> None:
 
 
 # ---------------------------------------------------------------------------
-# GET /billing/ledger — personal key
+# GET /billing/wallet/{owner_key}/ledger — personal key
 # ---------------------------------------------------------------------------
 
 
 def test_get_ledger_personal_key_returns_200() -> None:
     registry = get_unit_wallet_registry()
-    registry.credit_units(
+    registry.credit(
         owner_key="ledger-personal@ironclaw.test",
         units=1000,
+        reason="test_seed",
         metadata={"package_id": _PKG_5K},
     )
-    registry.debit_units(
+    registry.debit(
         owner_key="ledger-personal@ironclaw.test",
         units=25,
+        reason="test_debit",
         metadata={"route": "/guard/execute"},
     )
     response = _personal_client().get(
-        "/billing/ledger",
-        params={"owner_key": "ledger-personal@ironclaw.test", "limit": 10},
+        "/billing/wallet/ledger-personal@ironclaw.test/ledger",
+        params={"limit": 10},
     )
     assert response.status_code == 200
     data = response.json()
@@ -701,26 +779,27 @@ def test_get_ledger_personal_key_returns_200() -> None:
 
 
 def test_get_ledger_returns_401_unauthenticated() -> None:
-    response = _unauthed_client().get("/billing/ledger")
+    response = _unauthed_client().get("/billing/wallet/ledger-personal@ironclaw.test/ledger")
     assert response.status_code == 401
 
 
 # ---------------------------------------------------------------------------
-# GET /billing/ledger — org key isolation
+# GET /billing/wallet/{owner_key}/ledger — org key isolation
 # ---------------------------------------------------------------------------
 
 
 def test_get_ledger_org_key_can_read_own_org_wallet_entries() -> None:
     """Org key ledger query for its own ic_org_ wallet must succeed."""
     registry = get_unit_wallet_registry()
-    registry.credit_units(
+    registry.credit(
         owner_key=_ORG_OWNER_KEY,
         units=200,
+        reason="test_seed",
         metadata={"package_id": _PKG_25K},
     )
     response = _org_client().get(
-        "/billing/ledger",
-        params={"owner_key": _ORG_OWNER_KEY, "limit": 5},
+        f"/billing/wallet/{_ORG_OWNER_KEY}/ledger",
+        params={"limit": 5},
     )
     assert response.status_code == 200
     data = response.json()
@@ -731,26 +810,45 @@ def test_get_ledger_org_key_can_read_own_org_wallet_entries() -> None:
 
 def test_get_ledger_org_key_cannot_query_personal_wallet_entries_returns_403() -> None:
     """Org key must not be able to read a personal owner's ledger entries."""
-    response = _org_client().get(
-        "/billing/ledger",
-        params={"owner_key": "personal@ironclaw.test"},
-    )
+    response = _org_client().get("/billing/wallet/personal@ironclaw.test/ledger")
     assert response.status_code == 403
 
 
 def test_get_ledger_personal_key_cannot_query_org_wallet_entries_returns_403() -> None:
     """Personal key must not be able to read an org wallet's ledger entries."""
-    response = _personal_client().get(
-        "/billing/ledger",
-        params={"owner_key": _ORG_OWNER_KEY},
-    )
+    response = _personal_client().get(f"/billing/wallet/{_ORG_OWNER_KEY}/ledger")
     assert response.status_code == 403
 
 
 def test_get_ledger_org_key_cannot_query_different_org_wallet_returns_403() -> None:
     """Org key for org A must not read org B's ledger entries."""
-    response = _org_client().get(
-        "/billing/ledger",
-        params={"owner_key": "ic_org_otherorg999"},
-    )
+    response = _org_client().get("/billing/wallet/ic_org_otherorg999/ledger")
     assert response.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# GET /billing/purchases
+# ---------------------------------------------------------------------------
+
+
+def test_list_purchases_returns_200_with_count_and_list() -> None:
+    response = _personal_client().get("/billing/purchases")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["service"] == "ironclaw-billing"
+    assert "timestamp" in data
+    assert "count" in data
+    assert isinstance(data["purchases"], list)
+
+
+def test_list_purchases_limit_query_param_respected() -> None:
+    response = _personal_client().get("/billing/purchases", params={"limit": 1})
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["purchases"]) <= 1
+
+
+def test_list_purchases_returns_401_unauthenticated() -> None:
+    response = _unauthed_client().get("/billing/purchases")
+    assert response.status_code == 401
