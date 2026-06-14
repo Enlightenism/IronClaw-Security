@@ -281,7 +281,12 @@ def _wallet_to_view(wallet: Any) -> WalletBalanceView:
 
 
 def _assert_owner_access(owner_key: str, auth_ctx: AuthContext) -> None:
-    """Enforce that the caller may only access their own wallet or org wallet."""
+    """Enforce that the caller may only access their own wallet or org wallet.
+
+    Org key: owner_key must be ic_org_{auth_ctx.org_id}.
+    Personal key: owner_key must match auth_ctx.principal_id (normalized).
+                  principal_id is set to the caller's email by the auth layer.
+    """
     if owner_key.startswith(ORG_KEY_PREFIX):
         org_id = owner_key[len(ORG_KEY_PREFIX) :]
         if getattr(auth_ctx, "org_id", None) != org_id:
@@ -290,8 +295,8 @@ def _assert_owner_access(owner_key: str, auth_ctx: AuthContext) -> None:
                 detail="Access to this org wallet is not permitted.",
             )
     else:
-        caller_email = getattr(auth_ctx, "email", None) or getattr(auth_ctx, "principal_id", None)
-        if caller_email and owner_key != caller_email.strip().lower():
+        caller_id = getattr(auth_ctx, "principal_id", None)
+        if caller_id and owner_key != caller_id.strip().lower():
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access to this wallet is not permitted.",
@@ -367,11 +372,9 @@ def purchase_package(
 
     owner_key = resolve_billing_owner(auth_ctx, body.buyer_email)
     registry = get_unit_wallet_registry()
-    wallet = registry.credit(
+    wallet = registry.credit_units(
         owner_key=owner_key,
         units=int(pkg["included_units"]),
-        reason="purchase",
-        reference_id=body.package_id,
         metadata={
             "package_id": body.package_id,
             "buyer_name": body.buyer_name,
@@ -459,7 +462,7 @@ def get_wallet_ledger(
 ) -> BillingLedgerResponse:
     _assert_owner_access(owner_key, auth_ctx)
     registry = get_unit_wallet_registry()
-    entries = registry.get_ledger(owner_key=owner_key, limit=limit)
+    entries = registry.list_ledger_entries(owner_key=owner_key, limit=limit)
     entry_views = [
         WalletLedgerEntryView(
             entry_id=str(e.entry_id),
@@ -528,12 +531,14 @@ def debit_wallet(
             },
         )
 
-    updated_wallet = registry.debit(
+    updated_wallet = registry.debit_units(
         owner_key=owner_key,
         units=units_to_debit,
-        reason=body.reason,
-        reference_id=body.reference_id,
-        metadata=body.metadata,
+        metadata={
+            "reason": body.reason,
+            "reference_id": body.reference_id,
+            **body.metadata,
+        },
     )
     return WalletDebitResponse(
         status="ok",
@@ -558,12 +563,14 @@ def refund_wallet(
 ) -> WalletRefundResponse:
     _assert_owner_access(owner_key, auth_ctx)
     registry = get_unit_wallet_registry()
-    updated_wallet = registry.credit(
+    updated_wallet = registry.credit_units(
         owner_key=owner_key,
         units=body.units,
-        reason=body.reason,
-        reference_id=body.reference_id,
-        metadata=body.metadata,
+        metadata={
+            "reason": body.reason,
+            "reference_id": body.reference_id,
+            **body.metadata,
+        },
     )
     return WalletRefundResponse(
         status="ok",
