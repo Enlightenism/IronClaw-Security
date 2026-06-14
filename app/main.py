@@ -219,7 +219,6 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (_optional_router("app.api.onboarding"), {"dependencies": dependencies}),
         (_optional_router("app.api.backup"), {"dependencies": dependencies}),
         (_optional_router("app.api.restore"), {"dependencies": dependencies}),
-        (_optional_router("app.api.billing"), {"dependencies": dependencies}),
         (_optional_router("app.api.incidents"), {"dependencies": dependencies}),
         (_optional_router("app.api.notifications"), {"dependencies": dependencies}),
         (_optional_router("app.api.diagnostics"), {"dependencies": dependencies}),
@@ -258,6 +257,7 @@ def _include_optional_protected_routers(app: FastAPI) -> None:
     dependencies = _protected_dependencies()
 
     legacy_modules = [
+        "app.api.routes.billing",
         "app.api.routes.quarantine",
         "app.api.routes.llamafirewall",
         "app.api.routes.reviewqueue",
