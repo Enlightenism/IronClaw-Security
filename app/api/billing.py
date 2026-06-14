@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 import math
 import threading
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
@@ -339,22 +340,24 @@ def purchase_billing_package(
 
     owner_key = resolve_billing_owner(auth_ctx, payload.buyer_email)
 
+    # purchase_id is collision-safe regardless of concurrency or list length
+    purchase_id = f"purch_{uuid4().hex}"
+    purchase = BillingPackagePurchaseView(
+        purchase_id=purchase_id,
+        package_id=package_id,
+        package_name=str(package["name"]),
+        buyer_name=payload.buyer_name.strip(),
+        buyer_email=payload.buyer_email.strip().lower(),
+        owner_key=owner_key,
+        price_usd=float(package["price_usd"]),
+        granted_units=unit_amount,
+        token_coverage=unit_amount * TOKEN_CHUNK_SIZE,
+        tokens_per_unit=TOKEN_CHUNK_SIZE,
+        created_at=_utc_now_iso(),
+        metadata=payload.metadata,
+    )
+
     with _PURCHASES_LOCK:
-        purchase_id = f"purch_{len(_PURCHASES) + 1}"
-        purchase = BillingPackagePurchaseView(
-            purchase_id=purchase_id,
-            package_id=package_id,
-            package_name=str(package["name"]),
-            buyer_name=payload.buyer_name.strip(),
-            buyer_email=payload.buyer_email.strip().lower(),
-            owner_key=owner_key,
-            price_usd=float(package["price_usd"]),
-            granted_units=unit_amount,
-            token_coverage=unit_amount * TOKEN_CHUNK_SIZE,
-            tokens_per_unit=TOKEN_CHUNK_SIZE,
-            created_at=_utc_now_iso(),
-            metadata=payload.metadata,
-        )
         _PURCHASES.append(purchase)
 
     registry = get_unit_wallet_registry()
@@ -393,9 +396,7 @@ def debit_wallet(
     #   - Resolved target is the URL owner_key as-is.
 
     if auth_ctx.key_type == "org" and getattr(auth_ctx, "org_id", None):
-        # Always route org keys to their own org wallet.
         resolved_owner = f"ic_org_{auth_ctx.org_id}"
-        # If caller explicitly targeted a different org's wallet, block it.
         if owner_key.startswith("ic_org_") and owner_key != resolved_owner:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -406,10 +407,7 @@ def debit_wallet(
                     "action": "debit",
                 },
             )
-        # If caller targeted a personal wallet path, silently redirect to own
-        # org wallet — the debit will proceed against resolved_owner.
     else:
-        # Personal key: must not target an org wallet.
         if owner_key.startswith("ic_org_"):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -473,18 +471,21 @@ def refund_wallet(
     payload: WalletRefundRequest,
     auth_ctx: AuthContext = Depends(require_auth_context),
 ) -> WalletRefundResponse:
-    resolved_owner = resolve_billing_owner(auth_ctx, owner_key)
-    _assert_owner_access(auth_ctx, resolved_owner, action="refund")
+    # owner_key is already the canonical wallet key from the URL path.
+    # _assert_owner_access enforces org/personal isolation directly.
+    # resolve_billing_owner is NOT used here — it expects a buyer_email,
+    # not a pre-formed wallet key.
+    _assert_owner_access(auth_ctx, owner_key, action="refund")
 
     registry = get_unit_wallet_registry()
     wallet = registry.refund_units(
-        owner_key=resolved_owner,
+        owner_key=owner_key,
         units=payload.units,
         metadata={"reason": payload.reason},
     )
     return WalletRefundResponse(
         status="ok",
-        owner_key=resolved_owner,
+        owner_key=owner_key,
         units_refunded=payload.units,
         wallet=_wallet_view(wallet),
     )
@@ -549,7 +550,11 @@ def get_ledger(
                     },
                 )
     else:
-        owner_key = resolve_billing_owner(auth_ctx, "") or None
+        # No owner_key supplied: scope ledger to the caller's own wallet.
+        # For org keys this resolves to ic_org_<org_id>;
+        # for personal keys with no email available, return full unscoped ledger.
+        resolved = resolve_billing_owner(auth_ctx, "")
+        owner_key = resolved if resolved else None
 
     registry = get_unit_wallet_registry()
     entries = registry.list_ledger_entries(owner_key=owner_key, limit=limit)
