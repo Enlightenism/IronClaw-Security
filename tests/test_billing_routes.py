@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -200,6 +201,45 @@ def test_purchase_personal_key_pkg_60k_returns_201() -> None:
     data = response.json()
     assert data["purchase"]["package_id"] == _PKG_60K
     assert data["purchase"]["granted_units"] == UNIT_PACKAGE_CATALOG[_PKG_60K]["unit_amount"]
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/packages/purchase — purchase_id uniqueness (uuid-based)
+# ---------------------------------------------------------------------------
+
+
+def test_purchase_id_uniqueness_across_concurrent_purchases() -> None:
+    """
+    purchase_id must be uuid-based and collision-free under concurrent load.
+    Sequential ID generation (len + 1) would produce duplicates; uuid4 must not.
+    """
+    client = _personal_client()
+
+    def _do_purchase(i: int) -> str:
+        resp = client.post(
+            "/billing/packages/purchase",
+            json={
+                "package_id": _PKG_5K,
+                "buyer_name": f"Concurrent Buyer {i}",
+                "buyer_email": f"concurrent{i}@ironclaw.test",
+                "metadata": {},
+            },
+        )
+        assert resp.status_code == 201, f"Purchase {i} failed: {resp.text}"
+        return resp.json()["purchase"]["purchase_id"]
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+        futures = [pool.submit(_do_purchase, i) for i in range(20)]
+        purchase_ids = [f.result() for f in concurrent.futures.as_completed(futures)]
+
+    # All purchase_ids must be unique
+    assert len(purchase_ids) == len(set(purchase_ids)), f"Duplicate purchase_ids detected: {purchase_ids}"
+    # All must be uuid-based (purch_ prefix + 32 hex chars)
+    for pid in purchase_ids:
+        assert pid.startswith("purch_"), f"purchase_id missing purch_ prefix: {pid!r}"
+        hex_part = pid[len("purch_") :]
+        assert len(hex_part) == 32, f"purchase_id hex part wrong length: {pid!r}"
+        assert all(c in "0123456789abcdef" for c in hex_part), f"purchase_id contains non-hex characters: {pid!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -450,6 +490,29 @@ def test_debit_org_wallet_via_org_key_returns_200_and_routes_to_org_wallet() -> 
     assert data["wallet"]["owner_key"] == _ORG_OWNER_KEY
 
 
+def test_debit_org_key_personal_url_redirects_to_org_wallet() -> None:
+    """
+    Org key calling debit with a personal email in the URL path must be
+    silently redirected to the caller's own org wallet, not rejected.
+    The response owner_key must be the org wallet, not the URL personal key.
+    """
+    registry = get_unit_wallet_registry()
+    registry.credit_units(
+        owner_key=_ORG_OWNER_KEY,
+        units=200,
+        metadata={"package_id": _PKG_5K},
+    )
+    response = _org_client().post(
+        "/billing/wallet/some-personal@ironclaw.test/debit",
+        json={"units": 1, "reason": "redirect test"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    # Must resolve to the org wallet, not the personal URL path key
+    assert data["owner_key"] == _ORG_OWNER_KEY
+    assert data["wallet"]["owner_key"] == _ORG_OWNER_KEY
+
+
 def test_debit_org_key_cannot_target_different_org_wallet_returns_403() -> None:
     """Org key for org A must not debit org B's wallet."""
     other_org = "ic_org_attackerorg"
@@ -472,6 +535,37 @@ def test_debit_personal_key_cannot_target_org_wallet_returns_403() -> None:
 # ---------------------------------------------------------------------------
 # POST /billing/wallet/{owner_key}/refund — personal key
 # ---------------------------------------------------------------------------
+
+
+def test_refund_personal_wallet_path_key_used_directly_as_owner_key() -> None:
+    """
+    Regression: refund_wallet must pass the URL path owner_key directly to
+    _assert_owner_access, NOT through resolve_billing_owner (which expects a
+    buyer_email and would incorrectly re-derive the wallet key).
+    The response owner_key must equal the URL path exactly.
+    """
+    registry = get_unit_wallet_registry()
+    registry.credit_units(
+        owner_key="refund-pathkey@ironclaw.test",
+        units=100,
+        metadata={"package_id": _PKG_5K},
+    )
+    registry.debit_units(
+        owner_key="refund-pathkey@ironclaw.test",
+        units=30,
+        metadata={"reason": "setup"},
+    )
+    response = _personal_client().post(
+        "/billing/wallet/refund-pathkey@ironclaw.test/refund",
+        json={"units": 10, "reason": "path key regression test"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["units_refunded"] == 10
+    # owner_key in response must be the path parameter exactly
+    assert data["owner_key"] == "refund-pathkey@ironclaw.test"
+    assert data["wallet"]["balance_units"] == 80  # 100 - 30 + 10
 
 
 def test_refund_personal_wallet_returns_200() -> None:
@@ -497,6 +591,15 @@ def test_refund_personal_wallet_returns_200() -> None:
     assert data["owner_key"] == "refund-personal@ironclaw.test"
     wallet = data["wallet"]
     assert wallet["balance_units"] == 170  # 200 - 50 + 20
+
+
+def test_refund_zero_units_returns_422() -> None:
+    """Refund schema enforces ge=1 — zero units must be rejected at validation."""
+    response = _personal_client().post(
+        "/billing/wallet/refund-personal@ironclaw.test/refund",
+        json={"units": 0},
+    )
+    assert response.status_code == 422
 
 
 def test_refund_wallet_returns_401_unauthenticated() -> None:
@@ -534,6 +637,21 @@ def test_refund_org_wallet_via_org_key_returns_200() -> None:
     assert data["status"] == "ok"
     assert data["units_refunded"] == 30
     assert data["owner_key"] == _ORG_OWNER_KEY
+
+
+def test_refund_org_key_different_org_wallet_returns_403() -> None:
+    """
+    Org key for org A calling refund on ic_org_other (a different org's wallet)
+    must be rejected with 403. _assert_owner_access enforces this boundary.
+    """
+    other_org_wallet = "ic_org_completelyotherorg"
+    response = _org_client().post(
+        f"/billing/wallet/{other_org_wallet}/refund",
+        json={"units": 1, "reason": "cross-org refund attempt"},
+    )
+    assert response.status_code == 403
+    data = response.json()
+    assert data["detail"]["reason"] in {"org_id_mismatch", "org_wallet_requires_org_key"}
 
 
 def test_refund_personal_key_cannot_refund_org_wallet_returns_403() -> None:
