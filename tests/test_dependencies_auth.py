@@ -4,6 +4,7 @@ import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import HTTPException
+from fastapi.security import HTTPAuthorizationCredentials
 import pytest
 
 os.environ.setdefault("IRONCLAW_PERSISTENCE_MODE", "memory")
@@ -65,6 +66,11 @@ def _make_edge_auth_context(
         bearer_token=bearer_token,
         principal_id=principal_id,
     )
+
+
+def _make_bearer_creds(token: str) -> HTTPAuthorizationCredentials:
+    """Return a real HTTPAuthorizationCredentials so isinstance() passes in require_api_key."""
+    return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
 
 
 def _make_registry_stub_returning_none() -> MagicMock:
@@ -130,6 +136,10 @@ class TestRequireApiKeyEdgePath:
     the edge path is never reached.  Patch get_api_key_registry to return a stub
     whose .authenticate() returns None so the local-registry path never intercepts
     the bearer token before the mocked edge path runs.
+
+    IMPORTANT: credentials must be a real HTTPAuthorizationCredentials instance
+    (not a plain MagicMock) so that isinstance(credentials, HTTPAuthorizationCredentials)
+    inside require_api_key evaluates to True and raw_key is extracted correctly.
     """
 
     @pytest.mark.asyncio
@@ -143,6 +153,7 @@ class TestRequireApiKeyEdgePath:
         )
 
         registry_stub = _make_registry_stub_returning_none()
+        creds = _make_bearer_creds(bearer)
 
         with (
             patch(
@@ -154,9 +165,7 @@ class TestRequireApiKeyEdgePath:
                 new=AsyncMock(return_value=expected),
             ),
         ):
-            creds = MagicMock()
-            creds.credentials = bearer
-            result = await require_api_key(credentials=creds)
+            result = await require_api_key(x_api_key=None, credentials=creds)
 
         assert isinstance(result, EdgeAuthContext)
         assert result.tenant_id == "tenant-001"
@@ -165,15 +174,14 @@ class TestRequireApiKeyEdgePath:
     @pytest.mark.asyncio
     async def test_require_api_key_missing_credentials_raises_401(self) -> None:
         with pytest.raises(HTTPException) as exc_info:
-            await require_api_key(credentials=None)
+            await require_api_key(x_api_key=None, credentials=None)
         assert exc_info.value.status_code == 401
 
     @pytest.mark.asyncio
     async def test_require_api_key_empty_credentials_raises_401(self) -> None:
-        creds = MagicMock()
-        creds.credentials = ""
+        creds = _make_bearer_creds("")
         with pytest.raises(HTTPException) as exc_info:
-            await require_api_key(credentials=creds)
+            await require_api_key(x_api_key=None, credentials=creds)
         assert exc_info.value.status_code == 401
 
     @pytest.mark.asyncio
@@ -187,6 +195,7 @@ class TestRequireApiKeyEdgePath:
 
         mock_call = AsyncMock(return_value=expected)
         registry_stub = _make_registry_stub_returning_none()
+        creds = _make_bearer_creds(bearer)
 
         with (
             patch(
@@ -195,24 +204,65 @@ class TestRequireApiKeyEdgePath:
             ),
             patch("app.core.api_key_auth._call_edge_auth", new=mock_call),
         ):
-            creds = MagicMock()
-            creds.credentials = bearer
-            result = await require_api_key(credentials=creds)
+            result = await require_api_key(x_api_key=None, credentials=creds)
 
         mock_call.assert_awaited_once_with(bearer)
         assert result is expected
 
     @pytest.mark.asyncio
     async def test_require_api_key_propagates_edge_auth_error(self) -> None:
-        with patch(
-            "app.core.api_key_auth._call_edge_auth",
-            new=AsyncMock(side_effect=HTTPException(status_code=401, detail="Invalid token")),
+        registry_stub = _make_registry_stub_returning_none()
+        creds = _make_bearer_creds("bad-token")
+
+        with (
+            patch(
+                "app.core.api_key_auth.get_api_key_registry",
+                return_value=registry_stub,
+            ),
+            patch(
+                "app.core.api_key_auth._call_edge_auth",
+                new=AsyncMock(side_effect=HTTPException(status_code=401, detail="Invalid token")),
+            ),
         ):
-            creds = MagicMock()
-            creds.credentials = "bad-token"
             with pytest.raises(HTTPException) as exc_info:
-                await require_api_key(credentials=creds)
+                await require_api_key(x_api_key=None, credentials=creds)
         assert exc_info.value.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_require_api_key_static_prefix_key_rejected_401(self) -> None:
+        """Static-prefix keys that the registry doesn't recognise must 401, no edge call."""
+        registry_stub = _make_registry_stub_returning_none()
+        creds = _make_bearer_creds("ic_personal_unknown-key")
+
+        with (
+            patch(
+                "app.core.api_key_auth.get_api_key_registry",
+                return_value=registry_stub,
+            ),
+            patch(
+                "app.core.api_key_auth._call_edge_auth",
+                new=AsyncMock(side_effect=AssertionError("edge must not be called for static keys")),
+            ),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await require_api_key(x_api_key=None, credentials=creds)
+        assert exc_info.value.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_require_api_key_via_x_api_key_header(self) -> None:
+        """x_api_key header path resolves via registry when key is recognised."""
+        registry = APIKeyRegistry()
+        raw_key = generate_api_key()
+        registry.create_key("header-key-test", api_key=raw_key)
+
+        with patch(
+            "app.core.api_key_auth.get_api_key_registry",
+            return_value=registry,
+        ):
+            result = await require_api_key(x_api_key=raw_key, credentials=None)
+
+        assert isinstance(result, AuthContext)
+        assert result.authenticated is True
 
 
 # ---------------------------------------------------------------------------

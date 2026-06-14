@@ -351,7 +351,7 @@ def get_packages() -> BillingPackagesResponse:
     )
     return BillingPackagesResponse(
         status="ok",
-        service="ironclaw-billing",
+        service="IronClaw-Security",
         timestamp=_utc_now_iso(),
         packages=packages,
         unit_policy=unit_policy,
@@ -406,7 +406,7 @@ def purchase_package(
 
     return BillingPackagePurchaseResponse(
         status="ok",
-        service="ironclaw-billing",
+        service="IronClaw-Security",
         timestamp=_utc_now_iso(),
         purchase=purchase,
         wallet=_wallet_to_view(wallet),
@@ -423,7 +423,7 @@ def list_purchases(
     records = _PURCHASES[-limit:]
     return {
         "status": "ok",
-        "service": "ironclaw-billing",
+        "service": "IronClaw-Security",
         "timestamp": _utc_now_iso(),
         "count": len(records),
         "purchases": [p.model_dump() for p in records],
@@ -444,7 +444,7 @@ def get_wallet_balance(
     wallet = _require_existing_wallet(registry, owner_key)
     return BillingWalletBalanceResponse(
         status="ok",
-        service="ironclaw-billing",
+        service="IronClaw-Security",
         timestamp=_utc_now_iso(),
         wallet=_wallet_to_view(wallet),
     )
@@ -478,7 +478,7 @@ def get_wallet_ledger(
     ]
     return BillingLedgerResponse(
         status="ok",
-        service="ironclaw-billing",
+        service="IronClaw-Security",
         timestamp=_utc_now_iso(),
         owner_key=owner_key,
         limit=limit,
@@ -537,7 +537,7 @@ def debit_wallet(
     )
     return WalletDebitResponse(
         status="ok",
-        service="ironclaw-billing",
+        service="IronClaw-Security",
         timestamp=_utc_now_iso(),
         owner_key=owner_key,
         units_debited=units_to_debit,
@@ -571,7 +571,7 @@ def refund_wallet(
     )
     return WalletRefundResponse(
         status="ok",
-        service="ironclaw-billing",
+        service="IronClaw-Security",
         timestamp=_utc_now_iso(),
         owner_key=owner_key,
         units_refunded=body.units,
