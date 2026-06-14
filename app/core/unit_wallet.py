@@ -530,6 +530,15 @@ class UnitWalletRegistry:
         self._repo.append_ledger_entry(entry)
         return wallet
 
+    # Backward-compat alias — canonical name is credit_units
+    def credit(
+        self,
+        owner_key: str,
+        units: int,
+        metadata: dict[str, Any] | None = None,
+    ) -> RegistryUnitWallet:
+        return self.credit_units(owner_key=owner_key, units=units, metadata=metadata)
+
     def debit_units(
         self,
         owner_key: str,
@@ -539,9 +548,6 @@ class UnitWalletRegistry:
         safe_units = max(0, int(units))
         wallet = self.get_or_create_wallet(owner_key=owner_key)
 
-        # --- Capture state and build entry inside the lock ---
-        # The raise MUST happen outside the lock to guarantee the lock is
-        # released even when InsufficientUnitsError is propagated to the caller.
         insufficient: InsufficientUnitsError | None = None
         entry: RegistryUnitLedgerEntry | None = None
 
@@ -568,7 +574,6 @@ class UnitWalletRegistry:
                     metadata=metadata or {},
                 )
 
-        # Lock is released — safe to raise or persist
         if insufficient is not None:
             raise insufficient
 
