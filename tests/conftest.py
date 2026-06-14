@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from app.core.auth import AuthContext, require_auth_context
+from app.core.billing import _reset_billing_registry_for_testing
 from app.core.settings import get_settings
 import app.core.unit_wallet as _unit_wallet_module
 from app.core.unit_wallet import UnitWalletRegistry
@@ -74,6 +75,13 @@ def _reset_unit_wallet_registry() -> Generator[None, None, None]:
     _unit_wallet_module._unit_wallet_registry = fresh
     yield
     _unit_wallet_module._unit_wallet_registry = UnitWalletRegistry()
+
+
+@pytest.fixture(scope="function", autouse=True)
+def _reset_billing_registry() -> Generator[None, None, None]:
+    _reset_billing_registry_for_testing()
+    yield
+    _reset_billing_registry_for_testing()
 
 
 @pytest.fixture(autouse=True)

@@ -226,10 +226,17 @@ class InsufficientUnitsErrorResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# In-process purchase log
+# In-process purchase log (size-bounded)
 # ---------------------------------------------------------------------------
 
 _PURCHASES: list[BillingPackagePurchaseView] = []
+
+
+def _append_purchase(purchase: BillingPackagePurchaseView) -> None:
+    """Append purchase record and enforce the in-process cap."""
+    _PURCHASES.append(purchase)
+    if len(_PURCHASES) > _PURCHASES_MAX_SIZE:
+        del _PURCHASES[: len(_PURCHASES) - _PURCHASES_MAX_SIZE]
 
 
 # ---------------------------------------------------------------------------
@@ -260,106 +267,35 @@ def _package_to_view(pkg_id: str, pkg: dict[str, Any]) -> BillingPackageView:
     )
 
 
-def _require_known_package(package_id: str) -> tuple[str, dict[str, Any]]:
-    normalized = package_id.strip().lower()
-    package = PACKAGE_CATALOG.get(normalized)
-    if package is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=(f"Unknown billing package: {package_id!r}. " f"Valid IDs: {sorted(PACKAGE_CATALOG)}"),
-        )
-    return normalized, package
-
-
-def _assert_owner_access(auth_ctx: AuthContext, requested_owner_key: str) -> None:
-    """Enforce org-key wallet isolation.
-
-    Rules:
-    - org key (key_type == 'org'): may only access ``ic_org_{auth_ctx.org_id}``.
-      Any other key → 403.
-    - personal/session/None key_type: no restriction.
-    - personal key accessing an org-prefixed wallet: allowed (admin/support path).
-    """
-    key_type = getattr(auth_ctx, "key_type", None) or "personal"
-
-    if key_type != "org":
-        # Personal, session, or unknown key types are never blocked by the org guard.
-        return
-
-    org_id = getattr(auth_ctx, "org_id", None)
-    if not org_id:
-        return
-
-    expected = f"{ORG_KEY_PREFIX}{org_id}"
-    if requested_owner_key.strip().lower() != expected:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=(f"Org key for org '{org_id}' may only access wallet " f"'{expected}', not '{requested_owner_key}'."),
-        )
-
-
-def _build_unit_policy() -> UnitPolicyView:
-    return UnitPolicyView(
-        unit_definition=(f"1 protection unit = 1 IronClaw inspection window covering up to " f"{TOKEN_CHUNK_SIZE:,} tokens. Requests exceeding that boundary " f"consume one additional unit per {TOKEN_CHUNK_SIZE:,}-token chunk. " f"Scans are unlimited — units auto-deduct with no ceiling."),
-        token_chunk_size=TOKEN_CHUNK_SIZE,
-        delivery_model="All packages are prepaid unit bundles with no recurring subscription requirement.",
-        buyer_positioning=("Customers are buying protected AI usage, not raw API calls. Each unit funds layered " "security checks around prompts, tool activity, returned content, and release decisions."),
-        protection_layers=[
-            ProtectionValueView(
-                title="Prompt ingress protection",
-                detail="Screens incoming prompts before risky instructions begin spreading through the workflow.",
-            ),
-            ProtectionValueView(
-                title="Tool-call guardrails",
-                detail="Reviews agent actions before external tools, files, or execution paths are allowed to continue.",
-            ),
-            ProtectionValueView(
-                title="Source inspection",
-                detail="Checks returned web or external content for hostile prompt-injection patterns and suspicious payloads.",
-            ),
-            ProtectionValueView(
-                title="Response release control",
-                detail="Applies final safety review before content is released back into the user session or downstream agent flow.",
-            ),
-            ProtectionValueView(
-                title="Sandbox-backed isolation",
-                detail="Pairs AI judgment with runtime boundaries so suspicious content can be contained instead of trusted.",
-            ),
-        ],
-        market_context=[
-            "Agent platforms process untrusted instructions from websites, files, repositories, docs, and generated artifacts.",
-            "Prompt-injection attacks target AI systems specifically because they can redirect tools, leak data, or manipulate autonomous workflows.",
-            "IronClaw protection units are designed to add security coverage around every stage where hostile content can enter or spread.",
-            f"Each unit covers up to {TOKEN_CHUNK_SIZE:,} tokens; larger payloads automatically consume the correct number of units via ceiling division.",
-            "Scans have no upper token ceiling — units simply deduct in 25,000-token chunks for any payload size.",
-        ],
-    )
-
-
 def _wallet_to_view(wallet: Any) -> WalletBalanceView:
     return WalletBalanceView(
-        wallet_id=wallet.wallet_id,
-        owner_key=wallet.owner_key,
-        balance_units=wallet.balance_units,
-        total_purchased_units=wallet.total_purchased_units,
-        total_consumed_units=wallet.total_consumed_units,
-        total_refunded_units=getattr(wallet, "total_refunded_units", 0),
-        updated_at=wallet.updated_at.isoformat().replace("+00:00", "Z"),
-        metadata=wallet.metadata,
+        wallet_id=str(wallet.wallet_id),
+        owner_key=str(wallet.owner_key),
+        balance_units=int(wallet.balance_units),
+        total_purchased_units=int(wallet.total_purchased_units),
+        total_consumed_units=int(wallet.total_consumed_units),
+        total_refunded_units=int(wallet.total_refunded_units),
+        updated_at=_utc_now_iso(),
+        metadata=dict(wallet.metadata) if wallet.metadata else {},
     )
 
 
-def _ledger_entry_to_view(entry: Any) -> WalletLedgerEntryView:
-    return WalletLedgerEntryView(
-        entry_id=entry.entry_id,
-        wallet_id=entry.wallet_id,
-        owner_key=entry.owner_key,
-        entry_type=entry.entry_type,
-        units=entry.units,
-        balance_after=entry.balance_after,
-        created_at=entry.created_at.isoformat().replace("+00:00", "Z"),
-        metadata=entry.metadata,
-    )
+def _assert_owner_access(owner_key: str, auth_ctx: AuthContext) -> None:
+    """Enforce that the caller may only access their own wallet or org wallet."""
+    if owner_key.startswith(ORG_KEY_PREFIX):
+        org_id = owner_key[len(ORG_KEY_PREFIX) :]
+        if getattr(auth_ctx, "org_id", None) != org_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access to this org wallet is not permitted.",
+            )
+    else:
+        caller_email = getattr(auth_ctx, "email", None) or getattr(auth_ctx, "principal_id", None)
+        if caller_email and owner_key != caller_email.strip().lower():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access to this wallet is not permitted.",
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -367,218 +303,273 @@ def _ledger_entry_to_view(entry: Any) -> WalletLedgerEntryView:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/packages", response_model=BillingPackagesResponse)
-def list_billing_packages() -> BillingPackagesResponse:
-    packages = [_package_to_view(pkg_id, pkg) for pkg_id, pkg in PACKAGE_CATALOG.items()]
+@router.get(
+    "/packages",
+    response_model=BillingPackagesResponse,
+    summary="List available protection unit packages",
+)
+def get_packages() -> BillingPackagesResponse:
+    packages = [_package_to_view(pid, pkg) for pid, pkg in PACKAGE_CATALOG.items()]
+    unit_policy = UnitPolicyView(
+        unit_definition=(f"One protection unit covers {TOKEN_CHUNK_SIZE:,} tokens of inspected " "AI interaction across all active guardrails."),
+        token_chunk_size=TOKEN_CHUNK_SIZE,
+        delivery_model="prepaid",
+        buyer_positioning=("Units are consumed as AI actions pass through IronClaw guardrails. " "Unused units roll over until your balance is exhausted."),
+        protection_layers=[
+            ProtectionValueView(
+                title="Prompt Injection Guard",
+                detail="Detects and blocks adversarial instructions embedded in user input.",
+            ),
+            ProtectionValueView(
+                title="Tool Call Enforcement",
+                detail="Validates every tool invocation against your active policy set.",
+            ),
+            ProtectionValueView(
+                title="Data Leakage Prevention",
+                detail="Inspects outbound content for sensitive patterns before release.",
+            ),
+            ProtectionValueView(
+                title="Trust Boundary Enforcement",
+                detail="Maintains separation between agent tiers and external systems.",
+            ),
+        ],
+        market_context=[
+            "Enterprise AI security starts at the token layer.",
+            "Every guardrail inspection is metered, auditable, and reproducible.",
+            "IronClaw units give your team a shared enforcement budget with full telemetry.",
+        ],
+    )
     return BillingPackagesResponse(
         status="ok",
-        service="IronClaw-Security",
+        service="ironclaw-billing",
         timestamp=_utc_now_iso(),
         packages=packages,
-        unit_policy=_build_unit_policy(),
+        unit_policy=unit_policy,
     )
 
 
 @router.post(
-    "/packages/purchase",
+    "/purchase",
     response_model=BillingPackagePurchaseResponse,
     status_code=status.HTTP_201_CREATED,
+    summary="Purchase a protection unit package",
 )
-def purchase_billing_package(
-    payload: BillingPackagePurchaseRequest,
+def purchase_package(
+    body: BillingPackagePurchaseRequest,
     auth_ctx: AuthContext = Depends(get_auth_context),
 ) -> BillingPackagePurchaseResponse:
-    package_id, package = _require_known_package(payload.package_id)
-    granted_units = int(package["included_units"])
-    token_coverage = granted_units * TOKEN_CHUNK_SIZE
+    pkg = PACKAGE_CATALOG.get(body.package_id)
+    if pkg is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown package_id: {body.package_id!r}",
+        )
 
-    normalized_email = payload.buyer_email.strip().lower()
-    wallet_owner_key = resolve_billing_owner(auth_ctx, normalized_email)
-
-    purchase = BillingPackagePurchaseView(
-        purchase_id=_new_purchase_id(),
-        package_id=package_id,
-        package_name=str(package["name"]),
-        buyer_name=payload.buyer_name.strip(),
-        buyer_email=normalized_email,
-        owner_key=wallet_owner_key,
-        price_usd=float(package["price_usd"]),
-        granted_units=granted_units,
-        token_coverage=token_coverage,
-        tokens_per_unit=TOKEN_CHUNK_SIZE,
-        created_at=_utc_now_iso(),
-        metadata=payload.metadata,
-    )
-
-    global _PURCHASES
-    _PURCHASES.append(purchase)
-    if len(_PURCHASES) > _PURCHASES_MAX_SIZE:
-        _PURCHASES = _PURCHASES[-_PURCHASES_MAX_SIZE:]
-
-    wallet_registry = get_unit_wallet_registry()
-
-    # InsufficientUnitsError propagates to the centrally registered
-    # insufficient_units_handler which returns {"detail": {...}} at 402.
-    # Generic exceptions propagate to unhandled_exception_handler → 500.
-    wallet = wallet_registry.credit_units(
-        owner_key=wallet_owner_key,
-        units=granted_units,
+    owner_key = resolve_billing_owner(auth_ctx, body.buyer_email)
+    registry = get_unit_wallet_registry()
+    wallet = registry.credit(
+        owner_key=owner_key,
+        units=int(pkg["included_units"]),
+        reason="purchase",
+        reference_id=body.package_id,
         metadata={
-            "source": "billing_package_purchase",
-            "purchase_id": purchase.purchase_id,
-            "package_id": package_id,
-            "package_name": purchase.package_name,
-            "buyer_name": purchase.buyer_name,
-            "buyer_email": normalized_email,
-            "wallet_owner_key": wallet_owner_key,
-            "token_coverage": token_coverage,
-            "tokens_per_unit": TOKEN_CHUNK_SIZE,
-            **payload.metadata,
+            "package_id": body.package_id,
+            "buyer_name": body.buyer_name,
+            "buyer_email": body.buyer_email,
+            **body.metadata,
         },
     )
 
+    purchase = BillingPackagePurchaseView(
+        purchase_id=_new_purchase_id(),
+        package_id=body.package_id,
+        package_name=str(pkg["name"]),
+        buyer_name=body.buyer_name,
+        buyer_email=body.buyer_email,
+        owner_key=owner_key,
+        price_usd=float(pkg["price_usd"]),
+        granted_units=int(pkg["included_units"]),
+        token_coverage=int(pkg["included_units"]) * TOKEN_CHUNK_SIZE,
+        tokens_per_unit=TOKEN_CHUNK_SIZE,
+        created_at=_utc_now_iso(),
+        metadata=body.metadata,
+    )
+    _append_purchase(purchase)
+
     return BillingPackagePurchaseResponse(
         status="ok",
-        service="IronClaw-Security",
+        service="ironclaw-billing",
         timestamp=_utc_now_iso(),
         purchase=purchase,
         wallet=_wallet_to_view(wallet),
     )
 
 
-@router.get("/wallet/{owner_key}", response_model=BillingWalletBalanceResponse)
-def get_billing_wallet_balance(
+@router.get(
+    "/purchases",
+    summary="List recent in-process purchase records",
+)
+def list_purchases(
+    limit: int = Query(default=50, ge=1, le=_PURCHASES_MAX_SIZE),
+) -> dict[str, Any]:
+    records = _PURCHASES[-limit:]
+    return {
+        "status": "ok",
+        "service": "ironclaw-billing",
+        "timestamp": _utc_now_iso(),
+        "count": len(records),
+        "purchases": [p.model_dump() for p in records],
+    }
+
+
+@router.get(
+    "/wallet/{owner_key}",
+    response_model=BillingWalletBalanceResponse,
+    summary="Get wallet balance for an owner key",
+)
+def get_wallet_balance(
     owner_key: str,
     auth_ctx: AuthContext = Depends(get_auth_context),
 ) -> BillingWalletBalanceResponse:
-    normalized_owner = owner_key.strip().lower()
-    _assert_owner_access(auth_ctx, normalized_owner)
-
-    wallet_registry = get_unit_wallet_registry()
-    wallet = wallet_registry.get_wallet(normalized_owner)
-
+    _assert_owner_access(owner_key, auth_ctx)
+    registry = get_unit_wallet_registry()
+    wallet = registry.get_wallet(owner_key)
     if wallet is None:
-        wallet = wallet_registry.get_or_create_wallet(owner_key=normalized_owner)
-
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No wallet found for owner_key: {owner_key!r}",
+        )
     return BillingWalletBalanceResponse(
         status="ok",
-        service="IronClaw-Security",
+        service="ironclaw-billing",
         timestamp=_utc_now_iso(),
         wallet=_wallet_to_view(wallet),
+    )
+
+
+@router.get(
+    "/wallet/{owner_key}/ledger",
+    response_model=BillingLedgerResponse,
+    summary="Get ledger entries for a wallet",
+)
+def get_wallet_ledger(
+    owner_key: str,
+    limit: int = Query(default=50, ge=1, le=500),
+    auth_ctx: AuthContext = Depends(get_auth_context),
+) -> BillingLedgerResponse:
+    _assert_owner_access(owner_key, auth_ctx)
+    registry = get_unit_wallet_registry()
+    entries = registry.get_ledger(owner_key=owner_key, limit=limit)
+    entry_views = [
+        WalletLedgerEntryView(
+            entry_id=str(e.entry_id),
+            wallet_id=str(e.wallet_id),
+            owner_key=str(e.owner_key),
+            entry_type=str(e.entry_type),
+            units=int(e.units),
+            balance_after=int(e.balance_after),
+            created_at=str(e.created_at),
+            metadata=dict(e.metadata) if e.metadata else {},
+        )
+        for e in entries
+    ]
+    return BillingLedgerResponse(
+        status="ok",
+        service="ironclaw-billing",
+        timestamp=_utc_now_iso(),
+        owner_key=owner_key,
+        limit=limit,
+        entries=entry_views,
     )
 
 
 @router.post(
     "/wallet/{owner_key}/debit",
     response_model=WalletDebitResponse,
-    status_code=status.HTTP_200_OK,
+    summary="Debit units from a wallet",
 )
-def debit_billing_wallet(
+def debit_wallet(
     owner_key: str,
-    payload: WalletDebitRequest,
+    body: WalletDebitRequest,
     auth_ctx: AuthContext = Depends(get_auth_context),
 ) -> WalletDebitResponse:
-    if payload.units is None and payload.token_count is None:
+    _assert_owner_access(owner_key, auth_ctx)
+
+    if body.units is None and body.token_count is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Provide either 'units' or 'token_count'.",
         )
 
-    normalized_owner = owner_key.strip().lower()
-    _assert_owner_access(auth_ctx, normalized_owner)
-
-    wallet_registry = get_unit_wallet_registry()
-
-    if payload.token_count is not None:
-        units_to_debit: int = units_required_for_tokens(payload.token_count)
+    if body.units is not None:
+        units_to_debit = body.units
     else:
-        units_to_debit = int(payload.units)  # type: ignore[arg-type]
+        units_to_debit = units_required_for_tokens(body.token_count)  # type: ignore[arg-type]
 
-    debit_metadata: dict[str, Any] = {
-        "reason": payload.reason,
-        "tokens_per_unit": TOKEN_CHUNK_SIZE,
-        **({("token_count"): payload.token_count} if payload.token_count is not None else {}),
-        **({("reference_id"): payload.reference_id} if payload.reference_id else {}),
-        **payload.metadata,
-    }
+    registry = get_unit_wallet_registry()
+    wallet = registry.get_wallet(owner_key)
+    if wallet is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No wallet found for owner_key: {owner_key!r}",
+        )
 
-    # InsufficientUnitsError propagates to the centrally registered
-    # insufficient_units_handler which returns {"detail": {...}} at 402.
-    wallet = wallet_registry.debit_units(
-        owner_key=normalized_owner,
+    if wallet.balance_units < units_to_debit:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "status": "insufficient_units",
+                "error": "Insufficient protection units.",
+                "owner_key": owner_key,
+                "have": wallet.balance_units,
+                "need": units_to_debit,
+                "tokens_per_unit": TOKEN_CHUNK_SIZE,
+                "timestamp": _utc_now_iso(),
+            },
+        )
+
+    updated_wallet = registry.debit(
+        owner_key=owner_key,
         units=units_to_debit,
-        metadata=debit_metadata,
+        reason=body.reason,
+        reference_id=body.reference_id,
+        metadata=body.metadata,
     )
-
     return WalletDebitResponse(
         status="ok",
-        service="IronClaw-Security",
+        service="ironclaw-billing",
         timestamp=_utc_now_iso(),
-        owner_key=normalized_owner,
+        owner_key=owner_key,
         units_debited=units_to_debit,
-        token_count=payload.token_count,
-        wallet=_wallet_to_view(wallet),
+        token_count=body.token_count,
+        wallet=_wallet_to_view(updated_wallet),
     )
 
 
 @router.post(
     "/wallet/{owner_key}/refund",
     response_model=WalletRefundResponse,
-    status_code=status.HTTP_200_OK,
+    summary="Refund units to a wallet",
 )
-def refund_billing_wallet(
+def refund_wallet(
     owner_key: str,
-    payload: WalletRefundRequest,
+    body: WalletRefundRequest,
     auth_ctx: AuthContext = Depends(get_auth_context),
 ) -> WalletRefundResponse:
-    normalized_owner = owner_key.strip().lower()
-    _assert_owner_access(auth_ctx, normalized_owner)
-
-    wallet_registry = get_unit_wallet_registry()
-
-    refund_metadata: dict[str, Any] = {
-        "reason": payload.reason,
-        "tokens_per_unit": TOKEN_CHUNK_SIZE,
-        **({("reference_id"): payload.reference_id} if payload.reference_id else {}),
-        **payload.metadata,
-    }
-
-    # Generic exceptions propagate to unhandled_exception_handler → 500.
-    wallet = wallet_registry.refund_units(
-        owner_key=normalized_owner,
-        units=payload.units,
-        metadata=refund_metadata,
+    _assert_owner_access(owner_key, auth_ctx)
+    registry = get_unit_wallet_registry()
+    updated_wallet = registry.credit(
+        owner_key=owner_key,
+        units=body.units,
+        reason=body.reason,
+        reference_id=body.reference_id,
+        metadata=body.metadata,
     )
-
     return WalletRefundResponse(
         status="ok",
-        service="IronClaw-Security",
+        service="ironclaw-billing",
         timestamp=_utc_now_iso(),
-        owner_key=normalized_owner,
-        units_refunded=payload.units,
-        wallet=_wallet_to_view(wallet),
-    )
-
-
-@router.get("/ledger", response_model=BillingLedgerResponse)
-def list_billing_ledger(
-    auth_ctx: AuthContext = Depends(get_auth_context),
-    owner_key: str | None = Query(default=None),
-    limit: int = Query(default=100, ge=1, le=500),
-) -> BillingLedgerResponse:
-    normalized_owner = owner_key.strip().lower() if owner_key else None
-
-    if normalized_owner is not None:
-        _assert_owner_access(auth_ctx, normalized_owner)
-
-    wallet_registry = get_unit_wallet_registry()
-    entries = wallet_registry.list_ledger_entries(owner_key=normalized_owner, limit=limit)
-
-    return BillingLedgerResponse(
-        status="ok",
-        service="IronClaw-Security",
-        timestamp=_utc_now_iso(),
-        owner_key=normalized_owner,
-        limit=limit,
-        entries=[_ledger_entry_to_view(entry) for entry in entries],
+        owner_key=owner_key,
+        units_refunded=body.units,
+        wallet=_wallet_to_view(updated_wallet),
     )
