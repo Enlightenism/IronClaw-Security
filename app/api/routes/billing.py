@@ -280,15 +280,33 @@ def _wallet_to_view(wallet: Any) -> WalletBalanceView:
 
 
 def _assert_owner_access(owner_key: str, auth_ctx: AuthContext) -> None:
-    """Enforce that the caller may only access their own wallet or org wallet."""
-    if owner_key.startswith(ORG_KEY_PREFIX):
+    """Enforce that the caller may only access their own wallet or org wallet.
+
+    Rules:
+    - org key → may only access wallets whose owner_key matches ic_org_{auth_ctx.org_id}
+    - personal key with principal_id → may only access wallets matching principal_id
+    - personal key with no principal_id → may only access non-org wallets
+    """
+    is_org_wallet = owner_key.startswith(ORG_KEY_PREFIX)
+    caller_key_type = getattr(auth_ctx, "key_type", None)
+    caller_org_id = getattr(auth_ctx, "org_id", None)
+
+    if is_org_wallet:
+        # Only an org key whose org_id matches may access this wallet
         org_id = owner_key[len(ORG_KEY_PREFIX) :]
-        if getattr(auth_ctx, "org_id", None) != org_id:
+        if caller_org_id != org_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access to this org wallet is not permitted.",
             )
     else:
+        # Non-org wallet: org keys are never allowed to access personal wallets
+        if caller_key_type == "org" or caller_org_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Org keys may not access personal wallets.",
+            )
+        # Personal key with explicit principal_id: enforce identity match
         caller_id = getattr(auth_ctx, "principal_id", None)
         if caller_id and owner_key != caller_id.strip().lower():
             raise HTTPException(
@@ -305,6 +323,18 @@ def _require_existing_wallet(registry: Any, owner_key: str) -> Any:
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No wallet found for owner_key: {owner_key!r}",
         )
+    return wallet
+
+
+def _get_or_zero_wallet(registry: Any, owner_key: str) -> Any:
+    """Return wallet if it exists, else a zero-balance sentinel for debit checks."""
+    wallet = registry.get_wallet(owner_key)
+    if wallet is None:
+        # Return a lightweight object with zero balance so 402 fires correctly
+        class _ZeroWallet:
+            balance_units = 0
+
+        return _ZeroWallet()
     return wallet
 
 
@@ -510,7 +540,8 @@ def debit_wallet(
         units_to_debit = units_required_for_tokens(body.token_count)  # type: ignore[arg-type]
 
     registry = get_unit_wallet_registry()
-    wallet = _require_existing_wallet(registry, owner_key)
+    # Use zero-balance sentinel for non-existent wallets so 402 fires before 404
+    wallet = _get_or_zero_wallet(registry, owner_key)
 
     if wallet.balance_units < units_to_debit:
         raise HTTPException(
@@ -558,7 +589,6 @@ def refund_wallet(
 ) -> WalletRefundResponse:
     _assert_owner_access(owner_key, auth_ctx)
     registry = get_unit_wallet_registry()
-    # Wallet must exist before a refund can be applied — never auto-create.
     _require_existing_wallet(registry, owner_key)
     updated_wallet = registry.credit_units(
         owner_key=owner_key,
