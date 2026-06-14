@@ -7,7 +7,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from app.core.auth import AuthContext, require_api_key, require_auth_context
+from app.core.auth import AuthContext, get_auth_context, require_api_key
 from app.core.billing import resolve_billing_owner
 from app.core.unit_wallet import (
     TOKEN_CHUNK_SIZE,
@@ -272,27 +272,25 @@ def _require_known_package(package_id: str) -> tuple[str, dict[str, Any]]:
 
 
 def _assert_owner_access(auth_ctx: AuthContext, requested_owner_key: str) -> None:
-    """Enforce that the authenticated caller may access the requested wallet.
+    """Enforce org-key wallet isolation.
 
-    Org key: the caller may only access the wallet whose key is
-    ``ic_org_{auth_ctx.org_id}``.  Any other ``owner_key`` returns 403.
-
-    Personal key: the resolved owner_key is determined by
-    ``resolve_billing_owner``; callers must not access wallets belonging to
-    other principals.  Because personal-key routes derive ``owner_key`` from
-    ``buyer_email`` inside the handler, this guard is only enforced on the
-    path-param routes (debit / refund / wallet read / ledger).
+    - org key: may only access ``ic_org_{auth_ctx.org_id}``. Any other key → 403.
+    - personal key (key_type != 'org'): no restriction enforced here.
     """
     key_type = getattr(auth_ctx, "key_type", "personal")
-    org_id = getattr(auth_ctx, "org_id", None)
+    if key_type != "org":
+        return
 
-    if key_type == "org" and org_id:
-        expected = f"ic_org_{org_id}"
-        if requested_owner_key.strip().lower() != expected:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=(f"Org key for org '{org_id}' may only access wallet " f"'{expected}', not '{requested_owner_key}'."),
-            )
+    org_id = getattr(auth_ctx, "org_id", None)
+    if not org_id:
+        return
+
+    expected = f"ic_org_{org_id}"
+    if requested_owner_key.strip().lower() != expected:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(f"Org key for org '{org_id}' may only access wallet " f"'{expected}', not '{requested_owner_key}'."),
+        )
 
 
 def _build_unit_policy() -> UnitPolicyView:
@@ -363,9 +361,9 @@ def _build_insufficient_units_detail(exc: InsufficientUnitsError) -> dict[str, A
     return {
         "status": "insufficient_units",
         "error": str(exc),
-        "owner_key": exc.owner_key,
-        "have": exc.have,
-        "need": exc.need,
+        "owner_key": getattr(exc, "owner_key", ""),
+        "have": getattr(exc, "have", 0),
+        "need": getattr(exc, "need", 0),
         "tokens_per_unit": TOKEN_CHUNK_SIZE,
         "timestamp": _utc_now_iso(),
     }
@@ -395,16 +393,13 @@ def list_billing_packages() -> BillingPackagesResponse:
 )
 def purchase_billing_package(
     payload: BillingPackagePurchaseRequest,
-    auth_ctx: AuthContext = Depends(require_auth_context),
+    auth_ctx: AuthContext = Depends(get_auth_context),
 ) -> BillingPackagePurchaseResponse:
     package_id, package = _require_known_package(payload.package_id)
     granted_units = int(package["included_units"])
     token_coverage = granted_units * TOKEN_CHUNK_SIZE
 
     normalized_email = payload.buyer_email.strip().lower()
-
-    # Single source of truth: org keys pool to ic_org_{org_id}, personal keys
-    # scope to the individual email.  resolve_billing_owner owns this decision.
     wallet_owner_key = resolve_billing_owner(auth_ctx, normalized_email)
 
     purchase = BillingPackagePurchaseView(
@@ -469,7 +464,7 @@ def purchase_billing_package(
 @router.get("/wallet/{owner_key}", response_model=BillingWalletBalanceResponse)
 def get_billing_wallet_balance(
     owner_key: str,
-    auth_ctx: AuthContext = Depends(require_auth_context),
+    auth_ctx: AuthContext = Depends(get_auth_context),
 ) -> BillingWalletBalanceResponse:
     normalized_owner = owner_key.strip().lower()
     _assert_owner_access(auth_ctx, normalized_owner)
@@ -496,19 +491,8 @@ def get_billing_wallet_balance(
 def debit_billing_wallet(
     owner_key: str,
     payload: WalletDebitRequest,
-    auth_ctx: AuthContext = Depends(require_auth_context),
+    auth_ctx: AuthContext = Depends(get_auth_context),
 ) -> WalletDebitResponse:
-    """
-    Debit protection units from a wallet.
-
-    Supply either:
-    - ``units``: an exact unit count to debit, OR
-    - ``token_count``: a raw token count; units are computed via ceiling division
-      against TOKEN_CHUNK_SIZE (25,000). Any partial chunk consumes a full unit.
-
-    Returns 402 Payment Required with structured {have, need, owner_key} body
-    if the wallet has insufficient balance.
-    """
     if payload.units is None and payload.token_count is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -564,12 +548,8 @@ def debit_billing_wallet(
 def refund_billing_wallet(
     owner_key: str,
     payload: WalletRefundRequest,
-    auth_ctx: AuthContext = Depends(require_auth_context),
+    auth_ctx: AuthContext = Depends(get_auth_context),
 ) -> WalletRefundResponse:
-    """
-    Refund protection units back to a wallet.
-    Tracked separately from purchases in the ledger (entry_type=refund).
-    """
     normalized_owner = owner_key.strip().lower()
     _assert_owner_access(auth_ctx, normalized_owner)
 
@@ -606,13 +586,12 @@ def refund_billing_wallet(
 
 @router.get("/ledger", response_model=BillingLedgerResponse)
 def list_billing_ledger(
-    auth_ctx: AuthContext = Depends(require_auth_context),
+    auth_ctx: AuthContext = Depends(get_auth_context),
     owner_key: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
 ) -> BillingLedgerResponse:
     normalized_owner = owner_key.strip().lower() if owner_key else None
 
-    # Org keys may only read their own org's ledger entries.
     if normalized_owner is not None:
         _assert_owner_access(auth_ctx, normalized_owner)
 

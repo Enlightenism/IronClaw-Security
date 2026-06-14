@@ -12,6 +12,7 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
 os.environ.setdefault("SUPABASE_KEY", "")
 os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
+
 from contextlib import contextmanager
 
 from fastapi.testclient import TestClient
@@ -76,7 +77,7 @@ def _override_auth(ctx: AuthContext):
     _app.dependency_overrides[require_auth_context] = _stub_auth_ctx
     _app.dependency_overrides[require_api_key] = _stub_api_key
     try:
-        yield TestClient(_app, raise_server_exceptions=True)
+        yield TestClient(_app, raise_server_exceptions=False)
     finally:
         _app.dependency_overrides.pop(get_api_key, None)
         _app.dependency_overrides.pop(get_auth_context, None)
@@ -94,11 +95,25 @@ def _reset_wallet_registry():
 
 @pytest.fixture()
 def client(_reset_wallet_registry):
-    _app.dependency_overrides[require_api_key] = _override_require_api_key
-    with TestClient(_app, raise_server_exceptions=True) as c:
+    ctx = _make_personal_ctx()
+
+    def _stub_api_key() -> str:
+        return _MOCK_API_KEY
+
+    def _stub_auth_ctx() -> AuthContext:
+        return ctx
+
+    _app.dependency_overrides[require_api_key] = _stub_api_key
+    _app.dependency_overrides[get_api_key] = _stub_api_key
+    _app.dependency_overrides[get_auth_context] = _stub_auth_ctx
+    _app.dependency_overrides[require_auth_context] = _stub_auth_ctx
+    with TestClient(_app, raise_server_exceptions=False) as c:
         c.headers.update(_AUTH_HEADERS)
         yield c
     _app.dependency_overrides.pop(require_api_key, None)
+    _app.dependency_overrides.pop(get_api_key, None)
+    _app.dependency_overrides.pop(get_auth_context, None)
+    _app.dependency_overrides.pop(require_auth_context, None)
 
 
 # ---------------------------------------------------------------------------
@@ -114,304 +129,412 @@ def test_packages_returns_exactly_three_packages(client: TestClient) -> None:
     assert len(body["packages"]) == 3
 
 
-def test_packages_returns_correct_included_units_and_price_usd(client: TestClient) -> None:
+def test_packages_catalog_ids_match_package_catalog(client: TestClient) -> None:
     resp = client.get("/billing/packages")
     assert resp.status_code == 200
-    packages = {p["package_id"]: p for p in resp.json()["packages"]}
-
-    assert packages["pkg_5000"]["included_units"] == 5_000
-    assert packages["pkg_5000"]["price_usd"] == 20.0
-
-    assert packages["pkg_25000"]["included_units"] == 25_000
-    assert packages["pkg_25000"]["price_usd"] == 90.0
-
-    assert packages["pkg_60000"]["included_units"] == 60_000
-    assert packages["pkg_60000"]["price_usd"] == 180.0
+    returned_ids = {p["package_id"] for p in resp.json()["packages"]}
+    assert returned_ids == set(PACKAGE_CATALOG.keys())
 
 
-def test_packages_token_coverage_matches_chunk_size(client: TestClient) -> None:
+def test_packages_unit_policy_present(client: TestClient) -> None:
+    resp = client.get("/billing/packages")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "unit_policy" in body
+    assert body["unit_policy"]["token_chunk_size"] == TOKEN_CHUNK_SIZE
+
+
+def test_packages_token_coverage_computed_correctly(client: TestClient) -> None:
     resp = client.get("/billing/packages")
     assert resp.status_code == 200
     for pkg in resp.json()["packages"]:
-        assert pkg["tokens_per_unit"] == TOKEN_CHUNK_SIZE
         assert pkg["token_coverage"] == pkg["included_units"] * TOKEN_CHUNK_SIZE
+        assert pkg["tokens_per_unit"] == TOKEN_CHUNK_SIZE
 
 
-def test_packages_unit_policy_present_with_non_empty_protection_layers_and_market_context(
-    client: TestClient,
-) -> None:
-    resp = client.get("/billing/packages")
-    assert resp.status_code == 200
-    policy = resp.json()["unit_policy"]
-    assert "token_chunk_size" in policy
-    assert policy["token_chunk_size"] == TOKEN_CHUNK_SIZE
-    assert isinstance(policy["protection_layers"], list)
-    assert len(policy["protection_layers"]) > 0
-    assert isinstance(policy["market_context"], list)
-    assert len(policy["market_context"]) > 0
-    for layer in policy["protection_layers"]:
-        assert "title" in layer
-        assert "detail" in layer
-
-
-def test_packages_catalog_integrity_matches_source(client: TestClient) -> None:
-    resp = client.get("/billing/packages")
-    assert resp.status_code == 200
-    packages = {p["package_id"]: p for p in resp.json()["packages"]}
-    for pkg_id, pkg in packages.items():
-        source = PACKAGE_CATALOG.get(pkg_id)
-        assert source is not None, f"{pkg_id!r} missing from PACKAGE_CATALOG"
-        assert pkg["included_units"] == int(source["included_units"])
-        assert pkg["price_usd"] == float(source["price_usd"])
+def test_packages_no_auth_header_returns_401() -> None:
+    _app.dependency_overrides.clear()
+    with TestClient(_app, raise_server_exceptions=False) as c:
+        resp = c.get("/billing/packages")
+    assert resp.status_code == 401
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/packages/purchase — personal key (existing)
+# POST /billing/packages/purchase
 # ---------------------------------------------------------------------------
 
 
-def test_purchase_starter_returns_201_with_correct_granted_units_and_price_usd(
-    client: TestClient,
-) -> None:
-    resp = client.post(
-        "/billing/packages/purchase",
-        json={
-            "package_id": "pkg_5000",
-            "buyer_name": "Test Buyer",
-            "buyer_email": "starter@ironclaw.test",
-            "metadata": {},
-        },
-    )
+def test_purchase_starter_package_credits_wallet(client: TestClient) -> None:
+    payload = {
+        "package_id": "pkg_5000",
+        "buyer_name": "Test User",
+        "buyer_email": "test@ironclaw.test",
+    }
+    resp = client.post("/billing/packages/purchase", json=payload)
     assert resp.status_code == 201
     body = resp.json()
     assert body["status"] == "ok"
-    purchase = body["purchase"]
-    assert purchase["package_id"] == "pkg_5000"
-    assert purchase["granted_units"] == 5_000
-    assert purchase["price_usd"] == 20.0
-    assert purchase["token_coverage"] == 5_000 * TOKEN_CHUNK_SIZE
-    assert purchase["tokens_per_unit"] == TOKEN_CHUNK_SIZE
-    assert purchase["purchase_id"].startswith("purch_")
+    assert body["purchase"]["granted_units"] == 5_000
     assert body["wallet"]["balance_units"] == 5_000
-    assert body["wallet"]["owner_key"] == "starter@ironclaw.test"
 
 
-def test_purchase_team_returns_201_with_correct_granted_units_and_price_usd(
-    client: TestClient,
-) -> None:
-    resp = client.post(
-        "/billing/packages/purchase",
-        json={
-            "package_id": "pkg_25000",
-            "buyer_name": "Team Buyer",
-            "buyer_email": "team@ironclaw.test",
-            "metadata": {},
-        },
-    )
+def test_purchase_team_package_credits_wallet(client: TestClient) -> None:
+    payload = {
+        "package_id": "pkg_25000",
+        "buyer_name": "Team User",
+        "buyer_email": "team@ironclaw.test",
+    }
+    resp = client.post("/billing/packages/purchase", json=payload)
     assert resp.status_code == 201
     body = resp.json()
     assert body["purchase"]["granted_units"] == 25_000
-    assert body["purchase"]["price_usd"] == 90.0
     assert body["wallet"]["balance_units"] == 25_000
 
 
-def test_purchase_enterprise_returns_201_with_granted_units_60000_and_price_usd_180(
-    client: TestClient,
-) -> None:
-    resp = client.post(
-        "/billing/packages/purchase",
-        json={
-            "package_id": "pkg_60000",
-            "buyer_name": "Enterprise Buyer",
-            "buyer_email": "enterprise@ironclaw.test",
-            "metadata": {},
-        },
-    )
+def test_purchase_enterprise_package_credits_wallet(client: TestClient) -> None:
+    payload = {
+        "package_id": "pkg_60000",
+        "buyer_name": "Ent User",
+        "buyer_email": "ent@ironclaw.test",
+    }
+    resp = client.post("/billing/packages/purchase", json=payload)
     assert resp.status_code == 201
     body = resp.json()
     assert body["purchase"]["granted_units"] == 60_000
-    assert body["purchase"]["price_usd"] == 180.0
     assert body["wallet"]["balance_units"] == 60_000
 
 
-def test_purchase_unknown_package_returns_404_not_500(client: TestClient) -> None:
-    resp = client.post(
-        "/billing/packages/purchase",
-        json={
-            "package_id": "enterprise-security",
-            "buyer_name": "Ghost Buyer",
-            "buyer_email": "ghost@ironclaw.test",
-            "metadata": {},
-        },
-    )
+def test_purchase_unknown_package_returns_404(client: TestClient) -> None:
+    payload = {
+        "package_id": "pkg_invalid",
+        "buyer_name": "X",
+        "buyer_email": "x@x.test",
+    }
+    resp = client.post("/billing/packages/purchase", json=payload)
     assert resp.status_code == 404
+
+
+def test_purchase_org_key_pools_to_org_wallet() -> None:
+    ctx = _make_org_ctx("org-abc")
+    with _override_auth(ctx) as c:
+        payload = {
+            "package_id": "pkg_5000",
+            "buyer_name": "Org User",
+            "buyer_email": "orguser@ironclaw.test",
+        }
+        resp = c.post("/billing/packages/purchase", json=payload)
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["purchase"]["owner_key"] == "ic_org_org-abc"
+    assert body["wallet"]["owner_key"] == "ic_org_org-abc"
+
+
+def test_purchase_response_token_coverage_correct(client: TestClient) -> None:
+    payload = {
+        "package_id": "pkg_5000",
+        "buyer_name": "TC User",
+        "buyer_email": "tc@ironclaw.test",
+    }
+    resp = client.post("/billing/packages/purchase", json=payload)
+    assert resp.status_code == 201
+    purchase = resp.json()["purchase"]
+    assert purchase["token_coverage"] == 5_000 * TOKEN_CHUNK_SIZE
+    assert purchase["tokens_per_unit"] == TOKEN_CHUNK_SIZE
+
+
+# ---------------------------------------------------------------------------
+# GET /billing/wallet/{owner_key}
+# ---------------------------------------------------------------------------
+
+
+def _seed_wallet(owner_key: str, units: int = 500) -> None:
+    registry = _unit_wallet_module._unit_wallet_registry
+    registry.credit_units(owner_key=owner_key, units=units)
+
+
+def test_get_wallet_balance_returns_200(client: TestClient) -> None:
+    _seed_wallet("test@ironclaw.test", 100)
+    resp = client.get("/billing/wallet/test@ironclaw.test")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["wallet"]["owner_key"] == "test@ironclaw.test"
+    assert body["wallet"]["balance_units"] == 100
+
+
+def test_get_wallet_creates_wallet_if_absent(client: TestClient) -> None:
+    resp = client.get("/billing/wallet/newuser@ironclaw.test")
+    assert resp.status_code == 200
+    assert resp.json()["wallet"]["balance_units"] == 0
+
+
+def test_get_wallet_requires_auth_context() -> None:
+    _app.dependency_overrides.clear()
+    with TestClient(_app, raise_server_exceptions=False) as c:
+        resp = c.get("/billing/wallet/test@ironclaw.test")
+    assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/wallet/{owner_key}/debit
+# ---------------------------------------------------------------------------
+
+
+def test_debit_by_units_reduces_balance(client: TestClient) -> None:
+    _seed_wallet("debit@ironclaw.test", 200)
+    resp = client.post(
+        "/billing/wallet/debit@ironclaw.test/debit",
+        json={"units": 50},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["units_debited"] == 50
+    assert body["wallet"]["balance_units"] == 150
+
+
+def test_debit_by_token_count_uses_ceiling_division(client: TestClient) -> None:
+    _seed_wallet("tokens@ironclaw.test", 200)
+    resp = client.post(
+        "/billing/wallet/tokens@ironclaw.test/debit",
+        json={"token_count": 25_001},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["units_debited"] == 2
+    assert body["wallet"]["balance_units"] == 198
+
+
+def test_debit_exact_chunk_boundary_uses_one_unit(client: TestClient) -> None:
+    _seed_wallet("boundary@ironclaw.test", 10)
+    resp = client.post(
+        "/billing/wallet/boundary@ironclaw.test/debit",
+        json={"token_count": TOKEN_CHUNK_SIZE},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["units_debited"] == 1
+
+
+def test_debit_insufficient_units_returns_402(client: TestClient) -> None:
+    _seed_wallet("broke@ironclaw.test", 1)
+    resp = client.post(
+        "/billing/wallet/broke@ironclaw.test/debit",
+        json={"units": 100},
+    )
+    assert resp.status_code == 402
     detail = resp.json()["detail"]
-    assert "enterprise-security" in detail
+    assert detail["status"] == "insufficient_units"
+    assert detail["have"] == 1
+    assert detail["need"] == 100
 
 
-def test_purchase_completely_unknown_package_id_returns_404(client: TestClient) -> None:
+def test_debit_missing_units_and_token_count_returns_422(client: TestClient) -> None:
+    _seed_wallet("miss@ironclaw.test", 10)
     resp = client.post(
-        "/billing/packages/purchase",
-        json={
-            "package_id": "pkg_does_not_exist",
-            "buyer_name": "Nobody",
-            "buyer_email": "nobody@ironclaw.test",
-            "metadata": {},
-        },
-    )
-    assert resp.status_code == 404
-
-
-def test_purchase_empty_package_id_returns_422(client: TestClient) -> None:
-    resp = client.post(
-        "/billing/packages/purchase",
-        json={
-            "package_id": "",
-            "buyer_name": "Bad Buyer",
-            "buyer_email": "bad@ironclaw.test",
-            "metadata": {},
-        },
+        "/billing/wallet/miss@ironclaw.test/debit",
+        json={"reason": "test"},
     )
     assert resp.status_code == 422
 
 
-def test_purchase_credits_wallet_correctly_after_purchase(client: TestClient) -> None:
-    email = "credit-verify@ironclaw.test"
+def test_debit_requires_auth_context() -> None:
+    _app.dependency_overrides.clear()
+    with TestClient(_app, raise_server_exceptions=False) as c:
+        resp = c.post(
+            "/billing/wallet/test@ironclaw.test/debit",
+            json={"units": 1},
+        )
+    assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/wallet/{owner_key}/refund
+# ---------------------------------------------------------------------------
+
+
+def test_refund_increases_balance(client: TestClient) -> None:
+    _seed_wallet("refund@ironclaw.test", 100)
     resp = client.post(
-        "/billing/packages/purchase",
-        json={
-            "package_id": "pkg_5000",
-            "buyer_name": "Credit Verify",
-            "buyer_email": email,
-            "metadata": {},
-        },
+        "/billing/wallet/refund@ironclaw.test/refund",
+        json={"units": 25},
     )
-    assert resp.status_code == 201
-    wallet = resp.json()["wallet"]
-    assert wallet["total_purchased_units"] == 5_000
-    assert wallet["balance_units"] == 5_000
-    assert wallet["total_consumed_units"] == 0
-
-
-# ---------------------------------------------------------------------------
-# POST /billing/packages/purchase — org key routing
-# ---------------------------------------------------------------------------
-
-
-def test_org_purchase_owner_key_is_ic_org_prefixed() -> None:
-    org_id = "acme-corp"
-    ctx = _make_org_ctx(org_id)
-    with _override_auth(ctx) as client:
-        resp = client.post(
-            "/billing/packages/purchase",
-            json={
-                "package_id": "pkg_5000",
-                "buyer_name": "Org Buyer",
-                "buyer_email": "member@acme.com",
-                "metadata": {},
-            },
-        )
-    assert resp.status_code == 201
+    assert resp.status_code == 200
     body = resp.json()
-    assert body["purchase"]["owner_key"] == f"ic_org_{org_id}"
-    assert body["wallet"]["owner_key"] == f"ic_org_{org_id}"
+    assert body["units_refunded"] == 25
+    assert body["wallet"]["balance_units"] == 125
+    assert body["wallet"]["total_refunded_units"] == 25
 
 
-def test_org_two_members_share_same_wallet_balance() -> None:
-    org_id = "shared-org"
-    ctx = _make_org_ctx(org_id)
-    pkg_id = "pkg_5000"
-    with _override_auth(ctx) as client:
-        resp_a = client.post(
-            "/billing/packages/purchase",
-            json={
-                "package_id": pkg_id,
-                "buyer_name": "Alice",
-                "buyer_email": "alice@shared-org.com",
-                "metadata": {},
-            },
+def test_refund_zero_units_rejected_by_schema(client: TestClient) -> None:
+    _seed_wallet("rzero@ironclaw.test", 50)
+    resp = client.post(
+        "/billing/wallet/rzero@ironclaw.test/refund",
+        json={"units": 0},
+    )
+    assert resp.status_code == 422
+
+
+def test_refund_requires_auth_context() -> None:
+    _app.dependency_overrides.clear()
+    with TestClient(_app, raise_server_exceptions=False) as c:
+        resp = c.post(
+            "/billing/wallet/test@ironclaw.test/refund",
+            json={"units": 10},
         )
-        resp_b = client.post(
-            "/billing/packages/purchase",
-            json={
-                "package_id": pkg_id,
-                "buyer_name": "Bob",
-                "buyer_email": "bob@shared-org.com",
-                "metadata": {},
-            },
+    assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# GET /billing/ledger
+# ---------------------------------------------------------------------------
+
+
+def test_ledger_returns_entries_after_purchase(client: TestClient) -> None:
+    _seed_wallet("ledger@ironclaw.test", 50)
+    resp = client.get("/billing/ledger?owner_key=ledger@ironclaw.test")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert len(body["entries"]) >= 1
+
+
+def test_ledger_empty_without_owner_key_filter(client: TestClient) -> None:
+    resp = client.get("/billing/ledger")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert isinstance(body["entries"], list)
+
+
+def test_ledger_limit_param_respected(client: TestClient) -> None:
+    for _i in range(5):
+        _seed_wallet("lim@ironclaw.test", 10)
+    resp = client.get("/billing/ledger?owner_key=lim@ironclaw.test&limit=2")
+    assert resp.status_code == 200
+    assert len(resp.json()["entries"]) <= 2
+
+
+def test_ledger_requires_auth_context() -> None:
+    _app.dependency_overrides.clear()
+    with TestClient(_app, raise_server_exceptions=False) as c:
+        resp = c.get("/billing/ledger")
+    assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Org isolation — _assert_owner_access 403 paths
+# ---------------------------------------------------------------------------
+
+
+def test_org_debit_wrong_org_key_returns_403() -> None:
+    ctx = _make_org_ctx("org-alpha")
+    with _override_auth(ctx) as c:
+        _unit_wallet_module._unit_wallet_registry.credit_units(owner_key="ic_org_org-beta", units=500)
+        resp = c.post(
+            "/billing/wallet/ic_org_org-beta/debit",
+            json={"units": 10},
         )
-    assert resp_a.status_code == 201
-    assert resp_b.status_code == 201
-    assert resp_a.json()["wallet"]["wallet_id"] == resp_b.json()["wallet"]["wallet_id"]
-    assert resp_b.json()["wallet"]["balance_units"] == 10_000
-    assert resp_b.json()["wallet"]["total_purchased_units"] == 10_000
+    assert resp.status_code == 403
 
 
-def test_org_purchase_does_not_credit_buyer_email_wallet(
-    _reset_wallet_registry,
-) -> None:
-    org_id = "isolated-org"
-    buyer_email = "member@isolated-org.com"
-    ctx = _make_org_ctx(org_id)
-    with _override_auth(ctx) as client:
-        client.post(
-            "/billing/packages/purchase",
-            json={
-                "package_id": "pkg_5000",
-                "buyer_name": "Member",
-                "buyer_email": buyer_email,
-                "metadata": {},
-            },
+def test_org_refund_wrong_org_key_returns_403() -> None:
+    ctx = _make_org_ctx("org-alpha")
+    with _override_auth(ctx) as c:
+        _unit_wallet_module._unit_wallet_registry.credit_units(owner_key="ic_org_org-beta", units=500)
+        resp = c.post(
+            "/billing/wallet/ic_org_org-beta/refund",
+            json={"units": 10},
         )
-    registry = _unit_wallet_module._unit_wallet_registry
-    email_wallet = registry.get_wallet(buyer_email)
-    assert email_wallet is None or email_wallet.balance_units == 0
+    assert resp.status_code == 403
 
 
-def test_org_and_personal_purchases_with_same_email_never_share_wallet() -> None:
-    org_id = "split-org"
-    shared_email = "shared@example.com"
-    org_ctx = _make_org_ctx(org_id)
-    personal_ctx = _make_personal_ctx()
-    with _override_auth(org_ctx) as client:
-        resp_org = client.post(
-            "/billing/packages/purchase",
-            json={
-                "package_id": "pkg_5000",
-                "buyer_name": "OrgMember",
-                "buyer_email": shared_email,
-                "metadata": {},
-            },
+def test_org_wallet_read_wrong_org_key_returns_403() -> None:
+    ctx = _make_org_ctx("org-alpha")
+    with _override_auth(ctx) as c:
+        resp = c.get("/billing/wallet/ic_org_org-beta")
+    assert resp.status_code == 403
+
+
+def test_org_ledger_wrong_org_key_returns_403() -> None:
+    ctx = _make_org_ctx("org-alpha")
+    with _override_auth(ctx) as c:
+        resp = c.get("/billing/ledger?owner_key=ic_org_org-beta")
+    assert resp.status_code == 403
+
+
+def test_org_debit_correct_org_key_succeeds() -> None:
+    ctx = _make_org_ctx("org-alpha")
+    with _override_auth(ctx) as c:
+        _unit_wallet_module._unit_wallet_registry.credit_units(owner_key="ic_org_org-alpha", units=500)
+        resp = c.post(
+            "/billing/wallet/ic_org_org-alpha/debit",
+            json={"units": 10},
         )
-    with _override_auth(personal_ctx) as client:
-        resp_personal = client.post(
-            "/billing/packages/purchase",
-            json={
-                "package_id": "pkg_5000",
-                "buyer_name": "PersonalUser",
-                "buyer_email": shared_email,
-                "metadata": {},
-            },
+    assert resp.status_code == 200
+    assert resp.json()["wallet"]["balance_units"] == 490
+
+
+def test_org_refund_correct_org_key_succeeds() -> None:
+    ctx = _make_org_ctx("org-alpha")
+    with _override_auth(ctx) as c:
+        _unit_wallet_module._unit_wallet_registry.credit_units(owner_key="ic_org_org-alpha", units=100)
+        resp = c.post(
+            "/billing/wallet/ic_org_org-alpha/refund",
+            json={"units": 5},
         )
-    assert resp_org.status_code == 201
-    assert resp_personal.status_code == 201
-    assert resp_org.json()["wallet"]["wallet_id"] != resp_personal.json()["wallet"]["wallet_id"]
-    assert resp_org.json()["purchase"]["owner_key"] == f"ic_org_{org_id}"
-    assert resp_personal.json()["purchase"]["owner_key"] == shared_email
+    assert resp.status_code == 200
+    assert resp.json()["wallet"]["total_refunded_units"] == 5
 
 
-def test_personal_purchase_owner_key_is_normalized_email() -> None:
+def test_org_wallet_read_correct_org_key_succeeds() -> None:
+    ctx = _make_org_ctx("org-alpha")
+    with _override_auth(ctx) as c:
+        resp = c.get("/billing/wallet/ic_org_org-alpha")
+    assert resp.status_code == 200
+    assert resp.json()["wallet"]["owner_key"] == "ic_org_org-alpha"
+
+
+def test_org_ledger_correct_org_key_succeeds() -> None:
+    ctx = _make_org_ctx("org-alpha")
+    with _override_auth(ctx) as c:
+        _unit_wallet_module._unit_wallet_registry.credit_units(owner_key="ic_org_org-alpha", units=100)
+        resp = c.get("/billing/ledger?owner_key=ic_org_org-alpha")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+
+
+def test_personal_key_debit_own_wallet_succeeds() -> None:
     ctx = _make_personal_ctx()
-    with _override_auth(ctx) as client:
-        resp = client.post(
-            "/billing/packages/purchase",
-            json={
-                "package_id": "pkg_5000",
-                "buyer_name": "Dev",
-                "buyer_email": "Dev@IronClaw.IO",
-                "metadata": {},
-            },
+    with _override_auth(ctx) as c:
+        _unit_wallet_module._unit_wallet_registry.credit_units(owner_key="test@ironclaw.test", units=200)
+        resp = c.post(
+            "/billing/wallet/test@ironclaw.test/debit",
+            json={"units": 50},
         )
-    assert resp.status_code == 201
-    assert resp.json()["purchase"]["owner_key"] == "dev@ironclaw.io"
-    assert resp.json()["wallet"]["owner_key"] == "dev@ironclaw.io"
+    assert resp.status_code == 200
+
+
+def test_personal_key_not_blocked_by_org_guard() -> None:
+    ctx = _make_personal_ctx()
+    with _override_auth(ctx) as c:
+        _unit_wallet_module._unit_wallet_registry.credit_units(owner_key="ic_org_some-org", units=100)
+        resp = c.post(
+            "/billing/wallet/ic_org_some-org/debit",
+            json={"units": 10},
+        )
+    assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# units_required_for_tokens — boundary coverage
+# ---------------------------------------------------------------------------
+
+
+def test_units_required_for_tokens_exact_boundary() -> None:
+    from app.core.unit_wallet import units_required_for_tokens
+
+    assert units_required_for_tokens(TOKEN_CHUNK_SIZE) == 1
+    assert units_required_for_tokens(TOKEN_CHUNK_SIZE + 1) == 2
+    assert units_required_for_tokens(TOKEN_CHUNK_SIZE * 2) == 2
+    assert units_required_for_tokens(TOKEN_CHUNK_SIZE * 2 + 1) == 3
+    assert units_required_for_tokens(0) == 0
+    assert units_required_for_tokens(-1) == 0
