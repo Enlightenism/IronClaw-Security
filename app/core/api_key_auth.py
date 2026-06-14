@@ -22,6 +22,15 @@ _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 _DEFAULT_EDGE_PATH = "/functions/v1/ironclaw-auth"
 
+# Static API key prefixes — keys matching these are local-registry only and
+# are never forwarded to the edge auth function.
+_STATIC_KEY_PREFIXES: tuple[str, ...] = ("ic_personal_", "ic_org_", "ic_svc_", "ic_")
+
+
+def _looks_like_static_key(raw_key: str) -> bool:
+    """Return True if the key looks like a local registry key (not a JWT/Bearer token)."""
+    return any(raw_key.startswith(prefix) for prefix in _STATIC_KEY_PREFIXES)
+
 
 def _edge_function_url() -> str:
     base = vault.supabase_url().rstrip("/")
@@ -143,9 +152,10 @@ async def _call_edge_auth(bearer_token: str) -> EdgeAuthContext:
 
 def _build_auth_context_from_record(api_key: str, record: APIKeyRecord) -> AuthContext:
     """Build a full AuthContext from an authenticated APIKeyRecord."""
+    principal_type = "org_key" if record.key_type == "org" else "api_key"
     return AuthContext(
         api_key=api_key,
-        principal_type="api_key",
+        principal_type=principal_type,
         principal_id=record.key_id,
         session_id=None,
         org_id=record.org_id,
@@ -162,8 +172,16 @@ def _build_auth_context_from_record(api_key: str, record: APIKeyRecord) -> AuthC
 async def require_api_key(
     x_api_key: str | None = Depends(_api_key_header),
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
-) -> AuthContext:
-    """FastAPI dependency: authenticate via local APIKeyRegistry."""
+) -> AuthContext | EdgeAuthContext:
+    """FastAPI dependency: authenticate via local APIKeyRegistry with edge fallback.
+
+    Resolution order:
+    1. X-API-Key header or Bearer token resolved from credentials.
+    2. If the key matches a local-registry prefix → local registry only.
+    3. If the key does not match a static prefix (i.e. it is a JWT/Bearer token)
+       and the local registry returns None → fall back to _call_edge_auth.
+    4. If no key is present → 401.
+    """
     raw_key: str | None = x_api_key if isinstance(x_api_key, str) else None
     if not raw_key and isinstance(credentials, HTTPAuthorizationCredentials):
         raw_key = credentials.credentials or None
@@ -178,29 +196,37 @@ async def require_api_key(
     registry = get_api_key_registry()
     record: APIKeyRecord | None = registry.authenticate(raw_key, touch=True)
 
-    if record is None:
-        masked = raw_key[:6] + "..." if len(raw_key) > 6 else "***"
-        _logger.warning(
-            "api_key_auth_failed",
-            extra={"masked": masked},
+    if record is not None:
+        _logger.debug(
+            "api_key_auth_ok",
+            extra={
+                "key_id": record.key_id,
+                "key_type": record.key_type,
+                "org_id": record.org_id,
+                "owner_key": record.owner_key,
+            },
         )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or revoked API key",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        return _build_auth_context_from_record(raw_key, record)
 
-    _logger.debug(
-        "api_key_auth_ok",
-        extra={
-            "key_id": record.key_id,
-            "key_type": record.key_type,
-            "org_id": record.org_id,
-            "owner_key": record.owner_key,
-        },
+    # Local registry miss — attempt edge auth only for non-static keys (JWTs / Bearer tokens).
+    if not _looks_like_static_key(raw_key):
+        _logger.debug(
+            "api_key_auth_edge_fallback",
+            extra={"masked": raw_key[:6] + "..." if len(raw_key) > 6 else "***"},
+        )
+        return await _call_edge_auth(raw_key)
+
+    # Static-prefix key that the registry doesn't recognise → 401, no edge call.
+    masked = raw_key[:6] + "..." if len(raw_key) > 6 else "***"
+    _logger.warning(
+        "api_key_auth_failed",
+        extra={"masked": masked},
     )
-
-    return _build_auth_context_from_record(raw_key, record)
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or revoked API key",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 def require_scope(scope: str):
