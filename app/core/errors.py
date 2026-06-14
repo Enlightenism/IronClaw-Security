@@ -271,6 +271,11 @@ async def validation_exception_handler(
 
 
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    # Delegate intentional HTTP exceptions (401, 403, 404, etc.) to the
+    # correct handler instead of swallowing them as 500.
+    if isinstance(exc, HTTPException):
+        return await http_exception_handler(request, exc)
+
     logger = get_logger("ironclaw.errors")
     _log_exception(
         logger,
