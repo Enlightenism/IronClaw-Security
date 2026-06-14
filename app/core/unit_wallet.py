@@ -29,46 +29,14 @@ __all__ = [
     "get_unit_wallet_registry",
 ]
 
-# ---------------------------------------------------------------------------
-# Org-key convention
-#
-# When owner_key is prefixed with ORG_KEY_PREFIX ("ic_org_"), the wallet is
-# org-scoped: all team members who share the same org key consume units from
-# the same wallet.  The key is typically set by the billing or auth layer as
-# "ic_org_<org_id>" and passed directly into get_or_create_wallet().
-#
-# No wallet mechanics change — owner_key is already a freeform string.
-# get_or_create_wallet() is idempotent for org keys exactly as it is for
-# individual keys: first call creates the wallet, subsequent calls return the
-# same wallet_id.
-# ---------------------------------------------------------------------------
-
 ORG_KEY_PREFIX: str = "ic_org_"
 
 
 def is_org_key(owner_key: str) -> bool:
-    """Return True if *owner_key* is an org-scoped wallet key.
-
-    Org keys are prefixed with ORG_KEY_PREFIX (``"ic_org_"``).  All team
-    members that share the same org key debit from a single shared wallet.
-    """
     return owner_key.strip().lower().startswith(ORG_KEY_PREFIX)
 
 
-# ---------------------------------------------------------------------------
-# Structured insufficient-units exception
-# ---------------------------------------------------------------------------
-
-
 class InsufficientUnitsError(ValueError):
-    """Raised when a wallet debit cannot be satisfied.
-
-    Attributes:
-        have      — units currently in the wallet
-        need      — units required for the operation
-        owner_key — normalized wallet owner key
-    """
-
     def __init__(
         self,
         message: str = "Insufficient protection units",
@@ -83,58 +51,16 @@ class InsufficientUnitsError(ValueError):
         self.owner_key = str(owner_key)
 
 
-# ---------------------------------------------------------------------------
-# Token-to-unit coverage constants
-#
-# Each protection unit covers one inspection window of up to TOKEN_CHUNK_SIZE
-# tokens. Any request exceeding the boundary consumes one additional unit
-# per additional chunk (ceiling division).  Scans are UNLIMITED — units
-# auto-deduct in 25,000-token chunks with no ceiling.
-#
-# Coverage rule:
-#   units_required = ceil(token_count / TOKEN_CHUNK_SIZE)
-#
-# Examples:
-#   1 token       → 1 unit
-#   25_000 tokens → 1 unit
-#   25_001 tokens → 2 units
-#   50_000 tokens → 2 units
-#   50_001 tokens → 3 units
-# ---------------------------------------------------------------------------
-
 TOKEN_CHUNK_SIZE: int = 25_000
 
 
 def units_required_for_tokens(token_count: int) -> int:
-    """Return the number of protection units required to cover *token_count* tokens.
-
-    Uses ceiling division so any partial chunk above a boundary consumes a
-    full additional unit.  Returns 0 for non-positive token counts.
-    No maximum is imposed — scans are unlimited.
-    """
     if token_count <= 0:
         return 0
     return math.ceil(token_count / TOKEN_CHUNK_SIZE)
 
 
-# ---------------------------------------------------------------------------
-# Canonical package catalog — derived from billing.PLAN_DEFINITIONS
-# Single source of truth: billing.py owns plan codes + limits + prices.
-# unit_wallet.py maps them to purchasable package records.
-#
-# Authoritative package IDs and pricing:
-#   pkg_5000   — Starter    —  5,000 units — $20.00
-#   pkg_25000  — Team       — 25,000 units — $90.00
-#   pkg_60000  — Enterprise — 60,000 units — $180.00
-# ---------------------------------------------------------------------------
-
-
 def _build_package_catalog() -> dict[str, dict[str, Any]]:
-    """Derive the unit package catalog from billing.PLAN_DEFINITIONS.
-
-    Keeps unit_wallet.py in sync with billing.py automatically.
-    Falls back to hardcoded values only if billing import fails.
-    """
     try:
         from app.core.billing import PLAN_DEFINITIONS
 
@@ -217,10 +143,6 @@ def _build_package_catalog() -> dict[str, dict[str, Any]]:
 
 UNIT_PACKAGE_CATALOG: dict[str, dict[str, Any]] = _build_package_catalog()
 
-# ---------------------------------------------------------------------------
-# Module-level integrity assertion — catches catalog drift at startup
-# ---------------------------------------------------------------------------
-
 _EXPECTED_PACKAGES = {
     "pkg_5000": (5_000, 20.00),
     "pkg_25000": (25_000, 90.00),
@@ -234,16 +156,8 @@ for _pkg_id, (_expected_units, _expected_price) in _EXPECTED_PACKAGES.items():
     assert _entry["price_usd"] == _expected_price, f"unit_wallet: {_pkg_id} price_usd mismatch: got {_entry['price_usd']}, expected {_expected_price}"
     assert _entry["tokens_per_unit"] == TOKEN_CHUNK_SIZE, f"unit_wallet: {_pkg_id} tokens_per_unit mismatch: got {_entry['tokens_per_unit']}, expected {TOKEN_CHUNK_SIZE}"
 
-# ---------------------------------------------------------------------------
-# In-memory cache and ledger size guards
-# ---------------------------------------------------------------------------
-
 _WALLET_CACHE_MAX: int = 5_000
 _LEDGER_MAX_SIZE: int = 10_000
-
-# ---------------------------------------------------------------------------
-# Domain dataclasses
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -335,13 +249,6 @@ class UnitWallet:
         reference_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> UnitWalletTransaction:
-        """Consume the correct number of units to cover *token_count* tokens.
-
-        Calculates required units via ceiling division against TOKEN_CHUNK_SIZE
-        then delegates to consume_units.  Raises InsufficientUnitsError if
-        the wallet does not have enough units to cover the full token payload.
-        No maximum token count is enforced — scans are unlimited.
-        """
         required = units_required_for_tokens(token_count)
         combined_metadata = {
             "token_count": token_count,
@@ -404,22 +311,7 @@ class RegistryUnitLedgerEntry:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-# ---------------------------------------------------------------------------
-# Supabase persistence layer — only used when Supabase is configured
-# ---------------------------------------------------------------------------
-
-
 class SupabaseUnitWalletRepository:
-    """Durable wallet + ledger persistence via Supabase.
-
-    Table contracts expected in Supabase:
-      unit_wallets  (wallet_id, owner_key, balance_units,
-                     total_purchased_units, total_consumed_units,
-                     total_refunded_units, updated_at, metadata)
-      unit_ledger   (entry_id, wallet_id, owner_key, entry_type,
-                     units, balance_after, created_at, metadata)
-    """
-
     _WALLETS_TABLE = "unit_wallets"
     _LEDGER_TABLE = "unit_ledger"
 
@@ -500,15 +392,7 @@ class SupabaseUnitWalletRepository:
         return list(reversed(entries))
 
 
-# ---------------------------------------------------------------------------
-# Pure in-memory repository — used when IRONCLAW_PERSISTENCE_MODE=memory
-# or when Supabase is not configured
-# ---------------------------------------------------------------------------
-
-
 class MemoryUnitWalletRepository:
-    """Zero-dependency in-memory backend for tests and local-first mode."""
-
     def __init__(self) -> None:
         self._wallets: dict[str, RegistryUnitWallet] = {}
         self._wallets_by_owner: dict[str, str] = {}
@@ -531,7 +415,6 @@ class MemoryUnitWalletRepository:
         with self._lock:
             self._ledger.append(entry)
             if len(self._ledger) > _LEDGER_MAX_SIZE:
-                # Trim oldest entries to stay within memory bound
                 self._ledger = self._ledger[-_LEDGER_MAX_SIZE:]
 
     def fetch_ledger_entries(
@@ -543,11 +426,6 @@ class MemoryUnitWalletRepository:
         with self._lock:
             entries = self._ledger if owner_key is None else [e for e in self._ledger if e.owner_key == owner_key]
             return list(entries[-safe_limit:])
-
-
-# ---------------------------------------------------------------------------
-# Repository factory — picks backend from env at first use
-# ---------------------------------------------------------------------------
 
 
 def _make_repo() -> SupabaseUnitWalletRepository | MemoryUnitWalletRepository:
@@ -570,40 +448,7 @@ def _make_repo() -> SupabaseUnitWalletRepository | MemoryUnitWalletRepository:
         return MemoryUnitWalletRepository()
 
 
-# ---------------------------------------------------------------------------
-# Registry — in-memory cache with pluggable persistence backend
-# ---------------------------------------------------------------------------
-
-
 class UnitWalletRegistry:
-    """Prepaid unit wallet registry with pluggable persistence backend.
-
-    Supports:
-    - creating or resolving a wallet for an owner,
-    - crediting units after a package purchase,
-    - debiting units as protection events are consumed,
-    - debiting the correct number of units for a given token count (unlimited),
-    - returning units to a wallet as a refund,
-    - returning a compact ledger for UI and billing routes.
-
-    Token scans are UNLIMITED — units auto-deduct in TOKEN_CHUNK_SIZE chunks
-    with no ceiling imposed by this module.
-
-    Org-scoped wallets
-    ------------------
-    owner_key is a freeform string.  When prefixed with ORG_KEY_PREFIX
-    (``"ic_org_"``), the wallet is shared across an entire organization: all
-    team members who pass the same org key consume units from one wallet.
-    The caller (billing router, auth layer) is responsible for constructing
-    the org key as ``f"ic_org_{org_id}"``.
-
-    get_or_create_wallet() is fully idempotent for org keys — the first call
-    creates the wallet and all subsequent calls return the same wallet_id,
-    whether the lookup hits the in-memory cache or falls through to the
-    persistence backend.  No special handling is required for org keys vs
-    individual keys.
-    """
-
     def __init__(self) -> None:
         self._lock = Lock()
         self._wallets: dict[str, RegistryUnitWallet] = {}
@@ -611,11 +456,6 @@ class UnitWalletRegistry:
         self._repo: SupabaseUnitWalletRepository | MemoryUnitWalletRepository = _make_repo()
 
     def _evict_cache_if_needed(self) -> None:
-        """Trim the in-memory wallet cache when it exceeds _WALLET_CACHE_MAX.
-
-        Evicts the oldest half of entries by insertion order.
-        Must be called while self._lock is held.
-        """
         if len(self._wallets_by_owner) > _WALLET_CACHE_MAX:
             evict_count = _WALLET_CACHE_MAX // 2
             evict_owners = list(self._wallets_by_owner.keys())[:evict_count]
@@ -699,31 +539,41 @@ class UnitWalletRegistry:
         safe_units = max(0, int(units))
         wallet = self.get_or_create_wallet(owner_key=owner_key)
 
+        # --- Capture state and build entry inside the lock ---
+        # The raise MUST happen outside the lock to guarantee the lock is
+        # released even when InsufficientUnitsError is propagated to the caller.
+        insufficient: InsufficientUnitsError | None = None
+        entry: RegistryUnitLedgerEntry | None = None
+
         with self._lock:
             if safe_units > wallet.balance_units:
-                raise InsufficientUnitsError(
+                insufficient = InsufficientUnitsError(
                     "Insufficient protection units",
                     have=wallet.balance_units,
                     need=safe_units,
                     owner_key=wallet.owner_key,
                 )
+            else:
+                wallet.balance_units -= safe_units
+                wallet.total_consumed_units += safe_units
+                wallet.updated_at = datetime.now(UTC)
 
-            wallet.balance_units -= safe_units
-            wallet.total_consumed_units += safe_units
-            wallet.updated_at = datetime.now(UTC)
+                entry = RegistryUnitLedgerEntry(
+                    entry_id=f"ledger_{uuid.uuid4().hex}",
+                    wallet_id=wallet.wallet_id,
+                    owner_key=wallet.owner_key,
+                    entry_type="debit",
+                    units=safe_units,
+                    balance_after=wallet.balance_units,
+                    metadata=metadata or {},
+                )
 
-            entry = RegistryUnitLedgerEntry(
-                entry_id=f"ledger_{uuid.uuid4().hex}",
-                wallet_id=wallet.wallet_id,
-                owner_key=wallet.owner_key,
-                entry_type="debit",
-                units=safe_units,
-                balance_after=wallet.balance_units,
-                metadata=metadata or {},
-            )
+        # Lock is released — safe to raise or persist
+        if insufficient is not None:
+            raise insufficient
 
         self._repo.upsert_wallet(wallet)
-        self._repo.append_ledger_entry(entry)
+        self._repo.append_ledger_entry(entry)  # type: ignore[arg-type]
         return wallet
 
     def debit_units_for_tokens(
@@ -732,14 +582,6 @@ class UnitWalletRegistry:
         token_count: int,
         metadata: dict[str, Any] | None = None,
     ) -> tuple[RegistryUnitWallet, int]:
-        """Debit the correct number of units to cover *token_count* tokens.
-
-        Uses ceiling division against TOKEN_CHUNK_SIZE with no upper bound.
-        Returns the updated wallet and the number of units actually debited.
-
-        Raises InsufficientUnitsError (with have/need/owner_key) if the
-        wallet cannot cover the full token payload.
-        """
         required = units_required_for_tokens(token_count)
         combined_metadata = {
             "token_count": token_count,
@@ -760,7 +602,6 @@ class UnitWalletRegistry:
         units: int,
         metadata: dict[str, Any] | None = None,
     ) -> RegistryUnitWallet:
-        """Credit units back to a wallet as a refund, tracked separately from purchases."""
         safe_units = max(0, int(units))
         wallet = self.get_or_create_wallet(owner_key=owner_key)
 
@@ -798,10 +639,6 @@ class UnitWalletRegistry:
     ) -> list[RegistryUnitLedgerEntry]:
         return self._repo.fetch_ledger_entries(owner_key=owner_key, limit=limit)
 
-
-# ---------------------------------------------------------------------------
-# Module-level singleton
-# ---------------------------------------------------------------------------
 
 _unit_wallet_registry = UnitWalletRegistry()
 

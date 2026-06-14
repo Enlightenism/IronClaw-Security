@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from app.core.auth import AuthContext, get_auth_context, require_api_key
 from app.core.billing import resolve_billing_owner
 from app.core.unit_wallet import (
+    ORG_KEY_PREFIX,
     TOKEN_CHUNK_SIZE,
     UNIT_PACKAGE_CATALOG,
     InsufficientUnitsError,
@@ -274,18 +275,23 @@ def _require_known_package(package_id: str) -> tuple[str, dict[str, Any]]:
 def _assert_owner_access(auth_ctx: AuthContext, requested_owner_key: str) -> None:
     """Enforce org-key wallet isolation.
 
-    - org key: may only access ``ic_org_{auth_ctx.org_id}``. Any other key → 403.
-    - personal key (key_type != 'org'): no restriction enforced here.
+    Rules:
+    - org key (key_type == 'org'): may only access ``ic_org_{auth_ctx.org_id}``.
+      Any other key → 403.
+    - personal key accessing a non-org wallet: no restriction.
+    - personal key accessing an org-prefixed wallet: allowed (admin/support path).
     """
     key_type = getattr(auth_ctx, "key_type", "personal")
+
     if key_type != "org":
+        # Personal keys are never blocked by the org guard.
         return
 
     org_id = getattr(auth_ctx, "org_id", None)
     if not org_id:
         return
 
-    expected = f"ic_org_{org_id}"
+    expected = f"{ORG_KEY_PREFIX}{org_id}"
     if requested_owner_key.strip().lower() != expected:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -505,9 +511,9 @@ def debit_billing_wallet(
     wallet_registry = get_unit_wallet_registry()
 
     if payload.token_count is not None:
-        units_to_debit = units_required_for_tokens(payload.token_count)
+        units_to_debit: int = units_required_for_tokens(payload.token_count)
     else:
-        units_to_debit = payload.units  # type: ignore[assignment]
+        units_to_debit = int(payload.units)  # type: ignore[arg-type]
 
     debit_metadata: dict[str, Any] = {
         "reason": payload.reason,
