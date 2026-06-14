@@ -67,6 +67,13 @@ def _make_edge_auth_context(
     )
 
 
+def _make_registry_stub_returning_none() -> MagicMock:
+    """Return a registry stub whose .authenticate() always returns None."""
+    stub = MagicMock()
+    stub.authenticate.return_value = None
+    return stub
+
+
 # ---------------------------------------------------------------------------
 # EdgeAuthContext unit tests
 # ---------------------------------------------------------------------------
@@ -119,10 +126,10 @@ class TestEdgeAuthContext:
 
 class TestRequireApiKeyEdgePath:
     """
-    require_api_key calls _call_edge_auth(credentials.credentials).
-    _call_edge_auth always stamps bearer_token = the raw credentials string.
-    Mock _call_edge_auth to return an EdgeAuthContext whose bearer_token
-    matches the credentials string that will be passed in.
+    require_api_key calls registry.authenticate() first; if it returns a record
+    the edge path is never reached.  Patch get_api_key_registry to return a stub
+    whose .authenticate() returns None so the local-registry path never intercepts
+    the bearer token before the mocked edge path runs.
     """
 
     @pytest.mark.asyncio
@@ -135,9 +142,17 @@ class TestRequireApiKeyEdgePath:
             principal_id="pid-edge-001",
         )
 
-        with patch(
-            "app.core.api_key_auth._call_edge_auth",
-            new=AsyncMock(return_value=expected),
+        registry_stub = _make_registry_stub_returning_none()
+
+        with (
+            patch(
+                "app.core.api_key_auth.get_api_key_registry",
+                return_value=registry_stub,
+            ),
+            patch(
+                "app.core.api_key_auth._call_edge_auth",
+                new=AsyncMock(return_value=expected),
+            ),
         ):
             creds = MagicMock()
             creds.credentials = bearer
@@ -171,7 +186,15 @@ class TestRequireApiKeyEdgePath:
         )
 
         mock_call = AsyncMock(return_value=expected)
-        with patch("app.core.api_key_auth._call_edge_auth", new=mock_call):
+        registry_stub = _make_registry_stub_returning_none()
+
+        with (
+            patch(
+                "app.core.api_key_auth.get_api_key_registry",
+                return_value=registry_stub,
+            ),
+            patch("app.core.api_key_auth._call_edge_auth", new=mock_call),
+        ):
             creds = MagicMock()
             creds.credentials = bearer
             result = await require_api_key(credentials=creds)
