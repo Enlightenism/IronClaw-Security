@@ -233,7 +233,6 @@ _PURCHASES: list[BillingPackagePurchaseView] = []
 
 
 def _append_purchase(purchase: BillingPackagePurchaseView) -> None:
-    """Append purchase record and enforce the in-process cap."""
     _PURCHASES.append(purchase)
     if len(_PURCHASES) > _PURCHASES_MAX_SIZE:
         del _PURCHASES[: len(_PURCHASES) - _PURCHASES_MAX_SIZE]
@@ -281,12 +280,7 @@ def _wallet_to_view(wallet: Any) -> WalletBalanceView:
 
 
 def _assert_owner_access(owner_key: str, auth_ctx: AuthContext) -> None:
-    """Enforce that the caller may only access their own wallet or org wallet.
-
-    Org key: owner_key must be ic_org_{auth_ctx.org_id}.
-    Personal key: owner_key must match auth_ctx.principal_id (normalized).
-                  principal_id is set to the caller's email by the auth layer.
-    """
+    """Enforce that the caller may only access their own wallet or org wallet."""
     if owner_key.startswith(ORG_KEY_PREFIX):
         org_id = owner_key[len(ORG_KEY_PREFIX) :]
         if getattr(auth_ctx, "org_id", None) != org_id:
@@ -301,6 +295,17 @@ def _assert_owner_access(owner_key: str, auth_ctx: AuthContext) -> None:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access to this wallet is not permitted.",
             )
+
+
+def _require_existing_wallet(registry: Any, owner_key: str) -> Any:
+    """Fetch wallet or raise 404. Never auto-creates."""
+    wallet = registry.get_wallet(owner_key)
+    if wallet is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No wallet found for owner_key: {owner_key!r}",
+        )
+    return wallet
 
 
 # ---------------------------------------------------------------------------
@@ -436,12 +441,7 @@ def get_wallet_balance(
 ) -> BillingWalletBalanceResponse:
     _assert_owner_access(owner_key, auth_ctx)
     registry = get_unit_wallet_registry()
-    wallet = registry.get_wallet(owner_key)
-    if wallet is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No wallet found for owner_key: {owner_key!r}",
-        )
+    wallet = _require_existing_wallet(registry, owner_key)
     return BillingWalletBalanceResponse(
         status="ok",
         service="ironclaw-billing",
@@ -510,12 +510,7 @@ def debit_wallet(
         units_to_debit = units_required_for_tokens(body.token_count)  # type: ignore[arg-type]
 
     registry = get_unit_wallet_registry()
-    wallet = registry.get_wallet(owner_key)
-    if wallet is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No wallet found for owner_key: {owner_key!r}",
-        )
+    wallet = _require_existing_wallet(registry, owner_key)
 
     if wallet.balance_units < units_to_debit:
         raise HTTPException(
@@ -563,6 +558,8 @@ def refund_wallet(
 ) -> WalletRefundResponse:
     _assert_owner_access(owner_key, auth_ctx)
     registry = get_unit_wallet_registry()
+    # Wallet must exist before a refund can be applied — never auto-create.
+    _require_existing_wallet(registry, owner_key)
     updated_wallet = registry.credit_units(
         owner_key=owner_key,
         units=body.units,

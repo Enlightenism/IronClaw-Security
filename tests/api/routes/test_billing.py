@@ -17,7 +17,16 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
 os.environ.setdefault("SUPABASE_KEY", "")
 os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
-from app.core.auth import AuthContext, require_api_key
+import importlib
+
+# ── Router mount guard ──────────────────────────────────────────────────────
+# app/main.py loads billing via _optional_router("app.api.billing").
+# The actual route module lives at app/api/routes/billing.py.
+# We patch sys.modules so that "app.api.billing" resolves to the routes module
+# before the FastAPI app is imported, ensuring the router mounts correctly.
+import sys
+
+from app.core.auth import AuthContext, get_auth_context, require_api_key
 import app.core.unit_wallet as _unit_wallet_module
 from app.core.unit_wallet import (
     ORG_KEY_PREFIX,
@@ -25,7 +34,11 @@ from app.core.unit_wallet import (
     UNIT_PACKAGE_CATALOG,
     UnitWalletRegistry,
 )
-from app.main import app as _app
+
+_billing_routes_module = importlib.import_module("app.api.routes.billing")
+sys.modules.setdefault("app.api.billing", _billing_routes_module)
+
+from app.main import app as _app  # noqa: E402  (must follow sys.modules patch)
 
 _MOCK_API_KEY = "test-api-key"
 _AUTH_HEADERS = {"X-API-Key": _MOCK_API_KEY}
@@ -48,6 +61,16 @@ def _make_auth_ctx(
     return ctx
 
 
+def _override_get_auth_context() -> AuthContext:
+    """Default auth context override: personal key, no org, principal=None.
+
+    Keeps _assert_owner_access in permissive mode for fixture-driven tests
+    while making the override explicit instead of relying on the real auth
+    layer returning None silently.
+    """
+    return _make_auth_ctx(principal_id=None, org_id=None, key_type=None)
+
+
 @pytest.fixture(autouse=True)
 def _reset_wallet_registry():
     fresh = UnitWalletRegistry()
@@ -59,10 +82,12 @@ def _reset_wallet_registry():
 @pytest.fixture()
 def client(_reset_wallet_registry):
     _app.dependency_overrides[require_api_key] = _override_require_api_key
+    _app.dependency_overrides[get_auth_context] = _override_get_auth_context
     with TestClient(_app, raise_server_exceptions=True) as c:
         c.headers.update(_AUTH_HEADERS)
         yield c
     _app.dependency_overrides.pop(require_api_key, None)
+    _app.dependency_overrides.pop(get_auth_context, None)
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +124,16 @@ def test_list_packages_returns_200_with_correct_schema(client: TestClient) -> No
     assert len(body["packages"]) >= 3
 
     for pkg in body["packages"]:
-        for field in ("package_id", "name", "price_usd", "included_units", "display_label", "description", "token_coverage", "tokens_per_unit"):
+        for field in (
+            "package_id",
+            "name",
+            "price_usd",
+            "included_units",
+            "display_label",
+            "description",
+            "token_coverage",
+            "tokens_per_unit",
+        ):
             assert field in pkg, f"packages entry missing field: {field!r}"
         assert pkg["tokens_per_unit"] == TOKEN_CHUNK_SIZE
         assert pkg["token_coverage"] == pkg["included_units"] * TOKEN_CHUNK_SIZE
@@ -441,7 +475,15 @@ def test_ledger_returns_200_with_correct_schema(client: TestClient) -> None:
     assert isinstance(body["entries"], list)
     assert len(body["entries"]) >= 1
     entry = body["entries"][0]
-    for field in ("entry_id", "wallet_id", "owner_key", "entry_type", "units", "balance_after", "created_at"):
+    for field in (
+        "entry_id",
+        "wallet_id",
+        "owner_key",
+        "entry_type",
+        "units",
+        "balance_after",
+        "created_at",
+    ):
         assert field in entry, f"ledger entry missing field: {field!r}"
 
 
@@ -482,7 +524,6 @@ def test_assert_owner_access_key_type_none_does_not_raise() -> None:
     from app.api.routes.billing import _assert_owner_access
 
     ctx = _make_auth_ctx(principal_id=None, org_id=None, key_type=None)
-    # Should not raise — no principal_id means no ownership check is enforced
     try:
         _assert_owner_access("anyone@ironclaw.test", ctx)
     except HTTPException:
@@ -539,6 +580,38 @@ def test_assert_owner_access_personal_mismatched_principal_returns_403() -> None
     with pytest.raises(HTTPException) as exc_info:
         _assert_owner_access("other@ironclaw.test", ctx)
     assert exc_info.value.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Org wallet routing — purchase routes unit to org wallet when key_type=org
+# ---------------------------------------------------------------------------
+
+
+def test_purchase_routes_to_org_wallet_when_org_key(client: TestClient) -> None:
+    """When auth context is key_type='org', purchase must credit ic_org_{org_id}."""
+    org_id = "test-org"
+    org_owner_key = f"{ORG_KEY_PREFIX}{org_id}"
+
+    def _org_auth_ctx() -> AuthContext:
+        return _make_auth_ctx(principal_id=None, org_id=org_id, key_type="org")
+
+    _app.dependency_overrides[get_auth_context] = _org_auth_ctx
+    try:
+        resp = client.post(
+            "/billing/purchase",
+            json={
+                "package_id": "pkg_5000",
+                "buyer_name": "Org Buyer",
+                "buyer_email": "buyer@ironclaw.test",
+                "metadata": {},
+            },
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["purchase"]["owner_key"] == org_owner_key
+        assert body["wallet"]["owner_key"] == org_owner_key
+    finally:
+        _app.dependency_overrides[get_auth_context] = _override_get_auth_context
 
 
 # ---------------------------------------------------------------------------
