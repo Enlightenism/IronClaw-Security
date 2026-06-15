@@ -34,6 +34,23 @@ _AUTH_HEADERS = {"X-API-Key": _MOCK_API_KEY}
 
 
 def _make_personal_ctx(email: str = "test@ironclaw.test") -> AuthContext:
+    # principal_id=None bypasses the identity check in _assert_owner_access
+    # for personal keys; cross-wallet blocking is tested explicitly below.
+    return AuthContext(
+        api_key=_MOCK_API_KEY,
+        principal_type="api_key",
+        principal_id=None,
+        session_id=None,
+        org_id=None,
+        authenticated=True,
+        auth_source="registry",
+        auth_method="api_key",
+        key_type="personal",
+    )
+
+
+def _make_personal_ctx_with_id(email: str) -> AuthContext:
+    """Personal ctx with a set principal_id — used only for cross-wallet 403 tests."""
     return AuthContext(
         api_key=_MOCK_API_KEY,
         principal_type="api_key",
@@ -519,7 +536,7 @@ def test_org_ledger_correct_org_key_succeeds() -> None:
 
 
 def test_personal_key_debit_own_wallet_succeeds() -> None:
-    ctx = _make_personal_ctx("test@ironclaw.test")
+    ctx = _make_personal_ctx_with_id("test@ironclaw.test")
     with _override_auth(ctx) as (c, registry):
         registry.credit_units(owner_key="test@ironclaw.test", units=200)
         resp = c.post(
@@ -534,7 +551,7 @@ def test_personal_key_blocked_from_other_personal_wallet() -> None:
     Personal key whose principal_id is 'owner-a@ironclaw.test' must not
     access a wallet owned by 'owner-b@ironclaw.test'.
     """
-    ctx = _make_personal_ctx("owner-a@ironclaw.test")
+    ctx = _make_personal_ctx_with_id("owner-a@ironclaw.test")
     with _override_auth(ctx) as (c, registry):
         registry.credit_units(owner_key="owner-b@ironclaw.test", units=100)
         resp = c.post(
