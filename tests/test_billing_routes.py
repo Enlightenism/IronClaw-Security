@@ -45,7 +45,7 @@ _ORG_OWNER_KEY = f"ic_org_{_ORG_ID}"
 _PERSONAL_AUTH_CTX = AuthContext(
     api_key=_PERSONAL_API_KEY,
     principal_type="api_key",
-    principal_id=None,  # None → _assert_owner_access skips personal mismatch check
+    principal_id=None,
     session_id=None,
     org_id=None,
     authenticated=True,
@@ -369,7 +369,7 @@ def test_purchase_empty_package_id_returns_422() -> None:
 
 def test_get_wallet_personal_key_returns_200() -> None:
     registry = get_unit_wallet_registry()
-    registry.credit(
+    registry.credit_units(
         owner_key="wallet-read-personal@ironclaw.test",
         units=100,
         metadata={"package_id": _PKG_5K},
@@ -402,7 +402,7 @@ def test_get_wallet_unauthenticated_returns_401() -> None:
 
 def test_get_wallet_org_key_reads_own_org_wallet_returns_200() -> None:
     registry = get_unit_wallet_registry()
-    registry.credit(
+    registry.credit_units(
         owner_key=_ORG_OWNER_KEY,
         units=500,
         metadata={"package_id": _PKG_25K},
@@ -432,7 +432,7 @@ def test_get_wallet_org_key_cannot_access_different_org_wallet_returns_403() -> 
 
 def test_debit_personal_wallet_by_units_returns_200() -> None:
     registry = get_unit_wallet_registry()
-    registry.credit(
+    registry.credit_units(
         owner_key="debit-personal@ironclaw.test",
         units=500,
         metadata={"package_id": _PKG_5K},
@@ -451,7 +451,7 @@ def test_debit_personal_wallet_by_units_returns_200() -> None:
 
 def test_debit_personal_wallet_by_token_count_returns_200() -> None:
     registry = get_unit_wallet_registry()
-    registry.credit(
+    registry.credit_units(
         owner_key="debit-tokens@ironclaw.test",
         units=500,
         metadata={"package_id": _PKG_5K},
@@ -501,7 +501,7 @@ def test_debit_wallet_returns_401_unauthenticated() -> None:
 
 def test_debit_org_wallet_via_org_key_returns_200_and_routes_to_org_wallet() -> None:
     registry = get_unit_wallet_registry()
-    registry.credit(
+    registry.credit_units(
         owner_key=_ORG_OWNER_KEY,
         units=1000,
         metadata={"package_id": _PKG_25K},
@@ -520,12 +520,11 @@ def test_debit_org_wallet_via_org_key_returns_200_and_routes_to_org_wallet() -> 
 
 def test_debit_org_key_personal_url_redirects_to_org_wallet() -> None:
     registry = get_unit_wallet_registry()
-    registry.credit(
+    registry.credit_units(
         owner_key=_ORG_OWNER_KEY,
         units=200,
         metadata={"package_id": _PKG_5K},
     )
-    # org key hitting a personal-style URL — billing router redirects to org wallet
     response = _org_client().post(
         f"/billing/wallet/{_ORG_OWNER_KEY}/debit",
         json={"units": 1, "reason": "redirect test"},
@@ -560,7 +559,7 @@ def test_debit_personal_key_cannot_target_org_wallet_returns_403() -> None:
 
 def test_refund_personal_wallet_path_key_used_directly_as_owner_key() -> None:
     registry = get_unit_wallet_registry()
-    registry.credit(
+    registry.credit_units(
         owner_key="refund-pathkey@ironclaw.test",
         units=100,
         metadata={"package_id": _PKG_5K},
@@ -584,7 +583,7 @@ def test_refund_personal_wallet_path_key_used_directly_as_owner_key() -> None:
 
 def test_refund_personal_wallet_returns_200() -> None:
     registry = get_unit_wallet_registry()
-    registry.credit(
+    registry.credit_units(
         owner_key="refund-personal@ironclaw.test",
         units=200,
         metadata={"package_id": _PKG_5K},
@@ -629,7 +628,7 @@ def test_refund_wallet_returns_401_unauthenticated() -> None:
 
 def test_refund_org_wallet_via_org_key_returns_200() -> None:
     registry = get_unit_wallet_registry()
-    registry.credit(
+    registry.credit_units(
         owner_key=_ORG_OWNER_KEY,
         units=300,
         metadata={"package_id": _PKG_25K},
@@ -677,7 +676,7 @@ def test_refund_personal_key_cannot_refund_org_wallet_returns_403() -> None:
 
 def test_get_ledger_personal_key_returns_200() -> None:
     registry = get_unit_wallet_registry()
-    registry.credit(
+    registry.credit_units(
         owner_key="ledger-personal@ironclaw.test",
         units=1000,
         metadata={"package_id": _PKG_5K},
@@ -719,7 +718,7 @@ def test_get_ledger_returns_401_unauthenticated() -> None:
 
 def test_get_ledger_org_key_can_read_own_org_wallet_entries() -> None:
     registry = get_unit_wallet_registry()
-    registry.credit(
+    registry.credit_units(
         owner_key=_ORG_OWNER_KEY,
         units=200,
         metadata={"package_id": _PKG_25K},

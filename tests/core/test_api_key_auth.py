@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 import httpx
 import pytest
 
@@ -19,6 +21,7 @@ from app.core.apikeys import (
     utc_now_iso,
 )
 from app.core.auth import (
+    API_KEY_HEADER_NAME,
     AuthContext,
     _coerce_key_type,
     _coerce_org_id,
@@ -26,10 +29,13 @@ from app.core.auth import (
     _coerce_principal_id,
     _coerce_roles,
     _record_is_usable,
+    get_auth_context,
+    require_api_key,
+    require_auth_context,
 )
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Constants
 # ---------------------------------------------------------------------------
 
 _VALID_TOKEN = "test-bearer-token-abc123"
@@ -39,6 +45,11 @@ _SCOPES = ["scan:read", "scan:write"]
 _PERSONAL_KEY_RAW = "ic_personal_test_abc123"
 _ORG_KEY_RAW = "ic_org_team_test_xyz789"
 _ORG_ID = "org-ironclaw-001"
+_CONFIGURED_KEY = "ic_configured_static_key_abc"
+
+# ---------------------------------------------------------------------------
+# Shared record factories
+# ---------------------------------------------------------------------------
 
 
 def _mock_response(status_code: int, body: dict | None = None) -> MagicMock:
@@ -104,6 +115,587 @@ def _make_org_record(
         key_type="org",
         org_id=org_id,
     )
+
+
+# ---------------------------------------------------------------------------
+# TestClient app factory — injects settings and registry via app.state
+# ---------------------------------------------------------------------------
+
+
+def _make_app(
+    *,
+    auth_required: bool = False,
+    configured_key: str | None = None,
+    registry: APIKeyRegistry | None = None,
+) -> FastAPI:
+    """Build a minimal FastAPI app whose state mimics IronClaw settings."""
+    from fastapi import Depends
+
+    app = FastAPI()
+    settings = SimpleNamespace(
+        auth_required=auth_required,
+        ironclaw_api_key=configured_key,
+        internal_platform_api_key=None,
+        platform_api_key=None,
+        admin_api_key=None,
+        api_key=None,
+        effective_platform_api_key=None,
+        org_id=None,
+        organization_id=None,
+        default_org_id=None,
+    )
+    app.state.settings = settings
+    app.state.api_key_registry = registry or APIKeyRegistry()
+
+    @app.get("/probe/auth-context")
+    async def _probe_auth_context(ctx: AuthContext = Depends(get_auth_context)):
+        return {
+            "authenticated": ctx.authenticated,
+            "principal_type": ctx.principal_type,
+            "auth_source": ctx.auth_source,
+            "key_type": ctx.key_type,
+            "org_id": ctx.org_id,
+            "permissions": list(ctx.permissions),
+            "roles": list(ctx.roles),
+        }
+
+    @app.get("/probe/require-auth")
+    async def _probe_require_auth(ctx: AuthContext = Depends(require_auth_context)):
+        return {"authenticated": ctx.authenticated}
+
+    return app
+
+
+# ---------------------------------------------------------------------------
+# get_api_key — auth NOT required, no key provided → returns None
+# ---------------------------------------------------------------------------
+
+
+class TestGetApiKeyAuthNotRequired:
+    def test_no_key_auth_not_required_returns_none(self):
+        registry = APIKeyRegistry()
+        app = _make_app(auth_required=False, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get("/probe/auth-context")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["authenticated"] is False
+        assert data["principal_type"] == "anonymous"
+
+    def test_no_key_auth_not_required_anonymous_auth_source(self):
+        registry = APIKeyRegistry()
+        app = _make_app(auth_required=False, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                data = client.get("/probe/auth-context").json()
+        assert data["auth_source"] == "disabled"
+
+
+# ---------------------------------------------------------------------------
+# get_api_key — auth required, key missing → HTTP 401
+# ---------------------------------------------------------------------------
+
+
+class TestGetApiKeyAuthRequiredMissingKey:
+    def test_missing_key_auth_required_raises_401(self):
+        registry = APIKeyRegistry()
+        registry.create_key("Probe Key", key_type="personal")
+        app = _make_app(auth_required=True, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get("/probe/auth-context")
+        assert resp.status_code == 401
+
+    def test_missing_key_detail_contains_x_api_key(self):
+        registry = APIKeyRegistry()
+        registry.create_key("Probe Key", key_type="personal")
+        app = _make_app(auth_required=True, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get("/probe/auth-context")
+        assert "X-API-Key" in resp.json().get("detail", "")
+
+    def test_missing_key_detail_contains_bearer(self):
+        registry = APIKeyRegistry()
+        registry.create_key("Probe Key", key_type="personal")
+        app = _make_app(auth_required=True, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get("/probe/auth-context")
+        assert "Bearer" in resp.json().get("detail", "")
+
+    def test_missing_key_configured_key_present_raises_401(self):
+        registry = APIKeyRegistry()
+        app = _make_app(
+            auth_required=True,
+            configured_key=_CONFIGURED_KEY,
+            registry=registry,
+        )
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get("/probe/auth-context")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# get_api_key — auth required, key invalid → HTTP 401
+# ---------------------------------------------------------------------------
+
+
+class TestGetApiKeyInvalidKey:
+    def test_invalid_key_raises_401(self):
+        registry = APIKeyRegistry()
+        registry.create_key("Real Key", key_type="personal")
+        app = _make_app(auth_required=True, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: "ic_completely_wrong_key_xyz"},
+                )
+        assert resp.status_code == 401
+
+    def test_invalid_key_detail_is_invalid_api_key(self):
+        registry = APIKeyRegistry()
+        registry.create_key("Real Key", key_type="personal")
+        app = _make_app(auth_required=True, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: "ic_completely_wrong_key_xyz"},
+                )
+        assert resp.json().get("detail") == "Invalid API key"
+
+    def test_wrong_configured_key_raises_401(self):
+        registry = APIKeyRegistry()
+        app = _make_app(
+            auth_required=True,
+            configured_key=_CONFIGURED_KEY,
+            registry=registry,
+        )
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: "ic_wrong_static_key"},
+                )
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# get_api_key — auth required, no keys configured → HTTP 503
+# ---------------------------------------------------------------------------
+
+
+class TestGetApiKeyNoKeysConfigured:
+    def test_no_keys_configured_raises_503(self):
+        empty_registry = APIKeyRegistry()
+        app = _make_app(
+            auth_required=True,
+            configured_key=None,
+            registry=empty_registry,
+        )
+        with patch("app.core.auth.get_api_key_registry", return_value=empty_registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: "ic_any_key_doesnt_matter"},
+                )
+        assert resp.status_code == 503
+
+    def test_no_keys_configured_detail_mentions_api_keys(self):
+        empty_registry = APIKeyRegistry()
+        app = _make_app(
+            auth_required=True,
+            configured_key=None,
+            registry=empty_registry,
+        )
+        with patch("app.core.auth.get_api_key_registry", return_value=empty_registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: "ic_any_key_doesnt_matter"},
+                )
+        detail = resp.json().get("detail", "")
+        assert "API keys" in detail or "api keys" in detail.lower()
+
+    def test_no_keys_configured_detail_mentions_auth_required(self):
+        empty_registry = APIKeyRegistry()
+        app = _make_app(
+            auth_required=True,
+            configured_key=None,
+            registry=empty_registry,
+        )
+        with patch("app.core.auth.get_api_key_registry", return_value=empty_registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: "ic_any_key_doesnt_matter"},
+                )
+        detail = resp.json().get("detail", "")
+        assert "required" in detail.lower()
+
+
+# ---------------------------------------------------------------------------
+# get_auth_context — anonymous AuthContext when auth disabled
+# ---------------------------------------------------------------------------
+
+
+class TestGetAuthContextAnonymous:
+    def test_anonymous_context_when_auth_disabled(self):
+        registry = APIKeyRegistry()
+        app = _make_app(auth_required=False, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get("/probe/auth-context")
+        assert resp.status_code == 200
+        assert resp.json()["authenticated"] is False
+
+    def test_anonymous_principal_type(self):
+        registry = APIKeyRegistry()
+        app = _make_app(auth_required=False, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                data = client.get("/probe/auth-context").json()
+        assert data["principal_type"] == "anonymous"
+
+    def test_anonymous_auth_source_is_disabled(self):
+        registry = APIKeyRegistry()
+        app = _make_app(auth_required=False, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                data = client.get("/probe/auth-context").json()
+        assert data["auth_source"] == "disabled"
+
+    def test_anonymous_key_type_defaults_to_personal(self):
+        registry = APIKeyRegistry()
+        app = _make_app(auth_required=False, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                data = client.get("/probe/auth-context").json()
+        assert data["key_type"] == "personal"
+
+    def test_anonymous_permissions_empty(self):
+        registry = APIKeyRegistry()
+        app = _make_app(auth_required=False, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                data = client.get("/probe/auth-context").json()
+        assert data["permissions"] == []
+
+
+# ---------------------------------------------------------------------------
+# get_auth_context — authenticated AuthContext with registry personal key
+# ---------------------------------------------------------------------------
+
+
+class TestGetAuthContextAuthenticatedPersonalKey:
+    def test_valid_personal_key_returns_200(self):
+        registry = APIKeyRegistry()
+        record = registry.create_key(
+            "Test Personal",
+            key_type="personal",
+            scopes=["scan:read", "scan:write"],
+        )
+        app = _make_app(auth_required=True, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: record.api_key},
+                )
+        assert resp.status_code == 200
+
+    def test_valid_personal_key_authenticated_true(self):
+        registry = APIKeyRegistry()
+        record = registry.create_key("Test Personal", key_type="personal")
+        app = _make_app(auth_required=True, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                data = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: record.api_key},
+                ).json()
+        assert data["authenticated"] is True
+
+    def test_valid_personal_key_principal_type_is_api_key(self):
+        registry = APIKeyRegistry()
+        record = registry.create_key("Test Personal", key_type="personal")
+        app = _make_app(auth_required=True, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                data = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: record.api_key},
+                ).json()
+        assert data["principal_type"] == "api_key"
+
+    def test_valid_personal_key_key_type_is_personal(self):
+        registry = APIKeyRegistry()
+        record = registry.create_key("Test Personal", key_type="personal")
+        app = _make_app(auth_required=True, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                data = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: record.api_key},
+                ).json()
+        assert data["key_type"] == "personal"
+
+    def test_valid_personal_key_auth_source_is_registry(self):
+        registry = APIKeyRegistry()
+        record = registry.create_key("Test Personal", key_type="personal")
+        app = _make_app(auth_required=True, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                data = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: record.api_key},
+                ).json()
+        assert data["auth_source"] == "registry"
+
+    def test_valid_personal_key_permissions_from_scopes(self):
+        registry = APIKeyRegistry()
+        record = registry.create_key(
+            "Test Personal",
+            key_type="personal",
+            scopes=["scan:read", "scan:write"],
+        )
+        app = _make_app(auth_required=True, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                data = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: record.api_key},
+                ).json()
+        assert set(data["permissions"]) == {"scan:read", "scan:write"}
+
+    def test_valid_personal_key_org_id_none_when_not_set(self):
+        registry = APIKeyRegistry()
+        record = registry.create_key("Test Personal", key_type="personal")
+        app = _make_app(auth_required=True, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                data = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: record.api_key},
+                ).json()
+        assert data["org_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# get_auth_context — authenticated AuthContext with registry org key
+# ---------------------------------------------------------------------------
+
+
+class TestGetAuthContextAuthenticatedOrgKey:
+    def test_valid_org_key_principal_type_is_org_key(self):
+        registry = APIKeyRegistry()
+        record = registry.create_key(
+            "Test Org",
+            key_type="org",
+            org_id=_ORG_ID,
+            scopes=["scan:read", "audit:read"],
+        )
+        app = _make_app(auth_required=True, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                data = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: record.api_key},
+                ).json()
+        assert data["principal_type"] == "org_key"
+
+    def test_valid_org_key_key_type_is_org(self):
+        registry = APIKeyRegistry()
+        record = registry.create_key("Test Org", key_type="org", org_id=_ORG_ID)
+        app = _make_app(auth_required=True, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                data = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: record.api_key},
+                ).json()
+        assert data["key_type"] == "org"
+
+    def test_valid_org_key_org_id_propagated(self):
+        registry = APIKeyRegistry()
+        record = registry.create_key("Test Org", key_type="org", org_id=_ORG_ID)
+        app = _make_app(auth_required=True, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                data = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: record.api_key},
+                ).json()
+        assert data["org_id"] == _ORG_ID
+
+    def test_valid_org_key_permissions_include_all_scopes(self):
+        registry = APIKeyRegistry()
+        record = registry.create_key(
+            "Test Org",
+            key_type="org",
+            org_id=_ORG_ID,
+            scopes=["scan:read", "scan:write", "audit:read"],
+        )
+        app = _make_app(auth_required=True, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                data = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: record.api_key},
+                ).json()
+        assert {"scan:read", "scan:write", "audit:read"}.issubset(set(data["permissions"]))
+
+
+# ---------------------------------------------------------------------------
+# get_auth_context — configured static key (platform path)
+# ---------------------------------------------------------------------------
+
+
+class TestGetAuthContextConfiguredKey:
+    def test_configured_key_returns_authenticated(self):
+        registry = APIKeyRegistry()
+        app = _make_app(
+            auth_required=True,
+            configured_key=_CONFIGURED_KEY,
+            registry=registry,
+        )
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                data = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: _CONFIGURED_KEY},
+                ).json()
+        assert data["authenticated"] is True
+
+    def test_configured_key_principal_type_is_platform(self):
+        registry = APIKeyRegistry()
+        app = _make_app(
+            auth_required=True,
+            configured_key=_CONFIGURED_KEY,
+            registry=registry,
+        )
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                data = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: _CONFIGURED_KEY},
+                ).json()
+        assert data["principal_type"] == "platform"
+
+    def test_configured_key_auth_source_is_configured(self):
+        registry = APIKeyRegistry()
+        app = _make_app(
+            auth_required=True,
+            configured_key=_CONFIGURED_KEY,
+            registry=registry,
+        )
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                data = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: _CONFIGURED_KEY},
+                ).json()
+        assert data["auth_source"] == "configured"
+
+
+# ---------------------------------------------------------------------------
+# require_api_key — passthrough: returns key unchanged
+# ---------------------------------------------------------------------------
+
+
+class TestRequireApiKeyPassthrough:
+    def test_require_api_key_returns_valid_key_unchanged(self):
+        from fastapi import Depends
+
+        registry = APIKeyRegistry()
+        record = registry.create_key("Passthrough Key", key_type="personal")
+        app = _make_app(auth_required=True, registry=registry)
+
+        @app.get("/probe/require-api-key-passthrough")
+        async def _probe(key: str | None = Depends(require_api_key)):
+            return {"key": key}
+
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/probe/require-api-key-passthrough",
+                    headers={API_KEY_HEADER_NAME: record.api_key},
+                )
+        assert resp.status_code == 200
+        assert resp.json()["key"] == record.api_key
+
+    def test_require_api_key_returns_none_when_auth_not_required(self):
+        from fastapi import Depends
+
+        registry = APIKeyRegistry()
+        app = _make_app(auth_required=False, registry=registry)
+
+        @app.get("/probe/require-api-key-none")
+        async def _probe(key: str | None = Depends(require_api_key)):
+            return {"key": key}
+
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get("/probe/require-api-key-none")
+        assert resp.status_code == 200
+        assert resp.json()["key"] is None
+
+
+# ---------------------------------------------------------------------------
+# require_auth_context — raises HTTP 401 for unauthenticated context
+# ---------------------------------------------------------------------------
+
+
+class TestRequireAuthContext:
+    def test_unauthenticated_raises_401(self):
+        registry = APIKeyRegistry()
+        app = _make_app(auth_required=False, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get("/probe/require-auth")
+        assert resp.status_code == 401
+
+    def test_unauthenticated_detail_is_authentication_required(self):
+        registry = APIKeyRegistry()
+        app = _make_app(auth_required=False, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get("/probe/require-auth")
+        assert resp.json().get("detail") == "Authentication required"
+
+    def test_authenticated_context_passes_through(self):
+        registry = APIKeyRegistry()
+        record = registry.create_key("Auth Key", key_type="personal")
+        app = _make_app(auth_required=True, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/probe/require-auth",
+                    headers={API_KEY_HEADER_NAME: record.api_key},
+                )
+        assert resp.status_code == 200
+        assert resp.json()["authenticated"] is True
+
+    def test_unauthenticated_anonymous_context_raises_401(self):
+        ctx = AuthContext(
+            api_key=None,
+            principal_type="anonymous",
+            principal_id=None,
+            session_id=None,
+            org_id=None,
+            authenticated=False,
+            auth_source="disabled",
+            auth_method=None,
+            key_type="personal",
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            require_auth_context(context=ctx)
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.detail == "Authentication required"
 
 
 # ---------------------------------------------------------------------------
@@ -297,29 +889,29 @@ class TestCallEdgeAuthRequestError:
 class TestRequireApiKeyMissingHeader:
     @pytest.mark.asyncio
     async def test_missing_credentials_raises_401(self):
-        from app.core.api_key_auth import require_api_key
+        from app.core.api_key_auth import require_api_key as edge_require_api_key
 
         with pytest.raises(HTTPException) as exc_info:
-            await require_api_key(credentials=None)
+            await edge_require_api_key(credentials=None)
         assert exc_info.value.status_code == 401
 
     @pytest.mark.asyncio
     async def test_missing_credentials_detail_mentions_bearer(self):
-        from app.core.api_key_auth import require_api_key
+        from app.core.api_key_auth import require_api_key as edge_require_api_key
 
         with pytest.raises(HTTPException) as exc_info:
-            await require_api_key(credentials=None)
+            await edge_require_api_key(credentials=None)
         assert "bearer" in exc_info.value.detail.lower()
 
     @pytest.mark.asyncio
     async def test_empty_credentials_raises_401(self):
         from fastapi.security import HTTPAuthorizationCredentials
 
-        from app.core.api_key_auth import require_api_key
+        from app.core.api_key_auth import require_api_key as edge_require_api_key
 
         creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="")
         with pytest.raises(HTTPException) as exc_info:
-            await require_api_key(credentials=creds)
+            await edge_require_api_key(credentials=creds)
         assert exc_info.value.status_code == 401
 
 

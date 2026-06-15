@@ -292,7 +292,6 @@ def _assert_owner_access(owner_key: str, auth_ctx: AuthContext) -> None:
     caller_org_id = getattr(auth_ctx, "org_id", None)
 
     if is_org_wallet:
-        # Only an org key whose org_id matches may access this wallet
         org_id = owner_key[len(ORG_KEY_PREFIX) :]
         if caller_org_id != org_id:
             raise HTTPException(
@@ -300,13 +299,11 @@ def _assert_owner_access(owner_key: str, auth_ctx: AuthContext) -> None:
                 detail="Access to this org wallet is not permitted.",
             )
     else:
-        # Non-org wallet: org keys are never allowed to access personal wallets
         if caller_key_type == "org" or caller_org_id is not None:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Org keys may not access personal wallets.",
             )
-        # Personal key with explicit principal_id: enforce identity match
         caller_id = getattr(auth_ctx, "principal_id", None)
         if caller_id and owner_key != caller_id.strip().lower():
             raise HTTPException(
@@ -330,7 +327,7 @@ def _get_or_zero_wallet(registry: Any, owner_key: str) -> Any:
     """Return wallet if it exists, else a zero-balance sentinel for debit checks."""
     wallet = registry.get_wallet(owner_key)
     if wallet is None:
-        # Return a lightweight object with zero balance so 402 fires correctly
+
         class _ZeroWallet:
             balance_units = 0
 
@@ -540,7 +537,6 @@ def debit_wallet(
         units_to_debit = units_required_for_tokens(body.token_count)  # type: ignore[arg-type]
 
     registry = get_unit_wallet_registry()
-    # Use zero-balance sentinel for non-existent wallets so 402 fires before 404
     wallet = _get_or_zero_wallet(registry, owner_key)
 
     if wallet.balance_units < units_to_debit:
@@ -590,7 +586,7 @@ def refund_wallet(
     _assert_owner_access(owner_key, auth_ctx)
     registry = get_unit_wallet_registry()
     _require_existing_wallet(registry, owner_key)
-    updated_wallet = registry.credit_units(
+    updated_wallet = registry.refund_units(
         owner_key=owner_key,
         units=body.units,
         metadata={
