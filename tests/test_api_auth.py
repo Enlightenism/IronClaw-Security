@@ -9,7 +9,7 @@ from app.core.auth import API_KEY_HEADER_NAME, get_api_key, require_api_key
 from app.core.errors import register_exception_handlers
 
 # ---------------------------------------------------------------------------
-# App factory — registers exception handlers so 401 surfaces as HTTP response
+# App factory — registers exception handlers so AppError surfaces correctly
 # ---------------------------------------------------------------------------
 
 
@@ -101,6 +101,7 @@ def test_require_api_key_rejects_missing_key_when_required() -> None:
 
     assert response.status_code == 401
     body = response.json()
+    # HTTPException → http_exception_handler → {"detail": str}
     assert "detail" in body
     assert isinstance(body["detail"], str)
     assert "missing" in body["detail"].lower() or "api key" in body["detail"].lower()
@@ -123,9 +124,9 @@ def test_require_api_key_rejects_invalid_key_when_required() -> None:
 
     assert response.status_code == 401
     body = response.json()
-    assert "detail" in body
-    assert isinstance(body["detail"], str)
-    assert "invalid" in body["detail"].lower() or "api key" in body["detail"].lower()
+    # AppError("invalid_api_key") → app_error_handler → {"error": str, "message": str}
+    assert body.get("error") == "invalid_api_key"
+    assert "invalid" in body.get("message", "").lower() or "api key" in body.get("message", "").lower()
 
 
 def test_require_api_key_allows_when_auth_disabled_even_without_key() -> None:
@@ -145,12 +146,12 @@ def test_require_api_key_allows_when_auth_disabled_even_without_key() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 401 body contract assertions
+# 401/503 body contract assertions — shape depends on error origin
 # ---------------------------------------------------------------------------
 
 
-def test_missing_key_401_body_does_not_have_error_key() -> None:
-    """HTTPException 401 must produce {"detail": str}, never {"error": ...}."""
+def test_missing_key_401_body_has_detail_not_error() -> None:
+    """HTTPException 401 for missing key → {"detail": str}, no "error" key."""
     app = _make_app(auth_required=True)
 
     @app.get("/protected")
@@ -164,12 +165,13 @@ def test_missing_key_401_body_does_not_have_error_key() -> None:
 
     assert response.status_code == 401
     body = response.json()
+    # HTTPException path → http_exception_handler → {"detail": ...}
     assert "error" not in body
     assert "detail" in body
 
 
-def test_invalid_key_401_body_does_not_have_error_key() -> None:
-    """HTTPException 401 for invalid key must produce {"detail": str}."""
+def test_invalid_key_401_body_has_error_key() -> None:
+    """AppError 401 for invalid key → {"error": "invalid_api_key", "message": str}."""
     app = _make_app(auth_required=True)
 
     @app.get("/protected")
@@ -183,13 +185,13 @@ def test_invalid_key_401_body_does_not_have_error_key() -> None:
 
     assert response.status_code == 401
     body = response.json()
-    assert "error" not in body
-    assert "detail" in body
-    assert "invalid" in body["detail"].lower() or "api key" in body["detail"].lower()
+    # AppError path → app_error_handler → {"error": ..., "message": ...}
+    assert body.get("error") == "invalid_api_key"
+    assert "invalid" in body.get("message", "").lower() or "api key" in body.get("message", "").lower()
 
 
-def test_503_auth_not_configured_body_has_detail() -> None:
-    """When auth_required=True but no key is configured and registry is empty, 503 uses {"detail": str}."""
+def test_503_auth_not_configured_body_has_error_key() -> None:
+    """AppError 503 for unconfigured auth → {"error": "auth_not_configured", "message": str}."""
     app = FastAPI()
     register_exception_handlers(app)
     # No api_key attribute on settings — simulates unconfigured auth
@@ -202,10 +204,10 @@ def test_503_auth_not_configured_body_has_detail() -> None:
         return {"api_key": value}
 
     client = TestClient(app, raise_server_exceptions=False)
-    response = client.get("/protected")
+    response = client.get("/protected", headers={API_KEY_HEADER_NAME: "any-key"})
 
-    # Either 401 (missing key) or 503 (no keys configured) — both use {"detail": str}
-    assert response.status_code in (401, 503)
+    # AppError("auth_not_configured") → app_error_handler → {"error": ..., "message": ...}
+    assert response.status_code == 503
     body = response.json()
-    assert "detail" in body
-    assert isinstance(body["detail"], str)
+    assert body.get("error") == "auth_not_configured"
+    assert "configured" in body.get("message", "").lower() or "api keys" in body.get("message", "").lower()
