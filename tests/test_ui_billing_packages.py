@@ -96,7 +96,8 @@ def test_list_billing_packages_no_auth_raises_401() -> None:
     response = client.get("/billing/packages")
     assert response.status_code == 401
     data = response.json()
-    assert data.get("error") in ("missing_api_key", "authentication_required")
+    # HTTPException raised by get_api_key → http_exception_handler → {"detail": "..."}
+    assert data.get("detail") == "Missing API key — provide X-API-Key or Bearer token"
 
 
 def test_list_billing_packages_wrong_key_raises_401() -> None:
@@ -107,6 +108,7 @@ def test_list_billing_packages_wrong_key_raises_401() -> None:
     )
     assert response.status_code == 401
     data = response.json()
+    # AppError raised by get_api_key → app_error_handler → {"error": "invalid_api_key", ...}
     assert data.get("error") == "invalid_api_key"
 
 

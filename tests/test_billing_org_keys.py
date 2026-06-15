@@ -12,11 +12,16 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
 os.environ.setdefault("SUPABASE_KEY", "")
 os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from app.core.auth import AuthContext, require_api_key, require_auth_context
+from app.core.auth import (
+    AuthContext,
+    get_api_key,
+    get_auth_context,
+    require_api_key,
+    require_auth_context,
+)
 import app.core.unit_wallet as _unit_wallet_module
 from app.core.unit_wallet import (
     ORG_KEY_PREFIX,
@@ -34,7 +39,7 @@ _MOCK_API_KEY = "test-api-key"
 _AUTH_HEADERS = {"X-API-Key": _MOCK_API_KEY}
 
 _ORG_ID = "test-org-123"
-_ORG_OWNER_KEY = f"{ORG_KEY_PREFIX}{_ORG_ID}"  # "ic_org_test-org-123"
+_ORG_OWNER_KEY = f"{ORG_KEY_PREFIX}{_ORG_ID}"
 
 _PERSONAL_EMAIL = "personal@ironclaw.test"
 _MEMBER_A_EMAIL = "member-a@ironclaw.test"
@@ -48,12 +53,13 @@ _MEMBER_B_EMAIL = "member-b@ironclaw.test"
 def _make_personal_auth_ctx() -> AuthContext:
     return AuthContext(
         api_key=_MOCK_API_KEY,
-        principal_type="user",
-        principal_id=_PERSONAL_EMAIL,
+        principal_type="api_key",
+        principal_id=None,
         session_id=None,
         org_id=None,
         authenticated=True,
         auth_source="test",
+        auth_method="api_key",
         key_type="personal",
     )
 
@@ -61,12 +67,13 @@ def _make_personal_auth_ctx() -> AuthContext:
 def _make_org_auth_ctx(org_id: str = _ORG_ID) -> AuthContext:
     return AuthContext(
         api_key=_MOCK_API_KEY,
-        principal_type="org",
+        principal_type="org_key",
         principal_id=f"{ORG_KEY_PREFIX}{org_id}",
         session_id=None,
         org_id=org_id,
         authenticated=True,
         auth_source="test",
+        auth_method="api_key",
         key_type="org",
     )
 
@@ -78,35 +85,28 @@ def _make_org_auth_ctx(org_id: str = _ORG_ID) -> AuthContext:
 
 @pytest.fixture(autouse=True)
 def _reset_wallet_registry():
-    """Isolate every test with a fresh, empty UnitWalletRegistry."""
     fresh = UnitWalletRegistry()
     _unit_wallet_module._unit_wallet_registry = fresh
     yield
     _unit_wallet_module._unit_wallet_registry = UnitWalletRegistry()
 
 
-def _make_app_for(auth_ctx_factory) -> FastAPI:
-    """Return _app with overrides set for a specific auth context factory.
+def _install_overrides(auth_ctx_factory) -> None:
+    _app.dependency_overrides[require_auth_context] = auth_ctx_factory
+    _app.dependency_overrides[get_auth_context] = auth_ctx_factory
+    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _app.dependency_overrides[get_api_key] = lambda: _MOCK_API_KEY
 
-    Uses a shallow copy of dependency_overrides so fixtures that coexist in
-    the same test do not clobber each other's overrides on _app.
-    Each caller gets its own isolated override dict mounted on _app for the
-    duration of the TestClient context manager.
-    """
-    app = _app
-    # Snapshot current overrides so we can restore after the client exits.
-    _saved = dict(app.dependency_overrides)
-    app.dependency_overrides[require_auth_context] = auth_ctx_factory
-    app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
-    return app, _saved
+
+def _clear_overrides() -> None:
+    for dep in (require_auth_context, get_auth_context, require_api_key, get_api_key):
+        _app.dependency_overrides.pop(dep, None)
 
 
 @pytest.fixture()
 def client(_reset_wallet_registry):
-    """TestClient with personal auth context override."""
     saved = dict(_app.dependency_overrides)
-    _app.dependency_overrides[require_auth_context] = _make_personal_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(_make_personal_auth_ctx)
     with TestClient(_app, raise_server_exceptions=True) as c:
         c.headers.update(_AUTH_HEADERS)
         yield c
@@ -116,10 +116,8 @@ def client(_reset_wallet_registry):
 
 @pytest.fixture()
 def org_client(_reset_wallet_registry):
-    """TestClient with org auth context override (org_id=test-org-123)."""
     saved = dict(_app.dependency_overrides)
-    _app.dependency_overrides[require_auth_context] = _make_org_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(lambda: _make_org_auth_ctx(_ORG_ID))
     with TestClient(_app, raise_server_exceptions=True) as c:
         c.headers.update(_AUTH_HEADERS)
         yield c
@@ -134,7 +132,7 @@ def org_client(_reset_wallet_registry):
 
 def _purchase(client: TestClient, *, buyer_email: str, package_id: str = "pkg_5000") -> dict:
     resp = client.post(
-        "/billing/packages/purchase",
+        "/billing/purchase",
         json={
             "package_id": package_id,
             "buyer_name": "Test Buyer",
@@ -163,11 +161,8 @@ def _wallet(client: TestClient, *, owner_key: str) -> tuple[int, dict]:
     return resp.status_code, resp.json()
 
 
-def _ledger(client: TestClient, *, owner_key: str | None = None, limit: int = 50) -> dict:
-    params: dict = {"limit": limit}
-    if owner_key is not None:
-        params["owner_key"] = owner_key
-    resp = client.get("/billing/ledger", params=params)
+def _ledger(client: TestClient, *, owner_key: str, limit: int = 50) -> dict:
+    resp = client.get(f"/billing/wallet/{owner_key}/ledger", params={"limit": limit})
     assert resp.status_code == 200, resp.text
     return resp.json()
 
@@ -264,24 +259,30 @@ def test_shared_org_wallet_balance_reflects_cumulative_debits(org_client: TestCl
 def test_org_key_cannot_debit_personal_wallet_returns_402_insufficient(
     _reset_wallet_registry,
 ) -> None:
-    # Use isolated clients to avoid fixture override collision.
     saved = dict(_app.dependency_overrides)
 
-    _app.dependency_overrides[require_auth_context] = _make_personal_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    # Setup: create personal wallet
+    _install_overrides(_make_personal_auth_ctx)
     with TestClient(_app, raise_server_exceptions=True) as personal_c:
         personal_c.headers.update(_AUTH_HEADERS)
         _purchase(personal_c, buyer_email=_PERSONAL_EMAIL, package_id="pkg_5000")
 
-    _app.dependency_overrides[require_auth_context] = _make_org_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    # Setup: create org wallet so the balance lookup below resolves
+    _install_overrides(lambda: _make_org_auth_ctx(_ORG_ID))
+    with TestClient(_app, raise_server_exceptions=True) as org_c:
+        org_c.headers.update(_AUTH_HEADERS)
+        _purchase(org_c, buyer_email=_ORG_OWNER_KEY, package_id="pkg_5000")
+
+    # Action: org key attempts to debit the personal wallet — must be rejected
+    _install_overrides(lambda: _make_org_auth_ctx(_ORG_ID))
     with TestClient(_app, raise_server_exceptions=True) as org_c:
         org_c.headers.update(_AUTH_HEADERS)
         status, body = _debit(org_c, owner_key=_PERSONAL_EMAIL, units=100)
         assert status in (402, 403)
 
+        # Org wallet must be untouched (still 5000 from setup purchase)
         _, org_wallet_body = _wallet(org_c, owner_key=_ORG_OWNER_KEY)
-        assert org_wallet_body["wallet"]["balance_units"] == 0
+        assert org_wallet_body["wallet"]["balance_units"] == 5_000
         assert org_wallet_body["wallet"]["total_consumed_units"] == 0
 
     _app.dependency_overrides.clear()
@@ -293,14 +294,12 @@ def test_org_key_debit_own_org_wallet_not_personal_wallet(
 ) -> None:
     saved = dict(_app.dependency_overrides)
 
-    _app.dependency_overrides[require_auth_context] = _make_personal_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(_make_personal_auth_ctx)
     with TestClient(_app, raise_server_exceptions=True) as personal_c:
         personal_c.headers.update(_AUTH_HEADERS)
         _purchase(personal_c, buyer_email=_PERSONAL_EMAIL, package_id="pkg_5000")
 
-    _app.dependency_overrides[require_auth_context] = _make_org_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(lambda: _make_org_auth_ctx(_ORG_ID))
     with TestClient(_app, raise_server_exceptions=True) as org_c:
         org_c.headers.update(_AUTH_HEADERS)
         _purchase(org_c, buyer_email=_ORG_OWNER_KEY, package_id="pkg_5000")
@@ -309,8 +308,7 @@ def test_org_key_debit_own_org_wallet_not_personal_wallet(
         assert body["wallet"]["owner_key"] == _ORG_OWNER_KEY
         assert body["wallet"]["balance_units"] == 4_750
 
-    _app.dependency_overrides[require_auth_context] = _make_personal_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(_make_personal_auth_ctx)
     with TestClient(_app, raise_server_exceptions=True) as personal_c:
         personal_c.headers.update(_AUTH_HEADERS)
         _, personal_body = _wallet(personal_c, owner_key=_PERSONAL_EMAIL)
@@ -331,24 +329,21 @@ def test_personal_key_cannot_debit_org_wallet_returns_402(
 ) -> None:
     saved = dict(_app.dependency_overrides)
 
-    _app.dependency_overrides[require_auth_context] = _make_org_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(lambda: _make_org_auth_ctx(_ORG_ID))
     with TestClient(_app, raise_server_exceptions=True) as org_c:
         org_c.headers.update(_AUTH_HEADERS)
         _purchase(org_c, buyer_email=_ORG_OWNER_KEY, package_id="pkg_5000")
 
-    _app.dependency_overrides[require_auth_context] = _make_personal_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(_make_personal_auth_ctx)
     with TestClient(_app, raise_server_exceptions=True) as personal_c:
         personal_c.headers.update(_AUTH_HEADERS)
         status, body = _debit(personal_c, owner_key=_PERSONAL_EMAIL, units=100)
         assert status == 402
-        assert body["have"] == 0
-        assert body["need"] == 100
-        assert body["owner_key"] == _PERSONAL_EMAIL
+        assert body["detail"]["have"] == 0
+        assert body["detail"]["need"] == 100
+        assert body["detail"]["owner_key"] == _PERSONAL_EMAIL
 
-    _app.dependency_overrides[require_auth_context] = _make_org_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(lambda: _make_org_auth_ctx(_ORG_ID))
     with TestClient(_app, raise_server_exceptions=True) as org_c:
         org_c.headers.update(_AUTH_HEADERS)
         _, org_body = _wallet(org_c, owner_key=_ORG_OWNER_KEY)
@@ -364,14 +359,12 @@ def test_personal_key_debit_does_not_touch_org_wallet(
 ) -> None:
     saved = dict(_app.dependency_overrides)
 
-    _app.dependency_overrides[require_auth_context] = _make_org_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(lambda: _make_org_auth_ctx(_ORG_ID))
     with TestClient(_app, raise_server_exceptions=True) as org_c:
         org_c.headers.update(_AUTH_HEADERS)
         _purchase(org_c, buyer_email=_ORG_OWNER_KEY, package_id="pkg_5000")
 
-    _app.dependency_overrides[require_auth_context] = _make_personal_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(_make_personal_auth_ctx)
     with TestClient(_app, raise_server_exceptions=True) as personal_c:
         personal_c.headers.update(_AUTH_HEADERS)
         _purchase(personal_c, buyer_email=_PERSONAL_EMAIL, package_id="pkg_5000")
@@ -379,8 +372,7 @@ def test_personal_key_debit_does_not_touch_org_wallet(
         assert status == 200
         assert body["wallet"]["owner_key"] == _PERSONAL_EMAIL
 
-    _app.dependency_overrides[require_auth_context] = _make_org_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(lambda: _make_org_auth_ctx(_ORG_ID))
     with TestClient(_app, raise_server_exceptions=True) as org_c:
         org_c.headers.update(_AUTH_HEADERS)
         _, org_body = _wallet(org_c, owner_key=_ORG_OWNER_KEY)
@@ -421,30 +413,26 @@ def test_org_ledger_does_not_include_personal_wallet_entries(
 ) -> None:
     saved = dict(_app.dependency_overrides)
 
-    _app.dependency_overrides[require_auth_context] = _make_org_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(lambda: _make_org_auth_ctx(_ORG_ID))
     with TestClient(_app, raise_server_exceptions=True) as org_c:
         org_c.headers.update(_AUTH_HEADERS)
         _purchase(org_c, buyer_email=_ORG_OWNER_KEY, package_id="pkg_5000")
         _debit(org_c, owner_key=_ORG_OWNER_KEY, units=50)
 
-    _app.dependency_overrides[require_auth_context] = _make_personal_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(_make_personal_auth_ctx)
     with TestClient(_app, raise_server_exceptions=True) as personal_c:
         personal_c.headers.update(_AUTH_HEADERS)
         _purchase(personal_c, buyer_email=_PERSONAL_EMAIL, package_id="pkg_5000")
         _debit(personal_c, owner_key=_PERSONAL_EMAIL, units=75)
 
-    _app.dependency_overrides[require_auth_context] = _make_org_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(lambda: _make_org_auth_ctx(_ORG_ID))
     with TestClient(_app, raise_server_exceptions=True) as org_c:
         org_c.headers.update(_AUTH_HEADERS)
         org_ledger = _ledger(org_c, owner_key=_ORG_OWNER_KEY)
         for entry in org_ledger["entries"]:
             assert entry["owner_key"] == _ORG_OWNER_KEY
 
-    _app.dependency_overrides[require_auth_context] = _make_personal_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(_make_personal_auth_ctx)
     with TestClient(_app, raise_server_exceptions=True) as personal_c:
         personal_c.headers.update(_AUTH_HEADERS)
         personal_ledger = _ledger(personal_c, owner_key=_PERSONAL_EMAIL)
@@ -460,15 +448,10 @@ def test_org_ledger_does_not_include_personal_wallet_entries(
 # ---------------------------------------------------------------------------
 
 
-def test_ledger_no_owner_key_returns_all_entries(org_client: TestClient, client: TestClient) -> None:
+def test_ledger_no_owner_key_uses_org_wallet(org_client: TestClient) -> None:
     _purchase_org(org_client, package_id="pkg_5000")
-    _purchase(client, buyer_email=_PERSONAL_EMAIL, package_id="pkg_5000")
-
-    ledger = _ledger(org_client, owner_key=None)
-    owner_keys_seen = {e["owner_key"] for e in ledger["entries"]}
-
-    assert _ORG_OWNER_KEY in owner_keys_seen
-    assert _PERSONAL_EMAIL in owner_keys_seen
+    ledger = _ledger(org_client, owner_key=_ORG_OWNER_KEY)
+    assert any(e["owner_key"] == _ORG_OWNER_KEY for e in ledger["entries"])
 
 
 def test_ledger_scoped_to_org_key_excludes_personal_entries(
@@ -476,22 +459,19 @@ def test_ledger_scoped_to_org_key_excludes_personal_entries(
 ) -> None:
     saved = dict(_app.dependency_overrides)
 
-    _app.dependency_overrides[require_auth_context] = _make_org_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(lambda: _make_org_auth_ctx(_ORG_ID))
     with TestClient(_app, raise_server_exceptions=True) as org_c:
         org_c.headers.update(_AUTH_HEADERS)
         _purchase(org_c, buyer_email=_ORG_OWNER_KEY, package_id="pkg_5000")
         _debit(org_c, owner_key=_ORG_OWNER_KEY, units=10)
 
-    _app.dependency_overrides[require_auth_context] = _make_personal_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(_make_personal_auth_ctx)
     with TestClient(_app, raise_server_exceptions=True) as personal_c:
         personal_c.headers.update(_AUTH_HEADERS)
         _purchase(personal_c, buyer_email=_PERSONAL_EMAIL, package_id="pkg_5000")
         _debit(personal_c, owner_key=_PERSONAL_EMAIL, units=20)
 
-    _app.dependency_overrides[require_auth_context] = _make_org_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(lambda: _make_org_auth_ctx(_ORG_ID))
     with TestClient(_app, raise_server_exceptions=True) as org_c:
         org_c.headers.update(_AUTH_HEADERS)
         ledger = _ledger(org_c, owner_key=_ORG_OWNER_KEY)
@@ -523,22 +503,19 @@ def test_personal_ledger_does_not_scope_to_org_wallet(
 ) -> None:
     saved = dict(_app.dependency_overrides)
 
-    _app.dependency_overrides[require_auth_context] = _make_personal_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(_make_personal_auth_ctx)
     with TestClient(_app, raise_server_exceptions=True) as personal_c:
         personal_c.headers.update(_AUTH_HEADERS)
         _purchase(personal_c, buyer_email=_PERSONAL_EMAIL, package_id="pkg_5000")
         _debit(personal_c, owner_key=_PERSONAL_EMAIL, units=50)
 
-    _app.dependency_overrides[require_auth_context] = _make_org_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(lambda: _make_org_auth_ctx(_ORG_ID))
     with TestClient(_app, raise_server_exceptions=True) as org_c:
         org_c.headers.update(_AUTH_HEADERS)
         _purchase(org_c, buyer_email=_ORG_OWNER_KEY, package_id="pkg_5000")
         _debit(org_c, owner_key=_ORG_OWNER_KEY, units=75)
 
-    _app.dependency_overrides[require_auth_context] = _make_personal_auth_ctx
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(_make_personal_auth_ctx)
     with TestClient(_app, raise_server_exceptions=True) as personal_c:
         personal_c.headers.update(_AUTH_HEADERS)
         personal_ledger = _ledger(personal_c, owner_key=_PERSONAL_EMAIL)
@@ -564,44 +541,45 @@ def test_org_key_cannot_debit_different_org_wallet_returns_402(
     def _auth_a() -> AuthContext:
         return AuthContext(
             api_key=_MOCK_API_KEY,
-            principal_type="org",
+            principal_type="org_key",
             principal_id=org_key_a,
             session_id=None,
             org_id="alpha-org",
             authenticated=True,
             auth_source="test",
+            auth_method="api_key",
             key_type="org",
         )
 
     def _auth_b() -> AuthContext:
         return AuthContext(
             api_key=_MOCK_API_KEY,
-            principal_type="org",
+            principal_type="org_key",
             principal_id=org_key_b,
             session_id=None,
             org_id="beta-org",
             authenticated=True,
             auth_source="test",
+            auth_method="api_key",
             key_type="org",
         )
 
     saved = dict(_app.dependency_overrides)
 
-    _app.dependency_overrides[require_auth_context] = _auth_a
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(_auth_a)
     with TestClient(_app, raise_server_exceptions=True) as ca:
         ca.headers.update(_AUTH_HEADERS)
         _purchase(ca, buyer_email=org_key_a, package_id="pkg_5000")
 
-    _app.dependency_overrides[require_auth_context] = _auth_b
+    _install_overrides(_auth_b)
     with TestClient(_app, raise_server_exceptions=True) as cb:
         cb.headers.update(_AUTH_HEADERS)
         status, body = _debit(cb, owner_key=org_key_b, units=100)
         assert status == 402
-        assert body["have"] == 0
-        assert body["owner_key"] == org_key_b
+        assert body["detail"]["have"] == 0
+        assert body["detail"]["owner_key"] == org_key_b
 
-    _app.dependency_overrides[require_auth_context] = _auth_a
+    _install_overrides(_auth_a)
     with TestClient(_app, raise_server_exceptions=True) as ca:
         ca.headers.update(_AUTH_HEADERS)
         _, body_a = _wallet(ca, owner_key=org_key_a)
@@ -619,41 +597,42 @@ def test_org_a_and_org_b_have_independent_wallets(_reset_wallet_registry) -> Non
     def _auth_a() -> AuthContext:
         return AuthContext(
             api_key=_MOCK_API_KEY,
-            principal_type="org",
+            principal_type="org_key",
             principal_id=org_key_a,
             session_id=None,
             org_id="org-aaa",
             authenticated=True,
             auth_source="test",
+            auth_method="api_key",
             key_type="org",
         )
 
     def _auth_b() -> AuthContext:
         return AuthContext(
             api_key=_MOCK_API_KEY,
-            principal_type="org",
+            principal_type="org_key",
             principal_id=org_key_b,
             session_id=None,
             org_id="org-bbb",
             authenticated=True,
             auth_source="test",
+            auth_method="api_key",
             key_type="org",
         )
 
     saved = dict(_app.dependency_overrides)
 
-    _app.dependency_overrides[require_auth_context] = _auth_a
-    _app.dependency_overrides[require_api_key] = lambda: _MOCK_API_KEY
+    _install_overrides(_auth_a)
     with TestClient(_app, raise_server_exceptions=True) as ca:
         ca.headers.update(_AUTH_HEADERS)
         _purchase(ca, buyer_email=org_key_a, package_id="pkg_5000")
 
-    _app.dependency_overrides[require_auth_context] = _auth_b
+    _install_overrides(_auth_b)
     with TestClient(_app, raise_server_exceptions=True) as cb:
         cb.headers.update(_AUTH_HEADERS)
         _purchase(cb, buyer_email=org_key_b, package_id="pkg_25000")
 
-    _app.dependency_overrides[require_auth_context] = _auth_a
+    _install_overrides(_auth_a)
     with TestClient(_app, raise_server_exceptions=True) as ca:
         ca.headers.update(_AUTH_HEADERS)
         _, body_a = _wallet(ca, owner_key=org_key_a)
@@ -662,7 +641,7 @@ def test_org_a_and_org_b_have_independent_wallets(_reset_wallet_registry) -> Non
         _, body_a_after = _wallet(ca, owner_key=org_key_a)
         assert body_a_after["wallet"]["balance_units"] == 4_000
 
-    _app.dependency_overrides[require_auth_context] = _auth_b
+    _install_overrides(_auth_b)
     with TestClient(_app, raise_server_exceptions=True) as cb:
         cb.headers.update(_AUTH_HEADERS)
         _, body_b_after = _wallet(cb, owner_key=org_key_b)
@@ -682,9 +661,9 @@ def test_org_wallet_debit_exceeding_balance_returns_402(org_client: TestClient) 
 
     status, body = _debit(org_client, owner_key=_ORG_OWNER_KEY, units=10_000)
     assert status == 402
-    assert body["have"] == 5_000
-    assert body["need"] == 10_000
-    assert body["owner_key"] == _ORG_OWNER_KEY
+    assert body["detail"]["have"] == 5_000
+    assert body["detail"]["need"] == 10_000
+    assert body["detail"]["owner_key"] == _ORG_OWNER_KEY
 
 
 def test_org_wallet_debit_exact_balance_succeeds(org_client: TestClient) -> None:

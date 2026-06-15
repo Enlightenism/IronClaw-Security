@@ -11,18 +11,23 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
 os.environ.setdefault("SUPABASE_KEY", "")
 os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
-
 from contextlib import contextmanager
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 import pytest
 
-from app.core.auth import AuthContext, get_api_key, get_auth_context, require_auth_context
+from app.api.routes.billing import PACKAGE_CATALOG
+from app.core.auth import (
+    AuthContext,
+    get_api_key,
+    get_auth_context,
+    require_api_key,
+    require_auth_context,
+)
 from app.core.billing import resolve_billing_owner
 import app.core.unit_wallet as _unit_wallet_module
 from app.core.unit_wallet import (
-    UNIT_PACKAGE_CATALOG,
     MemoryUnitWalletRepository,
     UnitWalletRegistry,
 )
@@ -30,6 +35,8 @@ from app.core.unit_wallet import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+_MOCK_API_KEY = "test-key"
 
 
 def _make_auth_ctx(
@@ -41,20 +48,22 @@ def _make_auth_ctx(
     auth_source: str = "registry",
 ) -> AuthContext:
     return AuthContext(
-        api_key="test-key",
+        api_key=_MOCK_API_KEY,
         principal_type=principal_type,
-        principal_id="test-principal",
+        principal_id=None,
         session_id=None,
         org_id=org_id,
         authenticated=authenticated,
         auth_source=auth_source,
+        auth_method="api_key",
         key_type=key_type,
     )
 
 
 def _first_package() -> tuple[str, dict]:
-    pkg_id = next(iter(UNIT_PACKAGE_CATALOG))
-    return pkg_id, UNIT_PACKAGE_CATALOG[pkg_id]
+    """Return (pkg_id, pkg_dict) for the first entry in PACKAGE_CATALOG (route layer)."""
+    pkg_id = next(iter(PACKAGE_CATALOG))
+    return pkg_id, PACKAGE_CATALOG[pkg_id]
 
 
 def _purchase_payload(
@@ -63,7 +72,7 @@ def _purchase_payload(
     package_id: str | None = None,
 ) -> dict:
     if package_id is None:
-        package_id = next(iter(UNIT_PACKAGE_CATALOG))
+        package_id = next(iter(PACKAGE_CATALOG))
     return {
         "package_id": package_id,
         "buyer_name": buyer_name,
@@ -123,20 +132,20 @@ def personal_auth_ctx() -> AuthContext:
 @contextmanager
 def _override_auth(app_instance, ctx: AuthContext):
     def _stub_api_key() -> str:
-        return ctx.api_key or "test-key"
+        return ctx.api_key or _MOCK_API_KEY
 
     def _stub_auth_ctx() -> AuthContext:
         return ctx
 
     app_instance.dependency_overrides[get_api_key] = _stub_api_key
+    app_instance.dependency_overrides[require_api_key] = _stub_api_key
     app_instance.dependency_overrides[get_auth_context] = _stub_auth_ctx
     app_instance.dependency_overrides[require_auth_context] = _stub_auth_ctx
     try:
         yield TestClient(app_instance, raise_server_exceptions=True)
     finally:
-        app_instance.dependency_overrides.pop(get_api_key, None)
-        app_instance.dependency_overrides.pop(get_auth_context, None)
-        app_instance.dependency_overrides.pop(require_auth_context, None)
+        for dep in (get_api_key, require_api_key, get_auth_context, require_auth_context):
+            app_instance.dependency_overrides.pop(dep, None)
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +312,7 @@ class TestOrgWalletRouting:
 
 
 # ---------------------------------------------------------------------------
-# Integration tests — POST /billing/packages/purchase via TestClient
+# Integration tests — POST /billing/purchase via TestClient
 # ---------------------------------------------------------------------------
 
 
@@ -317,7 +326,7 @@ class TestPurchaseOrgWalletIntegration:
         ctx = _org_ctx(org_id)
         with _override_auth(app_instance, ctx) as client:
             resp = client.post(
-                "/billing/packages/purchase",
+                "/billing/purchase",
                 json=_purchase_payload("buyer@example.com"),
             )
         assert resp.status_code == 201
@@ -331,7 +340,7 @@ class TestPurchaseOrgWalletIntegration:
         ctx = _org_ctx(org_id)
         with _override_auth(app_instance, ctx) as client:
             resp = client.post(
-                "/billing/packages/purchase",
+                "/billing/purchase",
                 json=_purchase_payload("buyer@example.com"),
             )
         assert resp.status_code == 201
@@ -344,11 +353,11 @@ class TestPurchaseOrgWalletIntegration:
         _isolated_wallet_registry: UnitWalletRegistry,
     ) -> None:
         pkg_id, pkg = _first_package()
-        expected_units = int(pkg["unit_amount"])
+        expected_units = int(pkg["included_units"])
         ctx = _org_ctx(org_id)
         with _override_auth(app_instance, ctx) as client:
             resp = client.post(
-                "/billing/packages/purchase",
+                "/billing/purchase",
                 json=_purchase_payload("buyer@example.com", package_id=pkg_id),
             )
         assert resp.status_code == 201
@@ -367,7 +376,7 @@ class TestPurchaseOrgWalletIntegration:
         ctx = _org_ctx(org_id)
         with _override_auth(app_instance, ctx) as client:
             client.post(
-                "/billing/packages/purchase",
+                "/billing/purchase",
                 json=_purchase_payload(buyer_email),
             )
         email_wallet = _isolated_wallet_registry.get_wallet(buyer_email)
@@ -380,15 +389,15 @@ class TestPurchaseOrgWalletIntegration:
         _isolated_wallet_registry: UnitWalletRegistry,
     ) -> None:
         pkg_id, pkg = _first_package()
-        expected_units_each = int(pkg["unit_amount"])
+        expected_units_each = int(pkg["included_units"])
         ctx = _org_ctx(org_id)
         with _override_auth(app_instance, ctx) as client:
             resp_alice = client.post(
-                "/billing/packages/purchase",
+                "/billing/purchase",
                 json=_purchase_payload("alice@example.com", buyer_name="Alice", package_id=pkg_id),
             )
             resp_bob = client.post(
-                "/billing/packages/purchase",
+                "/billing/purchase",
                 json=_purchase_payload("bob@example.com", buyer_name="Bob", package_id=pkg_id),
             )
         assert resp_alice.status_code == 201
@@ -405,15 +414,15 @@ class TestPurchaseOrgWalletIntegration:
         app_instance,
         org_id: str,
     ) -> None:
-        pkg_id = next(iter(UNIT_PACKAGE_CATALOG))
+        pkg_id = next(iter(PACKAGE_CATALOG))
         ctx = _org_ctx(org_id)
         with _override_auth(app_instance, ctx) as client:
             resp_a = client.post(
-                "/billing/packages/purchase",
+                "/billing/purchase",
                 json=_purchase_payload("alice@example.com", buyer_name="Alice", package_id=pkg_id),
             )
             resp_b = client.post(
-                "/billing/packages/purchase",
+                "/billing/purchase",
                 json=_purchase_payload("bob@example.com", buyer_name="Bob", package_id=pkg_id),
             )
         assert resp_a.status_code == 201
@@ -427,11 +436,11 @@ class TestPurchaseOrgWalletIntegration:
     ) -> None:
         buyer_email = "solo-dev@ironclaw.io"
         pkg_id, pkg = _first_package()
-        expected_units = int(pkg["unit_amount"])
+        expected_units = int(pkg["included_units"])
         ctx = _personal_ctx()
         with _override_auth(app_instance, ctx) as client:
             resp = client.post(
-                "/billing/packages/purchase",
+                "/billing/purchase",
                 json=_purchase_payload(buyer_email, package_id=pkg_id),
             )
         assert resp.status_code == 201
@@ -452,7 +461,7 @@ class TestPurchaseOrgWalletIntegration:
         ctx = _personal_ctx()
         with _override_auth(app_instance, ctx) as client:
             client.post(
-                "/billing/packages/purchase",
+                "/billing/purchase",
                 json=_purchase_payload(buyer_email),
             )
         org_wallet = _isolated_wallet_registry.get_wallet("ic_org_acme-corp")
@@ -465,7 +474,7 @@ class TestPurchaseOrgWalletIntegration:
         ctx = _personal_ctx()
         with _override_auth(app_instance, ctx) as client:
             resp = client.post(
-                "/billing/packages/purchase",
+                "/billing/purchase",
                 json=_purchase_payload("Dev@IronClaw.IO"),
             )
         assert resp.status_code == 201
@@ -478,17 +487,17 @@ class TestPurchaseOrgWalletIntegration:
         _isolated_wallet_registry: UnitWalletRegistry,
     ) -> None:
         shared_email = "shared@example.com"
-        pkg_id = next(iter(UNIT_PACKAGE_CATALOG))
+        pkg_id = next(iter(PACKAGE_CATALOG))
         org_ctx = _org_ctx(org_id)
         personal_ctx = _personal_ctx()
         with _override_auth(app_instance, org_ctx) as client:
             resp_org = client.post(
-                "/billing/packages/purchase",
+                "/billing/purchase",
                 json=_purchase_payload(shared_email, buyer_name="OrgMember", package_id=pkg_id),
             )
         with _override_auth(app_instance, personal_ctx) as client:
             resp_personal = client.post(
-                "/billing/packages/purchase",
+                "/billing/purchase",
                 json=_purchase_payload(shared_email, buyer_name="PersonalUser", package_id=pkg_id),
             )
         assert resp_org.status_code == 201
@@ -505,7 +514,7 @@ class TestPurchaseOrgWalletIntegration:
         ctx = _org_ctx(org_id)
         with _override_auth(app_instance, ctx) as client:
             resp = client.post(
-                "/billing/packages/purchase",
+                "/billing/purchase",
                 json=_purchase_payload("buyer@example.com"),
             )
         assert resp.status_code == 201
@@ -523,7 +532,7 @@ class TestPurchaseOrgWalletIntegration:
         ctx = _org_ctx(org_id)
         with _override_auth(app_instance, ctx) as client:
             resp = client.post(
-                "/billing/packages/purchase",
+                "/billing/purchase",
                 json=_purchase_payload("buyer@example.com"),
             )
         assert resp.status_code == 201

@@ -9,8 +9,6 @@ from app.core.errors import register_exception_handlers
 
 def _build_test_app() -> FastAPI:
     app = FastAPI()
-    register_exception_handlers(app)
-    app.include_router(claude_router_proxy_router)
     app.state.settings = type(
         "TestSettings",
         (),
@@ -20,6 +18,8 @@ def _build_test_app() -> FastAPI:
             "admin_api_key": "",
         },
     )()
+    register_exception_handlers(app)
+    app.include_router(claude_router_proxy_router)
     return app
 
 
@@ -40,8 +40,8 @@ def test_router_proxy_requires_api_key() -> None:
     )
 
     assert response.status_code == 401
-    assert response.json()["error"] == "missing_api_key"
-    assert response.json()["message"] == "Missing API key"
+    # HTTPException raised by require_api_key → http_exception_handler → {"detail": "..."}
+    assert response.json()["detail"] == "Missing API key — provide X-API-Key or Bearer token"
 
 
 def test_router_proxy_requires_upstream_url_even_with_api_key() -> None:
@@ -55,6 +55,7 @@ def test_router_proxy_requires_upstream_url_even_with_api_key() -> None:
     )
 
     assert response.status_code == 400
+    # AppError raised by route handler → app_error_handler → {"error": ..., "message": ...}
     assert response.json()["error"] == "http_error"
     assert response.json()["message"] == "Missing 'upstream_url' in request body."
 
