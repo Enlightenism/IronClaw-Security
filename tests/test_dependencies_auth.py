@@ -19,6 +19,7 @@ os.environ.setdefault("SUPABASE_ANON_KEY", "test-anon-key")
 from app.core.api_key_auth import EdgeAuthContext, require_api_key, require_scope
 from app.core.apikeys import APIKeyRegistry, generate_api_key
 from app.core.auth import AuthContext, get_api_key
+from app.core.errors import AppError
 from app.dependencies.auth import (
     require_access_dependency,
     require_authenticated,
@@ -442,7 +443,7 @@ class TestRequireLocalApiKey:
         assert exc_info.value.status_code == 401
         assert "missing" in exc_info.value.detail.lower() or "api key" in exc_info.value.detail.lower()
 
-    def test_get_api_key_raises_401_on_invalid_key_when_auth_required(self) -> None:
+    def test_get_api_key_raises_app_error_on_invalid_key_when_auth_required(self) -> None:
         with (
             patch("app.core.auth._is_auth_required", return_value=True),
             patch("app.core.auth._extract_configured_api_key", return_value="correct-key"),
@@ -453,11 +454,11 @@ class TestRequireLocalApiKey:
 
             mock_request = MagicMock(spec=Request)
             mock_request.app.state.settings = None
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(AppError) as exc_info:
                 get_api_key(request=mock_request, provided_api_key="wrong-key")
 
+        assert exc_info.value.error == "invalid_api_key"
         assert exc_info.value.status_code == 401
-        assert "invalid" in exc_info.value.detail.lower() or "api key" in exc_info.value.detail.lower()
 
     def test_registry_key_type_is_str_or_none(self) -> None:
         registry = APIKeyRegistry()
@@ -559,8 +560,6 @@ class TestRequireAuthenticated:
 
     @pytest.mark.asyncio
     async def test_unauthenticated_context_raises(self) -> None:
-        from app.core.errors import AppError
-
         ctx = _make_auth_context(authenticated=False, principal_type="anonymous", api_key=None)
         with pytest.raises(AppError) as exc_info:
             await require_authenticated(context=ctx)
@@ -618,8 +617,6 @@ class TestRequireAccessDependency:
 
     @pytest.mark.asyncio
     async def test_unauthenticated_raises(self) -> None:
-        from app.core.errors import AppError
-
         ctx = _make_auth_context(authenticated=False, principal_type="anonymous", api_key=None)
         dep = require_access_dependency(action="scan:execute")
         with pytest.raises(AppError) as exc_info:
@@ -671,8 +668,6 @@ class TestRequireSameOrgDependency:
 
     @pytest.mark.asyncio
     async def test_mismatched_org_raises(self) -> None:
-        from app.core.errors import AppError
-
         ctx = _make_auth_context(
             authenticated=True,
             principal_type="api_key",
@@ -687,8 +682,6 @@ class TestRequireSameOrgDependency:
 
     @pytest.mark.asyncio
     async def test_unauthenticated_with_org_raises(self) -> None:
-        from app.core.errors import AppError
-
         ctx = _make_auth_context(
             authenticated=False,
             principal_type="anonymous",
