@@ -33,6 +33,7 @@ from app.core.auth import (
     require_api_key,
     require_auth_context,
 )
+from app.core.errors import register_exception_handlers
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -118,7 +119,7 @@ def _make_org_record(
 
 
 # ---------------------------------------------------------------------------
-# TestClient app factory — injects settings and registry via app.state
+# TestClient app factory — injects settings, registry, and exception handlers
 # ---------------------------------------------------------------------------
 
 
@@ -146,6 +147,9 @@ def _make_app(
     )
     app.state.settings = settings
     app.state.api_key_registry = registry or APIKeyRegistry()
+
+    # Register exception handlers so AppError → 401/503 (not 500)
+    register_exception_handlers(app)
 
     @app.get("/probe/auth-context")
     async def _probe_auth_context(ctx: AuthContext = Depends(get_auth_context)):
@@ -214,6 +218,7 @@ class TestGetApiKeyAuthRequiredMissingKey:
         with patch("app.core.auth.get_api_key_registry", return_value=registry):
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.get("/probe/auth-context")
+        # HTTPException → http_exception_handler → {"detail": "..."}
         assert "X-API-Key" in resp.json().get("detail", "")
 
     def test_missing_key_detail_contains_bearer(self):
@@ -266,7 +271,10 @@ class TestGetApiKeyInvalidKey:
                     "/probe/auth-context",
                     headers={API_KEY_HEADER_NAME: "ic_completely_wrong_key_xyz"},
                 )
-        assert resp.json().get("detail") == "Invalid API key"
+        # AppError → app_error_handler → {"error": "invalid_api_key", "message": "Invalid API key"}
+        body = resp.json()
+        assert body.get("error") == "invalid_api_key"
+        assert body.get("message") == "Invalid API key"
 
     def test_wrong_configured_key_raises_401(self):
         registry = APIKeyRegistry()
@@ -318,8 +326,9 @@ class TestGetApiKeyNoKeysConfigured:
                     "/probe/auth-context",
                     headers={API_KEY_HEADER_NAME: "ic_any_key_doesnt_matter"},
                 )
-        detail = resp.json().get("detail", "")
-        assert "API keys" in detail or "api keys" in detail.lower()
+        # AppError → app_error_handler → {"error": "auth_not_configured", "message": "..."}
+        message = resp.json().get("message", "")
+        assert "API keys" in message or "api keys" in message.lower()
 
     def test_no_keys_configured_detail_mentions_auth_required(self):
         empty_registry = APIKeyRegistry()
@@ -334,8 +343,8 @@ class TestGetApiKeyNoKeysConfigured:
                     "/probe/auth-context",
                     headers={API_KEY_HEADER_NAME: "ic_any_key_doesnt_matter"},
                 )
-        detail = resp.json().get("detail", "")
-        assert "required" in detail.lower()
+        message = resp.json().get("message", "")
+        assert "required" in message.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -665,6 +674,7 @@ class TestRequireAuthContext:
         with patch("app.core.auth.get_api_key_registry", return_value=registry):
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.get("/probe/require-auth")
+        # HTTPException → http_exception_handler → {"detail": "Authentication required"}
         assert resp.json().get("detail") == "Authentication required"
 
     def test_authenticated_context_passes_through(self):
