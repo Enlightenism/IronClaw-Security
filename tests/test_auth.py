@@ -14,6 +14,7 @@ from app.core.auth import (
     get_api_key,
     require_api_key,
 )
+from app.core.errors import register_exception_handlers
 from app.core.settings import get_settings
 
 # ---------------------------------------------------------------------------
@@ -162,7 +163,7 @@ class TestSecretsIndependence:
 
 
 # ---------------------------------------------------------------------------
-# get_api_key — auth_not_configured warning is logged
+# get_api_key — auth_not_configured: AppError 503
 # ---------------------------------------------------------------------------
 
 
@@ -170,6 +171,7 @@ class TestGetApiKeyAuthNotConfigured:
     def test_auth_not_configured_logs_warning(self, caplog):
         """When auth_required=True but no keys are configured, a WARNING is emitted."""
         app = FastAPI()
+        register_exception_handlers(app)
         app.state.settings = SimpleNamespace(auth_required=True)
 
         @app.get("/probe")
@@ -188,6 +190,7 @@ class TestGetApiKeyAuthNotConfigured:
     def test_auth_not_configured_raises_503(self, caplog):
         """503 is returned when auth_required but nothing is configured."""
         app = FastAPI()
+        register_exception_handlers(app)
         app.state.settings = SimpleNamespace(auth_required=True)
 
         @app.get("/probe")
@@ -203,7 +206,7 @@ class TestGetApiKeyAuthNotConfigured:
 
 
 # ---------------------------------------------------------------------------
-# Original integration tests — updated to HTTPException / {"detail": ...} shape
+# Original integration tests
 # ---------------------------------------------------------------------------
 
 
@@ -255,12 +258,14 @@ def test_require_api_key_raises_for_missing_key_when_required() -> None:
     response = client.get("/protected")
 
     assert response.status_code == 401
+    # HTTPException → http_exception_handler → {"detail": str}
     detail = response.json()["detail"]
     assert "missing" in detail.lower() or "api key" in detail.lower()
 
 
 def test_require_api_key_raises_for_invalid_key_when_required() -> None:
     app = FastAPI()
+    register_exception_handlers(app)
     app.state.settings = SimpleNamespace(api_key="test-secret-key", auth_required=True)
 
     @app.get("/protected")
@@ -273,8 +278,10 @@ def test_require_api_key_raises_for_invalid_key_when_required() -> None:
     response = client.get("/protected", headers={API_KEY_HEADER_NAME: "wrong-key"})
 
     assert response.status_code == 401
-    detail = response.json()["detail"]
-    assert "invalid" in detail.lower() or "api key" in detail.lower()
+    body = response.json()
+    # AppError("invalid_api_key") → app_error_handler → {"error": "invalid_api_key", "message": str}
+    assert body.get("error") == "invalid_api_key"
+    assert "invalid" in body.get("message", "").lower() or "api key" in body.get("message", "").lower()
 
 
 def test_require_api_key_allows_optional_mode_without_header() -> None:
