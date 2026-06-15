@@ -173,8 +173,7 @@ class TestProbeRoute:
         r = _bare_client().get("/test/probe", headers=_auth_headers(_BAD_KEY))
         assert r.status_code == 401
         body = r.json()
-        assert "detail" in body
-        assert "invalid" in body["detail"].lower() or "revoked" in body["detail"].lower()
+        assert body.get("error") == "invalid_api_key"
 
     def test_valid_key_sets_platform_principal_type(self, client: TestClient) -> None:
         r = client.get("/test/probe")
@@ -224,8 +223,7 @@ class TestRequireAuthenticatedHTTP:
     def test_invalid_key_401_detail_contains_invalid(self) -> None:
         r = _bare_client().get("/test/authenticated", headers=_auth_headers(_BAD_KEY))
         body = r.json()
-        assert "detail" in body
-        assert "invalid" in body["detail"].lower() or "revoked" in body["detail"].lower()
+        assert body.get("error") == "invalid_api_key"
 
     def test_valid_key_principal_type_platform(self, client: TestClient) -> None:
         r = client.get("/test/authenticated")
@@ -351,8 +349,7 @@ class TestRequireSameOrgDependencyHTTP:
     def test_invalid_key_401_detail_not_empty(self) -> None:
         r = _bare_client().get("/test/org", headers=_auth_headers(_BAD_KEY))
         body = r.json()
-        assert "detail" in body
-        assert len(body["detail"]) > 0
+        assert body.get("error") == "invalid_api_key"
 
     def test_valid_key_with_org_authenticated_true(self, client: TestClient) -> None:
         r = client.get("/test/org", headers=_auth_org_headers())
@@ -399,14 +396,15 @@ class TestHTTPContractAssertions:
         r = _bare_client().get("/test/authenticated", headers=_auth_headers(_BAD_KEY))
         assert r.status_code == 401
         body = r.json()
-        assert "detail" in body
-        assert isinstance(body["detail"], str)
-        assert len(body["detail"]) > 0
+        # AppError path → {"error": ..., "message": ..., "request_id": ..., "details": ...}
+        assert body.get("error") == "invalid_api_key"
+        assert isinstance(body.get("message"), str)
+        assert len(body.get("message", "")) > 0
 
     def test_invalid_key_401_detail_contains_expected_string(self) -> None:
         r = _bare_client().get("/test/authenticated", headers=_auth_headers(_BAD_KEY))
         body = r.json()
-        assert "invalid" in body["detail"].lower() or "revoked" in body["detail"].lower()
+        assert "invalid" in body.get("message", "").lower()
 
     def test_all_protected_routes_reject_missing_key(self) -> None:
         routes = ["/test/authenticated", "/test/access", "/test/access/permission", "/test/org"]
