@@ -38,6 +38,7 @@ def _make_auth_context(
     api_key: str | None = "test-api-key-deps-auth",
     permissions: tuple[str, ...] = (),
     roles: tuple[str, ...] = (),
+    key_type: str = "personal",
 ) -> AuthContext:
     return AuthContext(
         api_key=api_key,
@@ -50,6 +51,7 @@ def _make_auth_context(
         authenticated=authenticated,
         auth_source="configured",
         auth_method="api_key",
+        key_type=key_type,
     )
 
 
@@ -126,6 +128,50 @@ class TestEdgeAuthContext:
 
 
 # ---------------------------------------------------------------------------
+# _looks_like_static_key boundary tests
+# ---------------------------------------------------------------------------
+
+
+class TestLooksLikeStaticKey:
+    """Tests for the internal static-prefix detection logic in api_key_auth."""
+
+    def test_ic_personal_prefix_detected(self) -> None:
+        from app.core.api_key_auth import _looks_like_static_key
+
+        assert _looks_like_static_key("ic_personal_abc123") is True
+
+    def test_ic_org_prefix_detected(self) -> None:
+        from app.core.api_key_auth import _looks_like_static_key
+
+        assert _looks_like_static_key("ic_org_xyz789") is True
+
+    def test_ic_svc_prefix_detected(self) -> None:
+        from app.core.api_key_auth import _looks_like_static_key
+
+        assert _looks_like_static_key("ic_svc_svc001") is True
+
+    def test_bare_ic_prefix_detected(self) -> None:
+        from app.core.api_key_auth import _looks_like_static_key
+
+        assert _looks_like_static_key("ic_anything") is True
+
+    def test_jwt_bearer_not_detected_as_static(self) -> None:
+        from app.core.api_key_auth import _looks_like_static_key
+
+        assert _looks_like_static_key("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload") is False
+
+    def test_empty_string_not_detected_as_static(self) -> None:
+        from app.core.api_key_auth import _looks_like_static_key
+
+        assert _looks_like_static_key("") is False
+
+    def test_random_token_not_detected_as_static(self) -> None:
+        from app.core.api_key_auth import _looks_like_static_key
+
+        assert _looks_like_static_key("tok-abc-1234567890abcdef") is False
+
+
+# ---------------------------------------------------------------------------
 # require_api_key (Edge Function path) — returns EdgeAuthContext
 # ---------------------------------------------------------------------------
 
@@ -176,6 +222,7 @@ class TestRequireApiKeyEdgePath:
         with pytest.raises(HTTPException) as exc_info:
             await require_api_key(x_api_key=None, credentials=None)
         assert exc_info.value.status_code == 401
+        assert "missing" in exc_info.value.detail.lower() or "api key" in exc_info.value.detail.lower()
 
     @pytest.mark.asyncio
     async def test_require_api_key_empty_credentials_raises_401(self) -> None:
@@ -227,10 +274,11 @@ class TestRequireApiKeyEdgePath:
             with pytest.raises(HTTPException) as exc_info:
                 await require_api_key(x_api_key=None, credentials=creds)
         assert exc_info.value.status_code == 401
+        assert "Invalid token" in exc_info.value.detail
 
     @pytest.mark.asyncio
-    async def test_require_api_key_static_prefix_key_rejected_401(self) -> None:
-        """Static-prefix keys that the registry doesn't recognise must 401, no edge call."""
+    async def test_require_api_key_static_prefix_key_ic_personal_rejected_401(self) -> None:
+        """ic_personal_ keys the registry doesn't recognise must 401, no edge call."""
         registry_stub = _make_registry_stub_returning_none()
         creds = _make_bearer_creds("ic_personal_unknown-key")
 
@@ -242,6 +290,47 @@ class TestRequireApiKeyEdgePath:
             patch(
                 "app.core.api_key_auth._call_edge_auth",
                 new=AsyncMock(side_effect=AssertionError("edge must not be called for static keys")),
+            ),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await require_api_key(x_api_key=None, credentials=creds)
+        assert exc_info.value.status_code == 401
+        assert "invalid" in exc_info.value.detail.lower() or "revoked" in exc_info.value.detail.lower()
+
+    @pytest.mark.asyncio
+    async def test_require_api_key_static_prefix_key_ic_org_rejected_401(self) -> None:
+        """ic_org_ keys the registry doesn't recognise must 401, no edge call."""
+        registry_stub = _make_registry_stub_returning_none()
+        creds = _make_bearer_creds("ic_org_unknown-key")
+
+        with (
+            patch(
+                "app.core.api_key_auth.get_api_key_registry",
+                return_value=registry_stub,
+            ),
+            patch(
+                "app.core.api_key_auth._call_edge_auth",
+                new=AsyncMock(side_effect=AssertionError("edge must not be called for org static keys")),
+            ),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await require_api_key(x_api_key=None, credentials=creds)
+        assert exc_info.value.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_require_api_key_static_prefix_key_ic_svc_rejected_401(self) -> None:
+        """ic_svc_ keys the registry doesn't recognise must 401, no edge call."""
+        registry_stub = _make_registry_stub_returning_none()
+        creds = _make_bearer_creds("ic_svc_unknown-key")
+
+        with (
+            patch(
+                "app.core.api_key_auth.get_api_key_registry",
+                return_value=registry_stub,
+            ),
+            patch(
+                "app.core.api_key_auth._call_edge_auth",
+                new=AsyncMock(side_effect=AssertionError("edge must not be called for svc static keys")),
             ),
         ):
             with pytest.raises(HTTPException) as exc_info:
@@ -307,8 +396,12 @@ class TestRequireLocalApiKey:
         raw_key = generate_api_key()
         registry.create_key("local-dep-key", api_key=raw_key)
 
+        active_record = MagicMock()
+        active_record.active = True
+        active_record.revoked_at = None
+
         with (
-            patch("app.core.auth._resolve_registry_api_key", return_value=MagicMock(active=True, revoked_at=None)),
+            patch("app.core.auth._resolve_registry_api_key", return_value=active_record),
             patch("app.core.auth._is_auth_required", return_value=False),
             patch("app.core.auth._extract_configured_api_key", return_value=None),
         ):
@@ -318,7 +411,8 @@ class TestRequireLocalApiKey:
             mock_request.app.state.settings = None
             result = get_api_key(request=mock_request, provided_api_key=raw_key)
 
-        assert isinstance(result, str) or result is None
+        # When auth is not required and a valid registry record is found, key is returned
+        assert result == raw_key
 
     def test_get_api_key_returns_none_when_not_required(self) -> None:
         with (
@@ -332,6 +426,38 @@ class TestRequireLocalApiKey:
             result = get_api_key(request=mock_request, provided_api_key=None)
 
         assert result is None
+
+    def test_get_api_key_raises_401_when_auth_required_and_key_missing(self) -> None:
+        with (
+            patch("app.core.auth._is_auth_required", return_value=True),
+            patch("app.core.auth._extract_configured_api_key", return_value=None),
+        ):
+            from fastapi import Request
+
+            mock_request = MagicMock(spec=Request)
+            mock_request.app.state.settings = None
+            with pytest.raises(HTTPException) as exc_info:
+                get_api_key(request=mock_request, provided_api_key=None)
+
+        assert exc_info.value.status_code == 401
+        assert "missing" in exc_info.value.detail.lower() or "api key" in exc_info.value.detail.lower()
+
+    def test_get_api_key_raises_401_on_invalid_key_when_auth_required(self) -> None:
+        with (
+            patch("app.core.auth._is_auth_required", return_value=True),
+            patch("app.core.auth._extract_configured_api_key", return_value="correct-key"),
+            patch("app.core.auth._resolve_registry_api_key", return_value=None),
+            patch("app.core.auth._has_registry_keys", return_value=True),
+        ):
+            from fastapi import Request
+
+            mock_request = MagicMock(spec=Request)
+            mock_request.app.state.settings = None
+            with pytest.raises(HTTPException) as exc_info:
+                get_api_key(request=mock_request, provided_api_key="wrong-key")
+
+        assert exc_info.value.status_code == 401
+        assert "invalid" in exc_info.value.detail.lower() or "api key" in exc_info.value.detail.lower()
 
     def test_registry_key_type_is_str_or_none(self) -> None:
         registry = APIKeyRegistry()
@@ -406,6 +532,17 @@ class TestRequireScope:
         assert exc_info.value.status_code == 403
         assert "delete" in exc_info.value.detail
 
+    @pytest.mark.asyncio
+    async def test_require_scope_detail_contains_required_scope_name(self) -> None:
+        ctx = _make_edge_auth_context(scopes=("read",))
+        inner_fn = require_scope("audit:write")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await inner_fn(auth=ctx)
+
+        assert exc_info.value.status_code == 403
+        assert "audit:write" in exc_info.value.detail
+
 
 # ---------------------------------------------------------------------------
 # Compound dependencies — require_authenticated, require_access_dependency,
@@ -447,6 +584,17 @@ class TestRequireAuthenticated:
         ctx = _make_auth_context(authenticated=True, principal_type="api_key")
         result = await require_authenticated(context=ctx)
         assert result.principal_type == "api_key"
+
+    @pytest.mark.asyncio
+    async def test_org_key_principal_passes(self) -> None:
+        ctx = _make_auth_context(
+            authenticated=True,
+            principal_type="org_key",
+            key_type="org",
+        )
+        result = await require_authenticated(context=ctx)
+        assert result.principal_type == "org_key"
+        assert result.key_type == "org"
 
 
 class TestRequireAccessDependency:
@@ -611,3 +759,18 @@ class TestCompoundDependenciesChain:
         edge_ctx = _make_edge_auth_context(scopes=("scan",))
         assert edge_ctx.has_scope("scan") is True
         assert edge_ctx.has_scope("delete") is False
+
+    @pytest.mark.asyncio
+    async def test_auth_context_key_type_personal_default(self) -> None:
+        ctx = _make_auth_context(authenticated=True, key_type="personal")
+        assert ctx.key_type == "personal"
+
+    @pytest.mark.asyncio
+    async def test_auth_context_key_type_org(self) -> None:
+        ctx = _make_auth_context(
+            authenticated=True,
+            principal_type="org_key",
+            key_type="org",
+        )
+        assert ctx.key_type == "org"
+        assert ctx.principal_type == "org_key"

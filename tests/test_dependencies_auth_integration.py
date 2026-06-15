@@ -26,7 +26,11 @@ from app.dependencies.auth import (  # noqa: E402
 )
 
 _VALID_KEY = os.environ["IRONCLAW_API_KEY"]
-_BAD_KEY = "ic-invalid-key-that-will-never-match-000"
+
+# Use ic_ prefix so _looks_like_static_key returns True → guaranteed 401
+# with no edge-auth network call, making tests deterministic with SUPABASE_URL="".
+_BAD_KEY = "ic_invalid_key_that_will_never_match_000"
+
 _VALID_ORG = "org-integration-001"
 
 
@@ -113,7 +117,7 @@ def _refresh_settings() -> Iterator[None]:
 
 @pytest.fixture()
 def client() -> TestClient:
-    c = TestClient(_INTEGRATION_APP, raise_server_exceptions=True)
+    c = TestClient(_INTEGRATION_APP, raise_server_exceptions=False)
     c.headers.update({"X-API-Key": _VALID_KEY})
     return c
 
@@ -134,6 +138,11 @@ def _auth_org_headers(
     return {"X-API-Key": api_key, "X-Org-Id": org_id}
 
 
+def _bare_client() -> TestClient:
+    """TestClient with no default headers and raise_server_exceptions=False."""
+    return TestClient(_INTEGRATION_APP, raise_server_exceptions=False)
+
+
 # ---------------------------------------------------------------------------
 # /test/probe — control route
 # ---------------------------------------------------------------------------
@@ -146,13 +155,26 @@ class TestProbeRoute:
         assert r.json()["authenticated"] is True
 
     def test_missing_key_returns_401(self) -> None:
-        bare = TestClient(_INTEGRATION_APP, raise_server_exceptions=True)
-        r = bare.get("/test/probe")
+        r = _bare_client().get("/test/probe")
         assert r.status_code == 401
 
-    def test_invalid_key_returns_401(self) -> None:
-        r = TestClient(_INTEGRATION_APP, raise_server_exceptions=True).get("/test/probe", headers=_auth_headers(_BAD_KEY))
+    def test_missing_key_401_detail_contains_api_key(self) -> None:
+        r = _bare_client().get("/test/probe")
         assert r.status_code == 401
+        body = r.json()
+        assert "detail" in body
+        assert "api key" in body["detail"].lower() or "missing" in body["detail"].lower()
+
+    def test_invalid_key_returns_401(self) -> None:
+        r = _bare_client().get("/test/probe", headers=_auth_headers(_BAD_KEY))
+        assert r.status_code == 401
+
+    def test_invalid_key_401_detail_contains_invalid(self) -> None:
+        r = _bare_client().get("/test/probe", headers=_auth_headers(_BAD_KEY))
+        assert r.status_code == 401
+        body = r.json()
+        assert "detail" in body
+        assert "invalid" in body["detail"].lower() or "revoked" in body["detail"].lower()
 
     def test_valid_key_sets_platform_principal_type(self, client: TestClient) -> None:
         r = client.get("/test/probe")
@@ -179,24 +201,42 @@ class TestRequireAuthenticatedHTTP:
         assert r.json()["authenticated"] is True
 
     def test_missing_key_returns_401(self) -> None:
-        bare = TestClient(_INTEGRATION_APP, raise_server_exceptions=True)
-        r = bare.get("/test/authenticated")
+        r = _bare_client().get("/test/authenticated")
         assert r.status_code == 401
 
-    def test_invalid_key_returns_401(self) -> None:
-        r = TestClient(_INTEGRATION_APP, raise_server_exceptions=True).get("/test/authenticated", headers=_auth_headers(_BAD_KEY))
+    def test_missing_key_401_body_detail_is_string(self) -> None:
+        r = _bare_client().get("/test/authenticated")
         assert r.status_code == 401
+        body = r.json()
+        assert "detail" in body
+        assert isinstance(body["detail"], str)
+        assert len(body["detail"]) > 0
+
+    def test_missing_key_401_detail_contains_api_key(self) -> None:
+        r = _bare_client().get("/test/authenticated")
+        body = r.json()
+        assert "api key" in body["detail"].lower() or "missing" in body["detail"].lower()
+
+    def test_invalid_key_returns_401(self) -> None:
+        r = _bare_client().get("/test/authenticated", headers=_auth_headers(_BAD_KEY))
+        assert r.status_code == 401
+
+    def test_invalid_key_401_detail_contains_invalid(self) -> None:
+        r = _bare_client().get("/test/authenticated", headers=_auth_headers(_BAD_KEY))
+        body = r.json()
+        assert "detail" in body
+        assert "invalid" in body["detail"].lower() or "revoked" in body["detail"].lower()
 
     def test_valid_key_principal_type_platform(self, client: TestClient) -> None:
         r = client.get("/test/authenticated")
         assert r.json()["principal_type"] == "platform"
 
     def test_empty_key_header_returns_401(self) -> None:
-        r = TestClient(_INTEGRATION_APP, raise_server_exceptions=True).get("/test/authenticated", headers={"X-API-Key": ""})
+        r = _bare_client().get("/test/authenticated", headers={"X-API-Key": ""})
         assert r.status_code == 401
 
     def test_whitespace_key_returns_401(self) -> None:
-        r = TestClient(_INTEGRATION_APP, raise_server_exceptions=True).get("/test/authenticated", headers={"X-API-Key": "   "})
+        r = _bare_client().get("/test/authenticated", headers={"X-API-Key": "   "})
         assert r.status_code == 401
 
 
@@ -215,13 +255,25 @@ class TestRequireAccessDependencyHTTP:
         assert r.json()["authenticated"] is True
 
     def test_missing_key_returns_401(self) -> None:
-        bare = TestClient(_INTEGRATION_APP, raise_server_exceptions=True)
-        r = bare.get("/test/access")
+        r = _bare_client().get("/test/access")
         assert r.status_code == 401
 
+    def test_missing_key_401_body_has_detail(self) -> None:
+        r = _bare_client().get("/test/access")
+        body = r.json()
+        assert "detail" in body
+        assert isinstance(body["detail"], str)
+
     def test_invalid_key_returns_401_or_403(self) -> None:
-        r = TestClient(_INTEGRATION_APP, raise_server_exceptions=True).get("/test/access", headers=_auth_headers(_BAD_KEY))
+        r = _bare_client().get("/test/access", headers=_auth_headers(_BAD_KEY))
         assert r.status_code in (401, 403)
+
+    def test_invalid_key_4xx_body_has_detail_or_error(self) -> None:
+        r = _bare_client().get("/test/access", headers=_auth_headers(_BAD_KEY))
+        assert r.status_code in (401, 403)
+        body = r.json()
+        # HTTPException path → {"detail": str}; AppError path → {"error": ..., "message": ...}
+        assert "detail" in body or "error" in body
 
     def test_platform_principal_passes_access_check(self, client: TestClient) -> None:
         r = client.get("/test/access")
@@ -250,12 +302,17 @@ class TestRequireAccessPermissionHTTP:
         assert r.status_code == 200
 
     def test_missing_key_returns_401(self) -> None:
-        bare = TestClient(_INTEGRATION_APP, raise_server_exceptions=True)
-        r = bare.get("/test/access/permission")
+        r = _bare_client().get("/test/access/permission")
         assert r.status_code == 401
 
+    def test_missing_key_401_body_has_detail(self) -> None:
+        r = _bare_client().get("/test/access/permission")
+        body = r.json()
+        assert "detail" in body
+        assert isinstance(body["detail"], str)
+
     def test_invalid_key_returns_4xx(self) -> None:
-        r = TestClient(_INTEGRATION_APP, raise_server_exceptions=True).get("/test/access/permission", headers=_auth_headers(_BAD_KEY))
+        r = _bare_client().get("/test/access/permission", headers=_auth_headers(_BAD_KEY))
         assert r.status_code in (401, 403)
 
     def test_valid_key_authenticated_true(self, client: TestClient) -> None:
@@ -278,13 +335,24 @@ class TestRequireSameOrgDependencyHTTP:
         assert r.status_code == 200
 
     def test_missing_key_returns_401(self) -> None:
-        bare = TestClient(_INTEGRATION_APP, raise_server_exceptions=True)
-        r = bare.get("/test/org")
+        r = _bare_client().get("/test/org")
         assert r.status_code == 401
 
+    def test_missing_key_401_body_has_detail(self) -> None:
+        r = _bare_client().get("/test/org")
+        body = r.json()
+        assert "detail" in body
+        assert isinstance(body["detail"], str)
+
     def test_invalid_key_returns_401(self) -> None:
-        r = TestClient(_INTEGRATION_APP, raise_server_exceptions=True).get("/test/org", headers=_auth_headers(_BAD_KEY))
+        r = _bare_client().get("/test/org", headers=_auth_headers(_BAD_KEY))
         assert r.status_code == 401
+
+    def test_invalid_key_401_detail_not_empty(self) -> None:
+        r = _bare_client().get("/test/org", headers=_auth_headers(_BAD_KEY))
+        body = r.json()
+        assert "detail" in body
+        assert len(body["detail"]) > 0
 
     def test_valid_key_with_org_authenticated_true(self, client: TestClient) -> None:
         r = client.get("/test/org", headers=_auth_org_headers())
@@ -304,33 +372,55 @@ class TestRequireSameOrgDependencyHTTP:
 
 class TestHTTPContractAssertions:
     def test_401_response_is_json(self) -> None:
-        bare = TestClient(_INTEGRATION_APP, raise_server_exceptions=True)
-        r = bare.get("/test/authenticated")
+        r = _bare_client().get("/test/authenticated")
         assert r.status_code == 401
         assert r.headers.get("content-type", "").startswith("application/json")
 
-    def test_401_body_has_error_or_detail_key(self) -> None:
-        bare = TestClient(_INTEGRATION_APP, raise_server_exceptions=True)
-        r = bare.get("/test/authenticated")
+    def test_401_body_has_detail_key(self) -> None:
+        # HTTPException from auth.py → http_exception_handler → {"detail": str}
+        r = _bare_client().get("/test/authenticated")
         body = r.json()
-        assert "error" in body or "detail" in body
+        assert "detail" in body
+        assert isinstance(body["detail"], str)
+        assert len(body["detail"]) > 0
+
+    def test_401_body_does_not_expose_error_key_for_auth_exceptions(self) -> None:
+        # HTTPException 401 must NOT have "error" key — that is AppError shape only
+        r = _bare_client().get("/test/authenticated")
+        body = r.json()
+        assert "error" not in body
 
     def test_valid_200_response_is_json(self, client: TestClient) -> None:
         r = client.get("/test/authenticated")
         assert r.status_code == 200
         assert r.headers.get("content-type", "").startswith("application/json")
 
-    def test_invalid_key_401_body_not_empty(self) -> None:
-        r = TestClient(_INTEGRATION_APP, raise_server_exceptions=True).get("/test/authenticated", headers=_auth_headers(_BAD_KEY))
+    def test_invalid_key_401_body_has_detail(self) -> None:
+        r = _bare_client().get("/test/authenticated", headers=_auth_headers(_BAD_KEY))
         assert r.status_code == 401
-        assert r.text
+        body = r.json()
+        assert "detail" in body
+        assert isinstance(body["detail"], str)
+        assert len(body["detail"]) > 0
+
+    def test_invalid_key_401_detail_contains_expected_string(self) -> None:
+        r = _bare_client().get("/test/authenticated", headers=_auth_headers(_BAD_KEY))
+        body = r.json()
+        assert "invalid" in body["detail"].lower() or "revoked" in body["detail"].lower()
 
     def test_all_protected_routes_reject_missing_key(self) -> None:
-        bare = TestClient(_INTEGRATION_APP, raise_server_exceptions=True)
         routes = ["/test/authenticated", "/test/access", "/test/access/permission", "/test/org"]
         for route in routes:
-            r = bare.get(route)
+            r = _bare_client().get(route)
             assert r.status_code == 401, f"Expected 401 on {route}, got {r.status_code}"
+
+    def test_all_protected_routes_missing_key_401_body_has_detail(self) -> None:
+        routes = ["/test/authenticated", "/test/access", "/test/access/permission", "/test/org"]
+        for route in routes:
+            r = _bare_client().get(route)
+            body = r.json()
+            assert "detail" in body, f"No 'detail' key in 401 body for {route}: {body}"
+            assert isinstance(body["detail"], str)
 
     def test_all_protected_routes_accept_valid_key(self, client: TestClient) -> None:
         routes = ["/test/authenticated", "/test/access", "/test/access/permission"]
@@ -341,15 +431,15 @@ class TestHTTPContractAssertions:
     def test_all_protected_routes_reject_invalid_key(self) -> None:
         routes = ["/test/authenticated", "/test/access", "/test/access/permission", "/test/org"]
         for route in routes:
-            r = TestClient(_INTEGRATION_APP, raise_server_exceptions=True).get(route, headers=_auth_headers(_BAD_KEY))
+            r = _bare_client().get(route, headers=_auth_headers(_BAD_KEY))
             assert r.status_code in (401, 403), f"Expected 4xx on {route}, got {r.status_code}"
 
-    def test_x_api_key_header_name_is_case_insensitive(self, client: TestClient) -> None:
-        r = client.get("/test/authenticated", headers={"x-api-key": _VALID_KEY})
+    def test_x_api_key_header_name_is_case_insensitive(self) -> None:
+        r = _bare_client().get("/test/authenticated", headers={"x-api-key": _VALID_KEY})
         assert r.status_code == 200
 
     def test_extra_unknown_headers_do_not_affect_auth(self, client: TestClient) -> None:
-        r = client.get("/test/authenticated", headers={**_auth_headers(), "X-Unknown-Header": "some-value"})
+        r = client.get("/test/authenticated", headers={"X-Unknown-Header": "some-value"})
         assert r.status_code == 200
 
     def test_probe_returns_200_with_valid_key(self, client: TestClient) -> None:
