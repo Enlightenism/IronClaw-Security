@@ -14,6 +14,7 @@ from app.core.apikeys import (
     get_api_key_registry,
     is_api_key_expired,
 )
+from app.core.errors import AppError
 from app.core.settings import get_settings
 
 _logger = logging.getLogger(__name__)
@@ -331,15 +332,17 @@ def get_api_key(
         _logger.warning(
             "auth_not_configured: auth_required=True but no API keys are configured",
         )
-        raise HTTPException(
+        raise AppError(
+            "auth_not_configured",
+            "Authentication is required but no API keys are configured",
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication is required but no API keys are configured",
         )
 
     _logger.warning("Invalid API key")
-    raise HTTPException(
+    raise AppError(
+        "invalid_api_key",
+        "Invalid API key",
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid API key",
     )
 
 
@@ -368,8 +371,6 @@ def get_auth_context(
         resolved_key_type = _coerce_key_type(registry_record)
         resolved_org_id = _coerce_org_id(request, provided_org_id, registry_record)
 
-        # For org keys: principal_type reflects the org scope so downstream
-        # policy can distinguish shared-org access from personal key access.
         if resolved_key_type == "org" and registry_record is not None:
             principal_type = "org_key"
 
