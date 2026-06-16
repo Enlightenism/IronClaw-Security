@@ -4,22 +4,37 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.api.actiondecision import decideaction
 from app.core.auth import require_auth_context
+from app.schemas.audit import (
+    AuditEvent,
+    AuditEventCreate,
+    AuditEventResponse,
+    AuditListResponse,
+)
+from app.services.audit_log_service import (
+    get_audit_event_as_schema,
+    list_audit_events_as_schema,
+)
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
 
-AuditEventType = Literal[
+# ---------------------------------------------------------------------------
+# Local literals — intentionally distinct from app.schemas.audit enums
+# so legacy callers are not disrupted
+# ---------------------------------------------------------------------------
+
+_LegacyEventType = Literal[
     "execution_allowed",
     "execution_review",
     "execution_quarantined",
     "execution_denied",
 ]
-AuditSeverity = Literal["info", "warning", "high", "critical"]
+_LegacySeverity = Literal["info", "warning", "high", "critical"]
 
 
 def _utcnow() -> str:
@@ -37,7 +52,7 @@ def _coerceoutcome(value: Any) -> str:
     return "deny"
 
 
-def _eventshape(outcome: str) -> tuple[AuditEventType, AuditSeverity, str]:
+def _eventshape(outcome: str) -> tuple[_LegacyEventType, _LegacySeverity, str]:
     if outcome == "allow":
         return (
             "execution_allowed",
@@ -61,6 +76,11 @@ def _eventshape(outcome: str) -> tuple[AuditEventType, AuditSeverity, str]:
         "high",
         "Audit recorded a denied execution path.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Legacy request / response models — contract preserved
+# ---------------------------------------------------------------------------
 
 
 class AuditReasonView(BaseModel):
@@ -102,8 +122,8 @@ class AuditRequest(BaseModel):
 
 class AuditResponse(BaseModel):
     auditeventid: str
-    eventtype: AuditEventType
-    severity: AuditSeverity
+    eventtype: _LegacyEventType
+    severity: _LegacySeverity
     actiontype: str
     target: str
     filepath: str
@@ -117,6 +137,11 @@ class AuditResponse(BaseModel):
     promptinjection: dict[str, Any] = Field(default_factory=dict)
     hostilecontext: dict[str, Any] = Field(default_factory=dict)
     createdat: str
+
+
+# ---------------------------------------------------------------------------
+# Core audit event factory — legacy contract preserved
+# ---------------------------------------------------------------------------
 
 
 def createauditevent(
@@ -165,6 +190,11 @@ def createauditevent(
     }
 
 
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+
 @router.post(
     "/event",
     response_model=AuditResponse,
@@ -185,3 +215,54 @@ def auditevent(
         metadata=payload.metadata,
     )
     return AuditResponse(**result)
+
+
+@router.get(
+    "/events",
+    response_model=AuditListResponse,
+    summary="List recent audit events from the audit log.",
+)
+def list_events(
+    limit: int = Query(default=100, ge=1, le=1000, description="Maximum number of events to return."),
+    _auth: dict = Depends(require_auth_context),
+) -> AuditListResponse:
+    items: list[AuditEventCreate] = list_audit_events_as_schema(limit=limit)
+    audit_events: list[AuditEvent] = []
+    for i, item in enumerate(items):
+        audit_events.append(
+            AuditEvent(
+                event_id=f"evt_{i}",
+                event_type=item.event_type,
+                actor=item.actor,
+                actor_type=item.actor_type,
+                target_type=item.target_type,
+                target_id=item.target_id,
+                action=item.action,
+                outcome=item.outcome,
+                severity=item.severity,
+                org_id=item.org_id,
+                session_id=item.session_id,
+                request_id=item.request_id,
+                risk_score=item.risk_score,
+                categories=item.categories,
+                tags=item.tags,
+                reasoning=item.reasoning,
+                metadata=item.metadata,
+            )
+        )
+    return AuditListResponse(count=len(audit_events), total=len(audit_events), items=audit_events)
+
+
+@router.get(
+    "/events/{event_id}",
+    response_model=AuditEventResponse,
+    summary="Retrieve a single audit event by event ID.",
+)
+def get_event(
+    event_id: str,
+    _auth: dict = Depends(require_auth_context),
+) -> AuditEventResponse:
+    item = get_audit_event_as_schema(event_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"Audit event '{event_id}' not found.")
+    return AuditEventResponse(ok=True, event_id=event_id)
