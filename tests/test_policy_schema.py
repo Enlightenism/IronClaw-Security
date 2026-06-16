@@ -1,6 +1,7 @@
 """
 Unit tests for app/schemas/policy.py
 
+
 Covers:
 - PolicyRule field validation (invalid severity, enforcement_mode, missing rule_id)
 - PolicyCreateRequest heuristic_threshold bounds (ge=0, le=100)
@@ -11,7 +12,7 @@ Covers:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from pydantic import ValidationError
 import pytest
@@ -243,7 +244,7 @@ class TestPolicyStatusDefaults:
             PolicyStatus(**_minimal_status(heuristic_threshold=101))
 
     def test_full_status_population(self):
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         status = PolicyStatus(
             heuristic_threshold=80,
             unicode_normalization_enabled=True,
@@ -281,14 +282,14 @@ class TestPolicyStatusDefaults:
 class TestPolicyEvaluationResultAutoPopulation:
 
     def test_evaluated_at_auto_populated(self):
-        before = datetime.utcnow()
+        before = datetime.now(UTC)
         result = PolicyEvaluationResult(**_minimal_result())
-        after = datetime.utcnow()
+        after = datetime.now(UTC)
         assert isinstance(result.evaluated_at, datetime)
         assert before <= result.evaluated_at <= after
 
     def test_evaluated_at_can_be_overridden(self):
-        fixed = datetime(2025, 1, 1, 12, 0, 0)
+        fixed = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
         result = PolicyEvaluationResult(**_minimal_result(verdict=PolicyEnforcementMode.allow, evaluated_at=fixed))
         assert result.evaluated_at == fixed
 
@@ -324,7 +325,7 @@ class TestPolicyEvaluationResultAutoPopulation:
         assert result.policy_version is None
 
     def test_full_result_population(self):
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         result = PolicyEvaluationResult(
             verdict=PolicyEnforcementMode.block,
             risk_score=95,

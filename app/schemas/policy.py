@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -47,6 +47,8 @@ class PolicySeverity(str, Enum):
 class PolicyRule(BaseModel):
     """A single enforceable rule within a policy."""
 
+    model_config = ConfigDict(from_attributes=True)
+
     rule_id: str = Field(..., description="Unique rule identifier")
     name: str = Field(..., description="Human-readable rule name")
     description: str | None = None
@@ -60,8 +62,42 @@ class PolicyRule(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class PolicyRuleCreate(BaseModel):
+    """Payload for creating a new PolicyRule (rule_id is server-assigned)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str = Field(..., description="Human-readable rule name")
+    description: str | None = None
+    scope: PolicyScope = PolicyScope.global_
+    severity: PolicySeverity = PolicySeverity.medium
+    enforcement_mode: PolicyEnforcementMode = PolicyEnforcementMode.block
+    pattern: str | None = Field(None, description="Regex or keyword pattern this rule matches against")
+    categories: list[str] = Field(default_factory=list)
+    enabled: bool = True
+    tags: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class PolicyRuleMatch(BaseModel):
+    """Details of a single rule that matched during policy evaluation."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    rule_id: str
+    name: str
+    severity: PolicySeverity
+    enforcement_mode: PolicyEnforcementMode
+    pattern: str | None = None
+    categories: list[str] = Field(default_factory=list)
+    matched_text: str | None = Field(None, description="Excerpt that triggered the match")
+    tags: list[str] = Field(default_factory=list)
+
+
 class PolicyRuleSet(BaseModel):
     """Named, versioned collection of PolicyRules."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     ruleset_id: str
     name: str
@@ -73,12 +109,43 @@ class PolicyRuleSet(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# PolicySet aliases (canonical names used by service/router layer)
+# ---------------------------------------------------------------------------
+
+PolicySet = PolicyRuleSet
+
+
+class PolicySetCreate(BaseModel):
+    """Payload to create a new PolicySet (server assigns ruleset_id)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str
+    version: str = "1.0.0"
+    rules: list[PolicyRule] = Field(default_factory=list)
+    is_active: bool = True
+
+
+class PolicySetUpdate(BaseModel):
+    """Partial update to an existing PolicySet; all fields optional."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str | None = None
+    version: str | None = None
+    rules: list[PolicyRule] | None = None
+    is_active: bool | None = None
+
+
+# ---------------------------------------------------------------------------
 # Request / Response schemas
 # ---------------------------------------------------------------------------
 
 
 class PolicyCreateRequest(BaseModel):
     """Payload to create or replace the active policy ruleset."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     name: str
     version: str = "1.0.0"
@@ -93,6 +160,8 @@ class PolicyCreateRequest(BaseModel):
 class PolicyUpdateRequest(BaseModel):
     """Partial update to the active policy; all fields optional."""
 
+    model_config = ConfigDict(from_attributes=True)
+
     name: str | None = None
     version: str | None = None
     rules: list[PolicyRule] | None = None
@@ -103,8 +172,28 @@ class PolicyUpdateRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
+class PolicyVerdict(BaseModel):
+    """Structured verdict emitted after policy evaluation of a single payload."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    verdict: PolicyEnforcementMode
+    matched_rules: list[PolicyRuleMatch] = Field(default_factory=list)
+    severity: PolicySeverity = PolicySeverity.info
+    risk_score: int = Field(0, ge=0, le=100)
+    reasoning: str | None = None
+    categories: list[str] = Field(default_factory=list)
+    evaluated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    policy_version: str | None = None
+
+
 class PolicyEvaluationResult(BaseModel):
-    """Result returned when a payload is evaluated against the active policy."""
+    """Result returned when a payload is evaluated against the active policy.
+
+    Kept for backwards compatibility. New consumers should use PolicyVerdict.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
 
     verdict: PolicyEnforcementMode
     matched_rules: list[str] = Field(default_factory=list, description="rule_ids that matched")
@@ -112,7 +201,7 @@ class PolicyEvaluationResult(BaseModel):
     risk_score: int = Field(0, ge=0, le=100)
     reasoning: str | None = None
     categories: list[str] = Field(default_factory=list)
-    evaluated_at: datetime = Field(default_factory=datetime.utcnow)
+    evaluated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     policy_version: str | None = None
 
 
@@ -123,6 +212,8 @@ class PolicyEvaluationResult(BaseModel):
 
 class PolicyStatus(BaseModel):
     """Current runtime state of the policy engine."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     heuristic_threshold: int = Field(..., ge=0, le=100)
     heuristic_threshold_env: str | None = None
@@ -139,4 +230,7 @@ class PolicyStatus(BaseModel):
     last_policy_updated_at: datetime | None = None
     enabled_rules: int = 0
     disabled_rules: int = 0
-    tags_index: list[str] = Field(default_factory=list, description="Union of all tags across active rules")
+    tags_index: list[str] = Field(
+        default_factory=list,
+        description="Union of all tags across active rules",
+    )
