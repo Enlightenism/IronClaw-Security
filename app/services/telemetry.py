@@ -3,9 +3,11 @@ from __future__ import annotations
 from collections import deque
 from datetime import UTC, datetime
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from threading import Lock
-from typing import Any, Final, Literal
+from typing import Any, Final
+
+from app.schemas.telemetry import TelemetryEventType
 
 TELEMETRY_DIR: Final[Path] = Path.home() / ".ironclaw"
 TELEMETRY_PATH: Final[Path] = TELEMETRY_DIR / "telemetry_events.jsonl"
@@ -18,49 +20,10 @@ TELEMETRY_DIR.mkdir(parents=True, exist_ok=True)
 _TELEMETRY_LOCK = Lock()
 _COERCE_MAX_DEPTH = 32
 
-# ---------------------------------------------------------------------------
-# Canonical event type registry
-# Any service that emits telemetry must register its event types here.
-# External consumers and tests use KNOWN_EVENT_TYPES for contract validation.
-# ---------------------------------------------------------------------------
-
-KnownEventType = Literal[
-    # Core scan / action guard
-    "scan_completed",
-    "action_guard_decision",
-    "prompt_injection_detected",
-    # Quarantine / incidents
-    "quarantine_created",
-    "quarantine_released",
-    "incident_created",
-    "incident_updated",
-    # Policy
-    "policy_changed",
-    "policy_violation",
-    # Alerts
-    "alert_dispatched",
-    "alert_failed",
-    # Audit
-    "audit_entry_created",
-    # Trust
-    "trust_score_updated",
-    "trust_collapse_detected",
-    # Phase 9 — Behavioral Baseline & Agent Profiling
-    "behavioral_drift_detected",
-    "behavioral_baseline_updated",
-    "behavioral_baseline_suspended",
-    "agent_observation_recorded",
-    # System
-    "system_startup",
-    "system_shutdown",
-    "telemetry_cleared",
-]
-
-KNOWN_EVENT_TYPES: Final[frozenset[str]] = frozenset(KnownEventType.__args__)  # type: ignore[attr-defined]
+KNOWN_EVENT_TYPES: Final[frozenset[str]] = frozenset(e.value for e in TelemetryEventType)
 
 
 def is_known_event_type(event_type: str) -> bool:
-    """Return True if event_type is in the canonical registry."""
     return event_type in KNOWN_EVENT_TYPES
 
 
@@ -73,7 +36,6 @@ def _utc_now_iso() -> str:
 
 
 def _is_pydantic_model(value: Any) -> bool:
-    """Return True only for real Pydantic BaseModel instances, not Mocks."""
     try:
         from pydantic import BaseModel
 
@@ -93,7 +55,7 @@ def _coerce_json_safe(value: Any, _depth: int = 0) -> Any:
         return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
     if isinstance(value, Path):
-        return str(value)
+        return str(PurePosixPath(value))
 
     if isinstance(value, dict):
         return {str(k): _coerce_json_safe(v, _depth + 1) for k, v in value.items()}
@@ -131,8 +93,17 @@ def _ensure_parent_dir() -> None:
     TELEMETRY_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
-def _build_event_record(event_type: str, payload: dict[str, Any] | None) -> dict[str, Any]:
-    safe_event_type = str(event_type).strip() or "unknown"
+def _resolve_event_type(event_type: str | TelemetryEventType) -> str:
+    if isinstance(event_type, TelemetryEventType):
+        return event_type.value
+    return str(event_type).strip() or TelemetryEventType.UNKNOWN.value
+
+
+def _build_event_record(
+    event_type: str | TelemetryEventType,
+    payload: dict[str, Any] | None,
+) -> dict[str, Any]:
+    safe_event_type = _resolve_event_type(event_type)
     safe_payload = _coerce_json_safe(payload if payload is not None else {})
     if not isinstance(safe_payload, dict):
         safe_payload = {"value": safe_payload}
@@ -155,7 +126,7 @@ def _normalize_event(event: Any) -> dict[str, Any] | None:
     normalized["event_id"] = str(normalized.get("event_id") or "").strip() or None
     normalized["schema_version"] = int(normalized.get("schema_version") or TELEMETRY_SCHEMA_VERSION)
     normalized["timestamp"] = str(normalized.get("timestamp") or "").strip() or None
-    normalized["event_type"] = str(normalized.get("event_type") or "unknown").strip() or "unknown"
+    normalized["event_type"] = str(normalized.get("event_type") or TelemetryEventType.UNKNOWN.value).strip() or TelemetryEventType.UNKNOWN.value
 
     payload = _coerce_json_safe(normalized.get("payload"))
     normalized["payload"] = payload if isinstance(payload, dict) else {"value": payload}
@@ -172,7 +143,7 @@ def _parse_iso_timestamp(ts: str | None) -> datetime | None:
 
 
 def append_telemetry_event(
-    event_type: str,
+    event_type: str | TelemetryEventType,
     payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     record = _build_event_record(event_type, payload)
@@ -188,22 +159,13 @@ def append_telemetry_event(
 def read_telemetry_events(
     limit: int = DEFAULT_READ_LIMIT,
     *,
-    event_type: str | None = None,
+    event_type: str | TelemetryEventType | None = None,
     since: str | datetime | None = None,
     until: str | datetime | None = None,
     agent_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Read telemetry events in reverse-chronological order.
-
-    Args:
-        limit:      Maximum number of matching events to return.
-        event_type: Optional exact-match filter on event_type field.
-        since:      Optional ISO timestamp or datetime lower bound (inclusive).
-        until:      Optional ISO timestamp or datetime upper bound (inclusive).
-        agent_id:   Optional filter on payload.agent_id for behavioral events.
-    """
     safe_limit = _safe_limit(limit)
-    expected_type = str(event_type).strip() if event_type is not None else None
+    expected_type = _resolve_event_type(event_type) if event_type is not None else None
     expected_agent = str(agent_id).strip() if agent_id is not None else None
 
     since_dt: datetime | None = None
@@ -265,13 +227,9 @@ def get_events_by_agent(
     agent_id: str,
     *,
     limit: int = DEFAULT_READ_LIMIT,
-    event_type: str | None = None,
+    event_type: str | TelemetryEventType | None = None,
     since: str | datetime | None = None,
 ) -> list[dict[str, Any]]:
-    """Return telemetry events scoped to a specific agent_id.
-
-    Convenience wrapper for the behavioral baseline router and drift audit queries.
-    """
     return read_telemetry_events(
         limit=limit,
         event_type=event_type,
@@ -285,8 +243,8 @@ def summarize_telemetry_events(limit: int = 500) -> dict[str, Any]:
     counts: dict[str, int] = {}
 
     for event in events:
-        event_type = str(event.get("event_type") or "unknown")
-        counts[event_type] = counts.get(event_type, 0) + 1
+        et = str(event.get("event_type") or TelemetryEventType.UNKNOWN.value)
+        counts[et] = counts.get(et, 0) + 1
 
     unknown_types = [et for et in counts if et not in KNOWN_EVENT_TYPES]
 

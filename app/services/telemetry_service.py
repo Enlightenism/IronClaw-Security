@@ -9,6 +9,8 @@ from typing import Any, Literal
 import httpx
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.schemas.telemetry import TelemetryIngestResponse
+
 """
 telemetry_service.py
 ──────────────────────────────────────────────────────────────────────────────
@@ -21,6 +23,10 @@ a batch to the ironclaw-telemetry-ingest Edge Function.
 This module does NOT duplicate local JSONL storage — that is owned exclusively
 by app/services/telemetry.py (append_telemetry_event). Callers that need both
 local and remote persistence call both services independently.
+
+API-facing response contract: TelemetryIngestResponse (app.schemas.telemetry).
+Internal result model: TelemetryBatchResult — re-exported here for callers
+that import from this module directly.
 """
 
 logger = logging.getLogger(__name__)
@@ -83,6 +89,15 @@ class TelemetryEventInput(BaseModel):
 
 
 class TelemetryBatchResult(BaseModel):
+    """
+    Internal result model for post_telemetry_batch / post_telemetry_batch_async.
+
+    API-facing callers should use TelemetryIngestResponse from app.schemas.telemetry.
+    Both share the same field contract; TelemetryBatchResult adds `valid` for
+    internal accounting. Re-exported below so callers importing from this module
+    can reference TelemetryIngestResponse without an extra schema import.
+    """
+
     ok: bool
     received: int = 0
     valid: int = 0
@@ -90,6 +105,34 @@ class TelemetryBatchResult(BaseModel):
     duplicates: int = 0
     validation_errors: list[dict[str, Any]] = Field(default_factory=list)
     error: str | None = None
+
+    def to_ingest_response(self) -> TelemetryIngestResponse:
+        """Coerce to the API-facing schema contract."""
+        return TelemetryIngestResponse(
+            ok=self.ok,
+            received=self.received,
+            inserted=self.inserted,
+            duplicates=self.duplicates,
+            validation_errors=self.validation_errors,
+            error=self.error,
+        )
+
+
+# ─── Re-export bridge ─────────────────────────────────────────────────────────
+# Callers may use TelemetryIngestResponse as the API-facing contract directly
+# from this module without importing from app.schemas.telemetry separately.
+
+__all__ = [
+    "TelemetryEventInput",
+    "TelemetryBatchResult",
+    "TelemetryIngestResponse",
+    "MetricType",
+    "MAX_BATCH_SIZE",
+    "build_event_key",
+    "build_agent_event",
+    "post_telemetry_batch",
+    "post_telemetry_batch_async",
+]
 
 
 # ─── Deterministic event_key ──────────────────────────────────────────────────
