@@ -1,477 +1,586 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-from pathlib import Path, PurePosixPath
-from unittest.mock import patch
+from datetime import UTC, datetime
+import re
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
-from app.schemas.telemetry import TelemetryEventType
-import app.services.telemetry as _tel_module
-from app.services.telemetry import (
-    DEFAULT_READ_LIMIT,
-    KNOWN_EVENT_TYPES,
-    MAX_READ_LIMIT,
-    TELEMETRY_SCHEMA_VERSION,
-    _build_event_record,
-    _coerce_json_safe,
-    _normalize_event,
-    _parse_iso_timestamp,
-    _resolve_event_type,
-    _safe_limit,
-    append_telemetry_event,
-    clear_telemetry_events,
-    get_events_by_agent,
-    get_telemetry_path,
-    is_known_event_type,
-    read_telemetry_events,
-    summarize_telemetry_events,
-    telemetry_file_exists,
+from app.services.telemetry_service import (
+    MAX_BATCH_SIZE,
+    TelemetryBatchResult,
+    TelemetryEventInput,
+    TelemetryIngestResponse,
+    build_agent_event,
+    build_event_key,
+    post_telemetry_batch,
+    post_telemetry_batch_async,
 )
 
-_MODULE_PATH = "app.services.telemetry.TELEMETRY_PATH"
+# ─── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _iso_offset(seconds: int = 0) -> str:
-    return (datetime.now(UTC) + timedelta(seconds=seconds)).isoformat().replace("+00:00", "Z")
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
-@pytest.fixture(autouse=True)
-def _patch_telemetry_path(tmp_path: Path):
-    fake_path = tmp_path / "telemetry_events.jsonl"
-    with patch.object(_tel_module, "TELEMETRY_PATH", fake_path):
-        yield fake_path
+_MODULE = "app.services.telemetry_service"
 
 
-class TestKnownEventTypes:
-    def test_is_frozenset(self):
-        assert isinstance(KNOWN_EVENT_TYPES, frozenset)
-
-    def test_contains_all_enum_values(self):
-        for member in TelemetryEventType:
-            assert member.value in KNOWN_EVENT_TYPES
-
-    def test_no_extra_values(self):
-        enum_values = frozenset(e.value for e in TelemetryEventType)
-        assert KNOWN_EVENT_TYPES == enum_values
-
-    def test_unknown_fallback_present(self):
-        assert TelemetryEventType.UNKNOWN.value in KNOWN_EVENT_TYPES
-
-    def test_does_not_contain_old_literal_strings(self):
-        assert "scan_completed" not in KNOWN_EVENT_TYPES
-        assert "action_guard_decision" not in KNOWN_EVENT_TYPES
-        assert "quarantine_created" not in KNOWN_EVENT_TYPES
-        assert "trust_score_updated" not in KNOWN_EVENT_TYPES
-        assert "behavioral_drift_detected" not in KNOWN_EVENT_TYPES
+def _make_event(
+    source: str = "ironclaw.test",
+    metric_name: str = "test.metric",
+    metric_type: str = "event",
+) -> TelemetryEventInput:
+    return build_agent_event(
+        source=source,
+        metric_name=metric_name,
+        metric_type=metric_type,  # type: ignore[arg-type]
+    )
 
 
-class TestIsKnownEventType:
-    def test_known_enum_value_returns_true(self):
-        assert is_known_event_type(TelemetryEventType.PROMPT_SCANNED.value) is True
-
-    def test_unknown_string_returns_false(self):
-        assert is_known_event_type("not_a_real_event") is False
-
-    def test_unknown_enum_value_returns_true(self):
-        assert is_known_event_type(TelemetryEventType.UNKNOWN.value) is True
-
-    def test_empty_string_returns_false(self):
-        assert is_known_event_type("") is False
-
-
-class TestResolveEventType:
-    def test_enum_returns_value(self):
-        assert _resolve_event_type(TelemetryEventType.PROMPT_SCANNED) == "prompt.scanned"
-
-    def test_raw_string_passthrough(self):
-        assert _resolve_event_type("prompt.scanned") == "prompt.scanned"
-
-    def test_empty_string_falls_back_to_unknown(self):
-        assert _resolve_event_type("") == TelemetryEventType.UNKNOWN.value
-
-    def test_whitespace_only_falls_back_to_unknown(self):
-        assert _resolve_event_type("   ") == TelemetryEventType.UNKNOWN.value
-
-    def test_unknown_enum_member(self):
-        assert _resolve_event_type(TelemetryEventType.UNKNOWN) == "unknown"
-
-    def test_all_enum_members_resolve_to_their_value(self):
-        for member in TelemetryEventType:
-            assert _resolve_event_type(member) == member.value
+def _mock_ok_response(n: int = 1) -> MagicMock:
+    resp = MagicMock()
+    resp.json.return_value = {
+        "ok": True,
+        "received": n,
+        "valid": n,
+        "inserted": n,
+        "duplicates": 0,
+        "validation_errors": [],
+        "error": None,
+    }
+    resp.raise_for_status = MagicMock()
+    return resp
 
 
-class TestBuildEventRecord:
-    def test_returns_dict_with_required_keys(self):
-        record = _build_event_record(TelemetryEventType.SYSTEM_STARTUP, None)
-        assert set(record.keys()) == {"event_id", "schema_version", "timestamp", "event_type", "payload"}
-
-    def test_event_type_from_enum(self):
-        record = _build_event_record(TelemetryEventType.PROMPT_BLOCKED, None)
-        assert record["event_type"] == "prompt.blocked"
-
-    def test_event_type_from_string(self):
-        record = _build_event_record("prompt.blocked", None)
-        assert record["event_type"] == "prompt.blocked"
-
-    def test_payload_defaults_to_empty_dict(self):
-        record = _build_event_record(TelemetryEventType.SYSTEM_STARTUP, None)
-        assert record["payload"] == {}
-
-    def test_payload_dict_preserved(self):
-        record = _build_event_record(TelemetryEventType.SYSTEM_STARTUP, {"key": "val"})
-        assert record["payload"] == {"key": "val"}
-
-    def test_schema_version_correct(self):
-        record = _build_event_record(TelemetryEventType.SYSTEM_STARTUP, None)
-        assert record["schema_version"] == TELEMETRY_SCHEMA_VERSION
-
-    def test_event_id_starts_with_telem(self):
-        record = _build_event_record(TelemetryEventType.SYSTEM_STARTUP, None)
-        assert record["event_id"].startswith("telem_")
-
-    def test_timestamp_is_iso_string(self):
-        record = _build_event_record(TelemetryEventType.SYSTEM_STARTUP, None)
-        ts = record["timestamp"]
-        assert isinstance(ts, str)
-        parsed = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-        assert parsed.tzinfo is not None
+# ─── __all__ / re-export bridge ───────────────────────────────────────────────
 
 
-class TestNormalizeEvent:
-    def test_valid_dict_returned(self):
-        raw = {
-            "event_id": "telem_123",
-            "schema_version": 1,
-            "timestamp": "2024-01-01T00:00:00Z",
-            "event_type": "prompt.scanned",
-            "payload": {"foo": "bar"},
+class TestReExport:
+    def test_TelemetryIngestResponse_importable_from_service_module(self):
+        import app.services.telemetry_service as svc
+
+        assert hasattr(svc, "TelemetryIngestResponse")
+
+    def test_re_exported_class_is_same_object(self):
+        from app.schemas.telemetry import TelemetryIngestResponse as SchemaResp
+        from app.services.telemetry_service import TelemetryIngestResponse as SvcResp
+
+        assert SvcResp is SchemaResp
+
+    def test_all_contains_TelemetryIngestResponse(self):
+        import app.services.telemetry_service as svc
+
+        assert "TelemetryIngestResponse" in svc.__all__
+
+    def test_all_contains_core_symbols(self):
+        import app.services.telemetry_service as svc
+
+        for name in (
+            "TelemetryEventInput",
+            "TelemetryBatchResult",
+            "build_event_key",
+            "build_agent_event",
+            "post_telemetry_batch",
+            "post_telemetry_batch_async",
+        ):
+            assert name in svc.__all__, f"Missing from __all__: {name}"
+
+
+# ─── build_event_key ──────────────────────────────────────────────────────────
+
+
+class TestBuildEventKey:
+    def test_returns_uuid_format(self):
+        key = build_event_key(
+            source="ironclaw",
+            metric_name="prompt.scanned",
+            captured_at="2024-01-01T00:00:00Z",
+        )
+        assert _UUID_RE.match(key), f"Not UUID format: {key}"
+
+    def test_deterministic_same_inputs(self):
+        kwargs = dict(
+            source="ironclaw",
+            metric_name="prompt.scanned",
+            captured_at="2024-01-01T00:00:00Z",
+            org_id="org-1",
+        )
+        assert build_event_key(**kwargs) == build_event_key(**kwargs)
+
+    def test_different_source_produces_different_key(self):
+        base = dict(metric_name="m", captured_at="2024-01-01T00:00:00Z")
+        k1 = build_event_key(source="a", **base)
+        k2 = build_event_key(source="b", **base)
+        assert k1 != k2
+
+    def test_different_metric_name_produces_different_key(self):
+        base = dict(source="s", captured_at="2024-01-01T00:00:00Z")
+        k1 = build_event_key(metric_name="x", **base)
+        k2 = build_event_key(metric_name="y", **base)
+        assert k1 != k2
+
+    def test_different_captured_at_produces_different_key(self):
+        base = dict(source="s", metric_name="m")
+        k1 = build_event_key(captured_at="2024-01-01T00:00:00Z", **base)
+        k2 = build_event_key(captured_at="2024-01-02T00:00:00Z", **base)
+        assert k1 != k2
+
+    def test_different_org_id_produces_different_key(self):
+        base = dict(source="s", metric_name="m", captured_at="2024-01-01T00:00:00Z")
+        k1 = build_event_key(org_id="org-A", **base)
+        k2 = build_event_key(org_id="org-B", **base)
+        assert k1 != k2
+
+    def test_none_org_id_consistent_with_omitted(self):
+        base = dict(source="s", metric_name="m", captured_at="2024-01-01T00:00:00Z")
+        k1 = build_event_key(**base)
+        k2 = build_event_key(org_id=None, **base)
+        assert k1 == k2
+
+    def test_extra_seed_changes_key(self):
+        base = dict(source="s", metric_name="m", captured_at="2024-01-01T00:00:00Z")
+        k1 = build_event_key(extra="", **base)
+        k2 = build_event_key(extra="retry-1", **base)
+        assert k1 != k2
+
+    def test_key_lowercase_hex(self):
+        key = build_event_key(source="s", metric_name="m", captured_at="2024-01-01T00:00:00Z")
+        assert key == key.lower()
+
+
+# ─── build_agent_event ────────────────────────────────────────────────────────
+
+
+class TestBuildAgentEvent:
+    def test_returns_TelemetryEventInput(self):
+        event = _make_event()
+        assert isinstance(event, TelemetryEventInput)
+
+    def test_event_key_is_uuid_format(self):
+        event = _make_event()
+        assert _UUID_RE.match(event.event_key)
+
+    def test_metric_name_set(self):
+        event = _make_event(metric_name="policy.violation")
+        assert event.metric_name == "policy.violation"
+
+    def test_source_set(self):
+        event = _make_event(source="ironclaw.guard")
+        assert event.source == "ironclaw.guard"
+
+    def test_metric_type_set(self):
+        event = build_agent_event(source="s", metric_name="m", metric_type="counter")
+        assert event.metric_type == "counter"
+
+    def test_org_id_none_by_default(self):
+        event = _make_event()
+        assert event.org_id is None
+
+    def test_org_id_propagated(self):
+        event = build_agent_event(source="s", metric_name="m", org_id="org-X")
+        assert event.org_id == "org-X"
+
+    def test_value_numeric_propagated(self):
+        event = build_agent_event(source="s", metric_name="m", value_numeric=3.14)
+        assert event.value_numeric == 3.14
+
+    def test_value_text_propagated(self):
+        event = build_agent_event(source="s", metric_name="m", value_text="blocked")
+        assert event.value_text == "blocked"
+
+    def test_unit_propagated(self):
+        event = build_agent_event(source="s", metric_name="m", unit="ms")
+        assert event.unit == "ms"
+
+    def test_dimensions_propagated(self):
+        dims = {"region": "us-east-1"}
+        event = build_agent_event(source="s", metric_name="m", dimensions=dims)
+        assert event.dimensions == dims
+
+    def test_captured_at_defaults_to_now_utc(self):
+        before = datetime.now(UTC)
+        event = _make_event()
+        after = datetime.now(UTC)
+        ts = datetime.fromisoformat(event.captured_at.replace("Z", "+00:00"))
+        assert before <= ts <= after
+
+    def test_captured_at_datetime_coerced_to_iso_z(self):
+        dt = datetime(2025, 6, 1, 12, 0, 0, tzinfo=UTC)
+        event = build_agent_event(source="s", metric_name="m", captured_at=dt)
+        assert event.captured_at == "2025-06-01T12:00:00Z"
+
+    def test_captured_at_string_passthrough(self):
+        ts = "2025-06-01T12:00:00Z"
+        event = build_agent_event(source="s", metric_name="m", captured_at=ts)
+        assert event.captured_at == ts
+
+    def test_event_key_deterministic_across_calls(self):
+        ts = "2025-06-01T12:00:00Z"
+        e1 = build_agent_event(source="s", metric_name="m", captured_at=ts)
+        e2 = build_agent_event(source="s", metric_name="m", captured_at=ts)
+        assert e1.event_key == e2.event_key
+
+    def test_different_captured_at_different_key(self):
+        e1 = build_agent_event(source="s", metric_name="m", captured_at="2025-06-01T12:00:00Z")
+        e2 = build_agent_event(source="s", metric_name="m", captured_at="2025-06-02T12:00:00Z")
+        assert e1.event_key != e2.event_key
+
+    def test_retention_until_propagated(self):
+        ts = "2026-01-01T00:00:00Z"
+        event = build_agent_event(source="s", metric_name="m", retention_until=ts)
+        assert event.retention_until == ts
+
+    def test_empty_dimensions_default(self):
+        event = build_agent_event(source="s", metric_name="m")
+        assert event.dimensions == {}
+
+
+# ─── TelemetryBatchResult.to_ingest_response ──────────────────────────────────
+
+
+class TestToIngestResponse:
+    def test_returns_TelemetryIngestResponse(self):
+        result = TelemetryBatchResult(ok=True, received=5, inserted=5, duplicates=0)
+        resp = result.to_ingest_response()
+        assert isinstance(resp, TelemetryIngestResponse)
+
+    def test_ok_propagated(self):
+        resp = TelemetryBatchResult(ok=False, error="oops").to_ingest_response()
+        assert resp.ok is False
+
+    def test_received_propagated(self):
+        resp = TelemetryBatchResult(ok=True, received=10).to_ingest_response()
+        assert resp.received == 10
+
+    def test_inserted_propagated(self):
+        resp = TelemetryBatchResult(ok=True, inserted=7).to_ingest_response()
+        assert resp.inserted == 7
+
+    def test_duplicates_propagated(self):
+        resp = TelemetryBatchResult(ok=True, duplicates=3).to_ingest_response()
+        assert resp.duplicates == 3
+
+    def test_error_propagated(self):
+        resp = TelemetryBatchResult(ok=False, error="HTTP 500: bad gateway").to_ingest_response()
+        assert resp.error == "HTTP 500: bad gateway"
+
+    def test_validation_errors_propagated(self):
+        errs = [{"field": "metric_name", "msg": "too short"}]
+        resp = TelemetryBatchResult(ok=False, validation_errors=errs).to_ingest_response()
+        assert resp.validation_errors == errs
+
+    def test_valid_field_not_leaked(self):
+        resp = TelemetryBatchResult(ok=True, valid=9).to_ingest_response()
+        assert not hasattr(resp, "valid")
+
+    def test_none_error_preserved(self):
+        resp = TelemetryBatchResult(ok=True).to_ingest_response()
+        assert resp.error is None
+
+
+# ─── post_telemetry_batch (sync) ──────────────────────────────────────────────
+
+
+class TestPostTelemetryBatchSync:
+    def test_empty_list_returns_ok_zero(self):
+        result = post_telemetry_batch([])
+        assert result.ok is True
+        assert result.received == 0
+        assert result.inserted == 0
+
+    def test_unconfigured_returns_not_ok(self):
+        events = [_make_event()]
+        with (
+            patch(f"{_MODULE}._get_ingest_url", return_value=None),
+            patch(f"{_MODULE}._get_ingest_token", return_value=None),
+        ):
+            result = post_telemetry_batch(events)
+        assert result.ok is False
+        assert "not configured" in (result.error or "").lower()
+        assert result.received == 1
+
+    def test_unconfigured_missing_url_only(self):
+        events = [_make_event()]
+        with (
+            patch(f"{_MODULE}._get_ingest_url", return_value=None),
+            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+        ):
+            result = post_telemetry_batch(events)
+        assert result.ok is False
+
+    def test_unconfigured_missing_token_only(self):
+        events = [_make_event()]
+        with (
+            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com"),
+            patch(f"{_MODULE}._get_ingest_token", return_value=None),
+        ):
+            result = post_telemetry_batch(events)
+        assert result.ok is False
+
+    def test_success_response_parsed(self):
+        events = [_make_event()]
+        mock_resp = _mock_ok_response(1)
+        with (
+            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
+            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch("httpx.post", return_value=mock_resp),
+        ):
+            result = post_telemetry_batch(events)
+        assert result.ok is True
+        assert result.inserted == 1
+
+    def test_http_status_error_returns_not_ok(self):
+        events = [_make_event()]
+        exc_resp = MagicMock()
+        exc_resp.status_code = 503
+        exc_resp.text = "service unavailable"
+        with (
+            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
+            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch(
+                "httpx.post",
+                side_effect=httpx.HTTPStatusError("err", request=MagicMock(), response=exc_resp),
+            ),
+        ):
+            result = post_telemetry_batch(events)
+        assert result.ok is False
+        assert "503" in (result.error or "")
+        assert result.received == 1
+
+    def test_timeout_exception_returns_not_ok(self):
+        events = [_make_event()]
+        with (
+            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
+            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch("httpx.post", side_effect=httpx.TimeoutException("timed out")),
+        ):
+            result = post_telemetry_batch(events)
+        assert result.ok is False
+        assert "timed out" in (result.error or "").lower()
+        assert result.received == 1
+
+    def test_generic_exception_returns_not_ok(self):
+        events = [_make_event()]
+        with (
+            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
+            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch("httpx.post", side_effect=RuntimeError("boom")),
+        ):
+            result = post_telemetry_batch(events)
+        assert result.ok is False
+        assert "boom" in (result.error or "")
+
+    def test_batch_truncated_at_max(self):
+        events = [_make_event() for _ in range(MAX_BATCH_SIZE + 10)]
+        mock_resp = _mock_ok_response(MAX_BATCH_SIZE)
+        captured: list[list] = []
+
+        def fake_post(url, json, headers, timeout):
+            captured.append(json)
+            return mock_resp
+
+        with (
+            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
+            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch("httpx.post", side_effect=fake_post),
+        ):
+            post_telemetry_batch(events)
+
+        assert len(captured[0]) == MAX_BATCH_SIZE
+
+    def test_result_is_TelemetryBatchResult(self):
+        events = [_make_event()]
+        mock_resp = _mock_ok_response(1)
+        with (
+            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
+            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch("httpx.post", return_value=mock_resp),
+        ):
+            result = post_telemetry_batch(events)
+        assert isinstance(result, TelemetryBatchResult)
+
+    def test_to_ingest_response_from_sync_result(self):
+        events = [_make_event()]
+        mock_resp = _mock_ok_response(1)
+        with (
+            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
+            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch("httpx.post", return_value=mock_resp),
+        ):
+            result = post_telemetry_batch(events)
+        api_resp = result.to_ingest_response()
+        assert isinstance(api_resp, TelemetryIngestResponse)
+        assert api_resp.ok is True
+
+
+# ─── post_telemetry_batch_async ───────────────────────────────────────────────
+
+
+class TestPostTelemetryBatchAsync:
+    @pytest.mark.asyncio
+    async def test_empty_list_returns_ok_zero(self):
+        result = await post_telemetry_batch_async([])
+        assert result.ok is True
+        assert result.received == 0
+
+    @pytest.mark.asyncio
+    async def test_unconfigured_returns_not_ok(self):
+        events = [_make_event()]
+        with (
+            patch(f"{_MODULE}._get_ingest_url", return_value=None),
+            patch(f"{_MODULE}._get_ingest_token", return_value=None),
+        ):
+            result = await post_telemetry_batch_async(events)
+        assert result.ok is False
+        assert result.received == 1
+
+    @pytest.mark.asyncio
+    async def test_success_response_parsed(self):
+        events = [_make_event()]
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "ok": True,
+            "received": 1,
+            "valid": 1,
+            "inserted": 1,
+            "duplicates": 0,
+            "validation_errors": [],
+            "error": None,
         }
-        result = _normalize_event(raw)
-        assert result is not None
-        assert result["event_type"] == "prompt.scanned"
-
-    def test_non_dict_returns_none(self):
-        assert _normalize_event("not a dict") is None
-        assert _normalize_event(None) is None
-        assert _normalize_event(42) is None
-
-    def test_missing_event_type_falls_back_to_unknown(self):
-        result = _normalize_event({"event_type": None, "schema_version": 1})
-        assert result["event_type"] == TelemetryEventType.UNKNOWN.value
-
-    def test_empty_event_type_falls_back_to_unknown(self):
-        result = _normalize_event({"event_type": "", "schema_version": 1})
-        assert result["event_type"] == TelemetryEventType.UNKNOWN.value
-
-    def test_payload_non_dict_wrapped(self):
-        result = _normalize_event({"event_type": "prompt.scanned", "payload": "raw_string"})
-        assert isinstance(result["payload"], dict)
-        assert result["payload"] == {"value": "raw_string"}
-
-
-class TestSafeLimit:
-    def test_default_used_when_none(self):
-        assert _safe_limit(None) == DEFAULT_READ_LIMIT
-
-    def test_explicit_value_returned(self):
-        assert _safe_limit(10) == 10
-
-    def test_floor_is_1(self):
-        assert _safe_limit(0) == 1
-        assert _safe_limit(-5) == 1
-
-    def test_ceiling_is_max_read_limit(self):
-        assert _safe_limit(MAX_READ_LIMIT + 1000) == MAX_READ_LIMIT
-
-    def test_string_int_coerced(self):
-        assert _safe_limit("25") == 25
-
-    def test_invalid_string_falls_back_to_default(self):
-        assert _safe_limit("abc") == DEFAULT_READ_LIMIT
-
-
-class TestParseIsoTimestamp:
-    def test_valid_z_suffix(self):
-        result = _parse_iso_timestamp("2024-06-01T12:00:00Z")
-        assert isinstance(result, datetime)
-        assert result.tzinfo is not None
-
-    def test_valid_offset(self):
-        result = _parse_iso_timestamp("2024-06-01T12:00:00+00:00")
-        assert isinstance(result, datetime)
-
-    def test_none_returns_none(self):
-        assert _parse_iso_timestamp(None) is None
-
-    def test_empty_string_returns_none(self):
-        assert _parse_iso_timestamp("") is None
-
-    def test_invalid_string_returns_none(self):
-        assert _parse_iso_timestamp("not-a-date") is None
-
-
-class TestCoerceJsonSafe:
-    def test_primitives_passthrough(self):
-        assert _coerce_json_safe(None) is None
-        assert _coerce_json_safe(True) is True
-        assert _coerce_json_safe(42) == 42
-        assert _coerce_json_safe(3.14) == 3.14
-        assert _coerce_json_safe("hello") == "hello"
-
-    def test_datetime_to_iso_string(self):
-        dt = datetime(2024, 1, 1, tzinfo=UTC)
-        result = _coerce_json_safe(dt)
-        assert isinstance(result, str)
-        assert "2024" in result
-
-    def test_path_to_string(self):
-        result = _coerce_json_safe(Path("/tmp/test"))
-        assert result == str(PurePosixPath(Path("/tmp/test")))
-
-    def test_dict_recursed(self):
-        result = _coerce_json_safe({"k": datetime(2024, 1, 1, tzinfo=UTC)})
-        assert isinstance(result["k"], str)
-
-    def test_list_recursed(self):
-        result = _coerce_json_safe([1, "two", None])
-        assert result == [1, "two", None]
-
-    def test_set_to_list(self):
-        result = _coerce_json_safe({1, 2})
-        assert isinstance(result, list)
-
-    def test_depth_guard_returns_str(self):
-        nested: dict = {}
-        cursor = nested
-        for _ in range(35):
-            cursor["x"] = {}
-            cursor = cursor["x"]
-        result = _coerce_json_safe(nested)
-        assert result is not None
-
-
-class TestAppendTelemetryEvent:
-    def test_appends_with_raw_string(self, _patch_telemetry_path: Path):
-        record = append_telemetry_event("prompt.scanned", {"agent": "a1"})
-        assert _patch_telemetry_path.exists()
-        assert record["event_type"] == "prompt.scanned"
-
-    def test_appends_with_enum(self, _patch_telemetry_path: Path):
-        record = append_telemetry_event(TelemetryEventType.PROMPT_SCANNED, {"agent": "a1"})
-        assert record["event_type"] == "prompt.scanned"
-
-    def test_file_grows_on_multiple_appends(self, _patch_telemetry_path: Path):
-        append_telemetry_event(TelemetryEventType.SYSTEM_STARTUP)
-        append_telemetry_event(TelemetryEventType.SYSTEM_SHUTDOWN)
-        lines = [ln for ln in _patch_telemetry_path.read_text().splitlines() if ln.strip()]
-        assert len(lines) == 2
-
-    def test_return_shape(self, _patch_telemetry_path: Path):
-        record = append_telemetry_event(TelemetryEventType.POLICY_VIOLATION, {"reason": "test"})
-        assert "event_id" in record
-        assert "timestamp" in record
-        assert "schema_version" in record
-        assert record["payload"] == {"reason": "test"}
-
-    def test_none_payload_stored_as_empty_dict(self, _patch_telemetry_path: Path):
-        record = append_telemetry_event(TelemetryEventType.SYSTEM_STARTUP)
-        assert record["payload"] == {}
-
-
-class TestReadTelemetryEvents:
-    def test_returns_empty_when_no_file(self, _patch_telemetry_path: Path):
-        result = read_telemetry_events()
-        assert result == []
-
-    def test_returns_events_in_reverse_order(self, _patch_telemetry_path: Path):
-        append_telemetry_event(TelemetryEventType.SYSTEM_STARTUP)
-        append_telemetry_event(TelemetryEventType.SYSTEM_SHUTDOWN)
-        events = read_telemetry_events(limit=10)
-        assert events[0]["event_type"] == "system.shutdown"
-        assert events[1]["event_type"] == "system.startup"
-
-    def test_limit_respected(self, _patch_telemetry_path: Path):
-        for _ in range(5):
-            append_telemetry_event(TelemetryEventType.AUDIT_LOG_WRITTEN)
-        events = read_telemetry_events(limit=3)
-        assert len(events) == 3
-
-    def test_filter_by_raw_string(self, _patch_telemetry_path: Path):
-        append_telemetry_event(TelemetryEventType.SYSTEM_STARTUP)
-        append_telemetry_event(TelemetryEventType.POLICY_VIOLATION)
-        events = read_telemetry_events(event_type="system.startup")
-        assert all(e["event_type"] == "system.startup" for e in events)
-        assert len(events) == 1
-
-    def test_filter_by_enum(self, _patch_telemetry_path: Path):
-        append_telemetry_event(TelemetryEventType.SYSTEM_STARTUP)
-        append_telemetry_event(TelemetryEventType.POLICY_VIOLATION)
-        events = read_telemetry_events(event_type=TelemetryEventType.POLICY_VIOLATION)
-        assert all(e["event_type"] == "policy.violation" for e in events)
-        assert len(events) == 1
-
-    def test_filter_by_agent_id(self, _patch_telemetry_path: Path):
-        append_telemetry_event(TelemetryEventType.AGENT_PROFILE_UPDATED, {"agent_id": "agent-A"})
-        append_telemetry_event(TelemetryEventType.AGENT_PROFILE_UPDATED, {"agent_id": "agent-B"})
-        events = read_telemetry_events(agent_id="agent-A")
-        assert len(events) == 1
-        assert events[0]["payload"]["agent_id"] == "agent-A"
-
-    def test_malformed_lines_skipped(self, _patch_telemetry_path: Path):
-        _patch_telemetry_path.write_text("not json\n" '{"event_type":"system.startup","schema_version":1,"timestamp":"2024-01-01T00:00:00Z","event_id":"telem_1","payload":{}}\n')
-        events = read_telemetry_events(limit=10)
-        assert len(events) == 1
-        assert events[0]["event_type"] == "system.startup"
-
-    def test_empty_lines_skipped(self, _patch_telemetry_path: Path):
-        _patch_telemetry_path.write_text("\n\n\n")
-        events = read_telemetry_events()
-        assert events == []
-
-
-class TestTimestampRangeFilters:
-    def test_since_filters_out_older_events(self, _patch_telemetry_path: Path):
-        import json
-
-        past = (datetime.now(UTC) - timedelta(hours=2)).isoformat().replace("+00:00", "Z")
-        future = (datetime.now(UTC) + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
-        _patch_telemetry_path.write_text(json.dumps({"event_id": "t1", "schema_version": 1, "timestamp": past, "event_type": "system.startup", "payload": {}}) + "\n" + json.dumps({"event_id": "t2", "schema_version": 1, "timestamp": future, "event_type": "system.shutdown", "payload": {}}) + "\n")
-        cutoff = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-        events = read_telemetry_events(since=cutoff)
-        assert all(e["event_type"] == "system.shutdown" for e in events)
-
-    def test_until_filters_out_newer_events(self, _patch_telemetry_path: Path):
-        import json
-
-        past = (datetime.now(UTC) - timedelta(hours=2)).isoformat().replace("+00:00", "Z")
-        future = (datetime.now(UTC) + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
-        _patch_telemetry_path.write_text(json.dumps({"event_id": "t1", "schema_version": 1, "timestamp": past, "event_type": "system.startup", "payload": {}}) + "\n" + json.dumps({"event_id": "t2", "schema_version": 1, "timestamp": future, "event_type": "system.shutdown", "payload": {}}) + "\n")
-        cutoff = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-        events = read_telemetry_events(until=cutoff)
-        assert all(e["event_type"] == "system.startup" for e in events)
-
-    def test_since_as_datetime_object(self, _patch_telemetry_path: Path):
-        append_telemetry_event(TelemetryEventType.SYSTEM_STARTUP)
-        cutoff = datetime.now(UTC) + timedelta(hours=1)
-        events = read_telemetry_events(since=cutoff)
-        assert events == []
-
-    def test_until_as_datetime_object(self, _patch_telemetry_path: Path):
-        append_telemetry_event(TelemetryEventType.SYSTEM_STARTUP)
-        cutoff = datetime.now(UTC) - timedelta(hours=1)
-        events = read_telemetry_events(until=cutoff)
-        assert events == []
-
-
-class TestGetEventsByAgent:
-    def test_returns_only_matching_agent(self, _patch_telemetry_path: Path):
-        append_telemetry_event(TelemetryEventType.AGENT_PROFILE_UPDATED, {"agent_id": "agent-X"})
-        append_telemetry_event(TelemetryEventType.AGENT_PROFILE_UPDATED, {"agent_id": "agent-Y"})
-        events = get_events_by_agent("agent-X")
-        assert len(events) == 1
-        assert events[0]["payload"]["agent_id"] == "agent-X"
-
-    def test_returns_empty_for_unknown_agent(self, _patch_telemetry_path: Path):
-        append_telemetry_event(TelemetryEventType.AGENT_PROFILE_UPDATED, {"agent_id": "agent-X"})
-        events = get_events_by_agent("no-such-agent")
-        assert events == []
-
-    def test_event_type_filter_combined_with_agent(self, _patch_telemetry_path: Path):
-        append_telemetry_event(TelemetryEventType.AGENT_PROFILE_UPDATED, {"agent_id": "agent-X"})
-        append_telemetry_event(TelemetryEventType.POLICY_VIOLATION, {"agent_id": "agent-X"})
-        events = get_events_by_agent("agent-X", event_type=TelemetryEventType.POLICY_VIOLATION)
-        assert len(events) == 1
-        assert events[0]["event_type"] == "policy.violation"
-
-    def test_since_filter_respected(self, _patch_telemetry_path: Path):
-        append_telemetry_event(TelemetryEventType.AGENT_PROFILE_UPDATED, {"agent_id": "agent-X"})
-        future_cutoff = datetime.now(UTC) + timedelta(hours=1)
-        events = get_events_by_agent("agent-X", since=future_cutoff)
-        assert events == []
-
-    def test_limit_respected(self, _patch_telemetry_path: Path):
-        for _ in range(5):
-            append_telemetry_event(TelemetryEventType.AGENT_PROFILE_UPDATED, {"agent_id": "agent-X"})
-        events = get_events_by_agent("agent-X", limit=2)
-        assert len(events) == 2
-
-
-class TestSummarizeTelemetryEvents:
-    def test_empty_file_returns_zero_count(self, _patch_telemetry_path: Path):
-        summary = summarize_telemetry_events()
-        assert summary["event_count"] == 0
-        assert summary["event_type_counts"] == {}
-        assert summary["latest_timestamp"] is None
-
-    def test_counts_by_event_type(self, _patch_telemetry_path: Path):
-        append_telemetry_event(TelemetryEventType.SYSTEM_STARTUP)
-        append_telemetry_event(TelemetryEventType.SYSTEM_STARTUP)
-        append_telemetry_event(TelemetryEventType.POLICY_VIOLATION)
-        summary = summarize_telemetry_events()
-        assert summary["event_type_counts"]["system.startup"] == 2
-        assert summary["event_type_counts"]["policy.violation"] == 1
-
-    def test_known_types_produce_no_unknown(self, _patch_telemetry_path: Path):
-        append_telemetry_event(TelemetryEventType.SYSTEM_STARTUP)
-        summary = summarize_telemetry_events()
-        assert summary["unknown_event_types"] == []
-
-    def test_unknown_type_detected(self, _patch_telemetry_path: Path):
-        import json
-
-        _patch_telemetry_path.write_text(json.dumps({"event_id": "t1", "schema_version": 1, "timestamp": "2024-01-01T00:00:00Z", "event_type": "scan_completed", "payload": {}}) + "\n")
-        summary = summarize_telemetry_events()
-        assert "scan_completed" in summary["unknown_event_types"]
-
-    def test_schema_version_present(self, _patch_telemetry_path: Path):
-        summary = summarize_telemetry_events()
-        assert summary["schema_version"] == TELEMETRY_SCHEMA_VERSION
-
-    def test_latest_timestamp_is_most_recent(self, _patch_telemetry_path: Path):
-        append_telemetry_event(TelemetryEventType.SYSTEM_STARTUP)
-        append_telemetry_event(TelemetryEventType.SYSTEM_SHUTDOWN)
-        summary = summarize_telemetry_events()
-        assert summary["latest_timestamp"] is not None
-
-    def test_path_present_in_summary(self, _patch_telemetry_path: Path):
-        summary = summarize_telemetry_events()
-        assert "path" in summary
-
-
-class TestClearAndExists:
-    def test_file_does_not_exist_before_append(self, _patch_telemetry_path: Path):
-        assert telemetry_file_exists() is False
-
-    def test_file_exists_after_append(self, _patch_telemetry_path: Path):
-        append_telemetry_event(TelemetryEventType.SYSTEM_STARTUP)
-        assert telemetry_file_exists() is True
-
-    def test_clear_empties_file(self, _patch_telemetry_path: Path):
-        append_telemetry_event(TelemetryEventType.SYSTEM_STARTUP)
-        clear_telemetry_events()
-        events = read_telemetry_events()
-        assert events == []
-
-    def test_clear_file_still_exists_after_clear(self, _patch_telemetry_path: Path):
-        append_telemetry_event(TelemetryEventType.SYSTEM_STARTUP)
-        clear_telemetry_events()
-        assert telemetry_file_exists() is True
-
-    def test_append_after_clear_works(self, _patch_telemetry_path: Path):
-        append_telemetry_event(TelemetryEventType.SYSTEM_STARTUP)
-        clear_telemetry_events()
-        append_telemetry_event(TelemetryEventType.SYSTEM_SHUTDOWN)
-        events = read_telemetry_events()
-        assert len(events) == 1
-        assert events[0]["event_type"] == "system.shutdown"
-
-
-class TestGetTelemetryPath:
-    def test_returns_string(self):
-        result = get_telemetry_path()
-        assert isinstance(result, str)
-
-    def test_ends_with_jsonl(self):
-        result = get_telemetry_path()
-        assert result.endswith(".jsonl")
+        mock_resp.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
+            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch("httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await post_telemetry_batch_async(events)
+        assert result.ok is True
+        assert result.inserted == 1
+
+    @pytest.mark.asyncio
+    async def test_http_status_error_returns_not_ok(self):
+        events = [_make_event()]
+        exc_resp = MagicMock()
+        exc_resp.status_code = 429
+        exc_resp.text = "rate limited"
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(side_effect=httpx.HTTPStatusError("err", request=MagicMock(), response=exc_resp))
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
+            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch("httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await post_telemetry_batch_async(events)
+        assert result.ok is False
+        assert "429" in (result.error or "")
+
+    @pytest.mark.asyncio
+    async def test_timeout_returns_not_ok(self):
+        events = [_make_event()]
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(side_effect=httpx.TimeoutException("async timeout"))
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
+            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch("httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await post_telemetry_batch_async(events)
+        assert result.ok is False
+        assert "timed out" in (result.error or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_generic_exception_returns_not_ok(self):
+        events = [_make_event()]
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(side_effect=ValueError("unexpected"))
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
+            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch("httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await post_telemetry_batch_async(events)
+        assert result.ok is False
+        assert "unexpected" in (result.error or "")
+
+    @pytest.mark.asyncio
+    async def test_batch_truncated_at_max(self):
+        events = [_make_event() for _ in range(MAX_BATCH_SIZE + 5)]
+        captured: list[list] = []
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "ok": True,
+            "received": MAX_BATCH_SIZE,
+            "valid": MAX_BATCH_SIZE,
+            "inserted": MAX_BATCH_SIZE,
+            "duplicates": 0,
+            "validation_errors": [],
+            "error": None,
+        }
+        mock_resp.raise_for_status = MagicMock()
+
+        async def fake_post(url, json, headers):
+            captured.append(json)
+            return mock_resp
+
+        mock_client = AsyncMock()
+        mock_client.post = fake_post
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
+            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch("httpx.AsyncClient", return_value=mock_client),
+        ):
+            await post_telemetry_batch_async(events)
+
+        assert len(captured[0]) == MAX_BATCH_SIZE
+
+    @pytest.mark.asyncio
+    async def test_to_ingest_response_from_async_result(self):
+        events = [_make_event()]
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "ok": True,
+            "received": 1,
+            "valid": 1,
+            "inserted": 1,
+            "duplicates": 0,
+            "validation_errors": [],
+            "error": None,
+        }
+        mock_resp.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
+            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch("httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await post_telemetry_batch_async(events)
+        api_resp = result.to_ingest_response()
+        assert isinstance(api_resp, TelemetryIngestResponse)
+        assert api_resp.ok is True
