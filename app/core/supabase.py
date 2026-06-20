@@ -81,7 +81,7 @@ def get_supabase_service_client(
     if not url:
         raise SupabaseConfigurationError("missing SUPABASE_URL for service client")
     if not key:
-        raise SupabaseConfigurationError("missing SUPABASE_SERVICE_ROLE_KEY — service client requires the " "service-role key; anon keys are not accepted")
+        raise SupabaseConfigurationError("missing SUPABASE_SERVICE_ROLE_KEY — service client requires the service-role key; anon keys are not accepted")
     if not url.startswith(("http://", "https://")):
         raise SupabaseConfigurationError("SUPABASE_URL must start with http:// or https://")
 

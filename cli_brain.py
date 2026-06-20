@@ -147,7 +147,7 @@ def main() -> None:
         "--exit-on-verdict",
         action="store_true",
         dest="exit_on_verdict",
-        help=("Exit with a non-zero code based on verdict: " "allow=0, warn=2, quarantine=3, block=4."),
+        help=("Exit with a non-zero code based on verdict: allow=0, warn=2, quarantine=3, block=4."),
     )
 
     args = parser.parse_args()
@@ -168,7 +168,7 @@ def main() -> None:
 
     if args.verbose:
         print(
-            f"[ironclaw-brain] POST {resolved_base_url}/brain/decision" f"  session={session_id}  chars={len(target_value)}",
+            f"[ironclaw-brain] POST {resolved_base_url}/brain/decision  session={session_id}  chars={len(target_value)}",
             file=sys.stderr,
         )
 
@@ -220,7 +220,7 @@ def main() -> None:
     patterns_str = ",".join(matched_patterns) if matched_patterns else "none"
 
     print(
-        f"ACTION={final_action} CONFIDENCE={confidence_str} RISK_SCORE={risk_score}" f" LANE={sandbox_lane} PATTERNS={patterns_str}",
+        f"ACTION={final_action} CONFIDENCE={confidence_str} RISK_SCORE={risk_score} LANE={sandbox_lane} PATTERNS={patterns_str}",
     )
     if reason:
         print(f"REASON: {reason}")

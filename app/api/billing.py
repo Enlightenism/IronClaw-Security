@@ -273,7 +273,7 @@ def _build_unit_policy() -> UnitPolicyView:
     return UnitPolicyView(
         unit_definition="1 protection unit = 1 IronClaw protection event.",
         delivery_model="All packages are prepaid unit bundles with no recurring subscription requirement.",
-        buyer_positioning=("Customers are buying protected AI usage, not raw API calls. Each unit funds layered " "security checks around prompts, tool activity, returned content, and release decisions."),
+        buyer_positioning=("Customers are buying protected AI usage, not raw API calls. Each unit funds layered security checks around prompts, tool activity, returned content, and release decisions."),
         token_chunk_size=TOKEN_CHUNK_SIZE,
         protection_layers=[
             ProtectionValueView(

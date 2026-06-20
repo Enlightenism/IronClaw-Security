@@ -710,6 +710,6 @@ if _FRONTEND_BUILD.is_dir():
 
 else:
     logger.warning(
-        "Frontend build not found at %s — static serving disabled. " "Run `yarn build` inside the frontend directory to enable it.",
+        "Frontend build not found at %s — static serving disabled. Run `yarn build` inside the frontend directory to enable it.",
         _FRONTEND_BUILD,
     )

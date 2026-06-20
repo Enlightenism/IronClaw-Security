@@ -32,7 +32,7 @@ _BILLING_PACKAGE_FALLBACK: dict[str, dict[str, Any]] = {
         "price_usd": 20.00,
         "included_units": 5_000,
         "display_label": "5,000 units — $20.00",
-        "description": ("Prepaid protection units for individual builders who want guarded " "prompt handling, tool-call review, source inspection, and safe response release."),
+        "description": ("Prepaid protection units for individual builders who want guarded prompt handling, tool-call review, source inspection, and safe response release."),
     },
     "pkg_25000": {
         "package_id": "pkg_25000",
@@ -40,7 +40,7 @@ _BILLING_PACKAGE_FALLBACK: dict[str, dict[str, Any]] = {
         "price_usd": 90.00,
         "included_units": 25_000,
         "display_label": "25,000 units — $90.00",
-        "description": ("Prepaid protection units for teams running higher volumes of AI-assisted " "development, research, and guarded agent workflows."),
+        "description": ("Prepaid protection units for teams running higher volumes of AI-assisted development, research, and guarded agent workflows."),
     },
     "pkg_60000": {
         "package_id": "pkg_60000",
@@ -48,7 +48,7 @@ _BILLING_PACKAGE_FALLBACK: dict[str, dict[str, Any]] = {
         "price_usd": 180.00,
         "included_units": 60_000,
         "display_label": "60,000 units — $180.00",
-        "description": ("Prepaid protection units for organizations protecting large-scale agent " "operations, sensitive workflows, and high-frequency prompt activity."),
+        "description": ("Prepaid protection units for organizations protecting large-scale agent operations, sensitive workflows, and high-frequency prompt activity."),
     },
 }
 
@@ -348,10 +348,10 @@ def _get_or_zero_wallet(registry: Any, owner_key: str) -> Any:
 def get_packages() -> BillingPackagesResponse:
     packages = [_package_to_view(pid, pkg) for pid, pkg in PACKAGE_CATALOG.items()]
     unit_policy = UnitPolicyView(
-        unit_definition=(f"One protection unit covers {TOKEN_CHUNK_SIZE:,} tokens of inspected " "AI interaction across all active guardrails."),
+        unit_definition=(f"One protection unit covers {TOKEN_CHUNK_SIZE:,} tokens of inspected AI interaction across all active guardrails."),
         token_chunk_size=TOKEN_CHUNK_SIZE,
         delivery_model="prepaid",
-        buyer_positioning=("Units are consumed as AI actions pass through IronClaw guardrails. " "Unused units roll over until your balance is exhausted."),
+        buyer_positioning=("Units are consumed as AI actions pass through IronClaw guardrails. Unused units roll over until your balance is exhausted."),
         protection_layers=[
             ProtectionValueView(
                 title="Prompt Injection Guard",

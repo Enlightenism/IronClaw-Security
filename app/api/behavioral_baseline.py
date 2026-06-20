@@ -159,7 +159,7 @@ class ObservationListResponse(BaseModel):
     response_model=ObservationResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Record a single agent behavioral observation",
-    description=("Ingest one behavioral observation for a specific agent. " "Each ingestion automatically triggers baseline recompute. " "Once enough samples are collected, drift detection becomes active."),
+    description=("Ingest one behavioral observation for a specific agent. Each ingestion automatically triggers baseline recompute. Once enough samples are collected, drift detection becomes active."),
 )
 def record_observation(
     agent_id: str,
@@ -187,7 +187,7 @@ def record_observation(
     response_model=BulkObservationResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Bulk ingest agent behavioral observations",
-    description=("Ingest multiple behavioral observations for a specific agent in one request. " "Baseline recompute is triggered incrementally after each ingestion."),
+    description=("Ingest multiple behavioral observations for a specific agent in one request. Baseline recompute is triggered incrementally after each ingestion."),
 )
 def record_observations_bulk(
     agent_id: str,
@@ -224,7 +224,7 @@ def record_observations_bulk(
     "/behavioral/agents/{agent_id}/baseline",
     response_model=BaselineResponse,
     summary="Get the learned behavioral baseline for an agent",
-    description=("Returns the current learned baseline profile for the specified agent. " "Returns 404 if no baseline has been established yet."),
+    description=("Returns the current learned baseline profile for the specified agent. Returns 404 if no baseline has been established yet."),
 )
 def get_baseline(agent_id: str) -> BaselineResponse:
     store = get_behavioral_baseline_store()
@@ -244,7 +244,7 @@ def get_baseline(agent_id: str) -> BaselineResponse:
     "/behavioral/agents/{agent_id}/drift",
     response_model=DriftReportResponse,
     summary="Compute behavioral drift for an agent",
-    description=("Computes a full behavioral drift report comparing recent agent activity " "against the established baseline. Returns severity signals, recommendations, " "and suspension/alert flags."),
+    description=("Computes a full behavioral drift report comparing recent agent activity against the established baseline. Returns severity signals, recommendations, and suspension/alert flags."),
 )
 def compute_drift(
     agent_id: str,
@@ -297,7 +297,7 @@ def get_observations(
     "/behavioral/agents/{agent_id}/baseline",
     response_model=BaselineActionResponse,
     summary="Invalidate or purge an agent baseline",
-    description=("If `purge=true`, removes all observations and the baseline entirely. " "If `purge=false` (default), marks the baseline as stale so it will be rebuilt on next observation."),
+    description=("If `purge=true`, removes all observations and the baseline entirely. If `purge=false` (default), marks the baseline as stale so it will be rebuilt on next observation."),
 )
 def delete_baseline(
     agent_id: str,
@@ -339,7 +339,7 @@ def delete_baseline(
     "/behavioral/agents/{agent_id}/baseline/suspend",
     response_model=BaselineActionResponse,
     summary="Suspend an agent's behavioral profile",
-    description=("Suspends the agent's baseline profile. A suspended agent will receive a critical drift verdict " "on every subsequent drift check until manually cleared by an operator. " "Use after critical drift confirmation or adversarial action detection."),
+    description=("Suspends the agent's baseline profile. A suspended agent will receive a critical drift verdict on every subsequent drift check until manually cleared by an operator. Use after critical drift confirmation or adversarial action detection."),
 )
 def suspend_baseline(agent_id: str) -> BaselineActionResponse:
     store = get_behavioral_baseline_store()

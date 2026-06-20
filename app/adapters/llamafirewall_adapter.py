@@ -374,7 +374,7 @@ class LlamaFirewallAdapter(BaseIntegrationAdapter):
         scan_result = self._run_scan(request)
 
         result.status = "guarded"
-        result.summary = f"{self.record.name} guarded scan action " f"'{request.action_type}' for target '{request.target}'."
+        result.summary = f"{self.record.name} guarded scan action '{request.action_type}' for target '{request.target}'."
 
         result.output["guard_applied"] = True
         result.output["execution_mode"] = "prompt-gated"

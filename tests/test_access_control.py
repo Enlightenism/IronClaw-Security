@@ -696,7 +696,7 @@ def test_permission_boundary_matrix() -> None:
     for role, permission, expected in _PERMISSION_MATRIX:
         ctx = _ctx(roles=(role,))
         decision = evaluate_permission(ctx, permission)
-        assert decision.allowed is expected, f"Role={role!r} permission={permission!r} " f"expected={expected} got={decision.allowed} reason={decision.reason!r}"
+        assert decision.allowed is expected, f"Role={role!r} permission={permission!r} expected={expected} got={decision.allowed} reason={decision.reason!r}"
 
 
 # ---------------------------------------------------------------------------

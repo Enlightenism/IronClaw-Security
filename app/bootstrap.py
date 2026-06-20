@@ -65,7 +65,7 @@ def assert_schema_completeness() -> frozenset[str]:
     registered = get_registered_tables()
     count = len(registered)
     if count != _EXPECTED_TABLE_COUNT:
-        raise RuntimeError(f"IronClaw schema completeness check failed: expected " f"{_EXPECTED_TABLE_COUNT} tables, registry has {count}. " f"Tables present: {sorted(registered)}")
+        raise RuntimeError(f"IronClaw schema completeness check failed: expected {_EXPECTED_TABLE_COUNT} tables, registry has {count}. Tables present: {sorted(registered)}")
     _log.info(
         "bootstrap: schema completeness check passed — %d tables registered: %s",
         count,

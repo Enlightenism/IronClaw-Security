@@ -62,21 +62,21 @@ _PRICING_FALLBACK: dict[str, tuple[int, float, str, str, str]] = {
         20.00,
         "Starter",
         "5,000 units — $20.00",
-        ("Prepaid protection units for individual builders who want guarded " "prompt handling, tool-call review, source inspection, and safe response release."),
+        ("Prepaid protection units for individual builders who want guarded prompt handling, tool-call review, source inspection, and safe response release."),
     ),
     "pkg_25000": (
         25_000,
         90.00,
         "Team",
         "25,000 units — $90.00",
-        ("Prepaid protection units for teams running higher volumes of AI-assisted " "development, research, and guarded agent workflows."),
+        ("Prepaid protection units for teams running higher volumes of AI-assisted development, research, and guarded agent workflows."),
     ),
     "pkg_60000": (
         60_000,
         180.00,
         "Enterprise",
         "60,000 units — $180.00",
-        ("Prepaid protection units for organizations protecting large-scale agent " "operations, sensitive workflows, and high-frequency prompt activity."),
+        ("Prepaid protection units for organizations protecting large-scale agent operations, sensitive workflows, and high-frequency prompt activity."),
     ),
 }
 

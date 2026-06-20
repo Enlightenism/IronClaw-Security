@@ -154,7 +154,6 @@ def _override_auth(app_instance, ctx: AuthContext):
 
 
 class TestResolveBillingOwner:
-
     def test_org_key_with_org_id_returns_ic_org_prefix(self, org_id: str) -> None:
         ctx = _make_auth_ctx(key_type="org", org_id=org_id)
         result = resolve_billing_owner(ctx, "buyer@example.com")
@@ -228,7 +227,6 @@ class TestResolveBillingOwner:
 
 
 class TestOrgWalletRouting:
-
     def test_org_key_purchase_credits_org_wallet(
         self,
         org_id: str,
@@ -317,7 +315,6 @@ class TestOrgWalletRouting:
 
 
 class TestPurchaseOrgWalletIntegration:
-
     def test_org_purchase_response_owner_key_is_ic_org_prefixed(
         self,
         app_instance,

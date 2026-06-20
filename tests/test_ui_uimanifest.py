@@ -302,7 +302,9 @@ class TestManifestCategories:
 
 class TestManifestKnownRoutes:
     def _get_route(
-        self, manifest_data: dict, slug: str  # type: ignore[type-arg]
+        self,
+        manifest_data: dict,
+        slug: str,  # type: ignore[type-arg]
     ) -> dict:  # type: ignore[type-arg]
         for route in manifest_data["routes"]:
             if route["slug"] == slug:

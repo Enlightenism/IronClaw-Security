@@ -65,7 +65,7 @@ def _signing_secret() -> bytes:
     key = s.effective_platform_api_key
     if not key:
         if s.auth_required:
-            raise RuntimeError("AUTH_REQUIRED is true but no API key is configured. " "Set one of: INTERNAL_PLATFORM_API_KEY, PLATFORM_API_KEY, " "ADMIN_API_KEY, API_KEY, or IRONCLAW_API_KEY.")
+            raise RuntimeError("AUTH_REQUIRED is true but no API key is configured. Set one of: INTERNAL_PLATFORM_API_KEY, PLATFORM_API_KEY, ADMIN_API_KEY, API_KEY, or IRONCLAW_API_KEY.")
         key = "ironclaw-dev-insecure-cookie-secret"
     # PBKDF2 stretch: prevents direct key reuse as signing material
     return hashlib.pbkdf2_hmac(

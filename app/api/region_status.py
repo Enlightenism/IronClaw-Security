@@ -104,7 +104,7 @@ def _build_region_summary(configs: list[RegionConfig]) -> list[RegionHealthSumma
     "/status",
     response_model=RegionStatusResponse,
     summary="Region Status",
-    description=("Returns the current active region, HA enabled flag, failover state, " "and a list of all configured regions with configuration summary. " "No authentication required — safe for infrastructure health checks."),
+    description=("Returns the current active region, HA enabled flag, failover state, and a list of all configured regions with configuration summary. No authentication required — safe for infrastructure health checks."),
     status_code=status.HTTP_200_OK,
 )
 async def get_region_status() -> RegionStatusResponse:
@@ -134,7 +134,7 @@ async def get_region_status() -> RegionStatusResponse:
     "/primary",
     response_model=RegionConfigResponse,
     summary="Primary Region Config",
-    description=("Returns the primary region's configuration. " "Credentials are masked — URL is visible, keys are not returned. " "Requires a valid API key."),
+    description=("Returns the primary region's configuration. Credentials are masked — URL is visible, keys are not returned. Requires a valid API key."),
     status_code=status.HTTP_200_OK,
 )
 async def get_primary_region(
@@ -163,7 +163,7 @@ async def get_primary_region(
     "/replicas",
     response_model=list[RegionConfigResponse],
     summary="Read Replica Region Configs",
-    description=("Returns the list of configured read replica regions. " "Credentials are masked — URLs are visible, keys are not returned. " "Requires a valid API key."),
+    description=("Returns the list of configured read replica regions. Credentials are masked — URLs are visible, keys are not returned. Requires a valid API key."),
     status_code=status.HTTP_200_OK,
 )
 async def get_replica_regions(
@@ -185,7 +185,7 @@ async def get_replica_regions(
     "/health",
     response_model=list[RegionHealthLogResponse],
     summary="Region Health Log",
-    description=("Queries the region_health_log table in Supabase and returns the last N " "health check entries per configured region, ordered by checked_at descending. " "Requires a valid API key."),
+    description=("Queries the region_health_log table in Supabase and returns the last N health check entries per configured region, ordered by checked_at descending. Requires a valid API key."),
     status_code=status.HTTP_200_OK,
 )
 async def get_region_health_log(

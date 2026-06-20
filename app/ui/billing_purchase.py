@@ -85,7 +85,7 @@ def _get_registry() -> UnitWalletRegistry:
     response_model=BillingPurchaseResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Purchase protection units",
-    description=("Credits a prepaid unit balance for the given owner_key. " "Returns the resulting ledger entry and updated wallet state. " "Idempotent per reference_id — repeated calls with the same reference_id " "produce a new ledger entry; deduplication is the caller's responsibility."),
+    description=("Credits a prepaid unit balance for the given owner_key. Returns the resulting ledger entry and updated wallet state. Idempotent per reference_id — repeated calls with the same reference_id produce a new ledger entry; deduplication is the caller's responsibility."),
 )
 def purchase_units(
     payload: BillingPurchaseRequest = Body(...),

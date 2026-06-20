@@ -29,7 +29,7 @@ LedgerEntryType = Literal["purchase", "debit", "credit", "adjustment", "refund"]
 # ---------------------------------------------------------------------------
 # Canonical package pricing — single source of truth for this module.
 # ---------------------------------------------------------------------------
-_PACKAGE_PRICING_NOTE = "Package pricing: 5,000 units for $20.00 USD | " "25,000 units for $90.00 USD | " "60,000 units for $180.00 USD."
+_PACKAGE_PRICING_NOTE = "Package pricing: 5,000 units for $20.00 USD | 25,000 units for $90.00 USD | 60,000 units for $180.00 USD."
 
 
 # ---------------------------------------------------------------------------

@@ -55,7 +55,7 @@ _TOKENS_PER_UNIT: int = TOKEN_CHUNK_SIZE  # 25_000
 
 def test_token_chunk_size_matches_supabase_tokens_per_unit() -> None:
     """TOKEN_CHUNK_SIZE and supabaseclient.TOKENS_PER_UNIT must always be equal."""
-    assert TOKEN_CHUNK_SIZE == _SUPABASE_TOKENS_PER_UNIT, f"Billing integrity failure: TOKEN_CHUNK_SIZE={TOKEN_CHUNK_SIZE} != " f"TOKENS_PER_UNIT={_SUPABASE_TOKENS_PER_UNIT}. " "These constants must always be equal. Update the diverged module."
+    assert TOKEN_CHUNK_SIZE == _SUPABASE_TOKENS_PER_UNIT, f"Billing integrity failure: TOKEN_CHUNK_SIZE={TOKEN_CHUNK_SIZE} != TOKENS_PER_UNIT={_SUPABASE_TOKENS_PER_UNIT}. These constants must always be equal. Update the diverged module."
 
 
 # ===========================================================================
@@ -211,7 +211,7 @@ class TestPackageCatalog:
 
     def test_no_max_tokens_covered_key_in_any_entry(self) -> None:
         for pkg_id, pkg in UNIT_PACKAGE_CATALOG.items():
-            assert "max_tokens_covered" not in pkg, f"package {pkg_id!r} must not expose 'max_tokens_covered' — " "use token_coverage computed at the route layer instead"
+            assert "max_tokens_covered" not in pkg, f"package {pkg_id!r} must not expose 'max_tokens_covered' — use token_coverage computed at the route layer instead"
 
     def test_starter_unit_amount(self) -> None:
         assert UNIT_PACKAGE_CATALOG["pkg_5000"]["unit_amount"] == 5_000

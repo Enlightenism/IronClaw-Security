@@ -355,7 +355,7 @@ async def evaluate_openclaw(
     response_model=OpenClawHandshakeResponse,
     status_code=status.HTTP_200_OK,
     summary="Validate OpenClaw integration connection and return health manifest",
-    description=("Validates the OpenClaw integration connection configuration. " "Returns integration health status and capability manifest so callers " "can confirm IronClaw is reachable and correctly wired before sending " "live OpenClaw workflow payloads."),
+    description=("Validates the OpenClaw integration connection configuration. Returns integration health status and capability manifest so callers can confirm IronClaw is reachable and correctly wired before sending live OpenClaw workflow payloads."),
 )
 async def openclaw_handshake(
     body: OpenClawHandshakeRequest,
@@ -417,10 +417,7 @@ async def openclaw_handshake(
     status_code=status.HTTP_200_OK,
     summary="Return OpenClaw supported capabilities, guarded action categories, and policy bindings",
     description=(
-        "Returns the full capability manifest for the OpenClaw integration: "
-        "supported action types, guarded workflow categories derived from the active "
-        "policy engine, and policy rule bindings. Consumers use this to understand "
-        "what IronClaw will guard across OpenClaw builder workflows and how."
+        "Returns the full capability manifest for the OpenClaw integration: supported action types, guarded workflow categories derived from the active policy engine, and policy rule bindings. Consumers use this to understand what IronClaw will guard across OpenClaw builder workflows and how."
     ),
 )
 async def openclaw_manifest() -> OpenClawManifestResponse:

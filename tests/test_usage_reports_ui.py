@@ -59,7 +59,7 @@ def test_get_package_metadata_tokens_in_wallet_equals_included_units_times_chunk
     for pkg_id in _ORDERED_PACKAGE_IDS:
         meta = _get_package_metadata(pkg_id)
         expected = meta["included_units"] * TOKEN_CHUNK_SIZE
-        assert meta["tokens_in_wallet"] == expected, f"{pkg_id}: tokens_in_wallet {meta['tokens_in_wallet']} != " f"included_units({meta['included_units']}) * TOKEN_CHUNK_SIZE({TOKEN_CHUNK_SIZE})"
+        assert meta["tokens_in_wallet"] == expected, f"{pkg_id}: tokens_in_wallet {meta['tokens_in_wallet']} != included_units({meta['included_units']}) * TOKEN_CHUNK_SIZE({TOKEN_CHUNK_SIZE})"
 
 
 def test_get_package_metadata_starter_tokens_in_wallet() -> None:

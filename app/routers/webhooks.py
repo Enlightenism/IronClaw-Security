@@ -106,7 +106,7 @@ def _build_list_item(row: dict[str, Any]) -> dict[str, Any]:
     status_code=status.HTTP_201_CREATED,
     response_model=WebhookCreateResponse,
     summary="Create a webhook subscription",
-    description=("Creates a new webhook subscription for the authenticated tenant. " "Returns the full signing secret exactly once — store it securely. " "The secret_hash is never returned after creation; only a key_prefix hint is shown on subsequent reads."),
+    description=("Creates a new webhook subscription for the authenticated tenant. Returns the full signing secret exactly once — store it securely. The secret_hash is never returned after creation; only a key_prefix hint is shown on subsequent reads."),
 )
 async def create_webhook_subscription(
     payload: WebhookSubscriptionCreate,
@@ -337,7 +337,7 @@ async def delete_webhook_subscription(
     "/subscriptions/{subscription_id}/rotate-secret",
     status_code=status.HTTP_200_OK,
     summary="Rotate the signing secret for a webhook subscription",
-    description=("Generates a new HMAC-SHA256 signing secret for the subscription. " "The new full secret is returned exactly once. Deliveries signed with the old secret " "will be invalid immediately after rotation."),
+    description=("Generates a new HMAC-SHA256 signing secret for the subscription. The new full secret is returned exactly once. Deliveries signed with the old secret will be invalid immediately after rotation."),
 )
 async def rotate_webhook_secret(
     subscription_id: str,
@@ -496,7 +496,7 @@ async def list_retryable_webhook_deliveries(
     "/deliveries/{delivery_id}/retry",
     status_code=status.HTTP_200_OK,
     summary="Retry a specific failed webhook delivery",
-    description=("Re-executes a previously failed delivery by its delivery_id. " "Fetches the current subscription state from Supabase before retrying. " "Returns the updated WebhookDispatchResult."),
+    description=("Re-executes a previously failed delivery by its delivery_id. Fetches the current subscription state from Supabase before retrying. Returns the updated WebhookDispatchResult."),
 )
 async def retry_webhook_delivery(
     delivery_id: str,

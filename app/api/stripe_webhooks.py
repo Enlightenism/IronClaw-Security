@@ -114,7 +114,7 @@ def _verify_stripe_signature(
     if abs(now - event_timestamp) > tolerance:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(f"Stripe webhook timestamp is outside tolerance window " f"({tolerance}s). Possible replay attack."),
+            detail=(f"Stripe webhook timestamp is outside tolerance window ({tolerance}s). Possible replay attack."),
         )
 
     signed_payload = f"{event_timestamp}.".encode() + payload
@@ -185,7 +185,7 @@ def _handle_checkout_session_completed(
 
     if payment_status != "paid":
         logger.info(
-            "stripe_webhooks: checkout.session.completed skipped — " "payment_status=%s session=%s",
+            "stripe_webhooks: checkout.session.completed skipped — payment_status=%s session=%s",
             payment_status,
             session_id,
         )
@@ -211,7 +211,7 @@ def _handle_checkout_session_completed(
         raw_event_id=event_id,
     )
     logger.info(
-        "stripe_webhooks: checkout.session.completed processed — " "session=%s org=%s units=%d",
+        "stripe_webhooks: checkout.session.completed processed — session=%s org=%s units=%d",
         session_id,
         org_id,
         unit_credits,
@@ -285,7 +285,7 @@ def _handle_subscription_created(
         raw_event_id=event_id,
     )
     logger.info(
-        "stripe_webhooks: customer.subscription.created processed — " "sub=%s org=%s status=%s",
+        "stripe_webhooks: customer.subscription.created processed — sub=%s org=%s status=%s",
         subscription_id,
         org_id,
         status_val,
@@ -318,7 +318,7 @@ def _handle_subscription_updated(
         raw_event_id=event_id,
     )
     logger.info(
-        "stripe_webhooks: customer.subscription.updated processed — " "sub=%s org=%s status=%s",
+        "stripe_webhooks: customer.subscription.updated processed — sub=%s org=%s status=%s",
         subscription_id,
         org_id,
         status_val,
@@ -341,7 +341,7 @@ def _handle_subscription_deleted(
         raw_event_id=event_id,
     )
     logger.info(
-        "stripe_webhooks: customer.subscription.deleted processed — " "sub=%s org=%s",
+        "stripe_webhooks: customer.subscription.deleted processed — sub=%s org=%s",
         subscription_id,
         org_id,
     )
@@ -387,7 +387,7 @@ def _handle_invoice_paid(
         raw_event_id=event_id,
     )
     logger.info(
-        "stripe_webhooks: invoice.paid processed — " "invoice=%s sub=%s org=%s units=%d billing_reason=%s",
+        "stripe_webhooks: invoice.paid processed — invoice=%s sub=%s org=%s units=%d billing_reason=%s",
         invoice_id,
         subscription_id,
         org_id,
@@ -420,7 +420,7 @@ def _handle_invoice_payment_failed(
         raw_event_id=event_id,
     )
     logger.warning(
-        "stripe_webhooks: invoice.payment_failed — " "invoice=%s sub=%s org=%s attempt=%d",
+        "stripe_webhooks: invoice.payment_failed — invoice=%s sub=%s org=%s attempt=%d",
         invoice_id,
         subscription_id,
         org_id,
@@ -522,7 +522,7 @@ def _epoch_to_iso(epoch: Any) -> str:
     response_model=StripeWebhookAck,
     status_code=status.HTTP_200_OK,
     summary="Stripe event ingestion endpoint",
-    description=("Receives and processes Stripe webhook events. " "Validates HMAC-SHA256 signature before processing. " "Returns HTTP 200 for all valid events to prevent Stripe retries. " "Returns HTTP 400 only for signature failures."),
+    description=("Receives and processes Stripe webhook events. Validates HMAC-SHA256 signature before processing. Returns HTTP 200 for all valid events to prevent Stripe retries. Returns HTTP 400 only for signature failures."),
 )
 async def stripe_webhook_ingest(
     request: Request,
@@ -535,7 +535,7 @@ async def stripe_webhook_ingest(
     webhook_secret = svc.get_webhook_secret()
 
     if not webhook_secret:
-        logger.warning("stripe_webhooks: STRIPE_WEBHOOK_SECRET not configured. " "Accepting event without signature verification (setup mode).")
+        logger.warning("stripe_webhooks: STRIPE_WEBHOOK_SECRET not configured. Accepting event without signature verification (setup mode).")
     else:
         if not stripe_signature:
             raise HTTPException(

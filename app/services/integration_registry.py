@@ -190,7 +190,7 @@ def default_integrations() -> list[IntegrationRecord]:
             status="planned",
             version="0.1.0",
             command_name="ironclaw install llamafirewall",
-            description=("IronClaw adapter for Meta's LlamaFirewall open-source guardrail system. " "Guards prompt submissions, tool calls, and agent actions through the IronClaw " "policy engine before dispatching to LlamaFirewall's PromptGuard 2 and " "agent alignment scanning layers."),
+            description=("IronClaw adapter for Meta's LlamaFirewall open-source guardrail system. Guards prompt submissions, tool calls, and agent actions through the IronClaw policy engine before dispatching to LlamaFirewall's PromptGuard 2 and agent alignment scanning layers."),
             entrypoint="app.adapters.llamafirewall_adapter",
             install_target="local",
             capabilities=[
@@ -219,7 +219,7 @@ def default_integrations() -> list[IntegrationRecord]:
             status="planned",
             version="0.1.0",
             command_name="ironclaw install cape",
-            description=("IronClaw adapter for the CAPE malware analysis sandbox. " "Guards sample, URL, and process submissions through the IronClaw " "policy engine before dispatching to the CAPE analysis API."),
+            description=("IronClaw adapter for the CAPE malware analysis sandbox. Guards sample, URL, and process submissions through the IronClaw policy engine before dispatching to the CAPE analysis API."),
             entrypoint="app.adapters.cape_adapter",
             install_target="local",
             capabilities=[

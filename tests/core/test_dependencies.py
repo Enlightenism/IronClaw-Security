@@ -37,7 +37,6 @@ def _reset_registry():
 
 
 class TestGetServiceRegistry:
-
     def test_returns_service_registry_instance(self):
         result = get_service_registry()
         assert isinstance(result, ServiceRegistry)
@@ -80,7 +79,6 @@ class TestGetServiceRegistry:
 
 
 class TestGetReleasePolicyClient:
-
     def test_returns_release_policy_client_instance(self):
         result = get_release_policy_client()
         assert isinstance(result, ReleasePolicyClient)
@@ -109,7 +107,6 @@ class TestGetReleasePolicyClient:
 
 
 class TestGetAuthService:
-
     def test_returns_auth_service_instance(self):
         result = get_auth_service()
         assert isinstance(result, AuthService)
@@ -159,7 +156,6 @@ class TestGetAuthService:
 
 
 class TestGetStore:
-
     def test_returns_valid_store_type(self):
         result = get_store()
         assert isinstance(result, (SupabasePersistenceStore, InMemoryPersistenceStore))
@@ -231,7 +227,6 @@ class TestGetStore:
 
 
 class TestResetDependenciesForTests:
-
     def test_reset_is_callable(self):
         assert callable(_reset_dependencies_for_tests)
 

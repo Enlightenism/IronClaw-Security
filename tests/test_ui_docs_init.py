@@ -45,7 +45,7 @@ def test_doc_routes_are_unique() -> None:
 
 def test_all_doc_routers_in_ui_routers() -> None:
     for doc_router in _EXPECTED_DOC_ROUTERS:
-        assert doc_router in UI_ROUTERS, f"Doc router with prefix {doc_router.prefix!r} " f"and tags {doc_router.tags!r} is not registered in UI_ROUTERS"
+        assert doc_router in UI_ROUTERS, f"Doc router with prefix {doc_router.prefix!r} and tags {doc_router.tags!r} is not registered in UI_ROUTERS"
 
 
 def test_ui_routers_contains_exactly_seven_docs_prefix_routers() -> None:

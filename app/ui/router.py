@@ -157,7 +157,7 @@ def validate_ui_routers() -> None:
             key = _route_key(route)
             if key in seen_route_keys:
                 path_str, methods_tuple = key
-                raise ValueError(f"duplicate UI route registration detected: " f"{path_str} {list(methods_tuple)} " f"already registered under {seen_route_keys[key]}")
+                raise ValueError(f"duplicate UI route registration detected: {path_str} {list(methods_tuple)} already registered under {seen_route_keys[key]}")
 
             seen_route_keys[key] = label
 

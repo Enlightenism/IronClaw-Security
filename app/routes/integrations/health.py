@@ -32,7 +32,7 @@ class IntegrationHealthResponse(BaseModel):
     response_model=IntegrationHealthResponse,
     status_code=status.HTTP_200_OK,
     summary="Return health status for all registered integrations",
-    description=("Checks the integration registry and policy engine, returning a health " "summary for every registered integration alongside the active policy mode."),
+    description=("Checks the integration registry and policy engine, returning a health summary for every registered integration alongside the active policy mode."),
 )
 async def integrations_health() -> IntegrationHealthResponse:
     registry = initialize_integration_registry()

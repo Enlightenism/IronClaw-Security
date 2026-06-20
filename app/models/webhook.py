@@ -134,9 +134,9 @@ def _validate_event_list(v: list[str] | None) -> list[str] | None:
     valid = {e.value for e in WebhookEventType if e.value != "*"}
     unknown = [e for e in v if e not in valid]
     if unknown:
-        raise ValueError(f"Unsupported event types: {unknown}. " f"Supported: {sorted(valid)}")
+        raise ValueError(f"Unsupported event types: {unknown}. Supported: {sorted(valid)}")
     if "*" in v:
-        raise ValueError("The '*' wildcard is not accepted in subscription event lists. " "Enumerate the specific event types you want to receive.")
+        raise ValueError("The '*' wildcard is not accepted in subscription event lists. Enumerate the specific event types you want to receive.")
     return v
 
 

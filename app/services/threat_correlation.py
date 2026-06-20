@@ -137,7 +137,7 @@ def _detect_multi_ioc_cooccurrence(
         mitre_technique_ids=_mitre_ids(matches),
         confidence=round(conf, 4),
         score_contribution=score,
-        description=(f"Multi-IOC cooccurrence: {len(matches)} IOCs across " f"{len(distinct_types)} type(s) detected in a single pass."),
+        description=(f"Multi-IOC cooccurrence: {len(matches)} IOCs across {len(distinct_types)} type(s) detected in a single pass."),
     )
 
 
@@ -167,7 +167,7 @@ def _detect_attack_chain(
         mitre_technique_ids=sorted({t.upper() for t in techniques}),
         confidence=round(conf, 4),
         score_contribution=score,
-        description=(f"Attack chain detected: {len(tactics)} tactic(s), " f"{len(techniques)} technique(s) across matched IOCs."),
+        description=(f"Attack chain detected: {len(tactics)} tactic(s), {len(techniques)} technique(s) across matched IOCs."),
     )
 
 
@@ -194,7 +194,7 @@ def _detect_high_severity_cluster(
         mitre_technique_ids=_mitre_ids(high_crit),
         confidence=round(conf, 4),
         score_contribution=score,
-        description=(f"High-severity cluster: {len(high_crit)} HIGH/CRITICAL IOC(s) " "codetected in a single pass."),
+        description=(f"High-severity cluster: {len(high_crit)} HIGH/CRITICAL IOC(s) codetected in a single pass."),
     )
 
 
@@ -222,7 +222,7 @@ def _detect_mitre_chain(
         mitre_technique_ids=sorted(techniques),
         confidence=round(conf, 4),
         score_contribution=score,
-        description=(f"MITRE technique chain: {len(techniques)} distinct technique(s) " "identified across matched IOCs."),
+        description=(f"MITRE technique chain: {len(techniques)} distinct technique(s) identified across matched IOCs."),
     )
 
 
@@ -247,7 +247,7 @@ def _detect_hash_cluster(
         mitre_technique_ids=_mitre_ids(hash_matches),
         confidence=round(conf, 4),
         score_contribution=score,
-        description=(f"Hash cluster: {len(hash_matches)} file hash IOC(s) " "(MD5/SHA1/SHA256) detected in a single pass."),
+        description=(f"Hash cluster: {len(hash_matches)} file hash IOC(s) (MD5/SHA1/SHA256) detected in a single pass."),
     )
 
 
@@ -278,7 +278,7 @@ def _detect_c2_cluster(
         mitre_technique_ids=_mitre_ids(combined),
         confidence=round(conf, 4),
         score_contribution=score,
-        description=(f"C2 cluster: {len(c2_matches)} C2-tagged IOC(s) co-detected with " f"{len(network_matches)} network-type IOC(s)."),
+        description=(f"C2 cluster: {len(c2_matches)} C2-tagged IOC(s) co-detected with {len(network_matches)} network-type IOC(s)."),
     )
 
 

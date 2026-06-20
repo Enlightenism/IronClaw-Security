@@ -88,7 +88,7 @@ def _billing_catalog() -> dict[str, Any]:
         "featured_package_id": _FEATURED_PACKAGE_ID,
         "ordered_package_ids": list(_ORDERED_PACKAGE_IDS),
         "tokens_per_unit": _TOKENS_PER_UNIT,
-        "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; " "additional units consumed in 25,000-token chunks."),
+        "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; additional units consumed in 25,000-token chunks."),
         "packages": {pkg_id: _get_package_metadata(pkg_id) for pkg_id in _ORDERED_PACKAGE_IDS},
     }
 
@@ -142,7 +142,7 @@ def _fetch_usage_summary(rows: list[dict[str, Any]], period: str, limit: int) ->
             "total_units_consumed": total_units,
             "tokens_in_wallet": total_units * _TOKENS_PER_UNIT,
             "tokens_per_unit": _TOKENS_PER_UNIT,
-            "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; " "additional units consumed in 25,000-token chunks."),
+            "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; additional units consumed in 25,000-token chunks."),
             "billing_catalog": _billing_catalog(),
         },
     )
@@ -180,7 +180,7 @@ def _build_events_from_rows(rows: list[dict[str, Any]], limit: int) -> UsageEven
                     "source": "supabase",
                     "tokens_in_wallet": tokens_in_wallet,
                     "tokens_per_unit": _TOKENS_PER_UNIT,
-                    "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; " "additional units consumed in 25,000-token chunks."),
+                    "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; additional units consumed in 25,000-token chunks."),
                 },
             )
         )

@@ -66,7 +66,6 @@ def _minimal_result(**overrides) -> dict:
 
 
 class TestPolicyRuleValidation:
-
     def test_valid_rule_minimal(self):
         rule = PolicyRule(**_valid_rule())
         assert rule.rule_id == "rule-001"
@@ -149,7 +148,6 @@ class TestPolicyRuleValidation:
 
 
 class TestPolicyCreateRequestThreshold:
-
     def test_default_threshold(self):
         req = PolicyCreateRequest(name="Default Policy")
         assert req.heuristic_threshold == 50
@@ -207,7 +205,6 @@ class TestPolicyCreateRequestThreshold:
 
 
 class TestPolicyStatusDefaults:
-
     def test_required_fields_only(self):
         status = PolicyStatus(**_minimal_status())
         assert status.heuristic_threshold == 50
@@ -280,7 +277,6 @@ class TestPolicyStatusDefaults:
 
 
 class TestPolicyEvaluationResultAutoPopulation:
-
     def test_evaluated_at_auto_populated(self):
         before = datetime.now(UTC)
         result = PolicyEvaluationResult(**_minimal_result())
@@ -349,7 +345,6 @@ class TestPolicyEvaluationResultAutoPopulation:
 
 
 class TestEnumRoundTrip:
-
     def test_enforcement_mode_round_trip(self):
         for member in PolicyEnforcementMode:
             assert PolicyEnforcementMode(member.value) == member

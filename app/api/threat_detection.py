@@ -244,7 +244,7 @@ def run_detection(
     elapsed = _elapsed_ms(start)
 
     logger.info(
-        "threat_detection.run_detection event_id=%s org_id=%s verdict=%s " "score=%.3f severity=%s ioc_matches=%d signals=%d elapsed_ms=%d caller=%s",
+        "threat_detection.run_detection event_id=%s org_id=%s verdict=%s score=%.3f severity=%s ioc_matches=%d signals=%d elapsed_ms=%d caller=%s",
         result.event_id,
         result.org_id,
         result.verdict.value,
@@ -338,7 +338,7 @@ async def detect_threat(
     response_model=DetectionResult,
     status_code=status.HTTP_200_OK,
     summary="Retrieve a stored detection result by event ID",
-    description=("Returns the full DetectionResult for a previously stored detection event. " "Returns 404 if the event_id is not found in threat_detections. " "Returns 503 if the Supabase client is unavailable."),
+    description=("Returns the full DetectionResult for a previously stored detection event. Returns 404 if the event_id is not found in threat_detections. Returns 503 if the Supabase client is unavailable."),
     operation_id="threat_detection_get_by_event_id",
 )
 async def get_detection_by_event_id(
@@ -382,7 +382,7 @@ async def get_detection_by_event_id(
     response_model=list[DetectionSummary],
     status_code=status.HTTP_200_OK,
     summary="List stored detection summaries",
-    description=("Returns lightweight DetectionSummary rows from threat_detections. " "Filterable by org_id, agent_id, session_id, verdict, and severity. " "Results ordered by assessed_at descending."),
+    description=("Returns lightweight DetectionSummary rows from threat_detections. Filterable by org_id, agent_id, session_id, verdict, and severity. Results ordered by assessed_at descending."),
     operation_id="threat_detection_list_summaries",
 )
 async def list_detection_summaries(
@@ -402,7 +402,7 @@ async def list_detection_summaries(
     effective_org_id = org_id or auth.org_id
 
     try:
-        query = client.table(_TABLE_DETECTIONS).select("event_id,org_id,agent_id,session_id,verdict,score,severity," "ioc_match_count,correlation_signal_count,assessed_at")
+        query = client.table(_TABLE_DETECTIONS).select("event_id,org_id,agent_id,session_id,verdict,score,severity,ioc_match_count,correlation_signal_count,assessed_at")
         if effective_org_id:
             query = query.eq("org_id", effective_org_id)
         if agent_id:
@@ -524,7 +524,7 @@ async def list_correlation_signals(
 
     list_signals = getattr(engine, "list_correlation_signals", None)
     if not callable(list_signals):
-        logger.debug("threat_detection.list_correlation_signals: engine does not expose " "list_correlation_signals — returning empty")
+        logger.debug("threat_detection.list_correlation_signals: engine does not expose list_correlation_signals — returning empty")
         return []
 
     try:
@@ -548,7 +548,7 @@ async def list_correlation_signals(
     "/detect/health",
     status_code=status.HTTP_200_OK,
     summary="Detection engine health probe",
-    description=("Lightweight liveness check for the ThreatDetectionEngine and its " "dependent services (ioc_store, threat_correlation). " "Returns engine version, dependency availability, and UTC timestamp."),
+    description=("Lightweight liveness check for the ThreatDetectionEngine and its dependent services (ioc_store, threat_correlation). Returns engine version, dependency availability, and UTC timestamp."),
     operation_id="threat_detection_health",
 )
 async def detection_health(

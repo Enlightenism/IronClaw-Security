@@ -183,16 +183,14 @@ def get_docs_authentication() -> DocsAuthenticationPageResponse:
     return DocsAuthenticationPageResponse(
         generatedat=_utc_now(),
         headline="Authenticating with IronClaw",
-        intro=("Every request to a protected IronClaw route must carry a valid API key in the X-API-Key header. " "Keys are scoped to environments and capabilities. A missing or invalid key returns 401. " "A valid key without the required scope returns 403."),
+        intro=("Every request to a protected IronClaw route must carry a valid API key in the X-API-Key header. Keys are scoped to environments and capabilities. A missing or invalid key returns 401. A valid key without the required scope returns 403."),
         header_name="X-API-Key",
         header_example="X-API-Key: ic_prod_your_generated_key",
         key_naming=DocsAuthKeyNamingView(
             prefix_pattern="ic_{environment}_{identifier}",
             example_key="ic_prod_a1b2c3d4e5f6",
             description=(
-                "Keys are prefixed with ic_ followed by the environment tier (prod, staging, local) "
-                "and a unique identifier. The full secret is shown exactly once at creation and is never retrievable afterwards. "
-                "Masked representations (e.g. ic_prod_a1b2...f6) are used in all UI and audit surfaces."
+                "Keys are prefixed with ic_ followed by the environment tier (prod, staging, local) and a unique identifier. The full secret is shown exactly once at creation and is never retrievable afterwards. Masked representations (e.g. ic_prod_a1b2...f6) are used in all UI and audit surfaces."
             ),
         ),
         scopes=_build_scopes(),

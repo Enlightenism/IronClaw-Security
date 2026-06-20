@@ -134,7 +134,7 @@ class ThreatHuntService:
         query: HuntQuery,
         org_id: str | None,
     ) -> list[dict[str, Any]]:
-        q = client.table(_TABLE_DETECTIONS).select("event_id,org_id,agent_id,session_id,verdict,score,severity," "assessed_at,context,risk_families,extracted_indicators," "mitre_techniques,ioc_match_count,correlation_signal_count")
+        q = client.table(_TABLE_DETECTIONS).select("event_id,org_id,agent_id,session_id,verdict,score,severity,assessed_at,context,risk_families,extracted_indicators,mitre_techniques,ioc_match_count,correlation_signal_count")
 
         if org_id is not None:
             q = q.eq("org_id", org_id)

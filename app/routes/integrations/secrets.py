@@ -32,7 +32,7 @@ def _guard_secret_value(value: str, location: str) -> None:
         patterns = ", ".join({m.pattern_type for m in result.matches})
         raise HTTPException(
             status_code=400,
-            detail=(f"Secret value rejected by IronClaw secret scanner at '{location}': " f"{result.block_matches} high-severity pattern(s) detected " f"[{patterns}]. Do not submit live credentials as secret values."),
+            detail=(f"Secret value rejected by IronClaw secret scanner at '{location}': {result.block_matches} high-severity pattern(s) detected [{patterns}]. Do not submit live credentials as secret values."),
         )
 
 

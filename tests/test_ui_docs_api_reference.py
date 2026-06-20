@@ -270,7 +270,7 @@ def test_get_docs_api_reference_field_views_shape(test_client: TestClient) -> No
                     assert isinstance(field["description"], str)
                     assert field["description"].strip()
                     assert isinstance(field["required"], bool)
-                    assert field["location"] in _VALID_FIELD_LOCATIONS, f"groups[{gi}].routes[{ri}].{kind}[{fi}].location " f"{field['location']!r} is not valid"
+                    assert field["location"] in _VALID_FIELD_LOCATIONS, f"groups[{gi}].routes[{ri}].{kind}[{fi}].location {field['location']!r} is not valid"
 
 
 def test_get_docs_api_reference_guard_group_contains_guard_action(

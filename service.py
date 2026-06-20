@@ -433,13 +433,13 @@ def _compute_brain_decision(
 
     count = len(prior_high_risk)
     boosted_confidence = min(1.0, base.confidence + 0.05)
-    extra_reason = f" There are {count} prior high-risk events for this session or user," " indicating potential ongoing prompt abuse or malicious behavior."
+    extra_reason = f" There are {count} prior high-risk events for this session or user, indicating potential ongoing prompt abuse or malicious behavior."
 
     if base.final_action == "warn" and count >= 2:
         return BrainDecision(
             final_action="quarantine",
             confidence=min(1.0, boosted_confidence + 0.05),
-            reason=("Repeated suspicious activity was observed across related history." " The current event should be quarantined pending further review." + extra_reason),
+            reason=("Repeated suspicious activity was observed across related history. The current event should be quarantined pending further review." + extra_reason),
             recommended_mode="enforce",
         )
 
@@ -447,7 +447,7 @@ def _compute_brain_decision(
         return BrainDecision(
             final_action="warn",
             confidence=0.85,
-            reason=("The current content appears safe on its own, but related history" " shows repeated high-risk activity. Proceed with caution." + extra_reason),
+            reason=("The current content appears safe on its own, but related history shows repeated high-risk activity. Proceed with caution." + extra_reason),
             recommended_mode="enforce",
         )
 

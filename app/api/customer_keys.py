@@ -3,135 +3,258 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 
-from app.core.apikeys import (
-    APIKeyRecord,
-    generate_api_key,
-    get_api_key_registry,
-    mask_api_key,
-)
-from app.dependencies.auth import require_api_key
+from app.core.apikeys import APIKeyRecord, get_api_key_registry, mask_api_key
 
-router = APIRouter(
-    prefix="/customer-keys",
-    tags=["customer-keys"],
-    dependencies=[Depends(require_api_key)],
-)
+router = APIRouter(prefix="/customer-keys", tags=["customer-keys-management"])
 
+try:
+    from app.supabase_persistence import (  # type: ignore[import]
+        upsert_install_key,
+    )
 
-class CustomerKeyCreateRequest(BaseModel):
-    display_name: str = Field(min_length=1, max_length=120)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class CustomerKeyView(BaseModel):
-    key_id: str
-    display_name: str
-    masked_key: str
-    created_at: str
-    last_used_at: str | None = None
-    active: bool
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class CustomerKeyCreateResponse(BaseModel):
-    status: str
-    service: str
-    timestamp: str
-    api_key: str
-    key: CustomerKeyView
-
-
-class CustomerKeyListResponse(BaseModel):
-    status: str
-    service: str
-    timestamp: str
-    total_keys: int
-    keys: list[CustomerKeyView] = Field(default_factory=list)
-
-
-class CustomerKeyRevokeResponse(BaseModel):
-    status: str
-    service: str
-    timestamp: str
-    revoked_key_id: str
+    _PERSISTENCE_AVAILABLE = True
+except ImportError:
+    _PERSISTENCE_AVAILABLE = False
+    upsert_install_key = None  # type: ignore[assignment]
 
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
-def _normalize_iso(value: str | None) -> str | None:
+def _str_to_iso(value: str | None) -> str | None:
     if value is None:
         return None
     return value.replace("+00:00", "Z")
 
 
-def _to_view(record: APIKeyRecord, *, raw_key: str | None = None) -> CustomerKeyView:
-    masked = mask_api_key(raw_key) if raw_key else record.masked_key
-    return CustomerKeyView(
+def _record_status(record: APIKeyRecord) -> str:
+    return "active" if record.active else "revoked"
+
+
+def _record_scopes(record: APIKeyRecord) -> list[str]:
+    return list(record.scopes)
+
+
+def _record_owner_type(record: APIKeyRecord) -> str:
+    return str(record.metadata.get("owner_type", "customer"))
+
+
+def _record_owner_id(record: APIKeyRecord) -> str:
+    return str(record.metadata.get("owner_id", "default-customer"))
+
+
+def _record_environment(record: APIKeyRecord) -> str:
+    return str(record.metadata.get("environment", "production"))
+
+
+class CustomerKeyCreateRequest(BaseModel):
+    label: str = Field(..., min_length=1, max_length=200)
+    owner_type: str = Field(default="customer", min_length=1, max_length=100)
+    owner_id: str = Field(default="default-customer", min_length=1, max_length=200)
+    scopes: list[str] = Field(default_factory=list)
+    environment: str = Field(default="production", min_length=1, max_length=100)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CustomerKeyActionResponse(BaseModel):
+    status: str
+    service: str
+    timestamp: str
+    operation: str
+    key_id: str
+    label: str
+    key_status: str
+    masked_key: str
+    revealed_once_key: str | None = None
+    created_at: str
+    last_used_at: str | None = None
+    owner_type: str
+    owner_id: str
+    scopes: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    notes: list[str] = Field(default_factory=list)
+
+
+class CustomerKeyListResponse(BaseModel):
+    status: str
+    service: str
+    timestamp: str
+    total: int
+    keys: list[CustomerKeyActionResponse]
+
+
+def _build_response(
+    *,
+    operation: str,
+    record: APIKeyRecord,
+    revealed_once_key: str | None = None,
+    notes: list[str] | None = None,
+) -> CustomerKeyActionResponse:
+    display_key = revealed_once_key or record.api_key
+    masked_key = mask_api_key(display_key) if display_key else "hidden"
+
+    response_metadata = dict(record.metadata)
+    response_metadata["environment"] = _record_environment(record)
+    response_metadata["rotation_due"] = bool(record.metadata.get("rotation_due", False))
+
+    return CustomerKeyActionResponse(
+        status="ok",
+        service="IronClaw-Security",
+        timestamp=_utc_now_iso(),
+        operation=operation,
         key_id=record.key_id,
-        display_name=record.display_name,
-        masked_key=masked,
-        created_at=_normalize_iso(record.created_at) or _utc_now_iso(),
-        last_used_at=_normalize_iso(record.last_used_at),
-        active=record.active,
-        metadata=record.metadata or {},
+        label=record.display_name,
+        key_status=_record_status(record),
+        masked_key=masked_key,
+        revealed_once_key=revealed_once_key,
+        created_at=_str_to_iso(record.created_at) or _utc_now_iso(),
+        last_used_at=_str_to_iso(record.last_used_at),
+        owner_type=_record_owner_type(record),
+        owner_id=_record_owner_id(record),
+        scopes=_record_scopes(record),
+        metadata=response_metadata,
+        notes=notes or [],
+    )
+
+
+@router.post("", response_model=CustomerKeyActionResponse)
+def create_customer_key(payload: CustomerKeyCreateRequest) -> CustomerKeyActionResponse:
+    registry = get_api_key_registry()
+
+    metadata: dict[str, Any] = dict(payload.metadata)
+    metadata["owner_type"] = payload.owner_type
+    metadata["owner_id"] = payload.owner_id
+    metadata["environment"] = payload.environment
+    metadata.setdefault("rotation_due", False)
+
+    record = registry.create_key(
+        display_name=payload.label.strip(),
+        scopes=list(payload.scopes) or None,
+        metadata=metadata,
+    )
+
+    if _PERSISTENCE_AVAILABLE and upsert_install_key is not None:
+        try:
+            upsert_install_key(
+                key_id=record.key_id,
+                owner_id=payload.owner_id,
+                owner_type=payload.owner_type,
+                label=record.display_name,
+                scopes=list(record.scopes),
+                environment=payload.environment,
+                metadata=metadata,
+            )
+        except Exception:
+            pass
+
+    return _build_response(
+        operation="create",
+        record=record,
+        revealed_once_key=record.api_key,
+        notes=[
+            "The raw API key is only returned once during creation.",
+            "Store the revealed key securely before leaving this response.",
+            "This key is now available for authenticated customer workflows.",
+        ],
     )
 
 
 @router.get("", response_model=CustomerKeyListResponse)
-def list_customer_keys() -> CustomerKeyListResponse:
+def list_customer_keys(
+    active_only: bool = Query(default=False, description="Return only active keys"),
+    owner_id: str | None = Query(default=None, description="Filter by owner_id"),
+) -> CustomerKeyListResponse:
     registry = get_api_key_registry()
-    records = registry.list_keys(active_only=False)
+    records = registry.list_keys(active_only=active_only)
+
+    if owner_id is not None:
+        records = [r for r in records if r.metadata.get("owner_id") == owner_id]
+
+    key_responses = [_build_response(operation="list", record=r) for r in records]
 
     return CustomerKeyListResponse(
         status="ok",
         service="IronClaw-Security",
         timestamp=_utc_now_iso(),
-        total_keys=len(records),
-        keys=[_to_view(record) for record in records],
+        total=len(key_responses),
+        keys=key_responses,
     )
 
 
-@router.post(
-    "",
-    response_model=CustomerKeyCreateResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-def create_customer_key(payload: CustomerKeyCreateRequest) -> CustomerKeyCreateResponse:
+@router.get("/{key_id}", response_model=CustomerKeyActionResponse)
+def get_customer_key(
+    key_id: str = Path(..., min_length=1, max_length=255),
+) -> CustomerKeyActionResponse:
     registry = get_api_key_registry()
-    raw_api_key = generate_api_key()
-    record = registry.create_key(
-        display_name=payload.display_name.strip(),
-        api_key=raw_api_key,
-        metadata=payload.metadata,
-    )
+    record = registry.get_by_id(key_id.strip())
 
-    return CustomerKeyCreateResponse(
-        status="ok",
-        service="IronClaw-Security",
-        timestamp=_utc_now_iso(),
-        api_key=raw_api_key,
-        key=_to_view(record, raw_key=raw_api_key),
-    )
+    if record is None:
+        raise HTTPException(status_code=404, detail="Customer key not found")
+
+    return _build_response(operation="get", record=record)
 
 
-@router.post("/{key_id}/revoke", response_model=CustomerKeyRevokeResponse)
-def revoke_customer_key(key_id: str) -> CustomerKeyRevokeResponse:
+@router.post("/{key_id}/rotate", response_model=CustomerKeyActionResponse)
+def rotate_customer_key(
+    key_id: str = Path(..., min_length=1, max_length=255),
+) -> CustomerKeyActionResponse:
     registry = get_api_key_registry()
-    result = registry.revoke_key(key_id)
-    if result is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Key '{key_id}' not found.",
-        )
 
-    return CustomerKeyRevokeResponse(
-        status="ok",
-        service="IronClaw-Security",
-        timestamp=_utc_now_iso(),
-        revoked_key_id=key_id,
+    record = registry.rotate_key(
+        key_id.strip(),
+        metadata={"rotation_due": False},
+    )
+
+    if record is None:
+        raise HTTPException(status_code=404, detail="Customer key not found or not active")
+
+    if _PERSISTENCE_AVAILABLE and upsert_install_key is not None:
+        try:
+            upsert_install_key(
+                key_id=record.key_id,
+                owner_id=_record_owner_id(record),
+                owner_type=_record_owner_type(record),
+                label=record.display_name,
+                scopes=list(record.scopes),
+                environment=_record_environment(record),
+                metadata=dict(record.metadata),
+            )
+        except Exception:
+            pass
+
+    return _build_response(
+        operation="rotate",
+        record=record,
+        revealed_once_key=record.api_key,
+        notes=[
+            "The previous key secret is no longer valid after rotation.",
+            "The new raw API key is only returned once during rotation.",
+            "Update any clients or integrations that depended on the prior key.",
+        ],
+    )
+
+
+@router.post("/{key_id}/revoke", response_model=CustomerKeyActionResponse)
+def revoke_customer_key(
+    key_id: str = Path(..., min_length=1, max_length=255),
+) -> CustomerKeyActionResponse:
+    registry = get_api_key_registry()
+    record = registry.revoke_key(key_id.strip())
+
+    if record is None:
+        raise HTTPException(status_code=404, detail="Customer key not found")
+
+    return _build_response(
+        operation="revoke",
+        record=record,
+        revealed_once_key=None,
+        notes=[
+            "Revoked keys can no longer authenticate requests.",
+            "The key remains visible in inventory and detail views for auditability.",
+            "Create or rotate a replacement key before revoking production traffic keys.",
+        ],
     )

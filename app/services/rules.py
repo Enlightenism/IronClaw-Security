@@ -519,14 +519,14 @@ def check_rule_group_db_sync() -> dict[str, Any]:
 
         if in_memory_only:
             logger.warning(
-                "rules.sync_guard: %d rule ID(s) exist in ALL_RULE_GROUPS but are MISSING from " "scan_patterns — these rules will not persist across DB reloads: %s",
+                "rules.sync_guard: %d rule ID(s) exist in ALL_RULE_GROUPS but are MISSING from scan_patterns — these rules will not persist across DB reloads: %s",
                 len(in_memory_only),
                 in_memory_only,
             )
 
         if db_only:
             logger.warning(
-                "rules.sync_guard: %d rule ID(s) exist in scan_patterns but are ABSENT from " "ALL_RULE_GROUPS — scanner.py will pick them up via RULE_INDEX but rules.py " "does not own them: %s",
+                "rules.sync_guard: %d rule ID(s) exist in scan_patterns but are ABSENT from ALL_RULE_GROUPS — scanner.py will pick them up via RULE_INDEX but rules.py does not own them: %s",
                 len(db_only),
                 db_only,
             )

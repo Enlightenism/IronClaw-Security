@@ -167,7 +167,7 @@ def _run_threat_screen(
                 {
                     "source": "scan",
                     "label": "Threat detection signal",
-                    "details": (f"ThreatDetectionEngine verdict={result.verdict.value} " f"score={result.score:.3f} severity={result.severity.value} " f"ioc_matches={result.ioc_match_count} " f"correlation_signals={result.correlation_signal_count}"),
+                    "details": (f"ThreatDetectionEngine verdict={result.verdict.value} score={result.score:.3f} severity={result.severity.value} ioc_matches={result.ioc_match_count} correlation_signals={result.correlation_signal_count}"),
                     "score": result.score,
                 },
             )

@@ -678,7 +678,7 @@ class TestIngestCustomJsonStoreIntegration:
 
 class TestIngestCustomCsvStoreIntegration:
     def _csv(self) -> str:
-        return "value,ioc_type,severity,confidence,tags,description\n" "198.51.100.1,ipv4,high,0.9,custom,test ip\n"
+        return "value,ioc_type,severity,confidence,tags,description\n198.51.100.1,ipv4,high,0.9,custom,test ip\n"
 
     def test_bulk_upsert_called(self, svc, mock_store):
         mock_store.bulk_upsert.return_value = (1, 0, 0)

@@ -147,7 +147,7 @@ def _redact(value: str) -> str:
     keep_prefix = min(_REDACT_KEEP_PREFIX, length // 4)
     keep_suffix = min(_REDACT_KEEP_SUFFIX, length // 6)
     redacted_count = max(1, length - keep_prefix - keep_suffix)
-    return f"{value[:keep_prefix]}{'*' * redacted_count}{value[length - keep_suffix:]}"
+    return f"{value[:keep_prefix]}{'*' * redacted_count}{value[length - keep_suffix :]}"
 
 
 def _extract_match_value(match: re.Match[str]) -> str:
@@ -497,9 +497,9 @@ def adapt_policy_decision_to_secret_scanner(
     matched_rules = [match.rule_id for match in decision.matched_rules] + [f"secret_pattern:{pt}" for pt in matched_pattern_types]
 
     if scan_result.block_matches > 0:
-        summary = f"Secret scanner blocked payload: {scan_result.block_matches} high-severity " f"secret(s) detected across {len(scan_result.scanned_locations)} location(s). " f"Pattern types: {', '.join(matched_pattern_types[:5])}."
+        summary = f"Secret scanner blocked payload: {scan_result.block_matches} high-severity secret(s) detected across {len(scan_result.scanned_locations)} location(s). Pattern types: {', '.join(matched_pattern_types[:5])}."
     elif scan_result.warn_matches > 0:
-        summary = f"Secret scanner warned: {scan_result.warn_matches} potential secret(s) detected. " f"Pattern types: {', '.join(matched_pattern_types[:5])}."
+        summary = f"Secret scanner warned: {scan_result.warn_matches} potential secret(s) detected. Pattern types: {', '.join(matched_pattern_types[:5])}."
     else:
         summary = decision.summary or "Secret scanner: no secrets detected."
 
@@ -650,7 +650,7 @@ class SecretScannerAdapter(BaseIntegrationAdapter):
                 request=request,
                 success=False,
                 status="blocked",
-                summary=(f"{self.record.name} blocked action '{request.action_type}': " f"{scan_result.block_matches} high-severity secret(s) detected."),
+                summary=(f"{self.record.name} blocked action '{request.action_type}': {scan_result.block_matches} high-severity secret(s) detected."),
                 output={
                     "guard_applied": True,
                     "scan_result": scan_result.to_dict(),
@@ -666,7 +666,7 @@ class SecretScannerAdapter(BaseIntegrationAdapter):
                 request=request,
                 success=True,
                 status="accepted_with_warnings",
-                summary=(f"{self.record.name} warned on action '{request.action_type}': " f"{scan_result.warn_matches} potential secret(s) detected."),
+                summary=(f"{self.record.name} warned on action '{request.action_type}': {scan_result.warn_matches} potential secret(s) detected."),
                 output={
                     "guard_applied": True,
                     "scan_result": scan_result.to_dict(),
@@ -681,7 +681,7 @@ class SecretScannerAdapter(BaseIntegrationAdapter):
             request=request,
             success=True,
             status="accepted",
-            summary=(f"{self.record.name} cleared action '{request.action_type}': " f"no secrets detected."),
+            summary=(f"{self.record.name} cleared action '{request.action_type}': no secrets detected."),
             output={
                 "guard_applied": True,
                 "scan_result": scan_result.to_dict(),

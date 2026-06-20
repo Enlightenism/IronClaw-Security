@@ -218,7 +218,7 @@ async def run_threat_hunt(
     response_model=list[HuntMatch],
     status_code=status.HTTP_200_OK,
     summary="List stored hunt match records",
-    description=("Returns lightweight HuntMatch records from the threat_detections table. " "Filterable by org_id, hunt_id, and minimum_score. " "Results ordered by assessed_at descending."),
+    description=("Returns lightweight HuntMatch records from the threat_detections table. Filterable by org_id, hunt_id, and minimum_score. Results ordered by assessed_at descending."),
     operation_id="threat_hunt_list_matches",
 )
 async def list_hunt_matches(
@@ -239,7 +239,7 @@ async def list_hunt_matches(
     effective_org_id = org_id or auth.org_id
 
     try:
-        q = client.table("threat_detections").select("event_id,org_id,agent_id,session_id,verdict,score,severity," "matched_ioc_value,matched_ioc_type,matched_mitre_technique," "risk_families,context,assessed_at")
+        q = client.table("threat_detections").select("event_id,org_id,agent_id,session_id,verdict,score,severity,matched_ioc_value,matched_ioc_type,matched_mitre_technique,risk_families,context,assessed_at")
         if effective_org_id:
             q = q.eq("org_id", effective_org_id)
         if minimum_score > 0.0:
@@ -265,7 +265,7 @@ async def list_hunt_matches(
     "/hunt/health",
     status_code=status.HTTP_200_OK,
     summary="Threat hunt service health probe",
-    description=("Liveness check for the ThreatHuntService and its dependent services. " "Returns service availability and UTC timestamp."),
+    description=("Liveness check for the ThreatHuntService and its dependent services. Returns service availability and UTC timestamp."),
     operation_id="threat_hunt_health",
 )
 async def hunt_health(

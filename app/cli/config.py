@@ -20,7 +20,7 @@ class CLIConfig:
 def load_cli_config() -> CLIConfig:
     api_key = os.environ.get("IRONCLAW_API_KEY", "").strip()
     if not api_key:
-        raise OSError("IRONCLAW_API_KEY is required but not set. " "Export it as an environment variable before running the CLI.")
+        raise OSError("IRONCLAW_API_KEY is required but not set. Export it as an environment variable before running the CLI.")
 
     base_url = os.environ.get("IRONCLAW_BASE_URL", _DEFAULT_BASE_URL).strip().rstrip("/")
     if not base_url.startswith(("http://", "https://")):
@@ -33,7 +33,7 @@ def load_cli_config() -> CLIConfig:
         except ValueError as exc:
             raise OSError(f"IRONCLAW_TIMEOUT_SECONDS must be a number, got: {raw_timeout!r}") from exc
         if not (_MIN_TIMEOUT <= timeout_seconds <= _MAX_TIMEOUT):
-            raise OSError(f"IRONCLAW_TIMEOUT_SECONDS must be between {_MIN_TIMEOUT} and " f"{_MAX_TIMEOUT}, got: {timeout_seconds}")
+            raise OSError(f"IRONCLAW_TIMEOUT_SECONDS must be between {_MIN_TIMEOUT} and {_MAX_TIMEOUT}, got: {timeout_seconds}")
     else:
         timeout_seconds = _DEFAULT_TIMEOUT
 

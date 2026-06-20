@@ -47,7 +47,6 @@ def _real_table_set() -> frozenset[str]:
 
 
 class TestAssertSchemaCompleteness:
-
     def test_passes_and_returns_frozenset(self):
         result = assert_schema_completeness()
         assert isinstance(result, frozenset)
@@ -111,7 +110,6 @@ class TestAssertSchemaCompleteness:
 
 
 class TestConfigureAppState:
-
     def test_returns_fastapi_instance(self):
         app = _fresh_app()
         result = configure_app_state(app)
@@ -208,7 +206,6 @@ class TestConfigureAppState:
 
 
 class TestAddRequestTracingMiddleware:
-
     @pytest.mark.anyio
     async def test_x_request_id_header_injected(self):
         app = _fresh_app()
@@ -307,7 +304,6 @@ class TestAddRequestTracingMiddleware:
 
 
 class TestAddSecurityMiddleware:
-
     @pytest.mark.anyio
     async def _get_secure_response(self):
         app = _fresh_app()
@@ -391,7 +387,6 @@ class TestAddSecurityMiddleware:
 
 
 class TestBootstrapAppIdempotency:
-
     def test_returns_fastapi_instance(self):
         app = _fresh_app()
         result = bootstrap_app(app)
@@ -439,7 +434,6 @@ class TestBootstrapAppIdempotency:
 
 
 class TestBootstrapAppSchemaGate:
-
     def test_raises_runtime_error_when_schema_check_fails(self):
         app = _fresh_app()
         fake = frozenset({"only_one_table"})
@@ -493,7 +487,6 @@ class TestBootstrapAppSchemaGate:
 
 
 class TestInMemoryHistoryService:
-
     def test_list_results_empty_on_init(self):
         svc = InMemoryHistoryService()
         assert svc.list_results() == []

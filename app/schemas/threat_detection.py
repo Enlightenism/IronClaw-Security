@@ -561,7 +561,7 @@ class FeedRefreshRequest(BaseModel):
     )
     taxii_ingest: TAXIIIngestRequest | None = Field(
         default=None,
-        description=("STIX/TAXII connection parameters. Required when sources contains " "STIX_TAXII and the caller needs to specify a non-default server."),
+        description=("STIX/TAXII connection parameters. Required when sources contains STIX_TAXII and the caller needs to specify a non-default server."),
     )
 
     @model_validator(mode="after")

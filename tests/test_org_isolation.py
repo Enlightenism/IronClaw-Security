@@ -502,8 +502,8 @@ def test_tenant_isolation_matrix() -> None:
     for actor_org, target_org, roles, expected_allowed, expected_reason in _TENANT_MATRIX:
         ctx = _ctx(org_id=actor_org, roles=roles)
         decision = evaluate_org_isolation(ctx, target_org_id=target_org)
-        assert decision.allowed is expected_allowed, f"actor={actor_org!r} target={target_org!r} roles={roles!r} " f"expected={expected_allowed} got={decision.allowed} reason={decision.reason!r}"
-        assert decision.reason == expected_reason, f"actor={actor_org!r} target={target_org!r} roles={roles!r} " f"expected_reason={expected_reason!r} got={decision.reason!r}"
+        assert decision.allowed is expected_allowed, f"actor={actor_org!r} target={target_org!r} roles={roles!r} expected={expected_allowed} got={decision.allowed} reason={decision.reason!r}"
+        assert decision.reason == expected_reason, f"actor={actor_org!r} target={target_org!r} roles={roles!r} expected_reason={expected_reason!r} got={decision.reason!r}"
 
 
 # ---------------------------------------------------------------------------

@@ -212,7 +212,7 @@ class McpToolAdapter(BaseIntegrationAdapter):
         verdict = "allow"
         status: AdapterExecutionStatus = "guarded"
 
-        summary = f"Guarded tool '{invocation.tool_name}' at phase '{invocation.phase}' " f"for runtime '{invocation.runtime_name or 'unknown-runtime'}'."
+        summary = f"Guarded tool '{invocation.tool_name}' at phase '{invocation.phase}' for runtime '{invocation.runtime_name or 'unknown-runtime'}'."
 
         return McpToolGuardDecision(
             adapter_name=self.record.name,

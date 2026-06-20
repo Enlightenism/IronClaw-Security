@@ -79,7 +79,7 @@ def get_login_page() -> LoginPageResponse:
         generatedat=_utc_now(),
         environment="local",
         pageheadline="Sign in to IronClaw.",
-        pagesubtitle=("Access your protected workspace. All agent actions, " "policy decisions, and runtime events are guarded and auditable."),
+        pagesubtitle=("Access your protected workspace. All agent actions, policy decisions, and runtime events are guarded and auditable."),
         fields=fields,
         securitynotices=securitynotices,
         allowselfserve=True,

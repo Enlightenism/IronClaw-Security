@@ -420,7 +420,7 @@ def _build_match_reason(
     normalized_content: str,
     risk_score: int,
 ) -> str:
-    return f"Matched policy rule '{rule.rule_id}' for action '{normalized_action}' " f"with risk score {risk_score}. Target='{normalized_target}' " f"Content length={len(normalized_content)}."
+    return f"Matched policy rule '{rule.rule_id}' for action '{normalized_action}' with risk score {risk_score}. Target='{normalized_target}' Content length={len(normalized_content)}."
 
 
 def _build_summary(
@@ -516,7 +516,7 @@ def _build_tool_guard_matches(
             name="Tool Guard Execution Decision",
             verdict=tool_verdict,
             risk_level=_risk_level_from_verdict(tool_verdict),
-            reason=(f"Tool guard escalated action via {tool_decision.get('decision_source', 'unknown')} " f"with verdict '{tool_verdict}' and risk score {tool_decision.get('risk_score', 0)}."),
+            reason=(f"Tool guard escalated action via {tool_decision.get('decision_source', 'unknown')} with verdict '{tool_verdict}' and risk score {tool_decision.get('risk_score', 0)}."),
             tags=tuple(tags),
         ),
     ]

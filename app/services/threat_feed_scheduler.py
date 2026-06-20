@@ -392,7 +392,7 @@ class ThreatFeedScheduler:
             )
 
         logger.info(
-            "threat_feed_scheduler.run.done run_id=%s source=%s status=%s " "inserted=%d updated=%d errors=%d",
+            "threat_feed_scheduler.run.done run_id=%s source=%s status=%s inserted=%d updated=%d errors=%d",
             run_id,
             entry.source,
             status,

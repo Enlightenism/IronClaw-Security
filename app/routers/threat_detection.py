@@ -305,7 +305,7 @@ async def refresh_feeds(
     background_tasks: BackgroundTasks,
     use_scheduler: bool = Query(
         default=False,
-        description=("When true, delegate to the scheduler's force_feed_run() for sources registered " "in the scheduler (MITRE_ATTACK, CISA_KEV). Produces a full SchedulerRunRecord " "persisted to feed_ingest_log. Has no effect on STIX_TAXII sources."),
+        description=("When true, delegate to the scheduler's force_feed_run() for sources registered in the scheduler (MITRE_ATTACK, CISA_KEV). Produces a full SchedulerRunRecord persisted to feed_ingest_log. Has no effect on STIX_TAXII sources."),
     ),
     auth: AuthContext = Depends(get_auth_context),
     notification_engine: Any | None = Depends(_get_optional_notification_engine),
@@ -384,7 +384,7 @@ async def refresh_feeds(
             total_errors += len(result_dict.get("errors", []))
 
     logger.info(
-        "threat_detection.refresh_feeds request_id=%s sources=%s use_scheduler=%s " "inserted=%d updated=%d errors=%d",
+        "threat_detection.refresh_feeds request_id=%s sources=%s use_scheduler=%s inserted=%d updated=%d errors=%d",
         request_id,
         [s.value for s in payload.sources],
         use_scheduler,
@@ -446,7 +446,7 @@ async def refresh_feeds(
     "/feeds/scheduler/status",
     status_code=status.HTTP_200_OK,
     summary="Get threat feed scheduler status",
-    description=("Returns the current status of the background threat feed scheduler, " "including per-source schedule entries, recent run history, " "total run/failure counts, and prune configuration."),
+    description=("Returns the current status of the background threat feed scheduler, including per-source schedule entries, recent run history, total run/failure counts, and prune configuration."),
 )
 async def get_scheduler_status(
     auth: AuthContext = Depends(get_auth_context),
@@ -476,7 +476,7 @@ async def get_scheduler_status(
     "/feeds/taxii/ingest",
     status_code=status.HTTP_200_OK,
     summary="Ingest a STIX/TAXII 2.1 feed directly",
-    description=("Accepts full TAXII 2.1 connection parameters and dispatches directly to " "STIXAdapter.ingest_from_taxii(). Returns a FeedIngestResult with per-page " "IOC insert/update/skip/error counts and ingest metadata."),
+    description=("Accepts full TAXII 2.1 connection parameters and dispatches directly to STIXAdapter.ingest_from_taxii(). Returns a FeedIngestResult with per-page IOC insert/update/skip/error counts and ingest metadata."),
 )
 async def taxii_ingest(
     payload: TAXIIIngestRequest,
@@ -614,7 +614,7 @@ async def list_detections(
     effective_org_id = org_id or auth.org_id
 
     try:
-        query = client.table(_TABLE_DETECTIONS).select("event_id,org_id,agent_id,session_id,verdict,score,severity," "ioc_match_count,correlation_signal_count,assessed_at")
+        query = client.table(_TABLE_DETECTIONS).select("event_id,org_id,agent_id,session_id,verdict,score,severity,ioc_match_count,correlation_signal_count,assessed_at")
         if effective_org_id:
             query = query.eq("org_id", effective_org_id)
         if agent_id:
@@ -717,7 +717,7 @@ async def list_correlations(
     "/webhooks/retry",
     status_code=status.HTTP_410_GONE,
     summary="[DEPRECATED] Retry a single failed webhook delivery",
-    description=("This endpoint has been removed. " "Use POST /webhooks/deliveries/{delivery_id}/retry instead. " "Retry logic is owned exclusively by the webhooks router."),
+    description=("This endpoint has been removed. Use POST /webhooks/deliveries/{delivery_id}/retry instead. Retry logic is owned exclusively by the webhooks router."),
     deprecated=True,
 )
 async def retry_webhook_delivery_deprecated(
@@ -727,7 +727,7 @@ async def retry_webhook_delivery_deprecated(
         status_code=status.HTTP_410_GONE,
         content={
             "error": "endpoint_removed",
-            "message": ("POST /threat/webhooks/retry has been removed. " "Use POST /webhooks/deliveries/{delivery_id}/retry."),
+            "message": ("POST /threat/webhooks/retry has been removed. Use POST /webhooks/deliveries/{delivery_id}/retry."),
             "canonical_path": "/webhooks/deliveries/{delivery_id}/retry",
         },
     )
@@ -742,7 +742,7 @@ async def retry_webhook_delivery_deprecated(
     "/webhooks/retryable",
     status_code=status.HTTP_410_GONE,
     summary="[DEPRECATED] List webhook deliveries eligible for retry",
-    description=("This endpoint has been removed. " "Use GET /webhooks/deliveries/retryable instead. " "Retryable delivery listing is owned exclusively by the webhooks router."),
+    description=("This endpoint has been removed. Use GET /webhooks/deliveries/retryable instead. Retryable delivery listing is owned exclusively by the webhooks router."),
     deprecated=True,
 )
 async def list_retryable_webhook_deliveries_deprecated(
@@ -752,7 +752,7 @@ async def list_retryable_webhook_deliveries_deprecated(
         status_code=status.HTTP_410_GONE,
         content={
             "error": "endpoint_removed",
-            "message": ("GET /threat/webhooks/retryable has been removed. " "Use GET /webhooks/deliveries/retryable."),
+            "message": ("GET /threat/webhooks/retryable has been removed. Use GET /webhooks/deliveries/retryable."),
             "canonical_path": "/webhooks/deliveries/retryable",
         },
     )

@@ -93,7 +93,7 @@ def _billing_catalog() -> dict[str, Any]:
     return {
         "tokens_per_unit": _TOKENS_PER_UNIT,
         "featured_package_id": _FEATURED_PACKAGE_ID,
-        "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; " "additional units consumed in 25,000-token chunks."),
+        "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; additional units consumed in 25,000-token chunks."),
         "packages": {pkg_id: _get_package_metadata(pkg_id) for pkg_id in _ORDERED_PACKAGE_IDS},
     }
 

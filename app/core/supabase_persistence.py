@@ -32,6 +32,7 @@ _T_SCAN_PATTERNS = "scan_patterns"
 _T_RATE_LIMIT_STATE = "rate_limit_state"
 _T_WEBHOOK_SUBSCRIPTIONS = "webhook_subscriptions"
 _T_WEBHOOK_DELIVERIES = "webhook_deliveries"
+_T_INSTALL_KEYS = "install_keys"
 
 
 _COL_POLICY_RULE_ID = "policy_rule_id"
@@ -801,6 +802,109 @@ def update_webhook_delivery(delivery_id: str, updates: dict[str, Any]) -> dict[s
 
 
 # ---------------------------------------------------------------------------
+# Install Keys
+# ---------------------------------------------------------------------------
+
+
+def upsert_install_key(record: dict[str, Any]) -> dict[str, Any]:
+    """Create or replace an install key row by install_key_id."""
+    operation = "upsert_install_key"
+    if not record.get("install_key_id"):
+        raise PersistenceError(operation, "record must include install_key_id")
+    if not record.get("owner_id"):
+        raise PersistenceError(operation, "record must include owner_id")
+    try:
+        client = get_supabase_service_client()
+        if "created_at" not in record:
+            record = {**record, "created_at": _now_utc()}
+        record = {**record, "updated_at": _now_utc()}
+        resp = client.table(_T_INSTALL_KEYS).upsert(record, on_conflict="install_key_id", returning="representation").execute()
+        data = resp.data
+        if isinstance(data, list):
+            return data[0] if data else record
+        if isinstance(data, dict):
+            return data
+        return record
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+def get_install_key(install_key_id: str) -> dict[str, Any] | None:
+    """Fetch a single install key by its primary key."""
+    operation = "get_install_key"
+    if not install_key_id or not install_key_id.strip():
+        raise PersistenceError(operation, "install_key_id is required")
+    try:
+        client = get_supabase_service_client()
+        resp = client.table(_T_INSTALL_KEYS).select("*").eq("install_key_id", install_key_id.strip()).maybe_single().execute()
+        data = resp.data
+        if isinstance(data, dict) and data:
+            return data
+        if isinstance(data, list):
+            return data[0] if data else None
+        return None
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+def list_install_keys_for_owner(
+    owner_id: str,
+    *,
+    active_only: bool = False,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """List all install keys belonging to an owner, optionally filtered to active keys."""
+    operation = "list_install_keys_for_owner"
+    if not owner_id or not owner_id.strip():
+        raise PersistenceError(operation, "owner_id is required")
+    try:
+        client = get_supabase_service_client()
+        q = client.table(_T_INSTALL_KEYS).select("*").eq("owner_id", owner_id.strip())
+        if active_only:
+            q = q.eq("active", True)
+        q = q.order("created_at", desc=True).range(offset, offset + limit - 1)
+        resp = q.execute()
+        data = resp.data
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            return [data]
+        return []
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+def increment_install_key_units(install_key_id: str, delta: int = 1) -> dict[str, Any] | None:
+    """Atomically increment units_used on an install key row.
+
+    Fetches the current row, adds delta, and upserts back.
+    Returns the updated record or None if the key does not exist.
+    Delta must be a positive integer.
+    """
+    operation = "increment_install_key_units"
+    if not install_key_id or not install_key_id.strip():
+        raise PersistenceError(operation, "install_key_id is required")
+    if delta < 1:
+        raise PersistenceError(operation, "delta must be >= 1")
+    try:
+        existing = get_install_key(install_key_id.strip())
+        if existing is None:
+            return None
+        current: int = int(existing.get("units_used", 0))
+        updated = {
+            **existing,
+            "units_used": current + delta,
+            "updated_at": _now_utc(),
+        }
+        return upsert_install_key(updated)
+    except PersistenceError:
+        raise
+    except (SupabaseAPIError, SupabaseClientError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+# ---------------------------------------------------------------------------
 # Public surface
 # ---------------------------------------------------------------------------
 
@@ -837,8 +941,13 @@ __all__ = [
     "get_webhook_delivery_log",
     "get_webhook_delivery_record",
     "list_webhook_deliveries",
-    "list_retryable_webhook_deliveries",
     "get_webhook_delivery",
+    "list_retryable_webhook_deliveries",
     "upsert_webhook_delivery",
     "update_webhook_delivery",
+    # Install Keys
+    "upsert_install_key",
+    "get_install_key",
+    "list_install_keys_for_owner",
+    "increment_install_key_units",
 ]

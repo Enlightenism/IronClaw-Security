@@ -69,19 +69,19 @@ def _build_package_catalog() -> dict[str, dict[str, Any]]:
                 "package_id": "pkg_5000",
                 "name": "Starter",
                 "display_label": "5,000 units — $20.00",
-                "description": ("Prepaid protection units for individual builders who want guarded " "prompt handling, tool-call review, source inspection, and safe response release."),
+                "description": ("Prepaid protection units for individual builders who want guarded prompt handling, tool-call review, source inspection, and safe response release."),
             },
             "team-25k": {
                 "package_id": "pkg_25000",
                 "name": "Team",
                 "display_label": "25,000 units — $90.00",
-                "description": ("Prepaid protection units for teams running higher volumes of AI-assisted " "development, research, and guarded agent workflows."),
+                "description": ("Prepaid protection units for teams running higher volumes of AI-assisted development, research, and guarded agent workflows."),
             },
             "enterprise-60k": {
                 "package_id": "pkg_60000",
                 "name": "Enterprise",
                 "display_label": "60,000 units — $180.00",
-                "description": ("Prepaid protection units for organizations protecting large-scale agent " "operations, sensitive workflows, and high-frequency prompt activity."),
+                "description": ("Prepaid protection units for organizations protecting large-scale agent operations, sensitive workflows, and high-frequency prompt activity."),
             },
         }
 
@@ -117,7 +117,7 @@ def _build_package_catalog() -> dict[str, dict[str, Any]]:
                 "unit_amount": 5_000,
                 "price_usd": 20.00,
                 "display_label": "5,000 units — $20.00",
-                "description": ("Prepaid protection units for individual builders who want guarded " "prompt handling, tool-call review, source inspection, and safe response release."),
+                "description": ("Prepaid protection units for individual builders who want guarded prompt handling, tool-call review, source inspection, and safe response release."),
                 "tokens_per_unit": TOKEN_CHUNK_SIZE,
             },
             "pkg_25000": {
@@ -126,7 +126,7 @@ def _build_package_catalog() -> dict[str, dict[str, Any]]:
                 "unit_amount": 25_000,
                 "price_usd": 90.00,
                 "display_label": "25,000 units — $90.00",
-                "description": ("Prepaid protection units for teams running higher volumes of AI-assisted " "development, research, and guarded agent workflows."),
+                "description": ("Prepaid protection units for teams running higher volumes of AI-assisted development, research, and guarded agent workflows."),
                 "tokens_per_unit": TOKEN_CHUNK_SIZE,
             },
             "pkg_60000": {
@@ -135,7 +135,7 @@ def _build_package_catalog() -> dict[str, dict[str, Any]]:
                 "unit_amount": 60_000,
                 "price_usd": 180.00,
                 "display_label": "60,000 units — $180.00",
-                "description": ("Prepaid protection units for organizations protecting large-scale agent " "operations, sensitive workflows, and high-frequency prompt activity."),
+                "description": ("Prepaid protection units for organizations protecting large-scale agent operations, sensitive workflows, and high-frequency prompt activity."),
                 "tokens_per_unit": TOKEN_CHUNK_SIZE,
             },
         }

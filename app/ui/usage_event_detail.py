@@ -373,7 +373,7 @@ def get_usage_event_detail(
         wallet_id=payload.get("wallet_id"),
         metadata={
             "billing_state": payload["metadata"]["billing_state"],
-            "description": (f"Each unit covers up to {_TOKENS_PER_UNIT:,} tokens and additional units " f"are consumed in {_TOKENS_PER_UNIT:,}-token chunks."),
+            "description": (f"Each unit covers up to {_TOKENS_PER_UNIT:,} tokens and additional units are consumed in {_TOKENS_PER_UNIT:,}-token chunks."),
             "tokens_per_unit": _TOKENS_PER_UNIT,
             "token_count": token_count,
             "computed_units_for_tokens": computed_units,

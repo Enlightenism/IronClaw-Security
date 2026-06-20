@@ -130,7 +130,7 @@ class TestTrustEngineCacheShutdown:
             pass
 
         with lock:
-            assert len(cache) == 0, f"trust_engine._profile_cache was not cleared on shutdown; " f"remaining keys: {list(cache.keys())}"
+            assert len(cache) == 0, f"trust_engine._profile_cache was not cleared on shutdown; remaining keys: {list(cache.keys())}"
 
     def test_invalidate_all_cache_preferred_over_direct_clear(self) -> None:
         invalidate_mock = MagicMock()
@@ -232,7 +232,7 @@ class TestAgentRouterDependencies:
             pytest.skip("/guard routes not present in this build")
 
         dep_qualnames = [getattr(d, "__qualname__", "") for d in guard_deps]
-        assert any("agent_rate_limit_dependency" in qn for qn in dep_qualnames), f"No agent_rate_limit_dependency closure found in /guard deps. " f"Found qualnames: {dep_qualnames}"
+        assert any("agent_rate_limit_dependency" in qn for qn in dep_qualnames), f"No agent_rate_limit_dependency closure found in /guard deps. Found qualnames: {dep_qualnames}"
 
     def test_execute_routes_carry_agent_rate_limit_dependency(self) -> None:
         app = self._get_app()
@@ -242,7 +242,7 @@ class TestAgentRouterDependencies:
             pytest.skip("/execute routes not present in this build")
 
         dep_qualnames = [getattr(d, "__qualname__", "") for d in execute_deps]
-        assert any("agent_rate_limit_dependency" in qn for qn in dep_qualnames), f"No agent_rate_limit_dependency closure found in /execute deps. " f"Found qualnames: {dep_qualnames}"
+        assert any("agent_rate_limit_dependency" in qn for qn in dep_qualnames), f"No agent_rate_limit_dependency closure found in /execute deps. Found qualnames: {dep_qualnames}"
 
     def test_guard_routes_have_both_auth_and_rate_limit(self) -> None:
         """Single consolidated assertion that both deps are present together."""
@@ -256,7 +256,7 @@ class TestAgentRouterDependencies:
 
         has_auth = require_api_key in guard_deps
         has_agent_rl = any("agent_rate_limit_dependency" in getattr(d, "__qualname__", "") for d in guard_deps)
-        assert has_auth and has_agent_rl, f"Expected both require_api_key and agent_rate_limit_dependency on /guard. " f"has_auth={has_auth}, has_agent_rl={has_agent_rl}"
+        assert has_auth and has_agent_rl, f"Expected both require_api_key and agent_rate_limit_dependency on /guard. has_auth={has_auth}, has_agent_rl={has_agent_rl}"
 
 
 # ---------------------------------------------------------------------------

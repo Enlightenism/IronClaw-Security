@@ -201,13 +201,13 @@ def build_agent_profile(descriptor: AgentDescriptor) -> AgentProfile:
         notes.append("High-sensitivity profile: prefer review or isolation over direct execution.")
 
     if baseline_status == "learning":
-        notes.append("Behavioral baseline is still in learning phase; " "drift detection will activate once sufficient observations are collected.")
+        notes.append("Behavioral baseline is still in learning phase; drift detection will activate once sufficient observations are collected.")
     elif baseline_status == "stale":
         notes.append("Behavioral baseline is stale; recent observations may not reflect the active profile.")
     elif baseline_status == "suspended":
-        notes.append("Agent is currently suspended due to critical behavioral drift. " "Operator review is required before resuming execution.")
+        notes.append("Agent is currently suspended due to critical behavioral drift. Operator review is required before resuming execution.")
     elif baseline_status == "active" and drift_severity in ("high", "critical"):
-        notes.append(f"Active behavioral drift detected (severity={drift_severity}). " "Review agent activity before permitting further execution.")
+        notes.append(f"Active behavioral drift detected (severity={drift_severity}). Review agent activity before permitting further execution.")
 
     return AgentProfile(
         agent_id=descriptor.agent_id,

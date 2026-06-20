@@ -91,7 +91,7 @@ class WebhookSubscriptionCreateSchema(_WebhookSchemaBase):
     events: list[str] = Field(
         ...,
         min_length=1,
-        description=("IronClaw event types to subscribe to. " "Enumerate specific types — the '*' wildcard is not accepted."),
+        description=("IronClaw event types to subscribe to. Enumerate specific types — the '*' wildcard is not accepted."),
     )
     max_attempts: int = Field(
         default=5,
@@ -200,7 +200,7 @@ class WebhookSubscriptionCreateResponseSchema(_WebhookReadBase):
     )
     signing_secret: str = Field(
         ...,
-        description=("Full HMAC-SHA256 signing secret. " "Returned once at creation only — store it securely and do not log it."),
+        description=("Full HMAC-SHA256 signing secret. Returned once at creation only — store it securely and do not log it."),
     )
 
 

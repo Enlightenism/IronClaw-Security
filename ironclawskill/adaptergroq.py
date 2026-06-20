@@ -119,7 +119,7 @@ class GroqAdapter:
 
         api_key = self._effective_api_key()
         if not api_key:
-            raise ProviderAuthenticationError(f"{self.name} requires an API key. " "Set IRONCLAWSKILL_GROQ_API_KEY or GROQ_API_KEY.")
+            raise ProviderAuthenticationError(f"{self.name} requires an API key. Set IRONCLAWSKILL_GROQ_API_KEY or GROQ_API_KEY.")
 
         model = self._effective_model(getattr(request, "model", None))
         endpoint = self._effective_endpoint()

@@ -408,7 +408,7 @@ class IOCExpiryEngine:
             matched_indicators=list(active_matches),
             highest_severity=highest.severity,
             confidence=avg_confidence,
-            reasons=[f"Matched {len(active_matches)} active indicators " f"(highest severity: {highest.severity})."],
+            reasons=[f"Matched {len(active_matches)} active indicators (highest severity: {highest.severity})."],
         )
 
     # ---- Batch expiry sweep -------------------------------------------------
@@ -643,7 +643,6 @@ def no_expiry_indicator(engine: IOCExpiryEngine, feed_id: str) -> ThreatIndicato
 
 
 class TestLookupExpiryGate:
-
     def test_expired_indicator_not_matched(self, engine: IOCExpiryEngine, expired_indicator: ThreatIndicator) -> None:
         result = engine.lookup(expired_indicator.value, "ip")
         assert result.matched is False
@@ -757,7 +756,6 @@ class TestLookupExpiryGate:
 
 
 class TestNearExpiryFlagging:
-
     def test_near_expiry_indicator_is_still_matched(self, engine: IOCExpiryEngine, near_expiry_indicator: ThreatIndicator) -> None:
         result = engine.lookup(near_expiry_indicator.value, "domain")
         assert result.matched is True
@@ -859,7 +857,6 @@ class TestNearExpiryFlagging:
 
 
 class TestBatchExpirySweep:
-
     def test_sweep_expires_past_due_indicators(self, engine: IOCExpiryEngine, feed_id: str) -> None:
         engine.add_indicator(
             indicator_type="ip",
@@ -1020,7 +1017,6 @@ class TestBatchExpirySweep:
 
 
 class TestDeactivationVsAutoExpiry:
-
     def test_manual_deactivation_records_deactivated_manual_event(self, engine: IOCExpiryEngine, active_indicator: ThreatIndicator) -> None:
         engine.deactivate_indicator(active_indicator.indicator_id, actor="admin")
         trail = engine.get_audit_trail(
@@ -1130,7 +1126,6 @@ class TestDeactivationVsAutoExpiry:
 
 
 class TestReactivation:
-
     def test_reactivate_expired_indicator(self, engine: IOCExpiryEngine, expired_indicator: ThreatIndicator) -> None:
         engine.lookup(expired_indicator.value, "ip")
         assert expired_indicator.is_expired is True
@@ -1215,7 +1210,6 @@ class TestReactivation:
 
 
 class TestAuditTrailIntegrity:
-
     def test_ingest_always_records_ingested_event(self, engine: IOCExpiryEngine, feed_id: str) -> None:
         ind = engine.add_indicator(
             indicator_type="ip",
@@ -1317,7 +1311,6 @@ class TestAuditTrailIntegrity:
 
 
 class TestIntrospectionHelpers:
-
     def test_list_active_excludes_expired(
         self,
         engine: IOCExpiryEngine,
@@ -1385,7 +1378,6 @@ class TestIntrospectionHelpers:
 
 
 class TestSweepResultSuccessCount:
-
     def test_success_count_equals_expired_plus_near(self, engine: IOCExpiryEngine, feed_id: str) -> None:
         engine.add_indicator(
             indicator_type="ip",

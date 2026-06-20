@@ -99,7 +99,6 @@ def _memory_store() -> InMemoryPersistenceStore:
 
 
 class TestGetRegisteredTables:
-
     def test_returns_frozenset(self):
         result = get_registered_tables()
         assert isinstance(result, frozenset)
@@ -140,7 +139,6 @@ class TestGetRegisteredTables:
 
 
 class TestDDLRegistrySyncGuard:
-
     def test_ddl_registry_equals_ironclaw_tables(self):
         assert _IRONCLAW_DDL_TABLE_REGISTRY == IRONCLAW_TABLES
 
@@ -182,7 +180,6 @@ class TestDDLRegistrySyncGuard:
 
 
 class TestGetPersistenceStore:
-
     def test_returns_valid_store_type_memory_mode(self):
         result = get_persistence_store(mode=MEMORY_MODE)
         assert isinstance(result, (SupabasePersistenceStore, InMemoryPersistenceStore))
@@ -254,7 +251,6 @@ class TestGetPersistenceStore:
 
 
 class TestInMemoryPersistenceStoreTables:
-
     def test_tables_attribute_exists(self):
         store = _memory_store()
         assert hasattr(store, "_tables")
@@ -342,7 +338,6 @@ class TestInMemoryPersistenceStoreTables:
 
 
 class TestRateLimitStoreFactories:
-
     def test_get_rate_limit_store_returns_store_type(self):
         result = get_rate_limit_store(mode=MEMORY_MODE)
         assert isinstance(result, (SupabasePersistenceStore, InMemoryPersistenceStore))
@@ -416,7 +411,6 @@ class TestRateLimitStoreFactories:
 
 
 class TestFactoryAliases:
-
     def test_get_store_returns_store_type(self):
         result = get_store(mode=MEMORY_MODE)
         assert isinstance(result, (SupabasePersistenceStore, InMemoryPersistenceStore))
@@ -511,7 +505,6 @@ class TestFactoryAliases:
 
 
 class TestPersistenceBootstrapState:
-
     def test_memory_mode_migration_ready_true(self):
         state = PersistenceBootstrapState(
             mode=MEMORY_MODE,
@@ -568,7 +561,6 @@ class TestPersistenceBootstrapState:
 
 
 class TestGetPersistenceBootstrapState:
-
     def test_returns_persistence_bootstrap_state_instance(self):
         result = get_persistence_bootstrap_state(mode=MEMORY_MODE)
         assert isinstance(result, PersistenceBootstrapState)
@@ -599,7 +591,6 @@ class TestGetPersistenceBootstrapState:
 
 
 class TestBuildStore:
-
     def test_memory_mode_explicit_returns_in_memory_store(self):
         result = build_store(mode=MEMORY_MODE)
         assert isinstance(result, InMemoryPersistenceStore)
@@ -659,7 +650,6 @@ class TestBuildStore:
 
 
 class TestPersistenceStoreProtocol:
-
     def test_in_memory_store_satisfies_protocol(self):
         store = InMemoryPersistenceStore()
         assert isinstance(store, PersistenceStore)

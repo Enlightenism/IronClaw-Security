@@ -31,7 +31,7 @@ _PKG_25K = "pkg_25000"
 _PKG_60K = "pkg_60000"
 _ALL_PKG_IDS = {_PKG_5K, _PKG_25K, _PKG_60K}
 
-assert _ALL_PKG_IDS <= set(UNIT_PACKAGE_CATALOG.keys()), f"UNIT_PACKAGE_CATALOG is missing expected packages: " f"{_ALL_PKG_IDS - set(UNIT_PACKAGE_CATALOG.keys())}"
+assert _ALL_PKG_IDS <= set(UNIT_PACKAGE_CATALOG.keys()), f"UNIT_PACKAGE_CATALOG is missing expected packages: {_ALL_PKG_IDS - set(UNIT_PACKAGE_CATALOG.keys())}"
 
 # ---------------------------------------------------------------------------
 # App factory helpers

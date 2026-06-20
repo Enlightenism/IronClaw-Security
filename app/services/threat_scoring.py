@@ -317,11 +317,11 @@ def build_score_rationale(
 
     high_confidence = [m for m in ioc_matches if m.confidence >= 0.8]
     if high_confidence:
-        rationale.append(f"{len(high_confidence)} high-confidence IOC match(es) " f"(confidence >= 0.8): {', '.join(m.value for m in high_confidence[:5])}")
+        rationale.append(f"{len(high_confidence)} high-confidence IOC match(es) (confidence >= 0.8): {', '.join(m.value for m in high_confidence[:5])}")
 
     critical_matches = [m for m in ioc_matches if m.severity in (ThreatSeverityLevel.CRITICAL, ThreatSeverityLevel.HIGH)]
     if critical_matches:
-        rationale.append(f"{len(critical_matches)} HIGH/CRITICAL severity match(es): " f"{', '.join(m.value for m in critical_matches[:5])}")
+        rationale.append(f"{len(critical_matches)} HIGH/CRITICAL severity match(es): {', '.join(m.value for m in critical_matches[:5])}")
 
     cve_matches = [m for m in ioc_matches if m.cve_id or m.ioc_type == IOCTypeEnum.CVE]
     if cve_matches:
@@ -466,7 +466,7 @@ class ScoreResult:
         self.rationale = rationale
 
     def __repr__(self) -> str:
-        return f"ScoreResult(score={self.score:.3f}, verdict={self.verdict.value}, " f"severity={self.severity.value})"
+        return f"ScoreResult(score={self.score:.3f}, verdict={self.verdict.value}, severity={self.severity.value})"
 
 
 # ---------------------------------------------------------------------------

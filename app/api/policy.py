@@ -94,7 +94,7 @@ class GuardBundleRequest(BaseModel):
     def _at_least_one_non_empty(self) -> GuardBundleRequest:
         fields = [self.user_prompt, self.retrieved_doc, self.tool_output, self.model_output]
         if not any(f is not None and f.strip() for f in fields):
-            raise ValueError("At least one field (user_prompt, retrieved_doc, tool_output, model_output) " "must be a non-empty, non-whitespace string.")
+            raise ValueError("At least one field (user_prompt, retrieved_doc, tool_output, model_output) must be a non-empty, non-whitespace string.")
         return self
 
 

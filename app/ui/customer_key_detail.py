@@ -64,7 +64,7 @@ def _token_coverage_metadata(wallet_units: int) -> dict[str, Any]:
         "tokens_per_unit": _TOKENS_PER_UNIT,
         "wallet_units": wallet_units,
         "tokens_in_wallet": wallet_units * _TOKENS_PER_UNIT,
-        "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; " "additional units are consumed in 25,000-token chunks."),
+        "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; additional units are consumed in 25,000-token chunks."),
     }
 
 
@@ -312,7 +312,7 @@ def get_customer_key_detail(
                 "policy_profile": "default-customer-access",
                 "supports_billing": True,
                 "tokens_per_unit": _TOKENS_PER_UNIT,
-                "token_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; " "additional units consumed in 25,000-token chunks."),
+                "token_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; additional units consumed in 25,000-token chunks."),
             },
         ),
         billing={

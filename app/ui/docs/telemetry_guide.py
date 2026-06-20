@@ -88,7 +88,7 @@ def _build_event_schema() -> list[TelemetryEventFieldView]:
             type="string (UUID)",
             nullable=False,
             presentwhen="Always",
-            description=("Unique identifier for this telemetry event. " "Used to correlate events across the audit trail, review queue, and telemetry surfaces. " "Format: UUID v4."),
+            description=("Unique identifier for this telemetry event. Used to correlate events across the audit trail, review queue, and telemetry surfaces. Format: UUID v4."),
         ),
         TelemetryEventFieldView(
             fieldid="eventtype",
@@ -110,7 +110,7 @@ def _build_event_schema() -> list[TelemetryEventFieldView]:
             type="string (ISO 8601 UTC)",
             nullable=False,
             presentwhen="Always",
-            description=("UTC timestamp at which the event was emitted by IronClaw. " "Format: YYYY-MM-DDTHH:MM:SS.ffffffZ. " "All timestamp comparisons in query filters use this field."),
+            description=("UTC timestamp at which the event was emitted by IronClaw. Format: YYYY-MM-DDTHH:MM:SS.ffffffZ. All timestamp comparisons in query filters use this field."),
         ),
         TelemetryEventFieldView(
             fieldid="environment",
@@ -118,7 +118,7 @@ def _build_event_schema() -> list[TelemetryEventFieldView]:
             type="string",
             nullable=False,
             presentwhen="Always",
-            description=("The protected environment tier in which this event occurred. " "Values: local | staging | production. " "Used to scope queries and segment telemetry across deployment tiers."),
+            description=("The protected environment tier in which this event occurred. Values: local | staging | production. Used to scope queries and segment telemetry across deployment tiers."),
         ),
         TelemetryEventFieldView(
             fieldid="actiontype",
@@ -126,7 +126,7 @@ def _build_event_schema() -> list[TelemetryEventFieldView]:
             type="string",
             nullable=True,
             presentwhen="guard_action, guard_execute, guard_scan events only",
-            description=("The action category evaluated by the guard layer. " "Examples: toolcall | shellexec | httpfetch | filewrite | fileread | dbquery. " "Null on non-guard events such as policy_updated or audit_export."),
+            description=("The action category evaluated by the guard layer. Examples: toolcall | shellexec | httpfetch | filewrite | fileread | dbquery. Null on non-guard events such as policy_updated or audit_export."),
         ),
         TelemetryEventFieldView(
             fieldid="target",
@@ -134,7 +134,7 @@ def _build_event_schema() -> list[TelemetryEventFieldView]:
             type="string",
             nullable=True,
             presentwhen="guard_action, guard_execute, guard_scan events only",
-            description=("The resource or destination the action was directed at. " "May be a URL, file path, shell command string, or tool name depending on actiontype. " "Stored as-received for forensic fidelity. Null on non-guard events."),
+            description=("The resource or destination the action was directed at. May be a URL, file path, shell command string, or tool name depending on actiontype. Stored as-received for forensic fidelity. Null on non-guard events."),
         ),
         TelemetryEventFieldView(
             fieldid="riskscore",
@@ -142,7 +142,7 @@ def _build_event_schema() -> list[TelemetryEventFieldView]:
             type="integer (0–100)",
             nullable=True,
             presentwhen="guard_action, guard_execute, guard_scan, session_risk_updated events",
-            description=("The computed or caller-provided risk score at the time the guard decision was made. " "For guard_action and guard_execute events this is the effective score after scanner augmentation. " "For session_risk_updated events this reflects the aggregated session-level score."),
+            description=("The computed or caller-provided risk score at the time the guard decision was made. For guard_action and guard_execute events this is the effective score after scanner augmentation. For session_risk_updated events this reflects the aggregated session-level score."),
         ),
         TelemetryEventFieldView(
             fieldid="verdict",
@@ -150,7 +150,7 @@ def _build_event_schema() -> list[TelemetryEventFieldView]:
             type="string (enum)",
             nullable=True,
             presentwhen="guard_action, guard_execute, guard_scan events only",
-            description=("The policy verdict applied to the action: allow | warn | quarantine | block. " "Null on non-guard events. " "This field is the primary filter dimension for audit consumers and security dashboards."),
+            description=("The policy verdict applied to the action: allow | warn | quarantine | block. Null on non-guard events. This field is the primary filter dimension for audit consumers and security dashboards."),
         ),
         TelemetryEventFieldView(
             fieldid="policyversion",
@@ -159,9 +159,7 @@ def _build_event_schema() -> list[TelemetryEventFieldView]:
             nullable=True,
             presentwhen="guard_action, guard_execute, policy_updated events",
             description=(
-                "The version identifier of the active policy configuration at the time this event was emitted. "
-                "Enables forensic reconstruction of which policy rules and thresholds were in effect for a given decision. "
-                "Format: ISO 8601 timestamp of the last policy_updated event preceding this event."
+                "The version identifier of the active policy configuration at the time this event was emitted. Enables forensic reconstruction of which policy rules and thresholds were in effect for a given decision. Format: ISO 8601 timestamp of the last policy_updated event preceding this event."
             ),
         ),
         TelemetryEventFieldView(
@@ -170,7 +168,7 @@ def _build_event_schema() -> list[TelemetryEventFieldView]:
             type="string",
             nullable=True,
             presentwhen="All guard events where session context was present in the request",
-            description=("Session context identifier passed by the caller in the original guard request. " "Used to correlate all guard events from a single agent session across the audit trail and telemetry surfaces. " "Null if no session context was included in the originating request."),
+            description=("Session context identifier passed by the caller in the original guard request. Used to correlate all guard events from a single agent session across the audit trail and telemetry surfaces. Null if no session context was included in the originating request."),
         ),
         TelemetryEventFieldView(
             fieldid="reviewoutcome",
@@ -178,7 +176,7 @@ def _build_event_schema() -> list[TelemetryEventFieldView]:
             type="string (enum)",
             nullable=True,
             presentwhen="review_decided events only",
-            description=("The analyst decision applied to a review queue item: approved | denied. " "Present only on review_decided events. " "Null on all other event types including review_queued, which records the entry into the queue " "before any decision has been made."),
+            description=("The analyst decision applied to a review queue item: approved | denied. Present only on review_decided events. Null on all other event types including review_queued, which records the entry into the queue before any decision has been made."),
         ),
         TelemetryEventFieldView(
             fieldid="actor",
@@ -186,7 +184,7 @@ def _build_event_schema() -> list[TelemetryEventFieldView]:
             type="string",
             nullable=True,
             presentwhen="review_decided, policy_updated, quarantine_released, audit_export events",
-            description=("The operator identity responsible for a manual action such as a review decision, " "policy update, quarantine release, or audit export. " "Null on fully automated guard events where no human interaction occurred."),
+            description=("The operator identity responsible for a manual action such as a review decision, policy update, quarantine release, or audit export. Null on fully automated guard events where no human interaction occurred."),
         ),
         TelemetryEventFieldView(
             fieldid="reason",
@@ -225,7 +223,7 @@ def _build_emission_rules() -> list[TelemetryEmissionRuleView]:
             trigger="POST /guard/action or POST /guard/action-decision completes policy evaluation",
             emissionmode="automatic",
             eventtype="guard_action",
-            description=("Emitted automatically for every request that reaches the guard action evaluation path. " "Includes all verdict outcomes: allow, warn, quarantine, and block. " "No caller opt-in is required. Cannot be suppressed."),
+            description=("Emitted automatically for every request that reaches the guard action evaluation path. Includes all verdict outcomes: allow, warn, quarantine, and block. No caller opt-in is required. Cannot be suppressed."),
         ),
         TelemetryEmissionRuleView(
             ruleid="guard-execute-auto",
@@ -233,7 +231,7 @@ def _build_emission_rules() -> list[TelemetryEmissionRuleView]:
             trigger="POST /guard/execute completes policy evaluation",
             emissionmode="automatic",
             eventtype="guard_execute",
-            description=("Emitted automatically for every execution plan submitted to the guard execute path. " "Distinct from guard_action because the execute path carries additional execution plan context. " "Includes verdict, executionid, and any session context."),
+            description=("Emitted automatically for every execution plan submitted to the guard execute path. Distinct from guard_action because the execute path carries additional execution plan context. Includes verdict, executionid, and any session context."),
         ),
         TelemetryEmissionRuleView(
             ruleid="guard-scan-auto",
@@ -241,7 +239,7 @@ def _build_emission_rules() -> list[TelemetryEmissionRuleView]:
             trigger="POST /guard/scan/prompt completes scanner evaluation",
             emissionmode="automatic",
             eventtype="guard_scan",
-            description=("Emitted automatically for every prompt scan request. " "Includes threatdetected flag, threattype if a pattern was matched, confidence score, and scanid. " "Risk score reflects the scanner-augmented value, not the raw caller-supplied value."),
+            description=("Emitted automatically for every prompt scan request. Includes threatdetected flag, threattype if a pattern was matched, confidence score, and scanid. Risk score reflects the scanner-augmented value, not the raw caller-supplied value."),
         ),
         TelemetryEmissionRuleView(
             ruleid="review-queued-auto",
@@ -249,7 +247,7 @@ def _build_emission_rules() -> list[TelemetryEmissionRuleView]:
             trigger="Guard evaluation produces a quarantine or review verdict and queues the action",
             emissionmode="automatic",
             eventtype="review_queued",
-            description=("Emitted automatically when an action is placed in the review queue as a result of meeting " "the reviewthreshold or quarantinethreshold. " "Includes the actiontype, target, risk score, and the pending verdict awaiting analyst decision."),
+            description=("Emitted automatically when an action is placed in the review queue as a result of meeting the reviewthreshold or quarantinethreshold. Includes the actiontype, target, risk score, and the pending verdict awaiting analyst decision."),
         ),
         TelemetryEmissionRuleView(
             ruleid="review-decided-auto",
@@ -257,7 +255,7 @@ def _build_emission_rules() -> list[TelemetryEmissionRuleView]:
             trigger="POST /guard/reviews/decide is called with an approve or deny decision",
             emissionmode="automatic",
             eventtype="review_decided",
-            description=("Emitted automatically when an analyst submits a decision on a queued review item. " "Includes reviewoutcome (approved | denied), the analyst actor identity, " "and the attached reason string if provided."),
+            description=("Emitted automatically when an analyst submits a decision on a queued review item. Includes reviewoutcome (approved | denied), the analyst actor identity, and the attached reason string if provided."),
         ),
         TelemetryEmissionRuleView(
             ruleid="quarantine-created-auto",
@@ -265,7 +263,7 @@ def _build_emission_rules() -> list[TelemetryEmissionRuleView]:
             trigger="Guard evaluation produces a quarantine verdict",
             emissionmode="automatic",
             eventtype="quarantine_created",
-            description=("Emitted automatically when an action reaches the quarantinethreshold. " "Distinct from review_queued because quarantined actions are isolated and require operator release, " "not standard review queue approval."),
+            description=("Emitted automatically when an action reaches the quarantinethreshold. Distinct from review_queued because quarantined actions are isolated and require operator release, not standard review queue approval."),
         ),
         TelemetryEmissionRuleView(
             ruleid="quarantine-released-auto",
@@ -273,7 +271,7 @@ def _build_emission_rules() -> list[TelemetryEmissionRuleView]:
             trigger="Operator explicitly releases a quarantined action via admin surface",
             emissionmode="automatic",
             eventtype="quarantine_released",
-            description=("Emitted automatically when an operator releases a quarantined action. " "Includes the actor identity, the release reason, and the original quarantine event ID for correlation."),
+            description=("Emitted automatically when an operator releases a quarantined action. Includes the actor identity, the release reason, and the original quarantine event ID for correlation."),
         ),
         TelemetryEmissionRuleView(
             ruleid="policy-updated-auto",
@@ -281,7 +279,7 @@ def _build_emission_rules() -> list[TelemetryEmissionRuleView]:
             trigger="POST /policy/update is called and a change is committed",
             emissionmode="automatic",
             eventtype="policy_updated",
-            description=("Emitted automatically on every successful policy update. " "Includes a before-and-after snapshot of changed fields, the actor identity, " "and the new policyversion identifier. " "Used to reconstruct the policy state at any point in the audit trail."),
+            description=("Emitted automatically on every successful policy update. Includes a before-and-after snapshot of changed fields, the actor identity, and the new policyversion identifier. Used to reconstruct the policy state at any point in the audit trail."),
         ),
         TelemetryEmissionRuleView(
             ruleid="session-risk-updated-auto",
@@ -289,7 +287,7 @@ def _build_emission_rules() -> list[TelemetryEmissionRuleView]:
             trigger="Session risk score changes as new guard events are processed for the session",
             emissionmode="automatic",
             eventtype="session_risk_updated",
-            description=("Emitted automatically when the aggregated risk score for an active session crosses a " "configured change threshold (default: delta >= 10 points). " "Includes the new aggregated risk score and the contributing signal count."),
+            description=("Emitted automatically when the aggregated risk score for an active session crosses a configured change threshold (default: delta >= 10 points). Includes the new aggregated risk score and the contributing signal count."),
         ),
         TelemetryEmissionRuleView(
             ruleid="audit-export-ondemand",
@@ -297,7 +295,7 @@ def _build_emission_rules() -> list[TelemetryEmissionRuleView]:
             trigger="GET /audit/export is called by an authenticated operator",
             emissionmode="on-demand",
             eventtype="audit_export",
-            description=("Emitted on-demand when an operator requests an audit export. " "Records the export window, format, record count, and actor identity. " "This is the only telemetry event type that is not emitted automatically by guard or policy activity."),
+            description=("Emitted on-demand when an operator requests an audit export. Records the export window, format, record count, and actor identity. This is the only telemetry event type that is not emitted automatically by guard or policy activity."),
         ),
     ]
 
@@ -309,7 +307,7 @@ def _build_query_endpoints() -> list[TelemetryQueryEndpointView]:
             method="GET",
             path="/guard/audit/events",
             scope="history:read",
-            description=("Primary query surface for guard-layer telemetry events. " "Returns a paginated list of audit events with full field payloads. " "Supports filtering by time range, verdict, action type, and environment. " "Default page size is 50. Maximum page size is 200."),
+            description=("Primary query surface for guard-layer telemetry events. Returns a paginated list of audit events with full field payloads. Supports filtering by time range, verdict, action type, and environment. Default page size is 50. Maximum page size is 200."),
             filters=[
                 TelemetryQueryFilterView(
                     filterid="since",
@@ -399,9 +397,7 @@ def _build_query_endpoints() -> list[TelemetryQueryEndpointView]:
             method="GET",
             path="/audit/events",
             scope="history:read",
-            description=(
-                "Full audit log query surface covering all event types including policy updates, " "review decisions, quarantine operations, and operator actions. " "Use this endpoint when the query spans beyond guard-layer events. " "Supports the same filter parameters as /guard/audit/events."
-            ),
+            description=("Full audit log query surface covering all event types including policy updates, review decisions, quarantine operations, and operator actions. Use this endpoint when the query spans beyond guard-layer events. Supports the same filter parameters as /guard/audit/events."),
             filters=[
                 TelemetryQueryFilterView(
                     filterid="since",
@@ -455,7 +451,7 @@ def _build_query_endpoints() -> list[TelemetryQueryEndpointView]:
             method="GET",
             path="/telemetry/events",
             scope="history:read",
-            description=("Raw telemetry event stream from the IronClaw telemetry layer. " "Returns the lower-level emitted event records before they are fully indexed in the audit log. " "Useful for real-time dashboards, streaming consumers, and latency-sensitive monitoring integrations."),
+            description=("Raw telemetry event stream from the IronClaw telemetry layer. Returns the lower-level emitted event records before they are fully indexed in the audit log. Useful for real-time dashboards, streaming consumers, and latency-sensitive monitoring integrations."),
             filters=[
                 TelemetryQueryFilterView(
                     filterid="since",
@@ -491,7 +487,7 @@ def _build_query_endpoints() -> list[TelemetryQueryEndpointView]:
             method="GET",
             path="/telemetry/access-summary",
             scope="history:read",
-            description=("Aggregated access pattern and request volume telemetry for a rolling window. " "Returns totals for requests, blocked actions, quarantined actions, and reviewed actions. " "Use for dashboard KPI tiles and traffic overview panels."),
+            description=("Aggregated access pattern and request volume telemetry for a rolling window. Returns totals for requests, blocked actions, quarantined actions, and reviewed actions. Use for dashboard KPI tiles and traffic overview panels."),
             filters=[
                 TelemetryQueryFilterView(
                     filterid="window",
@@ -509,7 +505,7 @@ def _build_query_endpoints() -> list[TelemetryQueryEndpointView]:
             method="GET",
             path="/audit/export",
             scope="history:read",
-            description=("Export a bounded audit log slice as a structured downloadable payload. " "Supports JSON and CSV format hints. " "Emits an audit_export telemetry event on every call for operator accountability."),
+            description=("Export a bounded audit log slice as a structured downloadable payload. Supports JSON and CSV format hints. Emits an audit_export telemetry event on every call for operator accountability."),
             filters=[
                 TelemetryQueryFilterView(
                     filterid="since",
@@ -549,7 +545,7 @@ def _build_retention_tiers() -> list[TelemetryRetentionTierView]:
             tierid="hot",
             label="Hot Tier — Active Window",
             retentionperiod="7 days",
-            purgepolicy=("Events in the hot tier are retained in the primary telemetry store for 7 days from emission. " "All query endpoints operate against the hot tier by default. " "No manual purge is available for hot-tier events; they age out automatically."),
+            purgepolicy=("Events in the hot tier are retained in the primary telemetry store for 7 days from emission. All query endpoints operate against the hot tier by default. No manual purge is available for hot-tier events; they age out automatically."),
             affectedeventtypes=[
                 "guard_action",
                 "guard_execute",
@@ -560,7 +556,7 @@ def _build_retention_tiers() -> list[TelemetryRetentionTierView]:
                 "quarantine_released",
                 "session_risk_updated",
             ],
-            description=("All automatically emitted guard, review, quarantine, and session events are written to the hot tier. " "The hot tier is optimized for low-latency query and real-time dashboard consumption. " "Events older than 7 days are migrated to the cold tier automatically."),
+            description=("All automatically emitted guard, review, quarantine, and session events are written to the hot tier. The hot tier is optimized for low-latency query and real-time dashboard consumption. Events older than 7 days are migrated to the cold tier automatically."),
         ),
         TelemetryRetentionTierView(
             tierid="cold",
@@ -584,7 +580,7 @@ def _build_retention_tiers() -> list[TelemetryRetentionTierView]:
                 "session_risk_updated",
                 "audit_export",
             ],
-            description=("All event types are retained in the cold tier for 90 days for compliance, forensic investigation, " "and policy evolution auditing. " "Query performance is lower than the hot tier. " "Use GET /audit/export to extract cold-tier slices for offline analysis."),
+            description=("All event types are retained in the cold tier for 90 days for compliance, forensic investigation, and policy evolution auditing. Query performance is lower than the hot tier. Use GET /audit/export to extract cold-tier slices for offline analysis."),
         ),
         TelemetryRetentionTierView(
             tierid="operator-immutable",

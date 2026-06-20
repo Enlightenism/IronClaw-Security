@@ -118,7 +118,7 @@ class RegionConfig(BaseModel):
     @model_validator(mode="after")
     def validate_role_exclusivity(self) -> RegionConfig:
         if self.is_primary and self.is_read_replica:
-            raise ValueError(f"Region '{self.region_code}' cannot be both is_primary=True " "and is_read_replica=True simultaneously.")
+            raise ValueError(f"Region '{self.region_code}' cannot be both is_primary=True and is_read_replica=True simultaneously.")
         return self
 
     def masked(self) -> dict:
@@ -268,7 +268,7 @@ def get_primary_region_config() -> RegionConfig:
     for cfg in configs:
         if cfg.is_primary:
             return cfg
-    raise RuntimeError("No primary region is configured. " "Set PRIMARY_REGION and provide " "REGION_<CODE>_SUPABASE_URL / _SERVICE_ROLE_KEY / _ANON_KEY env vars.")
+    raise RuntimeError("No primary region is configured. Set PRIMARY_REGION and provide REGION_<CODE>_SUPABASE_URL / _SERVICE_ROLE_KEY / _ANON_KEY env vars.")
 
 
 def get_read_replica_configs() -> list[RegionConfig]:

@@ -304,7 +304,6 @@ def build_integration_installer(
 
 
 class _RouteInstaller:
-
     def install_integration(
         self,
         integrationid: str,

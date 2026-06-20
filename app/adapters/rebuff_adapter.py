@@ -277,7 +277,7 @@ class RebuffAdapter(BaseIntegrationAdapter):
             return result
 
         result.status = "guarded"
-        result.summary = f"{self.record.name} guarded injection-detection action " f"'{request.action_type}' for target '{request.target}'."
+        result.summary = f"{self.record.name} guarded injection-detection action '{request.action_type}' for target '{request.target}'."
 
         result.output.setdefault("guard_applied", True)
         result.output.setdefault("execution_mode", "injection-gated")

@@ -1058,7 +1058,7 @@ def run_feed_ingestion(
                 iocs_inserted=0,
                 iocs_updated=0,
                 iocs_skipped=0,
-                errors=["STIX_TAXII ingestion requires a TAXIIConfig (discovery_url, collection_id, " "credentials). Pass taxii_config= to run_feed_ingestion() or supply connection " "parameters via the feed refresh request body."],
+                errors=["STIX_TAXII ingestion requires a TAXIIConfig (discovery_url, collection_id, credentials). Pass taxii_config= to run_feed_ingestion() or supply connection parameters via the feed refresh request body."],
                 started_at=now,
                 completed_at=now,
                 org_id=org_id,

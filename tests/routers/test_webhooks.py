@@ -752,8 +752,8 @@ class TestListSupportedEvents:
 
 class TestNoDirectSupabaseClientOnModule:
     def test_get_supabase_client_does_not_exist_on_module(self):
-        assert not hasattr(_wh, "_get_supabase_client"), "_get_supabase_client must not exist on app.routers.webhooks — " "all Supabase access must go through app.core.supabase_persistence"
+        assert not hasattr(_wh, "_get_supabase_client"), "_get_supabase_client must not exist on app.routers.webhooks — all Supabase access must go through app.core.supabase_persistence"
 
     def test_get_supabase_service_client_not_imported_directly(self):
         module_globals = vars(_wh)
-        assert "get_supabase_service_client" not in module_globals, "get_supabase_service_client must not be imported directly in app.routers.webhooks — " "use persistence layer only"
+        assert "get_supabase_service_client" not in module_globals, "get_supabase_service_client must not be imported directly in app.routers.webhooks — use persistence layer only"

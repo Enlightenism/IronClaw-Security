@@ -315,7 +315,7 @@ async def evaluate_claude_code(
     response_model=ClaudeCodeHandshakeResponse,
     status_code=status.HTTP_200_OK,
     summary="Validate Claude Code integration connection and return health manifest",
-    description=("Validates the Claude Code integration connection configuration. " "Returns integration health status and capability manifest so callers " "can confirm IronClaw is reachable and correctly wired before sending " "live payloads."),
+    description=("Validates the Claude Code integration connection configuration. Returns integration health status and capability manifest so callers can confirm IronClaw is reachable and correctly wired before sending live payloads."),
 )
 async def claude_code_handshake(
     body: ClaudeCodeHandshakeRequest,
@@ -365,7 +365,7 @@ async def claude_code_handshake(
     response_model=ClaudeCodeManifestResponse,
     status_code=status.HTTP_200_OK,
     summary="Return Claude Code supported capabilities, guarded tool categories, and policy bindings",
-    description=("Returns the full capability manifest for the Claude Code integration: " "supported action types, guarded tool categories derived from the active " "policy engine, and policy rule bindings. Consumers use this to understand " "what IronClaw will guard and how."),
+    description=("Returns the full capability manifest for the Claude Code integration: supported action types, guarded tool categories derived from the active policy engine, and policy rule bindings. Consumers use this to understand what IronClaw will guard and how."),
 )
 async def claude_code_manifest() -> ClaudeCodeManifestResponse:
     adapter = _build_adapter()

@@ -56,7 +56,7 @@ PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
         "price_cents": BILLING_TIER_5K_PRICE_USD * 100,
         "tokens_per_unit": TOKENS_PER_UNIT,
         "token_coverage": BILLING_TIER_5K_UNITS * TOKENS_PER_UNIT,
-        "notes": (f"{BILLING_TIER_5K_UNITS:,} units · ${BILLING_TIER_5K_PRICE_USD} USD" f" · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
+        "notes": (f"{BILLING_TIER_5K_UNITS:,} units · ${BILLING_TIER_5K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
     },
     "team": {
         "label": "Team",
@@ -65,7 +65,7 @@ PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
         "price_cents": BILLING_TIER_25K_PRICE_USD * 100,
         "tokens_per_unit": TOKENS_PER_UNIT,
         "token_coverage": BILLING_TIER_25K_UNITS * TOKENS_PER_UNIT,
-        "notes": (f"{BILLING_TIER_25K_UNITS:,} units · ${BILLING_TIER_25K_PRICE_USD} USD" f" · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
+        "notes": (f"{BILLING_TIER_25K_UNITS:,} units · ${BILLING_TIER_25K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
     },
     "enterprise": {
         "label": "Enterprise",
@@ -74,7 +74,7 @@ PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
         "price_cents": BILLING_TIER_60K_PRICE_USD * 100,
         "tokens_per_unit": TOKENS_PER_UNIT,
         "token_coverage": BILLING_TIER_60K_UNITS * TOKENS_PER_UNIT,
-        "notes": (f"{BILLING_TIER_60K_UNITS:,} units · ${BILLING_TIER_60K_PRICE_USD} USD" f" · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
+        "notes": (f"{BILLING_TIER_60K_UNITS:,} units · ${BILLING_TIER_60K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
     },
 }
 
@@ -279,7 +279,7 @@ def get_payment_methods(
         return BillingPaymentMethodsNotFoundResponse(
             status="not_found",
             organizationid=organizationid,
-            message=(f"Organization '{organizationid}' could not be resolved. " "Supabase is not configured — connect SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."),
+            message=(f"Organization '{organizationid}' could not be resolved. Supabase is not configured — connect SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."),
             generatedat=datetime.now(UTC).isoformat(),
             environment=env,
         )

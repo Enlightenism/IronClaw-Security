@@ -123,10 +123,10 @@ def _downgrade_warning_flags(
         current = current_usage.get(metric, 0)
         if current > included:
             overage = current - included
-            flags.append(f"Current {metric} usage ({current:,}) exceeds {to_tier} plan included units " f"({included:,}). Overage of {overage:,} units will incur charges immediately.")
+            flags.append(f"Current {metric} usage ({current:,}) exceeds {to_tier} plan included units ({included:,}). Overage of {overage:,} units will incur charges immediately.")
     if _PLAN_TIER_ORDER[from_tier] > _PLAN_TIER_ORDER[to_tier]:
-        flags.append("Downgrading removes access to higher-tier features. Review feature compatibility " "before confirming this change.")
-        flags.append("Active security policies, guardrail rules, and audit configurations exceeding " f"{to_tier} plan limits will be suspended at the effective date.")
+        flags.append("Downgrading removes access to higher-tier features. Review feature compatibility before confirming this change.")
+        flags.append(f"Active security policies, guardrail rules, and audit configurations exceeding {to_tier} plan limits will be suspended at the effective date.")
     return flags
 
 
@@ -286,7 +286,7 @@ def get_plan_change(
         return BillingPlanChangeNotFoundResponse(
             status="not_found",
             requestedplan=currentplan,
-            message=(f"Plan '{currentplan}' is not a recognized IronClaw plan. " "Valid values are: starter, pro, enterprise."),
+            message=(f"Plan '{currentplan}' is not a recognized IronClaw plan. Valid values are: starter, pro, enterprise."),
             generatedat=datetime.now(UTC).isoformat(),
             environment="local",
         )
@@ -334,7 +334,7 @@ def get_plan_change(
         availableplans=available,
         changepreviews=previews,
         notes=[
-            f"Current plan is '{currentplan}'. Proration is calculated on {days_remaining} days " f"remaining in the current {_DAYS_IN_BILLING_PERIOD}-day billing period.",
+            f"Current plan is '{currentplan}'. Proration is calculated on {days_remaining} days remaining in the current {_DAYS_IN_BILLING_PERIOD}-day billing period.",
             "Prorated credit is the unused portion of the current plan refunded at change time.",
             "Prorated charge is the cost of the new plan for the remainder of the current period.",
             "Net change = prorated charge minus prorated credit. Negative values indicate a net credit.",

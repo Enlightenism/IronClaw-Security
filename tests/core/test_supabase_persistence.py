@@ -196,7 +196,6 @@ _WEBHOOK_DELIVERY_ROW: dict = {
 
 
 class TestPersistenceError:
-
     def test_operation_only_str_equals_operation(self):
         err = PersistenceError("upsert_scan")
         assert str(err) == "upsert_scan"
@@ -232,7 +231,6 @@ class TestPersistenceError:
 
 
 class TestWrap:
-
     def test_supabase_api_error_raises_persistence_error(self):
         from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
 
@@ -278,7 +276,6 @@ class TestWrap:
 
 
 class TestGetPolicySet:
-
     def test_returns_dict_with_policy_set_and_rules_keys(self):
         client = _make_policy_client(
             set_data=_POLICY_SET_ROW,
@@ -535,7 +532,6 @@ class TestGetPolicySet:
 
 
 class TestGetScanPatterns:
-
     def test_returns_list_of_patterns(self):
         client = _make_client([_SCAN_PATTERN_ROW])
         with patch(_PATCH_TARGET, return_value=client):
@@ -690,7 +686,6 @@ class TestGetScanPatterns:
 
 
 class TestGetRateLimitState:
-
     def test_returns_dict_when_row_found(self):
         client = _make_client(_RATE_LIMIT_ROW)
         with patch(_PATCH_TARGET, return_value=client):
@@ -811,7 +806,6 @@ class TestGetRateLimitState:
 
 
 class TestUpsertRateLimitState:
-
     def test_success_returns_upserted_row(self):
         client = _make_client([_RATE_LIMIT_STATE_ROW])
         with patch(_PATCH_TARGET, return_value=client):
@@ -913,7 +907,6 @@ class TestUpsertRateLimitState:
 
 
 class TestDeleteRateLimitState:
-
     def test_success_returns_none(self):
         qb = _make_qb(None)
         client = MagicMock()
@@ -1036,7 +1029,6 @@ class TestDeleteRateLimitState:
 
 
 class TestUpsertScan:
-
     def test_returns_first_element_of_list_response(self):
         client = _make_client([_SCAN_ROW])
         with patch(_PATCH_TARGET, return_value=client):
@@ -1105,7 +1097,6 @@ class TestUpsertScan:
 
 
 class TestGetScanById:
-
     def test_returns_dict_when_row_found(self):
         client = _make_client(_SCAN_ROW)
         with patch(_PATCH_TARGET, return_value=client):
@@ -1180,7 +1171,6 @@ class TestGetScanById:
 
 
 class TestListScans:
-
     def test_returns_list_of_scan_rows(self):
         client = _make_client([_SCAN_ROW])
         with patch(_PATCH_TARGET, return_value=client):
@@ -1310,7 +1300,6 @@ class TestListScans:
 
 
 class TestUpsertAuditEvent:
-
     def test_returns_first_element_of_list_response(self):
         client = _make_client([_AUDIT_ROW])
         with patch(_PATCH_TARGET, return_value=client):
@@ -1419,7 +1408,6 @@ class TestUpsertAuditEvent:
 
 
 class TestCreateWebhookSubscription:
-
     def test_returns_first_element_of_list_response(self):
         client = _make_client([_WEBHOOK_SUB_ROW])
         with patch(_PATCH_TARGET, return_value=client):
@@ -1524,7 +1512,6 @@ class TestCreateWebhookSubscription:
 
 
 class TestListWebhookSubscriptions:
-
     def test_returns_list_of_subscription_rows(self):
         client = _make_client([_WEBHOOK_SUB_ROW])
         with patch(_PATCH_TARGET, return_value=client):
@@ -1644,7 +1631,6 @@ class TestListWebhookSubscriptions:
 
 
 class TestGetWebhookSubscription:
-
     def test_returns_dict_when_found(self):
         client = _make_client(_WEBHOOK_SUB_ROW)
         with patch(_PATCH_TARGET, return_value=client):
@@ -1744,7 +1730,6 @@ class TestGetWebhookSubscription:
 
 
 class TestUpdateWebhookSubscription:
-
     def test_returns_first_element_of_list_response(self):
         updated = {**_WEBHOOK_SUB_ROW, "active": False}
         client = _make_client([updated])
@@ -1854,7 +1839,6 @@ class TestUpdateWebhookSubscription:
 
 
 class TestDeleteWebhookSubscription:
-
     def test_success_returns_none(self):
         qb = _make_qb(None)
         client = MagicMock()
@@ -1945,7 +1929,6 @@ class TestDeleteWebhookSubscription:
 
 
 class TestUpsertWebhookDelivery:
-
     def test_returns_first_element_of_list_response(self):
         client = _make_client([_WEBHOOK_DELIVERY_ROW])
         with patch(_PATCH_TARGET, return_value=client):
@@ -2059,7 +2042,6 @@ class TestUpsertWebhookDelivery:
 
 
 class TestUpdateWebhookDelivery:
-
     def test_returns_first_element_of_list_response(self):
         updated = {**_WEBHOOK_DELIVERY_ROW, "status": "failed"}
         client = _make_client([updated])
@@ -2155,7 +2137,6 @@ class TestUpdateWebhookDelivery:
 
 
 class TestGetWebhookDeliveryRecord:
-
     def test_returns_dict_when_found(self):
         client = _make_client(_WEBHOOK_DELIVERY_ROW)
         with patch(_PATCH_TARGET, return_value=client):
@@ -2249,7 +2230,6 @@ class TestGetWebhookDeliveryRecord:
 
 
 class TestGetWebhookDeliveryLog:
-
     def test_returns_list_of_delivery_rows(self):
         client = _make_client([_WEBHOOK_DELIVERY_ROW])
         with patch(_PATCH_TARGET, return_value=client):

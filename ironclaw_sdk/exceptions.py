@@ -51,7 +51,7 @@ class IronclawRetryExhausted(IronclawSDKError):
         super().__init__(msg)
 
     def __repr__(self) -> str:
-        return f"IronclawRetryExhausted(attempts={self.attempts}," f" last_status_code={self.last_status_code})"
+        return f"IronclawRetryExhausted(attempts={self.attempts}, last_status_code={self.last_status_code})"
 
 
 class IronclawTimeoutError(IronclawSDKError):

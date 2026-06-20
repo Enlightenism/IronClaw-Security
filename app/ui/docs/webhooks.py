@@ -114,10 +114,8 @@ def _build_event_types() -> list[WebhookEventTypeView]:
         WebhookEventTypeView(
             eventtypeid="scan_verdict_issued",
             label="Scan Verdict Issued",
-            trigger=(
-                "Fired after every guard action or guard execute evaluation that produces a warn, quarantine, " "or block verdict. Allow verdicts do not fire this event to reduce delivery volume. " "Configurable: set include_allow to true on the webhook registration to receive allow verdicts."
-            ),
-            description=("Delivers the full guard decision outcome to the registered endpoint. " "Use this event type to feed security dashboards, SIEM integrations, and alerting pipelines " "with real-time verdict data."),
+            trigger=("Fired after every guard action or guard execute evaluation that produces a warn, quarantine, or block verdict. Allow verdicts do not fire this event to reduce delivery volume. Configurable: set include_allow to true on the webhook registration to receive allow verdicts."),
+            description=("Delivers the full guard decision outcome to the registered endpoint. Use this event type to feed security dashboards, SIEM integrations, and alerting pipelines with real-time verdict data."),
             payloadshape={
                 "ironclaw_event": "scan_verdict_issued",
                 "ironclaw_delivery_id": "del_0000000000000001",
@@ -147,9 +145,7 @@ def _build_event_types() -> list[WebhookEventTypeView]:
                 "This event fires in addition to scan_verdict_issued when the verdict is quarantine, "
                 "giving consumers a dedicated signal for isolation events without needing to filter by verdict."
             ),
-            description=(
-                "Delivers the quarantine record including the original action details, " "the quarantine ID for subsequent operator lookup, and the triggering risk score. " "Use this event type to trigger immediate analyst notifications, PagerDuty alerts, " "or automated investigation workflows."
-            ),
+            description=("Delivers the quarantine record including the original action details, the quarantine ID for subsequent operator lookup, and the triggering risk score. Use this event type to trigger immediate analyst notifications, PagerDuty alerts, or automated investigation workflows."),
             payloadshape={
                 "ironclaw_event": "quarantine_triggered",
                 "ironclaw_delivery_id": "del_0000000000000002",
@@ -181,7 +177,7 @@ def _build_event_types() -> list[WebhookEventTypeView]:
                 "in addition to or instead of exceeding a numeric threshold. "
                 "Score-only threshold decisions that do not match a named rule do not fire this event."
             ),
-            description=("Delivers the policy violation record including the matched rule ID, rule label, " "the action details, and the resulting verdict. " "Use this event type to track named policy rule hit rates, " "surface configuration gaps, and feed compliance audit pipelines."),
+            description=("Delivers the policy violation record including the matched rule ID, rule label, the action details, and the resulting verdict. Use this event type to track named policy rule hit rates, surface configuration gaps, and feed compliance audit pipelines."),
             payloadshape={
                 "ironclaw_event": "policy_violation_recorded",
                 "ironclaw_delivery_id": "del_0000000000000003",
@@ -322,7 +318,7 @@ def _build_testing_steps() -> list[WebhookTestingStepView]:
         WebhookTestingStepView(
             stepid="1",
             label="Stand up a local receiver",
-            detail=("Use a request inspection service (such as a local ngrok tunnel or a request bin) " "to expose a reachable HTTPS endpoint before registering the webhook. " "The registration endpoint validates that the URL is reachable over HTTPS. " "HTTP URLs are rejected."),
+            detail=("Use a request inspection service (such as a local ngrok tunnel or a request bin) to expose a reachable HTTPS endpoint before registering the webhook. The registration endpoint validates that the URL is reachable over HTTPS. HTTP URLs are rejected."),
             codeblock=(
                 "# Start a local receiver with ngrok:\n"
                 "ngrok http 8080\n"
@@ -349,7 +345,7 @@ def _build_testing_steps() -> list[WebhookTestingStepView]:
         WebhookTestingStepView(
             stepid="2",
             label="Register the webhook with your test URL",
-            detail=("POST to /admin/webhooks with your ngrok HTTPS URL and the event types you want to receive. " "Copy the signingkey from the response immediately — it is not retrievable afterwards."),
+            detail=("POST to /admin/webhooks with your ngrok HTTPS URL and the event types you want to receive. Copy the signingkey from the response immediately — it is not retrievable afterwards."),
             codeblock=(
                 "curl -X POST http://127.0.0.1:8000/admin/webhooks \\\n"
                 '  -H "Content-Type: application/json" \\\n'
@@ -370,12 +366,12 @@ def _build_testing_steps() -> list[WebhookTestingStepView]:
                 "The test delivery carries a real HMAC-SHA256 signature computed with your signing key "
                 "so you can verify your signature verification logic end-to-end before receiving live events."
             ),
-            codeblock=("curl -X POST http://127.0.0.1:8000/admin/webhooks/wh_a1b2c3d4e5f6/test \\\n" '  -H "X-API-Key: ic_prod_your_generated_key"'),
+            codeblock=('curl -X POST http://127.0.0.1:8000/admin/webhooks/wh_a1b2c3d4e5f6/test \\\n  -H "X-API-Key: ic_prod_your_generated_key"'),
         ),
         WebhookTestingStepView(
             stepid="4",
             label="Verify the signature on the received payload",
-            detail=("Check the X-IronClaw-Signature-256 header on the delivery your receiver captured. " "Use the Python verification example from the Signature Verification section to confirm " "your implementation correctly validates the HMAC-SHA256 digest before processing live payloads."),
+            detail=("Check the X-IronClaw-Signature-256 header on the delivery your receiver captured. Use the Python verification example from the Signature Verification section to confirm your implementation correctly validates the HMAC-SHA256 digest before processing live payloads."),
             codeblock=(
                 "import hashlib\n"
                 "import hmac\n"
@@ -401,12 +397,12 @@ def _build_testing_steps() -> list[WebhookTestingStepView]:
                 "delivery timestamp, attempt number, and success or failure status. "
                 "Confirm all test deliveries show status 200 before going live."
             ),
-            codeblock=("curl http://127.0.0.1:8000/admin/webhooks/wh_a1b2c3d4e5f6/deliveries \\\n" '  -H "X-API-Key: ic_prod_your_generated_key"'),
+            codeblock=('curl http://127.0.0.1:8000/admin/webhooks/wh_a1b2c3d4e5f6/deliveries \\\n  -H "X-API-Key: ic_prod_your_generated_key"'),
         ),
         WebhookTestingStepView(
             stepid="6",
             label="Send a real guarded action to confirm live delivery",
-            detail=("Submit a high-risk guarded action to POST /guard/action that will produce a warn or block verdict. " "Confirm the live scan_verdict_issued event arrives at your endpoint " "and that your signature verification logic accepts it."),
+            detail=("Submit a high-risk guarded action to POST /guard/action that will produce a warn or block verdict. Confirm the live scan_verdict_issued event arrives at your endpoint and that your signature verification logic accepts it."),
             codeblock=(
                 "curl -X POST http://127.0.0.1:8000/guard/action \\\n"
                 '  -H "Content-Type: application/json" \\\n'

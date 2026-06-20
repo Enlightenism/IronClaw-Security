@@ -449,7 +449,7 @@ class NotificationEngine:
             payload = build_notification_payload(
                 event=event,
                 title=f"IronClaw Threat Detection: {verdict_val.upper()} [{severity_val}]",
-                body=(f"Event ID: {event_id} | Score: {score:.3f} | " f"Verdict: {verdict_val} | Severity: {severity_val}"),
+                body=(f"Event ID: {event_id} | Score: {score:.3f} | Verdict: {verdict_val} | Severity: {severity_val}"),
                 source_id=event_id,
                 source_type="threat_detection",
                 severity=notif_severity,
@@ -482,7 +482,7 @@ class NotificationEngine:
             payload = build_notification_payload(
                 event=event,
                 title=f"IronClaw Feed Refresh: {request_id}",
-                body=(f"Inserted: {total_inserted} | Updated: {total_updated} | " f"Errors: {total_errors}"),
+                body=(f"Inserted: {total_inserted} | Updated: {total_updated} | Errors: {total_errors}"),
                 source_id=request_id,
                 source_type="feed_refresh",
                 severity=notif_severity,
@@ -516,7 +516,7 @@ class NotificationEngine:
             payload = build_notification_payload(
                 event=event,
                 title=f"IronClaw Hunt Completed: {hunt_id}",
-                body=(f"Hunt ID: {hunt_id} | Matches: {total_matches} | " f"Status: {status_val} | Duration: {duration_ms}ms"),
+                body=(f"Hunt ID: {hunt_id} | Matches: {total_matches} | Status: {status_val} | Duration: {duration_ms}ms"),
                 source_id=hunt_id,
                 source_type="threat_hunt",
                 severity=notif_severity,

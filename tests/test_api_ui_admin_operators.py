@@ -168,7 +168,7 @@ def test_operators_each_item_permissions_is_list(client: TestClient) -> None:
     assert response.status_code == 200
     data = response.json()
     for item in data["items"]:
-        assert isinstance(item["permissions"], list), f"permissions must be a list, got {type(item['permissions'])} " f"for {item['operator_id']}"
+        assert isinstance(item["permissions"], list), f"permissions must be a list, got {type(item['permissions'])} for {item['operator_id']}"
 
 
 def test_operators_each_permission_has_required_fields(client: TestClient) -> None:

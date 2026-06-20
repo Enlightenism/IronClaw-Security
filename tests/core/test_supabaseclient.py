@@ -106,10 +106,10 @@ class TestIronclawTables:
         assert isinstance(IRONCLAW_TABLES, frozenset)
 
     def test_exact_count_is_19(self) -> None:
-        assert len(IRONCLAW_TABLES) == 19, f"Expected 19 tables, got {len(IRONCLAW_TABLES)}. " f"Present: {sorted(IRONCLAW_TABLES)}"
+        assert len(IRONCLAW_TABLES) == 19, f"Expected 19 tables, got {len(IRONCLAW_TABLES)}. Present: {sorted(IRONCLAW_TABLES)}"
 
     def test_matches_canonical_set(self) -> None:
-        assert IRONCLAW_TABLES == _ALL_19_TABLES, f"Missing: {_ALL_19_TABLES - IRONCLAW_TABLES}  " f"Extra: {IRONCLAW_TABLES - _ALL_19_TABLES}"
+        assert IRONCLAW_TABLES == _ALL_19_TABLES, f"Missing: {_ALL_19_TABLES - IRONCLAW_TABLES}  Extra: {IRONCLAW_TABLES - _ALL_19_TABLES}"
 
     # --- legacy name must be absent ---
 

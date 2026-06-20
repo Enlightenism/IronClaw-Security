@@ -193,7 +193,7 @@ async def usage_root(request: Request) -> HTMLResponse:
     sb_units = sb_usage.get("total_units_consumed", 0)
     sb_wallet_units = sb_wallet.get("wallet_units", 0)
     sb_tokens = sb_usage.get("total_tokens_covered", 0)
-    pkg_rows = "".join(f"<li>{_get_package_metadata(pid).get('display_label', pid)} — " f"tokens_per_unit: {_TOKENS_PER_UNIT:,}</li>" for pid in _ORDERED_PACKAGE_IDS)
+    pkg_rows = "".join(f"<li>{_get_package_metadata(pid).get('display_label', pid)} — tokens_per_unit: {_TOKENS_PER_UNIT:,}</li>" for pid in _ORDERED_PACKAGE_IDS)
 
     html = _render_html(
         "Usage Overview",
@@ -249,10 +249,10 @@ async def usage_reports(request: Request) -> HTMLResponse:
     sb_tokens = sb_usage.get("total_tokens_covered", 0)
     pkg_rows = "".join(
         f"""<tr>
-            <td>{_get_package_metadata(pid).get('name', pid)}</td>
-            <td>{_get_package_metadata(pid).get('display_label', '')}</td>
-            <td>{_get_package_metadata(pid).get('included_units', 0):,}</td>
-            <td>${_get_package_metadata(pid).get('price_usd', 0):.2f}</td>
+            <td>{_get_package_metadata(pid).get("name", pid)}</td>
+            <td>{_get_package_metadata(pid).get("display_label", "")}</td>
+            <td>{_get_package_metadata(pid).get("included_units", 0):,}</td>
+            <td>${_get_package_metadata(pid).get("price_usd", 0):.2f}</td>
             <td>{_TOKENS_PER_UNIT:,}</td>
         </tr>"""
         for pid in _ORDERED_PACKAGE_IDS

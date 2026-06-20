@@ -269,7 +269,7 @@ def load_builtin_policy_rules_from_db(
         _policy_loaded_from_db = True
 
         logger.info(
-            "action_policy: loaded rules from DB set %r — " "blocked=%d high_review=%d elevated_action=%d",
+            "action_policy: loaded rules from DB set %r — blocked=%d high_review=%d elevated_action=%d",
             resolved_key,
             len(BLOCKED_TARGETS),
             len(HIGH_REVIEW_TARGETS),

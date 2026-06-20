@@ -588,11 +588,11 @@ def _build_explanation(
     is_suspended: bool = False,
 ) -> str:
     if is_suspended:
-        return f"Verdict '{action}' issued: agent is suspended. " f"All further evaluation was skipped. " f"Policy set: '{policy_set_key}'. Risk score: {risk_score:.4f}."
+        return f"Verdict '{action}' issued: agent is suspended. All further evaluation was skipped. Policy set: '{policy_set_key}'. Risk score: {risk_score:.4f}."
     if action == ALLOW:
-        return f"Input passed all {len(matched_rules)} evaluated rules in policy set " f"'{policy_set_key}'. Risk score: {risk_score:.4f}."
+        return f"Input passed all {len(matched_rules)} evaluated rules in policy set '{policy_set_key}'. Risk score: {risk_score:.4f}."
     rule_names = ", ".join({r.rule_name for r in matched_rules if r.action != ALLOW})
-    return f"Verdict '{action}' issued by policy set '{policy_set_key}'. " f"Matched {len(matched_rules)} rule(s): [{rule_names}]. " f"Aggregate risk score: {risk_score:.4f}."
+    return f"Verdict '{action}' issued by policy set '{policy_set_key}'. Matched {len(matched_rules)} rule(s): [{rule_names}]. Aggregate risk score: {risk_score:.4f}."
 
 
 # ---------------------------------------------------------------------------

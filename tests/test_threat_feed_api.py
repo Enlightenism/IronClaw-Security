@@ -468,7 +468,6 @@ def _client_with_service() -> tuple[TestClient, _ThreatFeedService]:
 
 
 class TestRegisterFeedEndpoint:
-
     def test_register_feed_returns_201(self) -> None:
         app, _ = _fresh_app_and_service()
         try:
@@ -599,7 +598,6 @@ class TestRegisterFeedEndpoint:
 
 
 class TestListFeedsEndpoint:
-
     def test_list_feeds_empty_returns_200(self) -> None:
         app, _ = _fresh_app_and_service()
         try:
@@ -665,7 +663,6 @@ class TestListFeedsEndpoint:
 
 
 class TestGetFeedEndpoint:
-
     def test_get_feed_returns_200(self) -> None:
         app, svc = _fresh_app_and_service()
         feed = svc.register_feed(name="Fetch Me")
@@ -725,7 +722,6 @@ class TestGetFeedEndpoint:
 
 
 class TestIngestIndicatorsEndpoint:
-
     def test_ingest_indicators_returns_200(self) -> None:
         app, svc = _fresh_app_and_service()
         feed = svc.register_feed(name="Ingest Feed")
@@ -884,7 +880,6 @@ class TestIngestIndicatorsEndpoint:
 
 
 class TestLookupEndpoint:
-
     def test_lookup_matched_ip_returns_block_verdict(self) -> None:
         app, svc = _fresh_app_and_service()
         feed = svc.register_feed(name="Lookup Feed")
@@ -1063,7 +1058,7 @@ class TestLookupEndpoint:
                 app.dependency_overrides.clear()
 
             result = response.json()["result"]
-            assert result["verdict"] == expected_verdict, f"Expected verdict '{expected_verdict}' for severity '{severity}', " f"got '{result['verdict']}'"
+            assert result["verdict"] == expected_verdict, f"Expected verdict '{expected_verdict}' for severity '{severity}', got '{result['verdict']}'"
 
 
 # ---------------------------------------------------------------------------
@@ -1072,7 +1067,6 @@ class TestLookupEndpoint:
 
 
 class TestFeedStatsEndpoint:
-
     def test_feed_stats_returns_200(self) -> None:
         app, svc = _fresh_app_and_service()
         feed = svc.register_feed(name="Stats Feed")
@@ -1194,7 +1188,6 @@ class TestFeedStatsEndpoint:
 
 
 class TestDeactivateFeedEndpoint:
-
     def test_deactivate_feed_returns_200(self) -> None:
         app, svc = _fresh_app_and_service()
         feed = svc.register_feed(name="Deactivate Me")
@@ -1284,7 +1277,6 @@ class TestDeactivateFeedEndpoint:
 
 
 class TestCrossEndpointFlows:
-
     def test_register_ingest_lookup_full_flow(self) -> None:
         app, _ = _fresh_app_and_service()
         try:

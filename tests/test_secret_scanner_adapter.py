@@ -128,7 +128,7 @@ def test_scan_detects_private_key_block() -> None:
 
 
 def test_scan_detects_jwt_as_warn_or_block() -> None:
-    fake_jwt = "eyJhbGciOiJIUzI1NiJ9" ".eyJzdWIiOiJ1c2VyMSJ9" ".TJVA95OrM7E2cBab30RMHrHDcEfxjoYZgeFONFh7HgQ"
+    fake_jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyMSJ9.TJVA95OrM7E2cBab30RMHrHDcEfxjoYZgeFONFh7HgQ"
     result = scan_for_secrets(prompt_text=f"auth={fake_jwt}")
     assert result.verdict in ("warn", "block")
     assert result.total_matches >= 1
