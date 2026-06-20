@@ -18,7 +18,7 @@ from app.services.action_policy import (
     ActionPolicyDecision,
     evaluate_action_policy,
 )
-from app.services.behavioral_baseline import get_behavioral_baseline_store
+from app.services.behavioral_baseline import get_behavioral_baseline_service
 from app.services.telemetry import append_telemetry_event
 from app.services.telemetry_service import (
     TelemetryEventInput,
@@ -36,12 +36,14 @@ _REASON_SOURCE_MAP = {
     "prompt_injection": "scan",
 }
 
+
 _VERDICT_RANK: dict[str, int] = {
     "allow": 1,
     "warn": 2,
     "quarantine": 3,
     "block": 4,
 }
+
 
 _DETECTION_VERDICT_MAP: dict[str, str] = {
     "allow": "allow",
@@ -113,7 +115,7 @@ def _record_baseline_observation(
     if not agent_id:
         return
     try:
-        get_behavioral_baseline_store().record_observation(
+        get_behavioral_baseline_service().record_observation(
             agent_id=str(agent_id),
             action_type=payload.action_type,
             target=payload.target or "",

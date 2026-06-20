@@ -3,12 +3,17 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.core.apikeys import get_api_key_registry, mask_api_key
+from app.core.auth import require_api_key
 
-router = APIRouter(prefix="/ui/customer-keys", tags=["customer-keys"])
+router = APIRouter(
+    prefix="/ui/customer-keys",
+    tags=["customer-keys"],
+    dependencies=[Depends(require_api_key)],
+)
 
 
 def _utc_now_iso() -> str:

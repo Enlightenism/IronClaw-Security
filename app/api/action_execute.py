@@ -8,10 +8,11 @@ from app.facade import guardandexecuteaction
 from app.models.action_execute import ExecuteRequest, ExecuteResponse
 from app.orchestrator.secure_runtime_pipeline import SecureRuntimePipeline
 from app.services.action_guard import ActionGuardDecision, analyze_action
-from app.services.behavioral_baseline import get_behavioral_baseline_store
+from app.services.behavioral_baseline import get_behavioral_baseline_service
 from app.services.telemetry import append_telemetry_event
 
 router = APIRouter(dependencies=[Depends(limit_guard_routes)])
+
 
 _ALLOWED_REASON_SOURCES = {"policy", "scan", "ai"}
 _REASON_SOURCE_MAP = {
@@ -71,7 +72,7 @@ def _record_baseline_observation(
     if not agent_id:
         return
     try:
-        get_behavioral_baseline_store().record_observation(
+        get_behavioral_baseline_service().record_observation(
             agent_id=str(agent_id),
             action_type=payload.action_type,
             target=payload.target or "",
@@ -85,13 +86,6 @@ def _record_baseline_observation(
 
 
 def _run_detection(payload: ExecuteRequest) -> ActionGuardDecision | None:
-    """Run live threat detection on the incoming execute payload.
-
-    Returns the detection result for telemetry and baseline observation.
-    Never short-circuits execution — the pipeline owns all verdict responses.
-    Failures are swallowed so detection never blocks execution when the
-    service is unavailable.
-    """
     if not payload.action_type:
         return None
     try:
@@ -119,7 +113,6 @@ def guarded_execute(
 
     append_telemetry_event("execute_requested", {**meta, "action_type": payload.action_type})
 
-    # --- live detection: telemetry + baseline only; pipeline owns all verdicts ---
     detection = _run_detection(payload)
     if detection is not None:
         verdict = str(detection.get("verdict", "allow")).lower()
@@ -139,7 +132,6 @@ def guarded_execute(
             },
         )
 
-    # --- guarded execution: pipeline owns block/quarantine/allow response shape ---
     response: ExecuteResponse = guardandexecuteaction(payload, pipeline)
 
     append_telemetry_event(

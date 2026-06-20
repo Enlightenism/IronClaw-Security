@@ -15,7 +15,6 @@ from app.core.settings import get_settings
 
 ProtectedDependencyFactory = Callable[[], Any]
 
-
 _log = logging.getLogger(__name__)
 
 
@@ -192,8 +191,8 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
             {"prefix": "/api", "dependencies": dependencies},
         ),
         (
-            _optional_router("app.routes.behavioral_baseline"),
-            {"dependencies": agent_dependencies},
+            _optional_router("app.api.behavioral_baseline"),
+            {"dependencies": dependencies},
         ),
         (
             _optional_router("app.api.policy"),
@@ -205,7 +204,7 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (_optional_router("app.api.actionexecute"), {"dependencies": agent_dependencies}),
         (_optional_router("app.api.release_policy_routes"), {"dependencies": dependencies}),
         (_optional_router("app.api.integrations"), {"dependencies": dependencies}),
-        (_optional_router("app.api.customer_keys"), {}),
+        (_optional_router("app.api.customer_keys"), {"dependencies": dependencies}),
         (_optional_router("app.api.usage_reports"), {"dependencies": dependencies}),
         (_optional_router("app.api.auth"), {"dependencies": dependencies}),
         (_optional_router("app.api.operator_auth"), {"dependencies": dependencies}),

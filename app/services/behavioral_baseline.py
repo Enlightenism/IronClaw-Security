@@ -31,7 +31,6 @@ DriftCategory = Literal[
 ]
 BaselineStatus = Literal["learning", "active", "stale", "suspended"]
 
-
 # ---------------------------------------------------------------------------
 # Tuning constants
 # ---------------------------------------------------------------------------
@@ -128,6 +127,16 @@ def _severity_from_score(score: float) -> DriftSeverity:
     if score >= 0.20:
         return "low"
     return "none"
+
+
+def _compute_overall_drift_score(signals: list[DriftSignal]) -> float:
+    if not signals:
+        return 0.0
+    scores = [s.deviation_score for s in signals]
+    base = max(scores)
+    remainder = 1.0 - base
+    additional = sum(s * remainder for s in sorted(scores)[:-1]) / max(len(scores), 1)
+    return min(base + additional, 1.0)
 
 
 def _emit_telemetry(event_name: str, payload: dict[str, Any]) -> None:
@@ -423,6 +432,7 @@ def _build_baseline_from_observations(
     observations: list[AgentObservation],
     existing_baseline: AgentBaseline | None,
     drift_window_seconds: int = DRIFT_WINDOW_SECONDS,
+    min_samples_for_baseline: int = MIN_SAMPLES_FOR_BASELINE,
 ) -> AgentBaseline:
     now = _utcnow()
     n = len(observations)
@@ -502,7 +512,7 @@ def _build_baseline_from_observations(
             stdev_session_size=new_stdev_sess,
         )
 
-    status: BaselineStatus = "active" if n >= MIN_SAMPLES_FOR_BASELINE else "learning"
+    status: BaselineStatus = "active" if n >= min_samples_for_baseline else "learning"
     stdev_rate = max(_safe_stdev([action_rate]), _MIN_STDEV_RATE)
     stdev_tool = max(_safe_stdev([tool_rate]), 0.0)
 
@@ -545,11 +555,34 @@ def _analyze_drift(
     window_seconds: int = DRIFT_WINDOW_SECONDS,
 ) -> DriftReport:
     now = _utcnow()
+
+    # Suspended baseline → immediate critical report, no signal computation needed
+    if baseline.status == "suspended":
+        return DriftReport(
+            report_id=f"drift-{uuid4()}",
+            agent_id=agent_id,
+            client_id=client_id,
+            session_id=session_id,
+            timestamp=now,
+            window_seconds=window_seconds,
+            observation_count=len(_window_observations(observations, window_seconds)),
+            baseline_sample_count=baseline.sample_count,
+            baseline_status=baseline.status,
+            overall_drift_score=1.0,
+            overall_severity="critical",
+            signals=[],
+            recommendations=[
+                "Agent is suspended — review all recent actions before resuming.",
+                "Consider purging agent data if compromise is confirmed.",
+            ],
+            should_alert=True,
+            should_suspend=True,
+        )
+
     window_obs = _window_observations(observations, window_seconds)
     n = len(window_obs)
     signals: list[DriftSignal] = []
 
-    # Action frequency signal
     if baseline.stdev_action_rate > 0:
         observed_rate = _compute_action_rate(window_obs, window_seconds)
         z = min(_z_score(observed_rate, baseline.mean_action_rate, baseline.stdev_action_rate), _Z_SCORE_CAP)
@@ -567,7 +600,6 @@ def _analyze_drift(
                 )
             )
 
-    # Action type distribution signal
     if n > 0 and baseline.frozen_action_type_distribution:
         obs_dist = _compute_action_type_distribution(window_obs)
         jsd = _jensen_shannon_divergence(obs_dist, baseline.frozen_action_type_distribution)
@@ -585,7 +617,6 @@ def _analyze_drift(
                 )
             )
 
-    # Target scope signal
     if n > 0 and baseline.stdev_target_breadth > 0:
         obs_breadth = _compute_target_breadth(window_obs)
         z = min(_z_score(obs_breadth, baseline.mean_target_breadth, baseline.stdev_target_breadth), _Z_SCORE_CAP)
@@ -603,7 +634,6 @@ def _analyze_drift(
                 )
             )
 
-    # Risk score elevation signal
     if n > 0 and baseline.stdev_risk_score > 0:
         obs_risk = _compute_mean_risk(window_obs)
         z = min(_z_score(obs_risk, baseline.mean_risk_score, baseline.stdev_risk_score), _Z_SCORE_CAP)
@@ -621,7 +651,6 @@ def _analyze_drift(
                 )
             )
 
-    # Tool call pattern signal
     if n > 0 and baseline.stdev_tool_call_rate > 0:
         obs_tool = _compute_tool_call_rate(window_obs)
         z = min(_z_score(obs_tool, baseline.mean_tool_call_rate, baseline.stdev_tool_call_rate), _Z_SCORE_CAP)
@@ -639,7 +668,6 @@ def _analyze_drift(
                 )
             )
 
-    # Session anomaly signal
     if session_id and n > 0 and baseline.stdev_session_size > 0:
         session_obs = [o for o in window_obs if o.session_id == session_id]
         sess_size = float(len(session_obs))
@@ -661,10 +689,12 @@ def _analyze_drift(
                 )
             )
 
-    overall_score = max((s.deviation_score for s in signals), default=0.0)
+    overall_score = _compute_overall_drift_score(signals)
     overall_sev = _severity_from_score(overall_score)
 
     recommendations: list[str] = []
+    if baseline.status == "learning":
+        recommendations.append("Baseline is still learning — more observations needed before drift detection is reliable.")
     if overall_sev in ("high", "critical"):
         recommendations.append("Consider suspending agent pending review.")
     if any(s.category == "risk_score_elevation" for s in signals):
@@ -676,7 +706,7 @@ def _analyze_drift(
     should_suspend = overall_sev == "critical"
 
     return DriftReport(
-        report_id=str(uuid4()),
+        report_id=f"drift-{uuid4()}",
         agent_id=agent_id,
         client_id=client_id,
         session_id=session_id,
@@ -695,19 +725,39 @@ def _analyze_drift(
 
 
 # ---------------------------------------------------------------------------
-# BehavioralBaselineService
+# BehavioralBaselineStore
 # ---------------------------------------------------------------------------
 
 
-class BehavioralBaselineService:
-    def __init__(self) -> None:
+class BehavioralBaselineStore:
+    def __init__(
+        self,
+        drift_window_seconds: int = DRIFT_WINDOW_SECONDS,
+        max_observations_per_agent: int = MAX_BASELINE_SAMPLES,
+        min_samples_for_baseline: int = MIN_SAMPLES_FOR_BASELINE,
+    ) -> None:
+        self._drift_window_seconds = drift_window_seconds
+        self._max_observations_per_agent = max_observations_per_agent
+        self._min_samples_for_baseline = min_samples_for_baseline
         self._lock: Lock = Lock()
         self._observations: dict[str, list[AgentObservation]] = defaultdict(list)
         self._baselines: dict[str, AgentBaseline] = {}
+        self._baseline_client_ids: dict[str, str | None] = {}
         self._obs_since_last_build: dict[str, int] = defaultdict(int)
 
     # ------------------------------------------------------------------
-    # Public API
+    # reset
+    # ------------------------------------------------------------------
+
+    def reset(self) -> None:
+        with self._lock:
+            self._observations.clear()
+            self._baselines.clear()
+            self._baseline_client_ids.clear()
+            self._obs_since_last_build.clear()
+
+    # ------------------------------------------------------------------
+    # record_observation
     # ------------------------------------------------------------------
 
     def record_observation(
@@ -725,7 +775,7 @@ class BehavioralBaselineService:
         action_type = _require_str(action_type, "action_type")
 
         obs = AgentObservation(
-            observation_id=str(uuid4()),
+            observation_id=f"obs-{uuid4()}",
             agent_id=agent_id,
             session_id=session_id,
             client_id=client_id,
@@ -740,22 +790,21 @@ class BehavioralBaselineService:
         with self._lock:
             bucket = self._observations[agent_id]
             bucket.append(obs)
-            if len(bucket) > MAX_BASELINE_SAMPLES:
-                self._observations[agent_id] = bucket[-MAX_BASELINE_SAMPLES:]
+            if len(bucket) > self._max_observations_per_agent:
+                self._observations[agent_id] = bucket[-self._max_observations_per_agent :]
+            self._baseline_client_ids[agent_id] = client_id
             self._obs_since_last_build[agent_id] += 1
             should_rebuild = self._obs_since_last_build[agent_id] >= _BASELINE_UPDATE_BATCH
             if should_rebuild:
                 self._obs_since_last_build[agent_id] = 0
                 self._rebuild_baseline(agent_id, client_id)
+            elif len(self._observations[agent_id]) >= self._min_samples_for_baseline and agent_id not in self._baselines:
+                self._rebuild_baseline(agent_id, client_id)
 
-        # Persist observation — wrapped to never propagate DB failures
         try:
             _supabase_persist_observation(obs)
         except Exception:  # noqa: BLE001
-            _logger.warning(
-                "behavioral_baseline_persist_observation_suppressed",
-                extra={"event": "behavioral_baseline_persist_observation_suppressed", "agent_id": agent_id},
-            )
+            pass
 
         _emit_telemetry(
             "behavioral_observation_recorded",
@@ -768,14 +817,168 @@ class BehavioralBaselineService:
         )
         return obs
 
+    # ------------------------------------------------------------------
+    # record_observations_bulk
+    # ------------------------------------------------------------------
+
+    def record_observations_bulk(
+        self,
+        agent_id: str,
+        items: list[dict[str, Any]],
+        session_id: str | None = None,
+        client_id: str | None = None,
+    ) -> list[AgentObservation]:
+        results: list[AgentObservation] = []
+        for item in items:
+            obs = self.record_observation(
+                agent_id=agent_id,
+                action_type=item.get("action_type", "unknown"),
+                target=item.get("target", ""),
+                risk_score=int(item.get("risk_score", 0)),
+                matched_patterns=item.get("matched_patterns"),
+                session_id=item.get("session_id", session_id),
+                client_id=item.get("client_id", client_id),
+                metadata=item.get("metadata"),
+            )
+            results.append(obs)
+        return results
+
+    # ------------------------------------------------------------------
+    # get_observations
+    # ------------------------------------------------------------------
+
+    def get_observations(
+        self,
+        agent_id: str,
+        limit: int | None = None,
+        window_seconds: int | None = None,
+        session_id: str | None = None,
+    ) -> list[AgentObservation]:
+        agent_id = _require_str(agent_id, "agent_id")
+        with self._lock:
+            obs = list(self._observations.get(agent_id, []))
+        if window_seconds is not None:
+            obs = _window_observations(obs, window_seconds)
+        if session_id is not None:
+            obs = [o for o in obs if o.session_id == session_id]
+        if limit is not None:
+            obs = obs[-limit:]
+        return obs
+
+    # ------------------------------------------------------------------
+    # get_baseline
+    # ------------------------------------------------------------------
+
+    def get_baseline(self, agent_id: str) -> AgentBaseline | None:
+        agent_id = _require_str(agent_id, "agent_id")
+        with self._lock:
+            baseline = self._baselines.get(agent_id)
+            if baseline is not None:
+                return baseline
+            observations = list(self._observations.get(agent_id, []))
+        if not observations:
+            return None
+        client_id = self._baseline_client_ids.get(agent_id)
+        return _build_baseline_from_observations(
+            agent_id=agent_id,
+            client_id=client_id,
+            observations=observations,
+            existing_baseline=None,
+            drift_window_seconds=self._drift_window_seconds,
+            min_samples_for_baseline=self._min_samples_for_baseline,
+        )
+
+    # ------------------------------------------------------------------
+    # list_baselines
+    # ------------------------------------------------------------------
+
+    def list_baselines(
+        self,
+        client_id: str | None = None,
+        status: str | None = None,
+    ) -> list[AgentBaseline]:
+        with self._lock:
+            agent_ids = list(self._observations.keys())
+
+        results: list[AgentBaseline] = []
+        for aid in agent_ids:
+            baseline = self.get_baseline(aid)
+            if baseline is None:
+                continue
+            if client_id is not None and baseline.client_id != client_id:
+                continue
+            if status is not None and baseline.status != status:
+                continue
+            results.append(baseline)
+        return results
+
+    # ------------------------------------------------------------------
+    # invalidate_baseline
+    # ------------------------------------------------------------------
+
+    def invalidate_baseline(self, agent_id: str) -> bool:
+        agent_id = _require_str(agent_id, "agent_id")
+        with self._lock:
+            baseline = self._baselines.get(agent_id)
+            if baseline is None:
+                return False
+            stale = baseline._replace_status("stale")
+            self._baselines[agent_id] = stale
+
+        try:
+            _supabase_persist_baseline(stale)
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+
+    # ------------------------------------------------------------------
+    # suspend_baseline
+    # ------------------------------------------------------------------
+
+    def suspend_baseline(self, agent_id: str) -> bool:
+        agent_id = _require_str(agent_id, "agent_id")
+        with self._lock:
+            baseline = self._baselines.get(agent_id)
+            if baseline is None:
+                return False
+            suspended = baseline._replace_status("suspended")
+            self._baselines[agent_id] = suspended
+
+        try:
+            _supabase_persist_baseline(suspended)
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+
+    # ------------------------------------------------------------------
+    # purge_agent
+    # ------------------------------------------------------------------
+
+    def purge_agent(self, agent_id: str, client_id: str | None = None) -> bool:
+        agent_id = _require_str(agent_id, "agent_id")
+        with self._lock:
+            existed = agent_id in self._observations or agent_id in self._baselines
+            self._observations.pop(agent_id, None)
+            self._baselines.pop(agent_id, None)
+            self._baseline_client_ids.pop(agent_id, None)
+            self._obs_since_last_build.pop(agent_id, None)
+        if existed:
+            _supabase_delete_agent(agent_id, client_id=client_id)
+        return existed
+
+    # ------------------------------------------------------------------
+    # compute_drift
+    # ------------------------------------------------------------------
+
     def compute_drift(
         self,
         agent_id: str,
         session_id: str | None = None,
         client_id: str | None = None,
-        window_seconds: int = DRIFT_WINDOW_SECONDS,
+        window_seconds: int | None = None,
     ) -> DriftReport:
         agent_id = _require_str(agent_id, "agent_id")
+        window = window_seconds if window_seconds is not None else self._drift_window_seconds
 
         with self._lock:
             baseline = self._baselines.get(agent_id)
@@ -783,7 +986,7 @@ class BehavioralBaselineService:
 
         if baseline is None:
             n = len(observations)
-            status: BaselineStatus = "learning" if n < MIN_SAMPLES_FOR_BASELINE else "active"
+            status: BaselineStatus = "learning" if n < self._min_samples_for_baseline else "active"
             now = _utcnow()
             baseline = AgentBaseline(
                 baseline_id=str(uuid4()),
@@ -814,17 +1017,13 @@ class BehavioralBaselineService:
             session_id=session_id,
             baseline=baseline,
             observations=observations,
-            window_seconds=window_seconds,
+            window_seconds=window,
         )
 
-        # Persist drift report — wrapped to never propagate DB failures
         try:
             _supabase_persist_drift_report(report)
         except Exception:  # noqa: BLE001
-            _logger.warning(
-                "behavioral_baseline_persist_drift_suppressed",
-                extra={"event": "behavioral_baseline_persist_drift_suppressed", "agent_id": agent_id},
-            )
+            pass
 
         if report.should_suspend and baseline.status != "suspended":
             with self._lock:
@@ -833,13 +1032,10 @@ class BehavioralBaselineService:
             try:
                 _supabase_persist_baseline(suspended)
             except Exception:  # noqa: BLE001
-                _logger.warning(
-                    "behavioral_baseline_persist_suspended_baseline_suppressed",
-                    extra={"event": "behavioral_baseline_persist_suspended_baseline_suppressed", "agent_id": agent_id},
-                )
+                pass
 
         _emit_telemetry(
-            "behavioral_drift_computed",
+            "behavioral_drift_detected",
             {
                 "agent_id": agent_id,
                 "overall_severity": report.overall_severity,
@@ -850,67 +1046,6 @@ class BehavioralBaselineService:
             },
         )
         return report
-
-    def get_baseline(self, agent_id: str) -> AgentBaseline | None:
-        agent_id = _require_str(agent_id, "agent_id")
-        with self._lock:
-            return self._baselines.get(agent_id)
-
-    def get_observations(
-        self,
-        agent_id: str,
-        window_seconds: int | None = None,
-    ) -> list[AgentObservation]:
-        agent_id = _require_str(agent_id, "agent_id")
-        with self._lock:
-            obs = list(self._observations.get(agent_id, []))
-        if window_seconds is not None:
-            obs = _window_observations(obs, window_seconds)
-        return obs
-
-    def reset_agent(self, agent_id: str, client_id: str | None = None) -> None:
-        agent_id = _require_str(agent_id, "agent_id")
-        with self._lock:
-            self._observations.pop(agent_id, None)
-            self._baselines.pop(agent_id, None)
-            self._obs_since_last_build.pop(agent_id, None)
-        _supabase_delete_agent(agent_id, client_id=client_id)
-
-    def suspend_agent(self, agent_id: str, client_id: str | None = None) -> None:
-        agent_id = _require_str(agent_id, "agent_id")
-        with self._lock:
-            baseline = self._baselines.get(agent_id)
-            if baseline is None:
-                return
-            suspended = baseline._replace_status("suspended")
-            self._baselines[agent_id] = suspended
-        try:
-            _supabase_persist_baseline(suspended)
-        except Exception:  # noqa: BLE001
-            _logger.warning(
-                "behavioral_baseline_suspend_persist_suppressed",
-                extra={"event": "behavioral_baseline_suspend_persist_suppressed", "agent_id": agent_id},
-            )
-
-    def resume_agent(self, agent_id: str, client_id: str | None = None) -> None:
-        agent_id = _require_str(agent_id, "agent_id")
-        with self._lock:
-            baseline = self._baselines.get(agent_id)
-            if baseline is None:
-                return
-            resumed = baseline._replace_status("active")
-            self._baselines[agent_id] = resumed
-        try:
-            _supabase_persist_baseline(resumed)
-        except Exception:  # noqa: BLE001
-            _logger.warning(
-                "behavioral_baseline_resume_persist_suppressed",
-                extra={"event": "behavioral_baseline_resume_persist_suppressed", "agent_id": agent_id},
-            )
-
-    def list_agents(self) -> list[str]:
-        with self._lock:
-            return list(self._observations.keys())
 
     # ------------------------------------------------------------------
     # Internal
@@ -926,29 +1061,47 @@ class BehavioralBaselineService:
             client_id=client_id,
             observations=observations,
             existing_baseline=existing,
+            drift_window_seconds=self._drift_window_seconds,
+            min_samples_for_baseline=self._min_samples_for_baseline,
         )
         self._baselines[agent_id] = new_baseline
         try:
             _supabase_persist_baseline(new_baseline)
         except Exception:  # noqa: BLE001
-            _logger.warning(
-                "behavioral_baseline_rebuild_persist_suppressed",
-                extra={"event": "behavioral_baseline_rebuild_persist_suppressed", "agent_id": agent_id},
-            )
+            pass
 
+
+# ---------------------------------------------------------------------------
+# Backward-compat alias
+# ---------------------------------------------------------------------------
+
+BehavioralBaselineService = BehavioralBaselineStore
 
 # ---------------------------------------------------------------------------
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_service: BehavioralBaselineService | None = None
-_service_lock: Lock = Lock()
+_store: BehavioralBaselineStore | None = None
+_store_lock: Lock = Lock()
 
 
-def get_behavioral_baseline_service() -> BehavioralBaselineService:
-    global _service  # noqa: PLW0603
-    if _service is None:
-        with _service_lock:
-            if _service is None:
-                _service = BehavioralBaselineService()
-    return _service
+def get_behavioral_baseline_store() -> BehavioralBaselineStore:
+    global _store  # noqa: PLW0603
+    if _store is None:
+        with _store_lock:
+            if _store is None:
+                _store = BehavioralBaselineStore()
+    return _store
+
+
+def reset_behavioral_baseline_store() -> None:
+    global _store  # noqa: PLW0603
+    with _store_lock:
+        if _store is not None:
+            _store.reset()
+        _store = None
+
+
+# Backward-compat aliases
+def get_behavioral_baseline_service() -> BehavioralBaselineStore:
+    return get_behavioral_baseline_store()
