@@ -192,8 +192,8 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
             {"prefix": "/api", "dependencies": dependencies},
         ),
         (
-            _optional_router("app.api.behavioral_baseline"),
-            {"prefix": "/guard", "dependencies": agent_dependencies},
+            _optional_router("app.routes.behavioral_baseline"),
+            {"dependencies": agent_dependencies},
         ),
         (
             _optional_router("app.api.policy"),

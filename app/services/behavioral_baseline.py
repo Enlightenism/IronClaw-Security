@@ -45,8 +45,6 @@ _JSD_SIGNAL_THRESHOLD: float = 0.15
 _TARGET_SCOPE_SIGNAL_THRESHOLD: float = 0.30
 _Z_SCORE_CAP: float = 5.0
 
-# Session anomaly: flag if current session's action count exceeds baseline
-# mean session size by this many standard deviations.
 _SESSION_ANOMALY_Z_THRESHOLD: float = 2.0
 _MIN_STDEV_SESSION: float = 1.0
 
@@ -281,7 +279,6 @@ class AgentBaseline:
     stdev_tool_call_rate: float
     frozen_action_type_distribution: dict[str, float] = field(default_factory=dict)
     baseline_obs_count: int = 0
-    # Session size statistics for session_anomaly detection
     mean_session_size: float = 0.0
     stdev_session_size: float = 0.0
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -293,7 +290,6 @@ class AgentBaseline:
         return payload
 
     def _replace_status(self, status: BaselineStatus) -> AgentBaseline:
-        """Return a shallow copy with only status and updated_at changed."""
         return AgentBaseline(
             baseline_id=self.baseline_id,
             agent_id=self.agent_id,
@@ -409,7 +405,6 @@ def _compute_tool_call_rate(observations: list[AgentObservation]) -> float:
 
 
 def _compute_session_sizes(observations: list[AgentObservation]) -> list[float]:
-    """Return per-session observation counts as floats."""
     sessions: dict[str, int] = defaultdict(int)
     for obs in observations:
         key = obs.session_id or "__nosession__"
@@ -482,249 +477,237 @@ def _build_baseline_from_observations(
             alpha * abs(mean_sess_size - e.mean_session_size) + (1 - alpha) * e.stdev_session_size,
             _MIN_STDEV_SESSION,
         )
-        blended_dist: dict[str, float] = {}
-        all_keys = set(action_dist.keys()) | set(e.action_type_distribution.keys())
-        for k in all_keys:
-            blended_dist[k] = alpha * action_dist.get(k, 0.0) + (1 - alpha) * e.action_type_distribution.get(k, 0.0)
-        new_sample_count = e.sample_count + 1
-        baseline_id = e.baseline_id
-        created_at = e.created_at
-        frozen_dist = dict(e.frozen_action_type_distribution) if e.frozen_action_type_distribution else dict(e.action_type_distribution)
-    else:
-        new_mean_rate = action_rate
-        new_stdev_rate = max(_safe_stdev([action_rate]), _MIN_STDEV_RATE)
-        new_mean_risk = mean_risk
-        new_stdev_risk = stdev_risk
-        new_mean_breadth = mean_breadth
-        new_stdev_breadth = stdev_breadth
-        new_tool_rate = tool_rate
-        new_stdev_tool_rate = _safe_stdev([tool_rate])
-        new_mean_sess = mean_sess_size
-        new_stdev_sess = stdev_sess_size
-        blended_dist = action_dist
-        new_sample_count = n
-        baseline_id = existing_baseline.baseline_id if existing_baseline is not None else f"baseline-{uuid4().hex[:12]}"
-        created_at = existing_baseline.created_at if existing_baseline is not None else now
-        frozen_dist = dict(action_dist)
+        frozen_dist = dict(e.frozen_action_type_distribution) if e.frozen_action_type_distribution else dict(action_dist)
+        return AgentBaseline(
+            baseline_id=e.baseline_id,
+            agent_id=agent_id,
+            client_id=client_id,
+            status="active",
+            schema_version=BASELINE_SCHEMA_VERSION,
+            sample_count=n,
+            created_at=e.created_at,
+            updated_at=now,
+            mean_action_rate=new_mean_rate,
+            stdev_action_rate=new_stdev_rate,
+            action_type_distribution=action_dist,
+            mean_risk_score=new_mean_risk,
+            stdev_risk_score=new_stdev_risk,
+            mean_target_breadth=new_mean_breadth,
+            stdev_target_breadth=new_stdev_breadth,
+            mean_tool_call_rate=new_tool_rate,
+            stdev_tool_call_rate=new_stdev_tool_rate,
+            frozen_action_type_distribution=frozen_dist,
+            baseline_obs_count=e.baseline_obs_count + n,
+            mean_session_size=new_mean_sess,
+            stdev_session_size=new_stdev_sess,
+        )
 
-    status: BaselineStatus = "learning" if new_sample_count < MIN_SAMPLES_FOR_BASELINE else "active"
+    status: BaselineStatus = "active" if n >= MIN_SAMPLES_FOR_BASELINE else "learning"
+    stdev_rate = max(_safe_stdev([action_rate]), _MIN_STDEV_RATE)
+    stdev_tool = max(_safe_stdev([tool_rate]), 0.0)
 
     return AgentBaseline(
-        baseline_id=baseline_id,
+        baseline_id=str(uuid4()),
         agent_id=agent_id,
         client_id=client_id,
         status=status,
         schema_version=BASELINE_SCHEMA_VERSION,
-        sample_count=new_sample_count,
-        created_at=created_at,
+        sample_count=n,
+        created_at=now,
         updated_at=now,
-        mean_action_rate=new_mean_rate,
-        stdev_action_rate=new_stdev_rate,
-        action_type_distribution=blended_dist,
-        mean_risk_score=new_mean_risk,
-        stdev_risk_score=new_stdev_risk,
-        mean_target_breadth=new_mean_breadth,
-        stdev_target_breadth=new_stdev_breadth,
-        mean_tool_call_rate=new_tool_rate,
-        stdev_tool_call_rate=new_stdev_tool_rate,
-        frozen_action_type_distribution=frozen_dist,
+        mean_action_rate=action_rate,
+        stdev_action_rate=stdev_rate,
+        action_type_distribution=action_dist,
+        mean_risk_score=mean_risk,
+        stdev_risk_score=stdev_risk,
+        mean_target_breadth=mean_breadth,
+        stdev_target_breadth=stdev_breadth,
+        mean_tool_call_rate=tool_rate,
+        stdev_tool_call_rate=stdev_tool,
+        frozen_action_type_distribution=dict(action_dist),
         baseline_obs_count=n,
-        mean_session_size=new_mean_sess,
-        stdev_session_size=new_stdev_sess,
+        mean_session_size=mean_sess_size,
+        stdev_session_size=stdev_sess_size,
     )
 
 
 # ---------------------------------------------------------------------------
-# Drift detector
+# Drift analysis
 # ---------------------------------------------------------------------------
 
 
-def _build_drift_signals(
+def _analyze_drift(
+    agent_id: str,
+    client_id: str | None,
+    session_id: str | None,
     baseline: AgentBaseline,
-    window_observations: list[AgentObservation],
-    window_seconds: int,
-    session_id: str | None = None,
-) -> list[DriftSignal]:
+    observations: list[AgentObservation],
+    window_seconds: int = DRIFT_WINDOW_SECONDS,
+) -> DriftReport:
+    now = _utcnow()
+    window_obs = _window_observations(observations, window_seconds)
+    n = len(window_obs)
     signals: list[DriftSignal] = []
-    obs = window_observations
 
-    if not obs:
-        return signals
-
-    # 1. Action frequency
-    observed_rate = _compute_action_rate(obs, window_seconds)
-    rate_stdev = max(baseline.stdev_action_rate, _MIN_STDEV_RATE)
-    rate_z = _z_score(observed_rate, baseline.mean_action_rate, rate_stdev)
-    rate_score = min(rate_z / _Z_SCORE_CAP, 1.0)
-    if rate_score >= 0.20:
-        signals.append(
-            DriftSignal(
-                category="action_frequency",
-                observed_value=observed_rate,
-                baseline_value=baseline.mean_action_rate,
-                deviation_score=rate_score,
-                severity=_severity_from_score(rate_score),
-                detail=(f"Observed action rate {observed_rate:.2f}/hr vs baseline {baseline.mean_action_rate:.2f}/hr (z={rate_z:.2f})."),
-            )
-        )
-
-    # 2. Action type distribution — compare window against frozen pre-anomaly snapshot
-    observed_dist = _compute_action_type_distribution(obs)
-    reference_dist = baseline.frozen_action_type_distribution if baseline.frozen_action_type_distribution else baseline.action_type_distribution
-    jsd = _jensen_shannon_divergence(observed_dist, reference_dist)
-    if jsd >= _JSD_SIGNAL_THRESHOLD:
-        signals.append(
-            DriftSignal(
-                category="action_type_distribution",
-                observed_value=jsd,
-                baseline_value=0.0,
-                deviation_score=jsd,
-                severity=_severity_from_score(jsd),
-                detail=(f"Action type distribution diverged from baseline (JSD={jsd:.3f}). Observed: {observed_dist}."),
-            )
-        )
-
-    # 3. Risk score elevation
-    observed_mean_risk = _compute_mean_risk(obs)
-    risk_stdev = max(baseline.stdev_risk_score, _MIN_STDEV_RISK)
-    risk_z = _z_score(observed_mean_risk, baseline.mean_risk_score, risk_stdev)
-    risk_score_val = min(risk_z / _Z_SCORE_CAP, 1.0)
-    if risk_score_val >= 0.20:
-        signals.append(
-            DriftSignal(
-                category="risk_score_elevation",
-                observed_value=observed_mean_risk,
-                baseline_value=baseline.mean_risk_score,
-                deviation_score=risk_score_val,
-                severity=_severity_from_score(risk_score_val),
-                detail=(f"Mean risk score {observed_mean_risk:.1f} vs baseline {baseline.mean_risk_score:.1f} (z={risk_z:.2f})."),
-            )
-        )
-
-    # 4. Target scope breadth
-    observed_breadth = _compute_target_breadth(obs)
-    breadth_stdev = max(baseline.stdev_target_breadth, _MIN_STDEV_BREADTH)
-    breadth_z = _z_score(observed_breadth, baseline.mean_target_breadth, breadth_stdev)
-    breadth_score = min(breadth_z / _Z_SCORE_CAP, 1.0)
-    if breadth_score >= _TARGET_SCOPE_SIGNAL_THRESHOLD:
-        signals.append(
-            DriftSignal(
-                category="target_scope",
-                observed_value=observed_breadth,
-                baseline_value=baseline.mean_target_breadth,
-                deviation_score=breadth_score,
-                severity=_severity_from_score(breadth_score),
-                detail=(f"Target scope breadth {observed_breadth:.3f} vs baseline {baseline.mean_target_breadth:.3f} (z={breadth_z:.2f})."),
-            )
-        )
-
-    # 5. Tool call pattern
-    observed_tool_rate = _compute_tool_call_rate(obs)
-    tool_delta = abs(observed_tool_rate - baseline.mean_tool_call_rate)
-    tool_score = min(tool_delta / 0.5, 1.0) if baseline.mean_tool_call_rate < 1.0 else 0.0
-    if tool_score >= 0.20:
-        signals.append(
-            DriftSignal(
-                category="tool_call_pattern",
-                observed_value=observed_tool_rate,
-                baseline_value=baseline.mean_tool_call_rate,
-                deviation_score=tool_score,
-                severity=_severity_from_score(tool_score),
-                detail=(f"Tool call rate {observed_tool_rate:.3f} vs baseline {baseline.mean_tool_call_rate:.3f} (Δ={tool_delta:.3f})."),
-            )
-        )
-
-    # 6. Session anomaly — only when a session_id is active in the window
-    if session_id is not None and baseline.mean_session_size > 0.0:
-        session_obs_count = float(sum(1 for o in obs if o.session_id == session_id))
-        sess_stdev = max(baseline.stdev_session_size, _MIN_STDEV_SESSION)
-        sess_z = _z_score(session_obs_count, baseline.mean_session_size, sess_stdev)
-        if sess_z >= _SESSION_ANOMALY_Z_THRESHOLD:
-            sess_score = min(sess_z / _Z_SCORE_CAP, 1.0)
+    # Action frequency signal
+    if baseline.stdev_action_rate > 0:
+        observed_rate = _compute_action_rate(window_obs, window_seconds)
+        z = min(_z_score(observed_rate, baseline.mean_action_rate, baseline.stdev_action_rate), _Z_SCORE_CAP)
+        norm = z / _Z_SCORE_CAP
+        sev = _severity_from_score(norm)
+        if sev != "none":
             signals.append(
                 DriftSignal(
-                    category="session_anomaly",
-                    observed_value=session_obs_count,
-                    baseline_value=baseline.mean_session_size,
-                    deviation_score=sess_score,
-                    severity=_severity_from_score(sess_score),
-                    detail=(f"Session '{session_id}' contains {session_obs_count:.0f} actions vs baseline mean {baseline.mean_session_size:.1f} (z={sess_z:.2f})."),
+                    category="action_frequency",
+                    observed_value=observed_rate,
+                    baseline_value=baseline.mean_action_rate,
+                    deviation_score=norm,
+                    severity=sev,
+                    detail=f"Action rate {observed_rate:.2f}/hr vs baseline {baseline.mean_action_rate:.2f}/hr (z={z:.2f})",
                 )
             )
 
-    return signals
+    # Action type distribution signal
+    if n > 0 and baseline.frozen_action_type_distribution:
+        obs_dist = _compute_action_type_distribution(window_obs)
+        jsd = _jensen_shannon_divergence(obs_dist, baseline.frozen_action_type_distribution)
+        if jsd >= _JSD_SIGNAL_THRESHOLD:
+            norm = min(jsd / 1.0, 1.0)
+            sev = _severity_from_score(norm)
+            signals.append(
+                DriftSignal(
+                    category="action_type_distribution",
+                    observed_value=jsd,
+                    baseline_value=0.0,
+                    deviation_score=norm,
+                    severity=sev,
+                    detail=f"Action type distribution divergence (JSD={jsd:.3f})",
+                )
+            )
 
+    # Target scope signal
+    if n > 0 and baseline.stdev_target_breadth > 0:
+        obs_breadth = _compute_target_breadth(window_obs)
+        z = min(_z_score(obs_breadth, baseline.mean_target_breadth, baseline.stdev_target_breadth), _Z_SCORE_CAP)
+        norm = z / _Z_SCORE_CAP
+        if norm >= _TARGET_SCOPE_SIGNAL_THRESHOLD:
+            sev = _severity_from_score(norm)
+            signals.append(
+                DriftSignal(
+                    category="target_scope",
+                    observed_value=obs_breadth,
+                    baseline_value=baseline.mean_target_breadth,
+                    deviation_score=norm,
+                    severity=sev,
+                    detail=f"Target breadth {obs_breadth:.3f} vs baseline {baseline.mean_target_breadth:.3f} (z={z:.2f})",
+                )
+            )
 
-def _compute_overall_drift_score(signals: list[DriftSignal]) -> float:
-    if not signals:
-        return 0.0
-    max_score = max(s.deviation_score for s in signals)
-    additive_bonus = sum(s.deviation_score for s in signals) * 0.05
-    return min(max_score + additive_bonus, 1.0)
+    # Risk score elevation signal
+    if n > 0 and baseline.stdev_risk_score > 0:
+        obs_risk = _compute_mean_risk(window_obs)
+        z = min(_z_score(obs_risk, baseline.mean_risk_score, baseline.stdev_risk_score), _Z_SCORE_CAP)
+        norm = z / _Z_SCORE_CAP
+        sev = _severity_from_score(norm)
+        if sev != "none":
+            signals.append(
+                DriftSignal(
+                    category="risk_score_elevation",
+                    observed_value=obs_risk,
+                    baseline_value=baseline.mean_risk_score,
+                    deviation_score=norm,
+                    severity=sev,
+                    detail=f"Mean risk {obs_risk:.1f} vs baseline {baseline.mean_risk_score:.1f} (z={z:.2f})",
+                )
+            )
 
+    # Tool call pattern signal
+    if n > 0 and baseline.stdev_tool_call_rate > 0:
+        obs_tool = _compute_tool_call_rate(window_obs)
+        z = min(_z_score(obs_tool, baseline.mean_tool_call_rate, baseline.stdev_tool_call_rate), _Z_SCORE_CAP)
+        norm = z / _Z_SCORE_CAP
+        sev = _severity_from_score(norm)
+        if sev != "none":
+            signals.append(
+                DriftSignal(
+                    category="tool_call_pattern",
+                    observed_value=obs_tool,
+                    baseline_value=baseline.mean_tool_call_rate,
+                    deviation_score=norm,
+                    severity=sev,
+                    detail=f"Tool call rate {obs_tool:.3f} vs baseline {baseline.mean_tool_call_rate:.3f} (z={z:.2f})",
+                )
+            )
 
-def _build_recommendations(
-    signals: list[DriftSignal],
-    overall_severity: DriftSeverity,
-    baseline_status: BaselineStatus,
-) -> list[str]:
-    recs: list[str] = []
+    # Session anomaly signal
+    if session_id and n > 0 and baseline.stdev_session_size > 0:
+        session_obs = [o for o in window_obs if o.session_id == session_id]
+        sess_size = float(len(session_obs))
+        z = min(
+            _z_score(sess_size, baseline.mean_session_size, baseline.stdev_session_size),
+            _Z_SCORE_CAP,
+        )
+        if z >= _SESSION_ANOMALY_Z_THRESHOLD:
+            norm = min(z / _Z_SCORE_CAP, 1.0)
+            sev = _severity_from_score(norm)
+            signals.append(
+                DriftSignal(
+                    category="session_anomaly",
+                    observed_value=sess_size,
+                    baseline_value=baseline.mean_session_size,
+                    deviation_score=norm,
+                    severity=sev,
+                    detail=f"Session size {sess_size:.0f} vs baseline mean {baseline.mean_session_size:.1f} (z={z:.2f})",
+                )
+            )
 
-    if baseline_status == "learning":
-        recs.append(f"Agent baseline is still in learning phase; collect at least {MIN_SAMPLES_FOR_BASELINE} samples before treating drift as actionable.")
+    overall_score = max((s.deviation_score for s in signals), default=0.0)
+    overall_sev = _severity_from_score(overall_score)
 
-    if overall_severity in ("high", "critical"):
-        recs.append("Suspend or quarantine agent session pending operator review.")
-        recs.append("Emit a high-priority security alert and log to audit trail.")
+    recommendations: list[str] = []
+    if overall_sev in ("high", "critical"):
+        recommendations.append("Consider suspending agent pending review.")
+    if any(s.category == "risk_score_elevation" for s in signals):
+        recommendations.append("Review recent high-risk actions for policy violations.")
+    if any(s.category == "action_type_distribution" for s in signals):
+        recommendations.append("Inspect action type shift for unauthorized capability expansion.")
 
-    if overall_severity == "medium":
-        recs.append("Flag session for async review; apply tighter action guard thresholds.")
+    should_alert = overall_sev in ("medium", "high", "critical")
+    should_suspend = overall_sev == "critical"
 
-    for sig in signals:
-        if sig.category == "action_frequency" and sig.severity in ("high", "critical"):
-            recs.append("Abnormal action rate detected — possible runaway loop or automated exfiltration attempt.")
-        if sig.category == "risk_score_elevation" and sig.severity in ("high", "critical"):
-            recs.append("Risk score elevation suggests adversarial prompt injection or policy override attempt.")
-        if sig.category == "action_type_distribution" and sig.severity in ("high", "critical"):
-            recs.append("Action type distribution shift — agent may have changed objective or been hijacked.")
-        if sig.category == "target_scope" and sig.severity in ("medium", "high", "critical"):
-            recs.append("Broadened target scope detected — evaluate for lateral movement or data discovery attempts.")
-        if sig.category == "tool_call_pattern" and sig.severity in ("high", "critical"):
-            recs.append("Unusual tool call frequency — review for tool chain abuse or capability escalation.")
-        if sig.category == "session_anomaly" and sig.severity in ("medium", "high", "critical"):
-            recs.append("Session action volume is abnormally high — possible session hijack or runaway agent loop.")
-
-    if not recs:
-        recs.append("No action required; behavioral profile is within normal baseline bounds.")
-
-    return recs
+    return DriftReport(
+        report_id=str(uuid4()),
+        agent_id=agent_id,
+        client_id=client_id,
+        session_id=session_id,
+        timestamp=now,
+        window_seconds=window_seconds,
+        observation_count=n,
+        baseline_sample_count=baseline.sample_count,
+        baseline_status=baseline.status,
+        overall_drift_score=overall_score,
+        overall_severity=overall_sev,
+        signals=signals,
+        recommendations=recommendations,
+        should_alert=should_alert,
+        should_suspend=should_suspend,
+    )
 
 
 # ---------------------------------------------------------------------------
-# Core store
+# BehavioralBaselineService
 # ---------------------------------------------------------------------------
 
 
-class BehavioralBaselineStore:
-    """In-memory store for agent behavioral baselines and drift detection."""
-
-    def __init__(
-        self,
-        *,
-        drift_window_seconds: int = DRIFT_WINDOW_SECONDS,
-        max_observations_per_agent: int = MAX_BASELINE_SAMPLES,
-        min_samples_for_baseline: int = MIN_SAMPLES_FOR_BASELINE,
-    ) -> None:
-        self._lock = Lock()
-        self._drift_window_seconds = drift_window_seconds
-        self._max_observations_per_agent = max_observations_per_agent
-        self._min_samples_for_baseline = min_samples_for_baseline
+class BehavioralBaselineService:
+    def __init__(self) -> None:
+        self._lock: Lock = Lock()
         self._observations: dict[str, list[AgentObservation]] = defaultdict(list)
         self._baselines: dict[str, AgentBaseline] = {}
-        self._obs_since_last_update: dict[str, int] = defaultdict(int)
+        self._obs_since_last_build: dict[str, int] = defaultdict(int)
 
     # ------------------------------------------------------------------
-    # Observation ingestion
+    # Public API
     # ------------------------------------------------------------------
 
     def record_observation(
@@ -733,335 +716,239 @@ class BehavioralBaselineStore:
         action_type: str,
         target: str,
         risk_score: int,
-        *,
+        matched_patterns: list[str] | None = None,
         session_id: str | None = None,
         client_id: str | None = None,
-        matched_patterns: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> AgentObservation:
-        validated_agent_id = _require_str(agent_id, "agent_id")
-        validated_action = _require_str(action_type, "action_type")
-        validated_target = target.strip() if isinstance(target, str) else ""
-        validated_risk = max(0, min(int(risk_score), 100))
+        agent_id = _require_str(agent_id, "agent_id")
+        action_type = _require_str(action_type, "action_type")
 
         obs = AgentObservation(
-            observation_id=f"obs-{uuid4().hex[:12]}",
-            agent_id=validated_agent_id,
+            observation_id=str(uuid4()),
+            agent_id=agent_id,
             session_id=session_id,
             client_id=client_id,
             timestamp=_utcnow(),
-            action_type=validated_action,
-            target=validated_target,
-            risk_score=validated_risk,
+            action_type=action_type,
+            target=target or "",
+            risk_score=max(0, min(100, int(risk_score))),
             matched_patterns=list(matched_patterns or []),
             metadata=dict(metadata or {}),
         )
 
         with self._lock:
-            bucket = self._observations[validated_agent_id]
+            bucket = self._observations[agent_id]
             bucket.append(obs)
-            if len(bucket) > self._max_observations_per_agent:
-                self._observations[validated_agent_id] = bucket[-self._max_observations_per_agent :]
-            self._obs_since_last_update[validated_agent_id] += 1
-            self._recompute_baseline_locked(validated_agent_id, client_id)
-            updated_baseline = self._baselines.get(validated_agent_id)
+            if len(bucket) > MAX_BASELINE_SAMPLES:
+                self._observations[agent_id] = bucket[-MAX_BASELINE_SAMPLES:]
+            self._obs_since_last_build[agent_id] += 1
+            should_rebuild = self._obs_since_last_build[agent_id] >= _BASELINE_UPDATE_BATCH
+            if should_rebuild:
+                self._obs_since_last_build[agent_id] = 0
+                self._rebuild_baseline(agent_id, client_id)
 
-        _supabase_persist_observation(obs)
-        if updated_baseline is not None:
-            _supabase_persist_baseline(updated_baseline)
-
-        return obs
-
-    def record_observations_bulk(
-        self,
-        agent_id: str,
-        observations: list[dict[str, Any]],
-        client_id: str | None = None,
-    ) -> list[AgentObservation]:
-        """Ingest multiple observations under a single lock acquisition."""
-        validated_agent_id = _require_str(agent_id, "agent_id")
-        now = _utcnow()
-        recorded: list[AgentObservation] = []
-
-        for item in observations:
-            validated_action = _require_str(str(item.get("action_type", "")), "action_type")
-            raw_target = item.get("target", "")
-            validated_target = raw_target.strip() if isinstance(raw_target, str) else ""
-            validated_risk = max(0, min(int(item.get("risk_score", 0)), 100))
-            obs = AgentObservation(
-                observation_id=f"obs-{uuid4().hex[:12]}",
-                agent_id=validated_agent_id,
-                session_id=item.get("session_id"),
-                client_id=client_id,
-                timestamp=now,
-                action_type=validated_action,
-                target=validated_target,
-                risk_score=validated_risk,
-                matched_patterns=list(item.get("matched_patterns") or []),
-                metadata=dict(item.get("metadata") or {}),
-            )
-            recorded.append(obs)
-
-        with self._lock:
-            bucket = self._observations[validated_agent_id]
-            bucket.extend(recorded)
-            if len(bucket) > self._max_observations_per_agent:
-                self._observations[validated_agent_id] = bucket[-self._max_observations_per_agent :]
-            self._obs_since_last_update[validated_agent_id] += len(recorded)
-            self._recompute_baseline_locked(validated_agent_id, client_id)
-            updated_baseline = self._baselines.get(validated_agent_id)
-
-        for obs in recorded:
+        # Persist observation — wrapped to never propagate DB failures
+        try:
             _supabase_persist_observation(obs)
-        if updated_baseline is not None:
-            _supabase_persist_baseline(updated_baseline)
+        except Exception:  # noqa: BLE001
+            _logger.warning(
+                "behavioral_baseline_persist_observation_suppressed",
+                extra={"event": "behavioral_baseline_persist_observation_suppressed", "agent_id": agent_id},
+            )
 
-        return recorded
-
-    # ------------------------------------------------------------------
-    # Baseline access
-    # ------------------------------------------------------------------
-
-    def get_baseline(self, agent_id: str) -> AgentBaseline | None:
-        normalized = _require_str(agent_id, "agent_id")
-        with self._lock:
-            return self._baselines.get(normalized)
-
-    def list_baselines(
-        self,
-        *,
-        client_id: str | None = None,
-        status: BaselineStatus | None = None,
-    ) -> list[AgentBaseline]:
-        with self._lock:
-            items = list(self._baselines.values())
-        if client_id is not None:
-            items = [b for b in items if b.client_id == client_id]
-        if status is not None:
-            items = [b for b in items if b.status == status]
-        return items
-
-    def invalidate_baseline(self, agent_id: str) -> bool:
-        normalized = _require_str(agent_id, "agent_id")
-        with self._lock:
-            baseline = self._baselines.get(normalized)
-            if baseline is None:
-                return False
-            updated = baseline._replace_status("stale")
-            self._baselines[normalized] = updated
-
-        _supabase_persist_baseline(updated)
-        return True
-
-    def suspend_baseline(self, agent_id: str) -> bool:
-        normalized = _require_str(agent_id, "agent_id")
-        with self._lock:
-            baseline = self._baselines.get(normalized)
-            if baseline is None:
-                return False
-            updated = baseline._replace_status("suspended")
-            self._baselines[normalized] = updated
-
-        _supabase_persist_baseline(updated)
-        return True
-
-    # ------------------------------------------------------------------
-    # Drift detection
-    # ------------------------------------------------------------------
+        _emit_telemetry(
+            "behavioral_observation_recorded",
+            {
+                "agent_id": agent_id,
+                "action_type": action_type,
+                "risk_score": obs.risk_score,
+                "session_id": session_id,
+            },
+        )
+        return obs
 
     def compute_drift(
         self,
         agent_id: str,
-        *,
         session_id: str | None = None,
         client_id: str | None = None,
-        window_seconds: int | None = None,
+        window_seconds: int = DRIFT_WINDOW_SECONDS,
     ) -> DriftReport:
-        normalized = _require_str(agent_id, "agent_id")
-        effective_window = window_seconds if window_seconds and window_seconds > 0 else self._drift_window_seconds
+        agent_id = _require_str(agent_id, "agent_id")
 
         with self._lock:
-            all_obs = list(self._observations.get(normalized, []))
-            baseline = self._baselines.get(normalized)
-
-        window_obs = _window_observations(all_obs, effective_window)
+            baseline = self._baselines.get(agent_id)
+            observations = list(self._observations.get(agent_id, []))
 
         if baseline is None:
-            report = DriftReport(
-                report_id=f"drift-{uuid4().hex[:12]}",
-                agent_id=normalized,
+            n = len(observations)
+            status: BaselineStatus = "learning" if n < MIN_SAMPLES_FOR_BASELINE else "active"
+            now = _utcnow()
+            baseline = AgentBaseline(
+                baseline_id=str(uuid4()),
+                agent_id=agent_id,
                 client_id=client_id,
-                session_id=session_id,
-                timestamp=_utcnow(),
-                window_seconds=effective_window,
-                observation_count=len(window_obs),
-                baseline_sample_count=0,
-                baseline_status="learning",
-                overall_drift_score=0.0,
-                overall_severity="none",
-                signals=[],
-                recommendations=[f"No baseline established yet for agent '{normalized}'. Record at least {self._min_samples_for_baseline} observations to enable drift detection."],
-                should_alert=False,
-                should_suspend=False,
+                status=status,
+                schema_version=BASELINE_SCHEMA_VERSION,
+                sample_count=n,
+                created_at=now,
+                updated_at=now,
+                mean_action_rate=0.0,
+                stdev_action_rate=_MIN_STDEV_RATE,
+                action_type_distribution={},
+                mean_risk_score=0.0,
+                stdev_risk_score=_MIN_STDEV_RISK,
+                mean_target_breadth=0.0,
+                stdev_target_breadth=_MIN_STDEV_BREADTH,
+                mean_tool_call_rate=0.0,
+                stdev_tool_call_rate=0.0,
+                frozen_action_type_distribution={},
+                mean_session_size=0.0,
+                stdev_session_size=_MIN_STDEV_SESSION,
             )
-            _supabase_persist_drift_report(report)
-            return report
 
-        if baseline.status == "suspended":
-            report = DriftReport(
-                report_id=f"drift-{uuid4().hex[:12]}",
-                agent_id=normalized,
-                client_id=client_id,
-                session_id=session_id,
-                timestamp=_utcnow(),
-                window_seconds=effective_window,
-                observation_count=len(window_obs),
-                baseline_sample_count=baseline.sample_count,
-                baseline_status="suspended",
-                overall_drift_score=1.0,
-                overall_severity="critical",
-                signals=[],
-                recommendations=[f"Agent '{normalized}' is currently suspended. Manual operator review is required before resuming this agent."],
-                should_alert=True,
-                should_suspend=True,
-            )
-            _supabase_persist_drift_report(report)
-            return report
-
-        signals = _build_drift_signals(baseline, window_obs, effective_window, session_id=session_id)
-        overall_score = _compute_overall_drift_score(signals)
-
-        effective_score = overall_score * 0.5 if baseline.status == "learning" else overall_score
-        overall_severity = _severity_from_score(effective_score)
-
-        recommendations = _build_recommendations(signals, overall_severity, baseline.status)
-
-        should_alert = overall_severity in ("high", "critical")
-        should_suspend = overall_severity == "critical"
-
-        report = DriftReport(
-            report_id=f"drift-{uuid4().hex[:12]}",
-            agent_id=normalized,
+        report = _analyze_drift(
+            agent_id=agent_id,
             client_id=client_id,
             session_id=session_id,
-            timestamp=_utcnow(),
-            window_seconds=effective_window,
-            observation_count=len(window_obs),
-            baseline_sample_count=baseline.sample_count,
-            baseline_status=baseline.status,
-            overall_drift_score=overall_score,
-            overall_severity=overall_severity,
-            signals=signals,
-            recommendations=recommendations,
-            should_alert=should_alert,
-            should_suspend=should_suspend,
+            baseline=baseline,
+            observations=observations,
+            window_seconds=window_seconds,
         )
 
-        if should_suspend:
-            self.suspend_baseline(normalized)
-
-        if should_alert:
-            _emit_telemetry(
-                "behavioral_drift_detected",
-                {
-                    "agent_id": normalized,
-                    "client_id": client_id,
-                    "session_id": session_id,
-                    "report_id": report.report_id,
-                    "overall_severity": overall_severity,
-                    "overall_drift_score": overall_score,
-                    "signal_count": len(signals),
-                    "should_suspend": should_suspend,
-                },
+        # Persist drift report — wrapped to never propagate DB failures
+        try:
+            _supabase_persist_drift_report(report)
+        except Exception:  # noqa: BLE001
+            _logger.warning(
+                "behavioral_baseline_persist_drift_suppressed",
+                extra={"event": "behavioral_baseline_persist_drift_suppressed", "agent_id": agent_id},
             )
 
-        _supabase_persist_drift_report(report)
+        if report.should_suspend and baseline.status != "suspended":
+            with self._lock:
+                suspended = baseline._replace_status("suspended")
+                self._baselines[agent_id] = suspended
+            try:
+                _supabase_persist_baseline(suspended)
+            except Exception:  # noqa: BLE001
+                _logger.warning(
+                    "behavioral_baseline_persist_suspended_baseline_suppressed",
+                    extra={"event": "behavioral_baseline_persist_suspended_baseline_suppressed", "agent_id": agent_id},
+                )
+
+        _emit_telemetry(
+            "behavioral_drift_computed",
+            {
+                "agent_id": agent_id,
+                "overall_severity": report.overall_severity,
+                "overall_drift_score": report.overall_drift_score,
+                "should_alert": report.should_alert,
+                "should_suspend": report.should_suspend,
+                "session_id": session_id,
+            },
+        )
         return report
+
+    def get_baseline(self, agent_id: str) -> AgentBaseline | None:
+        agent_id = _require_str(agent_id, "agent_id")
+        with self._lock:
+            return self._baselines.get(agent_id)
 
     def get_observations(
         self,
         agent_id: str,
-        *,
-        limit: int = 100,
-        session_id: str | None = None,
+        window_seconds: int | None = None,
     ) -> list[AgentObservation]:
-        normalized = _require_str(agent_id, "agent_id")
+        agent_id = _require_str(agent_id, "agent_id")
         with self._lock:
-            obs = list(self._observations.get(normalized, []))
+            obs = list(self._observations.get(agent_id, []))
+        if window_seconds is not None:
+            obs = _window_observations(obs, window_seconds)
+        return obs
 
-        if session_id is not None:
-            obs = [o for o in obs if o.session_id == session_id]
-
-        return obs[-min(limit, MAX_BASELINE_SAMPLES) :]
-
-    def purge_agent(self, agent_id: str) -> bool:
-        normalized = _require_str(agent_id, "agent_id")
-        client_id: str | None = None
+    def reset_agent(self, agent_id: str, client_id: str | None = None) -> None:
+        agent_id = _require_str(agent_id, "agent_id")
         with self._lock:
-            baseline = self._baselines.get(normalized)
-            if baseline is not None:
-                client_id = baseline.client_id
-            found = normalized in self._observations or normalized in self._baselines
-            self._observations.pop(normalized, None)
-            self._baselines.pop(normalized, None)
-            self._obs_since_last_update.pop(normalized, None)
+            self._observations.pop(agent_id, None)
+            self._baselines.pop(agent_id, None)
+            self._obs_since_last_build.pop(agent_id, None)
+        _supabase_delete_agent(agent_id, client_id=client_id)
 
-        if found:
-            _supabase_delete_agent(normalized, client_id)
-
-        return found
-
-    def reset(self) -> None:
+    def suspend_agent(self, agent_id: str, client_id: str | None = None) -> None:
+        agent_id = _require_str(agent_id, "agent_id")
         with self._lock:
-            self._observations.clear()
-            self._baselines.clear()
-            self._obs_since_last_update.clear()
+            baseline = self._baselines.get(agent_id)
+            if baseline is None:
+                return
+            suspended = baseline._replace_status("suspended")
+            self._baselines[agent_id] = suspended
+        try:
+            _supabase_persist_baseline(suspended)
+        except Exception:  # noqa: BLE001
+            _logger.warning(
+                "behavioral_baseline_suspend_persist_suppressed",
+                extra={"event": "behavioral_baseline_suspend_persist_suppressed", "agent_id": agent_id},
+            )
+
+    def resume_agent(self, agent_id: str, client_id: str | None = None) -> None:
+        agent_id = _require_str(agent_id, "agent_id")
+        with self._lock:
+            baseline = self._baselines.get(agent_id)
+            if baseline is None:
+                return
+            resumed = baseline._replace_status("active")
+            self._baselines[agent_id] = resumed
+        try:
+            _supabase_persist_baseline(resumed)
+        except Exception:  # noqa: BLE001
+            _logger.warning(
+                "behavioral_baseline_resume_persist_suppressed",
+                extra={"event": "behavioral_baseline_resume_persist_suppressed", "agent_id": agent_id},
+            )
+
+    def list_agents(self) -> list[str]:
+        with self._lock:
+            return list(self._observations.keys())
 
     # ------------------------------------------------------------------
-    # Internal (lock must be held by caller)
+    # Internal
     # ------------------------------------------------------------------
 
-    def _recompute_baseline_locked(
-        self,
-        agent_id: str,
-        client_id: str | None,
-    ) -> None:
+    def _rebuild_baseline(self, agent_id: str, client_id: str | None) -> None:
         observations = self._observations.get(agent_id, [])
         existing = self._baselines.get(agent_id)
-
-        if existing is not None and existing.status == "suspended":
+        if existing and existing.status == "suspended":
             return
-
-        if len(observations) < 1:
-            return
-
-        # Always recompute while learning so status can promote to active.
-        # Once active, throttle by batch size.
-        if existing is not None and existing.status == "active":
-            if self._obs_since_last_update[agent_id] < _BASELINE_UPDATE_BATCH:
-                return
-            self._obs_since_last_update[agent_id] = 0
-
-        updated = _build_baseline_from_observations(
+        new_baseline = _build_baseline_from_observations(
             agent_id=agent_id,
             client_id=client_id,
             observations=observations,
             existing_baseline=existing,
-            drift_window_seconds=self._drift_window_seconds,
         )
-        self._baselines[agent_id] = updated
+        self._baselines[agent_id] = new_baseline
+        try:
+            _supabase_persist_baseline(new_baseline)
+        except Exception:  # noqa: BLE001
+            _logger.warning(
+                "behavioral_baseline_rebuild_persist_suppressed",
+                extra={"event": "behavioral_baseline_rebuild_persist_suppressed", "agent_id": agent_id},
+            )
 
 
 # ---------------------------------------------------------------------------
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_BEHAVIORAL_BASELINE_STORE = BehavioralBaselineStore()
+_service: BehavioralBaselineService | None = None
+_service_lock: Lock = Lock()
 
 
-def get_behavioral_baseline_store() -> BehavioralBaselineStore:
-    return _BEHAVIORAL_BASELINE_STORE
-
-
-def reset_behavioral_baseline_store() -> None:
-    _BEHAVIORAL_BASELINE_STORE.reset()
+def get_behavioral_baseline_service() -> BehavioralBaselineService:
+    global _service  # noqa: PLW0603
+    if _service is None:
+        with _service_lock:
+            if _service is None:
+                _service = BehavioralBaselineService()
+    return _service
