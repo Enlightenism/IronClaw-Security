@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 import pytest
@@ -14,6 +15,7 @@ os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
 os.environ["SUPABASE_KEY"] = ""
 os.environ["SUPABASE_ANON_KEY"] = ""
 
+from app.core.install_keys import InstallKeyNotFoundError, get_install_key_registry
 from app.core.settings import get_settings
 from app.main import app
 from app.services.audit_log_service import reset_audit_log
@@ -57,6 +59,38 @@ def client() -> TestClient:
 def _assert_has_keys(payload: dict, required_keys: set[str]) -> None:
     missing = required_keys - set(payload.keys())
     assert not missing, f"Missing keys: {sorted(missing)} in payload: {payload}"
+
+
+def _make_mock_key_entry(
+    key_id: str = "key-abc-123",
+    program: str = "ironclaw-core",
+    masked_key: str = "ic-****-xyz",
+    label: str = "primary",
+    active: bool = True,
+    units_consumed: int = 42,
+    last_used_at=None,
+) -> MagicMock:
+    entry = MagicMock()
+    entry.key_id = key_id
+    entry.program = program
+    entry.masked_key = masked_key
+    entry.label = label
+    entry.active = active
+    entry.units_consumed = units_consumed
+    entry.last_used_at = last_used_at
+    return entry
+
+
+def _make_mock_updated_key(
+    key_id: str = "key-abc-123",
+    units_consumed: int = 52,
+    last_used_at=None,
+) -> MagicMock:
+    updated = MagicMock()
+    updated.key_id = key_id
+    updated.units_consumed = units_consumed
+    updated.last_used_at = last_used_at
+    return updated
 
 
 # ===========================================================================
@@ -199,7 +233,7 @@ def test_history_events_unauthenticated_rejected() -> None:
 
 
 # ===========================================================================
-# /guard/reviews/summary — shape assertions
+# /policy/guard-bundle — shape assertions
 # ===========================================================================
 
 
@@ -215,3 +249,220 @@ def test_guard_bundle_contract(client: TestClient) -> None:
     assert isinstance(body["should_halt"], bool)
     assert isinstance(body["should_warn"], bool)
     assert isinstance(body["highest_verdict"], str)
+
+
+# ===========================================================================
+# /dashboard — public shape contracts (no auth enforced on dashboard routes)
+# ===========================================================================
+
+
+def test_dashboard_overview_response_contract(client: TestClient) -> None:
+    response = client.get("/dashboard/overview")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    data = response.json()
+    assert isinstance(data, dict)
+    _assert_has_keys(
+        data,
+        {
+            "status",
+            "service",
+            "timestamp",
+            "environment",
+            "kpis",
+            "alerts",
+            "activity",
+            "metadata",
+        },
+    )
+
+
+def test_organizations_response_contract(client: TestClient) -> None:
+    response = client.get("/organizations")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    data = response.json()
+    assert isinstance(data, dict)
+    _assert_has_keys(data, {"status", "service", "timestamp", "total", "items"})
+
+
+def test_ui_routes_response_contract(client: TestClient) -> None:
+    response = client.get("/ui/routes")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    data = response.json()
+    assert isinstance(data, dict)
+    _assert_has_keys(
+        data,
+        {"status", "service", "timestamp", "totalroutes", "routes", "metadata"},
+    )
+
+
+def test_ui_pages_response_contract(client: TestClient) -> None:
+    response = client.get("/ui/pages")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    data = response.json()
+    assert isinstance(data, dict)
+    _assert_has_keys(
+        data,
+        {"generatedat", "summary", "sections", "items", "metadata"},
+    )
+
+
+def test_ui_manifest_response_contract(client: TestClient) -> None:
+    response = client.get("/ui/manifest")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    data = response.json()
+    assert isinstance(data, dict)
+    _assert_has_keys(
+        data,
+        {"status", "service", "timestamp", "totalroutes", "routes", "metadata"},
+    )
+
+
+# ===========================================================================
+# GET /dashboard/units — DashboardUnitsResponse contract
+# ===========================================================================
+
+
+def test_dashboard_units_response_contract_valid_owner_key(client: TestClient) -> None:
+    mock_registry = MagicMock()
+    mock_registry.get_keys_for_owner.return_value = [_make_mock_key_entry()]
+    app.dependency_overrides[get_install_key_registry] = lambda: mock_registry
+    try:
+        response = client.get("/dashboard/units", params={"owner_key": "owner-test-001"})
+    finally:
+        app.dependency_overrides.pop(get_install_key_registry, None)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    data = response.json()
+    assert isinstance(data, dict)
+    _assert_has_keys(
+        data,
+        {"owner_key", "total_keys", "total_units_consumed", "keys", "timestamp"},
+    )
+    assert data["owner_key"] == "owner-test-001"
+    assert isinstance(data["total_keys"], int)
+    assert isinstance(data["total_units_consumed"], int)
+    assert isinstance(data["keys"], list)
+    assert isinstance(data["timestamp"], str)
+    assert len(data["timestamp"]) > 0
+
+
+def test_dashboard_units_keys_entry_shape(client: TestClient) -> None:
+    mock_registry = MagicMock()
+    mock_registry.get_keys_for_owner.return_value = [_make_mock_key_entry()]
+    app.dependency_overrides[get_install_key_registry] = lambda: mock_registry
+    try:
+        response = client.get("/dashboard/units", params={"owner_key": "owner-test-001"})
+    finally:
+        app.dependency_overrides.pop(get_install_key_registry, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["keys"]) == 1
+    entry = data["keys"][0]
+    _assert_has_keys(
+        entry,
+        {"key_id", "program", "masked_key", "label", "active", "units_consumed", "last_used_at"},
+    )
+    assert entry["key_id"] == "key-abc-123"
+    assert entry["units_consumed"] == 42
+    assert isinstance(entry["active"], bool)
+
+
+def test_dashboard_units_empty_owner_returns_zero_totals(client: TestClient) -> None:
+    mock_registry = MagicMock()
+    mock_registry.get_keys_for_owner.return_value = []
+    app.dependency_overrides[get_install_key_registry] = lambda: mock_registry
+    try:
+        response = client.get("/dashboard/units", params={"owner_key": "owner-nobody"})
+    finally:
+        app.dependency_overrides.pop(get_install_key_registry, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total_keys"] == 0
+    assert data["total_units_consumed"] == 0
+    assert data["keys"] == []
+
+
+# ===========================================================================
+# POST /dashboard/units/record — RecordKeyUsageResponse contract
+# ===========================================================================
+
+
+def test_record_key_usage_response_contract_valid_body(client: TestClient) -> None:
+    mock_registry = MagicMock()
+    mock_registry.record_key_usage.return_value = _make_mock_updated_key()
+    app.dependency_overrides[get_install_key_registry] = lambda: mock_registry
+    try:
+        response = client.post(
+            "/dashboard/units/record",
+            json={"key_id": "key-abc-123", "units": 10},
+        )
+    finally:
+        app.dependency_overrides.pop(get_install_key_registry, None)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    data = response.json()
+    assert isinstance(data, dict)
+    _assert_has_keys(data, {"key_id", "units_consumed", "last_used_at", "timestamp"})
+    assert data["key_id"] == "key-abc-123"
+    assert isinstance(data["units_consumed"], int)
+    assert isinstance(data["timestamp"], str)
+    assert len(data["timestamp"]) > 0
+
+
+def test_record_key_usage_unknown_key_id_returns_404(client: TestClient) -> None:
+    mock_registry = MagicMock()
+    mock_registry.record_key_usage.side_effect = InstallKeyNotFoundError("key-unknown not found")
+    app.dependency_overrides[get_install_key_registry] = lambda: mock_registry
+    try:
+        response = client.post(
+            "/dashboard/units/record",
+            json={"key_id": "key-unknown", "units": 5},
+        )
+    finally:
+        app.dependency_overrides.pop(get_install_key_registry, None)
+
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith("application/json")
+    data = response.json()
+    assert "detail" in data
+
+
+def test_record_key_usage_units_zero_rejected_by_schema(client: TestClient) -> None:
+    response = client.post(
+        "/dashboard/units/record",
+        json={"key_id": "key-abc-123", "units": 0},
+    )
+    assert response.status_code == 422
+
+
+def test_record_key_usage_units_negative_rejected_by_schema(client: TestClient) -> None:
+    response = client.post(
+        "/dashboard/units/record",
+        json={"key_id": "key-abc-123", "units": -10},
+    )
+    assert response.status_code == 422
+
+
+def test_record_key_usage_missing_key_id_rejected_by_schema(client: TestClient) -> None:
+    response = client.post(
+        "/dashboard/units/record",
+        json={"units": 5},
+    )
+    assert response.status_code == 422
+
+
+def test_record_key_usage_missing_units_rejected_by_schema(client: TestClient) -> None:
+    response = client.post(
+        "/dashboard/units/record",
+        json={"key_id": "key-abc-123"},
+    )
+    assert response.status_code == 422

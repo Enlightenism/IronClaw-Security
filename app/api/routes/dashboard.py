@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.auth import require_api_key
+from app.core.install_keys import InstallKeyNotFoundError, InstallKeyRegistry, get_install_key_registry
 from app.core.unit_wallet import get_unit_wallet_registry
 from app.services.audit_store import get_audit_store
 from app.services.incident_store import get_incident_store
@@ -71,6 +72,36 @@ class DashboardResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class KeyUsageSummary(BaseModel):
+    key_id: str
+    program: str
+    masked_key: str
+    label: str
+    active: bool
+    units_consumed: int
+    last_used_at: str | None
+
+
+class DashboardUnitsResponse(BaseModel):
+    owner_key: str
+    total_keys: int
+    total_units_consumed: int
+    keys: list[KeyUsageSummary]
+    timestamp: str
+
+
+class RecordKeyUsageRequest(BaseModel):
+    key_id: str
+    units: int = Field(..., gt=0)
+
+
+class RecordKeyUsageResponse(BaseModel):
+    key_id: str
+    units_consumed: int
+    last_used_at: str | None
+    timestamp: str
+
+
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
@@ -127,34 +158,10 @@ def get_dashboard_overview() -> DashboardResponse:
         timestamp=now,
         environment="production",
         kpis=[
-            DashboardStatView(
-                key="protected_requests",
-                label="Protected Requests",
-                value=len(audit_events),
-                delta=0,
-                metadata={"window": "active"},
-            ),
-            DashboardStatView(
-                key="blocked_actions",
-                label="Blocked Actions",
-                value=len(blocked_events),
-                delta=0,
-                metadata={"window": "active"},
-            ),
-            DashboardStatView(
-                key="quarantined_items",
-                label="Quarantined Items",
-                value=len(quarantine_items),
-                delta=0,
-                metadata={"window": "active"},
-            ),
-            DashboardStatView(
-                key="open_incidents",
-                label="Open Incidents",
-                value=len(open_incidents),
-                delta=0,
-                metadata={"window": "active"},
-            ),
+            DashboardStatView(key="protected_requests", label="Protected Requests", value=len(audit_events), delta=0, metadata={"window": "active"}),
+            DashboardStatView(key="blocked_actions", label="Blocked Actions", value=len(blocked_events), delta=0, metadata={"window": "active"}),
+            DashboardStatView(key="quarantined_items", label="Quarantined Items", value=len(quarantine_items), delta=0, metadata={"window": "active"}),
+            DashboardStatView(key="open_incidents", label="Open Incidents", value=len(open_incidents), delta=0, metadata={"window": "active"}),
         ],
         alerts=[
             DashboardIncidentView(
@@ -193,10 +200,7 @@ def get_dashboard_overview() -> DashboardResponse:
                 }
                 for item in sorted(
                     integration_rollups.values(),
-                    key=lambda item: (
-                        -int(item["protected_requests_24h"]),
-                        str(item["integration_id"]),
-                    ),
+                    key=lambda item: (-int(item["protected_requests_24h"]), str(item["integration_id"])),
                 )
             ],
             "wallet": {
@@ -207,4 +211,47 @@ def get_dashboard_overview() -> DashboardResponse:
                 "updated_at": wallet.updated_at.isoformat().replace("+00:00", "Z"),
             },
         },
+    )
+
+
+@router.get("/units", response_model=DashboardUnitsResponse)
+def get_dashboard_units(
+    owner_key: str = Query(...),
+    registry: InstallKeyRegistry = Depends(get_install_key_registry),
+) -> DashboardUnitsResponse:
+    records = registry.get_keys_for_owner(owner_key)
+    return DashboardUnitsResponse(
+        owner_key=owner_key,
+        total_keys=len(records),
+        total_units_consumed=sum(r.units_consumed for r in records),
+        keys=[
+            KeyUsageSummary(
+                key_id=r.key_id,
+                program=r.program,
+                masked_key=r.masked_key,
+                label=r.label,
+                active=r.active,
+                units_consumed=r.units_consumed,
+                last_used_at=r.last_used_at.isoformat().replace("+00:00", "Z") if r.last_used_at else None,
+            )
+            for r in records
+        ],
+        timestamp=_utc_now_iso(),
+    )
+
+
+@router.post("/units/record", response_model=RecordKeyUsageResponse)
+def record_key_usage(
+    body: RecordKeyUsageRequest,
+    registry: InstallKeyRegistry = Depends(get_install_key_registry),
+) -> RecordKeyUsageResponse:
+    try:
+        updated = registry.record_key_usage(body.key_id, body.units)
+    except InstallKeyNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return RecordKeyUsageResponse(
+        key_id=updated.key_id,
+        units_consumed=updated.units_consumed,
+        last_used_at=updated.last_used_at.isoformat().replace("+00:00", "Z") if updated.last_used_at else None,
+        timestamp=_utc_now_iso(),
     )
