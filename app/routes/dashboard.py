@@ -3,8 +3,15 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.core.install_keys import (
+    InstallKeyNotFoundError,
+    InstallKeyRegistry,
+    InstallKeyUsageError,
+    get_install_key_registry,
+)
 
 router = APIRouter(
     prefix="/dashboard",
@@ -58,8 +65,61 @@ class DashboardResponse(BaseModel):
     metadata: dict[str, str] = Field(default_factory=dict)
 
 
+# ---------------------------------------------------------------------------
+# Unit tracking schemas
+# ---------------------------------------------------------------------------
+
+
+class InstallKeyUnitEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key_id: str
+    program: str
+    masked_key: str
+    label: str
+    active: bool
+    units_consumed: int
+    last_used_at: str | None = None
+
+
+class DashboardUnitsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    owner_key: str
+    total_keys: int
+    total_units_consumed: int
+    keys: list[InstallKeyUnitEntry]
+    timestamp: str
+
+
+class RecordKeyUsageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key_id: str = Field(min_length=1, max_length=120)
+    units: int = Field(ge=1)
+
+
+class RecordKeyUsageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key_id: str
+    units_consumed: int
+    last_used_at: str | None = None
+    timestamp: str
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
 
 
 @router.get("/overview", response_model=DashboardResponse)
@@ -126,4 +186,58 @@ def get_dashboard_overview() -> DashboardResponse:
             "scope": "overview",
             "generatedby": "dashboard-route",
         },
+    )
+
+
+@router.get("/units", response_model=DashboardUnitsResponse)
+def get_units_for_owner(
+    owner_key: str,
+    registry: InstallKeyRegistry = Depends(get_install_key_registry),
+) -> DashboardUnitsResponse:
+    """
+    Return unit consumption tracking for all install keys belonging to owner_key.
+    """
+    records = registry.get_keys_for_owner(owner_key)
+    total_units = sum(r.units_consumed for r in records)
+    entries = [
+        InstallKeyUnitEntry(
+            key_id=r.key_id,
+            program=r.program,
+            masked_key=r.masked_key,
+            label=r.label,
+            active=r.active,
+            units_consumed=r.units_consumed,
+            last_used_at=r.last_used_at.isoformat() if r.last_used_at else None,
+        )
+        for r in records
+    ]
+    return DashboardUnitsResponse(
+        owner_key=owner_key,
+        total_keys=len(records),
+        total_units_consumed=total_units,
+        keys=entries,
+        timestamp=_utc_now_iso(),
+    )
+
+
+@router.post("/units/record", response_model=RecordKeyUsageResponse, status_code=status.HTTP_200_OK)
+def record_unit_usage(
+    body: RecordKeyUsageRequest,
+    registry: InstallKeyRegistry = Depends(get_install_key_registry),
+) -> RecordKeyUsageResponse:
+    """
+    Record unit consumption for a specific install key.
+    """
+    try:
+        updated = registry.record_key_usage(body.key_id, body.units)
+    except InstallKeyNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except InstallKeyUsageError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+    return RecordKeyUsageResponse(
+        key_id=updated.key_id,
+        units_consumed=updated.units_consumed,
+        last_used_at=updated.last_used_at.isoformat() if updated.last_used_at else None,
+        timestamp=_utc_now_iso(),
     )
