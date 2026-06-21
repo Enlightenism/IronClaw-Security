@@ -921,7 +921,19 @@ class BehavioralBaselineStore:
         with self._lock:
             baseline = self._baselines.get(agent_id)
             if baseline is None:
-                return False
+                # Fall back: build from observations so status transition is possible
+                observations = list(self._observations.get(agent_id, []))
+                if not observations:
+                    return False
+                client_id = self._baseline_client_ids.get(agent_id)
+                baseline = _build_baseline_from_observations(
+                    agent_id=agent_id,
+                    client_id=client_id,
+                    observations=observations,
+                    existing_baseline=None,
+                    drift_window_seconds=self._drift_window_seconds,
+                    min_samples_for_baseline=self._min_samples_for_baseline,
+                )
             stale = baseline._replace_status("stale")
             self._baselines[agent_id] = stale
 
@@ -940,7 +952,19 @@ class BehavioralBaselineStore:
         with self._lock:
             baseline = self._baselines.get(agent_id)
             if baseline is None:
-                return False
+                # Fall back: build from observations so status transition is possible
+                observations = list(self._observations.get(agent_id, []))
+                if not observations:
+                    return False
+                client_id = self._baseline_client_ids.get(agent_id)
+                baseline = _build_baseline_from_observations(
+                    agent_id=agent_id,
+                    client_id=client_id,
+                    observations=observations,
+                    existing_baseline=None,
+                    drift_window_seconds=self._drift_window_seconds,
+                    min_samples_for_baseline=self._min_samples_for_baseline,
+                )
             suspended = baseline._replace_status("suspended")
             self._baselines[agent_id] = suspended
 

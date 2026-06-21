@@ -65,13 +65,11 @@ class ScanRequest(BaseModel):
             raise ValueError(f"target_type must be one of {sorted(allowed)}, got '{v}'")
         return v
 
-    @field_validator("target_value")
-    @classmethod
-    def validate_target_value(cls, v: str) -> str:
-        stripped = v.strip()
-        if not stripped:
+    @model_validator(mode="after")
+    def validate_target_value_not_blank(self) -> ScanRequest:
+        if self.target_value is not None and not self.target_value.strip():
             raise ValueError("target_value must not be blank or whitespace-only")
-        return v
+        return self
 
 
 # ---------------------------------------------------------------------------

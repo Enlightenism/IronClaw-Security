@@ -104,10 +104,29 @@ def _sanitize_validation_errors(errors: list[Any]) -> list[dict[str, Any]]:
 
 
 def _is_value_error(errors: list[Any]) -> bool:
-    """Return True if ALL errors are model-level value_error (model_validator failures)."""
+    """Return True if ALL errors are value_error type (model_validator failures)."""
     if not errors:
         return False
     return all(isinstance(e, dict) and e.get("type") == "value_error" for e in errors)
+
+
+def _is_field_level_value_error(errors: list[Any]) -> bool:
+    """Return True if any value_error originates from a named field (field_validator).
+
+    field_validator errors have loc with more than one element beyond 'body',
+    e.g. ("body", "action_type") — distinguishing them from model_validator
+    errors which land at ("body",) or shallower.
+    """
+    for e in errors:
+        if not isinstance(e, dict):
+            continue
+        if e.get("type") != "value_error":
+            continue
+        loc = e.get("loc", ())
+        # field_validator: loc has a field name as last element (len >= 2 or last is str field)
+        if len(loc) >= 2:
+            return True
+    return False
 
 
 def build_error_response(
@@ -223,7 +242,6 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
         details=details,
     )
 
-    # Preserve {"detail": ...} shape — tests key on resp.json()["detail"]
     return JSONResponse(
         status_code=exc.status_code,
         content={"detail": exc.detail},
@@ -239,10 +257,10 @@ async def validation_exception_handler(
     sanitized_errors = _sanitize_validation_errors(raw_errors)
     details: dict[str, Any] = {"errors": sanitized_errors}
 
-    # model_validator raises ValueError → Pydantic wraps as value_error type.
-    # These are semantic business-rule rejections → 400 Bad Request.
-    # All other validation errors (missing fields, wrong types, etc.) → 422.
-    if _is_value_error(raw_errors):
+    # model_validator raises value_error at model root → 400 Bad Request.
+    # field_validator raises value_error at field level (loc len >= 2) → 422.
+    # All other validation errors → 422.
+    if _is_value_error(raw_errors) and not _is_field_level_value_error(raw_errors):
         response_status = status.HTTP_400_BAD_REQUEST
         error_code = "bad_request"
         message = "Request validation failed"
@@ -271,8 +289,6 @@ async def validation_exception_handler(
 
 
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    # Delegate intentional HTTP exceptions (401, 403, 404, etc.) to the
-    # correct handler instead of swallowing them as 500.
     if isinstance(exc, HTTPException):
         return await http_exception_handler(request, exc)
 

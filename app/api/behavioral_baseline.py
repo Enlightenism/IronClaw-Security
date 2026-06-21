@@ -21,7 +21,7 @@ router = APIRouter(tags=["behavioral-baseline"])
 
 
 class ObservationRequest(BaseModel):
-    action_type: str = Field(..., min_length=1, description="Type of action performed by the agent.")
+    action_type: str = Field(..., description="Type of action performed by the agent.")
     target: str = Field(default="", description="Resource or target the action operated on.")
     risk_score: int = Field(..., ge=0, le=100, description="Risk score for this action (0–100).")
     session_id: str | None = Field(default=None, description="Session identifier, if applicable.")
@@ -32,19 +32,25 @@ class ObservationRequest(BaseModel):
     @field_validator("action_type")
     @classmethod
     def _validate_action_type(cls, v: str) -> str:
-        stripped = v.strip()
-        if not stripped:
+        if not v.strip():
             raise ValueError("action_type must be a non-empty string")
-        return stripped
+        return v.strip()
 
 
 class BulkObservationItem(BaseModel):
-    action_type: str = Field(..., min_length=1)
+    action_type: str = Field(..., description="Type of action performed by the agent.")
     target: str = Field(default="")
     risk_score: int = Field(..., ge=0, le=100)
     session_id: str | None = Field(default=None)
     matched_patterns: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("action_type")
+    @classmethod
+    def _validate_action_type(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("action_type must be a non-empty string")
+        return v.strip()
 
 
 class BulkObservationRequest(BaseModel):
@@ -208,7 +214,7 @@ def record_observations_bulk(
     try:
         recorded = store.record_observations_bulk(
             agent_id=agent_id,
-            observations=items,
+            items=items,
             client_id=body.client_id,
         )
     except ValueError as exc:
