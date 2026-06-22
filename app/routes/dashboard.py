@@ -220,7 +220,11 @@ def get_units_for_owner(
     )
 
 
-@router.post("/units/record", response_model=RecordKeyUsageResponse, status_code=status.HTTP_200_OK)
+@router.post(
+    "/units/record",
+    response_model=RecordKeyUsageResponse,
+    status_code=status.HTTP_200_OK,
+)
 def record_unit_usage(
     body: RecordKeyUsageRequest,
     registry: InstallKeyRegistry = Depends(get_install_key_registry),
@@ -229,11 +233,17 @@ def record_unit_usage(
     Record unit consumption for a specific install key.
     """
     try:
-        updated = registry.record_key_usage(body.key_id, body.units)
+        updated = registry.record_key_usage(body.key_id, units=body.units)
     except InstallKeyNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
     except InstallKeyUsageError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
 
     return RecordKeyUsageResponse(
         key_id=updated.key_id,

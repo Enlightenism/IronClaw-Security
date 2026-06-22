@@ -9,6 +9,7 @@ from app.routes.auditexplorer import router as auditexplorer_router
 from app.routes.auditlog import router as auditlog_router
 from app.routes.behavioral_baseline import router as behavioral_baseline_router
 from app.routes.billing import router as billing_router
+from app.routes.customerkeys import router as customerkeys_router
 from app.routes.dashboard import router as dashboard_router
 from app.routes.deployment import router as deployment_router
 from app.routes.executiondashboard import router as executiondashboard_router
@@ -38,6 +39,7 @@ _INCLUDED_ROUTERS = (
     auditlog_router,
     behavioral_baseline_router,
     billing_router,
+    customerkeys_router,
     dashboard_router,
     deployment_router,
     executiondashboard_router,

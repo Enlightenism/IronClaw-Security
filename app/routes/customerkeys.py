@@ -145,8 +145,6 @@ def _key_to_view(record: Any) -> InstallKeyView:
 
 # ---------------------------------------------------------------------------
 # POST /customer-keys/generate
-# Enforces post-purchase gate: subscription_id + owner_key must be present
-# and no active key for the same program may already exist.
 # ---------------------------------------------------------------------------
 
 
@@ -165,7 +163,6 @@ def _key_to_view(record: Any) -> InstallKeyView:
 def generate_install_key(payload: GenerateInstallKeyRequest) -> GenerateInstallKeyResponse:
     _assert_valid_program(payload.program)
 
-    # Post-purchase gate: subscription_id must be a meaningful non-whitespace value
     if not payload.subscription_id.strip():
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
@@ -199,6 +196,31 @@ def generate_install_key(payload: GenerateInstallKeyRequest) -> GenerateInstallK
         timestamp=_utc_now_iso(),
         raw_key=record.raw_key,
         key=_key_to_view(record),
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /customer-keys/summary  — MUST be registered before /{key_id}
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/summary",
+    response_model=SummaryResponse,
+    summary="Aggregate summary of all install keys",
+)
+def install_key_summary() -> SummaryResponse:
+    registry = get_install_key_registry()
+    data = registry.summary()
+    return SummaryResponse(
+        status="ok",
+        service="IronClaw-Security",
+        timestamp=_utc_now_iso(),
+        total=data["total"],
+        active=data["active"],
+        revoked=data["revoked"],
+        openclaw_keys=data["openclaw_keys"],
+        claude_code_keys=data["claude_code_keys"],
     )
 
 
@@ -320,29 +342,4 @@ def record_key_usage(
         timestamp=_utc_now_iso(),
         key_id=updated.key_id,
         units_consumed=updated.units_consumed,
-    )
-
-
-# ---------------------------------------------------------------------------
-# GET /customer-keys/summary
-# ---------------------------------------------------------------------------
-
-
-@router.get(
-    "/summary",
-    response_model=SummaryResponse,
-    summary="Aggregate summary of all install keys",
-)
-def install_key_summary() -> SummaryResponse:
-    registry = get_install_key_registry()
-    data = registry.summary()
-    return SummaryResponse(
-        status="ok",
-        service="IronClaw-Security",
-        timestamp=_utc_now_iso(),
-        total=data["total"],
-        active=data["active"],
-        revoked=data["revoked"],
-        openclaw_keys=data["openclaw_keys"],
-        claude_code_keys=data["claude_code_keys"],
     )
