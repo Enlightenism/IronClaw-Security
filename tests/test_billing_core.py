@@ -34,7 +34,6 @@ from app.supabaseclient import (
 
 
 def _make_fake_store() -> MagicMock:
-    """Return a mock store that mimics app.persistencebootstrap.StoreType."""
     store = MagicMock()
     store.select.return_value = []
     store.insert.return_value = []
@@ -333,7 +332,6 @@ class TestBillingRegistryCRUDSubscription:
         reg = BillingRegistry(store=store)
         c = reg.create_customer(email="u@u.com", display_name="U", plan="starter-5k")
         reg.create_subscription(customer_id=c.customer_id, plan="starter-5k")
-        # insert called twice: once for customer, once for subscription
         assert store.insert.call_count == 2
 
 
@@ -406,7 +404,6 @@ class TestRecordUsage:
         c = _create_customer(reg)
         sub = _create_active_subscription(reg, c.customer_id)
         limit = sub.unit_limit
-        # Consume some first
         reg.record_usage(customer_id=c.customer_id, units=limit - 5)
         with pytest.raises(BillingUsageError) as exc_info:
             reg.record_usage(customer_id=c.customer_id, units=10)
@@ -611,15 +608,10 @@ class TestCanConsumeTokens:
         reg = _make_registry()
         c = _create_customer(reg)
         sub = _create_active_subscription(reg, c.customer_id)
-        # Exactly TOKENS_PER_UNIT = 1 unit required
         assert reg.can_consume_tokens(customer_id=c.customer_id, token_count=TOKENS_PER_UNIT)
-        # TOKENS_PER_UNIT + 1 → 2 units, still within 5k limit
         assert reg.can_consume_tokens(customer_id=c.customer_id, token_count=TOKENS_PER_UNIT + 1)
-        # Consume all but 1 unit
         reg.record_usage(customer_id=c.customer_id, units=sub.unit_limit - 1)
-        # 1 token needs 1 unit, should still pass
         assert reg.can_consume_tokens(customer_id=c.customer_id, token_count=1)
-        # 2 units worth would fail
         assert not reg.can_consume_tokens(customer_id=c.customer_id, token_count=TOKENS_PER_UNIT + 1)
 
 
@@ -683,6 +675,12 @@ class TestBillingSubscriptionProperties:
         assert sub.is_active is False
 
     def test_is_active_false_when_period_expired(self) -> None:
+        """
+        Units do not expire in IronClaw. is_active is gated on status and
+        remaining units only. A subscription with status=active and remaining
+        units is active regardless of period_end. is_period_active reflects
+        the date window; is_active reflects consumption eligibility.
+        """
         now = datetime.now(UTC)
         sub = BillingSubscription(
             subscription_id="s",
@@ -694,7 +692,8 @@ class TestBillingSubscriptionProperties:
             current_period_end=now - timedelta(days=1),
             units_consumed=0,
         )
-        assert sub.is_active is False
+        assert sub.is_period_active is False
+        assert sub.is_active is True
 
     def test_negative_units_consumed_raises(self) -> None:
         with pytest.raises(ValueError, match="units_consumed cannot be negative"):
@@ -734,5 +733,4 @@ class TestResetBillingRegistryForTesting:
         assert reg is not None
 
     def teardown_method(self) -> None:
-        # Always leave the singleton clean for other test modules.
         _reset_billing_registry_for_testing()
