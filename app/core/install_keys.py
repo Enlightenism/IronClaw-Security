@@ -413,11 +413,14 @@ class InstallKeyRegistry:
     # record_key_usage
     # ------------------------------------------------------------------
 
-    def record_key_usage(self, key_id: str, units: int) -> InstallKeyRecord:
+    def record_key_usage(self, key_id: str, *, units: int) -> InstallKeyRecord:
         """
         Increment units_consumed for the given key_id and persist to Supabase.
         Raises InstallKeyNotFoundError if key_id is unknown.
         Raises InstallKeyUsageError if key is inactive or units <= 0.
+
+        ``units`` is keyword-only to match the contract relied on by
+        dashboard.py and the billing provisioning call.
         """
         if units <= 0:
             raise InstallKeyUsageError(key_id, "units must be a positive integer")
