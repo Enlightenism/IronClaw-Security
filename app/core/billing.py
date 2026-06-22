@@ -42,7 +42,9 @@ __all__ = [
 
 
 TOKENS_PER_UNIT: Final[int] = 25_000
-_DEFAULT_PERIOD_DAYS: Final[int] = 30
+# Units do not expire in IronClaw. Period end is stored for DB completeness only
+# and is not used to gate consumption. Set to 100 years as a non-expiring sentinel.
+_DEFAULT_PERIOD_DAYS: Final[int] = 36500
 
 
 def units_required_for_tokens(token_count: int) -> int:
@@ -252,12 +254,14 @@ class BillingSubscription:
 
     @property
     def is_period_active(self) -> bool:
+        """Retained for DB introspection only. Not used to gate consumption."""
         now = datetime.now(UTC)
         return self.current_period_start <= now <= self.current_period_end
 
     @property
     def is_active(self) -> bool:
-        return self.status == "active" and self.remaining_units > 0 and self.is_period_active
+        """Units do not expire. Active is determined by status and remaining units only."""
+        return self.status == "active" and self.remaining_units > 0
 
 
 def _customer_from_row(row: dict[str, Any]) -> BillingCustomer:
@@ -304,13 +308,26 @@ def _subscription_from_row(row: dict[str, Any]) -> BillingSubscription:
 class BillingRegistry:
     """Billing foundation for IronClaw agentic systems."""
 
-    def __init__(self, *, store: StoreType | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        store: StoreType | None = None,
+        install_key_registry: Any | None = None,
+    ) -> None:
         self._lock = Lock()
         self._store: StoreType = store if store is not None else build_store()
         self._customers: dict[str, BillingCustomer] = {}
         self._subscriptions: dict[str, BillingSubscription] = {}
         self._customer_sub_index: dict[str, list[str]] = {}
         self._loaded = False
+        self._install_key_registry = install_key_registry
+
+    def _get_install_key_registry(self) -> Any:
+        if self._install_key_registry is not None:
+            return self._install_key_registry
+        from app.core.install_keys import get_install_key_registry  # local import to avoid circular
+
+        return get_install_key_registry()
 
     def _ensure_loaded(self) -> None:
         if self._loaded:
@@ -664,6 +681,83 @@ class BillingRegistry:
 
     def get_unit_package_catalog(self) -> list[_UnitPackageEntry]:
         return list(UNIT_PACKAGE_CATALOG)
+
+    # ---------------------------------------------------------------------------
+    # has_active_subscription — gates install key generation
+    # ---------------------------------------------------------------------------
+
+    def has_active_subscription(self, owner_key: str) -> bool:
+        """
+        Return True if owner_key has at least one active subscription.
+
+        owner_key is the canonical wallet key produced by resolve_billing_owner —
+        either a normalized email address or an ic_org_{org_id} string.
+        Matches by customer email for personal keys.
+        """
+        with self._lock:
+            self._ensure_loaded()
+            normalized = owner_key.strip().lower()
+            for customer in self._customers.values():
+                if not customer.active:
+                    continue
+                if customer.email == normalized:
+                    sub = self._get_active_subscription_unlocked(customer.customer_id)
+                    if sub is not None:
+                        return True
+            return False
+
+    # ---------------------------------------------------------------------------
+    # provision_install_keys_on_purchase
+    # ---------------------------------------------------------------------------
+
+    def provision_install_keys_on_purchase(
+        self,
+        customer_id: str,
+        subscription_id: str,
+        owner_key: str,
+    ) -> dict[str, Any]:
+        """
+        Provision one install key per program (openclaw + claude_code) immediately
+        after a successful create_subscription().
+
+        Gates on has_active_subscription(owner_key). Raises ValueError if no
+        active subscription exists for the owner at call time.
+
+        Returns {"openclaw": InstallKeyRecord, "claude_code": InstallKeyRecord}.
+        Raises InstallKeyAlreadyExistsError on duplicate provisioning attempt.
+        """
+        if not self.has_active_subscription(owner_key):
+            raise ValueError(f"Cannot provision install keys: no active subscription found for owner {owner_key!r}")
+
+        registry = self._get_install_key_registry()
+
+        openclaw_key = registry.generate_install_key(
+            owner_key,
+            subscription_id,
+            "openclaw",
+            label="auto-provisioned",
+            metadata={"customer_id": customer_id, "provisioned_by": "billing"},
+        )
+        claude_key = registry.generate_install_key(
+            owner_key,
+            subscription_id,
+            "claude_code",
+            label="auto-provisioned",
+            metadata={"customer_id": customer_id, "provisioned_by": "billing"},
+        )
+
+        logger.info(
+            "install_keys_provisioned",
+            extra={
+                "customer_id": customer_id,
+                "subscription_id": subscription_id,
+                "owner_key": owner_key,
+                "openclaw_key_id": openclaw_key.key_id,
+                "claude_key_id": claude_key.key_id,
+            },
+        )
+
+        return {"openclaw": openclaw_key, "claude_code": claude_key}
 
 
 _billing_registry: BillingRegistry | None = None
