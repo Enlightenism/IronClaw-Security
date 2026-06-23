@@ -49,6 +49,7 @@ class SystemDiagnosticsResponse(BaseModel):
     overall_status: str
     overall_tone: str
     service: str
+    generated_at: str
     checks: list[DiagnosticsCheck]
     kpis: list[DiagnosticsKpi]
     active_incidents: list[DiagnosticsIncident]
@@ -137,7 +138,7 @@ _INCIDENTS: list[DiagnosticsIncident] = [
         status="open",
         title="Review queue backlog elevated",
         summary="Queued human-review items exceeded preferred operating threshold.",
-        detected_at="2026-01-01T00:00:00Z",
+        detected_at="2026-06-23T10:14:00Z",
         owner="ops-review",
     ),
     DiagnosticsIncident(
@@ -146,35 +147,35 @@ _INCIDENTS: list[DiagnosticsIncident] = [
         status="monitoring",
         title="Telemetry ingest spike observed",
         summary="Short-lived telemetry burst detected and automatically absorbed.",
-        detected_at="2026-01-01T00:00:00Z",
+        detected_at="2026-06-23T11:02:00Z",
         owner="system",
     ),
 ]
 
 _TIMELINE: list[DiagnosticsTimelineEvent] = [
     DiagnosticsTimelineEvent(
-        timestamp="2026-01-01T00:00:00Z",
+        timestamp="2026-06-23T08:00:00Z",
         category="telemetry",
         title="Telemetry summary refreshed",
         summary="Background summarizer completed without lag.",
         tone="success",
     ),
     DiagnosticsTimelineEvent(
-        timestamp="2026-01-01T00:00:00Z",
+        timestamp="2026-06-23T09:45:00Z",
         category="review",
         title="Review backlog threshold crossed",
         summary="Queue moved into degraded state due to pending approvals.",
         tone="warning",
     ),
     DiagnosticsTimelineEvent(
-        timestamp="2026-01-01T00:00:00Z",
+        timestamp="2026-06-23T10:14:00Z",
         category="runtime",
         title="Sandbox session blocked",
         summary="High-risk execution halted by runtime boundary controls.",
         tone="critical",
     ),
     DiagnosticsTimelineEvent(
-        timestamp="2026-01-01T00:00:00Z",
+        timestamp="2026-06-23T11:30:00Z",
         category="policy",
         title="Policy bundle validated",
         summary="Current policy bundle passed integrity and compatibility checks.",
@@ -192,6 +193,7 @@ _RESPONSE = SystemDiagnosticsResponse(
     overall_status="degraded" if _degraded_count else "healthy",
     overall_tone="warning" if _degraded_count else "success",
     service="IronClaw",
+    generated_at="2026-06-23T00:00:00Z",
     checks=_CHECKS,
     kpis=[
         DiagnosticsKpi(label="Healthy Checks", value=str(_healthy_count), tone="success"),
@@ -204,12 +206,13 @@ _RESPONSE = SystemDiagnosticsResponse(
     actions=[],
     metadata={
         "page_id": "system-diagnostics",
+        "title": "System Diagnostics",
         "supports_live_polling": True,
         "refresh_interval_seconds": 15,
     },
 )
 
 
-@router.get("/ui/system-diagnostics", response_model=SystemDiagnosticsResponse)
+@router.get("/ui/systemdiagnostics", response_model=SystemDiagnosticsResponse)
 def get_system_diagnostics() -> SystemDiagnosticsResponse:
     return _RESPONSE
