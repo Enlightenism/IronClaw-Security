@@ -1,19 +1,14 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
 router = APIRouter(
-    prefix="/telemetry-access-summary",
+    prefix="/ui/telemetry-access-summary",
     tags=["telemetry-access-summary"],
 )
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 class TelemetrySummaryCounterView(BaseModel):
@@ -48,52 +43,40 @@ class TelemetrySummaryLinkView(BaseModel):
 
 
 class TelemetryAccessSummaryResponse(BaseModel):
+    title: str
     status: str
     service: str
-    timestamp: str
     window: TelemetrySummaryWindowView
-    counters: list[TelemetrySummaryCounterView] = Field(default_factory=list)
+    metrics: list[TelemetrySummaryCounterView] = Field(default_factory=list)
     recent_events: list[TelemetrySummaryEventView] = Field(default_factory=list)
-    links: list[TelemetrySummaryLinkView] = Field(default_factory=list)
+    sections: list[TelemetrySummaryLinkView] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
 
 
-def _build_counters(
-    summary_limit: int,
-    events_limit: int,
-) -> list[TelemetrySummaryCounterView]:
+def _build_metrics(summary_limit: int, events_limit: int) -> list[TelemetrySummaryCounterView]:
     return [
         TelemetrySummaryCounterView(
             label="Telemetry reads",
             value=0,
             trend="stable",
-            metadata={
-                "summary_limit": summary_limit,
-                "source": "telemetry-access-summary-ui",
-            },
+            metadata={"summary_limit": summary_limit, "source": "telemetry-access-summary-ui"},
         ),
         TelemetrySummaryCounterView(
             label="Audit-linked accesses",
             value=0,
             trend="stable",
-            metadata={
-                "events_limit": events_limit,
-                "source": "telemetry-access-summary-ui",
-            },
+            metadata={"events_limit": events_limit, "source": "telemetry-access-summary-ui"},
         ),
         TelemetrySummaryCounterView(
             label="Policy-sensitive events",
             value=0,
             trend="stable",
-            metadata={
-                "classification": "guard-aware",
-                "source": "telemetry-access-summary-ui",
-            },
+            metadata={"classification": "guard-aware", "source": "telemetry-access-summary-ui"},
         ),
     ]
 
 
-def _build_links() -> list[TelemetrySummaryLinkView]:
+def _build_sections() -> list[TelemetrySummaryLinkView]:
     return [
         TelemetrySummaryLinkView(
             label="Audit log",
@@ -124,24 +107,18 @@ def get_telemetry_access_summary(
     events_limit: int = Query(default=50, ge=1, le=500),
 ) -> TelemetryAccessSummaryResponse:
     return TelemetryAccessSummaryResponse(
+        title="Telemetry Access Summary",
         status="ok",
         service="IronClaw-Security",
-        timestamp=_utc_now_iso(),
         window=TelemetrySummaryWindowView(
             summary_limit=summary_limit,
             events_limit=events_limit,
             time_window="rolling",
-            metadata={
-                "ui_surface": "telemetry-access-summary",
-                "default_mode": "safe-empty",
-            },
+            metadata={"ui_surface": "telemetry-access-summary", "default_mode": "safe-empty"},
         ),
-        counters=_build_counters(
-            summary_limit=summary_limit,
-            events_limit=events_limit,
-        ),
+        metrics=_build_metrics(summary_limit=summary_limit, events_limit=events_limit),
         recent_events=[],
-        links=_build_links(),
+        sections=_build_sections(),
         notes=[
             "Telemetry access summary provides a UI-safe overview of telemetry reads and related operational activity.",
             "This Gen1 view returns a stable empty-state structure until live telemetry hydration is connected.",

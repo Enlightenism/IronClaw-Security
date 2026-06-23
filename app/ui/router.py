@@ -56,7 +56,7 @@ UI_ROUTERS: Final[tuple[APIRouter, ...]] = (
             _optional_router("app.ui.audit.log"),
             # ── alerts / system / incidents ──────────────────────────────────
             _optional_router("app.ui.alerts.notifications"),
-            _optional_router("app.ui.system.diagnostics"),
+            _optional_router("app.ui.systemdiagnostics"),
             _optional_router("app.ui.incidents.triage"),
             # ── integrations ─────────────────────────────────────────────────
             _optional_router("app.ui.integrations.settings"),
