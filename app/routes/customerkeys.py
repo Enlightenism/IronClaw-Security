@@ -6,6 +6,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 
+from app.core.billing import get_billing_registry
 from app.core.install_keys import (
     InstallKeyAlreadyExistsError,
     InstallKeyNotFoundError,
@@ -47,8 +48,8 @@ def _assert_valid_program(program: str) -> ProgramCode:
 
 class GenerateInstallKeyRequest(BaseModel):
     owner_key: str = Field(min_length=1, max_length=512)
-    subscription_id: str = Field(min_length=1, max_length=512)
-    program: Literal["openclaw", "claude_code"]
+    subscription_id: str | None = Field(default=None, max_length=512)
+    program: Literal["openclaw", "claude_code"] | None = None
     label: str = Field(default="", max_length=255)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -95,6 +96,7 @@ class RevokeInstallKeyResponse(BaseModel):
     service: str
     timestamp: str
     key_id: str
+    program: str | None
     active: bool
 
 
@@ -155,27 +157,34 @@ def _key_to_view(record: Any) -> InstallKeyView:
     summary="Generate a post-purchase install key",
     description=(
         "Generates a new install key for the given owner_key + program combination. "
-        "Enforces the post-purchase gate: requires a non-empty subscription_id and "
-        "raises 409 if an active key for the same owner and program already exists. "
-        "The raw_key is returned exactly once and never stored in plaintext."
+        "Enforces the post-purchase gate: requires an active billing subscription for "
+        "the owner and raises 409 if an active key for the same owner and program "
+        "already exists. The raw_key is returned exactly once and never stored in plaintext."
     ),
 )
 def generate_install_key(payload: GenerateInstallKeyRequest) -> GenerateInstallKeyResponse:
-    _assert_valid_program(payload.program)
+    if payload.program is not None:
+        _assert_valid_program(payload.program)
 
-    if not payload.subscription_id.strip():
+    # Billing gate: owner must have an active subscription.
+    billing = get_billing_registry()
+    if not billing.has_active_subscription(payload.owner_key):
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail="A valid subscription_id is required to generate an install key.",
+            detail="purchase_required",
         )
+
+    subscription_id = payload.subscription_id or ""
+    program: ProgramCode = payload.program or "openclaw"  # type: ignore[assignment]
+    _assert_valid_program(program)
 
     registry = get_install_key_registry()
 
     try:
         record = registry.generate_install_key(
             owner_key=payload.owner_key,
-            subscription_id=payload.subscription_id,
-            program=payload.program,
+            subscription_id=subscription_id,
+            program=program,
             label=payload.label,
             metadata=payload.metadata,
         )
@@ -300,11 +309,13 @@ def revoke_install_key(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Install key not found: {exc.key_id!r}",
         ) from exc
+    public = updated.public_dict()
     return RevokeInstallKeyResponse(
         status="ok",
         service="IronClaw-Security",
         timestamp=_utc_now_iso(),
         key_id=updated.key_id,
+        program=public.get("program"),
         active=updated.active,
     )
 
