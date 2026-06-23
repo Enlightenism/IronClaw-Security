@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from app.clients.release_policy_client import ReleasePolicyClient
+from app.core.billing import BillingRegistry, get_billing_registry
+from app.core.install_keys import InstallKeyRegistry, get_install_key_registry
+from app.core.unit_wallet import UnitWalletRegistry, get_unit_wallet_registry
 from app.persistencebootstrap import StoreType, get_persistence_store
 from app.providers.service_registry import ServiceRegistry, build_service_registry
 from app.services.authservice import AuthService
@@ -33,11 +36,17 @@ def _reset_dependencies_for_tests() -> None:
 
 
 __all__ = [
+    "BillingRegistry",
+    "InstallKeyRegistry",
     "ServiceRegistry",
+    "UnitWalletRegistry",
     "_reset_dependencies_for_tests",
     "build_service_registry",
     "get_auth_service",
+    "get_billing_registry",
+    "get_install_key_registry",
     "get_release_policy_client",
     "get_service_registry",
     "get_store",
+    "get_unit_wallet_registry",
 ]

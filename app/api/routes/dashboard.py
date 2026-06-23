@@ -7,8 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.auth import require_api_key
+from app.core.billing import BillingRegistry, get_billing_registry
 from app.core.install_keys import InstallKeyNotFoundError, InstallKeyRegistry, get_install_key_registry
-from app.core.unit_wallet import get_unit_wallet_registry
+from app.core.settings import Settings, get_settings
+from app.core.unit_wallet import UnitWalletRegistry, get_unit_wallet_registry
 from app.services.audit_store import get_audit_store
 from app.services.incident_store import get_incident_store
 from app.services.quarantine_store import get_quarantine_store
@@ -111,13 +113,16 @@ def _normalize_label(value: str) -> str:
 
 
 @router.get("/overview", response_model=DashboardResponse)
-def get_dashboard_overview() -> DashboardResponse:
+def get_dashboard_overview(
+    settings: Settings = Depends(get_settings),
+    wallet_registry: UnitWalletRegistry = Depends(get_unit_wallet_registry),
+    billing_registry: BillingRegistry = Depends(get_billing_registry),
+) -> DashboardResponse:
     now = _utc_now_iso()
 
     incident_store = get_incident_store()
     quarantine_store = get_quarantine_store()
     audit_store = get_audit_store()
-    wallet_registry = get_unit_wallet_registry()
 
     incidents = incident_store.list_incidents()
     quarantine_items = quarantine_store.list_items()
@@ -143,9 +148,21 @@ def get_dashboard_overview() -> DashboardResponse:
         if (event.verdict or "").lower() in {"block", "quarantine"}:
             bucket["blocked_events_24h"] = int(bucket["blocked_events_24h"]) + 1
 
-    wallet = wallet_registry.get_wallet("demo@ironclaw.local")
+    _DEMO_OWNER = "demo@ironclaw.local"
+    wallet = wallet_registry.get_wallet(_DEMO_OWNER)
     if wallet is None:
-        wallet = wallet_registry.get_or_create_wallet("demo@ironclaw.local")
+        wallet = wallet_registry.get_or_create_wallet(_DEMO_OWNER)
+
+    subscription = billing_registry.get_active_subscription_for_customer(_DEMO_OWNER)
+    subscription_meta: dict[str, Any] = {}
+    if subscription is not None:
+        subscription_meta = {
+            "plan": subscription.plan,
+            "status": subscription.status,
+            "units_consumed": subscription.units_consumed,
+            "unit_limit": subscription.unit_limit,
+            "remaining_units": subscription.remaining_units,
+        }
 
     recent_incidents = sorted(incidents, key=lambda i: i.created_at, reverse=True)[:5]
 
@@ -156,7 +173,7 @@ def get_dashboard_overview() -> DashboardResponse:
         status="ok",
         service="IronClaw-Security",
         timestamp=now,
-        environment="production",
+        environment=settings.environment,
         kpis=[
             DashboardStatView(key="protected_requests", label="Protected Requests", value=len(audit_events), delta=0, metadata={"window": "active"}),
             DashboardStatView(key="blocked_actions", label="Blocked Actions", value=len(blocked_events), delta=0, metadata={"window": "active"}),
@@ -210,6 +227,7 @@ def get_dashboard_overview() -> DashboardResponse:
                 "total_consumed_units": wallet.total_consumed_units,
                 "updated_at": wallet.updated_at.isoformat().replace("+00:00", "Z"),
             },
+            "subscription": subscription_meta,
         },
     )
 
