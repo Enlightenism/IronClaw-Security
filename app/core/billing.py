@@ -31,11 +31,13 @@ __all__ = [
     "BillingUsageError",
     "PlanCode",
     "PlanDefinition",
+    "UnitPackageEntry",
     "PLAN_DEFINITIONS",
     "TOKENS_PER_UNIT",
     "UNIT_PACKAGE_CATALOG",
     "units_required_for_tokens",
     "get_billing_registry",
+    "get_active_subscription_for_customer",
     "resolve_billing_owner",
     "_reset_billing_registry_for_testing",
 ]
@@ -62,7 +64,7 @@ def resolve_billing_owner(auth_ctx: Any, buyer_email: str) -> str:
     """Return the canonical wallet owner key for a billing operation.
 
     When the request is authenticated via an org API key
-    (``auth_ctx.key_type == "org"`` and ``auth_ctx.org_id`` is set),
+    (``auth_ctx.key_type == \"org\"`` and ``auth_ctx.org_id`` is set),
     all unit consumption is pooled under ``ic_org_{org_id}`` so every team
     member draws from the same shared wallet and the key format matches the
     ``_assert_owner_access`` guard in ``app/api/billing.py``.
@@ -124,7 +126,7 @@ PLAN_DEFINITIONS: Final[dict[PlanCode, PlanDefinition]] = {
 # ---------------------------------------------------------------------------
 
 
-class _UnitPackageEntry(TypedDict):
+class UnitPackageEntry(TypedDict):
     code: PlanCode
     name: str
     units: int
@@ -132,7 +134,11 @@ class _UnitPackageEntry(TypedDict):
     tokens_per_unit: int
 
 
-UNIT_PACKAGE_CATALOG: Final[list[_UnitPackageEntry]] = [
+# Keep private alias for backward compat with any internal reference.
+_UnitPackageEntry = UnitPackageEntry
+
+
+UNIT_PACKAGE_CATALOG: Final[list[UnitPackageEntry]] = [
     {
         "code": "starter-5k",
         "name": "Starter",
@@ -498,11 +504,16 @@ class BillingRegistry:
 
     def get_active_subscription_for_customer(
         self,
-        customer_id: str,
+        owner_key: str,
     ) -> BillingSubscription | None:
+        """Return the first active subscription whose customer_id matches owner_key.
+
+        owner_key is the canonical lookup argument used by get_dashboard_overview
+        and all dashboard callers.  It is treated as a direct customer_id lookup.
+        """
         with self._lock:
             self._ensure_loaded()
-            return self._get_active_subscription_unlocked(customer_id)
+            return self._get_active_subscription_unlocked(owner_key)
 
     def cancel_subscription(self, subscription_id: str) -> BillingSubscription:
         with self._lock:
@@ -679,7 +690,7 @@ class BillingRegistry:
     def get_plan_definitions(self) -> dict[PlanCode, PlanDefinition]:
         return dict(PLAN_DEFINITIONS)
 
-    def get_unit_package_catalog(self) -> list[_UnitPackageEntry]:
+    def get_unit_package_catalog(self) -> list[UnitPackageEntry]:
         return list(UNIT_PACKAGE_CATALOG)
 
     # ---------------------------------------------------------------------------
@@ -687,12 +698,14 @@ class BillingRegistry:
     # ---------------------------------------------------------------------------
 
     def has_active_subscription(self, owner_key: str) -> bool:
-        """
-        Return True if owner_key has at least one active subscription.
+        """Return True if owner_key has at least one active subscription.
 
         owner_key is the canonical wallet key produced by resolve_billing_owner —
         either a normalized email address or an ic_org_{org_id} string.
-        Matches by customer email for personal keys.
+
+        For personal keys (email), matches by customer email.
+        For org keys (ic_org_{org_id}), matches by customer_id prefix lookup
+        so that org-pooled wallets are correctly gated.
         """
         with self._lock:
             self._ensure_loaded()
@@ -700,7 +713,9 @@ class BillingRegistry:
             for customer in self._customers.values():
                 if not customer.active:
                     continue
-                if customer.email == normalized:
+                # Org key match: owner_key was stored as customer_id for org customers.
+                # Personal key match: owner_key is the normalized email.
+                if customer.customer_id == normalized or customer.email == normalized:
                     sub = self._get_active_subscription_unlocked(customer.customer_id)
                     if sub is not None:
                         return True
@@ -716,8 +731,7 @@ class BillingRegistry:
         subscription_id: str,
         owner_key: str,
     ) -> dict[str, Any]:
-        """
-        Provision one install key per program (openclaw + claude_code) immediately
+        """Provision one install key per program (openclaw + claude_code) immediately
         after a successful create_subscription().
 
         Gates on has_active_subscription(owner_key). Raises ValueError if no
@@ -771,6 +785,15 @@ def get_billing_registry() -> BillingRegistry:
             if _billing_registry is None:
                 _billing_registry = BillingRegistry()
     return _billing_registry
+
+
+def get_active_subscription_for_customer(owner_key: str) -> BillingSubscription | None:
+    """Module-level convenience wrapper for get_dashboard_overview and other callers.
+
+    Delegates to the singleton BillingRegistry so callers do not need to
+    instantiate the registry themselves.
+    """
+    return get_billing_registry().get_active_subscription_for_customer(owner_key)
 
 
 def _reset_billing_registry_for_testing() -> None:

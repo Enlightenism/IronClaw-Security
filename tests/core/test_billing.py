@@ -25,6 +25,10 @@ from app.core.billing import (
     BillingRegistry,
     BillingSubscription,
     BillingUsageError,
+    UnitPackageEntry,
+    _reset_billing_registry_for_testing,
+    get_active_subscription_for_customer,
+    get_billing_registry,
     resolve_billing_owner,
     units_required_for_tokens,
 )
@@ -130,6 +134,12 @@ def test_unit_package_catalog_units_are_positive() -> None:
 def test_unit_package_catalog_price_usd_are_positive() -> None:
     for entry in UNIT_PACKAGE_CATALOG:
         assert entry["price_usd"] > 0, f"price_usd must be positive for {entry['code']!r}"
+
+
+def test_unit_package_catalog_entry_type_is_unit_package_entry() -> None:
+    for entry in UNIT_PACKAGE_CATALOG:
+        typed: UnitPackageEntry = entry  # type: ignore[assignment]
+        assert typed["code"] in PLAN_DEFINITIONS
 
 
 # ---------------------------------------------------------------------------
@@ -401,11 +411,6 @@ def test_billing_subscription_is_active_true_when_period_is_future_and_status_ac
 
 
 def test_billing_subscription_is_active_false_when_period_expired() -> None:
-    """
-    is_active is NOT gated on period_end — units do not expire in IronClaw.
-    A sub with status=active and remaining units is active even if period_end is past.
-    is_period_active reflects the date window; is_active reflects consumption eligibility.
-    """
     sub = BillingSubscription(
         subscription_id="sub_test",
         customer_id="cus_test",
@@ -599,11 +604,6 @@ def test_create_subscription_not_active_when_period_already_expired(
     registry: BillingRegistry,
     customer: BillingCustomer,
 ) -> None:
-    """
-    Units do not expire — is_active is gated on status and remaining units only.
-    A subscription created with an expired period_end is still active if status=active
-    and units remain. is_period_active correctly reflects the date window.
-    """
     sub = registry.create_subscription(
         customer_id=customer.customer_id,
         plan="starter-5k",
@@ -625,6 +625,195 @@ def test_create_subscription_appears_in_list_subscriptions(
     )
     ids = [s.subscription_id for s in registry.list_subscriptions()]
     assert sub.subscription_id in ids
+
+
+# ---------------------------------------------------------------------------
+# BillingRegistry.get_active_subscription_for_customer (method)
+# ---------------------------------------------------------------------------
+
+
+def test_get_active_subscription_for_customer_method_returns_active_sub(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+    active_sub: BillingSubscription,
+) -> None:
+    result = registry.get_active_subscription_for_customer(customer.customer_id)
+    assert result is not None
+    assert result.subscription_id == active_sub.subscription_id
+
+
+def test_get_active_subscription_for_customer_method_returns_none_when_no_sub(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+) -> None:
+    result = registry.get_active_subscription_for_customer(customer.customer_id)
+    assert result is None
+
+
+def test_get_active_subscription_for_customer_method_returns_none_after_cancellation(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+    active_sub: BillingSubscription,
+) -> None:
+    registry.cancel_subscription(active_sub.subscription_id)
+    result = registry.get_active_subscription_for_customer(customer.customer_id)
+    assert result is None
+
+
+def test_get_active_subscription_for_customer_method_accepts_owner_key_positional(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+    active_sub: BillingSubscription,
+) -> None:
+    result = registry.get_active_subscription_for_customer(customer.customer_id)
+    assert result is not None
+
+
+# ---------------------------------------------------------------------------
+# Module-level get_active_subscription_for_customer function
+# ---------------------------------------------------------------------------
+
+
+def test_module_level_get_active_subscription_for_customer_returns_active_sub() -> None:
+    _reset_billing_registry_for_testing()
+    reg = get_billing_registry()
+    c = reg.create_customer(
+        email="modlevel@ironclaw.test",
+        display_name="ModLevel",
+        plan="starter-5k",
+    )
+    sub = reg.create_subscription(
+        customer_id=c.customer_id,
+        plan="starter-5k",
+        status="active",
+        period_end=_future(30),
+    )
+    result = get_active_subscription_for_customer(c.customer_id)
+    assert result is not None
+    assert result.subscription_id == sub.subscription_id
+    _reset_billing_registry_for_testing()
+
+
+def test_module_level_get_active_subscription_for_customer_returns_none_when_no_sub() -> None:
+    _reset_billing_registry_for_testing()
+    reg = get_billing_registry()
+    c = reg.create_customer(
+        email="nosub_modlevel@ironclaw.test",
+        display_name="NoSub",
+        plan="starter-5k",
+    )
+    result = get_active_subscription_for_customer(c.customer_id)
+    assert result is None
+    _reset_billing_registry_for_testing()
+
+
+def test_module_level_get_active_subscription_for_customer_accepts_owner_key_param() -> None:
+    import inspect
+
+    sig = inspect.signature(get_active_subscription_for_customer)
+    params = list(sig.parameters.keys())
+    assert params[0] == "owner_key"
+
+
+# ---------------------------------------------------------------------------
+# BillingRegistry.has_active_subscription — email path
+# ---------------------------------------------------------------------------
+
+
+def test_has_active_subscription_true_for_email_owner_key(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+    active_sub: BillingSubscription,
+) -> None:
+    assert registry.has_active_subscription(customer.email) is True
+
+
+def test_has_active_subscription_false_when_no_subscription(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+) -> None:
+    assert registry.has_active_subscription(customer.email) is False
+
+
+def test_has_active_subscription_false_after_cancellation(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+    active_sub: BillingSubscription,
+) -> None:
+    registry.cancel_subscription(active_sub.subscription_id)
+    assert registry.has_active_subscription(customer.email) is False
+
+
+def test_has_active_subscription_case_insensitive_email(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+    active_sub: BillingSubscription,
+) -> None:
+    assert registry.has_active_subscription(customer.email.upper()) is True
+
+
+def test_has_active_subscription_false_for_unknown_email(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+    active_sub: BillingSubscription,
+) -> None:
+    assert registry.has_active_subscription("unknown@ironclaw.test") is False
+
+
+# ---------------------------------------------------------------------------
+# BillingRegistry.has_active_subscription — org-key path (customer_id == normalized)
+# ---------------------------------------------------------------------------
+
+
+def test_has_active_subscription_true_for_org_key(registry: BillingRegistry) -> None:
+    org_key = "ic_org_testorg"
+    c = BillingCustomer(
+        customer_id=org_key,
+        email="org-billing@ironclaw.test",
+        display_name="Test Org",
+        plan="team-25k",
+    )
+    registry._customers[org_key] = c
+    registry._customer_sub_index.setdefault(org_key, [])
+    registry.create_subscription(
+        customer_id=org_key,
+        plan="team-25k",
+        status="active",
+        period_end=_future(30),
+    )
+    assert registry.has_active_subscription(org_key) is True
+
+
+def test_has_active_subscription_false_for_org_key_with_no_sub(registry: BillingRegistry) -> None:
+    org_key = "ic_org_nosub"
+    c = BillingCustomer(
+        customer_id=org_key,
+        email="orgnos@ironclaw.test",
+        display_name="No Sub Org",
+        plan="team-25k",
+    )
+    registry._customers[org_key] = c
+    registry._customer_sub_index.setdefault(org_key, [])
+    assert registry.has_active_subscription(org_key) is False
+
+
+def test_has_active_subscription_org_key_is_case_insensitive(registry: BillingRegistry) -> None:
+    org_key = "ic_org_caseorg"
+    c = BillingCustomer(
+        customer_id=org_key,
+        email="caseorg@ironclaw.test",
+        display_name="Case Org",
+        plan="team-25k",
+    )
+    registry._customers[org_key] = c
+    registry._customer_sub_index.setdefault(org_key, [])
+    registry.create_subscription(
+        customer_id=org_key,
+        plan="team-25k",
+        status="active",
+        period_end=_future(30),
+    )
+    assert registry.has_active_subscription("IC_ORG_CASEORG") is True
 
 
 # ---------------------------------------------------------------------------
@@ -791,3 +980,180 @@ def test_record_token_usage_zero_tokens_raises_value_error(
 ) -> None:
     with pytest.raises(ValueError, match="units must be positive"):
         registry.record_token_usage(customer_id=customer.customer_id, token_count=0)
+
+
+# ---------------------------------------------------------------------------
+# BillingRegistry.can_consume / can_consume_tokens
+# ---------------------------------------------------------------------------
+
+
+def test_can_consume_returns_true_when_units_available(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+    active_sub: BillingSubscription,
+) -> None:
+    assert registry.can_consume(customer_id=customer.customer_id, units=1) is True
+
+
+def test_can_consume_returns_false_when_no_active_subscription(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+) -> None:
+    assert registry.can_consume(customer_id=customer.customer_id, units=1) is False
+
+
+def test_can_consume_returns_false_when_units_would_exceed_limit(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+    active_sub: BillingSubscription,
+) -> None:
+    plan_def = PLAN_DEFINITIONS["starter-5k"]
+    assert registry.can_consume(customer_id=customer.customer_id, units=plan_def["unit_limit"] + 1) is False
+
+
+def test_can_consume_returns_false_for_zero_units(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+    active_sub: BillingSubscription,
+) -> None:
+    assert registry.can_consume(customer_id=customer.customer_id, units=0) is False
+
+
+def test_can_consume_tokens_returns_true_when_coverage_available(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+    active_sub: BillingSubscription,
+) -> None:
+    assert registry.can_consume_tokens(customer_id=customer.customer_id, token_count=TOKENS_PER_UNIT) is True
+
+
+def test_can_consume_tokens_returns_false_when_over_coverage(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+    active_sub: BillingSubscription,
+) -> None:
+    plan_def = PLAN_DEFINITIONS["starter-5k"]
+    over = plan_def["unit_limit"] * TOKENS_PER_UNIT + 1
+    assert registry.can_consume_tokens(customer_id=customer.customer_id, token_count=over) is False
+
+
+# ---------------------------------------------------------------------------
+# BillingRegistry.upgrade_plan
+# ---------------------------------------------------------------------------
+
+
+def test_upgrade_plan_creates_new_active_subscription(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+    active_sub: BillingSubscription,
+) -> None:
+    _, new_sub = registry.upgrade_plan(customer_id=customer.customer_id, new_plan="team-25k")
+    assert new_sub.plan == "team-25k"
+    assert new_sub.is_active is True
+
+
+def test_upgrade_plan_cancels_old_subscription(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+    active_sub: BillingSubscription,
+) -> None:
+    registry.upgrade_plan(customer_id=customer.customer_id, new_plan="team-25k")
+    old = registry._subscriptions[active_sub.subscription_id]
+    assert old.status == "upgraded"
+
+
+def test_upgrade_plan_updates_customer_plan(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+    active_sub: BillingSubscription,
+) -> None:
+    updated_customer, _ = registry.upgrade_plan(customer_id=customer.customer_id, new_plan="team-25k")
+    assert updated_customer.plan == "team-25k"
+
+
+def test_upgrade_plan_raises_for_unknown_customer(registry: BillingRegistry) -> None:
+    with pytest.raises(KeyError, match="Unknown customer_id"):
+        registry.upgrade_plan(customer_id="cus_ghost", new_plan="team-25k")
+
+
+# ---------------------------------------------------------------------------
+# BillingRegistry.deactivate_customer
+# ---------------------------------------------------------------------------
+
+
+def test_deactivate_customer_sets_active_false(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+    active_sub: BillingSubscription,
+) -> None:
+    registry.deactivate_customer(customer.customer_id)
+    assert registry._customers[customer.customer_id].active is False
+
+
+def test_deactivate_customer_cancels_active_subscriptions(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+    active_sub: BillingSubscription,
+) -> None:
+    registry.deactivate_customer(customer.customer_id)
+    sub = registry._subscriptions[active_sub.subscription_id]
+    assert sub.status == "cancelled"
+
+
+def test_deactivate_customer_raises_for_unknown_customer(registry: BillingRegistry) -> None:
+    with pytest.raises(KeyError, match="Unknown customer_id"):
+        registry.deactivate_customer("cus_ghost")
+
+
+# ---------------------------------------------------------------------------
+# BillingRegistry.reset_period
+# ---------------------------------------------------------------------------
+
+
+def test_reset_period_zeroes_units_consumed(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+    active_sub: BillingSubscription,
+) -> None:
+    registry.record_usage(customer_id=customer.customer_id, units=50)
+    registry.reset_period(subscription_id=active_sub.subscription_id, new_period_end=_future(30))
+    sub = registry._subscriptions[active_sub.subscription_id]
+    assert sub.units_consumed == 0
+
+
+def test_reset_period_sets_new_period_end(
+    registry: BillingRegistry,
+    customer: BillingCustomer,
+    active_sub: BillingSubscription,
+) -> None:
+    new_end = _future(60)
+    registry.reset_period(subscription_id=active_sub.subscription_id, new_period_end=new_end)
+    sub = registry._subscriptions[active_sub.subscription_id]
+    assert sub.current_period_end == new_end
+
+
+def test_reset_period_raises_for_unknown_subscription(registry: BillingRegistry) -> None:
+    with pytest.raises(KeyError, match="Unknown subscription_id"):
+        registry.reset_period(subscription_id="sub_ghost", new_period_end=_future(30))
+
+
+# ---------------------------------------------------------------------------
+# get_billing_registry singleton + _reset_billing_registry_for_testing
+# ---------------------------------------------------------------------------
+
+
+def test_get_billing_registry_returns_same_instance() -> None:
+    _reset_billing_registry_for_testing()
+    r1 = get_billing_registry()
+    r2 = get_billing_registry()
+    assert r1 is r2
+    _reset_billing_registry_for_testing()
+
+
+def test_reset_billing_registry_for_testing_creates_new_instance() -> None:
+    _reset_billing_registry_for_testing()
+    r1 = get_billing_registry()
+    _reset_billing_registry_for_testing()
+    r2 = get_billing_registry()
+    assert r1 is not r2
+    _reset_billing_registry_for_testing()
