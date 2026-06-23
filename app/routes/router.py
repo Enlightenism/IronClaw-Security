@@ -15,6 +15,7 @@ from app.routes.deployment import router as deployment_router
 from app.routes.executiondashboard import router as executiondashboard_router
 from app.routes.guard import router as guard_router
 from app.routes.incidents import router as incidents_router
+from app.routes.install_keys import router as install_keys_router
 from app.routes.onboarding import router as onboarding_router
 from app.routes.organizations import router as organizations_router
 from app.routes.orgs import router as orgs_router
@@ -57,6 +58,7 @@ _INCLUDED_ROUTERS = (
     usage_router,
     ui_review_router,
     ui_reviewqueue_router,
+    install_keys_router,
 )
 
 
