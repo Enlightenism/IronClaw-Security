@@ -15,8 +15,10 @@ os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
 os.environ["SUPABASE_KEY"] = ""
 os.environ["SUPABASE_ANON_KEY"] = ""
 
+from app.core.billing import get_billing_registry
 from app.core.install_keys import InstallKeyNotFoundError, get_install_key_registry
 from app.core.settings import get_settings
+from app.core.unit_wallet import get_unit_wallet_registry
 from app.main import app
 from app.services.audit_log_service import reset_audit_log
 
@@ -91,6 +93,28 @@ def _make_mock_updated_key(
     updated.units_consumed = units_consumed
     updated.last_used_at = last_used_at
     return updated
+
+
+def _make_mock_wallet_registry() -> MagicMock:
+    mock_wallet = MagicMock()
+    mock_wallet.owner_key = "demo@ironclaw.local"
+    mock_wallet.balance_units = 1000
+    mock_wallet.total_purchased_units = 1000
+    mock_wallet.total_consumed_units = 0
+    from datetime import UTC, datetime
+
+    mock_wallet.updated_at = datetime.now(UTC)
+
+    registry = MagicMock()
+    registry.get_wallet.return_value = mock_wallet
+    registry.get_or_create_wallet.return_value = mock_wallet
+    return registry
+
+
+def _make_mock_billing_registry() -> MagicMock:
+    registry = MagicMock()
+    registry.get_active_subscription_for_customer.return_value = None
+    return registry
 
 
 # ===========================================================================
@@ -252,12 +276,19 @@ def test_guard_bundle_contract(client: TestClient) -> None:
 
 
 # ===========================================================================
-# /dashboard — public shape contracts (no auth enforced on dashboard routes)
+# /dashboard/overview — DI-isolated contract tests
 # ===========================================================================
 
 
 def test_dashboard_overview_response_contract(client: TestClient) -> None:
-    response = client.get("/dashboard/overview")
+    app.dependency_overrides[get_unit_wallet_registry] = _make_mock_wallet_registry
+    app.dependency_overrides[get_billing_registry] = _make_mock_billing_registry
+    try:
+        response = client.get("/dashboard/overview")
+    finally:
+        app.dependency_overrides.pop(get_unit_wallet_registry, None)
+        app.dependency_overrides.pop(get_billing_registry, None)
+
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/json")
     data = response.json()
@@ -275,6 +306,87 @@ def test_dashboard_overview_response_contract(client: TestClient) -> None:
             "metadata",
         },
     )
+
+
+def test_dashboard_overview_wallet_registry_overridable(client: TestClient) -> None:
+    mock_wallet_registry = _make_mock_wallet_registry()
+    app.dependency_overrides[get_unit_wallet_registry] = lambda: mock_wallet_registry
+    app.dependency_overrides[get_billing_registry] = _make_mock_billing_registry
+    try:
+        response = client.get("/dashboard/overview")
+    finally:
+        app.dependency_overrides.pop(get_unit_wallet_registry, None)
+        app.dependency_overrides.pop(get_billing_registry, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    _assert_has_keys(
+        data,
+        {
+            "status",
+            "service",
+            "timestamp",
+            "environment",
+            "kpis",
+            "alerts",
+            "activity",
+            "metadata",
+        },
+    )
+    assert data["status"] == "ok"
+    assert "wallet" in data["metadata"]
+    assert data["metadata"]["wallet"]["owner_key"] == "demo@ironclaw.local"
+    mock_wallet_registry.get_wallet.assert_called_once_with("demo@ironclaw.local")
+
+
+def test_dashboard_overview_billing_registry_overridable(client: TestClient) -> None:
+    mock_subscription = MagicMock()
+    mock_subscription.plan = "pro"
+    mock_subscription.status = "active"
+    mock_subscription.units_consumed = 100
+    mock_subscription.unit_limit = 5000
+    mock_subscription.remaining_units = 4900
+
+    mock_billing_registry = MagicMock()
+    mock_billing_registry.get_active_subscription_for_customer.return_value = mock_subscription
+
+    app.dependency_overrides[get_unit_wallet_registry] = _make_mock_wallet_registry
+    app.dependency_overrides[get_billing_registry] = lambda: mock_billing_registry
+    try:
+        response = client.get("/dashboard/overview")
+    finally:
+        app.dependency_overrides.pop(get_unit_wallet_registry, None)
+        app.dependency_overrides.pop(get_billing_registry, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    _assert_has_keys(
+        data,
+        {
+            "status",
+            "service",
+            "timestamp",
+            "environment",
+            "kpis",
+            "alerts",
+            "activity",
+            "metadata",
+        },
+    )
+    assert data["status"] == "ok"
+    assert "subscription" in data["metadata"]
+    sub = data["metadata"]["subscription"]
+    assert sub["plan"] == "pro"
+    assert sub["status"] == "active"
+    assert sub["units_consumed"] == 100
+    assert sub["unit_limit"] == 5000
+    assert sub["remaining_units"] == 4900
+    mock_billing_registry.get_active_subscription_for_customer.assert_called_once_with("demo@ironclaw.local")
+
+
+# ===========================================================================
+# /dashboard/organizations — public shape contracts
+# ===========================================================================
 
 
 def test_organizations_response_contract(client: TestClient) -> None:
