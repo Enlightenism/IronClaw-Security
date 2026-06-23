@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.auth import require_api_key
-from app.core.billing import BillingRegistry, get_billing_registry
+from app.core.billing import BillingRegistry, BillingSubscription, get_billing_registry
 from app.core.install_keys import InstallKeyNotFoundError, InstallKeyRegistry, get_install_key_registry
 from app.core.settings import Settings, get_settings
 from app.core.unit_wallet import UnitWalletRegistry, get_unit_wallet_registry
@@ -20,6 +20,11 @@ router = APIRouter(
     tags=["dashboard"],
     dependencies=[Depends(require_api_key)],
 )
+
+
+# ---------------------------------------------------------------------------
+# Shared models
+# ---------------------------------------------------------------------------
 
 
 class DashboardStatView(BaseModel):
@@ -47,20 +52,35 @@ class DashboardQueueView(BaseModel):
     completed_today: int
 
 
-class DashboardIntegrationView(BaseModel):
-    integration_id: str
+class DashboardInstallKeyView(BaseModel):
+    key_id: str
+    program: str
+    masked_key: str
     label: str
     status: str
-    protected_requests_24h: int
-    blocked_events_24h: int
+    active: bool
+    locked: bool
+    revoked: bool
+    units_consumed: int
+    created_at: str | None
+    activated_at: str | None
+    revoked_at: str | None
+    last_used_at: str | None
 
 
-class DashboardWalletView(BaseModel):
-    owner_key: str
-    balance_units: int
+class DashboardWalletKPI(BaseModel):
+    unit_balance: int
+    units_consumed: int
     total_purchased_units: int
-    total_consumed_units: int
-    updated_at: str
+    updated_at: str | None
+
+
+class DashboardBillingKPI(BaseModel):
+    plan: str
+    status: str
+    units_consumed: int
+    unit_limit: int
+    remaining_units: int
 
 
 class DashboardResponse(BaseModel):
@@ -71,6 +91,9 @@ class DashboardResponse(BaseModel):
     kpis: list[DashboardStatView] = Field(default_factory=list)
     alerts: list[DashboardIncidentView] = Field(default_factory=list)
     activity: list[DashboardQueueView] = Field(default_factory=list)
+    install_keys: list[DashboardInstallKeyView] = Field(default_factory=list)
+    wallet: DashboardWalletKPI | None = None
+    billing: DashboardBillingKPI | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -104,6 +127,11 @@ class RecordKeyUsageResponse(BaseModel):
     timestamp: str
 
 
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
+
+
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
@@ -112,11 +140,116 @@ def _normalize_label(value: str) -> str:
     return value.replace("-", " ").replace("_", " ").title()
 
 
+def _iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def _build_install_key_views(
+    registry: InstallKeyRegistry,
+    owner_key: str,
+) -> list[DashboardInstallKeyView]:
+    """
+    Return all install key records for owner_key with correct slot status.
+    Status precedence: revoked > locked > active.
+    A key is:
+      - revoked  : revoked_at is set OR status field == "revoked"
+      - locked   : active is False AND revoked_at is None (not yet activated)
+      - active   : active is True AND revoked_at is None
+    """
+    try:
+        records = registry.get_keys_for_owner(owner_key)
+    except Exception:
+        return []
+
+    views: list[DashboardInstallKeyView] = []
+    for r in records:
+        revoked_at = getattr(r, "revoked_at", None)
+        activated_at = getattr(r, "activated_at", None)
+        active = bool(getattr(r, "active", False))
+        raw_status = str(getattr(r, "status", "") or "")
+
+        is_revoked = revoked_at is not None or raw_status == "revoked"
+        is_locked = not active and not is_revoked
+        is_active = active and not is_revoked
+
+        if is_revoked:
+            slot_status = "revoked"
+        elif is_locked:
+            slot_status = "locked"
+        else:
+            slot_status = "active"
+
+        views.append(
+            DashboardInstallKeyView(
+                key_id=r.key_id,
+                program=r.program,
+                masked_key=r.masked_key,
+                label=r.label,
+                status=slot_status,
+                active=is_active,
+                locked=is_locked,
+                revoked=is_revoked,
+                units_consumed=getattr(r, "units_consumed", 0),
+                created_at=_iso(getattr(r, "created_at", None)),
+                activated_at=_iso(activated_at),
+                revoked_at=_iso(revoked_at),
+                last_used_at=_iso(getattr(r, "last_used_at", None)),
+            )
+        )
+    return views
+
+
+def _build_wallet_kpi(
+    wallet_registry: UnitWalletRegistry,
+    owner_key: str,
+) -> DashboardWalletKPI | None:
+    try:
+        wallet = wallet_registry.get_wallet(owner_key)
+        if wallet is None:
+            return None
+        return DashboardWalletKPI(
+            unit_balance=wallet.balance_units,
+            units_consumed=wallet.total_consumed_units,
+            total_purchased_units=wallet.total_purchased_units,
+            updated_at=_iso(wallet.updated_at),
+        )
+    except Exception:
+        return None
+
+
+def _build_billing_kpi(
+    billing_registry: BillingRegistry,
+    owner_key: str,
+) -> DashboardBillingKPI | None:
+    try:
+        subscription: BillingSubscription | None = billing_registry.get_active_subscription_for_customer(owner_key)
+        if subscription is None:
+            return None
+        return DashboardBillingKPI(
+            plan=subscription.plan,
+            status=subscription.status,
+            units_consumed=subscription.units_consumed,
+            unit_limit=subscription.unit_limit,
+            remaining_units=subscription.remaining_units,
+        )
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+
 @router.get("/overview", response_model=DashboardResponse)
 def get_dashboard_overview(
+    owner_key: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
     wallet_registry: UnitWalletRegistry = Depends(get_unit_wallet_registry),
     billing_registry: BillingRegistry = Depends(get_billing_registry),
+    install_key_registry: InstallKeyRegistry = Depends(get_install_key_registry),
 ) -> DashboardResponse:
     now = _utc_now_iso()
 
@@ -148,37 +281,93 @@ def get_dashboard_overview(
         if (event.verdict or "").lower() in {"block", "quarantine"}:
             bucket["blocked_events_24h"] = int(bucket["blocked_events_24h"]) + 1
 
+    # ---------------------------------------------------------------------------
+    # Owner-scoped wallet, billing, and install key resolution
+    # owner_key query param → live per-owner data
+    # no owner_key → fall back to demo sentinel for backward compat
+    # ---------------------------------------------------------------------------
     _DEMO_OWNER = "demo@ironclaw.local"
-    wallet = wallet_registry.get_wallet(_DEMO_OWNER)
-    if wallet is None:
-        wallet = wallet_registry.get_or_create_wallet(_DEMO_OWNER)
+    resolved_owner = owner_key.strip() if owner_key and owner_key.strip() else _DEMO_OWNER
 
-    subscription = billing_registry.get_active_subscription_for_customer(_DEMO_OWNER)
+    wallet_kpi = _build_wallet_kpi(wallet_registry, resolved_owner)
+
+    # If no wallet under the resolved key and we fell back to demo, try get_or_create
+    if wallet_kpi is None and resolved_owner == _DEMO_OWNER:
+        try:
+            wallet = wallet_registry.get_or_create_wallet(_DEMO_OWNER)
+            wallet_kpi = DashboardWalletKPI(
+                unit_balance=wallet.balance_units,
+                units_consumed=wallet.total_consumed_units,
+                total_purchased_units=wallet.total_purchased_units,
+                updated_at=_iso(wallet.updated_at),
+            )
+        except Exception:
+            wallet_kpi = None
+
+    billing_kpi = _build_billing_kpi(billing_registry, resolved_owner)
+    install_keys = _build_install_key_views(install_key_registry, resolved_owner)
+
+    # ---------------------------------------------------------------------------
+    # Backward-compat metadata.wallet block (legacy consumers)
+    # ---------------------------------------------------------------------------
+    wallet_meta: dict[str, Any] = {}
+    if wallet_kpi is not None:
+        wallet_meta = {
+            "owner_key": resolved_owner,
+            "unit_balance": wallet_kpi.unit_balance,
+            "units_consumed": wallet_kpi.units_consumed,
+            "total_purchased_units": wallet_kpi.total_purchased_units,
+            "updated_at": wallet_kpi.updated_at,
+        }
+
     subscription_meta: dict[str, Any] = {}
-    if subscription is not None:
+    if billing_kpi is not None:
         subscription_meta = {
-            "plan": subscription.plan,
-            "status": subscription.status,
-            "units_consumed": subscription.units_consumed,
-            "unit_limit": subscription.unit_limit,
-            "remaining_units": subscription.remaining_units,
+            "plan": billing_kpi.plan,
+            "status": billing_kpi.status,
+            "units_consumed": billing_kpi.units_consumed,
+            "unit_limit": billing_kpi.unit_limit,
+            "remaining_units": billing_kpi.remaining_units,
         }
 
     recent_incidents = sorted(incidents, key=lambda i: i.created_at, reverse=True)[:5]
-
     quarantine_pending = [i for i in quarantine_items if i.status in {"isolated", "under_review"}]
     quarantine_completed = [i for i in quarantine_items if i.status in {"released", "destroyed"}]
 
     return DashboardResponse(
         status="ok",
-        service="IronClaw-Security",
+        service="ironclaw-security",
         timestamp=now,
         environment=settings.environment,
         kpis=[
-            DashboardStatView(key="protected_requests", label="Protected Requests", value=len(audit_events), delta=0, metadata={"window": "active"}),
-            DashboardStatView(key="blocked_actions", label="Blocked Actions", value=len(blocked_events), delta=0, metadata={"window": "active"}),
-            DashboardStatView(key="quarantined_items", label="Quarantined Items", value=len(quarantine_items), delta=0, metadata={"window": "active"}),
-            DashboardStatView(key="open_incidents", label="Open Incidents", value=len(open_incidents), delta=0, metadata={"window": "active"}),
+            DashboardStatView(
+                key="protected_requests",
+                label="Protected Requests",
+                value=len(audit_events),
+                delta=0,
+                metadata={"window": "active"},
+            ),
+            DashboardStatView(
+                key="blocked_actions",
+                label="Blocked Actions",
+                value=len(blocked_events),
+                delta=0,
+                metadata={"window": "active"},
+            ),
+            DashboardStatView(
+                key="quarantined_items",
+                label="Quarantined Items",
+                value=len(quarantine_items),
+                delta=0,
+                metadata={"window": "active"},
+            ),
+            DashboardStatView(
+                key="open_incidents",
+                label="Open Incidents",
+                value=len(open_incidents),
+                delta=0,
+                metadata={"window": "active"},
+            ),
         ],
         alerts=[
             DashboardIncidentView(
@@ -206,6 +395,9 @@ def get_dashboard_overview(
                 completed_today=len(quarantine_completed),
             ),
         ],
+        install_keys=install_keys,
+        wallet=wallet_kpi,
+        billing=billing_kpi,
         metadata={
             "integrations": [
                 {
@@ -220,14 +412,9 @@ def get_dashboard_overview(
                     key=lambda item: (-int(item["protected_requests_24h"]), str(item["integration_id"])),
                 )
             ],
-            "wallet": {
-                "owner_key": wallet.owner_key,
-                "balance_units": wallet.balance_units,
-                "total_purchased_units": wallet.total_purchased_units,
-                "total_consumed_units": wallet.total_consumed_units,
-                "updated_at": wallet.updated_at.isoformat().replace("+00:00", "Z"),
-            },
+            "wallet": wallet_meta,
             "subscription": subscription_meta,
+            "owner_key": resolved_owner,
         },
     )
 
