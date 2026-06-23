@@ -6,12 +6,14 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.core.billing import BillingRegistry, get_billing_registry
 from app.core.install_keys import (
     InstallKeyNotFoundError,
     InstallKeyRegistry,
     InstallKeyUsageError,
     get_install_key_registry,
 )
+from app.core.unit_wallet import UnitWalletRegistry, get_unit_wallet_registry
 
 router = APIRouter(
     prefix="/dashboard",
@@ -23,6 +25,7 @@ DashboardAlertSeverity = Literal["low", "medium", "high", "critical"]
 DashboardAlertStatus = Literal["open", "acknowledged", "resolved"]
 DashboardActivityStatus = Literal["completed", "denied", "in-progress"]
 DashboardStatus = Literal["ok"]
+InstallKeySlotStatus = Literal["locked", "active", "revoked"]
 
 
 class DashboardKPI(BaseModel):
@@ -52,6 +55,16 @@ class DashboardAlertItem(BaseModel):
     status: DashboardAlertStatus
 
 
+class InstallKeyDashboardSlot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    program: str
+    masked_key: str | None = None
+    status: InstallKeySlotStatus
+    units_consumed: int
+    last_used_at: str | None = None
+
+
 class DashboardResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -62,6 +75,7 @@ class DashboardResponse(BaseModel):
     kpis: list[DashboardKPI] = Field(default_factory=list)
     alerts: list[DashboardAlertItem] = Field(default_factory=list)
     activity: list[DashboardActivityItem] = Field(default_factory=list)
+    install_keys: list[InstallKeyDashboardSlot] = Field(default_factory=list)
     metadata: dict[str, str] = Field(default_factory=dict)
 
 
@@ -117,22 +131,95 @@ def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+_PROGRAMS: tuple[str, ...] = ("openclaw", "claude_code")
+
+
+def _build_install_key_slots(
+    owner_key: str,
+    install_key_registry: InstallKeyRegistry,
+) -> list[InstallKeyDashboardSlot]:
+    records = install_key_registry.get_keys_for_owner(owner_key)
+    by_program: dict[str, InstallKeyDashboardSlot] = {}
+
+    for rec in records:
+        slot_status: InstallKeySlotStatus
+        if rec.active:
+            slot_status = "active"
+        else:
+            slot_status = "revoked"
+
+        existing = by_program.get(rec.program)
+        # Prefer active key over revoked; most recent revoked over older revoked
+        if existing is None or (slot_status == "active" and existing.status != "active"):
+            by_program[rec.program] = InstallKeyDashboardSlot(
+                program=rec.program,
+                masked_key=rec.masked_key,
+                status=slot_status,
+                units_consumed=rec.units_consumed,
+                last_used_at=rec.last_used_at.isoformat() if rec.last_used_at else None,
+            )
+
+    slots: list[InstallKeyDashboardSlot] = []
+    for program in _PROGRAMS:
+        if program in by_program:
+            slots.append(by_program[program])
+        else:
+            slots.append(
+                InstallKeyDashboardSlot(
+                    program=program,
+                    masked_key=None,
+                    status="locked",
+                    units_consumed=0,
+                    last_used_at=None,
+                )
+            )
+    return slots
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
 
 @router.get("/overview", response_model=DashboardResponse)
-def get_dashboard_overview() -> DashboardResponse:
+def get_dashboard_overview(
+    owner_key: str,
+    install_key_registry: InstallKeyRegistry = Depends(get_install_key_registry),
+    wallet_registry: UnitWalletRegistry = Depends(get_unit_wallet_registry),
+    billing_registry: BillingRegistry = Depends(get_billing_registry),
+) -> DashboardResponse:
+    # --- wallet KPI ---
+    wallet = wallet_registry.get_wallet(owner_key)
+    balance_units = wallet.balance_units if wallet is not None else 0
+    total_consumed = wallet.total_consumed_units if wallet is not None else 0
+    units_tone: DashboardTone = "good" if balance_units > 0 else "warning"
+
+    # --- plan/subscription KPI ---
+    plan_label = "No active plan"
+    plan_tone: DashboardTone = "warning"
+    try:
+        sub = billing_registry.get_active_subscription_for_customer(owner_key)
+        if sub is not None:
+            from app.core.billing import PLAN_DEFINITIONS
+
+            plan_def = PLAN_DEFINITIONS.get(sub.plan)
+            plan_label = plan_def["name"] if plan_def else sub.plan
+            plan_tone = "good"
+    except Exception:
+        pass
+
+    # --- install key slots ---
+    install_key_slots = _build_install_key_slots(owner_key, install_key_registry)
+
     return DashboardResponse(
         status="ok",
         service="ironclaw-dashboard",
         timestamp=_utc_now_iso(),
-        environment="production-simulated",
+        environment="production",
         kpis=[
-            DashboardKPI(label="Protected Requests", value="12,480", tone="good"),
-            DashboardKPI(label="Blocked Actions", value="184", tone="warning"),
-            DashboardKPI(label="Pending Reviews", value="7", tone="warning"),
+            DashboardKPI(label="Unit Balance", value=str(balance_units), tone=units_tone),
+            DashboardKPI(label="Units Consumed", value=str(total_consumed), tone="neutral"),
+            DashboardKPI(label="Active Plan", value=plan_label, tone=plan_tone),
             DashboardKPI(label="Runtime Health", value="Healthy", tone="good"),
         ],
         alerts=[
@@ -181,10 +268,12 @@ def get_dashboard_overview() -> DashboardResponse:
                 },
             ),
         ],
+        install_keys=install_key_slots,
         metadata={
             "surface": "dashboard",
             "scope": "overview",
             "generatedby": "dashboard-route",
+            "owner_key": owner_key,
         },
     )
 
