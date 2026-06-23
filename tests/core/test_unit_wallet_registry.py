@@ -359,6 +359,152 @@ def test_debit_units_for_tokens_returns_correct_units_debited(registry: UnitWall
 
 
 # ---------------------------------------------------------------------------
+# debit_units_for_install_key — happy path
+# ---------------------------------------------------------------------------
+
+
+def test_debit_units_for_install_key_reduces_balance(registry: UnitWalletRegistry) -> None:
+    registry.credit_units("key_user@ironclaw.test", 1_000)
+    wallet = registry.debit_units_for_install_key(
+        owner_key="key_user@ironclaw.test",
+        key_id="key_abc123",
+        units=50,
+        program="claude",
+    )
+    assert wallet.balance_units == 950
+    assert wallet.total_consumed_units == 50
+
+
+def test_debit_units_for_install_key_entry_type_is_debit(registry: UnitWalletRegistry) -> None:
+    registry.credit_units("key_user@ironclaw.test", 1_000)
+    registry.debit_units_for_install_key(
+        owner_key="key_user@ironclaw.test",
+        key_id="key_abc123",
+        units=50,
+        program="claude",
+    )
+    entries = registry.list_ledger_entries(owner_key="key_user@ironclaw.test")
+    debit_entry = next(e for e in entries if e.entry_type == "debit")
+    assert debit_entry.entry_type == "debit"
+
+
+def test_debit_units_for_install_key_metadata_contains_key_id(registry: UnitWalletRegistry) -> None:
+    registry.credit_units("key_user@ironclaw.test", 1_000)
+    registry.debit_units_for_install_key(
+        owner_key="key_user@ironclaw.test",
+        key_id="key_abc123",
+        units=50,
+        program="claude",
+    )
+    entries = registry.list_ledger_entries(owner_key="key_user@ironclaw.test")
+    debit_entry = next(e for e in entries if e.entry_type == "debit")
+    assert debit_entry.metadata.get("key_id") == "key_abc123"
+
+
+def test_debit_units_for_install_key_metadata_contains_program(registry: UnitWalletRegistry) -> None:
+    registry.credit_units("key_user@ironclaw.test", 1_000)
+    registry.debit_units_for_install_key(
+        owner_key="key_user@ironclaw.test",
+        key_id="key_abc123",
+        units=50,
+        program="claude",
+    )
+    entries = registry.list_ledger_entries(owner_key="key_user@ironclaw.test")
+    debit_entry = next(e for e in entries if e.entry_type == "debit")
+    assert debit_entry.metadata.get("program") == "claude"
+
+
+def test_debit_units_for_install_key_balance_after_is_correct_in_ledger(registry: UnitWalletRegistry) -> None:
+    registry.credit_units("key_user@ironclaw.test", 1_000)
+    registry.debit_units_for_install_key(
+        owner_key="key_user@ironclaw.test",
+        key_id="key_abc123",
+        units=50,
+        program="claude",
+    )
+    entries = registry.list_ledger_entries(owner_key="key_user@ironclaw.test")
+    debit_entry = next(e for e in entries if e.entry_type == "debit")
+    assert debit_entry.balance_after == 950
+
+
+def test_debit_units_for_install_key_exact_balance_empties_wallet(registry: UnitWalletRegistry) -> None:
+    registry.credit_units("key_user@ironclaw.test", 100)
+    wallet = registry.debit_units_for_install_key(
+        owner_key="key_user@ironclaw.test",
+        key_id="key_exact",
+        units=100,
+        program="openai",
+    )
+    assert wallet.balance_units == 0
+
+
+# ---------------------------------------------------------------------------
+# debit_units_for_install_key — InsufficientUnitsError propagation
+# ---------------------------------------------------------------------------
+
+
+def test_debit_units_for_install_key_raises_insufficient_units_error(registry: UnitWalletRegistry) -> None:
+    registry.credit_units("key_broke@ironclaw.test", 10)
+    with pytest.raises(InsufficientUnitsError):
+        registry.debit_units_for_install_key(
+            owner_key="key_broke@ironclaw.test",
+            key_id="key_over",
+            units=999,
+            program="groq",
+        )
+
+
+def test_debit_units_for_install_key_error_have_attribute_is_correct(registry: UnitWalletRegistry) -> None:
+    registry.credit_units("key_broke@ironclaw.test", 10)
+    with pytest.raises(InsufficientUnitsError) as exc_info:
+        registry.debit_units_for_install_key(
+            owner_key="key_broke@ironclaw.test",
+            key_id="key_over",
+            units=999,
+            program="groq",
+        )
+    assert exc_info.value.have == 10
+
+
+def test_debit_units_for_install_key_error_need_attribute_is_correct(registry: UnitWalletRegistry) -> None:
+    registry.credit_units("key_broke@ironclaw.test", 10)
+    with pytest.raises(InsufficientUnitsError) as exc_info:
+        registry.debit_units_for_install_key(
+            owner_key="key_broke@ironclaw.test",
+            key_id="key_over",
+            units=999,
+            program="groq",
+        )
+    assert exc_info.value.need == 999
+
+
+def test_debit_units_for_install_key_error_does_not_mutate_balance(registry: UnitWalletRegistry) -> None:
+    registry.credit_units("key_broke@ironclaw.test", 10)
+    with pytest.raises(InsufficientUnitsError):
+        registry.debit_units_for_install_key(
+            owner_key="key_broke@ironclaw.test",
+            key_id="key_over",
+            units=999,
+            program="groq",
+        )
+    wallet = registry.get_wallet("key_broke@ironclaw.test")
+    assert wallet is not None
+    assert wallet.balance_units == 10
+
+
+def test_debit_units_for_install_key_zero_wallet_raises_insufficient_units_error(registry: UnitWalletRegistry) -> None:
+    with pytest.raises(InsufficientUnitsError) as exc_info:
+        registry.debit_units_for_install_key(
+            owner_key="key_empty@ironclaw.test",
+            key_id="key_zero",
+            units=1,
+            program="claude",
+        )
+    assert exc_info.value.have == 0
+    assert exc_info.value.need == 1
+
+
+# ---------------------------------------------------------------------------
 # get_or_create_wallet idempotency
 # ---------------------------------------------------------------------------
 

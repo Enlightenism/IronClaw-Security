@@ -601,6 +601,25 @@ class UnitWalletRegistry:
         )
         return wallet, required
 
+    def debit_units_for_install_key(
+        self,
+        owner_key: str,
+        key_id: str,
+        units: int,
+        program: str,
+    ) -> RegistryUnitWallet:
+        """Debit wallet units on behalf of an install key usage event.
+
+        This is the single entry point all install key usage routes call to
+        debit the wallet. Passes key_id and program into the ledger metadata
+        so every debit is fully traceable back to the install key and program.
+        """
+        return self.debit_units(
+            owner_key=owner_key,
+            units=units,
+            metadata={"key_id": key_id, "program": program},
+        )
+
     def refund_units(
         self,
         owner_key: str,
