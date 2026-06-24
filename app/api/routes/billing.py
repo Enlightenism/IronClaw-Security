@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import logging
+import re
 from typing import Any
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.auth import AuthContext, get_auth_context, require_api_key
 from app.core.billing import resolve_billing_owner
@@ -23,13 +24,17 @@ from app.core.unit_wallet import (
 
 logger = logging.getLogger(__name__)
 
+
 router = APIRouter(
     prefix="/billing",
     tags=["billing"],
     dependencies=[Depends(require_api_key)],
 )
 
+
 _PURCHASES_MAX_SIZE: int = 1_000
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
 
 _BILLING_PACKAGE_FALLBACK: dict[str, dict[str, Any]] = {
     "pkg_5000": {
@@ -120,8 +125,16 @@ class UnitPolicyView(BaseModel):
 class BillingPackagePurchaseRequest(BaseModel):
     package_id: str = Field(min_length=1, max_length=120)
     buyer_name: str = Field(min_length=1, max_length=120)
-    buyer_email: EmailStr
+    buyer_email: str = Field(min_length=3, max_length=254)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("buyer_email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        normalized = v.strip().lower()
+        if not _EMAIL_RE.match(normalized):
+            raise ValueError("Invalid email address")
+        return normalized
 
 
 class BillingPackagePurchaseView(BaseModel):
@@ -294,19 +307,11 @@ def _wallet_to_view(wallet: Any) -> WalletBalanceView:
 
 
 def _assert_owner_access(owner_key: str, auth_ctx: AuthContext) -> None:
-    """Enforce that the caller may only access their own wallet or org wallet.
-
-    Rules:
-    - org key → may only access wallets whose owner_key matches ic_org_{auth_ctx.org_id}
-    - personal key → may not access org wallets
-    - personal key with principal_id → may only access wallets matching principal_id
-    """
     is_org_wallet = owner_key.startswith(ORG_KEY_PREFIX)
     caller_key_type = getattr(auth_ctx, "key_type", None)
     caller_org_id = getattr(auth_ctx, "org_id", None)
 
     if is_org_wallet:
-        # Org wallet: only matching org key may access
         if caller_key_type != "org" or caller_org_id is None:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -325,7 +330,6 @@ def _assert_owner_access(owner_key: str, auth_ctx: AuthContext) -> None:
                 },
             )
     else:
-        # Personal wallet: org keys may not access
         if caller_key_type == "org" or caller_org_id is not None:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -346,7 +350,6 @@ def _assert_owner_access(owner_key: str, auth_ctx: AuthContext) -> None:
 
 
 def _require_existing_wallet(registry: Any, owner_key: str) -> Any:
-    """Fetch wallet or raise 404. Never auto-creates."""
     wallet = registry.get_wallet(owner_key)
     if wallet is None:
         raise HTTPException(
@@ -357,7 +360,6 @@ def _require_existing_wallet(registry: Any, owner_key: str) -> Any:
 
 
 def _get_or_zero_wallet(registry: Any, owner_key: str) -> Any:
-    """Return wallet if it exists, else a zero-balance sentinel for debit checks."""
     wallet = registry.get_wallet(owner_key)
     if wallet is None:
 
@@ -372,12 +374,6 @@ def _provision_install_keys(
     owner_key: str,
     purchase_id: str,
 ) -> tuple[str | None, str | None]:
-    """Provision openclaw and claude_code install keys for a purchase.
-
-    Returns (openclaw_raw_key, claude_code_raw_key).
-    On InstallKeyAlreadyExistsError or any other exception per program,
-    that key slot returns None — purchase still succeeds.
-    """
     registry = get_install_key_registry()
     openclaw_key: str | None = None
     claude_key: str | None = None
@@ -478,7 +474,7 @@ def purchase_package(
             detail=f"Unknown package_id: {body.package_id!r}",
         )
 
-    buyer_email_normalized = str(body.buyer_email).lower()
+    buyer_email_normalized = body.buyer_email  # already normalized by validator
     owner_key = resolve_billing_owner(auth_ctx, buyer_email_normalized)
     registry = get_unit_wallet_registry()
 

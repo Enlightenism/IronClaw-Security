@@ -509,7 +509,8 @@ def test_purchase_id_uniqueness_across_concurrent_purchases() -> None:
     for pid in purchase_ids:
         assert pid.startswith("purch_"), f"purchase_id missing purch_ prefix: {pid!r}"
         hex_part = pid[len("purch_") :]
-        assert len(hex_part) == 32, f"purchase_id hex part wrong length: {pid!r}"
+        # _new_purchase_id() uses uuid.uuid4().hex[:16] — 16 hex chars
+        assert len(hex_part) == 16, f"purchase_id hex part wrong length: {pid!r}"
         assert all(c in "0123456789abcdef" for c in hex_part), f"purchase_id contains non-hex characters: {pid!r}"
 
 
