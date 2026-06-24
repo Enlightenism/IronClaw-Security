@@ -167,15 +167,11 @@ def test_list_packages_returns_401_unauthenticated() -> None:
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/packages/purchase — install key provisioning (new)
+# POST /billing/packages/purchase — install key provisioning
 # ---------------------------------------------------------------------------
 
 
 def test_purchase_provisions_both_install_keys_on_success() -> None:
-    """
-    Happy path: both openclaw and claude_code keys are generated and returned
-    as raw strings in the purchase response (shown exactly once).
-    """
     buyer_email = "installkey-happy@ironclaw.test"
     purchase_id_seen: list[str] = []
 
@@ -211,17 +207,12 @@ def test_purchase_provisions_both_install_keys_on_success() -> None:
     assert purchase["package_id"] == _PKG_5K
     assert purchase["buyer_email"] == buyer_email.lower()
 
-    # generate_install_key called exactly twice (once per program)
     assert mock_registry.generate_install_key.call_count == 2
     call_programs = {call.kwargs.get("program") or call.args[2] for call in mock_registry.generate_install_key.call_args_list}
     assert call_programs == {"openclaw", "claude_code"}
 
 
 def test_purchase_install_key_already_exists_returns_none_keys_purchase_still_succeeds() -> None:
-    """
-    If InstallKeyAlreadyExistsError is raised for both programs, both keys
-    are None but the purchase still returns 201 and wallet is credited.
-    """
     buyer_email = "installkey-exists@ironclaw.test"
 
     def _fake_generate(owner_key: str, subscription_id: str, program: str, **kwargs: object) -> InstallKeyRecord:
@@ -249,18 +240,12 @@ def test_purchase_install_key_already_exists_returns_none_keys_purchase_still_su
     assert purchase["openclaw_install_key"] is None
     assert purchase["claude_code_install_key"] is None
 
-    # Wallet must still be credited
     wallet = data["wallet"]
     assert wallet["owner_key"] == buyer_email.lower()
     assert wallet["balance_units"] >= UNIT_PACKAGE_CATALOG[_PKG_5K]["unit_amount"]
 
 
 def test_purchase_install_key_provisioning_exception_returns_none_keys_purchase_still_succeeds() -> None:
-    """
-    If generate_install_key raises an unexpected exception for both programs,
-    both keys are None but the purchase still returns 201 — soft failure,
-    no 500, wallet is still credited.
-    """
     buyer_email = "installkey-exc@ironclaw.test"
 
     def _fake_generate(owner_key: str, subscription_id: str, program: str, **kwargs: object) -> InstallKeyRecord:
@@ -294,10 +279,6 @@ def test_purchase_install_key_provisioning_exception_returns_none_keys_purchase_
 
 
 def test_purchase_install_key_partial_success_one_key_already_exists() -> None:
-    """
-    openclaw key exists (raises InstallKeyAlreadyExistsError), claude_code
-    key is provisioned successfully.  Response: openclaw=None, claude_code=raw.
-    """
     buyer_email = "installkey-partial@ironclaw.test"
     claude_raw = "ic_install_claude_code_PARTIALTEST00001"
 
@@ -321,17 +302,12 @@ def test_purchase_install_key_partial_success_one_key_already_exists() -> None:
         )
 
     assert response.status_code == 201
-    data = response.json()
-    purchase = data["purchase"]
+    purchase = response.json()["purchase"]
     assert purchase["openclaw_install_key"] is None
     assert purchase["claude_code_install_key"] == claude_raw
 
 
 def test_purchase_response_schema_includes_install_key_fields() -> None:
-    """
-    Without mocking, the install key fields must exist in the schema and
-    default to None (since Supabase is not available in unit test env).
-    """
     mock_registry = MagicMock()
     mock_registry.generate_install_key.side_effect = RuntimeError("no db in unit test")
 
@@ -353,7 +329,72 @@ def test_purchase_response_schema_includes_install_key_fields() -> None:
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/packages/purchase — personal key (existing coverage)
+# POST /billing/packages/purchase — email validator
+# ---------------------------------------------------------------------------
+
+
+def test_purchase_malformed_email_no_at_sign_returns_422() -> None:
+    response = _personal_client().post(
+        "/billing/packages/purchase",
+        json={
+            "package_id": _PKG_5K,
+            "buyer_name": "Bad Email Buyer",
+            "buyer_email": "notanemail",
+            "metadata": {},
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_purchase_malformed_email_missing_domain_returns_422() -> None:
+    response = _personal_client().post(
+        "/billing/packages/purchase",
+        json={
+            "package_id": _PKG_5K,
+            "buyer_name": "Bad Email Buyer",
+            "buyer_email": "missing@",
+            "metadata": {},
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_purchase_malformed_email_no_tld_returns_422() -> None:
+    response = _personal_client().post(
+        "/billing/packages/purchase",
+        json={
+            "package_id": _PKG_5K,
+            "buyer_name": "Bad Email Buyer",
+            "buyer_email": "user@nodot",
+            "metadata": {},
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_purchase_email_is_normalized_to_lowercase() -> None:
+    mock_registry = MagicMock()
+    mock_registry.generate_install_key.side_effect = RuntimeError("no db")
+
+    with patch("app.api.billing.get_install_key_registry", return_value=mock_registry):
+        response = _personal_client().post(
+            "/billing/packages/purchase",
+            json={
+                "package_id": _PKG_5K,
+                "buyer_name": "Case Buyer",
+                "buyer_email": "UPPER@IronClaw.TEST",
+                "metadata": {},
+            },
+        )
+
+    assert response.status_code == 201
+    purchase = response.json()["purchase"]
+    assert purchase["buyer_email"] == "upper@ironclaw.test"
+    assert purchase["owner_key"] == "upper@ironclaw.test"
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/packages/purchase — personal key (happy path)
 # ---------------------------------------------------------------------------
 
 
@@ -444,7 +485,6 @@ def test_purchase_id_uniqueness_across_concurrent_purchases() -> None:
     mock_registry.generate_install_key.side_effect = RuntimeError("no db")
 
     app = _build_app(auth_ctx=_PERSONAL_AUTH_CTX)
-    # Single shared app so _PURCHASES is shared across threads
     client = TestClient(app)
 
     def _do_purchase(i: int) -> str:
@@ -581,6 +621,8 @@ def test_get_wallet_personal_key_returns_200() -> None:
 def test_get_wallet_personal_key_cannot_access_org_wallet_returns_403() -> None:
     response = _personal_client().get(f"/billing/wallet/{_ORG_OWNER_KEY}")
     assert response.status_code == 403
+    detail = response.json()["detail"]
+    assert detail["reason"] == "org_wallet_requires_org_key"
 
 
 def test_get_wallet_unauthenticated_returns_401() -> None:
@@ -610,6 +652,8 @@ def test_get_wallet_org_key_reads_own_org_wallet_returns_200() -> None:
 def test_get_wallet_org_key_cannot_access_personal_wallet_returns_403() -> None:
     response = _org_client().get("/billing/wallet/personal@ironclaw.test")
     assert response.status_code == 403
+    detail = response.json()["detail"]
+    assert detail["reason"] == "org_key_cannot_access_personal_wallet"
 
 
 def test_get_wallet_org_key_cannot_access_different_org_wallet_returns_403() -> None:
@@ -735,6 +779,8 @@ def test_debit_org_key_cannot_target_different_org_wallet_returns_403() -> None:
         json={"units": 1},
     )
     assert response.status_code == 403
+    detail = response.json()["detail"]
+    assert "match" in str(detail).lower() or "forbidden" in str(detail).lower()
 
 
 def test_debit_personal_key_cannot_target_org_wallet_returns_403() -> None:
@@ -743,6 +789,8 @@ def test_debit_personal_key_cannot_target_org_wallet_returns_403() -> None:
         json={"units": 1},
     )
     assert response.status_code == 403
+    detail = response.json()["detail"]
+    assert detail["reason"] == "org_wallet_requires_org_key"
 
 
 # ---------------------------------------------------------------------------
@@ -860,6 +908,8 @@ def test_refund_personal_key_cannot_refund_org_wallet_returns_403() -> None:
         json={"units": 1},
     )
     assert response.status_code == 403
+    detail = response.json()["detail"]
+    assert detail["reason"] == "org_wallet_requires_org_key"
 
 
 # ---------------------------------------------------------------------------
@@ -952,7 +1002,7 @@ def test_get_ledger_org_key_cannot_query_different_org_wallet_returns_403() -> N
 
 
 # ---------------------------------------------------------------------------
-# GET /billing/packages (purchases list removed — route lives in billing.py not routes/billing.py)
+# GET /billing/packages — service field
 # ---------------------------------------------------------------------------
 
 

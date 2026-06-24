@@ -3,13 +3,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import logging
 import math
+import re
 import threading
 from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
 from app.core.auth import AuthContext, require_auth_context
@@ -25,10 +26,14 @@ from app.core.unit_wallet import (
 
 logger = logging.getLogger(__name__)
 
+_EMAIL_RE = re.compile(r"[^@]+@[^@]+\.[^@]+")
+_PURCHASES_MAX = 10_000
+
 
 router = APIRouter(
     prefix="/billing",
     tags=["billing"],
+    dependencies=[Depends(require_auth_context)],
 )
 
 
@@ -150,6 +155,13 @@ class BillingPackagePurchaseRequest(BaseModel):
     buyer_name: str = Field(min_length=1, max_length=120)
     buyer_email: str = Field(min_length=3, max_length=255)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("buyer_email")
+    @classmethod
+    def _validate_email(cls, v: str) -> str:
+        if not _EMAIL_RE.match(v.strip()):
+            raise ValueError("buyer_email must be a valid email address")
+        return v.strip().lower()
 
 
 class BillingPackagePurchaseView(BaseModel):
@@ -355,7 +367,6 @@ def _provision_install_keys(
 @router.get(
     "/packages",
     response_model=BillingPackagesResponse,
-    dependencies=[Depends(require_auth_context)],
 )
 def list_billing_packages() -> BillingPackagesResponse:
     packages = [_package_to_view(pkg) for pkg in UNIT_PACKAGE_CATALOG.values()]
@@ -401,7 +412,7 @@ def purchase_billing_package(
         package_id=package_id,
         package_name=str(package["name"]),
         buyer_name=payload.buyer_name.strip(),
-        buyer_email=payload.buyer_email.strip().lower(),
+        buyer_email=payload.buyer_email,
         owner_key=owner_key,
         price_usd=float(package["price_usd"]),
         granted_units=unit_amount,
@@ -414,6 +425,8 @@ def purchase_billing_package(
     )
 
     with _PURCHASES_LOCK:
+        if len(_PURCHASES) >= _PURCHASES_MAX:
+            _PURCHASES.pop(0)
         _PURCHASES.append(purchase)
 
     return BillingPackagePurchaseResponse(
@@ -431,37 +444,14 @@ def debit_wallet(
     payload: WalletDebitRequest,
     auth_ctx: AuthContext = Depends(require_auth_context),
 ) -> Any:
-    if auth_ctx.key_type == "org" and getattr(auth_ctx, "org_id", None):
-        resolved_owner = f"ic_org_{auth_ctx.org_id}"
-        if owner_key.startswith("ic_org_") and owner_key != resolved_owner:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={
-                    "status": "forbidden",
-                    "reason": "org_id_mismatch",
-                    "owner_key": owner_key,
-                    "action": "debit",
-                },
-            )
-    else:
-        if owner_key.startswith("ic_org_"):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={
-                    "status": "forbidden",
-                    "reason": "personal_key_cannot_access_org_wallet",
-                    "owner_key": owner_key,
-                    "action": "debit",
-                },
-            )
-        resolved_owner = owner_key
+    _assert_owner_access(auth_ctx, owner_key, action="debit")
 
     registry = get_unit_wallet_registry()
     try:
         if payload.token_count is not None:
             units_debited = math.ceil(payload.token_count / TOKEN_CHUNK_SIZE)
             wallet = registry.debit_units(
-                owner_key=resolved_owner,
+                owner_key=owner_key,
                 units=units_debited,
                 metadata={
                     "token_count": payload.token_count,
@@ -471,20 +461,20 @@ def debit_wallet(
             )
             return WalletDebitResponse(
                 status="ok",
-                owner_key=resolved_owner,
+                owner_key=owner_key,
                 units_debited=units_debited,
                 token_count=payload.token_count,
                 wallet=_wallet_view(wallet),
             )
         else:
             wallet = registry.debit_units(
-                owner_key=resolved_owner,
+                owner_key=owner_key,
                 units=payload.units,  # type: ignore[arg-type]
                 metadata={"reason": payload.reason},
             )
             return WalletDebitResponse(
                 status="ok",
-                owner_key=resolved_owner,
+                owner_key=owner_key,
                 units_debited=payload.units,  # type: ignore[arg-type]
                 token_count=None,
                 wallet=_wallet_view(wallet),
@@ -495,7 +485,7 @@ def debit_wallet(
             content={
                 "detail": {
                     "status": "insufficient_units",
-                    "owner_key": exc.owner_key or resolved_owner,
+                    "owner_key": exc.owner_key or owner_key,
                     "have": exc.have,
                     "need": exc.need,
                 },
