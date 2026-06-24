@@ -46,6 +46,10 @@ def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
+def _new_purchase_id() -> str:
+    return f"purch_{uuid4().hex[:16]}"
+
+
 def _require_known_package(package_id: str) -> tuple[str, dict[str, Any]]:
     normalized = package_id.strip()
     package = UNIT_PACKAGE_CATALOG.get(normalized)
@@ -393,7 +397,7 @@ def purchase_billing_package(
 
     owner_key = resolve_billing_owner(auth_ctx, payload.buyer_email)
 
-    purchase_id = f"purch_{uuid4().hex}"
+    purchase_id = _new_purchase_id()
 
     registry = get_unit_wallet_registry()
     wallet = registry.credit_units(
