@@ -38,6 +38,8 @@ from app.core.unit_wallet import (
 
 _MOCK_API_KEY = "test-key"
 
+_PURCHASE_URL = "/billing/packages/purchase"
+
 
 def _make_auth_ctx(
     *,
@@ -310,7 +312,7 @@ class TestOrgWalletRouting:
 
 
 # ---------------------------------------------------------------------------
-# Integration tests — POST /billing/purchase via TestClient
+# Integration tests — POST /billing/packages/purchase via TestClient
 # ---------------------------------------------------------------------------
 
 
@@ -323,7 +325,7 @@ class TestPurchaseOrgWalletIntegration:
         ctx = _org_ctx(org_id)
         with _override_auth(app_instance, ctx) as client:
             resp = client.post(
-                "/billing/purchase",
+                _PURCHASE_URL,
                 json=_purchase_payload("buyer@example.com"),
             )
         assert resp.status_code == 201
@@ -337,7 +339,7 @@ class TestPurchaseOrgWalletIntegration:
         ctx = _org_ctx(org_id)
         with _override_auth(app_instance, ctx) as client:
             resp = client.post(
-                "/billing/purchase",
+                _PURCHASE_URL,
                 json=_purchase_payload("buyer@example.com"),
             )
         assert resp.status_code == 201
@@ -354,7 +356,7 @@ class TestPurchaseOrgWalletIntegration:
         ctx = _org_ctx(org_id)
         with _override_auth(app_instance, ctx) as client:
             resp = client.post(
-                "/billing/purchase",
+                _PURCHASE_URL,
                 json=_purchase_payload("buyer@example.com", package_id=pkg_id),
             )
         assert resp.status_code == 201
@@ -373,7 +375,7 @@ class TestPurchaseOrgWalletIntegration:
         ctx = _org_ctx(org_id)
         with _override_auth(app_instance, ctx) as client:
             client.post(
-                "/billing/purchase",
+                _PURCHASE_URL,
                 json=_purchase_payload(buyer_email),
             )
         email_wallet = _isolated_wallet_registry.get_wallet(buyer_email)
@@ -390,11 +392,11 @@ class TestPurchaseOrgWalletIntegration:
         ctx = _org_ctx(org_id)
         with _override_auth(app_instance, ctx) as client:
             resp_alice = client.post(
-                "/billing/purchase",
+                _PURCHASE_URL,
                 json=_purchase_payload("alice@example.com", buyer_name="Alice", package_id=pkg_id),
             )
             resp_bob = client.post(
-                "/billing/purchase",
+                _PURCHASE_URL,
                 json=_purchase_payload("bob@example.com", buyer_name="Bob", package_id=pkg_id),
             )
         assert resp_alice.status_code == 201
@@ -415,11 +417,11 @@ class TestPurchaseOrgWalletIntegration:
         ctx = _org_ctx(org_id)
         with _override_auth(app_instance, ctx) as client:
             resp_a = client.post(
-                "/billing/purchase",
+                _PURCHASE_URL,
                 json=_purchase_payload("alice@example.com", buyer_name="Alice", package_id=pkg_id),
             )
             resp_b = client.post(
-                "/billing/purchase",
+                _PURCHASE_URL,
                 json=_purchase_payload("bob@example.com", buyer_name="Bob", package_id=pkg_id),
             )
         assert resp_a.status_code == 201
@@ -437,7 +439,7 @@ class TestPurchaseOrgWalletIntegration:
         ctx = _personal_ctx()
         with _override_auth(app_instance, ctx) as client:
             resp = client.post(
-                "/billing/purchase",
+                _PURCHASE_URL,
                 json=_purchase_payload(buyer_email, package_id=pkg_id),
             )
         assert resp.status_code == 201
@@ -458,7 +460,7 @@ class TestPurchaseOrgWalletIntegration:
         ctx = _personal_ctx()
         with _override_auth(app_instance, ctx) as client:
             client.post(
-                "/billing/purchase",
+                _PURCHASE_URL,
                 json=_purchase_payload(buyer_email),
             )
         org_wallet = _isolated_wallet_registry.get_wallet("ic_org_acme-corp")
@@ -471,7 +473,7 @@ class TestPurchaseOrgWalletIntegration:
         ctx = _personal_ctx()
         with _override_auth(app_instance, ctx) as client:
             resp = client.post(
-                "/billing/purchase",
+                _PURCHASE_URL,
                 json=_purchase_payload("Dev@IronClaw.IO"),
             )
         assert resp.status_code == 201
@@ -489,12 +491,12 @@ class TestPurchaseOrgWalletIntegration:
         personal_ctx = _personal_ctx()
         with _override_auth(app_instance, org_ctx) as client:
             resp_org = client.post(
-                "/billing/purchase",
+                _PURCHASE_URL,
                 json=_purchase_payload(shared_email, buyer_name="OrgMember", package_id=pkg_id),
             )
         with _override_auth(app_instance, personal_ctx) as client:
             resp_personal = client.post(
-                "/billing/purchase",
+                _PURCHASE_URL,
                 json=_purchase_payload(shared_email, buyer_name="PersonalUser", package_id=pkg_id),
             )
         assert resp_org.status_code == 201
@@ -511,7 +513,7 @@ class TestPurchaseOrgWalletIntegration:
         ctx = _org_ctx(org_id)
         with _override_auth(app_instance, ctx) as client:
             resp = client.post(
-                "/billing/purchase",
+                _PURCHASE_URL,
                 json=_purchase_payload("buyer@example.com"),
             )
         assert resp.status_code == 201
@@ -529,7 +531,7 @@ class TestPurchaseOrgWalletIntegration:
         ctx = _org_ctx(org_id)
         with _override_auth(app_instance, ctx) as client:
             resp = client.post(
-                "/billing/purchase",
+                _PURCHASE_URL,
                 json=_purchase_payload("buyer@example.com"),
             )
         assert resp.status_code == 201

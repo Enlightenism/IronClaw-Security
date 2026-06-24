@@ -500,9 +500,7 @@ def test_ledger_scoped_to_org_key_excludes_personal_entries(
     _clear_overrides()
 
 
-def test_ledger_scoped_to_personal_key_excludes_org_entries(
-    org_client: TestClient, client: TestClient
-) -> None:
+def test_ledger_scoped_to_personal_key_excludes_org_entries(org_client: TestClient, client: TestClient) -> None:
     _purchase_org(org_client, package_id="pkg_5000")
     _purchase(client, buyer_email=_PERSONAL_EMAIL, package_id="pkg_5000")
 
