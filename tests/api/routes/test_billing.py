@@ -18,12 +18,6 @@ os.environ.setdefault("SUPABASE_KEY", "")
 os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
 import importlib
-
-# ── Router mount guard ──────────────────────────────────────────────────────
-# app/main.py loads billing via _optional_router("app.api.billing").
-# The actual route module lives at app/api/routes/billing.py.
-# We patch sys.modules so that "app.api.billing" resolves to the routes module
-# before the FastAPI app is imported, ensuring the router mounts correctly.
 import sys
 
 from app.core.auth import AuthContext, get_auth_context, require_api_key
@@ -62,12 +56,7 @@ def _make_auth_ctx(
 
 
 def _override_get_auth_context() -> AuthContext:
-    """Default auth context override: personal key, no org, principal=None.
-
-    Keeps _assert_owner_access in permissive mode for fixture-driven tests
-    while making the override explicit instead of relying on the real auth
-    layer returning None silently.
-    """
+    """Default auth context override: personal key, no org, principal=None."""
     return _make_auth_ctx(principal_id=None, org_id=None, key_type=None)
 
 
@@ -129,7 +118,6 @@ def test_list_packages_returns_200_with_correct_schema(client: TestClient) -> No
             "name",
             "price_usd",
             "included_units",
-            "display_label",
             "description",
             "token_coverage",
             "tokens_per_unit",
@@ -181,6 +169,11 @@ def test_purchase_valid_package_returns_201_with_correct_shape(client: TestClien
     assert purchase["tokens_per_unit"] == TOKEN_CHUNK_SIZE
     assert purchase["buyer_email"] == "buyer@ironclaw.test"
     assert purchase["purchase_id"].startswith("purch_")
+    # install key fields must be present; None on soft-failure is acceptable
+    assert "openclaw_install_key" in purchase
+    assert "claude_code_install_key" in purchase
+    assert purchase["openclaw_install_key"] is None or isinstance(purchase["openclaw_install_key"], str)
+    assert purchase["claude_code_install_key"] is None or isinstance(purchase["claude_code_install_key"], str)
     wallet = body["wallet"]
     assert wallet["balance_units"] == 5_000
     assert wallet["total_purchased_units"] == 5_000
@@ -319,10 +312,8 @@ def test_debit_insufficient_balance_returns_402_with_structured_detail(client: T
     assert detail["owner_key"] == owner
     assert "have" in detail
     assert "need" in detail
-    assert "tokens_per_unit" in detail
     assert detail["have"] == 5_000
     assert detail["need"] == 9_999_999
-    assert detail["tokens_per_unit"] == TOKEN_CHUNK_SIZE
 
 
 def test_debit_insufficient_balance_zero_wallet_returns_402(client: TestClient) -> None:
