@@ -10,9 +10,27 @@ router = APIRouter(prefix="/api", tags=["api"])
 inventory_router = APIRouter(tags=["api-inventory"])
 
 OPTIONAL_API_MODULES: Final[tuple[str, ...]] = (
+    "app.api.routes.billing",
+    "app.api.routes.alerts",
+    "app.api.routes.audit",
+    "app.api.routes.audit_explorer",
+    "app.api.routes.audit_log",
+    "app.api.routes.dashboard",
+    "app.api.routes.deployment",
+    "app.api.routes.execution_dashboard",
+    "app.api.routes.guard",
     "app.api.routes.incidents",
     "app.api.routes.integrations",
+    "app.api.routes.llamafirewall",
+    "app.api.routes.onboarding",
+    "app.api.routes.organizations",
+    "app.api.routes.orgs",
+    "app.api.routes.policy",
+    "app.api.routes.quarantine",
+    "app.api.routes.review_queue",
     "app.api.routes.reviewqueue",
+    "app.api.routes.scan",
+    "app.api.routes.usage",
     "app.api.threat_feed",
 )
 
