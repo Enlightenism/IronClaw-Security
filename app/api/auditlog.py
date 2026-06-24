@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from app.dependencies.auth import require_access_dependency
 from app.services.auditlogservice import AuditLogService, build_audit_log_service
@@ -21,11 +22,26 @@ router = APIRouter(
 )
 
 
+class AuditEventCreatePayload(BaseModel):
+    action: str = Field(min_length=1, max_length=200)
+    actor_id: str | None = Field(default=None, max_length=200)
+    request_id: str | None = Field(default=None, max_length=200)
+    trace_id: str | None = Field(default=None, max_length=200)
+    result: str | None = Field(default=None, max_length=100)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AuditEventListResponse(BaseModel):
+    events: list[dict[str, Any]]
+    count: int
+
+
 @router.get(
     "/events",
     summary="List Audit Events",
-    response_model=dict,
+    response_model=AuditEventListResponse,
     dependencies=[Depends(_audit_read_dep)],
+    operation_id="audit_list_events",
 )
 def list_audit_events(
     actorid: str | None = Query(default=None, alias="actorid"),
@@ -35,7 +51,7 @@ def list_audit_events(
     eventtype: str | None = Query(default=None, alias="eventtype"),
     limit: int = Query(default=100, ge=1, le=500),
     service: AuditLogService = Depends(_get_service),
-) -> dict[str, Any]:
+) -> AuditEventListResponse:
     filters: dict[str, Any] = {}
     if actorid:
         filters["actor_id"] = actorid
@@ -49,7 +65,7 @@ def list_audit_events(
         filters["action"] = eventtype
 
     events = service.list_logs(limit=limit, filters=filters or None)
-    return {"events": events, "count": len(events)}
+    return AuditEventListResponse(events=events, count=len(events))
 
 
 @router.post(
@@ -57,12 +73,13 @@ def list_audit_events(
     summary="Create Audit Event",
     response_model=dict,
     dependencies=[Depends(_audit_write_dep)],
+    operation_id="audit_create_event",
 )
 def create_audit_event(
-    payload: dict[str, Any],
+    payload: AuditEventCreatePayload,
     service: AuditLogService = Depends(_get_service),
 ) -> dict[str, Any]:
-    return service.write_log(payload)
+    return service.write_log(payload.model_dump(exclude_none=False))
 
 
 @router.get(
@@ -70,6 +87,7 @@ def create_audit_event(
     summary="Get Audit Event By ID",
     response_model=dict,
     dependencies=[Depends(_audit_read_dep)],
+    operation_id="audit_get_event_by_id",
 )
 def get_audit_event(
     log_id: str,
@@ -86,6 +104,7 @@ def get_audit_event(
     summary="List Audit Events By Actor",
     response_model=list,
     dependencies=[Depends(_audit_read_dep)],
+    operation_id="audit_list_by_actor",
 )
 def list_audit_events_by_actor(
     actor_id: str,
@@ -100,6 +119,7 @@ def list_audit_events_by_actor(
     summary="List Audit Events By Request",
     response_model=list,
     dependencies=[Depends(_audit_read_dep)],
+    operation_id="audit_list_by_request",
 )
 def list_audit_events_by_request(
     request_id: str,
@@ -114,6 +134,7 @@ def list_audit_events_by_request(
     summary="List Audit Events By Trace",
     response_model=list,
     dependencies=[Depends(_audit_read_dep)],
+    operation_id="audit_list_by_trace",
 )
 def list_audit_events_by_trace(
     trace_id: str,
@@ -128,6 +149,7 @@ def list_audit_events_by_trace(
     summary="Audit Log Summary",
     response_model=dict,
     dependencies=[Depends(_audit_read_dep)],
+    operation_id="audit_get_summary",
 )
 def get_audit_summary(
     organization_id: str | None = Query(default=None),
