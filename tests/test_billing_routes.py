@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.billing import (
+from app.api.routes.billing import (
     router as billing_router,
 )
 from app.core.auth import (
@@ -186,7 +186,7 @@ def test_purchase_provisions_both_install_keys_on_success() -> None:
     mock_registry = MagicMock()
     mock_registry.generate_install_key.side_effect = _fake_generate
 
-    with patch("app.api.billing.get_install_key_registry", return_value=mock_registry):
+    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _personal_client().post(
             "/billing/packages/purchase",
             json={
@@ -221,7 +221,7 @@ def test_purchase_install_key_already_exists_returns_none_keys_purchase_still_su
     mock_registry = MagicMock()
     mock_registry.generate_install_key.side_effect = _fake_generate
 
-    with patch("app.api.billing.get_install_key_registry", return_value=mock_registry):
+    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _personal_client().post(
             "/billing/packages/purchase",
             json={
@@ -254,7 +254,7 @@ def test_purchase_install_key_provisioning_exception_returns_none_keys_purchase_
     mock_registry = MagicMock()
     mock_registry.generate_install_key.side_effect = _fake_generate
 
-    with patch("app.api.billing.get_install_key_registry", return_value=mock_registry):
+    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _personal_client().post(
             "/billing/packages/purchase",
             json={
@@ -290,7 +290,7 @@ def test_purchase_install_key_partial_success_one_key_already_exists() -> None:
     mock_registry = MagicMock()
     mock_registry.generate_install_key.side_effect = _fake_generate
 
-    with patch("app.api.billing.get_install_key_registry", return_value=mock_registry):
+    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _personal_client().post(
             "/billing/packages/purchase",
             json={
@@ -311,7 +311,7 @@ def test_purchase_response_schema_includes_install_key_fields() -> None:
     mock_registry = MagicMock()
     mock_registry.generate_install_key.side_effect = RuntimeError("no db in unit test")
 
-    with patch("app.api.billing.get_install_key_registry", return_value=mock_registry):
+    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _personal_client().post(
             "/billing/packages/purchase",
             json={
@@ -376,7 +376,7 @@ def test_purchase_email_is_normalized_to_lowercase() -> None:
     mock_registry = MagicMock()
     mock_registry.generate_install_key.side_effect = RuntimeError("no db")
 
-    with patch("app.api.billing.get_install_key_registry", return_value=mock_registry):
+    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _personal_client().post(
             "/billing/packages/purchase",
             json={
@@ -404,7 +404,7 @@ def test_purchase_personal_key_returns_201_and_owner_key_is_buyer_email() -> Non
     mock_registry = MagicMock()
     mock_registry.generate_install_key.side_effect = RuntimeError("no db")
 
-    with patch("app.api.billing.get_install_key_registry", return_value=mock_registry):
+    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _personal_client().post(
             "/billing/packages/purchase",
             json={
@@ -437,7 +437,7 @@ def test_purchase_personal_key_pkg_25k_returns_201() -> None:
     mock_registry = MagicMock()
     mock_registry.generate_install_key.side_effect = RuntimeError("no db")
 
-    with patch("app.api.billing.get_install_key_registry", return_value=mock_registry):
+    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _personal_client().post(
             "/billing/packages/purchase",
             json={
@@ -458,7 +458,7 @@ def test_purchase_personal_key_pkg_60k_returns_201() -> None:
     mock_registry = MagicMock()
     mock_registry.generate_install_key.side_effect = RuntimeError("no db")
 
-    with patch("app.api.billing.get_install_key_registry", return_value=mock_registry):
+    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _personal_client().post(
             "/billing/packages/purchase",
             json={
@@ -481,10 +481,6 @@ def test_purchase_personal_key_pkg_60k_returns_201() -> None:
 
 
 def test_purchase_id_uniqueness_across_concurrent_purchases() -> None:
-    # Patch is hoisted outside the thread closure so the mock context is
-    # established once before the ThreadPoolExecutor starts. This prevents
-    # the patch context from exiting mid-flight while threads are still in
-    # their request cycle, eliminating the RuntimeError side_effect race.
     mock_registry = MagicMock()
     mock_registry.generate_install_key.side_effect = RuntimeError("no db")
 
@@ -504,7 +500,7 @@ def test_purchase_id_uniqueness_across_concurrent_purchases() -> None:
         assert resp.status_code == 201, f"Purchase {i} failed: {resp.text}"
         return resp.json()["purchase"]["purchase_id"]
 
-    with patch("app.api.billing.get_install_key_registry", return_value=mock_registry):
+    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
             futures = [pool.submit(_do_purchase, i) for i in range(20)]
             purchase_ids = [f.result() for f in concurrent.futures.as_completed(futures)]
@@ -539,7 +535,7 @@ def test_purchase_unknown_package_id_returns_404() -> None:
     mock_registry = MagicMock()
     mock_registry.generate_install_key.side_effect = RuntimeError("no db")
 
-    with patch("app.api.billing.get_install_key_registry", return_value=mock_registry):
+    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _personal_client().post(
             "/billing/packages/purchase",
             json={
@@ -575,7 +571,7 @@ def test_purchase_org_key_returns_201_and_owner_key_is_ic_org() -> None:
     mock_registry = MagicMock()
     mock_registry.generate_install_key.side_effect = RuntimeError("no db")
 
-    with patch("app.api.billing.get_install_key_registry", return_value=mock_registry):
+    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _org_client().post(
             "/billing/packages/purchase",
             json={
@@ -917,7 +913,7 @@ def test_refund_personal_key_cannot_refund_org_wallet_returns_403() -> None:
 
 
 # ---------------------------------------------------------------------------
-# GET /billing/ledger — personal key
+# GET /billing/wallet/{owner_key}/ledger — personal key
 # ---------------------------------------------------------------------------
 
 
@@ -934,8 +930,8 @@ def test_get_ledger_personal_key_returns_200() -> None:
         metadata={"reason": "test_debit", "route": "/guard/execute"},
     )
     response = _personal_client().get(
-        "/billing/ledger",
-        params={"owner_key": "ledger-personal@ironclaw.test", "limit": 10},
+        "/billing/wallet/ledger-personal@ironclaw.test/ledger",
+        params={"limit": 10},
     )
     assert response.status_code == 200
     data = response.json()
@@ -954,12 +950,12 @@ def test_get_ledger_personal_key_returns_200() -> None:
 
 
 def test_get_ledger_returns_401_unauthenticated() -> None:
-    response = _unauthed_client().get("/billing/ledger")
+    response = _unauthed_client().get("/billing/wallet/any@ironclaw.test/ledger")
     assert response.status_code == 401
 
 
 # ---------------------------------------------------------------------------
-# GET /billing/ledger — org key isolation
+# GET /billing/wallet/{owner_key}/ledger — org key isolation
 # ---------------------------------------------------------------------------
 
 
@@ -971,8 +967,8 @@ def test_get_ledger_org_key_can_read_own_org_wallet_entries() -> None:
         metadata={"package_id": _PKG_25K},
     )
     response = _org_client().get(
-        "/billing/ledger",
-        params={"owner_key": _ORG_OWNER_KEY, "limit": 5},
+        f"/billing/wallet/{_ORG_OWNER_KEY}/ledger",
+        params={"limit": 5},
     )
     assert response.status_code == 200
     data = response.json()
@@ -983,24 +979,21 @@ def test_get_ledger_org_key_can_read_own_org_wallet_entries() -> None:
 
 def test_get_ledger_org_key_cannot_query_personal_wallet_entries_returns_403() -> None:
     response = _org_client().get(
-        "/billing/ledger",
-        params={"owner_key": "personal@ironclaw.test"},
+        "/billing/wallet/personal@ironclaw.test/ledger",
     )
     assert response.status_code == 403
 
 
 def test_get_ledger_personal_key_cannot_query_org_wallet_entries_returns_403() -> None:
     response = _personal_client().get(
-        "/billing/ledger",
-        params={"owner_key": _ORG_OWNER_KEY},
+        f"/billing/wallet/{_ORG_OWNER_KEY}/ledger",
     )
     assert response.status_code == 403
 
 
 def test_get_ledger_org_key_cannot_query_different_org_wallet_returns_403() -> None:
     response = _org_client().get(
-        "/billing/ledger",
-        params={"owner_key": "ic_org_otherorg999"},
+        "/billing/wallet/ic_org_otherorg999/ledger",
     )
     assert response.status_code == 403
 
