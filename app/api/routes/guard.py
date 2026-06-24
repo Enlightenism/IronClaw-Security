@@ -1,20 +1,23 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
 
 from app.core.auth import require_api_key
-from app.orchestrator.execution_trace import build_trace_id
 from app.orchestrator.policy_enforcer import enforce_policy, initialize_policy_engine
 from app.services.action_decision import evaluate_action_execution
 
 router = APIRouter(prefix="/guard", tags=["guard"])
 
-
 _ENGINE = initialize_policy_engine(mode="enforce")
 _AUDIT_EVENTS: list[dict[str, Any]] = []
+
+
+def build_trace_id() -> str:
+    return f"trace-{uuid4().hex[:16]}"
 
 
 class ActionDecisionRequest(BaseModel):
