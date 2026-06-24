@@ -5,14 +5,11 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.C_gen1 import scan_archive, scan_github_repo, scan_text, scan_url
-from app.C_gen1service import (
-    apply_review_action,
-    get_history_item,
-    get_history_items,
-    record_scan_result,
-    review_scan,
-)
+from app.services import action_decision as action_decision_svc
+from app.services import action_guard as action_guard_svc
+from app.services import action_policy as action_policy_svc
+from app.services import history as history_svc
+from app.services import scanner as scanner_svc
 
 router = APIRouter()
 
@@ -107,36 +104,36 @@ class GuardDecisionResponse(BaseModel):
 
 @router.post("/scan/", response_model=ScanResponse)
 def scan_target(request: ScanRequest) -> ScanResponse:
-    target_type = request.target_type
-    target_value = request.target_value
+    ttype = request.target_type
+    tvalue = request.target_value
 
-    normalized_value = " ".join(target_value.split())
-    if target_type == "text" and not normalized_value:
+    normalized_value = " ".join(tvalue.split())
+    if ttype == "text" and not normalized_value:
         raise HTTPException(status_code=400, detail="target_value is empty after normalization")
 
-    if target_type == "text":
-        result = scan_text(normalized_value)
-    elif target_type == "url":
-        result = scan_url(target_value)
-    elif target_type == "github_repo":
-        result = scan_github_repo(target_value)
-    elif target_type == "archive":
-        result = scan_archive(target_value)
+    if ttype == "text":
+        result = scanner_svc.scan_text(normalized_value)
+    elif ttype == "url":
+        result = scanner_svc.scan_url(tvalue)
+    elif ttype == "github_repo":
+        result = scanner_svc.scan_github_repo(tvalue)
+    elif ttype == "archive":
+        result = scanner_svc.scan_archive(tvalue)
     else:
-        raise HTTPException(status_code=400, detail=f"unsupported target_type={target_type}")
+        raise HTTPException(status_code=400, detail=f"unsupported target_type={ttype}")
 
-    stored = record_scan_result(
-        target_type=target_type,
-        target_value=target_value,
+    stored = history_svc.record_scan_result(
+        target_type=ttype,
+        target_value=tvalue,
         result=result,
     )
 
     return ScanResponse(
         scan_id=stored.scan_id,
-        verdict=stored.verdict,
+        verdict=stored.verdict,  # type: ignore[assignment]
         summary=stored.summary,
-        risk_score=stored.risk_score,
-        matched_patterns=list(stored.matchedpatterns),
+        risk_score=stored.riskscore,
+        matched_patterns=list(getattr(stored, "matchedpatterns", [])),
         risky_files=list(getattr(stored, "riskyfiles", [])),
         checks_loaded=list(getattr(stored, "checksloaded", [])),
         failed_checks=list(getattr(stored, "failedchecks", [])),
@@ -148,14 +145,14 @@ def scan_target(request: ScanRequest) -> ScanResponse:
 
 @router.get("/history/", response_model=HistoryListResponse)
 def list_history() -> HistoryListResponse:
-    items = get_history_items()
+    items = history_svc.get_history_items()
     return HistoryListResponse(
         items=[
             HistoryItem(
                 scan_id=i.scan_id,
                 target_type=i.targettype,
                 target_value=i.targetvalue,
-                verdict=i.verdict,
+                verdict=i.verdict,  # type: ignore[assignment]
                 summary=i.summary,
                 risk_score=i.riskscore,
                 matched_patterns=list(getattr(i, "matchedpatterns", [])),
@@ -170,7 +167,7 @@ def list_history() -> HistoryListResponse:
 
 @router.get("/history/{scan_id}", response_model=HistoryItem)
 def get_history(scan_id: str) -> HistoryItem:
-    item = get_history_item(scan_id)
+    item = history_svc.get_history_item(scan_id)
     if item is None:
         raise HTTPException(status_code=404, detail="scan_id not found")
 
@@ -178,7 +175,7 @@ def get_history(scan_id: str) -> HistoryItem:
         scan_id=item.scan_id,
         target_type=item.targettype,
         target_value=item.targetvalue,
-        verdict=item.verdict,
+        verdict=item.verdict,  # type: ignore[assignment]
         summary=item.summary,
         risk_score=item.riskscore,
         matched_patterns=list(getattr(item, "matchedpatterns", [])),
@@ -191,21 +188,27 @@ def get_history(scan_id: str) -> HistoryItem:
 @router.post("/history/{scan_id}/review")
 def review_history_item(scan_id: str, request: ReviewRequest) -> dict[str, Any]:
     try:
-        updated = review_scan(scan_id=scan_id, action=request.action)
+        updated = history_svc.review_scan(scan_id=scan_id, action=request.action)
     except KeyError as err:
         raise HTTPException(status_code=404, detail="scan_id not found") from err
 
     if updated is None:
         raise HTTPException(status_code=400, detail="review not applicable for this scan")
 
-    apply_review_action(updated, request.action)
+    history_svc.apply_review_action(updated, request.action)
     return {"status": "ok", "scan_id": scan_id, "action": request.action}
 
 
 @router.post("/guard/action", response_model=GuardActionResponse)
 def guard_action(request: GuardActionRequest) -> GuardActionResponse:
-    scan_result = scan_text(request.content)
+    scan_result = action_guard_svc.evaluate_action(
+        action_type=request.action_type,
+        target=request.target,
+        content=request.content,
+    )
+
     verdict: Verdict = scan_result.verdict  # type: ignore[assignment]
+    matched_patterns = list(getattr(scan_result, "matchedpatterns", []))
 
     should_halt = verdict in ("block", "quarantine")
     should_warn = verdict in ("warn", "quarantine")
@@ -217,7 +220,7 @@ def guard_action(request: GuardActionRequest) -> GuardActionResponse:
         verdict=verdict,
         should_halt=bool(should_halt),
         should_warn=bool(should_warn),
-        matched_patterns=list(scan_result.matchedpatterns),
+        matched_patterns=matched_patterns,
         client_id=request.client_id,
         session_id=request.session_id,
     )
@@ -225,26 +228,20 @@ def guard_action(request: GuardActionRequest) -> GuardActionResponse:
 
 @router.post("/guard/action-policy", response_model=GuardPolicyResponse)
 def guard_action_policy(request: GuardActionRequest) -> GuardPolicyResponse:
-    content = request.content.lower()
-    if "powershell" in content:
-        policy_mode: Literal["review", "allow", "block"] = "review"
-        verdict: Verdict = "warn"
-        should_halt = False
-        should_warn = True
-    else:
-        policy_mode = "allow"
-        verdict = "allow"
-        should_halt = False
-        should_warn = False
+    policy = action_policy_svc.evaluate_policy(
+        action_type=request.action_type,
+        target=request.target,
+        content=request.content,
+    )
 
     return GuardPolicyResponse(
         action_type=request.action_type,
         target=request.target,
         content=request.content,
-        policy_mode=policy_mode,
-        verdict=verdict,
-        should_halt=should_halt,
-        should_warn=should_warn,
+        policy_mode=policy.mode,
+        verdict=policy.verdict,  # type: ignore[assignment]
+        should_halt=policy.should_halt,
+        should_warn=policy.should_warn,
         client_id=request.client_id,
         session_id=request.session_id,
     )
@@ -252,35 +249,22 @@ def guard_action_policy(request: GuardActionRequest) -> GuardPolicyResponse:
 
 @router.post("/guard/action-decision", response_model=GuardDecisionResponse)
 def guard_action_decision(request: GuardActionRequest) -> GuardDecisionResponse:
-    scan_result = scan_text(request.content)
-    scan_verdict: Verdict = scan_result.verdict  # type: ignore[assignment]
-
-    policy_resp = guard_action_policy(request)
-    policy_mode = policy_resp.policy_mode
-
-    matched_patterns = list(scan_result.matchedpatterns)
-
-    if scan_verdict in ("block", "quarantine"):
-        final_verdict = "block"
-        decision_source: Literal["scan", "policy"] = "scan"
-        should_halt = True
-        should_warn = False
-    else:
-        final_verdict = policy_resp.verdict
-        decision_source = "policy"
-        should_halt = policy_resp.should_halt
-        should_warn = policy_resp.should_warn
+    decision = action_decision_svc.evaluate_action_decision(
+        action_type=request.action_type,
+        target=request.target,
+        content=request.content,
+    )
 
     return GuardDecisionResponse(
         action_type=request.action_type,
         target=request.target,
         content=request.content,
-        policy_mode=policy_mode,
-        verdict=final_verdict,
-        decision_source=decision_source,
-        should_halt=should_halt,
-        should_warn=should_warn,
-        matched_patterns=matched_patterns,
+        policy_mode=decision.policy_mode,  # type: ignore[assignment]
+        verdict=decision.verdict,  # type: ignore[assignment]
+        decision_source=decision.source,
+        should_halt=decision.should_halt,
+        should_warn=decision.should_warn,
+        matched_patterns=list(getattr(decision, "matchedpatterns", [])),
         client_id=request.client_id,
         session_id=request.session_id,
     )
