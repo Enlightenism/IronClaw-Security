@@ -481,6 +481,10 @@ def test_purchase_personal_key_pkg_60k_returns_201() -> None:
 
 
 def test_purchase_id_uniqueness_across_concurrent_purchases() -> None:
+    # Patch is hoisted outside the thread closure so the mock context is
+    # established once before the ThreadPoolExecutor starts. This prevents
+    # the patch context from exiting mid-flight while threads are still in
+    # their request cycle, eliminating the RuntimeError side_effect race.
     mock_registry = MagicMock()
     mock_registry.generate_install_key.side_effect = RuntimeError("no db")
 
@@ -488,28 +492,27 @@ def test_purchase_id_uniqueness_across_concurrent_purchases() -> None:
     client = TestClient(app)
 
     def _do_purchase(i: int) -> str:
-        with patch("app.api.billing.get_install_key_registry", return_value=mock_registry):
-            resp = client.post(
-                "/billing/packages/purchase",
-                json={
-                    "package_id": _PKG_5K,
-                    "buyer_name": f"Concurrent Buyer {i}",
-                    "buyer_email": f"concurrent{i}@ironclaw.test",
-                    "metadata": {},
-                },
-            )
+        resp = client.post(
+            "/billing/packages/purchase",
+            json={
+                "package_id": _PKG_5K,
+                "buyer_name": f"Concurrent Buyer {i}",
+                "buyer_email": f"concurrent{i}@ironclaw.test",
+                "metadata": {},
+            },
+        )
         assert resp.status_code == 201, f"Purchase {i} failed: {resp.text}"
         return resp.json()["purchase"]["purchase_id"]
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
-        futures = [pool.submit(_do_purchase, i) for i in range(20)]
-        purchase_ids = [f.result() for f in concurrent.futures.as_completed(futures)]
+    with patch("app.api.billing.get_install_key_registry", return_value=mock_registry):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+            futures = [pool.submit(_do_purchase, i) for i in range(20)]
+            purchase_ids = [f.result() for f in concurrent.futures.as_completed(futures)]
 
     assert len(purchase_ids) == len(set(purchase_ids)), f"Duplicate purchase_ids detected: {purchase_ids}"
     for pid in purchase_ids:
         assert pid.startswith("purch_"), f"purchase_id missing purch_ prefix: {pid!r}"
-        hex_part = pid[len("purch_") :]
-        # _new_purchase_id() uses uuid.uuid4().hex[:16] — 16 hex chars
+        hex_part = pid[len("purch_"):]
         assert len(hex_part) == 16, f"purchase_id hex part wrong length: {pid!r}"
         assert all(c in "0123456789abcdef" for c in hex_part), f"purchase_id contains non-hex characters: {pid!r}"
 
