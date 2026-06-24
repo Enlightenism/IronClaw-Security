@@ -17,9 +17,6 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
 os.environ.setdefault("SUPABASE_KEY", "")
 os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
-import importlib
-import sys
-
 from app.core.auth import AuthContext, get_auth_context, require_api_key
 import app.core.unit_wallet as _unit_wallet_module
 from app.core.unit_wallet import (
@@ -28,11 +25,7 @@ from app.core.unit_wallet import (
     UNIT_PACKAGE_CATALOG,
     UnitWalletRegistry,
 )
-
-_billing_routes_module = importlib.import_module("app.api.routes.billing")
-sys.modules.setdefault("app.api.billing", _billing_routes_module)
-
-from app.main import app as _app  # noqa: E402  (must follow sys.modules patch)
+from app.main import app as _app  # noqa: E402
 
 _MOCK_API_KEY = "test-api-key"
 _AUTH_HEADERS = {"X-API-Key": _MOCK_API_KEY}
@@ -86,7 +79,7 @@ def client(_reset_wallet_registry):
 
 def _fund_wallet(client: TestClient, email: str, package_id: str = "pkg_5000") -> None:
     resp = client.post(
-        "/billing/purchase",
+        "/billing/packages/purchase",
         json={
             "package_id": package_id,
             "buyer_name": "Fixture Buyer",
@@ -145,13 +138,13 @@ def test_list_packages_token_coverage_matches_catalog(client: TestClient) -> Non
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/purchase
+# POST /billing/packages/purchase
 # ---------------------------------------------------------------------------
 
 
 def test_purchase_valid_package_returns_201_with_correct_shape(client: TestClient) -> None:
     resp = client.post(
-        "/billing/purchase",
+        "/billing/packages/purchase",
         json={
             "package_id": "pkg_5000",
             "buyer_name": "Test Buyer",
@@ -182,7 +175,7 @@ def test_purchase_valid_package_returns_201_with_correct_shape(client: TestClien
 
 def test_purchase_team_package_credits_correct_units(client: TestClient) -> None:
     resp = client.post(
-        "/billing/purchase",
+        "/billing/packages/purchase",
         json={
             "package_id": "pkg_25000",
             "buyer_name": "Team Buyer",
@@ -198,7 +191,7 @@ def test_purchase_team_package_credits_correct_units(client: TestClient) -> None
 
 def test_purchase_enterprise_package_credits_correct_units(client: TestClient) -> None:
     resp = client.post(
-        "/billing/purchase",
+        "/billing/packages/purchase",
         json={
             "package_id": "pkg_60000",
             "buyer_name": "Enterprise Buyer",
@@ -212,7 +205,7 @@ def test_purchase_enterprise_package_credits_correct_units(client: TestClient) -
 
 def test_purchase_unknown_package_returns_404(client: TestClient) -> None:
     resp = client.post(
-        "/billing/purchase",
+        "/billing/packages/purchase",
         json={
             "package_id": "pkg_unknown_xyz",
             "buyer_name": "Ghost Buyer",
@@ -226,7 +219,7 @@ def test_purchase_unknown_package_returns_404(client: TestClient) -> None:
 
 def test_purchase_empty_package_id_returns_422(client: TestClient) -> None:
     resp = client.post(
-        "/billing/purchase",
+        "/billing/packages/purchase",
         json={
             "package_id": "",
             "buyer_name": "Bad Buyer",
@@ -589,7 +582,7 @@ def test_purchase_routes_to_org_wallet_when_org_key(client: TestClient) -> None:
     _app.dependency_overrides[get_auth_context] = _org_auth_ctx
     try:
         resp = client.post(
-            "/billing/purchase",
+            "/billing/packages/purchase",
             json={
                 "package_id": "pkg_5000",
                 "buyer_name": "Org Buyer",
