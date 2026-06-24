@@ -33,9 +33,12 @@ _MOCK_API_KEY = "test-api-key"
 _AUTH_HEADERS = {"X-API-Key": _MOCK_API_KEY}
 
 
+# ---------------------------------------------------------------------------
+# Auth context factories
+# ---------------------------------------------------------------------------
+
+
 def _make_personal_ctx(email: str = "test@ironclaw.test") -> AuthContext:
-    # principal_id=None bypasses the identity check in _assert_owner_access
-    # for personal keys; cross-wallet blocking is tested explicitly below.
     return AuthContext(
         api_key=_MOCK_API_KEY,
         principal_type="api_key",
@@ -78,18 +81,32 @@ def _make_org_ctx(org_id: str) -> AuthContext:
     )
 
 
+# ---------------------------------------------------------------------------
+# Registry helpers
+# ---------------------------------------------------------------------------
+
+
 def _fresh_registry() -> UnitWalletRegistry:
-    """Create and install a fresh registry; return it for direct seeding."""
+    """Install and return a fresh registry on the module global."""
     fresh = UnitWalletRegistry()
     _unit_wallet_module._unit_wallet_registry = fresh
     return fresh
+
+
+def _seed_wallet(registry: UnitWalletRegistry, owner_key: str, units: int = 500) -> None:
+    registry.credit_units(owner_key=owner_key, units=units)
+
+
+# ---------------------------------------------------------------------------
+# Auth override context manager
+# ---------------------------------------------------------------------------
 
 
 @contextmanager
 def _override_auth(ctx: AuthContext):
     """
     Override auth dependencies on the shared _app and install a fresh
-    wallet registry so org-isolation tests never share state.
+    wallet registry so isolation tests never share state.
     """
     registry = _fresh_registry()
 
@@ -112,10 +129,15 @@ def _override_auth(ctx: AuthContext):
         _app.dependency_overrides.pop(require_api_key, None)
 
 
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
 @pytest.fixture(autouse=True)
 def _reset_wallet_registry():
-    fresh = UnitWalletRegistry()
-    _unit_wallet_module._unit_wallet_registry = fresh
+    """Guarantee a clean registry before AND after every test."""
+    _unit_wallet_module._unit_wallet_registry = UnitWalletRegistry()
     yield
     _unit_wallet_module._unit_wallet_registry = UnitWalletRegistry()
 
@@ -187,8 +209,23 @@ def test_packages_no_auth_header_returns_401() -> None:
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/purchase  (canonical route — not /billing/packages/purchase)
+# POST /billing/purchase  (canonical route)
 # ---------------------------------------------------------------------------
+# NOTE: /billing/packages/purchase is NOT a valid route.
+# The router registers POST /billing/purchase — never /billing/packages/purchase.
+# Any test that hits /billing/packages/purchase correctly expects 404/405.
+# ---------------------------------------------------------------------------
+
+
+def test_purchase_old_path_returns_404_or_405(client: TestClient) -> None:
+    """Guard: the stale /billing/packages/purchase path must never resolve."""
+    payload = {
+        "package_id": "pkg_5000",
+        "buyer_name": "Ghost",
+        "buyer_email": "ghost@ironclaw.test",
+    }
+    resp = client.post("/billing/packages/purchase", json=payload)
+    assert resp.status_code in (404, 405)
 
 
 def test_purchase_starter_package_credits_wallet(client: TestClient) -> None:
@@ -241,6 +278,25 @@ def test_purchase_unknown_package_returns_404(client: TestClient) -> None:
     assert resp.status_code == 404
 
 
+def test_purchase_missing_required_fields_returns_422(client: TestClient) -> None:
+    resp = client.post("/billing/purchase", json={"package_id": "pkg_5000"})
+    assert resp.status_code == 422
+
+
+def test_purchase_no_auth_returns_401() -> None:
+    _app.dependency_overrides.clear()
+    with TestClient(_app, raise_server_exceptions=False) as c:
+        resp = c.post(
+            "/billing/purchase",
+            json={
+                "package_id": "pkg_5000",
+                "buyer_name": "No Auth",
+                "buyer_email": "noauth@ironclaw.test",
+            },
+        )
+    assert resp.status_code == 401
+
+
 def test_purchase_org_key_pools_to_org_wallet() -> None:
     ctx = _make_org_ctx("org-abc")
     with _override_auth(ctx) as (c, _registry):
@@ -269,14 +325,21 @@ def test_purchase_response_token_coverage_correct(client: TestClient) -> None:
     assert purchase["tokens_per_unit"] == TOKEN_CHUNK_SIZE
 
 
+def test_purchase_idempotent_double_purchase_accumulates(client: TestClient) -> None:
+    payload = {
+        "package_id": "pkg_5000",
+        "buyer_name": "Double User",
+        "buyer_email": "double@ironclaw.test",
+    }
+    client.post("/billing/purchase", json=payload)
+    resp = client.post("/billing/purchase", json=payload)
+    assert resp.status_code == 201
+    assert resp.json()["wallet"]["balance_units"] == 10_000
+
+
 # ---------------------------------------------------------------------------
 # GET /billing/wallet/{owner_key}
 # ---------------------------------------------------------------------------
-
-
-def _seed_wallet(registry: UnitWalletRegistry, owner_key: str, units: int = 500) -> None:
-    """Seed via the provided registry instance — never reads the module global directly."""
-    registry.credit_units(owner_key=owner_key, units=units)
 
 
 def test_get_wallet_balance_returns_200(client: TestClient) -> None:
@@ -291,9 +354,6 @@ def test_get_wallet_balance_returns_200(client: TestClient) -> None:
 
 
 def test_get_wallet_returns_404_for_unknown_owner(client: TestClient) -> None:
-    """
-    The route raises 404 for unknown wallets — it does NOT auto-create.
-    """
     resp = client.get("/billing/wallet/nobody@ironclaw.test")
     assert resp.status_code == 404
 
@@ -381,6 +441,16 @@ def test_debit_requires_auth_context() -> None:
     assert resp.status_code == 401
 
 
+def test_debit_zero_units_rejected(client: TestClient) -> None:
+    registry = _unit_wallet_module._unit_wallet_registry
+    _seed_wallet(registry, "zero@ironclaw.test", 50)
+    resp = client.post(
+        "/billing/wallet/zero@ironclaw.test/debit",
+        json={"units": 0},
+    )
+    assert resp.status_code == 422
+
+
 # ---------------------------------------------------------------------------
 # POST /billing/wallet/{owner_key}/refund
 # ---------------------------------------------------------------------------
@@ -421,7 +491,7 @@ def test_refund_requires_auth_context() -> None:
 
 
 # ---------------------------------------------------------------------------
-# GET /billing/wallet/{owner_key}/ledger  (canonical route)
+# GET /billing/wallet/{owner_key}/ledger
 # ---------------------------------------------------------------------------
 
 
@@ -449,6 +519,18 @@ def test_ledger_requires_auth_context() -> None:
     with TestClient(_app, raise_server_exceptions=False) as c:
         resp = c.get("/billing/wallet/test@ironclaw.test/ledger")
     assert resp.status_code == 401
+
+
+def test_ledger_empty_for_new_wallet_after_purchase(client: TestClient) -> None:
+    payload = {
+        "package_id": "pkg_5000",
+        "buyer_name": "Ledger User",
+        "buyer_email": "ledgeruser@ironclaw.test",
+    }
+    client.post("/billing/purchase", json=payload)
+    resp = client.get("/billing/wallet/ledgeruser@ironclaw.test/ledger")
+    assert resp.status_code == 200
+    assert len(resp.json()["entries"]) >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -547,10 +629,6 @@ def test_personal_key_debit_own_wallet_succeeds() -> None:
 
 
 def test_personal_key_blocked_from_other_personal_wallet() -> None:
-    """
-    Personal key whose principal_id is 'owner-a@ironclaw.test' must not
-    access a wallet owned by 'owner-b@ironclaw.test'.
-    """
     ctx = _make_personal_ctx_with_id("owner-a@ironclaw.test")
     with _override_auth(ctx) as (c, registry):
         registry.credit_units(owner_key="owner-b@ironclaw.test", units=100)
