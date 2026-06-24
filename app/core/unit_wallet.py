@@ -151,10 +151,36 @@ _EXPECTED_PACKAGES = {
 
 for _pkg_id, (_expected_units, _expected_price) in _EXPECTED_PACKAGES.items():
     _entry = UNIT_PACKAGE_CATALOG.get(_pkg_id)
-    assert _entry is not None, f"unit_wallet: UNIT_PACKAGE_CATALOG is missing required package {_pkg_id!r}"
-    assert _entry["unit_amount"] == _expected_units, f"unit_wallet: {_pkg_id} unit_amount mismatch: got {_entry['unit_amount']}, expected {_expected_units}"
-    assert _entry["price_usd"] == _expected_price, f"unit_wallet: {_pkg_id} price_usd mismatch: got {_entry['price_usd']}, expected {_expected_price}"
-    assert _entry["tokens_per_unit"] == TOKEN_CHUNK_SIZE, f"unit_wallet: {_pkg_id} tokens_per_unit mismatch: got {_entry['tokens_per_unit']}, expected {TOKEN_CHUNK_SIZE}"
+    if _entry is None:
+        logger.error(
+            "unit_wallet: UNIT_PACKAGE_CATALOG is missing required package %r",
+            _pkg_id,
+        )
+        raise RuntimeError(f"unit_wallet: UNIT_PACKAGE_CATALOG is missing required package {_pkg_id!r}")
+    if _entry["unit_amount"] != _expected_units:
+        logger.error(
+            "unit_wallet: %s unit_amount mismatch: got %r, expected %r",
+            _pkg_id,
+            _entry["unit_amount"],
+            _expected_units,
+        )
+        raise RuntimeError(f"unit_wallet: {_pkg_id} unit_amount mismatch: got {_entry['unit_amount']}, expected {_expected_units}")
+    if _entry["price_usd"] != _expected_price:
+        logger.error(
+            "unit_wallet: %s price_usd mismatch: got %r, expected %r",
+            _pkg_id,
+            _entry["price_usd"],
+            _expected_price,
+        )
+        raise RuntimeError(f"unit_wallet: {_pkg_id} price_usd mismatch: got {_entry['price_usd']}, expected {_expected_price}")
+    if _entry["tokens_per_unit"] != TOKEN_CHUNK_SIZE:
+        logger.error(
+            "unit_wallet: %s tokens_per_unit mismatch: got %r, expected %r",
+            _pkg_id,
+            _entry["tokens_per_unit"],
+            TOKEN_CHUNK_SIZE,
+        )
+        raise RuntimeError(f"unit_wallet: {_pkg_id} tokens_per_unit mismatch: got {_entry['tokens_per_unit']}, expected {TOKEN_CHUNK_SIZE}")
 
 _WALLET_CACHE_MAX: int = 5_000
 _LEDGER_MAX_SIZE: int = 10_000

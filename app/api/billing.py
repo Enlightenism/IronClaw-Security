@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import logging
 import math
 import threading
 from typing import Any
@@ -13,6 +14,7 @@ from pydantic_core import PydanticCustomError
 
 from app.core.auth import AuthContext, require_auth_context
 from app.core.billing import resolve_billing_owner
+from app.core.install_keys import InstallKeyAlreadyExistsError, get_install_key_registry
 from app.core.unit_wallet import (
     TOKEN_CHUNK_SIZE,
     UNIT_PACKAGE_CATALOG,
@@ -20,6 +22,9 @@ from app.core.unit_wallet import (
     RegistryUnitWallet,
     get_unit_wallet_registry,
 )
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(
     prefix="/billing",
@@ -83,12 +88,7 @@ def _assert_owner_access(
         if owner_key != expected:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail={
-                    "status": "forbidden",
-                    "reason": "org_id_mismatch",
-                    "owner_key": owner_key,
-                    "action": action,
-                },
+                detail=f"Org key does not match wallet owner: expected {expected}, got {owner_key}",
             )
     else:
         if auth_ctx.key_type == "org":
@@ -164,6 +164,8 @@ class BillingPackagePurchaseView(BaseModel):
     token_coverage: int
     tokens_per_unit: int
     created_at: str
+    openclaw_install_key: str | None = None
+    claude_code_install_key: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -306,6 +308,46 @@ def _build_unit_policy() -> UnitPolicyView:
 
 
 # ---------------------------------------------------------------------------
+# Install key provisioning helper
+# ---------------------------------------------------------------------------
+
+
+def _provision_install_keys(
+    owner_key: str,
+    purchase_id: str,
+) -> tuple[str | None, str | None]:
+    ik_registry = get_install_key_registry()
+    openclaw_key: str | None = None
+    claude_key: str | None = None
+
+    for program in ("openclaw", "claude_code"):
+        try:
+            record = ik_registry.generate_install_key(
+                owner_key=owner_key,
+                subscription_id=purchase_id,
+                program=program,  # type: ignore[arg-type]
+                label=f"auto-provisioned on purchase {purchase_id}",
+                metadata={"purchase_id": purchase_id, "auto_provisioned": True},
+            )
+            if program == "openclaw":
+                openclaw_key = record.raw_key
+            else:
+                claude_key = record.raw_key
+        except InstallKeyAlreadyExistsError:
+            logger.info(
+                "install_key_already_exists_on_purchase",
+                extra={"owner_key": owner_key, "program": program, "purchase_id": purchase_id},
+            )
+        except Exception:
+            logger.exception(
+                "install_key_provision_failed",
+                extra={"owner_key": owner_key, "program": program, "purchase_id": purchase_id},
+            )
+
+    return openclaw_key, claude_key
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -340,8 +382,20 @@ def purchase_billing_package(
 
     owner_key = resolve_billing_owner(auth_ctx, payload.buyer_email)
 
-    # purchase_id is collision-safe regardless of concurrency or list length
     purchase_id = f"purch_{uuid4().hex}"
+
+    registry = get_unit_wallet_registry()
+    wallet = registry.credit_units(
+        owner_key=owner_key,
+        units=unit_amount,
+        metadata={"purchase_id": purchase_id, "package_id": package_id},
+    )
+
+    openclaw_install_key, claude_code_install_key = _provision_install_keys(
+        owner_key=owner_key,
+        purchase_id=purchase_id,
+    )
+
     purchase = BillingPackagePurchaseView(
         purchase_id=purchase_id,
         package_id=package_id,
@@ -354,18 +408,13 @@ def purchase_billing_package(
         token_coverage=unit_amount * TOKEN_CHUNK_SIZE,
         tokens_per_unit=TOKEN_CHUNK_SIZE,
         created_at=_utc_now_iso(),
+        openclaw_install_key=openclaw_install_key,
+        claude_code_install_key=claude_code_install_key,
         metadata=payload.metadata,
     )
 
     with _PURCHASES_LOCK:
         _PURCHASES.append(purchase)
-
-    registry = get_unit_wallet_registry()
-    wallet = registry.credit_units(
-        owner_key=owner_key,
-        units=unit_amount,
-        metadata={"purchase_id": purchase_id, "package_id": package_id},
-    )
 
     return BillingPackagePurchaseResponse(
         status="ok",
@@ -382,19 +431,6 @@ def debit_wallet(
     payload: WalletDebitRequest,
     auth_ctx: AuthContext = Depends(require_auth_context),
 ) -> Any:
-    # Resolve the canonical wallet target for this caller.
-    #
-    # Org key rules:
-    #   - Always debit their own org wallet (ic_org_<org_id>), regardless of
-    #     the URL owner_key. If the URL owner_key is a personal email, silently
-    #     redirect to the caller's own org wallet — the org key cannot touch a
-    #     personal wallet, so the effective target is always the org wallet.
-    #   - If the URL owner_key is an ic_org_ key for a DIFFERENT org → 403.
-    #
-    # Personal key rules:
-    #   - May not target an org wallet → 403.
-    #   - Resolved target is the URL owner_key as-is.
-
     if auth_ctx.key_type == "org" and getattr(auth_ctx, "org_id", None):
         resolved_owner = f"ic_org_{auth_ctx.org_id}"
         if owner_key.startswith("ic_org_") and owner_key != resolved_owner:
@@ -457,10 +493,12 @@ def debit_wallet(
         return JSONResponse(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             content={
-                "status": "insufficient_units",
-                "owner_key": exc.owner_key or resolved_owner,
-                "have": exc.have,
-                "need": exc.need,
+                "detail": {
+                    "status": "insufficient_units",
+                    "owner_key": exc.owner_key or resolved_owner,
+                    "have": exc.have,
+                    "need": exc.need,
+                },
             },
         )
 
@@ -471,10 +509,6 @@ def refund_wallet(
     payload: WalletRefundRequest,
     auth_ctx: AuthContext = Depends(require_auth_context),
 ) -> WalletRefundResponse:
-    # owner_key is already the canonical wallet key from the URL path.
-    # _assert_owner_access enforces org/personal isolation directly.
-    # resolve_billing_owner is NOT used here — it expects a buyer_email,
-    # not a pre-formed wallet key.
     _assert_owner_access(auth_ctx, owner_key, action="refund")
 
     registry = get_unit_wallet_registry()
@@ -550,9 +584,6 @@ def get_ledger(
                     },
                 )
     else:
-        # No owner_key supplied: scope ledger to the caller's own wallet.
-        # For org keys this resolves to ic_org_<org_id>;
-        # for personal keys with no email available, return full unscoped ledger.
         resolved = resolve_billing_owner(auth_ctx, "")
         owner_key = resolved if resolved else None
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import logging
 from typing import Any
 import uuid
 
@@ -12,10 +13,11 @@ from app.core.billing import resolve_billing_owner
 from app.core.unit_wallet import (
     ORG_KEY_PREFIX,
     TOKEN_CHUNK_SIZE,
-    UNIT_PACKAGE_CATALOG,
     get_unit_wallet_registry,
     units_required_for_tokens,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/billing",
@@ -54,22 +56,28 @@ _BILLING_PACKAGE_FALLBACK: dict[str, dict[str, Any]] = {
 
 
 def _derive_package_catalog() -> dict[str, dict[str, Any]]:
-    required_ids = set(_BILLING_PACKAGE_FALLBACK)
-    catalog: dict[str, dict[str, Any]] = {}
-    for pkg_id in required_ids:
-        source = UNIT_PACKAGE_CATALOG.get(pkg_id)
-        if source is not None:
-            catalog[pkg_id] = {
-                "package_id": pkg_id,
-                "name": str(source["name"]),
-                "price_usd": float(source["price_usd"]),
-                "included_units": int(source["unit_amount"]),
-                "display_label": str(source.get("display_label", "")),
-                "description": str(source.get("description", "")),
-            }
-        else:
-            catalog[pkg_id] = _BILLING_PACKAGE_FALLBACK[pkg_id]
-    return catalog
+    try:
+        from app.core.unit_wallet import UNIT_PACKAGE_CATALOG  # noqa: PLC0415
+
+        required_ids = set(_BILLING_PACKAGE_FALLBACK)
+        catalog: dict[str, dict[str, Any]] = {}
+        for pkg_id in required_ids:
+            source = UNIT_PACKAGE_CATALOG.get(pkg_id)
+            if source is not None:
+                catalog[pkg_id] = {
+                    "package_id": pkg_id,
+                    "name": str(source["name"]),
+                    "price_usd": float(source["price_usd"]),
+                    "included_units": int(source["unit_amount"]),
+                    "display_label": str(source.get("display_label", "")),
+                    "description": str(source.get("description", "")),
+                }
+            else:
+                catalog[pkg_id] = _BILLING_PACKAGE_FALLBACK[pkg_id]
+        return catalog
+    except Exception:
+        logger.exception("billing: failed to derive PACKAGE_CATALOG from unit_wallet; using hardcoded fallback")
+        return dict(_BILLING_PACKAGE_FALLBACK)
 
 
 PACKAGE_CATALOG: dict[str, dict[str, Any]] = _derive_package_catalog()

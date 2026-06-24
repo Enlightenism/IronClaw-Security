@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from app.api.routes.billing import PACKAGE_CATALOG
+from app.core.unit_wallet import UNIT_PACKAGE_CATALOG
 
 router = APIRouter(prefix="/billing-summary", tags=["billing-summary"])
 
@@ -58,12 +58,12 @@ def _build_packages() -> list[BillingSummaryPackageView]:
     packages: list[BillingSummaryPackageView] = []
 
     for package_id in _ORDERED_PACKAGE_IDS:
-        package = PACKAGE_CATALOG.get(package_id)
+        package = UNIT_PACKAGE_CATALOG.get(package_id)
         if package is None:
             continue
 
         price_usd = float(package["price_usd"])
-        included_units = int(package["included_units"])
+        included_units = int(package["unit_amount"])
         effective_price_per_1k_units = round((price_usd / included_units) * 1000, 4) if included_units > 0 else 0.0
         display_label = str(package.get("display_label", f"{included_units:,} units — ${price_usd:.2f}"))
 

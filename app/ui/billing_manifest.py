@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from app.api.routes.billing import PACKAGE_CATALOG
+from app.core.unit_wallet import UNIT_PACKAGE_CATALOG
 
 router = APIRouter(prefix="/billing-manifest", tags=["billing-manifest"])
 
@@ -65,12 +65,12 @@ _ORDERED_PACKAGE_IDS = ["pkg_5000", "pkg_25000", "pkg_60000"]
 def _build_packages() -> list[BillingManifestPackageView]:
     packages: list[BillingManifestPackageView] = []
     for package_id in _ORDERED_PACKAGE_IDS:
-        package = PACKAGE_CATALOG.get(package_id)
+        package = UNIT_PACKAGE_CATALOG.get(package_id)
         if package is None:
             continue
 
         price_usd = float(package["price_usd"])
-        included_units = int(package["included_units"])
+        included_units = int(package["unit_amount"])
         unit_price_per_1k = round((price_usd / included_units) * 1000, 4) if included_units > 0 else 0.0
         display_label = str(package.get("display_label", f"{included_units:,} units — ${price_usd:.2f}"))
 
@@ -80,7 +80,7 @@ def _build_packages() -> list[BillingManifestPackageView]:
                 name=str(package["name"]),
                 price_usd=price_usd,
                 included_units=included_units,
-                description=str(package["description"]),
+                description=str(package.get("description", "")),
                 featured=package_id == _FEATURED_PACKAGE_ID,
                 metadata={
                     "price_display": f"${price_usd:.2f}",
@@ -173,7 +173,7 @@ def get_billing_manifest() -> BillingManifestResponse:
             ),
         ],
         metadata={
-            "source": "app.api.routes.billing",
+            "source": "app.core.unit_wallet",
             "package_count": len(packages),
             "featured_package_id": _FEATURED_PACKAGE_ID,
         },
