@@ -6,10 +6,14 @@ from typing import Any
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 from app.core.auth import AuthContext, get_auth_context, require_api_key
 from app.core.billing import resolve_billing_owner
+from app.core.install_keys import (
+    InstallKeyAlreadyExistsError,
+    get_install_key_registry,
+)
 from app.core.unit_wallet import (
     ORG_KEY_PREFIX,
     TOKEN_CHUNK_SIZE,
@@ -116,7 +120,7 @@ class UnitPolicyView(BaseModel):
 class BillingPackagePurchaseRequest(BaseModel):
     package_id: str = Field(min_length=1, max_length=120)
     buyer_name: str = Field(min_length=1, max_length=120)
-    buyer_email: str = Field(min_length=3, max_length=255)
+    buyer_email: EmailStr
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -132,6 +136,8 @@ class BillingPackagePurchaseView(BaseModel):
     token_coverage: int
     tokens_per_unit: int
     created_at: str
+    openclaw_install_key: str | None = None
+    claude_code_install_key: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -292,31 +298,50 @@ def _assert_owner_access(owner_key: str, auth_ctx: AuthContext) -> None:
 
     Rules:
     - org key → may only access wallets whose owner_key matches ic_org_{auth_ctx.org_id}
+    - personal key → may not access org wallets
     - personal key with principal_id → may only access wallets matching principal_id
-    - personal key with no principal_id → may only access non-org wallets
     """
     is_org_wallet = owner_key.startswith(ORG_KEY_PREFIX)
     caller_key_type = getattr(auth_ctx, "key_type", None)
     caller_org_id = getattr(auth_ctx, "org_id", None)
 
     if is_org_wallet:
-        org_id = owner_key[len(ORG_KEY_PREFIX) :]
-        if caller_org_id != org_id:
+        # Org wallet: only matching org key may access
+        if caller_key_type != "org" or caller_org_id is None:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access to this org wallet is not permitted.",
+                detail={
+                    "reason": "org_wallet_requires_org_key",
+                    "detail": "This wallet requires an org key.",
+                },
+            )
+        expected_owner = f"{ORG_KEY_PREFIX}{caller_org_id}"
+        if owner_key != expected_owner:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "reason": "org_key_mismatch",
+                    "detail": (f"Org key does not match wallet owner: expected {expected_owner}, got {owner_key}"),
+                },
             )
     else:
+        # Personal wallet: org keys may not access
         if caller_key_type == "org" or caller_org_id is not None:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Org keys may not access personal wallets.",
+                detail={
+                    "reason": "org_key_cannot_access_personal_wallet",
+                    "detail": "Org keys may not access personal wallets.",
+                },
             )
         caller_id = getattr(auth_ctx, "principal_id", None)
         if caller_id and owner_key != caller_id.strip().lower():
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access to this wallet is not permitted.",
+                detail={
+                    "reason": "principal_mismatch",
+                    "detail": "Access to this wallet is not permitted.",
+                },
             )
 
 
@@ -341,6 +366,49 @@ def _get_or_zero_wallet(registry: Any, owner_key: str) -> Any:
 
         return _ZeroWallet()
     return wallet
+
+
+def _provision_install_keys(
+    owner_key: str,
+    purchase_id: str,
+) -> tuple[str | None, str | None]:
+    """Provision openclaw and claude_code install keys for a purchase.
+
+    Returns (openclaw_raw_key, claude_code_raw_key).
+    On InstallKeyAlreadyExistsError or any other exception per program,
+    that key slot returns None — purchase still succeeds.
+    """
+    registry = get_install_key_registry()
+    openclaw_key: str | None = None
+    claude_key: str | None = None
+
+    for program, slot in (("openclaw", "openclaw"), ("claude_code", "claude_code")):
+        try:
+            record = registry.generate_install_key(
+                owner_key=owner_key,
+                subscription_id=purchase_id,
+                program=program,  # type: ignore[arg-type]
+                label=f"auto-provisioned on purchase {purchase_id}",
+                metadata={"purchase_id": purchase_id, "auto_provisioned": True},
+            )
+            if slot == "openclaw":
+                openclaw_key = record.raw_key
+            else:
+                claude_key = record.raw_key
+        except InstallKeyAlreadyExistsError:
+            logger.info(
+                "billing: install key already exists for owner=%r program=%r — skipping",
+                owner_key,
+                program,
+            )
+        except Exception:
+            logger.exception(
+                "billing: failed to provision install key for owner=%r program=%r",
+                owner_key,
+                program,
+            )
+
+    return openclaw_key, claude_key
 
 
 # ---------------------------------------------------------------------------
@@ -394,7 +462,7 @@ def get_packages() -> BillingPackagesResponse:
 
 
 @router.post(
-    "/purchase",
+    "/packages/purchase",
     response_model=BillingPackagePurchaseResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Purchase a protection unit package",
@@ -410,31 +478,40 @@ def purchase_package(
             detail=f"Unknown package_id: {body.package_id!r}",
         )
 
-    owner_key = resolve_billing_owner(auth_ctx, body.buyer_email)
+    buyer_email_normalized = str(body.buyer_email).lower()
+    owner_key = resolve_billing_owner(auth_ctx, buyer_email_normalized)
     registry = get_unit_wallet_registry()
+
+    purchase_id = _new_purchase_id()
+
     wallet = registry.credit_units(
         owner_key=owner_key,
         units=int(pkg["included_units"]),
         metadata={
             "package_id": body.package_id,
+            "purchase_id": purchase_id,
             "buyer_name": body.buyer_name,
-            "buyer_email": body.buyer_email,
+            "buyer_email": buyer_email_normalized,
             **body.metadata,
         },
     )
 
+    openclaw_key, claude_key = _provision_install_keys(owner_key, purchase_id)
+
     purchase = BillingPackagePurchaseView(
-        purchase_id=_new_purchase_id(),
+        purchase_id=purchase_id,
         package_id=body.package_id,
         package_name=str(pkg["name"]),
         buyer_name=body.buyer_name,
-        buyer_email=body.buyer_email,
+        buyer_email=buyer_email_normalized,
         owner_key=owner_key,
         price_usd=float(pkg["price_usd"]),
         granted_units=int(pkg["included_units"]),
         token_coverage=int(pkg["included_units"]) * TOKEN_CHUNK_SIZE,
         tokens_per_unit=TOKEN_CHUNK_SIZE,
         created_at=_utc_now_iso(),
+        openclaw_install_key=openclaw_key,
+        claude_code_install_key=claude_key,
         metadata=body.metadata,
     )
     _append_purchase(purchase)
@@ -497,7 +574,11 @@ def get_wallet_ledger(
 ) -> BillingLedgerResponse:
     _assert_owner_access(owner_key, auth_ctx)
     registry = get_unit_wallet_registry()
-    entries = registry.list_ledger_entries(owner_key=owner_key, limit=limit)
+    try:
+        entries = registry.list_ledger_entries(owner_key=owner_key, limit=limit)
+    except Exception:
+        logger.exception("billing: list_ledger_entries failed for owner_key=%r", owner_key)
+        entries = []
     entry_views = [
         WalletLedgerEntryView(
             entry_id=str(e.entry_id),
