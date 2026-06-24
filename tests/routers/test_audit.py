@@ -215,7 +215,7 @@ def test_list_events_returns_200(client: TestClient) -> None:
     assert r.status_code == 200
     body = r.json()
     assert "items" in body
-    assert "count" in body
+    assert "total" in body
     assert isinstance(body["items"], list)
 
 
@@ -234,6 +234,13 @@ def test_list_events_limit_param(client: TestClient) -> None:
 def test_list_events_limit_below_minimum_returns_422(client: TestClient) -> None:
     r = client.get(_AUDIT_EVENTS_ROUTE, params={"limit": 0})
     assert r.status_code == 422
+
+
+def test_list_events_total_is_integer(client: TestClient) -> None:
+    r = client.get(_AUDIT_EVENTS_ROUTE)
+    assert r.status_code == 200
+    body = r.json()
+    assert isinstance(body["total"], (int, type(None)))
 
 
 # ---------------------------------------------------------------------------
