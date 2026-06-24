@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from app.core.auth import require_api_key
@@ -13,7 +13,6 @@ from app.services.action_decision import evaluate_action_execution
 router = APIRouter(prefix="/guard", tags=["guard"])
 
 _ENGINE = initialize_policy_engine(mode="enforce")
-_AUDIT_EVENTS: list[dict[str, Any]] = []
 
 
 def build_trace_id() -> str:
@@ -48,12 +47,6 @@ def _merge_metadata(payload_metadata: dict[str, Any], *, session_id: str | None)
     return merged
 
 
-def _append_audit_event(event: dict[str, Any]) -> None:
-    _AUDIT_EVENTS.append(event)
-    if len(_AUDIT_EVENTS) > 500:
-        del _AUDIT_EVENTS[:-500]
-
-
 @router.post("/action-decision", dependencies=[Depends(require_api_key)])
 def action_decision(payload: ActionDecisionRequest, request: Request) -> dict[str, Any]:
     trace_id = build_trace_id()
@@ -66,7 +59,7 @@ def action_decision(payload: ActionDecisionRequest, request: Request) -> dict[st
         session_id=payload.session_id,
     )
 
-    response = {
+    return {
         "trace_id": trace_id,
         "verdict": tool_decision["verdict"],
         "risk_score": int(tool_decision["risk_score"]),
@@ -75,21 +68,6 @@ def action_decision(payload: ActionDecisionRequest, request: Request) -> dict[st
         "decision_source": tool_decision.get("decision_source", "unknown"),
         "matched_patterns": list(tool_decision.get("matched_patterns", [])),
     }
-
-    _append_audit_event(
-        {
-            "event_type": "action_decision",
-            "trace_id": trace_id,
-            "path": str(request.url.path),
-            "client_id": payload.client_id,
-            "session_id": payload.session_id,
-            "action_type": payload.action_type,
-            "target": payload.target,
-            "response": response,
-        },
-    )
-
-    return response
 
 
 @router.post("/execute", dependencies=[Depends(require_api_key)])
@@ -120,7 +98,7 @@ def guarded_execute(payload: ExecuteRequest, request: Request) -> dict[str, Any]
         response_status = "denied"
         execution_state = "failed"
 
-    response = {
+    return {
         "execution_id": policy_decision.decision_id,
         "trace_id": trace_id,
         "response_status": response_status,
@@ -135,29 +113,4 @@ def guarded_execute(payload: ExecuteRequest, request: Request) -> dict[str, Any]
         "target": payload.target,
         "action_type": payload.action_type,
         "file_path": payload.file_path,
-    }
-
-    _append_audit_event(
-        {
-            "event_type": "execute",
-            "trace_id": trace_id,
-            "path": str(request.url.path),
-            "client_id": payload.client_id,
-            "session_id": payload.session_id,
-            "action_type": payload.action_type,
-            "target": payload.target,
-            "response": response,
-        },
-    )
-
-    return response
-
-
-@router.get("/audit/events", dependencies=[Depends(require_api_key)])
-def get_audit_events(limit: int = Query(default=20, ge=1, le=200)) -> dict[str, Any]:
-    events = list(reversed(_AUDIT_EVENTS[-limit:]))
-    return {
-        "events": events,
-        "count": len(events),
-        "limit": limit,
     }
