@@ -30,6 +30,9 @@ from app.main import app as _app  # noqa: E402
 _MOCK_API_KEY = "test-api-key"
 _AUTH_HEADERS = {"X-API-Key": _MOCK_API_KEY}
 
+_PURCHASE_PATH = "/billing/purchase"
+_STALE_PURCHASE_PATH = "/billing/packages/purchase"
+
 
 def _override_require_api_key() -> str:
     return _MOCK_API_KEY
@@ -79,7 +82,7 @@ def client(_reset_wallet_registry):
 
 def _fund_wallet(client: TestClient, email: str, package_id: str = "pkg_5000") -> None:
     resp = client.post(
-        "/billing/packages/purchase",
+        _PURCHASE_PATH,
         json={
             "package_id": package_id,
             "buyer_name": "Fixture Buyer",
@@ -138,13 +141,46 @@ def test_list_packages_token_coverage_matches_catalog(client: TestClient) -> Non
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/packages/purchase
+# POST /billing/purchase — stale-path guard (old /billing/packages/purchase is dead)
+# ---------------------------------------------------------------------------
+
+
+def test_purchase_old_path_returns_404_or_405(client: TestClient) -> None:
+    """The old route /billing/packages/purchase must no longer exist."""
+    resp = client.post(
+        _STALE_PURCHASE_PATH,
+        json={
+            "package_id": "pkg_5000",
+            "buyer_name": "Stale Buyer",
+            "buyer_email": "stale@ironclaw.test",
+            "metadata": {},
+        },
+    )
+    assert resp.status_code in (404, 405), f"Expected stale path to be dead (404/405), got {resp.status_code}"
+
+
+def test_stale_purchase_path_returns_404_or_405(client: TestClient) -> None:
+    """Redundant guard: confirm /billing/packages/purchase is unreachable under any auth."""
+    resp = client.post(
+        _STALE_PURCHASE_PATH,
+        json={
+            "package_id": "pkg_25000",
+            "buyer_name": "Ghost Buyer",
+            "buyer_email": "ghost2@ironclaw.test",
+            "metadata": {},
+        },
+    )
+    assert resp.status_code in (404, 405), f"Stale purchase path must be dead, got {resp.status_code}"
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/purchase — happy path and schema
 # ---------------------------------------------------------------------------
 
 
 def test_purchase_valid_package_returns_201_with_correct_shape(client: TestClient) -> None:
     resp = client.post(
-        "/billing/packages/purchase",
+        _PURCHASE_PATH,
         json={
             "package_id": "pkg_5000",
             "buyer_name": "Test Buyer",
@@ -162,7 +198,6 @@ def test_purchase_valid_package_returns_201_with_correct_shape(client: TestClien
     assert purchase["tokens_per_unit"] == TOKEN_CHUNK_SIZE
     assert purchase["buyer_email"] == "buyer@ironclaw.test"
     assert purchase["purchase_id"].startswith("purch_")
-    # install key fields must be present; None on soft-failure is acceptable
     assert "openclaw_install_key" in purchase
     assert "claude_code_install_key" in purchase
     assert purchase["openclaw_install_key"] is None or isinstance(purchase["openclaw_install_key"], str)
@@ -175,7 +210,7 @@ def test_purchase_valid_package_returns_201_with_correct_shape(client: TestClien
 
 def test_purchase_team_package_credits_correct_units(client: TestClient) -> None:
     resp = client.post(
-        "/billing/packages/purchase",
+        _PURCHASE_PATH,
         json={
             "package_id": "pkg_25000",
             "buyer_name": "Team Buyer",
@@ -191,7 +226,7 @@ def test_purchase_team_package_credits_correct_units(client: TestClient) -> None
 
 def test_purchase_enterprise_package_credits_correct_units(client: TestClient) -> None:
     resp = client.post(
-        "/billing/packages/purchase",
+        _PURCHASE_PATH,
         json={
             "package_id": "pkg_60000",
             "buyer_name": "Enterprise Buyer",
@@ -205,7 +240,7 @@ def test_purchase_enterprise_package_credits_correct_units(client: TestClient) -
 
 def test_purchase_unknown_package_returns_404(client: TestClient) -> None:
     resp = client.post(
-        "/billing/packages/purchase",
+        _PURCHASE_PATH,
         json={
             "package_id": "pkg_unknown_xyz",
             "buyer_name": "Ghost Buyer",
@@ -219,11 +254,62 @@ def test_purchase_unknown_package_returns_404(client: TestClient) -> None:
 
 def test_purchase_empty_package_id_returns_422(client: TestClient) -> None:
     resp = client.post(
-        "/billing/packages/purchase",
+        _PURCHASE_PATH,
         json={
             "package_id": "",
             "buyer_name": "Bad Buyer",
             "buyer_email": "bad@ironclaw.test",
+            "metadata": {},
+        },
+    )
+    assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/purchase — buyer_email: org-key bypass (_ORG_KEY_RE)
+# ---------------------------------------------------------------------------
+
+
+def test_purchase_org_key_as_buyer_email_passes_validation(client: TestClient) -> None:
+    """ic_org_* values must pass BillingPackagePurchaseRequest.validate_email without 422."""
+    resp = client.post(
+        _PURCHASE_PATH,
+        json={
+            "package_id": "pkg_5000",
+            "buyer_name": "Org Key Buyer",
+            "buyer_email": "ic_org_test-org-123",
+            "metadata": {},
+        },
+    )
+    # Must not be 422 — validator must pass ic_org_* through without email-format enforcement.
+    assert resp.status_code != 422, "ic_org_* buyer_email must bypass email regex validation, got 422"
+    assert resp.status_code in (201, 200)
+
+
+def test_purchase_org_key_as_buyer_email_value_preserved(client: TestClient) -> None:
+    """The ic_org_* value must be preserved as-is in the purchase response."""
+    org_key_email = "ic_org_test-org-456"
+    resp = client.post(
+        _PURCHASE_PATH,
+        json={
+            "package_id": "pkg_5000",
+            "buyer_name": "Org Key Buyer B",
+            "buyer_email": org_key_email,
+            "metadata": {},
+        },
+    )
+    assert resp.status_code == 201
+    assert resp.json()["purchase"]["buyer_email"] == org_key_email
+
+
+def test_purchase_invalid_email_non_org_key_returns_422(client: TestClient) -> None:
+    """Non-org-key values that are not valid emails must still be rejected."""
+    resp = client.post(
+        _PURCHASE_PATH,
+        json={
+            "package_id": "pkg_5000",
+            "buyer_name": "Bad Email Buyer",
+            "buyer_email": "not-an-email-and-not-org-key",
             "metadata": {},
         },
     )
@@ -471,6 +557,18 @@ def test_ledger_returns_200_with_correct_schema(client: TestClient) -> None:
         assert field in entry, f"ledger entry missing field: {field!r}"
 
 
+def test_ledger_empty_for_new_wallet_after_purchase(client: TestClient) -> None:
+    """After purchase, ledger must contain at least one credit entry."""
+    owner = "ledger-after-purchase@ironclaw.test"
+    _fund_wallet(client, owner)
+    resp = client.get(f"/billing/wallet/{owner}/ledger")
+    assert resp.status_code == 200
+    entries = resp.json()["entries"]
+    assert len(entries) >= 1, "Ledger must have at least one entry after purchase"
+    entry_types = {e["entry_type"] for e in entries}
+    assert "credit" in entry_types, f"Expected 'credit' entry after purchase, got: {entry_types}"
+
+
 def test_ledger_debit_and_credit_entries_appear(client: TestClient) -> None:
     owner = "full-ledger@ironclaw.test"
     _fund_wallet(client, owner)
@@ -582,7 +680,7 @@ def test_purchase_routes_to_org_wallet_when_org_key(client: TestClient) -> None:
     _app.dependency_overrides[get_auth_context] = _org_auth_ctx
     try:
         resp = client.post(
-            "/billing/packages/purchase",
+            _PURCHASE_PATH,
             json={
                 "package_id": "pkg_5000",
                 "buyer_name": "Org Buyer",

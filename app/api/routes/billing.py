@@ -44,10 +44,7 @@ _BILLING_PACKAGE_FALLBACK: dict[str, dict[str, Any]] = {
         "price_usd": 20.00,
         "included_units": 5_000,
         "display_label": "5,000 units — $20.00",
-        "description": (
-            "Prepaid protection units for individual builders who want guarded prompt handling, "
-            "tool-call review, source inspection, and safe response release."
-        ),
+        "description": ("Prepaid protection units for individual builders who want guarded prompt handling, tool-call review, source inspection, and safe response release."),
     },
     "pkg_25000": {
         "package_id": "pkg_25000",
@@ -55,10 +52,7 @@ _BILLING_PACKAGE_FALLBACK: dict[str, dict[str, Any]] = {
         "price_usd": 90.00,
         "included_units": 25_000,
         "display_label": "25,000 units — $90.00",
-        "description": (
-            "Prepaid protection units for teams running higher volumes of AI-assisted development, "
-            "research, and guarded agent workflows."
-        ),
+        "description": ("Prepaid protection units for teams running higher volumes of AI-assisted development, research, and guarded agent workflows."),
     },
     "pkg_60000": {
         "package_id": "pkg_60000",
@@ -66,10 +60,7 @@ _BILLING_PACKAGE_FALLBACK: dict[str, dict[str, Any]] = {
         "price_usd": 180.00,
         "included_units": 60_000,
         "display_label": "60,000 units — $180.00",
-        "description": (
-            "Prepaid protection units for organizations protecting large-scale agent operations, "
-            "sensitive workflows, and high-frequency prompt activity."
-        ),
+        "description": ("Prepaid protection units for organizations protecting large-scale agent operations, sensitive workflows, and high-frequency prompt activity."),
     },
 }
 
@@ -95,9 +86,7 @@ def _derive_package_catalog() -> dict[str, dict[str, Any]]:
                 catalog[pkg_id] = _BILLING_PACKAGE_FALLBACK[pkg_id]
         return catalog
     except Exception:
-        logger.exception(
-            "billing: failed to derive PACKAGE_CATALOG from unit_wallet; using hardcoded fallback"
-        )
+        logger.exception("billing: failed to derive PACKAGE_CATALOG from unit_wallet; using hardcoded fallback")
         return dict(_BILLING_PACKAGE_FALLBACK)
 
 
@@ -341,9 +330,7 @@ def _assert_owner_access(owner_key: str, auth_ctx: AuthContext) -> None:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
                     "reason": "org_key_mismatch",
-                    "detail": (
-                        f"Org key does not match wallet owner: expected {expected_owner}, got {owner_key}"
-                    ),
+                    "detail": (f"Org key does not match wallet owner: expected {expected_owner}, got {owner_key}"),
                 },
             )
     else:
@@ -437,16 +424,10 @@ def _provision_install_keys(
 def get_packages() -> BillingPackagesResponse:
     packages = [_package_to_view(pid, pkg) for pid, pkg in PACKAGE_CATALOG.items()]
     unit_policy = UnitPolicyView(
-        unit_definition=(
-            f"One protection unit covers {TOKEN_CHUNK_SIZE:,} tokens of inspected AI interaction "
-            f"across all active guardrails."
-        ),
+        unit_definition=(f"One protection unit covers {TOKEN_CHUNK_SIZE:,} tokens of inspected AI interaction across all active guardrails."),
         token_chunk_size=TOKEN_CHUNK_SIZE,
         delivery_model="prepaid",
-        buyer_positioning=(
-            "Units are consumed as AI actions pass through IronClaw guardrails. "
-            "Unused units roll over until your balance is exhausted."
-        ),
+        buyer_positioning=("Units are consumed as AI actions pass through IronClaw guardrails. Unused units roll over until your balance is exhausted."),
         protection_layers=[
             ProtectionValueView(
                 title="Prompt Injection Guard",
