@@ -622,7 +622,9 @@ def test_get_wallet_personal_key_cannot_access_org_wallet_returns_403() -> None:
     response = _personal_client().get(f"/billing/wallet/{_ORG_OWNER_KEY}")
     assert response.status_code == 403
     detail = response.json()["detail"]
+    assert isinstance(detail, dict)
     assert detail["reason"] == "org_wallet_requires_org_key"
+    assert isinstance(detail["detail"], str)
 
 
 def test_get_wallet_unauthenticated_returns_401() -> None:
@@ -653,13 +655,19 @@ def test_get_wallet_org_key_cannot_access_personal_wallet_returns_403() -> None:
     response = _org_client().get("/billing/wallet/personal@ironclaw.test")
     assert response.status_code == 403
     detail = response.json()["detail"]
+    assert isinstance(detail, dict)
     assert detail["reason"] == "org_key_cannot_access_personal_wallet"
+    assert isinstance(detail["detail"], str)
 
 
 def test_get_wallet_org_key_cannot_access_different_org_wallet_returns_403() -> None:
     other_org_wallet = "ic_org_differentorg999"
     response = _org_client().get(f"/billing/wallet/{other_org_wallet}")
     assert response.status_code == 403
+    detail = response.json()["detail"]
+    assert isinstance(detail, dict)
+    assert detail["reason"] == "org_key_mismatch"
+    assert isinstance(detail["detail"], str)
 
 
 # ---------------------------------------------------------------------------
@@ -780,7 +788,9 @@ def test_debit_org_key_cannot_target_different_org_wallet_returns_403() -> None:
     )
     assert response.status_code == 403
     detail = response.json()["detail"]
-    assert "match" in str(detail).lower() or "forbidden" in str(detail).lower()
+    assert isinstance(detail, dict)
+    assert detail["reason"] == "org_key_mismatch"
+    assert isinstance(detail["detail"], str)
 
 
 def test_debit_personal_key_cannot_target_org_wallet_returns_403() -> None:
@@ -790,7 +800,9 @@ def test_debit_personal_key_cannot_target_org_wallet_returns_403() -> None:
     )
     assert response.status_code == 403
     detail = response.json()["detail"]
+    assert isinstance(detail, dict)
     assert detail["reason"] == "org_wallet_requires_org_key"
+    assert isinstance(detail["detail"], str)
 
 
 # ---------------------------------------------------------------------------
@@ -898,8 +910,10 @@ def test_refund_org_key_different_org_wallet_returns_403() -> None:
     )
     assert response.status_code == 403
     detail = response.json()["detail"]
-    assert isinstance(detail, str)
-    assert len(detail) > 0
+    assert isinstance(detail, dict)
+    assert detail["reason"] == "org_key_mismatch"
+    assert isinstance(detail["detail"], str)
+    assert len(detail["detail"]) > 0
 
 
 def test_refund_personal_key_cannot_refund_org_wallet_returns_403() -> None:
@@ -909,7 +923,9 @@ def test_refund_personal_key_cannot_refund_org_wallet_returns_403() -> None:
     )
     assert response.status_code == 403
     detail = response.json()["detail"]
+    assert isinstance(detail, dict)
     assert detail["reason"] == "org_wallet_requires_org_key"
+    assert isinstance(detail["detail"], str)
 
 
 # ---------------------------------------------------------------------------
@@ -982,6 +998,10 @@ def test_get_ledger_org_key_cannot_query_personal_wallet_entries_returns_403() -
         "/billing/wallet/personal@ironclaw.test/ledger",
     )
     assert response.status_code == 403
+    detail = response.json()["detail"]
+    assert isinstance(detail, dict)
+    assert detail["reason"] == "org_key_cannot_access_personal_wallet"
+    assert isinstance(detail["detail"], str)
 
 
 def test_get_ledger_personal_key_cannot_query_org_wallet_entries_returns_403() -> None:
@@ -989,6 +1009,10 @@ def test_get_ledger_personal_key_cannot_query_org_wallet_entries_returns_403() -
         f"/billing/wallet/{_ORG_OWNER_KEY}/ledger",
     )
     assert response.status_code == 403
+    detail = response.json()["detail"]
+    assert isinstance(detail, dict)
+    assert detail["reason"] == "org_wallet_requires_org_key"
+    assert isinstance(detail["detail"], str)
 
 
 def test_get_ledger_org_key_cannot_query_different_org_wallet_returns_403() -> None:
@@ -996,6 +1020,10 @@ def test_get_ledger_org_key_cannot_query_different_org_wallet_returns_403() -> N
         "/billing/wallet/ic_org_otherorg999/ledger",
     )
     assert response.status_code == 403
+    detail = response.json()["detail"]
+    assert isinstance(detail, dict)
+    assert detail["reason"] == "org_key_mismatch"
+    assert isinstance(detail["detail"], str)
 
 
 # ---------------------------------------------------------------------------
