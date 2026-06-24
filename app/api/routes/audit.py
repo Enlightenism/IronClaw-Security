@@ -72,8 +72,12 @@ def _to_view(item: StoredAuditEventRecord) -> AuditEventView:
     return AuditEventView(**item.to_dict())
 
 
-@router.get("/events", response_model=AuditEventListResponse)
-def list_audit_events(
+@router.get(
+    "/events",
+    response_model=AuditEventListResponse,
+    operation_id="routes_audit_list_events",
+)
+def routes_list_audit_events(
     actor_id: str | None = Query(default=None),
     request_id: str | None = Query(default=None),
     trace_id: str | None = Query(default=None),
@@ -99,8 +103,12 @@ def list_audit_events(
     )
 
 
-@router.post("/events", response_model=AuditEventResponse)
-def create_audit_event(payload: AuditEventCreateRequest) -> AuditEventResponse:
+@router.post(
+    "/events",
+    response_model=AuditEventResponse,
+    operation_id="routes_audit_create_event",
+)
+def routes_create_audit_event(payload: AuditEventCreateRequest) -> AuditEventResponse:
     event = get_audit_store().create_event(
         event_type=payload.event_type,
         severity=payload.severity,
@@ -122,16 +130,28 @@ def create_audit_event(payload: AuditEventCreateRequest) -> AuditEventResponse:
     )
 
 
-@router.get("/events/by-actor/{actor_id}", response_model=list[AuditEventView])
-def list_audit_events_by_actor(actor_id: str) -> list[AuditEventView]:
+@router.get(
+    "/events/by-actor/{actor_id}",
+    response_model=list[AuditEventView],
+    operation_id="routes_audit_list_by_actor",
+)
+def routes_list_audit_events_by_actor(actor_id: str) -> list[AuditEventView]:
     return [_to_view(item) for item in get_audit_store().get_by_actor(actor_id)]
 
 
-@router.get("/events/by-request/{request_id}", response_model=list[AuditEventView])
-def list_audit_events_by_request(request_id: str) -> list[AuditEventView]:
+@router.get(
+    "/events/by-request/{request_id}",
+    response_model=list[AuditEventView],
+    operation_id="routes_audit_list_by_request",
+)
+def routes_list_audit_events_by_request(request_id: str) -> list[AuditEventView]:
     return [_to_view(item) for item in get_audit_store().get_by_request(request_id)]
 
 
-@router.get("/events/by-trace/{trace_id}", response_model=list[AuditEventView])
-def list_audit_events_by_trace(trace_id: str) -> list[AuditEventView]:
+@router.get(
+    "/events/by-trace/{trace_id}",
+    response_model=list[AuditEventView],
+    operation_id="routes_audit_list_by_trace",
+)
+def routes_list_audit_events_by_trace(trace_id: str) -> list[AuditEventView]:
     return [_to_view(item) for item in get_audit_store().get_by_trace(trace_id)]
