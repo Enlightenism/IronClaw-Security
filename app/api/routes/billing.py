@@ -462,7 +462,7 @@ def get_packages() -> BillingPackagesResponse:
 
 
 @router.post(
-    "/purchase",
+    "/packages/purchase",
     response_model=BillingPackagePurchaseResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Purchase a protection unit package",
