@@ -167,7 +167,7 @@ def test_list_packages_returns_401_unauthenticated() -> None:
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/packages/purchase — install key provisioning
+# POST /billing/purchase — install key provisioning
 # ---------------------------------------------------------------------------
 
 
@@ -188,7 +188,7 @@ def test_purchase_provisions_both_install_keys_on_success() -> None:
 
     with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _personal_client().post(
-            "/billing/packages/purchase",
+            "/billing/purchase",
             json={
                 "package_id": _PKG_5K,
                 "buyer_name": "Install Key Buyer",
@@ -223,7 +223,7 @@ def test_purchase_install_key_already_exists_returns_none_keys_purchase_still_su
 
     with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _personal_client().post(
-            "/billing/packages/purchase",
+            "/billing/purchase",
             json={
                 "package_id": _PKG_5K,
                 "buyer_name": "Existing Key Buyer",
@@ -256,7 +256,7 @@ def test_purchase_install_key_provisioning_exception_returns_none_keys_purchase_
 
     with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _personal_client().post(
-            "/billing/packages/purchase",
+            "/billing/purchase",
             json={
                 "package_id": _PKG_5K,
                 "buyer_name": "Exception Key Buyer",
@@ -292,7 +292,7 @@ def test_purchase_install_key_partial_success_one_key_already_exists() -> None:
 
     with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _personal_client().post(
-            "/billing/packages/purchase",
+            "/billing/purchase",
             json={
                 "package_id": _PKG_5K,
                 "buyer_name": "Partial Key Buyer",
@@ -313,7 +313,7 @@ def test_purchase_response_schema_includes_install_key_fields() -> None:
 
     with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _personal_client().post(
-            "/billing/packages/purchase",
+            "/billing/purchase",
             json={
                 "package_id": _PKG_5K,
                 "buyer_name": "Schema Check Buyer",
@@ -329,13 +329,13 @@ def test_purchase_response_schema_includes_install_key_fields() -> None:
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/packages/purchase — email validator
+# POST /billing/purchase — email validator
 # ---------------------------------------------------------------------------
 
 
 def test_purchase_malformed_email_no_at_sign_returns_422() -> None:
     response = _personal_client().post(
-        "/billing/packages/purchase",
+        "/billing/purchase",
         json={
             "package_id": _PKG_5K,
             "buyer_name": "Bad Email Buyer",
@@ -348,7 +348,7 @@ def test_purchase_malformed_email_no_at_sign_returns_422() -> None:
 
 def test_purchase_malformed_email_missing_domain_returns_422() -> None:
     response = _personal_client().post(
-        "/billing/packages/purchase",
+        "/billing/purchase",
         json={
             "package_id": _PKG_5K,
             "buyer_name": "Bad Email Buyer",
@@ -361,7 +361,7 @@ def test_purchase_malformed_email_missing_domain_returns_422() -> None:
 
 def test_purchase_malformed_email_no_tld_returns_422() -> None:
     response = _personal_client().post(
-        "/billing/packages/purchase",
+        "/billing/purchase",
         json={
             "package_id": _PKG_5K,
             "buyer_name": "Bad Email Buyer",
@@ -378,7 +378,7 @@ def test_purchase_email_is_normalized_to_lowercase() -> None:
 
     with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _personal_client().post(
-            "/billing/packages/purchase",
+            "/billing/purchase",
             json={
                 "package_id": _PKG_5K,
                 "buyer_name": "Case Buyer",
@@ -394,7 +394,7 @@ def test_purchase_email_is_normalized_to_lowercase() -> None:
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/packages/purchase — personal key (happy path)
+# POST /billing/purchase — personal key (happy path)
 # ---------------------------------------------------------------------------
 
 
@@ -406,7 +406,7 @@ def test_purchase_personal_key_returns_201_and_owner_key_is_buyer_email() -> Non
 
     with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _personal_client().post(
-            "/billing/packages/purchase",
+            "/billing/purchase",
             json={
                 "package_id": _PKG_5K,
                 "buyer_name": "Test Buyer",
@@ -439,7 +439,7 @@ def test_purchase_personal_key_pkg_25k_returns_201() -> None:
 
     with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _personal_client().post(
-            "/billing/packages/purchase",
+            "/billing/purchase",
             json={
                 "package_id": _PKG_25K,
                 "buyer_name": "Team Buyer",
@@ -460,7 +460,7 @@ def test_purchase_personal_key_pkg_60k_returns_201() -> None:
 
     with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _personal_client().post(
-            "/billing/packages/purchase",
+            "/billing/purchase",
             json={
                 "package_id": _PKG_60K,
                 "buyer_name": "Enterprise Buyer",
@@ -476,7 +476,7 @@ def test_purchase_personal_key_pkg_60k_returns_201() -> None:
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/packages/purchase — purchase_id uniqueness
+# POST /billing/purchase — purchase_id uniqueness
 # ---------------------------------------------------------------------------
 
 
@@ -489,7 +489,7 @@ def test_purchase_id_uniqueness_across_concurrent_purchases() -> None:
 
     def _do_purchase(i: int) -> str:
         resp = client.post(
-            "/billing/packages/purchase",
+            "/billing/purchase",
             json={
                 "package_id": _PKG_5K,
                 "buyer_name": f"Concurrent Buyer {i}",
@@ -514,13 +514,13 @@ def test_purchase_id_uniqueness_across_concurrent_purchases() -> None:
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/packages/purchase — auth enforcement
+# POST /billing/purchase — auth enforcement
 # ---------------------------------------------------------------------------
 
 
 def test_purchase_no_api_key_returns_401() -> None:
     response = _unauthed_client().post(
-        "/billing/packages/purchase",
+        "/billing/purchase",
         json={
             "package_id": _PKG_5K,
             "buyer_name": "Attacker",
@@ -537,7 +537,7 @@ def test_purchase_unknown_package_id_returns_404() -> None:
 
     with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _personal_client().post(
-            "/billing/packages/purchase",
+            "/billing/purchase",
             json={
                 "package_id": "pkg_does_not_exist",
                 "buyer_name": "Test Buyer",
@@ -551,7 +551,7 @@ def test_purchase_unknown_package_id_returns_404() -> None:
 
 def test_purchase_empty_package_id_returns_422() -> None:
     response = _personal_client().post(
-        "/billing/packages/purchase",
+        "/billing/purchase",
         json={
             "package_id": "",
             "buyer_name": "Test Buyer",
@@ -563,7 +563,7 @@ def test_purchase_empty_package_id_returns_422() -> None:
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/packages/purchase — org key
+# POST /billing/purchase — org key
 # ---------------------------------------------------------------------------
 
 
@@ -573,7 +573,7 @@ def test_purchase_org_key_returns_201_and_owner_key_is_ic_org() -> None:
 
     with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
         response = _org_client().post(
-            "/billing/packages/purchase",
+            "/billing/purchase",
             json={
                 "package_id": _PKG_5K,
                 "buyer_name": "Org Admin",

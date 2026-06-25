@@ -11,6 +11,7 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
 os.environ.setdefault("SUPABASE_KEY", "")
 os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
+
 from contextlib import contextmanager
 from unittest.mock import MagicMock
 
@@ -36,9 +37,11 @@ from app.core.unit_wallet import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 _MOCK_API_KEY = "test-key"
 
-_PURCHASE_URL = "/billing/packages/purchase"
+
+_PURCHASE_URL = "/billing/purchase"
 
 
 def _make_auth_ctx(
@@ -312,7 +315,7 @@ class TestOrgWalletRouting:
 
 
 # ---------------------------------------------------------------------------
-# Integration tests — POST /billing/packages/purchase via TestClient
+# Integration tests — POST /billing/purchase via TestClient
 # ---------------------------------------------------------------------------
 
 
