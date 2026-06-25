@@ -26,6 +26,7 @@ __all__ = [
     "SupabaseAPIError",
     "get_supabase_client",
     "get_supabase_service_client",
+    "create_supabase_client",
     "is_supabase_configured",
     "get_supabase_config",
 ]
@@ -85,3 +86,8 @@ def get_supabase_service_client(
 
     config = SupabaseConfig(url=url.rstrip("/"), key=key)
     return SupabaseClient(config=config, timeout=timeout)
+
+
+# Public alias — create_supabase_client is the factory name used by callers
+# that do not need to distinguish service-role semantics from the call site.
+create_supabase_client = get_supabase_service_client
