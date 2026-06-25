@@ -185,7 +185,11 @@ def _run_deferred_startup(app: FastAPI) -> None:
     import time (which would break openapi schema export and test collection).
     """
     try:
-        assert_schema_completeness()
+        tables = assert_schema_completeness()
+        _log.info(
+            "bootstrap.startup: schema completeness check passed — %d tables verified",
+            len(tables),
+        )
     except RuntimeError as exc:
         _log.critical(
             "bootstrap.startup: schema completeness check FAILED — server will continue but schema integrity is not guaranteed: %s",
