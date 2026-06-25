@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+import sys
 from unittest.mock import MagicMock
 
 import pytest
@@ -22,12 +24,10 @@ from app.supabaseclient import (
     SupabaseConfigurationError,
     SupabaseConnectionError,
     SupabaseRequestError,
-    create_supabase_client,
-    createsupabaseclient,
     get_supabase_client,
     get_supabase_config,
     is_supabase_configured,
-    supabaseclient,
+    reset_supabase_client,
 )
 
 # ---------------------------------------------------------------------------
@@ -60,6 +60,36 @@ _ALL_19_TABLES: frozenset[str] = frozenset(
         "webhook_deliveries",
     }
 )
+
+
+# ---------------------------------------------------------------------------
+# Import-time safety
+# ---------------------------------------------------------------------------
+
+
+class TestImportTimeSafety:
+    def test_import_does_not_raise_with_no_env_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Importing supabaseclient with empty env vars must never crash."""
+        monkeypatch.delenv("SUPABASE_URL", raising=False)
+        monkeypatch.delenv("IRONCLAW_SUPABASE_URL", raising=False)
+        monkeypatch.delenv("NEXT_PUBLIC_SUPABASE_URL", raising=False)
+        monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+        monkeypatch.delenv("SUPABASE_KEY", raising=False)
+        monkeypatch.delenv("IRONCLAW_SUPABASE_KEY", raising=False)
+        monkeypatch.delenv("SUPABASE_ANON_KEY", raising=False)
+        monkeypatch.delenv("NEXT_PUBLIC_SUPABASE_ANON_KEY", raising=False)
+
+        # Force a fresh import without cached module state
+        mod_name = "app.supabaseclient"
+        saved = sys.modules.pop(mod_name, None)
+        try:
+            imported = importlib.import_module(mod_name)
+            assert imported is not None
+        finally:
+            if saved is not None:
+                sys.modules[mod_name] = saved
+            else:
+                sys.modules.pop(mod_name, None)
 
 
 # ---------------------------------------------------------------------------
@@ -100,8 +130,6 @@ class TestModuleConstants:
 
 
 class TestIronclawTables:
-    """IRONCLAW_TABLES must be a frozenset containing exactly the 19 canonical table names."""
-
     def test_is_frozenset(self) -> None:
         assert isinstance(IRONCLAW_TABLES, frozenset)
 
@@ -111,25 +139,17 @@ class TestIronclawTables:
     def test_matches_canonical_set(self) -> None:
         assert IRONCLAW_TABLES == _ALL_19_TABLES, f"Missing: {_ALL_19_TABLES - IRONCLAW_TABLES}  Extra: {IRONCLAW_TABLES - _ALL_19_TABLES}"
 
-    # --- legacy name must be absent ---
-
     def test_webhook_delivery_log_is_absent(self) -> None:
         assert "webhook_delivery_log" not in IRONCLAW_TABLES
 
-    # --- correct webhook name must be present ---
-
     def test_webhook_deliveries_is_present(self) -> None:
         assert "webhook_deliveries" in IRONCLAW_TABLES
-
-    # --- core scan pipeline ---
 
     def test_scan_history_present(self) -> None:
         assert "scan_history" in IRONCLAW_TABLES
 
     def test_scan_patterns_present(self) -> None:
         assert "scan_patterns" in IRONCLAW_TABLES
-
-    # --- policy engine ---
 
     def test_policy_rules_present(self) -> None:
         assert "policy_rules" in IRONCLAW_TABLES
@@ -140,22 +160,14 @@ class TestIronclawTables:
     def test_policy_set_memberships_present(self) -> None:
         assert "policy_set_memberships" in IRONCLAW_TABLES
 
-    # --- agents ---
-
     def test_agents_present(self) -> None:
         assert "agents" in IRONCLAW_TABLES
-
-    # --- telemetry ---
 
     def test_telemetry_events_present(self) -> None:
         assert "telemetry_events" in IRONCLAW_TABLES
 
-    # --- webhook subscriptions ---
-
     def test_webhook_subscriptions_present(self) -> None:
         assert "webhook_subscriptions" in IRONCLAW_TABLES
-
-    # --- 10 newly added tables ---
 
     def test_audit_events_present(self) -> None:
         assert "audit_events" in IRONCLAW_TABLES
@@ -393,6 +405,71 @@ class TestIsSupabaseConfigured:
         monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
         assert is_supabase_configured() is False
 
+    def test_returns_false_when_no_env_vars_at_all(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for var in (
+            "SUPABASE_URL",
+            "IRONCLAW_SUPABASE_URL",
+            "NEXT_PUBLIC_SUPABASE_URL",
+            "SUPABASE_SERVICE_ROLE_KEY",
+            "SUPABASE_KEY",
+            "IRONCLAW_SUPABASE_KEY",
+            "SUPABASE_ANON_KEY",
+            "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        ):
+            monkeypatch.delenv(var, raising=False)
+        assert is_supabase_configured() is False
+
+
+# ---------------------------------------------------------------------------
+# Singleton — get_supabase_client / reset_supabase_client
+# ---------------------------------------------------------------------------
+
+
+class TestSingleton:
+    @pytest.fixture(autouse=True)
+    def _clear_singleton(self) -> None:
+        reset_supabase_client()
+        yield
+        reset_supabase_client()
+
+    def test_two_calls_return_same_object(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
+        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
+        a = get_supabase_client()
+        b = get_supabase_client()
+        assert a is b
+
+    def test_reset_clears_singleton(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
+        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
+        a = get_supabase_client()
+        reset_supabase_client()
+        b = get_supabase_client()
+        assert a is not b
+
+    def test_reset_allows_new_instance(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
+        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
+        reset_supabase_client()
+        client = get_supabase_client()
+        assert isinstance(client, SupabaseClient)
+
+    def test_config_error_raised_when_env_missing_on_config_access(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for var in (
+            "SUPABASE_URL",
+            "IRONCLAW_SUPABASE_URL",
+            "NEXT_PUBLIC_SUPABASE_URL",
+            "SUPABASE_SERVICE_ROLE_KEY",
+            "SUPABASE_KEY",
+            "IRONCLAW_SUPABASE_KEY",
+            "SUPABASE_ANON_KEY",
+            "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        ):
+            monkeypatch.delenv(var, raising=False)
+        client = get_supabase_client()
+        with pytest.raises(SupabaseConfigurationError):
+            _ = client.config  # lazy config resolution triggers here
+
 
 # ---------------------------------------------------------------------------
 # SupabaseClient construction
@@ -454,15 +531,19 @@ def _make_client() -> SupabaseClient:
     return SupabaseClient(config=cfg)
 
 
-def _mock_response(status: int, body: object = None, content_type: str = "application/json") -> MagicMock:
+def _mock_response(
+    status: int,
+    body: object = None,
+    content_type: str = "application/json",
+) -> MagicMock:
+    import json as _json
+
     resp = MagicMock()
     resp.status_code = status
     resp.content = b"body" if body is not None else b""
     resp.headers = {"content-type": content_type}
     if body is not None:
         resp.json.return_value = body
-        import json as _json
-
         resp.text = _json.dumps(body)
     else:
         resp.json.side_effect = ValueError("no content")
@@ -532,6 +613,36 @@ class TestSupabaseClientRequest:
         client.session.request = MagicMock(return_value=_mock_response(422, {"message": "column not found"}))
         with pytest.raises(SupabaseAPIError, match="column not found"):
             client.request("GET", f"{_VALID_URL}/rest/v1/scan_history")
+
+
+# ---------------------------------------------------------------------------
+# SupabaseClient.healthcheck
+# ---------------------------------------------------------------------------
+
+
+class TestHealthcheck:
+    def test_raises_connection_error_on_network_failure(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(side_effect=requests.ConnectionError("refused"))
+        with pytest.raises(SupabaseConnectionError):
+            client.healthcheck()
+
+    def test_raises_connection_error_on_timeout(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(side_effect=requests.Timeout("timed out"))
+        with pytest.raises(SupabaseConnectionError):
+            client.healthcheck()
+
+    def test_returns_true_on_success(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(200, body=None))
+        assert client.healthcheck() is True
+
+    def test_raises_api_error_on_401(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(401, {"message": "unauthorized"}))
+        with pytest.raises(SupabaseAPIError):
+            client.healthcheck()
 
 
 # ---------------------------------------------------------------------------
@@ -625,6 +736,11 @@ class TestSupabaseClientInsert:
         with pytest.raises(ValueError, match="table is required"):
             client.insert("", {"col": "val"})
 
+    def test_raises_on_blank_table(self) -> None:
+        client = _make_client()
+        with pytest.raises(ValueError, match="table is required"):
+            client.insert("   ", {"col": "val"})
+
     def test_raises_on_none_payload(self) -> None:
         client = _make_client()
         with pytest.raises(ValueError, match="payload is required"):
@@ -656,6 +772,11 @@ class TestSupabaseClientUpdate:
         with pytest.raises(ValueError, match="table is required"):
             client.update("", {"status": "ok"}, filters={"id": "eq.1"})
 
+    def test_raises_on_blank_table(self) -> None:
+        client = _make_client()
+        with pytest.raises(ValueError, match="table is required"):
+            client.update("   ", {"status": "ok"}, filters={"id": "eq.1"})
+
     def test_raises_on_empty_payload(self) -> None:
         client = _make_client()
         with pytest.raises(ValueError, match="payload is required"):
@@ -684,6 +805,11 @@ class TestSupabaseClientDelete:
         client = _make_client()
         with pytest.raises(ValueError, match="table is required"):
             client.delete("", filters={"id": "eq.1"})
+
+    def test_raises_on_blank_table(self) -> None:
+        client = _make_client()
+        with pytest.raises(ValueError, match="table is required"):
+            client.delete("   ", filters={"id": "eq.1"})
 
     def test_raises_on_empty_filters(self) -> None:
         client = _make_client()
@@ -738,6 +864,180 @@ class TestSupabaseClientRpc:
         client.session.request = MagicMock(return_value=_mock_response(200, {"result": True}))
         result = client.rpc("my_function")
         assert result == {"result": True}
+
+
+# ---------------------------------------------------------------------------
+# _QueryBuilder — comprehensive filter/param-build tests
+# ---------------------------------------------------------------------------
+
+
+class TestQueryBuilderParams:
+    def test_eq_filter_param(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(200, []))
+        client.table("agents").select("*").eq("status", "active").execute()
+        params = client.session.request.call_args.kwargs.get("params") or {}
+        assert params.get("status") == "eq.active"
+
+    def test_neq_filter_param(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(200, []))
+        client.table("agents").select("*").neq("status", "deleted").execute()
+        params = client.session.request.call_args.kwargs.get("params") or {}
+        assert params.get("status") == "neq.deleted"
+
+    def test_gt_filter_param(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(200, []))
+        client.table("scan_history").select("*").gt("score", 5).execute()
+        params = client.session.request.call_args.kwargs.get("params") or {}
+        assert params.get("score") == "gt.5"
+
+    def test_lt_filter_param(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(200, []))
+        client.table("scan_history").select("*").lt("score", 5).execute()
+        params = client.session.request.call_args.kwargs.get("params") or {}
+        assert params.get("score") == "lt.5"
+
+    def test_gte_filter_param(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(200, []))
+        client.table("scan_history").select("*").gte("score", 3).execute()
+        params = client.session.request.call_args.kwargs.get("params") or {}
+        assert params.get("score") == "gte.3"
+
+    def test_lte_filter_param(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(200, []))
+        client.table("scan_history").select("*").lte("score", 3).execute()
+        params = client.session.request.call_args.kwargs.get("params") or {}
+        assert params.get("score") == "lte.3"
+
+    def test_is_filter_param(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(200, []))
+        client.table("agents").select("*").is_("deleted_at", "null").execute()
+        params = client.session.request.call_args.kwargs.get("params") or {}
+        assert params.get("deleted_at") == "is.null"
+
+    def test_not_is_filter_via_proxy(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(200, []))
+        client.table("agents").select("*").not_.is_("deleted_at", "null").execute()
+        params = client.session.request.call_args.kwargs.get("params") or {}
+        assert params.get("deleted_at") == "not.is.null"
+
+    def test_in_filter_param(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(200, []))
+        client.table("agents").select("*").in_("status", ["active", "idle"]).execute()
+        params = client.session.request.call_args.kwargs.get("params") or {}
+        assert params.get("status") == "in.(active,idle)"
+
+    def test_ilike_filter_param(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(200, []))
+        client.table("agents").select("*").ilike("name", "%claw%").execute()
+        params = client.session.request.call_args.kwargs.get("params") or {}
+        assert params.get("name") == "ilike.%claw%"
+
+    def test_order_asc_param(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(200, []))
+        client.table("scan_history").select("*").order("created_at", desc=False).execute()
+        params = client.session.request.call_args.kwargs.get("params") or {}
+        assert params.get("order") == "created_at.asc"
+
+    def test_order_desc_param(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(200, []))
+        client.table("scan_history").select("*").order("created_at", desc=True).execute()
+        params = client.session.request.call_args.kwargs.get("params") or {}
+        assert params.get("order") == "created_at.desc"
+
+    def test_limit_param(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(200, []))
+        client.table("scan_history").select("*").limit(25).execute()
+        params = client.session.request.call_args.kwargs.get("params") or {}
+        assert params.get("limit") == "25"
+
+    def test_select_columns_param(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(200, []))
+        client.table("agents").select("id,name,status").execute()
+        params = client.session.request.call_args.kwargs.get("params") or {}
+        assert params.get("select") == "id,name,status"
+
+    def test_insert_sends_post(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(201, [{"id": "new"}]))
+        client.table("agents").insert({"name": "agent-x"}).execute()
+        method = client.session.request.call_args[1].get("method") or client.session.request.call_args[0][0]
+        assert method.upper() == "POST"
+
+    def test_delete_sends_delete(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(200, []))
+        client.table("agents").delete().eq("id", "old-id").execute()
+        method = client.session.request.call_args[1].get("method") or client.session.request.call_args[0][0]
+        assert method.upper() == "DELETE"
+
+    def test_maybe_single_returns_none_on_406(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(406, {"message": "not acceptable"}))
+        resp = client.table("agents").select("*").maybe_single().execute()
+        assert resp.data is None
+
+    def test_not_proxy_attached(self) -> None:
+        client = _make_client()
+        qb = client.table("scan_history")
+        assert hasattr(qb, "not_")
+
+    def test_response_data_matches_payload(self) -> None:
+        client = _make_client()
+        rows = [{"id": "1"}]
+        client.session.request = MagicMock(return_value=_mock_response(200, rows))
+        resp = client.table("scan_history").select("*").execute()
+        assert resp.data == rows
+
+    def test_multiple_filters_all_set(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(200, []))
+        client.table("scan_history").select("*").eq("status", "allow").gt("score", 3).execute()
+        params = client.session.request.call_args.kwargs.get("params") or {}
+        assert params.get("status") == "eq.allow"
+        assert params.get("score") == "gt.3"
+
+    def test_or_filter_param(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(200, []))
+        client.table("agents").select("*").or_("status.eq.active,status.eq.idle").execute()
+        params = client.session.request.call_args.kwargs.get("params") or {}
+        assert "or" in params
+        assert "active" in params["or"]
+
+    def test_contains_list_filter_param(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(200, []))
+        client.table("agents").select("*").contains("tags", ["ironclaw", "scan"]).execute()
+        params = client.session.request.call_args.kwargs.get("params") or {}
+        assert params.get("tags") == "cs.{ironclaw,scan}"
+
+    def test_upsert_sends_post(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(200, [{"id": "1"}]))
+        client.table("agents").upsert({"id": "1", "name": "agent-x"}, on_conflict="id").execute()
+        method = client.session.request.call_args[1].get("method") or client.session.request.call_args[0][0]
+        assert method.upper() == "POST"
+
+    def test_update_sends_patch(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(return_value=_mock_response(200, [{"id": "1"}]))
+        client.table("agents").update({"status": "idle"}).eq("id", "1").execute()
+        method = client.session.request.call_args[1].get("method") or client.session.request.call_args[0][0]
+        assert method.upper() == "PATCH"
 
 
 # ---------------------------------------------------------------------------
@@ -915,7 +1215,6 @@ class TestFetchWebhookSubscriptions:
 
 # ---------------------------------------------------------------------------
 # Domain helpers — fetch_webhook_delivery_log
-# (must query webhook_deliveries, NOT webhook_delivery_log)
 # ---------------------------------------------------------------------------
 
 
@@ -981,96 +1280,3 @@ class TestFetchWebhookDeliveryLog:
         client.session.request = MagicMock(return_value=_mock_response(200, rows))
         result = client.fetch_webhook_delivery_log()
         assert result == rows
-
-
-# ---------------------------------------------------------------------------
-# Factory functions — aliasing contracts
-# ---------------------------------------------------------------------------
-
-
-class TestFactoryFunctions:
-    def test_create_supabase_client_returns_supabase_client(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
-        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
-        client = create_supabase_client()
-        assert isinstance(client, SupabaseClient)
-
-    def test_get_supabase_client_returns_supabase_client(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
-        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
-        client = get_supabase_client()
-        assert isinstance(client, SupabaseClient)
-
-    def test_createsupabaseclient_alias_returns_supabase_client(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
-        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
-        client = createsupabaseclient()
-        assert isinstance(client, SupabaseClient)
-
-    def test_supabaseclient_alias_is_callable(self) -> None:
-        assert callable(supabaseclient)
-
-    def test_custom_timeout_forwarded_by_create(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
-        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
-        client = create_supabase_client(timeout=99.0)
-        assert client.timeout == 99.0
-
-    def test_custom_session_forwarded_by_create(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
-        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
-        sess = requests.Session()
-        client = create_supabase_client(session=sess)
-        assert client.session is sess
-
-
-# ---------------------------------------------------------------------------
-# SupabaseClient.table — QueryBuilder smoke test
-# ---------------------------------------------------------------------------
-
-
-class TestQueryBuilderSmoke:
-    def test_table_returns_query_builder(self) -> None:
-        client = _make_client()
-        qb = client.table("scan_history")
-        assert qb is not None
-
-    def test_query_builder_select_execute_returns_response(self) -> None:
-        client = _make_client()
-        rows = [{"id": "1"}]
-        client.session.request = MagicMock(return_value=_mock_response(200, rows))
-        resp = client.table("scan_history").select("*").execute()
-        assert resp.data == rows
-
-    def test_query_builder_eq_filter_sets_param(self) -> None:
-        client = _make_client()
-        client.session.request = MagicMock(return_value=_mock_response(200, []))
-        client.table("agents").select("*").eq("status", "active").execute()
-        call_kwargs = client.session.request.call_args
-        params = call_kwargs.kwargs.get("params") or call_kwargs[1].get("params") or {}
-        assert params.get("status") == "eq.active"
-
-    def test_query_builder_insert_sends_post(self) -> None:
-        client = _make_client()
-        client.session.request = MagicMock(return_value=_mock_response(201, [{"id": "new"}]))
-        client.table("agents").insert({"name": "agent-x"}).execute()
-        method = client.session.request.call_args[1].get("method") or client.session.request.call_args[0][0]
-        assert method.upper() == "POST"
-
-    def test_query_builder_delete_sends_delete(self) -> None:
-        client = _make_client()
-        client.session.request = MagicMock(return_value=_mock_response(200, []))
-        client.table("agents").delete().eq("id", "old-id").execute()
-        method = client.session.request.call_args[1].get("method") or client.session.request.call_args[0][0]
-        assert method.upper() == "DELETE"
-
-    def test_query_builder_not_proxy_is_attached(self) -> None:
-        client = _make_client()
-        qb = client.table("scan_history")
-        assert hasattr(qb, "not_")
-
-    def test_query_builder_maybe_single_returns_none_on_406(self) -> None:
-        client = _make_client()
-        client.session.request = MagicMock(return_value=_mock_response(406, {"message": "not acceptable"}))
-        resp = client.table("agents").select("*").maybe_single().execute()
-        assert resp.data is None

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import os
+import threading
 from typing import Any
 
 import requests
@@ -759,12 +760,15 @@ class SupabaseClient:
         )
 
 
-def create_supabase_client(
-    *,
-    timeout: float = SUPABASE_TIMEOUT_SECONDS,
-    session: requests.Session | None = None,
-) -> SupabaseClient:
-    return SupabaseClient(timeout=timeout, session=session)
+# ---------------------------------------------------------------------------
+# Process-level singleton with lazy initialization and thread-safe guard.
+# Importing this module never creates a SupabaseClient or reads env vars.
+# Call get_supabase_client() to obtain the shared instance at runtime.
+# Call reset_supabase_client() in tests to clear the singleton between cases.
+# ---------------------------------------------------------------------------
+
+_client: SupabaseClient | None = None
+_client_lock: threading.Lock = threading.Lock()
 
 
 def get_supabase_client(
@@ -772,15 +776,27 @@ def get_supabase_client(
     timeout: float = SUPABASE_TIMEOUT_SECONDS,
     session: requests.Session | None = None,
 ) -> SupabaseClient:
-    return SupabaseClient(timeout=timeout, session=session)
+    """Return the process-level SupabaseClient singleton.
+
+    The instance is created on the first call; subsequent calls return the
+    cached instance.  Passing a custom ``timeout`` or ``session`` only takes
+    effect when the singleton does not yet exist (i.e. on the very first call
+    or after ``reset_supabase_client()``).
+    """
+    global _client
+    if _client is None:
+        with _client_lock:
+            if _client is None:
+                _client = SupabaseClient(timeout=timeout, session=session)
+    return _client
 
 
-def createsupabaseclient(
-    *,
-    timeout: float = SUPABASE_TIMEOUT_SECONDS,
-    session: requests.Session | None = None,
-) -> SupabaseClient:
-    return create_supabase_client(timeout=timeout, session=session)
+def reset_supabase_client() -> None:
+    """Destroy the process-level singleton.
 
-
-supabaseclient = get_supabase_client
+    Intended for use in tests only — allows each test to start with a fresh
+    client without env-var bleed-through.
+    """
+    global _client
+    with _client_lock:
+        _client = None
