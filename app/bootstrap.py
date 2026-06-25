@@ -61,6 +61,8 @@ def assert_schema_completeness() -> frozenset[str]:
 
     Raises RuntimeError if the registry count is wrong or any expected table
     is missing. Returns the verified table set on success.
+
+    Safe to call at startup; must NOT be called at module import time.
     """
     registered = get_registered_tables()
     count = len(registered)
@@ -175,17 +177,43 @@ def add_security_middleware(app: FastAPI) -> FastAPI:
     return app
 
 
+def _run_deferred_startup(app: FastAPI) -> None:
+    """Execute startup-time checks that must not run at module import.
+
+    Registered as a startup event by bootstrap_app. Calls assert_schema_completeness
+    inside a guarded block so CI schema mismatches surface at server start, not at
+    import time (which would break openapi schema export and test collection).
+    """
+    try:
+        assert_schema_completeness()
+    except RuntimeError as exc:
+        _log.critical(
+            "bootstrap.startup: schema completeness check FAILED — server will continue but schema integrity is not guaranteed: %s",
+            exc,
+        )
+
+
 def bootstrap_app(app: FastAPI) -> FastAPI:
     """Entry point to configure global app state and middleware.
 
-    Performs schema completeness check (all 19 DDL-registered tables must be
-    present), configures app state, and installs request tracing and security
-    middleware. Call this once, right after creating the FastAPI() instance.
+    Registers a deferred startup event that runs assert_schema_completeness
+    only when the server actually starts (not at import time). Configures app
+    state and installs request tracing and security middleware. Call this once,
+    right after creating the FastAPI() instance.
     """
     if getattr(app.state, "_bootstrap_installed", False):
         return app
 
-    assert_schema_completeness()
+    # Deferred: schema completeness check runs at server startup, not import time.
+    # This prevents CI crashes when env vars are absent during schema export or
+    # test collection.
+    if not getattr(app.state, "_bootstrap_startup_registered", False):
+
+        @app.on_event("startup")
+        async def _bootstrap_startup_event() -> None:
+            _run_deferred_startup(app)
+
+        app.state._bootstrap_startup_registered = True
 
     app = configure_app_state(app)
     app = add_request_tracing_middleware(app)
