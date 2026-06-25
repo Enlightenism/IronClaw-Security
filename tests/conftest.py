@@ -16,6 +16,7 @@ import app.core.unit_wallet as _unit_wallet_module
 from app.core.unit_wallet import UnitWalletRegistry
 from app.main import app as _app
 from app.services.audit_log_service import reset_audit_log
+from app.supabaseclient import reset_supabase_client
 from ironclaw_sdk.client import IronclawClient
 from ironclaw_sdk.exceptions import IronclawAPIError, IronclawAuthError
 from ironclaw_sdk.models import ScanRequest as SDKScanRequest
@@ -60,6 +61,18 @@ def _override_require_auth_context() -> AuthContext:
 # ---------------------------------------------------------------------------
 # Autouse fixtures
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="function", autouse=True)
+def _reset_supabase_singleton() -> Generator[None, None, None]:
+    """Clear the Supabase client singleton before and after every test.
+
+    Prevents cached _client state from one test (e.g. env-var patching)
+    bleeding into subsequent tests.
+    """
+    reset_supabase_client()
+    yield
+    reset_supabase_client()
 
 
 @pytest.fixture(scope="function", autouse=True)
