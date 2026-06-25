@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 # ---------------------------------------------------------------------------
 
 
-class IOCType(str, Enum):
+class IOCType(StrEnum):
     """
     Indicator of Compromise type.
     Maps to the ioc_type column in ioc_records.
@@ -27,14 +27,14 @@ class IOCType(str, Enum):
     PATTERN = "pattern"
 
 
-class IOCSeverity(str, Enum):
+class IOCSeverity(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
 
 
-class IOCSource(str, Enum):
+class IOCSource(StrEnum):
     INTERNAL = "internal"
     MITRE_ATTACK = "mitre_attack"
     CISA_KEV = "cisa_kev"

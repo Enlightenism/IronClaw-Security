@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 import threading
 from typing import Any
 from uuid import uuid4
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/onboarding", tags=["onboarding"])
 # ---------------------------------------------------------------------------
 
 
-class OnboardingStepKey(str, Enum):
+class OnboardingStepKey(StrEnum):
     ACCOUNT_CREATED = "account_created"
     ORG_CONFIGURED = "org_configured"
     POLICY_CREATED = "policy_created"
@@ -31,14 +31,14 @@ class OnboardingStepKey(str, Enum):
     COMPLETED = "completed"
 
 
-class OnboardingStatus(str, Enum):
+class OnboardingStatus(StrEnum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     SKIPPED = "skipped"
 
 
-class OnboardingSessionStatus(str, Enum):
+class OnboardingSessionStatus(StrEnum):
     ACTIVE = "active"
     COMPLETED = "completed"
     ABANDONED = "abandoned"

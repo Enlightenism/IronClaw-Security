@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 # ─── Event Type Enum ──────────────────────────────────────────────────────────
 
 
-class TelemetryEventType(str, Enum):
+class TelemetryEventType(StrEnum):
     # Prompt / scan layer
     PROMPT_RECEIVED = "prompt.received"
     PROMPT_SCANNED = "prompt.scanned"
@@ -103,7 +103,7 @@ class TelemetryEventType(str, Enum):
 # ─── Verdict / Severity ───────────────────────────────────────────────────────
 
 
-class TelemetryVerdict(str, Enum):
+class TelemetryVerdict(StrEnum):
     ALLOW = "allow"
     WARN = "warn"
     QUARANTINE = "quarantine"
@@ -111,7 +111,7 @@ class TelemetryVerdict(str, Enum):
     UNKNOWN = "unknown"
 
 
-class TelemetrySeverity(str, Enum):
+class TelemetrySeverity(StrEnum):
     INFO = "info"
     LOW = "low"
     MEDIUM = "medium"

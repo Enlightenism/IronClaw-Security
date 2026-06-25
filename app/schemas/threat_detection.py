@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -11,14 +11,14 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 # ---------------------------------------------------------------------------
 
 
-class DetectionVerdict(str, Enum):
+class DetectionVerdict(StrEnum):
     ALLOW = "allow"
     MONITOR = "monitor"
     REVIEW = "review"
     BLOCK = "block"
 
 
-class ThreatSeverityLevel(str, Enum):
+class ThreatSeverityLevel(StrEnum):
     INFO = "info"
     LOW = "low"
     MEDIUM = "medium"
@@ -26,7 +26,7 @@ class ThreatSeverityLevel(str, Enum):
     CRITICAL = "critical"
 
 
-class IOCTypeEnum(str, Enum):
+class IOCTypeEnum(StrEnum):
     IPV4 = "ipv4"
     IPV6 = "ipv6"
     DOMAIN = "domain"
@@ -41,7 +41,7 @@ class IOCTypeEnum(str, Enum):
     UNKNOWN = "unknown"
 
 
-class ThreatFeedSourceEnum(str, Enum):
+class ThreatFeedSourceEnum(StrEnum):
     MITRE_ATTACK = "mitre_attack"
     CISA_KEV = "cisa_kev"
     CUSTOM_IOC = "custom_ioc"
@@ -49,21 +49,21 @@ class ThreatFeedSourceEnum(str, Enum):
     INTERNAL = "internal"
 
 
-class IngestStatusEnum(str, Enum):
+class IngestStatusEnum(StrEnum):
     SUCCESS = "success"
     PARTIAL = "partial"
     FAILED = "failed"
     SKIPPED = "skipped"
 
 
-class AlertSeverityEnum(str, Enum):
+class AlertSeverityEnum(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
 
 
-class HuntStatusEnum(str, Enum):
+class HuntStatusEnum(StrEnum):
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"

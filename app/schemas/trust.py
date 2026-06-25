@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 # ---------------------------------------------------------------------------
 
 
-class TrustEventType(str, Enum):
+class TrustEventType(StrEnum):
     """Discrete events that cause trust score changes or profile state transitions."""
 
     # Positive / trust-building events
@@ -56,7 +56,7 @@ class TrustEventType(str, Enum):
     UNKNOWN = "unknown"
 
 
-class TrustTier(str, Enum):
+class TrustTier(StrEnum):
     """Human-readable classification of the current trust score range."""
 
     CRITICAL = "critical"  # 0–19
@@ -66,7 +66,7 @@ class TrustTier(str, Enum):
     FULL = "full"  # 80–100
 
 
-class TrustOutcome(str, Enum):
+class TrustOutcome(StrEnum):
     INCREASED = "increased"
     DECREASED = "decreased"
     LOCKED = "locked"
@@ -76,7 +76,7 @@ class TrustOutcome(str, Enum):
     DECAYED = "decayed"
 
 
-class TrustDecayStrategy(str, Enum):
+class TrustDecayStrategy(StrEnum):
     """Algorithm used when applying passive trust decay."""
 
     LINEAR = "linear"

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 # ---------------------------------------------------------------------------
 
 
-class PolicyEnforcementMode(str, Enum):
+class PolicyEnforcementMode(StrEnum):
     """How the policy engine handles a matched rule."""
 
     block = "block"
@@ -21,7 +21,7 @@ class PolicyEnforcementMode(str, Enum):
     audit = "audit"
 
 
-class PolicyScope(str, Enum):
+class PolicyScope(StrEnum):
     """Which layer of the request pipeline this policy targets."""
 
     prompt = "prompt"
@@ -31,7 +31,7 @@ class PolicyScope(str, Enum):
     global_ = "global"
 
 
-class PolicySeverity(str, Enum):
+class PolicySeverity(StrEnum):
     critical = "critical"
     high = "high"
     medium = "medium"

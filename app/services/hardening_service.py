@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 import os
 from typing import Any
 
@@ -11,7 +11,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 
-class HardeningCheckStatus(str, Enum):
+class HardeningCheckStatus(StrEnum):
     PASS = "pass"
     FAIL = "fail"
     WARN = "warn"

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 # ---------------------------------------------------------------------------
 
 
-class ReviewStatus(str, Enum):
+class ReviewStatus(StrEnum):
     """Lifecycle state of a review queue item."""
 
     pending = "pending"
@@ -20,7 +20,7 @@ class ReviewStatus(str, Enum):
     escalated = "escalated"
 
 
-class ReviewItemType(str, Enum):
+class ReviewItemType(StrEnum):
     """The kind of artifact placed in the review queue."""
 
     scan = "scan"

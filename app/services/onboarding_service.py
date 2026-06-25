@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from enum import Enum
+from enum import StrEnum
 import hashlib
 import hmac
 import os
@@ -47,14 +47,14 @@ def _safe_compare(a: str, b: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-class InviteStatus(str, Enum):
+class InviteStatus(StrEnum):
     PENDING = "pending"
     ACCEPTED = "accepted"
     EXPIRED = "expired"
     REVOKED = "revoked"
 
 
-class VerificationStatus(str, Enum):
+class VerificationStatus(StrEnum):
     UNVERIFIED = "unverified"
     PENDING = "pending"
     VERIFIED = "verified"
@@ -62,7 +62,7 @@ class VerificationStatus(str, Enum):
     EXPIRED = "expired"
 
 
-class OnboardingStep(str, Enum):
+class OnboardingStep(StrEnum):
     INVITE_SENT = "invite_sent"
     EMAIL_VERIFIED = "email_verified"
     PROFILE_COMPLETE = "profile_complete"
@@ -70,14 +70,14 @@ class OnboardingStep(str, Enum):
     COMPLETED = "completed"
 
 
-class TeamProvisionStatus(str, Enum):
+class TeamProvisionStatus(StrEnum):
     PENDING = "pending"
     PROVISIONING = "provisioning"
     ACTIVE = "active"
     FAILED = "failed"
 
 
-class MemberRole(str, Enum):
+class MemberRole(StrEnum):
     OWNER = "owner"
     ADMIN = "admin"
     MEMBER = "member"

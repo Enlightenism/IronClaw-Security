@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 # ---------------------------------------------------------------------------
 
 
-class ToolCallRiskLevel(str, Enum):
+class ToolCallRiskLevel(StrEnum):
     """Assessed risk level for a tool call."""
 
     critical = "critical"
@@ -21,7 +21,7 @@ class ToolCallRiskLevel(str, Enum):
     info = "info"
 
 
-class ToolCallVerdict(str, Enum):
+class ToolCallVerdict(StrEnum):
     """Enforcement decision returned after inspecting a tool call."""
 
     allow = "allow"

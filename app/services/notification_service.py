@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 import logging
 from typing import Any, Literal
 
@@ -17,7 +17,7 @@ NotificationSeverity = Literal["info", "warning", "critical"]
 NotificationStatus = Literal["sent", "failed", "suppressed", "simulated"]
 
 
-class NotificationEvent(str, Enum):
+class NotificationEvent(StrEnum):
     ALERT_CREATED = "alert_created"
     ALERT_ESCALATED = "alert_escalated"
     INCIDENT_OPENED = "incident_opened"

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
-class Scope(str, Enum):
+class Scope(StrEnum):
     """Canonical permission scopes enforced at the API schema layer."""
 
     SYSTEM = "system"

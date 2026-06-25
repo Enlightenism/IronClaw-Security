@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 import logging
 from threading import Lock
 from typing import Any
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class RemediationAction(str, Enum):
+class RemediationAction(StrEnum):
     QUARANTINE = "quarantine"
     ISOLATE = "isolate"
     REVOKE_SESSION = "revoke_session"
@@ -35,7 +35,7 @@ class RemediationAction(str, Enum):
     NO_OP = "no_op"
 
 
-class RemediationStatus(str, Enum):
+class RemediationStatus(StrEnum):
     PENDING = "pending"
     RUNNING = "running"
     SUCCEEDED = "succeeded"

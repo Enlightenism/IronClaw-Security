@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 # ---------------------------------------------------------------------------
 
 
-class AuditEventType(str, Enum):
+class AuditEventType(StrEnum):
     # Prompt layer
     PROMPT_RECEIVED = "prompt.received"
     PROMPT_SCANNED = "prompt.scanned"
@@ -109,7 +109,7 @@ class AuditEventType(str, Enum):
     UNKNOWN = "unknown"
 
 
-class AuditOutcome(str, Enum):
+class AuditOutcome(StrEnum):
     """Result of the audited action."""
 
     SUCCESS = "success"
@@ -123,7 +123,7 @@ class AuditOutcome(str, Enum):
     UNKNOWN = "unknown"
 
 
-class AuditSeverity(str, Enum):
+class AuditSeverity(StrEnum):
     INFO = "info"
     LOW = "low"
     MEDIUM = "medium"
@@ -131,7 +131,7 @@ class AuditSeverity(str, Enum):
     CRITICAL = "critical"
 
 
-class AuditTargetType(str, Enum):
+class AuditTargetType(StrEnum):
     """The type of entity that was the target of the audited action."""
 
     PROMPT = "prompt"

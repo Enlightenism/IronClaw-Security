@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 import logging
 import math
 from threading import Lock
@@ -92,20 +92,20 @@ def units_for_tokens(token_count: int) -> int:
 # ---------------------------------------------------------------------------
 
 
-class StripeCheckoutMode(str, Enum):
+class StripeCheckoutMode(StrEnum):
     PAYMENT = "payment"
     SUBSCRIPTION = "subscription"
     SETUP = "setup"
 
 
-class StripeBillingInterval(str, Enum):
+class StripeBillingInterval(StrEnum):
     MONTHLY = "month"
     ANNUAL = "year"
     WEEKLY = "week"
     DAILY = "day"
 
 
-class StripeSubscriptionStatus(str, Enum):
+class StripeSubscriptionStatus(StrEnum):
     ACTIVE = "active"
     TRIALING = "trialing"
     PAST_DUE = "past_due"
@@ -116,7 +116,7 @@ class StripeSubscriptionStatus(str, Enum):
     UNPAID = "unpaid"
 
 
-class StripeUnitEventReason(str, Enum):
+class StripeUnitEventReason(StrEnum):
     CHECKOUT_COMPLETE = "checkout.complete"
     SUBSCRIPTION_RENEWED = "subscription.renewed"
     MANUAL_CREDIT = "manual.credit"
@@ -125,7 +125,7 @@ class StripeUnitEventReason(str, Enum):
     ADJUSTMENT = "adjustment"
 
 
-class StripeWebhookEventType(str, Enum):
+class StripeWebhookEventType(StrEnum):
     CHECKOUT_SESSION_COMPLETED = "checkout.session.completed"
     CHECKOUT_SESSION_EXPIRED = "checkout.session.expired"
     CUSTOMER_SUBSCRIPTION_CREATED = "customer.subscription.created"
