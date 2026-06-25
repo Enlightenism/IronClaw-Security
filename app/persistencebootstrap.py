@@ -10,7 +10,7 @@ from app.supabaseclient import (
     IRONCLAW_TABLES,
     SupabaseClient,
     SupabaseConfigurationError,
-    create_supabase_client,
+    get_supabase_client,
 )
 
 logger = logging.getLogger(__name__)
@@ -20,45 +20,30 @@ DEFAULT_PERSISTENCE_MODE = "auto"
 MEMORY_MODE = "memory"
 SUPABASE_MODE = "supabase"
 
-# DDL bootstrap — one entry per canonical IronClaw table.
-# Entries are advisory: they document required schema and are used by
-# startup health checks and migration helpers. They do NOT execute DDL
-# directly against Supabase (managed via migrations); they exist so the
-# bootstrap layer can assert that every expected table is accounted for.
 _IRONCLAW_DDL_TABLE_REGISTRY: frozenset[str] = frozenset(
     {
-        # core scan pipeline
         "scan_history",
         "scan_patterns",
-        # policy engine
         "policy_rules",
         "policy_sets",
         "policy_set_memberships",
-        # agents + trust
         "agents",
         "agent_trust_profiles",
         "trust_events",
-        # telemetry + audit
         "telemetry_events",
         "audit_events",
-        # threat intelligence
         "iocs",
         "threat_detections",
-        # quarantine + review
         "quarantine_items",
         "review_queue",
-        # rate limiting (runtime state)
         "rate_limit_state",
-        # tool + sandbox execution logs
         "tool_call_log",
         "sandbox_execution_log",
-        # webhooks
         "webhook_subscriptions",
         "webhook_deliveries",
     }
 )
 
-# Verify at import time that DDL registry stays in sync with IRONCLAW_TABLES.
 _missing_from_registry = IRONCLAW_TABLES - _IRONCLAW_DDL_TABLE_REGISTRY
 _extra_in_registry = _IRONCLAW_DDL_TABLE_REGISTRY - IRONCLAW_TABLES
 if _missing_from_registry:
@@ -365,6 +350,11 @@ class SupabasePersistenceStore:
 StoreType = SupabasePersistenceStore | InMemoryPersistenceStore
 
 
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
 def _normalize_mode(value: str | None) -> str:
     mode = (value or DEFAULT_PERSISTENCE_MODE).strip().lower()
     if mode in {"", "default"}:
@@ -396,214 +386,197 @@ def _build_memory_store(*, reason: str | None) -> InMemoryPersistenceStore:
 
 def _build_supabase_store(
     *,
-    client_factory: Callable[..., SupabaseClient] = create_supabase_client,
+    client_factory: Callable[..., SupabaseClient] = get_supabase_client,
 ) -> SupabasePersistenceStore:
     client = client_factory()
-    return SupabasePersistenceStore(client)
-
-
-def build_store(
-    *,
-    mode: str | None = None,
-    backend: str | None = None,
-    provider: str | None = None,
-    persistence: str | None = None,
-    allow_fallback: bool = True,
-    verify_connection: bool = False,
-    client_factory: Callable[..., SupabaseClient] = create_supabase_client,
-) -> StoreType:
-    requested_mode = _normalize_mode(
-        mode or backend or provider or persistence or _env_persistence_mode(),
-    )
-
-    if requested_mode == MEMORY_MODE:
-        return _build_memory_store(reason="explicit-memory-mode")
-
-    if requested_mode == SUPABASE_MODE:
-        try:
-            store = _build_supabase_store(client_factory=client_factory)
-            if verify_connection:
-                store.healthcheck()
-            return store
-        except SupabaseConfigurationError:
-            if not allow_fallback:
-                raise
-            return _build_memory_store(reason="supabase-misconfigured")
-        except Exception:
-            if not allow_fallback:
-                raise
-            logger.exception("supabase bootstrap failed; falling back to memory store")
-            return _build_memory_store(reason="supabase-bootstrap-failed")
-
-    if requested_mode == DEFAULT_PERSISTENCE_MODE:
-        if _supabase_env_present():
-            try:
-                store = _build_supabase_store(client_factory=client_factory)
-                if verify_connection:
-                    store.healthcheck()
-                return store
-            except Exception:
-                if not allow_fallback:
-                    raise
-                logger.exception(
-                    "auto persistence bootstrap failed; falling back to memory store",
-                )
-                return _build_memory_store(reason="auto-supabase-bootstrap-failed")
-        return _build_memory_store(reason="supabase-env-missing")
-
-    raise PersistenceBootstrapError(f"unhandled persistence mode: {requested_mode}")
+    return SupabasePersistenceStore(client=client)
 
 
 # ---------------------------------------------------------------------------
-# Canonical top-level accessor — imported by name across the service layer
-# ---------------------------------------------------------------------------
-
-
-def get_persistence_store(**kwargs: Any) -> StoreType:
-    """Primary accessor used by all service-layer imports."""
-    return build_store(**kwargs)
-
-
-# ---------------------------------------------------------------------------
-# Aliased factory surface — preserve all existing call sites
-# ---------------------------------------------------------------------------
-
-
-def create_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-def get_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-def build_organization_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-def create_organization_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-def get_organization_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-def build_telemetry_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-def create_telemetry_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-def get_telemetry_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-def build_runtime_state_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-def create_runtime_state_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-def get_runtime_state_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-def build_runtime_session_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-def create_runtime_session_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-def get_runtime_session_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-def build_review_state_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-def create_review_state_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-def get_review_state_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-def build_checkpoint_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-def create_checkpoint_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-def get_checkpoint_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-# ---------------------------------------------------------------------------
-# Domain-scoped rate-limit store accessor
-# ---------------------------------------------------------------------------
-
-
-def get_rate_limit_store(**kwargs: Any) -> StoreType:
-    """Accessor for the rate_limit_state table layer."""
-    return build_store(**kwargs)
-
-
-def build_rate_limit_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-def create_rate_limit_store(**kwargs: Any) -> StoreType:
-    return build_store(**kwargs)
-
-
-# ---------------------------------------------------------------------------
-# Bootstrap state introspection
-# ---------------------------------------------------------------------------
-
-
-def get_persistence_bootstrap_state(
-    *,
-    mode: str | None = None,
-    backend: str | None = None,
-    provider: str | None = None,
-    persistence: str | None = None,
-    allow_fallback: bool = True,
-) -> PersistenceBootstrapState:
-    store = build_store(
-        mode=mode,
-        backend=backend,
-        provider=provider,
-        persistence=persistence,
-        allow_fallback=allow_fallback,
-    )
-    fallback_reason = getattr(store, "fallback_reason", None)
-    fallback_enabled = bool(getattr(store, "fallback_enabled", True))
-    backend_name = str(getattr(store, "backend_name", MEMORY_MODE))
-    mode_name = str(getattr(store, "mode", backend_name))
-    return PersistenceBootstrapState(
-        mode=mode_name,
-        backend_name=backend_name,
-        fallback_enabled=fallback_enabled,
-        fallback_reason=fallback_reason,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Schema registry introspection helper
+# Public table registry accessor
 # ---------------------------------------------------------------------------
 
 
 def get_registered_tables() -> frozenset[str]:
-    """Return the canonical DDL registry; used by startup health checks."""
-    return _IRONCLAW_DDL_TABLE_REGISTRY
+    """Return the canonical IronClaw table registry (single source of truth)."""
+    return IRONCLAW_TABLES
+
+
+# ---------------------------------------------------------------------------
+# Core store builder
+# ---------------------------------------------------------------------------
+
+
+def build_store(
+    mode: str | None = None,
+    *,
+    backend: str | None = None,
+    provider: str | None = None,
+    persistence: str | None = None,
+    allow_fallback: bool = True,
+    client_factory: Callable[..., SupabaseClient] = get_supabase_client,
+) -> StoreType:
+    # Accept mode aliases: backend, provider, persistence
+    resolved_mode = mode or backend or provider or persistence
+    resolved = _normalize_mode(resolved_mode) if resolved_mode is not None else _env_persistence_mode()
+
+    if resolved == MEMORY_MODE:
+        return _build_memory_store(reason="explicit-memory-mode")
+
+    if resolved == SUPABASE_MODE:
+        if not _supabase_env_present() and not allow_fallback:
+            raise PersistenceBootstrapError(
+                "SUPABASE_MODE requested but SUPABASE_URL / key env vars are not set",
+            )
+        try:
+            return _build_supabase_store(client_factory=client_factory)
+        except (SupabaseConfigurationError, PersistenceBootstrapError, RuntimeError) as exc:
+            if not allow_fallback:
+                raise
+            logger.warning("supabase store init failed, falling back to memory: %s", exc)
+            return _build_memory_store(reason=str(exc))
+
+    # auto mode
+    if _supabase_env_present():
+        try:
+            return _build_supabase_store(client_factory=client_factory)
+        except (SupabaseConfigurationError, RuntimeError) as exc:
+            if not allow_fallback:
+                raise
+            logger.warning("supabase unavailable, falling back to memory store: %s", exc)
+            return _build_memory_store(reason=str(exc))
+
+    return _build_memory_store(reason="supabase-env-missing")
+
+
+# ---------------------------------------------------------------------------
+# get_persistence_store — primary public API with allow_fallback control
+# ---------------------------------------------------------------------------
+
+
+def get_persistence_store(
+    mode: str | None = None,
+    *,
+    allow_fallback: bool = True,
+    client_factory: Callable[..., SupabaseClient] = get_supabase_client,
+) -> StoreType:
+    return build_store(
+        mode=mode,
+        allow_fallback=allow_fallback,
+        client_factory=client_factory,
+    )
+
+
+# ---------------------------------------------------------------------------
+# get_persistence_bootstrap_state
+# ---------------------------------------------------------------------------
+
+
+def get_persistence_bootstrap_state(
+    mode: str | None = None,
+    *,
+    allow_fallback: bool = True,
+    client_factory: Callable[..., SupabaseClient] = get_supabase_client,
+) -> PersistenceBootstrapState:
+    store = build_store(mode=mode, allow_fallback=allow_fallback, client_factory=client_factory)
+    return PersistenceBootstrapState(
+        mode=store.mode,
+        backend_name=store.backend_name,
+        fallback_enabled=store.fallback_enabled,
+        fallback_reason=store.fallback_reason,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Alias family — all delegate to build_store, single source of truth
+# ---------------------------------------------------------------------------
+
+
+def get_store(
+    mode: str | None = None,
+    *,
+    allow_fallback: bool = True,
+    client_factory: Callable[..., SupabaseClient] = get_supabase_client,
+) -> StoreType:
+    return build_store(mode=mode, allow_fallback=allow_fallback, client_factory=client_factory)
+
+
+def create_store(
+    mode: str | None = None,
+    *,
+    allow_fallback: bool = True,
+    client_factory: Callable[..., SupabaseClient] = get_supabase_client,
+) -> StoreType:
+    return build_store(mode=mode, allow_fallback=allow_fallback, client_factory=client_factory)
+
+
+def get_organization_store(
+    mode: str | None = None,
+    *,
+    allow_fallback: bool = True,
+    client_factory: Callable[..., SupabaseClient] = get_supabase_client,
+) -> StoreType:
+    return build_store(mode=mode, allow_fallback=allow_fallback, client_factory=client_factory)
+
+
+def get_telemetry_store(
+    mode: str | None = None,
+    *,
+    allow_fallback: bool = True,
+    client_factory: Callable[..., SupabaseClient] = get_supabase_client,
+) -> StoreType:
+    return build_store(mode=mode, allow_fallback=allow_fallback, client_factory=client_factory)
+
+
+def get_runtime_state_store(
+    mode: str | None = None,
+    *,
+    allow_fallback: bool = True,
+    client_factory: Callable[..., SupabaseClient] = get_supabase_client,
+) -> StoreType:
+    return build_store(mode=mode, allow_fallback=allow_fallback, client_factory=client_factory)
+
+
+def get_review_state_store(
+    mode: str | None = None,
+    *,
+    allow_fallback: bool = True,
+    client_factory: Callable[..., SupabaseClient] = get_supabase_client,
+) -> StoreType:
+    return build_store(mode=mode, allow_fallback=allow_fallback, client_factory=client_factory)
+
+
+def get_checkpoint_store(
+    mode: str | None = None,
+    *,
+    allow_fallback: bool = True,
+    client_factory: Callable[..., SupabaseClient] = get_supabase_client,
+) -> StoreType:
+    return build_store(mode=mode, allow_fallback=allow_fallback, client_factory=client_factory)
+
+
+def get_rate_limit_store(
+    mode: str | None = None,
+    *,
+    allow_fallback: bool = True,
+    client_factory: Callable[..., SupabaseClient] = get_supabase_client,
+) -> StoreType:
+    return build_store(mode=mode, allow_fallback=allow_fallback, client_factory=client_factory)
+
+
+def build_rate_limit_store(
+    mode: str | None = None,
+    *,
+    allow_fallback: bool = True,
+    client_factory: Callable[..., SupabaseClient] = get_supabase_client,
+) -> StoreType:
+    return build_store(mode=mode, allow_fallback=allow_fallback, client_factory=client_factory)
+
+
+def create_rate_limit_store(
+    mode: str | None = None,
+    *,
+    allow_fallback: bool = True,
+    client_factory: Callable[..., SupabaseClient] = get_supabase_client,
+) -> StoreType:
+    return build_store(mode=mode, allow_fallback=allow_fallback, client_factory=client_factory)
