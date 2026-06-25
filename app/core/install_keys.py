@@ -27,6 +27,12 @@ _T_INSTALL_KEYS: Final[str] = "install_keys"
 ProgramCode = Literal["openclaw", "claude_code"]
 _VALID_PROGRAMS: frozenset[str] = frozenset({"openclaw", "claude_code"})
 
+# Ordered longest-first so the greedy prefix match is always correct.
+_KNOWN_PREFIXES: Final[tuple[str, ...]] = (
+    _INSTALL_KEY_PREFIX_CLAUDE,  # "ic_install_claude_code_" (longer)
+    _INSTALL_KEY_PREFIX_OPENCLAW,  # "ic_install_openclaw_"
+)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -46,6 +52,24 @@ def _hash_key(raw_key: str) -> str:
 
 
 def _mask_key(raw_key: str) -> str:
+    """
+    Preserve the full program prefix intact, append '...', then show the
+    last 4 characters of the secret token.
+
+    Examples:
+      ic_install_openclaw_<secret>     → ic_install_openclaw_...Xy9z
+      ic_install_claude_code_<secret>  → ic_install_claude_code_...Xy9z
+
+    For any key shorter than (prefix + 5) characters the entire value is
+    masked with '*' so the secret body is never exposed under any input.
+    """
+    for prefix in _KNOWN_PREFIXES:
+        if raw_key.startswith(prefix):
+            secret_part = raw_key[len(prefix) :]
+            if len(secret_part) < 5:
+                return "*" * len(raw_key)
+            return f"{prefix}...{secret_part[-4:]}"
+    # Fallback for keys that somehow lack a recognised prefix
     if len(raw_key) <= 12:
         return "*" * len(raw_key)
     return f"{raw_key[:10]}...{raw_key[-4:]}"
