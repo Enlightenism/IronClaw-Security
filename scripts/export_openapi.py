@@ -45,27 +45,35 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_app():
-    """Load FastAPI app instance from app.main or app_init using create_app() factory."""
+    """Load FastAPI app instance from app.main singleton."""
     try:
         sys.path.insert(0, str(Path(__file__).parent.parent))
 
         try:
-            from app.main import create_app
+            from app.main import app  # noqa: PLC0415
+
+            return app
         except (ImportError, AttributeError):
-            try:
-                from app.main import app
+            pass
 
-                return app
-            except (ImportError, AttributeError):
-                from app_init import create_app
+        try:
+            from app.main import create_app  # noqa: PLC0415
 
-        app = create_app()
-        return app
-    except ImportError as exc:
-        print(f"[export_openapi] ERROR: Failed to import FastAPI app: {exc}", file=sys.stderr)
+            return create_app()
+        except (ImportError, AttributeError):
+            pass
+
+        print(
+            "[export_openapi] ERROR: Failed to import FastAPI app from app.main",
+            file=sys.stderr,
+        )
         return None
+
     except Exception as exc:
-        print(f"[export_openapi] ERROR: Failed to initialize FastAPI app: {exc}", file=sys.stderr)
+        print(
+            f"[export_openapi] ERROR: Failed to initialize FastAPI app: {exc}",
+            file=sys.stderr,
+        )
         return None
 
 
@@ -80,15 +88,21 @@ def extract_openapi_schema(app) -> dict[str, Any] | None:
 
 
 def validate_openapi_schema(schema: dict[str, Any]) -> bool:
-    """Validate OpenAPI schema structure for required fields and OpenAPI 3.1.0 conformance."""
+    """Validate OpenAPI schema structure for required fields and OpenAPI 3.x conformance."""
     required_fields = ["openapi", "info", "paths"]
     for field in required_fields:
         if field not in schema:
-            print(f"[export_openapi] ERROR: Missing required field '{field}' in OpenAPI schema", file=sys.stderr)
+            print(
+                f"[export_openapi] ERROR: Missing required field '{field}' in OpenAPI schema",
+                file=sys.stderr,
+            )
             return False
 
     if not schema["openapi"].startswith("3."):
-        print(f"[export_openapi] ERROR: Unsupported OpenAPI version '{schema['openapi']}', expected 3.x", file=sys.stderr)
+        print(
+            f"[export_openapi] ERROR: Unsupported OpenAPI version '{schema['openapi']}', expected 3.x",
+            file=sys.stderr,
+        )
         return False
 
     if not isinstance(schema["info"], dict):
