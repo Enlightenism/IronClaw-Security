@@ -507,10 +507,12 @@ def _do_load(force: bool = False) -> None:
 
 
 def _ensure_loaded() -> None:
+    import app.core.pattern_registry as _self
+
     with _lock:
         now = time.monotonic()
         if not _compiled_entries or (now - _last_loaded_at) > _TTL_SECONDS:
-            _do_load(force=False)
+            _self._do_load(force=False)
 
 
 # ---------------------------------------------------------------------------
