@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal
+
+from typing_extensions import TypedDict
 
 ExecutionState = Literal["executed", "denied", "held", "failed"]
 ResponseAction = Literal["allow", "warn", "quarantine", "block", "review"]
