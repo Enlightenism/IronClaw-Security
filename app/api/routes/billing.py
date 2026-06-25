@@ -132,7 +132,6 @@ class BillingPackagePurchaseRequest(BaseModel):
     @field_validator("buyer_email")
     @classmethod
     def validate_email(cls, v: str) -> str:
-        # Org owner keys (ic_org_*) are valid buyer_email values — pass through as-is.
         if _ORG_KEY_RE.match(v):
             return v
         normalized = v.strip().lower()
@@ -462,7 +461,7 @@ def get_packages() -> BillingPackagesResponse:
 
 
 @router.post(
-    "/packages/purchase",
+    "/purchase",
     response_model=BillingPackagePurchaseResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Purchase a protection unit package",
@@ -478,7 +477,7 @@ def purchase_package(
             detail=f"Unknown package_id: {body.package_id!r}",
         )
 
-    buyer_email_normalized = body.buyer_email  # already normalized by validator
+    buyer_email_normalized = body.buyer_email
     owner_key = resolve_billing_owner(auth_ctx, buyer_email_normalized)
     registry = get_unit_wallet_registry()
 
