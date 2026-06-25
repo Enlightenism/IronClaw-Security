@@ -7,7 +7,7 @@ from app.supabaseclient import (
     SupabaseClient,
     SupabaseConfigurationError,
     SupabaseConnectionError,
-    createsupabaseclient,
+    get_supabase_client,
 )
 
 TABLE_NAME = "scan_history"
@@ -180,7 +180,7 @@ class ScanHistoryRepository:
         client: SupabaseClient | None = None,
         table_name: str = TABLE_NAME,
     ) -> None:
-        self.client = client or createsupabaseclient()
+        self.client = client or get_supabase_client()
         self.table_name = table_name
 
     def list_items(

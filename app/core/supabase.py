@@ -10,7 +10,6 @@ from app.clients.supabase import (
     SupabaseConfigurationError,
     SupabaseConnectionError,
     SupabaseRequestError,
-    create_supabase_client,
     get_supabase_client,
     get_supabase_config,
 )
@@ -28,7 +27,6 @@ __all__ = [
     "get_supabase_client",
     "get_supabase_service_client",
     "is_supabase_configured",
-    "create_supabase_client",
     "get_supabase_config",
 ]
 
