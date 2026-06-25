@@ -366,6 +366,10 @@ _current_version: int = 0
 _last_loaded_at: float = 0.0
 _TTL_SECONDS: float = 120.0
 
+# Sentinel value that guarantees (now - _last_loaded_at) > _TTL_SECONDS
+# regardless of how early in the process lifetime the check runs.
+_INVALIDATED_SENTINEL: float = -(_TTL_SECONDS + 1.0)
+
 
 # ---------------------------------------------------------------------------
 # Internal compilation helpers
@@ -543,7 +547,6 @@ def reload_if_version_changed() -> bool:
         if db_version != _current_version:
             _do_load(force=True)
             return True
-        _last_loaded_at_ref = _last_loaded_at  # noqa: F841
         return False
 
 
@@ -551,10 +554,13 @@ def invalidate() -> None:
     """Force-expire the registry so the next match() call reloads from DB.
 
     Call after directly mutating scan_patterns in Supabase.
+    Sets _last_loaded_at to a negative sentinel so the TTL check fires
+    unconditionally on the next _ensure_loaded() call, regardless of how
+    early in the process lifetime it runs.
     """
     global _last_loaded_at
     with _lock:
-        _last_loaded_at = 0.0
+        _last_loaded_at = _INVALIDATED_SENTINEL
     _logger.info("pattern_registry: cache invalidated — will reload on next match()")
 
 
