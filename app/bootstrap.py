@@ -177,24 +177,23 @@ def add_security_middleware(app: FastAPI) -> FastAPI:
     return app
 
 
-async def _run_deferred_startup(app: FastAPI) -> None:
+def _run_deferred_startup(app: FastAPI) -> bool:
     """Execute startup-time checks that must not run at module import.
 
+    Returns True if schema completeness passed, False if it failed.
     Registered as a startup event by bootstrap_app. Calls assert_schema_completeness
     inside a guarded block so CI schema mismatches surface at server start, not at
     import time (which would break openapi schema export and test collection).
     """
     try:
-        tables = assert_schema_completeness()
-        _log.info(
-            "bootstrap.startup: schema completeness check passed — %d tables verified",
-            len(tables),
-        )
+        assert_schema_completeness()
+        return True
     except RuntimeError as exc:
         _log.critical(
             "bootstrap.startup: schema completeness check FAILED — server will continue but schema integrity is not guaranteed: %s",
             exc,
         )
+        return False
 
 
 def bootstrap_app(app: FastAPI) -> FastAPI:
@@ -215,7 +214,9 @@ def bootstrap_app(app: FastAPI) -> FastAPI:
 
         @app.on_event("startup")
         async def _bootstrap_startup_event() -> None:
-            await _run_deferred_startup(app)
+            passed = _run_deferred_startup(app)
+            if passed:
+                _log.info("bootstrap.startup: schema completeness check passed — all tables verified")
 
         app.state._bootstrap_startup_registered = True
 
