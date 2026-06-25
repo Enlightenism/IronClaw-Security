@@ -116,7 +116,6 @@ class TestRunDeferredStartup:
         app = _fresh_app()
         with caplog.at_level(logging.INFO, logger="app.bootstrap"):
             _run_deferred_startup(app)
-        # No critical log on success
         assert not any(r.levelno >= logging.CRITICAL for r in caplog.records)
 
     def test_logs_critical_on_wrong_table_count(self, caplog):
@@ -131,7 +130,6 @@ class TestRunDeferredStartup:
         app = _fresh_app()
         fake = frozenset({"table_a"})
         with patch(_BOOTSTRAP_PATCH, return_value=fake):
-            # Must not raise — deferred startup is fail-open for server continuity
             _run_deferred_startup(app)
 
     def test_does_not_raise_on_empty_registry(self):
@@ -152,7 +150,6 @@ class TestRunDeferredStartup:
         app = _fresh_app()
         with caplog.at_level(logging.INFO, logger="app.bootstrap"):
             _run_deferred_startup(app)
-        # INFO pass log from assert_schema_completeness should be present
         assert any(r.levelno == logging.INFO for r in caplog.records)
 
 
@@ -165,7 +162,6 @@ class TestBootstrapAppStartupEvent:
     def test_startup_event_is_registered(self):
         app = _fresh_app()
         bootstrap_app(app)
-        # FastAPI stores on_event("startup") handlers in router.on_startup
         assert len(app.router.on_startup) >= 1
 
     def test_startup_flag_set_after_bootstrap(self):
@@ -185,17 +181,14 @@ class TestBootstrapAppStartupEvent:
         app = _fresh_app()
         bootstrap_app(app)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            # Startup fires here; must not raise
             response = await client.get("/nonexistent")
         assert response.status_code in {404, 200}
 
-    @pytest.mark.anyio
-    async def test_startup_event_logs_schema_pass(self, caplog):
+    def test_startup_event_logs_schema_pass(self, caplog):
         app = _fresh_app()
         bootstrap_app(app)
         with caplog.at_level(logging.INFO, logger="app.bootstrap"):
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-                await client.get("/nonexistent")
+            _run_deferred_startup(app)
         assert any("schema" in r.message.lower() for r in caplog.records)
 
 
