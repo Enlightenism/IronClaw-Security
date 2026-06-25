@@ -31,7 +31,6 @@ from app.ui.reviewqueue import router as ui_reviewqueue_router
 
 router = APIRouter()
 
-
 _INCLUDED_ROUTERS = (
     actionhistorytest_router,
     alerts_router,
@@ -46,6 +45,7 @@ _INCLUDED_ROUTERS = (
     executiondashboard_router,
     guard_router,
     incidents_router,
+    install_keys_router,
     onboarding_router,
     organizations_router,
     orgs_router,
@@ -58,9 +58,7 @@ _INCLUDED_ROUTERS = (
     usage_router,
     ui_review_router,
     ui_reviewqueue_router,
-    install_keys_router,
 )
-
 
 for included_router in _INCLUDED_ROUTERS:
     router.include_router(included_router)

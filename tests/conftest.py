@@ -9,6 +9,8 @@ import pytest
 
 from app.core.auth import AuthContext, require_auth_context
 from app.core.billing import _reset_billing_registry_for_testing
+import app.core.install_keys as _install_keys_module
+from app.core.install_keys import InstallKeyRegistry
 from app.core.settings import get_settings
 import app.core.unit_wallet as _unit_wallet_module
 from app.core.unit_wallet import UnitWalletRegistry
@@ -75,6 +77,17 @@ def _reset_unit_wallet_registry() -> Generator[None, None, None]:
     _unit_wallet_module._unit_wallet_registry = fresh
     yield
     _unit_wallet_module._unit_wallet_registry = UnitWalletRegistry()
+
+
+@pytest.fixture(scope="function", autouse=True)
+def _reset_install_key_registry() -> Generator[None, None, None]:
+    fresh = InstallKeyRegistry()
+    fresh._loaded = True  # prevent Supabase load in test context
+    _install_keys_module._install_key_registry = fresh
+    yield
+    fresh2 = InstallKeyRegistry()
+    fresh2._loaded = True
+    _install_keys_module._install_key_registry = fresh2
 
 
 @pytest.fixture(scope="function", autouse=True)

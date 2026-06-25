@@ -25,12 +25,18 @@ from app.core.auth import (
     require_api_key,
     require_auth_context,
 )
+import app.core.install_keys as _install_keys_module
+from app.core.install_keys import (
+    InstallKeyRegistry,
+)
 import app.core.unit_wallet as _unit_wallet_module
 from app.core.unit_wallet import TOKEN_CHUNK_SIZE, UnitWalletRegistry
 from app.main import app as _app
 
 _MOCK_API_KEY = "test-api-key"
 _AUTH_HEADERS = {"X-API-Key": _MOCK_API_KEY}
+_BUYER_EMAIL = "test@ironclaw.test"
+_SUB_ID = "purch_test00000000001"
 
 
 # ---------------------------------------------------------------------------
@@ -38,7 +44,7 @@ _AUTH_HEADERS = {"X-API-Key": _MOCK_API_KEY}
 # ---------------------------------------------------------------------------
 
 
-def _make_personal_ctx(email: str = "test@ironclaw.test") -> AuthContext:
+def _make_personal_ctx(email: str = _BUYER_EMAIL) -> AuthContext:
     return AuthContext(
         api_key=_MOCK_API_KEY,
         principal_type="api_key",
@@ -93,6 +99,14 @@ def _fresh_registry() -> UnitWalletRegistry:
     return fresh
 
 
+def _fresh_install_registry() -> InstallKeyRegistry:
+    """Install and return a fresh install key registry on the module global."""
+    fresh = InstallKeyRegistry()
+    fresh._loaded = True
+    _install_keys_module._install_key_registry = fresh
+    return fresh
+
+
 def _seed_wallet(registry: UnitWalletRegistry, owner_key: str, units: int = 500) -> None:
     registry.credit_units(owner_key=owner_key, units=units)
 
@@ -105,10 +119,11 @@ def _seed_wallet(registry: UnitWalletRegistry, owner_key: str, units: int = 500)
 @contextmanager
 def _override_auth(ctx: AuthContext):
     """
-    Override auth dependencies on the shared _app and install a fresh
-    wallet registry so isolation tests never share state.
+    Override auth dependencies on the shared _app and install fresh
+    wallet and install key registries so isolation tests never share state.
     """
     registry = _fresh_registry()
+    _fresh_install_registry()
 
     def _stub_api_key() -> str:
         return ctx.api_key or _MOCK_API_KEY
@@ -136,10 +151,12 @@ def _override_auth(ctx: AuthContext):
 
 @pytest.fixture(autouse=True)
 def _reset_wallet_registry():
-    """Guarantee a clean registry before AND after every test."""
+    """Guarantee a clean wallet registry before AND after every test."""
     _unit_wallet_module._unit_wallet_registry = UnitWalletRegistry()
+    _fresh_install_registry()
     yield
     _unit_wallet_module._unit_wallet_registry = UnitWalletRegistry()
+    _fresh_install_registry()
 
 
 @pytest.fixture()
@@ -209,11 +226,10 @@ def test_packages_no_auth_header_returns_401() -> None:
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/purchase  (canonical route)
+# POST /billing/purchase
 # ---------------------------------------------------------------------------
 # NOTE: /billing/packages/purchase is NOT a valid route.
 # The router registers POST /billing/purchase — never /billing/packages/purchase.
-# Any test that hits /billing/packages/purchase correctly expects 404/405.
 # ---------------------------------------------------------------------------
 
 
@@ -335,6 +351,122 @@ def test_purchase_idempotent_double_purchase_accumulates(client: TestClient) -> 
     resp = client.post("/billing/purchase", json=payload)
     assert resp.status_code == 201
     assert resp.json()["wallet"]["balance_units"] == 10_000
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/purchase — install key provisioning tests (NEW)
+# ---------------------------------------------------------------------------
+
+
+def test_provision_install_keys_on_purchase_returns_both_keys(client: TestClient) -> None:
+    """provision_install_keys fires after purchase and both key fields are present."""
+    payload = {
+        "package_id": "pkg_5000",
+        "buyer_name": "Key User",
+        "buyer_email": "keyuser@ironclaw.test",
+    }
+    resp = client.post("/billing/purchase", json=payload)
+    assert resp.status_code == 201
+    purchase = resp.json()["purchase"]
+    assert purchase["openclaw_install_key"] is not None
+    assert purchase["claude_code_install_key"] is not None
+    assert purchase["openclaw_install_key"].startswith("ic_install_openclaw_")
+    assert purchase["claude_code_install_key"].startswith("ic_install_claude_code_")
+
+
+def test_provision_install_keys_creates_two_key_records(client: TestClient) -> None:
+    """After purchase, the install key registry holds exactly two active records."""
+    payload = {
+        "package_id": "pkg_5000",
+        "buyer_name": "Key Record User",
+        "buyer_email": "keyrecord@ironclaw.test",
+    }
+    resp = client.post("/billing/purchase", json=payload)
+    assert resp.status_code == 201
+    purchase = resp.json()["purchase"]
+
+    install_registry = _install_keys_module._install_key_registry
+    assert install_registry is not None
+
+    owner_key = purchase["owner_key"]
+    records = install_registry.get_keys_for_owner(owner_key)
+    active = [r for r in records if r.active]
+    programs = {r.program for r in active}
+    assert len(active) == 2
+    assert "openclaw" in programs
+    assert "claude_code" in programs
+
+
+def test_has_active_subscription_false_before_purchase() -> None:
+    """Before any purchase, the install key registry is empty for this owner."""
+    ctx = _make_personal_ctx_with_id("fresh@ironclaw.test")
+    with _override_auth(ctx) as (_c, _registry):
+        install_registry = _install_keys_module._install_key_registry
+        assert install_registry is not None
+        records = install_registry.get_keys_for_owner("fresh@ironclaw.test")
+        active = [r for r in records if r.active]
+        assert len(active) == 0
+
+
+def test_has_active_subscription_true_after_purchase() -> None:
+    """After purchase, the owner has active install keys (subscription is active)."""
+    ctx = _make_personal_ctx_with_id("subscriber@ironclaw.test")
+    with _override_auth(ctx) as (c, _registry):
+        payload = {
+            "package_id": "pkg_5000",
+            "buyer_name": "Subscriber",
+            "buyer_email": "subscriber@ironclaw.test",
+        }
+        resp = c.post("/billing/purchase", json=payload)
+        assert resp.status_code == 201
+
+        install_registry = _install_keys_module._install_key_registry
+        assert install_registry is not None
+        owner_key = resp.json()["purchase"]["owner_key"]
+        records = install_registry.get_keys_for_owner(owner_key)
+        active = [r for r in records if r.active]
+        assert len(active) == 2
+
+
+def test_provision_install_keys_idempotent_on_double_purchase() -> None:
+    """Second purchase for same owner skips key generation (AlreadyExists) without 500."""
+    ctx = _make_personal_ctx_with_id("double@ironclaw.test")
+    with _override_auth(ctx) as (c, _registry):
+        payload = {
+            "package_id": "pkg_5000",
+            "buyer_name": "Double Key",
+            "buyer_email": "double@ironclaw.test",
+        }
+        resp1 = c.post("/billing/purchase", json=payload)
+        assert resp1.status_code == 201
+        resp2 = c.post("/billing/purchase", json=payload)
+        assert resp2.status_code == 201
+
+        purchase2 = resp2.json()["purchase"]
+        # Second purchase: keys already exist, provisioning skips gracefully
+        # Fields may be None (already exists) — the important thing is no 500
+        assert "openclaw_install_key" in purchase2
+        assert "claude_code_install_key" in purchase2
+
+
+def test_provision_install_keys_purchase_id_matches_subscription_id(client: TestClient) -> None:
+    """The subscription_id on each install key record matches the purchase_id."""
+    payload = {
+        "package_id": "pkg_5000",
+        "buyer_name": "Sub ID User",
+        "buyer_email": "subid@ironclaw.test",
+    }
+    resp = client.post("/billing/purchase", json=payload)
+    assert resp.status_code == 201
+    purchase = resp.json()["purchase"]
+    purchase_id = purchase["purchase_id"]
+
+    install_registry = _install_keys_module._install_key_registry
+    assert install_registry is not None
+    owner_key = purchase["owner_key"]
+    records = install_registry.get_keys_for_owner(owner_key)
+    for record in records:
+        assert record.subscription_id == purchase_id
 
 
 # ---------------------------------------------------------------------------
