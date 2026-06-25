@@ -177,7 +177,7 @@ def add_security_middleware(app: FastAPI) -> FastAPI:
     return app
 
 
-def _run_deferred_startup(app: FastAPI) -> None:
+async def _run_deferred_startup(app: FastAPI) -> None:
     """Execute startup-time checks that must not run at module import.
 
     Registered as a startup event by bootstrap_app. Calls assert_schema_completeness
@@ -215,7 +215,7 @@ def bootstrap_app(app: FastAPI) -> FastAPI:
 
         @app.on_event("startup")
         async def _bootstrap_startup_event() -> None:
-            _run_deferred_startup(app)
+            await _run_deferred_startup(app)
 
         app.state._bootstrap_startup_registered = True
 
