@@ -287,11 +287,11 @@ class TestRegistryStats:
 
 
 class TestInvalidate:
-    def test_invalidate_resets_last_loaded_at_to_zero(self):
+    def test_invalidate_resets_last_loaded_at_to_sentinel(self):
         with _patch_no_db():
             load(force=True)
             invalidate()
-        assert _pr._last_loaded_at == 0.0
+        assert _pr._last_loaded_at == _pr._INVALIDATED_SENTINEL
 
     def test_after_invalidate_next_match_triggers_reload(self):
         reload_mock_calls: list[bool] = []
