@@ -72,10 +72,14 @@ from app.ui.billing.package import (
     router as package_router,
 )
 from app.ui.billing.payment_methods import (
+    AddPaymentMethodRequest,
+    AddPaymentMethodResponse,
     BillingPaymentMethodsNotFoundResponse,
     BillingPaymentMethodsResponse,
     BillingPaymentMethodStatusCount,
     BillingPaymentMethodView,
+    DeletePaymentMethodResponse,
+    SetDefaultPaymentMethodResponse,
     get_payment_methods,
 )
 from app.ui.billing.payment_methods import (
@@ -146,6 +150,10 @@ __all__ = [
     "BillingPaymentMethodStatusCount",
     "BillingPaymentMethodsResponse",
     "BillingPaymentMethodsNotFoundResponse",
+    "AddPaymentMethodRequest",
+    "AddPaymentMethodResponse",
+    "SetDefaultPaymentMethodResponse",
+    "DeletePaymentMethodResponse",
     "get_payment_methods",
     # plan change
     "BillingPlanOptionView",
