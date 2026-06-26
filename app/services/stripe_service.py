@@ -1526,6 +1526,7 @@ class StripeService:
                 in (
                     StripeSubscriptionStatus.ACTIVE.value,
                     StripeSubscriptionStatus.TRIALING.value,
+                    StripeSubscriptionStatus.PAST_DUE.value,
                 )
             ]
         if not records:
