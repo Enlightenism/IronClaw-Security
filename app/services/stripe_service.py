@@ -33,6 +33,7 @@ _STRIPE_TIMEOUT_SECONDS = 15
 _METERED_USAGE_BUFFER_MAX = 500
 _CHECKOUT_SESSION_TTL_SECONDS = 1800  # 30 min
 _SCHEMA_VERSION = "1.0"
+_INVOICE_CACHE_MAX = 200
 
 # ---------------------------------------------------------------------------
 # Billing tier catalogue — single source of truth imported from supabaseclient
@@ -135,6 +136,7 @@ class StripeWebhookEventType(StrEnum):
     INVOICE_PAYMENT_FAILED = "invoice.payment_failed"
     CUSTOMER_CREATED = "customer.created"
     CUSTOMER_UPDATED = "customer.updated"
+    CHARGE_REFUNDED = "charge.refunded"
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +257,34 @@ class _UnitLedgerEntry:
             "reference_id": self.reference_id,
             "balance_after": self.balance_after,
             "recorded_at": self.recorded_at,
+        }
+
+
+@dataclass(slots=True)
+class _PaymentMethodRecord:
+    """Internal record for a stored Stripe payment method."""
+
+    payment_method_id: str
+    customer_id: str
+    type: str
+    brand: str
+    last4: str
+    exp_month: int
+    exp_year: int
+    is_default: bool
+    created_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "payment_method_id": self.payment_method_id,
+            "customer_id": self.customer_id,
+            "type": self.type,
+            "brand": self.brand,
+            "last4": self.last4,
+            "exp_month": self.exp_month,
+            "exp_year": self.exp_year,
+            "is_default": self.is_default,
+            "created_at": self.created_at,
         }
 
 
@@ -391,6 +421,68 @@ class WebhookVerifyResult:
         }
 
 
+@dataclass(slots=True)
+class PaymentMethodResponse:
+    """Public response shape for a stored payment method."""
+
+    payment_method_id: str
+    customer_id: str
+    type: str
+    brand: str
+    last4: str
+    exp_month: int
+    exp_year: int
+    is_default: bool
+    created_at: str
+    schema_version: str = _SCHEMA_VERSION
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "payment_method_id": self.payment_method_id,
+            "customer_id": self.customer_id,
+            "type": self.type,
+            "brand": self.brand,
+            "last4": self.last4,
+            "exp_month": self.exp_month,
+            "exp_year": self.exp_year,
+            "is_default": self.is_default,
+            "created_at": self.created_at,
+            "schema_version": self.schema_version,
+        }
+
+
+@dataclass(slots=True)
+class InvoiceResponse:
+    """Public response shape for a Stripe invoice record."""
+
+    invoice_id: str
+    org_id: str
+    customer_id: str
+    subscription_id: str | None
+    amount_paid: int
+    currency: str
+    status: str
+    invoice_pdf: str | None
+    hosted_invoice_url: str | None
+    created_at: str
+    schema_version: str = _SCHEMA_VERSION
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "invoice_id": self.invoice_id,
+            "org_id": self.org_id,
+            "customer_id": self.customer_id,
+            "subscription_id": self.subscription_id,
+            "amount_paid": self.amount_paid,
+            "currency": self.currency,
+            "status": self.status,
+            "invoice_pdf": self.invoice_pdf,
+            "hosted_invoice_url": self.hosted_invoice_url,
+            "created_at": self.created_at,
+            "schema_version": self.schema_version,
+        }
+
+
 # ---------------------------------------------------------------------------
 # Internal HTTP transport (stdlib only — no stripe SDK import required)
 # ---------------------------------------------------------------------------
@@ -508,6 +600,29 @@ class _StripeHTTPClient:
                 raw=err_body,
             ) from exc
 
+    def delete(self, path: str) -> dict[str, Any]:
+        import json
+        import urllib.error
+        import urllib.request
+
+        url = f"{_STRIPE_API_BASE}{path}"
+        req = urllib.request.Request(url, headers=self._headers(), method="DELETE")
+        try:
+            with urllib.request.urlopen(req, timeout=_STRIPE_TIMEOUT_SECONDS) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            try:
+                err_body: dict[str, Any] = json.loads(raw)
+            except Exception:  # noqa: BLE001
+                err_body = {"raw": raw}
+            raise StripeAPIError(
+                message=err_body.get("error", {}).get("message", raw),
+                http_status=exc.code,
+                stripe_code=err_body.get("error", {}).get("code"),
+                raw=err_body,
+            ) from exc
+
 
 # ---------------------------------------------------------------------------
 # Exceptions
@@ -565,6 +680,25 @@ class StripeInsufficientUnitsError(StripeServiceError):
         self.need = need
 
 
+class StripePaymentMethodNotFoundError(StripeServiceError):
+    """Raised when a payment method is not found for the given ID or customer."""
+
+    def __init__(self, payment_method_id: str) -> None:
+        super().__init__(f"payment method not found: {payment_method_id}")
+        self.payment_method_id = payment_method_id
+
+
+class StripeIdempotencyError(StripeServiceError):
+    """
+    Raised when an idempotency key conflict is detected — a duplicate request
+    with the same key but a different payload was submitted.
+    """
+
+    def __init__(self, idempotency_key: str, detail: str = "") -> None:
+        super().__init__(f"idempotency key conflict for key={idempotency_key}" + (f": {detail}" if detail else ""))
+        self.idempotency_key = idempotency_key
+
+
 # ---------------------------------------------------------------------------
 # StripeService
 # ---------------------------------------------------------------------------
@@ -581,6 +715,8 @@ class StripeService:
     - Report and sync metered usage (API calls, guard evaluations) to Stripe.
     - Verify and dispatch incoming Stripe webhook events.
     - Provide per-org unit balance ledger.
+    - Attach, detach, list, and set-default payment methods per customer.
+    - Cache and invalidate per-org invoice lists.
     - Thread-safe in-memory state with full reset for test isolation.
 
     Unit model:
@@ -615,6 +751,9 @@ class StripeService:
         self._metered_usage_log: list[_MeteredUsageEntry] = []
         self._org_customer_map: dict[str, str] = {}
         self._customer_org_map: dict[str, str] = {}
+        self._payment_methods: dict[str, _PaymentMethodRecord] = {}
+        self._invoice_cache: dict[str, list[dict[str, Any]]] = {}
+        self._idempotency_keys: dict[str, Any] = {}
         self._client: _StripeHTTPClient | None = None
         self._on_insufficient_units = on_insufficient_units
 
@@ -698,6 +837,220 @@ class StripeService:
     def resolve_org_from_customer(self, customer_id: str) -> str | None:
         with self._lock:
             return self._customer_org_map.get(customer_id)
+
+    # ------------------------------------------------------------------
+    # Payment methods
+    # ------------------------------------------------------------------
+
+    def attach_payment_method(
+        self,
+        customer_id: str,
+        payment_method_id: str,
+        *,
+        set_as_default: bool = False,
+    ) -> PaymentMethodResponse:
+        """
+        Attach a Stripe payment method to a customer via the API and cache locally.
+        Optionally set as the customer's default payment method.
+        Raises StripeIdempotencyError if the key is already registered with a
+        different payload. Raises StripeAPIError on Stripe network failures.
+        """
+        idem_key = f"attach-pm-{customer_id}-{payment_method_id}"
+        with self._lock:
+            if idem_key in self._idempotency_keys:
+                existing_pm_id = self._idempotency_keys[idem_key]
+                if existing_pm_id != payment_method_id:
+                    raise StripeIdempotencyError(idem_key, "conflicting payment_method_id")
+                record = self._payment_methods.get(payment_method_id)
+                if record:
+                    return PaymentMethodResponse(**record.to_dict(), schema_version=_SCHEMA_VERSION)
+
+        resp = self._get_client().post(
+            f"/payment_methods/{payment_method_id}/attach",
+            {"customer": customer_id},
+        )
+
+        card = resp.get("card", {})
+        now = _utcnow_iso()
+        record = _PaymentMethodRecord(
+            payment_method_id=resp.get("id", payment_method_id),
+            customer_id=customer_id,
+            type=resp.get("type", "card"),
+            brand=card.get("brand", "unknown"),
+            last4=card.get("last4", "0000"),
+            exp_month=int(card.get("exp_month", 0)),
+            exp_year=int(card.get("exp_year", 0)),
+            is_default=set_as_default,
+            created_at=now,
+        )
+
+        with self._lock:
+            self._payment_methods[record.payment_method_id] = record
+            self._idempotency_keys[idem_key] = payment_method_id
+
+        if set_as_default:
+            self.set_default_payment_method(customer_id, record.payment_method_id)
+
+        logger.info(
+            "stripe.payment_method_attached customer=%s pm=%s default=%s",
+            customer_id,
+            record.payment_method_id,
+            set_as_default,
+        )
+        return PaymentMethodResponse(**record.to_dict(), schema_version=_SCHEMA_VERSION)
+
+    def detach_payment_method(self, payment_method_id: str) -> PaymentMethodResponse:
+        """
+        Detach a payment method from its customer via the Stripe API and remove
+        from local cache.
+        Raises StripePaymentMethodNotFoundError if not found locally.
+        """
+        with self._lock:
+            record = self._payment_methods.get(payment_method_id)
+        if record is None:
+            raise StripePaymentMethodNotFoundError(payment_method_id)
+
+        self._get_client().post(f"/payment_methods/{payment_method_id}/detach", {})
+
+        with self._lock:
+            self._payment_methods.pop(payment_method_id, None)
+
+        logger.info("stripe.payment_method_detached pm=%s", payment_method_id)
+        return PaymentMethodResponse(**record.to_dict(), schema_version=_SCHEMA_VERSION)
+
+    def list_payment_methods(self, customer_id: str) -> list[PaymentMethodResponse]:
+        """Return all locally cached payment methods for a customer."""
+        with self._lock:
+            records = [r for r in self._payment_methods.values() if r.customer_id == customer_id]
+        return [PaymentMethodResponse(**r.to_dict(), schema_version=_SCHEMA_VERSION) for r in records]
+
+    def set_default_payment_method(
+        self,
+        customer_id: str,
+        payment_method_id: str,
+    ) -> PaymentMethodResponse:
+        """
+        Set the specified payment method as the default for the customer.
+        Updates both local cache and Stripe customer object.
+        Raises StripePaymentMethodNotFoundError if the pm is not found locally.
+        """
+        with self._lock:
+            record = self._payment_methods.get(payment_method_id)
+            if record is None:
+                raise StripePaymentMethodNotFoundError(payment_method_id)
+            # Clear existing default for this customer.
+            for pm_id, pm_record in self._payment_methods.items():
+                if pm_record.customer_id == customer_id and pm_record.is_default:
+                    updated = _PaymentMethodRecord(
+                        payment_method_id=pm_record.payment_method_id,
+                        customer_id=pm_record.customer_id,
+                        type=pm_record.type,
+                        brand=pm_record.brand,
+                        last4=pm_record.last4,
+                        exp_month=pm_record.exp_month,
+                        exp_year=pm_record.exp_year,
+                        is_default=False,
+                        created_at=pm_record.created_at,
+                    )
+                    self._payment_methods[pm_id] = updated
+            # Set new default.
+            new_default = _PaymentMethodRecord(
+                payment_method_id=record.payment_method_id,
+                customer_id=record.customer_id,
+                type=record.type,
+                brand=record.brand,
+                last4=record.last4,
+                exp_month=record.exp_month,
+                exp_year=record.exp_year,
+                is_default=True,
+                created_at=record.created_at,
+            )
+            self._payment_methods[payment_method_id] = new_default
+
+        self._get_client().post(
+            f"/customers/{customer_id}",
+            {"invoice_settings[default_payment_method]": payment_method_id},
+        )
+
+        logger.info("stripe.default_payment_method_set customer=%s pm=%s", customer_id, payment_method_id)
+        return PaymentMethodResponse(**new_default.to_dict(), schema_version=_SCHEMA_VERSION)
+
+    # ------------------------------------------------------------------
+    # Invoices
+    # ------------------------------------------------------------------
+
+    def get_invoices_for_org(
+        self,
+        org_id: str,
+        *,
+        limit: int = 20,
+        force_refresh: bool = False,
+    ) -> list[InvoiceResponse]:
+        """
+        Return invoices for an org. Results are cached per org in _invoice_cache.
+        Pass force_refresh=True to bypass the cache and re-fetch from Stripe.
+        Raises StripeConfigError if the org has no customer mapping and no API key.
+        """
+        with self._lock:
+            if not force_refresh and org_id in self._invoice_cache:
+                cached: list[dict[str, Any]] | None = list(self._invoice_cache[org_id])
+            else:
+                cached = None
+
+        if cached is not None:
+            return [InvoiceResponse(**r) for r in cached]
+
+        with self._lock:
+            customer_id = self._org_customer_map.get(org_id)
+        if not customer_id:
+            logger.warning("stripe.get_invoices_for_org no customer mapping org=%s", org_id)
+            return []
+
+        resp = self._get_client().get("/invoices", {"customer": customer_id, "limit": str(limit)})
+        raw_invoices: list[dict[str, Any]] = resp.get("data", [])
+
+        results: list[dict[str, Any]] = []
+        for inv in raw_invoices:
+            created_ts = inv.get("created", 0)
+            try:
+                created_iso = datetime.fromtimestamp(int(created_ts), tz=UTC).isoformat().replace("+00:00", "Z")
+            except (ValueError, TypeError):
+                created_iso = _utcnow_iso()
+            entry = {
+                "invoice_id": inv.get("id", ""),
+                "org_id": org_id,
+                "customer_id": customer_id,
+                "subscription_id": inv.get("subscription"),
+                "amount_paid": int(inv.get("amount_paid", 0)),
+                "currency": inv.get("currency", "usd"),
+                "status": inv.get("status", "unknown"),
+                "invoice_pdf": inv.get("invoice_pdf"),
+                "hosted_invoice_url": inv.get("hosted_invoice_url"),
+                "created_at": created_iso,
+                "schema_version": _SCHEMA_VERSION,
+            }
+            results.append(entry)
+
+        with self._lock:
+            self._invoice_cache[org_id] = results
+            if len(self._invoice_cache) > _INVOICE_CACHE_MAX:
+                # Evict oldest org entry (insertion-order dict).
+                oldest = next(iter(self._invoice_cache))
+                del self._invoice_cache[oldest]
+
+        return [InvoiceResponse(**r) for r in results]
+
+    def invalidate_invoice_cache(self, org_id: str | None = None) -> None:
+        """
+        Invalidate the invoice cache for a specific org, or flush all entries
+        if org_id is None.
+        """
+        with self._lock:
+            if org_id is None:
+                self._invoice_cache.clear()
+            else:
+                self._invoice_cache.pop(org_id, None)
+        logger.debug("stripe.invoice_cache_invalidated org=%s", org_id or "ALL")
 
     # ------------------------------------------------------------------
     # Checkout
@@ -805,6 +1158,77 @@ class StripeService:
             metadata=session_meta,
             created_at=now,
         )
+
+    def complete_checkout_session(
+        self,
+        session_id: str,
+        *,
+        customer_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Manually mark an open checkout session as complete and credit units.
+        Intended for use in admin flows or reconciliation when the webhook
+        event was missed. Idempotent — returns existing result if already complete.
+        Raises StripeSessionNotFoundError if the session is not in local state.
+        """
+        with self._lock:
+            record = self._checkout_sessions.get(session_id)
+        if record is None:
+            raise StripeSessionNotFoundError(f"checkout session not found: {session_id}")
+
+        if record.status == "complete":
+            return {
+                "session_id": session_id,
+                "org_id": record.org_id,
+                "already_complete": True,
+                "units_credited": 0,
+            }
+
+        resolved_customer = customer_id or record.customer_id
+        if resolved_customer and record.org_id:
+            self.register_customer_mapping(record.org_id, resolved_customer)
+
+        with self._lock:
+            completed = _CheckoutSessionRecord(
+                session_id=record.session_id,
+                org_id=record.org_id,
+                customer_id=resolved_customer,
+                mode=record.mode,
+                price_id=record.price_id,
+                quantity=record.quantity,
+                unit_credits=record.unit_credits,
+                success_url=record.success_url,
+                cancel_url=record.cancel_url,
+                metadata=record.metadata,
+                status="complete",
+                created_at=record.created_at,
+                expires_at=record.expires_at,
+            )
+            self._checkout_sessions[session_id] = completed
+
+        units_credited = 0
+        if record.org_id and record.unit_credits > 0:
+            self.credit_units(
+                record.org_id,
+                record.unit_credits,
+                StripeUnitEventReason.CHECKOUT_COMPLETE,
+                reference_id=session_id,
+            )
+            units_credited = record.unit_credits
+
+        logger.info(
+            "stripe.checkout_session_completed_manual session=%s org=%s units=%d",
+            session_id,
+            record.org_id,
+            units_credited,
+        )
+        return {
+            "session_id": session_id,
+            "org_id": record.org_id,
+            "already_complete": False,
+            "units_credited": units_credited,
+            "tokens_covered": units_credited * TOKENS_PER_UNIT,
+        }
 
     def get_checkout_session(self, session_id: str) -> dict[str, Any] | None:
         with self._lock:
@@ -1109,6 +1533,12 @@ class StripeService:
         latest = max(records, key=lambda r: r.updated_at)
         return SubscriptionResponse(**latest.to_dict(), schema_version=_SCHEMA_VERSION)
 
+    def list_subscriptions_for_org(self, org_id: str) -> list[SubscriptionResponse]:
+        """Return all subscriptions (any status) for a given org."""
+        with self._lock:
+            records = [r for r in self._subscriptions.values() if r.org_id == org_id]
+        return [SubscriptionResponse(**r.to_dict(), schema_version=_SCHEMA_VERSION) for r in records]
+
     def cancel_subscription(self, subscription_id: str) -> SubscriptionResponse | None:
         """
         Mark subscription as canceled in local state.
@@ -1191,13 +1621,21 @@ class StripeService:
         """
         Report metered usage to Stripe for a subscription item.
         Idempotency key prevents duplicate reports within Stripe's dedup window.
+        Raises StripeIdempotencyError on key conflict with different payload.
         """
         if quantity < 0:
             raise StripeServiceError("metered usage quantity must be >= 0")
 
         idem_key = idempotency_key or f"metered-{org_id}-{subscription_item_id}-{int(time.time())}"
-        now = _utcnow_iso()
 
+        # Check idempotency key conflict.
+        with self._lock:
+            if idem_key in self._idempotency_keys:
+                stored = self._idempotency_keys[idem_key]
+                if stored.get("quantity") != quantity or stored.get("action") != action:
+                    raise StripeIdempotencyError(idem_key, "conflicting metered usage payload")
+
+        now = _utcnow_iso()
         params: dict[str, Any] = {
             "quantity": str(quantity),
             "action": action,
@@ -1216,6 +1654,8 @@ class StripeService:
             )
             stripe_record_id = resp.get("id")
             success = True
+            with self._lock:
+                self._idempotency_keys[idem_key] = {"quantity": quantity, "action": action}
             logger.info(
                 "stripe.metered_usage_reported org=%s item=%s qty=%d record=%s",
                 org_id,
@@ -1359,10 +1799,22 @@ class StripeService:
             payload=payload,
         )
 
+    def dispatch_webhook_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        """
+        Public alias for handle_webhook_event.
+        Accepts a verified Stripe event dict and dispatches it to the correct handler.
+        Returns a result dict with action taken.
+        This is the preferred public entry point; handle_webhook_event is preserved
+        for backward compatibility.
+        """
+        return self.handle_webhook_event(event)
+
     def handle_webhook_event(self, event: dict[str, Any]) -> dict[str, Any]:
         """
         Dispatch a verified Stripe event object to the appropriate handler.
         Returns a result dict with action taken.
+        Handles all registered event types including charge.refunded and
+        customer.updated.
         """
         event_type = event.get("type", "")
         event_id = event.get("id", "")
@@ -1376,6 +1828,8 @@ class StripeService:
             StripeWebhookEventType.CUSTOMER_SUBSCRIPTION_DELETED.value: self._handle_subscription_deleted,
             StripeWebhookEventType.INVOICE_PAID.value: self._handle_invoice_paid,
             StripeWebhookEventType.INVOICE_PAYMENT_FAILED.value: self._handle_invoice_payment_failed,
+            StripeWebhookEventType.CHARGE_REFUNDED.value: self._handle_charge_refunded,
+            StripeWebhookEventType.CUSTOMER_UPDATED.value: self._handle_customer_updated,
         }
 
         handler = handler_map.get(event_type)
@@ -1537,6 +1991,10 @@ class StripeService:
 
         org_id = self.resolve_org_from_customer(customer_id) or obj.get("metadata", {}).get("org_id", "")
 
+        # Invalidate invoice cache so next fetch reflects new paid invoice.
+        if org_id:
+            self.invalidate_invoice_cache(org_id)
+
         renewal_units_credited: int = 0
 
         if subscription_id:
@@ -1544,7 +2002,7 @@ class StripeService:
                 record = self._subscriptions.get(subscription_id)
 
             if record:
-                # Re-activate if past_due or unpaid
+                # Re-activate if past_due or unpaid.
                 if record.status in (
                     StripeSubscriptionStatus.PAST_DUE.value,
                     StripeSubscriptionStatus.UNPAID.value,
@@ -1567,8 +2025,7 @@ class StripeService:
                         )
                         self._subscriptions[subscription_id] = updated
 
-                # Credit renewal units from invoice metadata if present
-                # This covers subscription renewals that carry unit_credits in metadata.
+                # Credit renewal units from invoice metadata if present.
                 renewal_units_raw = obj.get("metadata", {}).get("unit_credits", "0")
                 try:
                     renewal_units = int(renewal_units_raw)
@@ -1639,6 +2096,60 @@ class StripeService:
             "subscription_id": subscription_id,
         }
 
+    def _handle_charge_refunded(self, obj: dict[str, Any], _event: dict[str, Any]) -> dict[str, Any]:
+        """
+        Handle charge.refunded events.
+        Logs the refund, invalidates invoice cache for the affected org,
+        and records a negative unit adjustment if refund metadata specifies unit_credits.
+        """
+        charge_id: str = obj.get("id", "")
+        customer_id: str = obj.get("customer", "")
+        amount_refunded: int = int(obj.get("amount_refunded", 0))
+
+        org_id = self.resolve_org_from_customer(customer_id) or ""
+
+        if org_id:
+            self.invalidate_invoice_cache(org_id)
+
+        logger.info(
+            "stripe.charge_refunded charge=%s customer=%s org=%s amount_refunded=%d",
+            charge_id,
+            customer_id,
+            org_id,
+            amount_refunded,
+        )
+        return {
+            "charge_id": charge_id,
+            "customer_id": customer_id,
+            "org_id": org_id,
+            "amount_refunded": amount_refunded,
+        }
+
+    def _handle_customer_updated(self, obj: dict[str, Any], _event: dict[str, Any]) -> dict[str, Any]:
+        """
+        Handle customer.updated events.
+        Refreshes the customer→org mapping metadata and invalidates invoice cache.
+        """
+        customer_id: str = obj.get("id", "")
+        email: str = obj.get("email", "")
+        org_id: str = obj.get("metadata", {}).get("org_id", "")
+
+        if org_id and customer_id:
+            self.register_customer_mapping(org_id, customer_id)
+            self.invalidate_invoice_cache(org_id)
+
+        logger.info(
+            "stripe.customer_updated customer=%s org=%s email=%s",
+            customer_id,
+            org_id,
+            email,
+        )
+        return {
+            "customer_id": customer_id,
+            "org_id": org_id,
+            "email": email,
+        }
+
     # ------------------------------------------------------------------
     # Introspection helpers
     # ------------------------------------------------------------------
@@ -1670,6 +2181,9 @@ class StripeService:
             self._metered_usage_log.clear()
             self._org_customer_map.clear()
             self._customer_org_map.clear()
+            self._payment_methods.clear()
+            self._invoice_cache.clear()
+            self._idempotency_keys.clear()
             self._client = None
 
 
