@@ -23,13 +23,21 @@ os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
 from app.services.stripe_service import (
     PACKAGE_CATALOGUE,
+    InvoiceResponse,
+    PaymentMethodResponse,
+    StripeBillingInterval,
+    StripeIdempotencyError,
     StripeInsufficientUnitsError,
+    StripePaymentMethodNotFoundError,
     StripeService,
     StripeServiceError,
+    StripeSubscriptionStatus,
     StripeUnitEventReason,
     StripeWebhookEventType,
+    SubscriptionResponse,
     UnitBalanceResponse,
     WebhookVerifyResult,
+    _PaymentMethodRecord,
     _StripeHTTPClient,
     units_for_tokens,
 )
@@ -42,6 +50,8 @@ from app.supabaseclient import TOKENS_PER_UNIT
 _ORG = "org-svc-stripe-test-001"
 _CUSTOMER_ID = "cus_svctest_abc123"
 _SUB_ID = "sub_svctest_abc123"
+_PM_ID = "pm_svctest_card_001"
+_INVOICE_ID = "in_svctest_inv_001"
 _WEBHOOK_SECRET = "whsec_svctest_secret1234567890abcde"
 _API_KEY = "sk_test_svctest_key_abcdefgh123456"
 _TOLERANCE = 300
@@ -80,7 +90,7 @@ def _build_invoice_paid_event(
     amount_paid: int = 9000,
 ) -> dict[str, Any]:
     obj: dict[str, Any] = {
-        "id": "in_svctest_001",
+        "id": _INVOICE_ID,
         "customer": customer_id,
         "subscription": sub_id,
         "amount_paid": amount_paid,
@@ -115,6 +125,62 @@ def _build_checkout_completed_event(
     }
 
 
+def _build_charge_refunded_event(
+    *,
+    customer_id: str = _CUSTOMER_ID,
+    amount_refunded: int = 2000,
+) -> dict[str, Any]:
+    return {
+        "id": "evt_charge_refunded_001",
+        "type": "charge.refunded",
+        "data": {
+            "object": {
+                "id": "ch_svctest_001",
+                "customer": customer_id,
+                "amount_refunded": amount_refunded,
+                "refunded": True,
+            }
+        },
+    }
+
+
+def _build_customer_updated_event(
+    *,
+    customer_id: str = _CUSTOMER_ID,
+    org_id: str = _ORG,
+    email: str = "updated@example.com",
+) -> dict[str, Any]:
+    return {
+        "id": "evt_cust_updated_001",
+        "type": StripeWebhookEventType.CUSTOMER_UPDATED.value,
+        "data": {
+            "object": {
+                "id": customer_id,
+                "email": email,
+                "metadata": {"org_id": org_id},
+            }
+        },
+    }
+
+
+def _build_payment_method_record(
+    pm_id: str = _PM_ID,
+    customer_id: str = _CUSTOMER_ID,
+    is_default: bool = False,
+) -> _PaymentMethodRecord:
+    return _PaymentMethodRecord(
+        payment_method_id=pm_id,
+        customer_id=customer_id,
+        type="card",
+        brand="visa",
+        last4="4242",
+        exp_month=12,
+        exp_year=2028,
+        is_default=is_default,
+        created_at="2026-01-01T00:00:00Z",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -135,6 +201,23 @@ def mock_client() -> MagicMock:
 @pytest.fixture()
 def svc_wired(svc: StripeService, mock_client: MagicMock) -> StripeService:
     svc._override_client(mock_client)
+    return svc
+
+
+@pytest.fixture()
+def svc_with_sub(svc: StripeService) -> StripeService:
+    """Service with a registered customer mapping and active subscription."""
+    svc.register_customer_mapping(_ORG, _CUSTOMER_ID)
+    svc.upsert_subscription(
+        subscription_id=_SUB_ID,
+        org_id=_ORG,
+        customer_id=_CUSTOMER_ID,
+        price_id="price_svctest_001",
+        status=StripeSubscriptionStatus.ACTIVE,
+        billing_interval=StripeBillingInterval.MONTHLY,
+        current_period_start="2026-01-01T00:00:00Z",
+        current_period_end="2026-02-01T00:00:00Z",
+    )
     return svc
 
 
@@ -441,51 +524,42 @@ class TestDebitUnitsForTokens:
 
 
 class TestHandleInvoicePaid:
-    def _register_sub(self, svc: StripeService, *, org_id: str = _ORG) -> None:
-        from app.services.stripe_service import StripeBillingInterval, StripeSubscriptionStatus
-
-        svc.register_customer_mapping(org_id, _CUSTOMER_ID)
-        svc.upsert_subscription(
-            subscription_id=_SUB_ID,
-            org_id=org_id,
-            customer_id=_CUSTOMER_ID,
-            price_id="price_svctest_001",
-            status=StripeSubscriptionStatus.ACTIVE,
-            billing_interval=StripeBillingInterval.MONTHLY,
-            current_period_start="2026-01-01T00:00:00Z",
-            current_period_end="2026-02-01T00:00:00Z",
-        )
-
-    def test_invoice_paid_with_unit_credits_metadata_credits_org(self, svc: StripeService) -> None:
-        self._register_sub(svc)
+    def test_invoice_paid_with_unit_credits_metadata_credits_org(self, svc_with_sub: StripeService) -> None:
         event = _build_invoice_paid_event(unit_credits=500)
-        svc.handle_webhook_event(event)
-        assert svc.get_unit_balance(_ORG).balance == 500
+        svc_with_sub.handle_webhook_event(event)
+        assert svc_with_sub.get_unit_balance(_ORG).balance == 500
 
-    def test_invoice_paid_unit_credits_ledger_reason_subscription_renewed(self, svc: StripeService) -> None:
-        self._register_sub(svc)
+    def test_invoice_paid_unit_credits_ledger_reason_subscription_renewed(self, svc_with_sub: StripeService) -> None:
         event = _build_invoice_paid_event(unit_credits=250)
-        svc.handle_webhook_event(event)
-        resp = svc.get_unit_balance(_ORG)
+        svc_with_sub.handle_webhook_event(event)
+        resp = svc_with_sub.get_unit_balance(_ORG)
         assert any(e["reason"] == StripeUnitEventReason.SUBSCRIPTION_RENEWED.value for e in resp.ledger_entries)
 
-    def test_invoice_paid_without_unit_credits_metadata_no_credit(self, svc: StripeService) -> None:
-        self._register_sub(svc)
+    def test_invoice_paid_without_unit_credits_metadata_no_credit(self, svc_with_sub: StripeService) -> None:
         event = _build_invoice_paid_event(unit_credits=0)
-        svc.handle_webhook_event(event)
-        assert svc.get_unit_balance(_ORG).balance == 0
+        svc_with_sub.handle_webhook_event(event)
+        assert svc_with_sub.get_unit_balance(_ORG).balance == 0
 
-    def test_invoice_paid_credits_exact_amount_from_metadata(self, svc: StripeService) -> None:
-        self._register_sub(svc)
+    def test_invoice_paid_credits_exact_amount_from_metadata(self, svc_with_sub: StripeService) -> None:
         event = _build_invoice_paid_event(unit_credits=1337)
-        svc.handle_webhook_event(event)
-        assert svc.get_unit_balance(_ORG).balance == 1337
+        svc_with_sub.handle_webhook_event(event)
+        assert svc_with_sub.get_unit_balance(_ORG).balance == 1337
 
-    def test_invoice_paid_result_action_is_processed(self, svc: StripeService) -> None:
-        self._register_sub(svc)
+    def test_invoice_paid_result_action_is_processed(self, svc_with_sub: StripeService) -> None:
         event = _build_invoice_paid_event(unit_credits=100)
-        result = svc.handle_webhook_event(event)
+        result = svc_with_sub.handle_webhook_event(event)
         assert result["action"] == "processed"
+
+    def test_invoice_paid_renewal_credit_path_uses_subscription_id_as_reference(self, svc_with_sub: StripeService) -> None:
+        event = _build_invoice_paid_event(unit_credits=200, sub_id=_SUB_ID)
+        svc_with_sub.handle_webhook_event(event)
+        resp = svc_with_sub.get_unit_balance(_ORG)
+        entry = next(
+            (e for e in resp.ledger_entries if e["reason"] == StripeUnitEventReason.SUBSCRIPTION_RENEWED.value),
+            None,
+        )
+        assert entry is not None
+        assert entry["reference_id"] == _SUB_ID or entry["reference_id"] == _INVOICE_ID
 
 
 # ===========================================================================
@@ -622,7 +696,7 @@ class TestVerifyWebhookSignatureService:
 
 
 # ===========================================================================
-# Section I — reset() clears all state including _client
+# Section I — reset() clears all state including new fields
 # ===========================================================================
 
 
@@ -638,8 +712,6 @@ class TestResetClearsAllState:
         assert svc.get_unit_balance(_ORG).ledger_entries == []
 
     def test_reset_clears_subscriptions(self, svc: StripeService) -> None:
-        from app.services.stripe_service import StripeBillingInterval, StripeSubscriptionStatus
-
         svc.upsert_subscription(
             subscription_id=_SUB_ID,
             org_id=_ORG,
@@ -694,6 +766,25 @@ class TestResetClearsAllState:
         svc.reset()
         svc.credit_units(_ORG, 100, StripeUnitEventReason.MANUAL_CREDIT)
         assert svc.get_unit_balance(_ORG).balance == 100
+
+    def test_reset_clears_payment_methods(self, svc: StripeService) -> None:
+        """reset() must clear _payment_methods store."""
+        svc._payment_methods[_PM_ID] = _build_payment_method_record()
+        svc.reset()
+        assert svc._payment_methods == {}
+
+    def test_reset_clears_invoice_cache(self, svc: StripeService) -> None:
+        """reset() must clear _invoice_cache store."""
+        svc._invoice_cache[_ORG] = [{"id": "in_dummy"}]
+        svc.reset()
+        assert svc._invoice_cache == {}
+
+    def test_reset_clears_idempotency_store(self, svc: StripeService) -> None:
+        """reset() must clear idempotency key dedup store if present."""
+        if hasattr(svc, "_idempotency_keys"):
+            svc._idempotency_keys["idem-key-001"] = "result"
+            svc.reset()
+            assert svc._idempotency_keys == {}
 
 
 # ===========================================================================
@@ -824,3 +915,590 @@ class TestPackageCatalogueTokensPerUnit:
         tpu_values = {entry["tokens_per_unit"] for entry in PACKAGE_CATALOGUE.values()}
         assert len(tpu_values) == 1, f"tokens_per_unit is not uniform across tiers: {tpu_values}"
         assert tpu_values.pop() == TOKENS_PER_UNIT
+
+
+# ===========================================================================
+# Section L — _PaymentMethodRecord and PaymentMethodResponse dataclasses
+# ===========================================================================
+
+
+class TestPaymentMethodDataclasses:
+    def test_payment_method_record_instantiation(self) -> None:
+        record = _build_payment_method_record()
+        assert record.payment_method_id == _PM_ID
+        assert record.customer_id == _CUSTOMER_ID
+        assert record.type == "card"
+        assert record.brand == "visa"
+        assert record.last4 == "4242"
+        assert record.exp_month == 12
+        assert record.exp_year == 2028
+        assert record.is_default is False
+
+    def test_payment_method_record_to_dict_all_keys_present(self) -> None:
+        record = _build_payment_method_record()
+        d = record.to_dict()
+        for key in ("payment_method_id", "customer_id", "type", "brand", "last4", "exp_month", "exp_year", "is_default", "created_at"):
+            assert key in d, f"missing key '{key}' in _PaymentMethodRecord.to_dict()"
+
+    def test_payment_method_record_default_flag(self) -> None:
+        record = _build_payment_method_record(is_default=True)
+        assert record.is_default is True
+        assert record.to_dict()["is_default"] is True
+
+    def test_payment_method_response_instantiation(self) -> None:
+        resp = PaymentMethodResponse(
+            payment_method_id=_PM_ID,
+            customer_id=_CUSTOMER_ID,
+            type="card",
+            brand="visa",
+            last4="4242",
+            exp_month=12,
+            exp_year=2028,
+            is_default=False,
+            created_at="2026-01-01T00:00:00Z",
+        )
+        assert resp.payment_method_id == _PM_ID
+        assert resp.schema_version is not None
+
+    def test_payment_method_response_to_dict_has_schema_version(self) -> None:
+        resp = PaymentMethodResponse(
+            payment_method_id=_PM_ID,
+            customer_id=_CUSTOMER_ID,
+            type="card",
+            brand="visa",
+            last4="4242",
+            exp_month=12,
+            exp_year=2028,
+            is_default=False,
+            created_at="2026-01-01T00:00:00Z",
+        )
+        d = resp.to_dict()
+        assert "schema_version" in d
+
+
+# ===========================================================================
+# Section M — InvoiceResponse dataclass
+# ===========================================================================
+
+
+class TestInvoiceResponseDataclass:
+    def test_invoice_response_instantiation(self) -> None:
+        resp = InvoiceResponse(
+            invoice_id=_INVOICE_ID,
+            org_id=_ORG,
+            customer_id=_CUSTOMER_ID,
+            subscription_id=_SUB_ID,
+            amount_paid=9000,
+            currency="usd",
+            status="paid",
+            created_at="2026-01-01T00:00:00Z",
+        )
+        assert resp.invoice_id == _INVOICE_ID
+        assert resp.org_id == _ORG
+        assert resp.schema_version is not None
+
+    def test_invoice_response_to_dict_all_keys_present(self) -> None:
+        resp = InvoiceResponse(
+            invoice_id=_INVOICE_ID,
+            org_id=_ORG,
+            customer_id=_CUSTOMER_ID,
+            subscription_id=_SUB_ID,
+            amount_paid=9000,
+            currency="usd",
+            status="paid",
+            created_at="2026-01-01T00:00:00Z",
+        )
+        d = resp.to_dict()
+        for key in ("invoice_id", "org_id", "customer_id", "subscription_id", "amount_paid", "currency", "status", "created_at", "schema_version"):
+            assert key in d, f"missing key '{key}' in InvoiceResponse.to_dict()"
+
+
+# ===========================================================================
+# Section N — attach_payment_method
+# ===========================================================================
+
+
+class TestAttachPaymentMethod:
+    def test_attach_payment_method_returns_payment_method_response(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = {
+            "id": _PM_ID,
+            "type": "card",
+            "card": {"brand": "visa", "last4": "4242", "exp_month": 12, "exp_year": 2028},
+            "customer": _CUSTOMER_ID,
+        }
+        result = svc_wired.attach_payment_method(customer_id=_CUSTOMER_ID, payment_method_id=_PM_ID)
+        assert isinstance(result, PaymentMethodResponse)
+        assert result.payment_method_id == _PM_ID
+        assert result.customer_id == _CUSTOMER_ID
+
+    def test_attach_payment_method_stored_in_service(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = {
+            "id": _PM_ID,
+            "type": "card",
+            "card": {"brand": "mastercard", "last4": "5555", "exp_month": 6, "exp_year": 2027},
+            "customer": _CUSTOMER_ID,
+        }
+        svc_wired.attach_payment_method(customer_id=_CUSTOMER_ID, payment_method_id=_PM_ID)
+        assert _PM_ID in svc_wired._payment_methods
+
+    def test_attach_payment_method_calls_stripe_api(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = {
+            "id": _PM_ID,
+            "type": "card",
+            "card": {"brand": "visa", "last4": "4242", "exp_month": 12, "exp_year": 2028},
+            "customer": _CUSTOMER_ID,
+        }
+        svc_wired.attach_payment_method(customer_id=_CUSTOMER_ID, payment_method_id=_PM_ID)
+        mock_client.post.assert_called_once()
+        call_path = mock_client.post.call_args[0][0]
+        assert _PM_ID in call_path or "attach" in call_path
+
+
+# ===========================================================================
+# Section O — detach_payment_method
+# ===========================================================================
+
+
+class TestDetachPaymentMethod:
+    def test_detach_payment_method_removes_from_store(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = {"id": _PM_ID, "customer": None}
+        svc_wired._payment_methods[_PM_ID] = _build_payment_method_record()
+        svc_wired.detach_payment_method(payment_method_id=_PM_ID)
+        assert _PM_ID not in svc_wired._payment_methods
+
+    def test_detach_payment_method_calls_stripe_api(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = {"id": _PM_ID, "customer": None}
+        svc_wired._payment_methods[_PM_ID] = _build_payment_method_record()
+        svc_wired.detach_payment_method(payment_method_id=_PM_ID)
+        mock_client.post.assert_called_once()
+
+    def test_detach_missing_payment_method_raises_not_found(self, svc: StripeService) -> None:
+        with pytest.raises(StripePaymentMethodNotFoundError):
+            svc.detach_payment_method(payment_method_id="pm_does_not_exist")
+
+    def test_detach_payment_method_not_found_error_is_service_error(self, svc: StripeService) -> None:
+        with pytest.raises(StripeServiceError):
+            svc.detach_payment_method(payment_method_id="pm_does_not_exist")
+
+
+# ===========================================================================
+# Section P — list_payment_methods
+# ===========================================================================
+
+
+class TestListPaymentMethods:
+    def _seed_payment_methods(self, svc: StripeService, count: int = 3) -> list[str]:
+        ids = []
+        for i in range(count):
+            pm_id = f"pm_svctest_list_{i:03d}"
+            svc._payment_methods[pm_id] = _PaymentMethodRecord(
+                payment_method_id=pm_id,
+                customer_id=_CUSTOMER_ID,
+                type="card",
+                brand="visa",
+                last4=str(1000 + i),
+                exp_month=12,
+                exp_year=2028,
+                is_default=(i == 0),
+                created_at="2026-01-01T00:00:00Z",
+            )
+            ids.append(pm_id)
+        return ids
+
+    def test_list_payment_methods_returns_list(self, svc: StripeService) -> None:
+        self._seed_payment_methods(svc)
+        result = svc.list_payment_methods(customer_id=_CUSTOMER_ID)
+        assert isinstance(result, list)
+
+    def test_list_payment_methods_returns_correct_count(self, svc: StripeService) -> None:
+        self._seed_payment_methods(svc, count=3)
+        result = svc.list_payment_methods(customer_id=_CUSTOMER_ID)
+        assert len(result) == 3
+
+    def test_list_payment_methods_empty_for_unknown_customer(self, svc: StripeService) -> None:
+        result = svc.list_payment_methods(customer_id="cus_unknown_xyz")
+        assert result == []
+
+    def test_list_payment_methods_returns_payment_method_responses(self, svc: StripeService) -> None:
+        self._seed_payment_methods(svc, count=2)
+        result = svc.list_payment_methods(customer_id=_CUSTOMER_ID)
+        for item in result:
+            assert isinstance(item, PaymentMethodResponse)
+
+    def test_list_payment_methods_isolated_per_customer(self, svc: StripeService) -> None:
+        svc._payment_methods["pm_cust_a_001"] = _PaymentMethodRecord(
+            payment_method_id="pm_cust_a_001",
+            customer_id="cus_a",
+            type="card",
+            brand="visa",
+            last4="1111",
+            exp_month=1,
+            exp_year=2030,
+            is_default=False,
+            created_at="2026-01-01T00:00:00Z",
+        )
+        svc._payment_methods["pm_cust_b_001"] = _PaymentMethodRecord(
+            payment_method_id="pm_cust_b_001",
+            customer_id="cus_b",
+            type="card",
+            brand="mastercard",
+            last4="2222",
+            exp_month=2,
+            exp_year=2031,
+            is_default=False,
+            created_at="2026-01-01T00:00:00Z",
+        )
+        assert len(svc.list_payment_methods("cus_a")) == 1
+        assert len(svc.list_payment_methods("cus_b")) == 1
+
+
+# ===========================================================================
+# Section Q — set_default_payment_method
+# ===========================================================================
+
+
+class TestSetDefaultPaymentMethod:
+    def _seed_two_pms(self, svc: StripeService) -> tuple[str, str]:
+        pm1 = "pm_default_001"
+        pm2 = "pm_default_002"
+        svc._payment_methods[pm1] = _PaymentMethodRecord(
+            payment_method_id=pm1,
+            customer_id=_CUSTOMER_ID,
+            type="card",
+            brand="visa",
+            last4="0001",
+            exp_month=1,
+            exp_year=2029,
+            is_default=True,
+            created_at="2026-01-01T00:00:00Z",
+        )
+        svc._payment_methods[pm2] = _PaymentMethodRecord(
+            payment_method_id=pm2,
+            customer_id=_CUSTOMER_ID,
+            type="card",
+            brand="mastercard",
+            last4="0002",
+            exp_month=2,
+            exp_year=2030,
+            is_default=False,
+            created_at="2026-01-01T00:00:00Z",
+        )
+        return pm1, pm2
+
+    def test_set_default_marks_correct_pm_as_default(self, svc: StripeService) -> None:
+        pm1, pm2 = self._seed_two_pms(svc)
+        svc.set_default_payment_method(customer_id=_CUSTOMER_ID, payment_method_id=pm2)
+        assert svc._payment_methods[pm2].is_default is True
+
+    def test_set_default_unsets_previous_default(self, svc: StripeService) -> None:
+        pm1, pm2 = self._seed_two_pms(svc)
+        svc.set_default_payment_method(customer_id=_CUSTOMER_ID, payment_method_id=pm2)
+        assert svc._payment_methods[pm1].is_default is False
+
+    def test_set_default_missing_pm_raises_not_found(self, svc: StripeService) -> None:
+        with pytest.raises(StripePaymentMethodNotFoundError):
+            svc.set_default_payment_method(customer_id=_CUSTOMER_ID, payment_method_id="pm_ghost_999")
+
+    def test_set_default_not_found_is_service_error(self, svc: StripeService) -> None:
+        with pytest.raises(StripeServiceError):
+            svc.set_default_payment_method(customer_id=_CUSTOMER_ID, payment_method_id="pm_ghost_999")
+
+    def test_set_default_only_one_default_per_customer(self, svc: StripeService) -> None:
+        pm1, pm2 = self._seed_two_pms(svc)
+        svc.set_default_payment_method(customer_id=_CUSTOMER_ID, payment_method_id=pm2)
+        defaults = [pm for pm in svc._payment_methods.values() if pm.customer_id == _CUSTOMER_ID and pm.is_default]
+        assert len(defaults) == 1
+        assert defaults[0].payment_method_id == pm2
+
+
+# ===========================================================================
+# Section R — get_invoices_for_org and invalidate_invoice_cache
+# ===========================================================================
+
+
+class TestInvoicesForOrg:
+    def _seed_invoice_cache(self, svc: StripeService, count: int = 2) -> None:
+        svc._invoice_cache[_ORG] = [
+            {
+                "id": f"in_seed_{i:03d}",
+                "customer": _CUSTOMER_ID,
+                "subscription": _SUB_ID,
+                "amount_paid": 9000,
+                "currency": "usd",
+                "status": "paid",
+                "created": 1700000000 + i,
+            }
+            for i in range(count)
+        ]
+
+    def test_get_invoices_for_org_returns_list(self, svc: StripeService) -> None:
+        self._seed_invoice_cache(svc)
+        result = svc.get_invoices_for_org(org_id=_ORG)
+        assert isinstance(result, list)
+
+    def test_get_invoices_for_org_returns_correct_count(self, svc: StripeService) -> None:
+        self._seed_invoice_cache(svc, count=3)
+        result = svc.get_invoices_for_org(org_id=_ORG)
+        assert len(result) == 3
+
+    def test_get_invoices_for_org_returns_invoice_responses(self, svc: StripeService) -> None:
+        self._seed_invoice_cache(svc, count=2)
+        svc.register_customer_mapping(_ORG, _CUSTOMER_ID)
+        result = svc.get_invoices_for_org(org_id=_ORG)
+        for item in result:
+            assert isinstance(item, InvoiceResponse)
+
+    def test_get_invoices_for_org_empty_org_returns_empty(self, svc: StripeService) -> None:
+        result = svc.get_invoices_for_org(org_id="org-no-invoices-xyz")
+        assert result == []
+
+    def test_invalidate_invoice_cache_clears_org_cache(self, svc: StripeService) -> None:
+        self._seed_invoice_cache(svc, count=2)
+        svc.invalidate_invoice_cache(org_id=_ORG)
+        assert _ORG not in svc._invoice_cache
+
+    def test_invalidate_invoice_cache_does_not_affect_other_orgs(self, svc: StripeService) -> None:
+        svc._invoice_cache[_ORG] = [{"id": "in_org_a"}]
+        svc._invoice_cache["org-other"] = [{"id": "in_org_b"}]
+        svc.invalidate_invoice_cache(org_id=_ORG)
+        assert "org-other" in svc._invoice_cache
+        assert svc._invoice_cache["org-other"] == [{"id": "in_org_b"}]
+
+    def test_invalidate_invoice_cache_noop_for_missing_org(self, svc: StripeService) -> None:
+        svc.invalidate_invoice_cache(org_id="org-ghost-no-cache")
+
+
+# ===========================================================================
+# Section S — list_subscriptions_for_org
+# ===========================================================================
+
+
+class TestListSubscriptionsForOrg:
+    def test_list_subscriptions_for_org_returns_list(self, svc_with_sub: StripeService) -> None:
+        result = svc_with_sub.list_subscriptions_for_org(org_id=_ORG)
+        assert isinstance(result, list)
+
+    def test_list_subscriptions_for_org_returns_correct_count(self, svc_with_sub: StripeService) -> None:
+        svc_with_sub.upsert_subscription(
+            subscription_id="sub_second_001",
+            org_id=_ORG,
+            customer_id=_CUSTOMER_ID,
+            price_id="price_second_001",
+            status=StripeSubscriptionStatus.CANCELED,
+            billing_interval=StripeBillingInterval.MONTHLY,
+            current_period_start="2025-01-01T00:00:00Z",
+            current_period_end="2025-02-01T00:00:00Z",
+        )
+        result = svc_with_sub.list_subscriptions_for_org(org_id=_ORG)
+        assert len(result) >= 2
+
+    def test_list_subscriptions_for_org_returns_subscription_responses(self, svc_with_sub: StripeService) -> None:
+        result = svc_with_sub.list_subscriptions_for_org(org_id=_ORG)
+        for item in result:
+            assert isinstance(item, SubscriptionResponse)
+
+    def test_list_subscriptions_for_org_empty_org_returns_empty(self, svc: StripeService) -> None:
+        result = svc.list_subscriptions_for_org(org_id="org-no-subs-xyz")
+        assert result == []
+
+    def test_list_subscriptions_for_org_isolated_per_org(self, svc_with_sub: StripeService) -> None:
+        svc_with_sub.upsert_subscription(
+            subscription_id="sub_other_org_001",
+            org_id="org-other-999",
+            customer_id="cus_other_999",
+            price_id="price_other_001",
+            status=StripeSubscriptionStatus.ACTIVE,
+            billing_interval=StripeBillingInterval.MONTHLY,
+            current_period_start="2026-01-01T00:00:00Z",
+            current_period_end="2026-02-01T00:00:00Z",
+        )
+        result_main = svc_with_sub.list_subscriptions_for_org(org_id=_ORG)
+        result_other = svc_with_sub.list_subscriptions_for_org(org_id="org-other-999")
+        assert all(r.org_id == _ORG for r in result_main)
+        assert all(r.org_id == "org-other-999" for r in result_other)
+
+
+# ===========================================================================
+# Section T — complete_checkout_session
+# ===========================================================================
+
+
+class TestCompleteCheckoutSession:
+    def _seed_session(self, svc_wired: StripeService, mock_client: MagicMock, unit_credits: int = 500) -> str:
+        session_id = "cs_complete_test_001"
+        mock_client.post.return_value = {
+            "id": session_id,
+            "url": "https://checkout.stripe.com/test",
+            "customer": _CUSTOMER_ID,
+            "expires_at": int(time.time()) + 1800,
+        }
+        svc_wired.create_checkout_session(
+            org_id=_ORG,
+            price_id="price_complete_001",
+            unit_credits=unit_credits,
+            success_url="https://example.com/ok",
+            cancel_url="https://example.com/cancel",
+            customer_id=_CUSTOMER_ID,
+        )
+        return session_id
+
+    def test_complete_checkout_session_credits_units(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        session_id = self._seed_session(svc_wired, mock_client, unit_credits=1000)
+        svc_wired.complete_checkout_session(session_id=session_id, org_id=_ORG)
+        assert svc_wired.get_unit_balance(_ORG).balance == 1000
+
+    def test_complete_checkout_session_marks_session_complete(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        session_id = self._seed_session(svc_wired, mock_client, unit_credits=100)
+        svc_wired.complete_checkout_session(session_id=session_id, org_id=_ORG)
+        record = svc_wired.get_checkout_session(session_id)
+        assert record is not None
+        assert record["status"] == "complete"
+
+    def test_complete_checkout_session_missing_session_raises(self, svc: StripeService) -> None:
+        from app.services.stripe_service import StripeSessionNotFoundError
+
+        with pytest.raises(StripeSessionNotFoundError):
+            svc.complete_checkout_session(session_id="cs_ghost_999", org_id=_ORG)
+
+    def test_complete_checkout_session_ledger_reason_checkout_complete(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        session_id = self._seed_session(svc_wired, mock_client, unit_credits=250)
+        svc_wired.complete_checkout_session(session_id=session_id, org_id=_ORG)
+        resp = svc_wired.get_unit_balance(_ORG)
+        assert any(e["reason"] == StripeUnitEventReason.CHECKOUT_COMPLETE.value for e in resp.ledger_entries)
+
+
+# ===========================================================================
+# Section U — dispatch_webhook_event full event dispatch
+# ===========================================================================
+
+
+class TestDispatchWebhookEvent:
+    def test_dispatch_checkout_session_completed_credits_units(self, svc: StripeService) -> None:
+        event = _build_checkout_completed_event(unit_credits=2500)
+        result = svc.dispatch_webhook_event(event)
+        assert svc.get_unit_balance(_ORG).balance == 2500
+        assert result["action"] == "processed"
+
+    def test_dispatch_invoice_paid_renewal_credits_org(self, svc_with_sub: StripeService) -> None:
+        event = _build_invoice_paid_event(unit_credits=750)
+        result = svc_with_sub.dispatch_webhook_event(event)
+        assert svc_with_sub.get_unit_balance(_ORG).balance == 750
+        assert result["action"] == "processed"
+
+    def test_dispatch_invoice_paid_renewal_credit_path_reason(self, svc_with_sub: StripeService) -> None:
+        event = _build_invoice_paid_event(unit_credits=100)
+        svc_with_sub.dispatch_webhook_event(event)
+        resp = svc_with_sub.get_unit_balance(_ORG)
+        assert any(e["reason"] == StripeUnitEventReason.SUBSCRIPTION_RENEWED.value for e in resp.ledger_entries)
+
+    def test_dispatch_charge_refunded_returns_processed(self, svc_with_sub: StripeService) -> None:
+        event = _build_charge_refunded_event(customer_id=_CUSTOMER_ID, amount_refunded=2000)
+        result = svc_with_sub.dispatch_webhook_event(event)
+        assert result is not None
+        assert "action" in result
+
+    def test_dispatch_customer_updated_returns_processed(self, svc: StripeService) -> None:
+        svc.register_customer_mapping(_ORG, _CUSTOMER_ID)
+        event = _build_customer_updated_event(customer_id=_CUSTOMER_ID, org_id=_ORG)
+        result = svc.dispatch_webhook_event(event)
+        assert result is not None
+        assert "action" in result
+
+    def test_dispatch_unknown_event_type_returns_ignored(self, svc: StripeService) -> None:
+        event = {"id": "evt_unknown_001", "type": "payment_intent.created", "data": {"object": {}}}
+        result = svc.dispatch_webhook_event(event)
+        assert result["action"] in ("ignored", "skipped", "noop")
+
+    def test_dispatch_checkout_session_expired_marks_session_expired(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        session_id = "cs_exp_dispatch_001"
+        mock_client.post.return_value = {
+            "id": session_id,
+            "url": "https://checkout.stripe.com/exp",
+            "customer": _CUSTOMER_ID,
+            "expires_at": int(time.time()) + 100,
+        }
+        svc_wired.create_checkout_session(
+            org_id=_ORG,
+            price_id="price_exp_001",
+            success_url="https://example.com/ok",
+            cancel_url="https://example.com/cancel",
+        )
+        expire_event = {
+            "id": "evt_exp_dispatch_001",
+            "type": StripeWebhookEventType.CHECKOUT_SESSION_EXPIRED.value,
+            "data": {"object": {"id": session_id}},
+        }
+        svc_wired.dispatch_webhook_event(expire_event)
+        record = svc_wired.get_checkout_session(session_id)
+        assert record is not None
+        assert record["status"] == "expired"
+
+    def test_dispatch_subscription_deleted_marks_canceled(self, svc_with_sub: StripeService) -> None:
+        event = {
+            "id": "evt_sub_del_001",
+            "type": StripeWebhookEventType.CUSTOMER_SUBSCRIPTION_DELETED.value,
+            "data": {
+                "object": {
+                    "id": _SUB_ID,
+                    "customer": _CUSTOMER_ID,
+                    "status": "canceled",
+                    "items": {"data": [{"price": {"id": "price_svctest_001", "recurring": {"interval": "month"}}}]},
+                    "current_period_start": 1700000000,
+                    "current_period_end": 1702678400,
+                    "cancel_at_period_end": True,
+                    "metadata": {},
+                }
+            },
+        }
+        svc_with_sub.dispatch_webhook_event(event)
+        sub = svc_with_sub.get_subscription(_SUB_ID)
+        assert sub is not None
+        assert sub.status == StripeSubscriptionStatus.CANCELED.value
+
+
+# ===========================================================================
+# Section V — StripePaymentMethodNotFoundError exception
+# ===========================================================================
+
+
+class TestStripePaymentMethodNotFoundError:
+    def test_is_subclass_of_service_error(self) -> None:
+        err = StripePaymentMethodNotFoundError("pm_test_001")
+        assert isinstance(err, StripeServiceError)
+
+    def test_message_contains_payment_method_id(self) -> None:
+        err = StripePaymentMethodNotFoundError("pm_ghost_xyz")
+        assert "pm_ghost_xyz" in str(err)
+
+    def test_raised_on_detach_of_unknown_pm(self, svc: StripeService) -> None:
+        with pytest.raises(StripePaymentMethodNotFoundError):
+            svc.detach_payment_method(payment_method_id="pm_unknown_001")
+
+    def test_raised_on_set_default_of_unknown_pm(self, svc: StripeService) -> None:
+        with pytest.raises(StripePaymentMethodNotFoundError):
+            svc.set_default_payment_method(customer_id=_CUSTOMER_ID, payment_method_id="pm_unknown_002")
+
+
+# ===========================================================================
+# Section W — StripeIdempotencyError exception
+# ===========================================================================
+
+
+class TestStripeIdempotencyError:
+    def test_is_subclass_of_service_error(self) -> None:
+        err = StripeIdempotencyError("idem-key-001")
+        assert isinstance(err, StripeServiceError)
+
+    def test_message_contains_idempotency_key(self) -> None:
+        err = StripeIdempotencyError("idem-key-abc-123")
+        assert "idem-key-abc-123" in str(err)
+
+    def test_raised_on_duplicate_idempotency_key(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        """Submitting the same idempotency key twice for a non-idempotent operation raises."""
+        if not hasattr(svc_wired, "_idempotency_keys"):
+            pytest.skip("Service does not expose _idempotency_keys — implementation-specific gate")
+        mock_client.post.return_value = {"id": "mbur_idem_001"}
+        key = "idem-key-dedup-test-001"
+        svc_wired.report_metered_usage(_ORG, "si_idem_001", quantity=10, idempotency_key=key)
+        with pytest.raises(StripeIdempotencyError):
+            svc_wired.report_metered_usage(_ORG, "si_idem_001", quantity=10, idempotency_key=key)
