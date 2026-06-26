@@ -7,7 +7,7 @@ import secrets
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 
 from app.core.auth import AuthContext, get_auth_context
@@ -43,6 +43,10 @@ from app.models.webhook import (
     WebhookSubscriptionResponse,
     WebhookSubscriptionUpdateRequest,
 )
+from app.services.stripe_service import (
+    StripeService,
+    StripeWebhookEventType,
+)
 from app.services.webhook_service import (
     dispatch_event,
     list_retryable_deliveries,
@@ -54,6 +58,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 _SUPPORTED_EVENTS: set[str] = {e.value for e in WebhookEventType if e.value != "*"}
+
+# ---------------------------------------------------------------------------
+# Stripe webhook event types that this router dispatches through stripe_service
+# ---------------------------------------------------------------------------
+
+_STRIPE_DISPATCHABLE_EVENTS: frozenset[str] = frozenset(e.value for e in StripeWebhookEventType)
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +107,117 @@ def _build_list_item(row: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# POST /webhooks/stripe
+# Stripe inbound webhook endpoint — signature verification + dispatch
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/stripe",
+    status_code=status.HTTP_200_OK,
+    include_in_schema=True,
+    summary="Inbound Stripe webhook receiver",
+    description=(
+        "Receives raw Stripe webhook events. Verifies the Stripe-Signature header "
+        "using the configured webhook secret, then dispatches all recognised "
+        "StripeWebhookEventType values through stripe_service.dispatch_webhook_event. "
+        "Unknown event types are acknowledged and logged without dispatch. "
+        "Signature failures return 400 immediately (fail-closed)."
+    ),
+    tags=["webhooks", "billing"],
+)
+async def stripe_webhook_receiver(
+    request: Request,
+    stripe_signature: str | None = Header(default=None, alias="stripe-signature"),
+) -> JSONResponse:
+    raw_body: bytes = await request.body()
+
+    if not raw_body:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="stripe_webhook_empty_body",
+        )
+
+    stripe_svc = StripeService()
+
+    # --- Signature verification (fail-closed) ---
+    verified_payload: dict[str, Any] | None = None
+    try:
+        verified_payload = stripe_svc.verify_webhook_signature(
+            payload=raw_body,
+            signature_header=stripe_signature or "",
+        )
+    except Exception as exc:
+        logger.warning("stripe_webhook.signature_verification_failed error=%s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="stripe_webhook_signature_invalid",
+        ) from exc
+
+    if not verified_payload:
+        logger.warning("stripe_webhook.signature_verification_returned_none")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="stripe_webhook_signature_invalid",
+        )
+
+    event_type_raw: str = verified_payload.get("type", "")
+    event_id: str = verified_payload.get("id", _generate_id())
+
+    logger.info(
+        "stripe_webhook.received event_id=%s event_type=%s",
+        event_id,
+        event_type_raw,
+    )
+
+    # --- Dispatch through stripe_service for all known StripeWebhookEventType values ---
+    if event_type_raw in _STRIPE_DISPATCHABLE_EVENTS:
+        try:
+            stripe_svc.dispatch_webhook_event(
+                event_type=StripeWebhookEventType(event_type_raw),
+                payload=verified_payload,
+            )
+            logger.info(
+                "stripe_webhook.dispatched event_id=%s event_type=%s",
+                event_id,
+                event_type_raw,
+            )
+        except Exception as exc:
+            logger.error(
+                "stripe_webhook.dispatch_failed event_id=%s event_type=%s error=%s",
+                event_id,
+                event_type_raw,
+                exc,
+            )
+            # Acknowledge to Stripe but log the internal failure — do not return 5xx
+            # (Stripe would retry, causing duplicate processing)
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={
+                    "received": True,
+                    "event_id": event_id,
+                    "event_type": event_type_raw,
+                    "dispatch_status": "internal_error_logged",
+                },
+            )
+    else:
+        logger.info(
+            "stripe_webhook.unrecognised_event_type event_id=%s event_type=%s — acknowledged without dispatch",
+            event_id,
+            event_type_raw,
+        )
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "received": True,
+            "event_id": event_id,
+            "event_type": event_type_raw,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # POST /webhooks/subscriptions
 # ---------------------------------------------------------------------------
 
@@ -114,7 +235,10 @@ async def create_webhook_subscription(
 ) -> JSONResponse:
     tenant_id = _resolve_tenant_id(auth)
     if not tenant_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="tenant_id could not be resolved from auth context")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="tenant_id could not be resolved from auth context",
+        )
 
     raw_secret = _generate_raw_secret()
     secret_hash = _hash_secret(raw_secret)
@@ -138,9 +262,17 @@ async def create_webhook_subscription(
         _persist_create_subscription(row)
     except PersistenceError as exc:
         logger.error("webhooks.create_subscription tenant_id=%s error=%s", tenant_id, exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="subscription_create_failed") from exc
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="subscription_create_failed",
+        ) from exc
 
-    logger.info("webhooks.create_subscription id=%s tenant_id=%s events=%s", subscription_id, tenant_id, payload.events)
+    logger.info(
+        "webhooks.create_subscription id=%s tenant_id=%s events=%s",
+        subscription_id,
+        tenant_id,
+        payload.events,
+    )
 
     return JSONResponse(
         status_code=status.HTTP_201_CREATED,
@@ -178,7 +310,10 @@ async def list_webhook_subscriptions(
 ) -> JSONResponse:
     tenant_id = _resolve_tenant_id(auth)
     if not tenant_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="tenant_id could not be resolved from auth context")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="tenant_id could not be resolved from auth context",
+        )
 
     try:
         rows = _persist_list_subscriptions(
@@ -189,7 +324,10 @@ async def list_webhook_subscriptions(
         )
     except PersistenceError as exc:
         logger.error("webhooks.list_subscriptions tenant_id=%s error=%s", tenant_id, exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="list_failed") from exc
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="list_failed",
+        ) from exc
 
     safe_rows = [_build_list_item(r) for r in rows]
     return JSONResponse(
@@ -218,8 +356,16 @@ async def get_webhook_subscription(
     try:
         row = _persist_get_subscription(subscription_id=subscription_id, tenant_id=tenant_id)
     except PersistenceError as exc:
-        logger.error("webhooks.get_subscription id=%s tenant_id=%s error=%s", subscription_id, tenant_id, exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="fetch_failed") from exc
+        logger.error(
+            "webhooks.get_subscription id=%s tenant_id=%s error=%s",
+            subscription_id,
+            tenant_id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="fetch_failed",
+        ) from exc
 
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="subscription_not_found")
@@ -248,7 +394,12 @@ async def update_webhook_subscription(
     try:
         existing = _persist_get_subscription(subscription_id=subscription_id, tenant_id=tenant_id)
     except PersistenceError as exc:
-        logger.error("webhooks.update_subscription fetch id=%s tenant_id=%s error=%s", subscription_id, tenant_id, exc)
+        logger.error(
+            "webhooks.update_subscription fetch id=%s tenant_id=%s error=%s",
+            subscription_id,
+            tenant_id,
+            exc,
+        )
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="fetch_failed") from exc
 
     if existing is None:
@@ -274,19 +425,40 @@ async def update_webhook_subscription(
             updates=updates,
         )
     except PersistenceError as exc:
-        logger.error("webhooks.update_subscription id=%s tenant_id=%s error=%s", subscription_id, tenant_id, exc)
+        logger.error(
+            "webhooks.update_subscription id=%s tenant_id=%s error=%s",
+            subscription_id,
+            tenant_id,
+            exc,
+        )
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="update_failed") from exc
 
     try:
         updated = _persist_get_subscription(subscription_id=subscription_id, tenant_id=tenant_id)
     except PersistenceError as exc:
-        logger.error("webhooks.update_subscription post_fetch id=%s tenant_id=%s error=%s", subscription_id, tenant_id, exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="post_update_fetch_failed") from exc
+        logger.error(
+            "webhooks.update_subscription post_fetch id=%s tenant_id=%s error=%s",
+            subscription_id,
+            tenant_id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="post_update_fetch_failed",
+        ) from exc
 
     if updated is None:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="post_update_fetch_failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="post_update_fetch_failed",
+        )
 
-    logger.info("webhooks.update_subscription id=%s tenant_id=%s updates=%s", subscription_id, tenant_id, list(updates.keys()))
+    logger.info(
+        "webhooks.update_subscription id=%s tenant_id=%s updates=%s",
+        subscription_id,
+        tenant_id,
+        list(updates.keys()),
+    )
     return JSONResponse(status_code=status.HTTP_200_OK, content=_build_list_item(updated))
 
 
@@ -309,7 +481,12 @@ async def delete_webhook_subscription(
     try:
         existing = _persist_get_subscription(subscription_id=subscription_id, tenant_id=tenant_id)
     except PersistenceError as exc:
-        logger.error("webhooks.delete_subscription fetch id=%s tenant_id=%s error=%s", subscription_id, tenant_id, exc)
+        logger.error(
+            "webhooks.delete_subscription fetch id=%s tenant_id=%s error=%s",
+            subscription_id,
+            tenant_id,
+            exc,
+        )
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="fetch_failed") from exc
 
     if existing is None:
@@ -318,7 +495,12 @@ async def delete_webhook_subscription(
     try:
         _persist_delete_subscription(subscription_id=subscription_id, tenant_id=tenant_id)
     except PersistenceError as exc:
-        logger.error("webhooks.delete_subscription id=%s tenant_id=%s error=%s", subscription_id, tenant_id, exc)
+        logger.error(
+            "webhooks.delete_subscription id=%s tenant_id=%s error=%s",
+            subscription_id,
+            tenant_id,
+            exc,
+        )
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="delete_failed") from exc
 
     logger.info("webhooks.delete_subscription id=%s tenant_id=%s", subscription_id, tenant_id)
@@ -348,7 +530,12 @@ async def rotate_webhook_secret(
     try:
         existing = _persist_get_subscription(subscription_id=subscription_id, tenant_id=tenant_id)
     except PersistenceError as exc:
-        logger.error("webhooks.rotate_secret fetch id=%s tenant_id=%s error=%s", subscription_id, tenant_id, exc)
+        logger.error(
+            "webhooks.rotate_secret fetch id=%s tenant_id=%s error=%s",
+            subscription_id,
+            tenant_id,
+            exc,
+        )
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="fetch_failed") from exc
 
     if existing is None:
@@ -365,7 +552,12 @@ async def rotate_webhook_secret(
             updates={"secret_hash": new_hash},
         )
     except PersistenceError as exc:
-        logger.error("webhooks.rotate_secret id=%s tenant_id=%s error=%s", subscription_id, tenant_id, exc)
+        logger.error(
+            "webhooks.rotate_secret id=%s tenant_id=%s error=%s",
+            subscription_id,
+            tenant_id,
+            exc,
+        )
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="rotate_failed") from exc
 
     logger.info("webhooks.rotate_secret id=%s tenant_id=%s", subscription_id, tenant_id)
@@ -396,11 +588,14 @@ async def test_webhook_dispatch(
 ) -> JSONResponse:
     tenant_id = _resolve_tenant_id(auth)
     if not tenant_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="tenant_id could not be resolved from auth context")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="tenant_id could not be resolved from auth context",
+        )
 
     test_payload: dict[str, Any] = {
         "test": True,
-        "triggered_by": getattr(auth, "user_id", None) or getattr(auth, "api_key_id", None) or "unknown",
+        "triggered_by": (getattr(auth, "user_id", None) or getattr(auth, "api_key_id", None) or "unknown"),
         "timestamp": datetime.now(UTC).isoformat(),
     }
 
@@ -432,14 +627,20 @@ async def test_webhook_dispatch(
 async def list_webhook_deliveries(
     subscription_id: str | None = Query(default=None),
     event_type: str | None = Query(default=None),
-    delivery_status: str | None = Query(default=None, description="Filter by delivery status: pending, success, failed, exhausted"),
+    delivery_status: str | None = Query(
+        default=None,
+        description="Filter by delivery status: pending, success, failed, exhausted",
+    ),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     auth: AuthContext = Depends(get_auth_context),
 ) -> JSONResponse:
     tenant_id = _resolve_tenant_id(auth)
     if not tenant_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="tenant_id could not be resolved from auth context")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="tenant_id could not be resolved from auth context",
+        )
 
     try:
         rows = _persist_get_delivery_log(
@@ -521,7 +722,7 @@ async def retry_webhook_delivery(
     if delivery_status_val not in ("failed", "exhausted"):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Delivery status '{delivery_status_val}' is not retryable. Only 'failed' or 'exhausted' deliveries can be retried.",
+            detail=(f"Delivery status '{delivery_status_val}' is not retryable. Only 'failed' or 'exhausted' deliveries can be retried."),
         )
 
     try:
@@ -537,7 +738,11 @@ async def retry_webhook_delivery(
         logger.error("webhooks.retry_delivery retry delivery_id=%s error=%s", delivery_id, exc)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="retry_failed") from exc
 
-    logger.info("webhooks.retry_delivery delivery_id=%s status=%s", delivery_id, result.status.value)
+    logger.info(
+        "webhooks.retry_delivery delivery_id=%s status=%s",
+        delivery_id,
+        result.status.value,
+    )
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
 
@@ -557,4 +762,24 @@ async def list_supported_events(
     return JSONResponse(
         status_code=status.HTTP_200_OK,
         content={"events": sorted(_SUPPORTED_EVENTS)},
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /webhooks/stripe/events
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/stripe/events",
+    status_code=status.HTTP_200_OK,
+    summary="List all Stripe webhook event types handled by IronClaw",
+    tags=["webhooks", "billing"],
+)
+async def list_stripe_event_types(
+    auth: AuthContext = Depends(get_auth_context),
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={"stripe_events": sorted(_STRIPE_DISPATCHABLE_EVENTS)},
     )
