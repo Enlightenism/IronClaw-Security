@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 import os
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.supabaseclient import (
@@ -30,6 +30,7 @@ _STATUS_COLOR: dict[str, str] = {
     "active": "success",
     "expired": "warning",
     "revoked": "error",
+    "pending": "info",
 }
 
 _BRAND_DISPLAY: dict[str, str] = {
@@ -46,6 +47,8 @@ _BRAND_DISPLAY: dict[str, str] = {
 # Team      : 25,000 units → $90 USD
 # Enterprise: 60,000 units → $180 USD
 # Each protection unit covers up to TOKENS_PER_UNIT (25,000) tokens.
+# stripe_price_id must be set in the environment or Stripe dashboard and
+# stored here as a reference; populate via STRIPE_PRICE_ID_* env vars.
 # ---------------------------------------------------------------------------
 
 PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
@@ -56,6 +59,7 @@ PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
         "price_cents": BILLING_TIER_5K_PRICE_USD * 100,
         "tokens_per_unit": TOKENS_PER_UNIT,
         "token_coverage": BILLING_TIER_5K_UNITS * TOKENS_PER_UNIT,
+        "stripe_price_id": os.environ.get("STRIPE_PRICE_ID_STARTER", ""),
         "notes": (f"{BILLING_TIER_5K_UNITS:,} units · ${BILLING_TIER_5K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
     },
     "team": {
@@ -65,6 +69,7 @@ PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
         "price_cents": BILLING_TIER_25K_PRICE_USD * 100,
         "tokens_per_unit": TOKENS_PER_UNIT,
         "token_coverage": BILLING_TIER_25K_UNITS * TOKENS_PER_UNIT,
+        "stripe_price_id": os.environ.get("STRIPE_PRICE_ID_TEAM", ""),
         "notes": (f"{BILLING_TIER_25K_UNITS:,} units · ${BILLING_TIER_25K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
     },
     "enterprise": {
@@ -74,6 +79,7 @@ PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
         "price_cents": BILLING_TIER_60K_PRICE_USD * 100,
         "tokens_per_unit": TOKENS_PER_UNIT,
         "token_coverage": BILLING_TIER_60K_UNITS * TOKENS_PER_UNIT,
+        "stripe_price_id": os.environ.get("STRIPE_PRICE_ID_ENTERPRISE", ""),
         "notes": (f"{BILLING_TIER_60K_UNITS:,} units · ${BILLING_TIER_60K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
     },
 }
@@ -81,6 +87,40 @@ PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
 
 def _get_environment() -> str:
     return os.environ.get("IRONCLAW_ENV", os.environ.get("APP_ENV", "production"))
+
+
+# ---------------------------------------------------------------------------
+# Stripe helpers
+# ---------------------------------------------------------------------------
+
+
+def _stripe_mode() -> str | None:
+    """Return 'live', 'test', or None when the key is absent/invalid."""
+    key = os.environ.get("STRIPE_API_KEY", "")
+    if key.startswith("sk_live_"):
+        return "live"
+    if key.startswith("sk_test_"):
+        return "test"
+    return None
+
+
+def _stripe_connection_note() -> str:
+    mode = _stripe_mode()
+    if mode:
+        return f"Stripe is connected and active (mode: {mode})."
+    return "Stripe API key is not configured — payment processing is unavailable."
+
+
+def _stripe_webhook_secret_note() -> str:
+    secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+    if secret and secret.startswith("whsec_"):
+        return "Stripe webhook secret is configured."
+    return "Stripe webhook secret (STRIPE_WEBHOOK_SECRET) is not configured — webhook signature verification is disabled."
+
+
+# ---------------------------------------------------------------------------
+# Pydantic models
+# ---------------------------------------------------------------------------
 
 
 class BillingPaymentMethodView(BaseModel):
@@ -112,6 +152,7 @@ class PackageCatalogueEntry(BaseModel):
     price_cents: int
     tokens_per_unit: int
     token_coverage: int
+    stripe_price_id: str
     notes: str
 
 
@@ -120,6 +161,8 @@ class BillingPaymentMethodsResponse(BaseModel):
     environment: str
     organizationid: str
     organizationname: str
+    stripe_customer_id: str | None
+    stripe_mode: str | None
     defaultmethodid: str | None
     methods: list[BillingPaymentMethodView] = Field(default_factory=list)
     methodcount: int
@@ -137,6 +180,50 @@ class BillingPaymentMethodsNotFoundResponse(BaseModel):
     message: str
     generatedat: str
     environment: str
+
+
+class AddPaymentMethodRequest(BaseModel):
+    stripe_payment_method_id: str = Field(
+        ...,
+        description="Stripe PaymentMethod ID (pm_...) returned by Stripe.js or the Stripe API.",
+    )
+    set_as_default: bool = Field(
+        default=False,
+        description="If true, mark this method as the organization default.",
+    )
+
+
+class AddPaymentMethodResponse(BaseModel):
+    status: str
+    methodid: str
+    organizationid: str
+    set_as_default: bool
+    generatedat: str
+    environment: str
+    message: str
+
+
+class SetDefaultPaymentMethodResponse(BaseModel):
+    status: str
+    methodid: str
+    organizationid: str
+    generatedat: str
+    environment: str
+    message: str
+
+
+class DeletePaymentMethodResponse(BaseModel):
+    status: str
+    methodid: str
+    organizationid: str
+    generatedat: str
+    environment: str
+    message: str
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 
 def _utc_iso(year: int, month: int, day: int, hour: int, minute: int = 0) -> str:
@@ -191,7 +278,9 @@ def _resolve_default_method_id(methods: list[BillingPaymentMethodView]) -> str |
     return None
 
 
-def _build_status_counts(methods: list[BillingPaymentMethodView]) -> list[BillingPaymentMethodStatusCount]:
+def _build_status_counts(
+    methods: list[BillingPaymentMethodView],
+) -> list[BillingPaymentMethodStatusCount]:
     counts: dict[str, int] = {}
     for m in methods:
         counts[m.status] = counts.get(m.status, 0) + 1
@@ -205,7 +294,9 @@ def _build_status_counts(methods: list[BillingPaymentMethodView]) -> list[Billin
     ]
 
 
-def _fetch_org_payment_methods(organizationid: str) -> list[BillingPaymentMethodView] | None:
+def _fetch_org_payment_methods(
+    organizationid: str,
+) -> list[BillingPaymentMethodView] | None:
     """
     Query Supabase for payment methods belonging to the given organizationid.
     Returns a list of BillingPaymentMethodView on success, or None if Supabase
@@ -255,12 +346,100 @@ def _fetch_org_name(organizationid: str) -> str | None:
         return None
 
 
-def _stripe_connection_note() -> str:
-    stripe_key = os.environ.get("STRIPE_API_KEY", "")
-    if stripe_key and stripe_key.startswith(("sk_live_", "sk_test_")):
-        mode = "live" if stripe_key.startswith("sk_live_") else "test"
-        return f"Stripe is connected and active (mode: {mode})."
-    return "Stripe API key is not configured — payment processing is unavailable."
+def _fetch_stripe_customer_id(organizationid: str) -> str | None:
+    """
+    Query Supabase for the stripe_customer_id on the organization record.
+    Returns None if unavailable or not set.
+    """
+    if not is_supabase_configured():
+        return None
+    try:
+        client = get_supabase_client()
+        rows = client.table("organizations").select("stripe_customer_id").eq("id", organizationid).limit(1).execute().data
+        if rows:
+            val = rows[0].get("stripe_customer_id")
+            return str(val) if val else None
+        return None
+    except Exception:
+        return None
+
+
+def _insert_payment_method_record(
+    organizationid: str,
+    stripe_payment_method_id: str,
+    set_as_default: bool,
+) -> str | None:
+    """
+    Insert a payment_methods row into Supabase and return the new row id.
+    If set_as_default is True, clears is_default on all existing rows first.
+    Returns the new row's id string or None on failure.
+    """
+    if not is_supabase_configured():
+        return None
+    try:
+        client = get_supabase_client()
+        if set_as_default:
+            client.table("payment_methods").update({"is_default": False}).eq("organization_id", organizationid).execute()
+        payload: dict[str, Any] = {
+            "organization_id": organizationid,
+            "stripe_payment_method_id": stripe_payment_method_id,
+            "type": "card",
+            "brand": "",
+            "last4": "",
+            "exp_month": 0,
+            "exp_year": 0,
+            "is_default": set_as_default,
+            "status": "active",
+            "created_at": datetime.now(UTC).isoformat(),
+        }
+        rows = client.table("payment_methods").insert(payload).execute().data
+        if rows:
+            return str(rows[0].get("id", ""))
+        return None
+    except Exception:
+        return None
+
+
+def _set_default_method_in_db(
+    organizationid: str,
+    methodid: str,
+) -> bool:
+    """
+    Set is_default=True on the target row and False on all others.
+    Returns True on success, False on failure.
+    """
+    if not is_supabase_configured():
+        return False
+    try:
+        client = get_supabase_client()
+        client.table("payment_methods").update({"is_default": False}).eq("organization_id", organizationid).execute()
+        client.table("payment_methods").update({"is_default": True}).eq("id", methodid).eq("organization_id", organizationid).execute()
+        return True
+    except Exception:
+        return False
+
+
+def _delete_method_from_db(
+    organizationid: str,
+    methodid: str,
+) -> bool:
+    """
+    Delete the payment_methods row matching methodid and organizationid.
+    Returns True on success, False on failure.
+    """
+    if not is_supabase_configured():
+        return False
+    try:
+        client = get_supabase_client()
+        client.table("payment_methods").delete().eq("id", methodid).eq("organization_id", organizationid).execute()
+        return True
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
 
 
 @router.get(
@@ -270,10 +449,14 @@ def _stripe_connection_note() -> str:
 def get_payment_methods(
     organizationid: str = "org-001",
 ) -> BillingPaymentMethodsResponse | BillingPaymentMethodsNotFoundResponse:
+    if not organizationid or not organizationid.strip():
+        organizationid = "org-001"
+
     env = _get_environment()
 
     sb_methods = _fetch_org_payment_methods(organizationid)
     sb_org_name = _fetch_org_name(organizationid)
+    sb_stripe_customer_id = _fetch_stripe_customer_id(organizationid)
 
     if sb_methods is None and not is_supabase_configured():
         return BillingPaymentMethodsNotFoundResponse(
@@ -304,21 +487,25 @@ def get_payment_methods(
     active_count = sum(1 for m in methods if m.status == "active")
     expired_count = sum(1 for m in methods if m.status == "expired")
     revoked_count = sum(1 for m in methods if m.status == "revoked")
+    pending_count = sum(1 for m in methods if m.status == "pending")
 
     notes = [
         f"Organization '{organizationid}' has {methodcount} payment method(s) on file.",
-        f"Active: {active_count}. Expired: {expired_count}. Revoked: {revoked_count}.",
+        f"Active: {active_count}. Expired: {expired_count}. Revoked: {revoked_count}. Pending: {pending_count}.",
         f"Maximum allowed payment methods per organization is {_MAX_METHODS}.",
         f"canaddnew is {'true' if canaddnew else 'false'} — organization {'can' if canaddnew else 'cannot'} add new payment methods.",
-        "statuscolor maps payment method status to a UI hint: success (active), warning (expired), error (revoked).",
+        "statuscolor maps payment method status to a UI hint: success (active), warning (expired), error (revoked), info (pending).",
         f"Each protection unit covers up to {TOKENS_PER_UNIT:,} tokens. Partial token chunks consume a full additional unit.",
         _stripe_connection_note(),
+        _stripe_webhook_secret_note(),
     ]
 
     if expired_count > 0:
         notes.append("One or more payment methods are expired. Prompt the user to update billing details.")
     if revoked_count > 0:
         notes.append("One or more payment methods have been revoked and cannot be used for future charges.")
+    if pending_count > 0:
+        notes.append("One or more payment methods are pending verification.")
 
     catalogue_out: dict[str, PackageCatalogueEntry] = {k: PackageCatalogueEntry(**v) for k, v in PACKAGE_CATALOGUE.items()}
 
@@ -327,6 +514,8 @@ def get_payment_methods(
         environment=env,
         organizationid=organizationid,
         organizationname=org_name,
+        stripe_customer_id=sb_stripe_customer_id,
+        stripe_mode=_stripe_mode(),
         defaultmethodid=defaultmethodid,
         methods=methods,
         methodcount=methodcount,
@@ -336,4 +525,140 @@ def get_payment_methods(
         tokens_per_unit=TOKENS_PER_UNIT,
         package_catalogue=catalogue_out,
         notes=notes,
+    )
+
+
+@router.post(
+    "/payment-methods",
+    response_model=AddPaymentMethodResponse,
+    status_code=201,
+)
+def add_payment_method(
+    body: AddPaymentMethodRequest,
+    organizationid: str = "org-001",
+) -> AddPaymentMethodResponse:
+    """
+    Attach a Stripe PaymentMethod to the organization and persist the record
+    in Supabase. The caller must supply the Stripe PaymentMethod ID (pm_...)
+    obtained from Stripe.js or the Stripe API before calling this endpoint.
+    """
+    if not organizationid or not organizationid.strip():
+        raise HTTPException(status_code=422, detail="organizationid is required.")
+
+    env = _get_environment()
+
+    if not is_supabase_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Supabase is not configured — payment method cannot be persisted.",
+        )
+
+    existing = _fetch_org_payment_methods(organizationid)
+    if existing is not None and len(existing) >= _MAX_METHODS:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"Organization '{organizationid}' has reached the maximum of {_MAX_METHODS} payment methods. Remove an existing method before adding a new one."),
+        )
+
+    new_id = _insert_payment_method_record(
+        organizationid=organizationid,
+        stripe_payment_method_id=body.stripe_payment_method_id,
+        set_as_default=body.set_as_default,
+    )
+
+    if new_id is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to persist the payment method. Please try again.",
+        )
+
+    return AddPaymentMethodResponse(
+        status="created",
+        methodid=new_id,
+        organizationid=organizationid,
+        set_as_default=body.set_as_default,
+        generatedat=datetime.now(UTC).isoformat(),
+        environment=env,
+        message=(f"Payment method '{new_id}' has been added to organization '{organizationid}'." + (" Set as default." if body.set_as_default else "")),
+    )
+
+
+@router.patch(
+    "/payment-methods/{methodid}/default",
+    response_model=SetDefaultPaymentMethodResponse,
+)
+def set_default_payment_method(
+    methodid: str,
+    organizationid: str = "org-001",
+) -> SetDefaultPaymentMethodResponse:
+    """
+    Set the specified payment method as the default for the organization.
+    Clears is_default on all other methods for this organization.
+    """
+    if not organizationid or not organizationid.strip():
+        raise HTTPException(status_code=422, detail="organizationid is required.")
+
+    env = _get_environment()
+
+    if not is_supabase_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Supabase is not configured — cannot update payment method.",
+        )
+
+    success = _set_default_method_in_db(organizationid=organizationid, methodid=methodid)
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to set method '{methodid}' as default. Please try again.",
+        )
+
+    return SetDefaultPaymentMethodResponse(
+        status="updated",
+        methodid=methodid,
+        organizationid=organizationid,
+        generatedat=datetime.now(UTC).isoformat(),
+        environment=env,
+        message=f"Payment method '{methodid}' is now the default for organization '{organizationid}'.",
+    )
+
+
+@router.delete(
+    "/payment-methods/{methodid}",
+    response_model=DeletePaymentMethodResponse,
+)
+def delete_payment_method(
+    methodid: str,
+    organizationid: str = "org-001",
+) -> DeletePaymentMethodResponse:
+    """
+    Remove a payment method record from Supabase.
+    Does not call Stripe directly — the caller is responsible for detaching
+    the PaymentMethod in Stripe before or after this call.
+    """
+    if not organizationid or not organizationid.strip():
+        raise HTTPException(status_code=422, detail="organizationid is required.")
+
+    env = _get_environment()
+
+    if not is_supabase_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Supabase is not configured — cannot delete payment method.",
+        )
+
+    success = _delete_method_from_db(organizationid=organizationid, methodid=methodid)
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete method '{methodid}'. Please try again.",
+        )
+
+    return DeletePaymentMethodResponse(
+        status="deleted",
+        methodid=methodid,
+        organizationid=organizationid,
+        generatedat=datetime.now(UTC).isoformat(),
+        environment=env,
+        message=f"Payment method '{methodid}' has been removed from organization '{organizationid}'.",
     )
