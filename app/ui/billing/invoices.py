@@ -7,6 +7,8 @@ from typing import Literal
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.ui.billing.package import StripeStatus, _get_environment, _get_stripe_status
+
 router = APIRouter(
     prefix="/ui/billing",
     tags=["billing-invoices"],
@@ -75,6 +77,7 @@ class BillingInvoiceListFilters(BaseModel):
 class BillingInvoiceListResponse(BaseModel):
     generatedat: str
     environment: str
+    stripe: StripeStatus
     totalcount: int
     page: int
     pagesize: int
@@ -307,6 +310,7 @@ def get_billing_invoices(
     sortby: str = "issuedat",
     sortdir: Literal["asc", "desc"] = "desc",
 ) -> BillingInvoiceListResponse:
+    stripe = _get_stripe_status()
     all_inv = _all_invoices()
     status_counts = _build_status_counts(all_inv)
     filtered = _apply_filters(all_inv, status, organizationid)
@@ -320,7 +324,8 @@ def get_billing_invoices(
 
     return BillingInvoiceListResponse(
         generatedat=datetime.now(UTC).isoformat(),
-        environment="local",
+        environment=_get_environment(),
+        stripe=stripe,
         totalcount=totalcount,
         page=page,
         pagesize=pagesize,
@@ -345,6 +350,7 @@ def get_billing_invoices(
             "sortby accepts: issuedat, dueat, total, status, organizationid. Default: issuedat desc.",
             "totalrevenuecents and totalrevenuedisplay reflect paid invoices in the filtered (pre-pagination) set.",
             "downloadurl is present for paid invoices; null for draft and void invoices.",
+            stripe.note,
             "All values are placeholder UI contract data for the current local-first Gen1 build.",
             "This page is ready to be wired to a live invoice persistence layer.",
         ],
@@ -363,7 +369,7 @@ def get_invoice_download(invoiceid: str) -> BillingInvoiceDownloadResponse:
             available=False,
             message=f"Invoice '{invoiceid}' was not found.",
             generatedat=datetime.now(UTC).isoformat(),
-            environment="local",
+            environment=_get_environment(),
         )
     inv_map = {inv.invoiceid: inv for inv in _all_invoices()}
     inv = inv_map.get(invoiceid)
@@ -374,5 +380,5 @@ def get_invoice_download(invoiceid: str) -> BillingInvoiceDownloadResponse:
         available=has_download,
         message=(f"Download available for invoice '{invoiceid}'." if has_download else f"No PDF download available for invoice '{invoiceid}' (status: {inv.status if inv else 'unknown'})."),
         generatedat=datetime.now(UTC).isoformat(),
-        environment="local",
+        environment=_get_environment(),
     )
