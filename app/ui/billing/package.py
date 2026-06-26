@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import UTC, datetime
+import logging
 import math
 import os
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.supabaseclient import (
@@ -20,6 +21,8 @@ from app.supabaseclient import (
     get_supabase_client,
     is_supabase_configured,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/ui/billing",
@@ -39,6 +42,9 @@ _USAGE_STATUS_COLOR: dict[str, str] = {
     "warning": "warning",
     "critical": "error",
 }
+
+_VALID_STATUSES: frozenset[str] = frozenset(_STATUS_COLOR.keys())
+_VALID_PLANS: frozenset[str] = frozenset({"starter", "team", "enterprise"})
 
 # ---------------------------------------------------------------------------
 # Package catalogue — single source of truth imported from supabaseclient
@@ -82,6 +88,49 @@ _PLAN_UNITS: dict[str, int] = {plan: meta["units"] for plan, meta in PACKAGE_CAT
 _PLAN_PRICE_CENTS: dict[str, int] = {plan: meta["price_cents"] for plan, meta in PACKAGE_CATALOGUE.items()}
 
 
+# ---------------------------------------------------------------------------
+# Stripe mode detection — single source of truth for this module
+# ---------------------------------------------------------------------------
+
+
+class StripeStatus(BaseModel):
+    configured: bool
+    mode: str  # "live" | "test" | "unconfigured"
+    note: str
+
+
+def _get_stripe_status() -> StripeStatus:
+    """
+    Inspect STRIPE_API_KEY and return a structured StripeStatus.
+    - sk_live_* → live mode (production)
+    - sk_test_* → test mode
+    - anything else → unconfigured
+    """
+    key = os.environ.get("STRIPE_API_KEY", "").strip()
+    if key.startswith("sk_live_"):
+        return StripeStatus(
+            configured=True,
+            mode="live",
+            note="Stripe is connected and active (mode: live). Real payment processing is enabled.",
+        )
+    if key.startswith("sk_test_"):
+        return StripeStatus(
+            configured=True,
+            mode="test",
+            note="Stripe is connected in test mode. Switch to a live key before going to production.",
+        )
+    return StripeStatus(
+        configured=False,
+        mode="unconfigured",
+        note="Stripe API key is not configured — payment processing is unavailable.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public helper
+# ---------------------------------------------------------------------------
+
+
 def units_for_tokens(token_count: int) -> int:
     """
     Return the number of protection units required to cover token_count tokens.
@@ -101,6 +150,11 @@ def units_for_tokens(token_count: int) -> int:
 
 def _get_environment() -> str:
     return os.environ.get("IRONCLAW_ENV", os.environ.get("APP_ENV", "production"))
+
+
+# ---------------------------------------------------------------------------
+# Response models
+# ---------------------------------------------------------------------------
 
 
 class BillingCurrencyAmountView(BaseModel):
@@ -169,6 +223,7 @@ class PackageCatalogueEntry(BaseModel):
 class BillingPackageListResponse(BaseModel):
     generatedat: str
     environment: str
+    stripe: StripeStatus
     totalcount: int
     page: int
     pagesize: int
@@ -179,6 +234,11 @@ class BillingPackageListResponse(BaseModel):
     tokens_per_unit: int
     package_catalogue: dict[str, PackageCatalogueEntry] = Field(default_factory=dict)
     notes: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 
 def _utc_iso(year: int, month: int, day: int, hour: int, minute: int = 0) -> str:
@@ -319,6 +379,7 @@ def _fetch_packages_from_supabase() -> list[BillingPackageListItem] | None:
             )
         return items
     except Exception:
+        logger.exception("Failed to fetch billing packages from Supabase")
         return None
 
 
@@ -477,11 +538,11 @@ def _build_status_counts(
     counts = Counter(pkg.status for pkg in packages)
     return [
         BillingPackageStatusCount(
-            status=status,
-            count=count,
-            statuscolor=_status_color(status),
+            status=s,
+            count=c,
+            statuscolor=_status_color(s),
         )
-        for status, count in sorted(counts.items())
+        for s, c in sorted(counts.items())
     ]
 
 
@@ -489,7 +550,7 @@ def _build_plan_counts(
     packages: list[BillingPackageListItem],
 ) -> list[BillingPackagePlanCount]:
     counts = Counter(pkg.plan for pkg in packages)
-    return [BillingPackagePlanCount(plan=plan, count=count) for plan, count in sorted(counts.items())]
+    return [BillingPackagePlanCount(plan=p, count=c) for p, c in sorted(counts.items())]
 
 
 def _apply_filters(
@@ -516,35 +577,46 @@ def _paginate_packages(
     return packages[start : start + pagesize]
 
 
+# ---------------------------------------------------------------------------
+# Route
+# ---------------------------------------------------------------------------
+
+
 @router.get("/packages", response_model=BillingPackageListResponse)
 def get_billing_packages(
-    status: str | None = None,
-    plan: str | None = None,
-    organizationid: str | None = None,
-    page: int = 1,
-    pagesize: int = 25,
+    status: str | None = Query(default=None),
+    plan: str | None = Query(default=None),
+    organizationid: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    pagesize: int = Query(default=25, ge=1, le=100),
 ) -> BillingPackageListResponse:
+    # Validate enum-like query params to return 422 instead of silent empty results
+    if status is not None and status not in _VALID_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid status '{status}'. Valid values: {sorted(_VALID_STATUSES)}",
+        )
+    if plan is not None and plan not in _VALID_PLANS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid plan '{plan}'. Valid values: {sorted(_VALID_PLANS)}",
+        )
+
     all_pkgs = _all_packages()
     status_counts = _build_status_counts(all_pkgs)
     plan_counts = _build_plan_counts(all_pkgs)
     filtered = _apply_filters(all_pkgs, status, plan, organizationid)
     totalcount = len(filtered)
-    page = max(1, page)
-    pagesize = max(1, min(pagesize, 100))
     paginated = _paginate_packages(filtered, page, pagesize)
 
     catalogue_out: dict[str, PackageCatalogueEntry] = {k: PackageCatalogueEntry(**v) for k, v in PACKAGE_CATALOGUE.items()}
 
-    stripe_key = os.environ.get("STRIPE_API_KEY", "")
-    if stripe_key and stripe_key.startswith(("sk_live_", "sk_test_")):
-        mode = "live" if stripe_key.startswith("sk_live_") else "test"
-        stripe_note = f"Stripe is connected and active (mode: {mode})."
-    else:
-        stripe_note = "Stripe API key is not configured — payment processing is unavailable."
+    stripe = _get_stripe_status()
 
     return BillingPackageListResponse(
         generatedat=datetime.now(UTC).isoformat(),
         environment=_get_environment(),
+        stripe=stripe,
         totalcount=totalcount,
         page=page,
         pagesize=pagesize,
@@ -569,7 +641,7 @@ def get_billing_packages(
             f"Each protection unit covers up to {TOKENS_PER_UNIT:,} tokens. Partial token chunks consume a full additional unit (ceiling division).",
             f"Canonical plans: starter ({BILLING_TIER_5K_UNITS:,} units / ${BILLING_TIER_5K_PRICE_USD}), team ({BILLING_TIER_25K_UNITS:,} units / ${BILLING_TIER_25K_PRICE_USD}), enterprise ({BILLING_TIER_60K_UNITS:,} units / ${BILLING_TIER_60K_PRICE_USD}).",
             "Pagination is 1-indexed. Default pagesize is 25, maximum is 100.",
-            stripe_note,
+            stripe.note,
             "Dedicated billing overview available at /ui/billing/overview. Invoice list available at /ui/billing/invoices.",
         ],
     )
