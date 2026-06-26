@@ -82,6 +82,13 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
 
     # ------------------------------------------------------------------
+    # Stripe
+    # ------------------------------------------------------------------
+    stripe_api_key: str = Field(default="", alias="STRIPE_API_KEY")
+    stripe_publishable_key: str = Field(default="", alias="STRIPE_PUBLISHABLE_KEY")
+    stripe_webhook_secret: str = Field(default="", alias="STRIPE_WEBHOOK_SECRET")
+
+    # ------------------------------------------------------------------
     # Policy / verdict defaults
     # ------------------------------------------------------------------
     default_scan_verdict: str = Field(default="allow", alias="DEFAULT_SCAN_VERDICT")
