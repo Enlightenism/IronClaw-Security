@@ -220,6 +220,7 @@ const Dashboard = () => {
             hasPaid={data?.has_paid}
             onPurchase={handlePurchase}
             purchasingId={purchasingId}
+            organizationId={data?.organization_id ?? "org-001"}
           />
           <div className="lg:row-span-2">
             <SecurityAnalysis
