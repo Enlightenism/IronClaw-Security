@@ -23,21 +23,32 @@ os.environ.setdefault("SUPABASE_KEY", "")
 os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
 from app.services.stripe_service import (
+    PACKAGE_CATALOGUE,
     CheckoutSessionResponse,
+    InvoiceResponse,
+    PaymentMethodResponse,
     StripeAPIError,
     StripeBillingInterval,
     StripeCheckoutMode,
     StripeConfigError,
+    StripeIdempotencyError,
+    StripeInsufficientUnitsError,
+    StripePaymentMethodNotFoundError,
     StripeService,
     StripeServiceError,
     StripeSubscriptionStatus,
     StripeUnitEventReason,
+    StripeWebhookEventType,
+    StripeWebhookSignatureError,
     SubscriptionResponse,
+    UnitBalanceResponse,
+    WebhookVerifyResult,
     _new_id,
     _StripeHTTPClient,
     _utcnow_iso,
     get_stripe_service,
     reset_stripe_service,
+    units_for_tokens,
 )
 from app.supabaseclient import (
     BILLING_TIER_5K_PRICE_USD,
@@ -62,6 +73,8 @@ _TEST_SUB_ID = "sub_test_abc123"
 _TEST_SESSION_ID = "cs_test_abc123"
 _TEST_WEBHOOK_SECRET = "whsec_testsecret1234567890abcdefghij"
 _TEST_API_KEY = "sk_test_ironclaw_key_abc123456789"
+_TEST_PM_ID = "pm_test_abc123"
+_TEST_PM_ID_2 = "pm_test_def456"
 
 # ---------------------------------------------------------------------------
 # Package catalogue test constants — derived from supabaseclient single source
@@ -139,6 +152,50 @@ def _mock_subscription_obj(
                 }
             ]
         },
+    }
+
+
+def _mock_pm_resp(
+    pm_id: str = _TEST_PM_ID,
+    customer_id: str = _TEST_CUSTOMER_ID,
+    brand: str = "visa",
+    last4: str = "4242",
+    exp_month: int = 12,
+    exp_year: int = 2030,
+) -> dict[str, Any]:
+    return {
+        "id": pm_id,
+        "type": "card",
+        "customer": customer_id,
+        "card": {
+            "brand": brand,
+            "last4": last4,
+            "exp_month": exp_month,
+            "exp_year": exp_year,
+        },
+    }
+
+
+def _mock_invoice_list(
+    customer_id: str = _TEST_CUSTOMER_ID,
+    count: int = 2,
+) -> dict[str, Any]:
+    now = int(time.time())
+    return {
+        "data": [
+            {
+                "id": f"in_test_{i}",
+                "customer": customer_id,
+                "subscription": _TEST_SUB_ID,
+                "amount_paid": 2000,
+                "currency": "usd",
+                "status": "paid",
+                "invoice_pdf": f"https://stripe.com/invoice_{i}.pdf",
+                "hosted_invoice_url": f"https://invoice.stripe.com/{i}",
+                "created": now - (i * 86400),
+            }
+            for i in range(count)
+        ]
     }
 
 
@@ -303,6 +360,11 @@ class TestCustomerManagement:
         svc_with_client.get_or_create_stripe_customer("org-y")
         assert mock_client.post.call_count == 2
 
+    def test_get_or_create_customer_stores_mapping(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = {"id": "cus_mapped"}
+        svc_with_client.get_or_create_stripe_customer("org-mapped")
+        assert svc_with_client.resolve_org_from_customer("cus_mapped") == "org-mapped"
+
 
 # ===========================================================================
 # Section 5 — Checkout session creation
@@ -411,6 +473,16 @@ class TestCheckoutSessionCreation:
         results = svc_with_client.list_checkout_sessions(org_id="org-alpha")
         assert all(s["org_id"] == "org-alpha" for s in results)
 
+    def test_create_checkout_session_response_has_schema_version(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = _mock_session_resp()
+        resp = svc_with_client.create_checkout_session(
+            org_id=_TEST_ORG,
+            price_id=_TEST_PRICE_ID,
+            success_url=_TEST_SUCCESS_URL,
+            cancel_url=_TEST_CANCEL_URL,
+        )
+        assert resp.schema_version == "1.0"
+
 
 # ===========================================================================
 # Section 6 — Unit balance ledger
@@ -441,10 +513,18 @@ class TestUnitBalanceLedger:
         resp = svc.debit_units(_TEST_ORG, _PKG_STARTER_UNITS, StripeUnitEventReason.METERED_SYNC)
         assert resp.balance == _PKG_TEAM_UNITS - _PKG_STARTER_UNITS
 
-    def test_debit_units_insufficient_raises(self, svc: StripeService) -> None:
+    def test_debit_units_insufficient_raises_specific_error(self, svc: StripeService) -> None:
         svc.credit_units(_TEST_ORG, 10, StripeUnitEventReason.CHECKOUT_COMPLETE)
-        with pytest.raises(StripeServiceError, match="insufficient"):
+        with pytest.raises(StripeInsufficientUnitsError) as exc_info:
             svc.debit_units(_TEST_ORG, 11, StripeUnitEventReason.METERED_SYNC)
+        assert exc_info.value.org_id == _TEST_ORG
+        assert exc_info.value.have == 10
+        assert exc_info.value.need == 11
+
+    def test_debit_units_insufficient_is_stripe_service_error(self, svc: StripeService) -> None:
+        svc.credit_units(_TEST_ORG, 5, StripeUnitEventReason.CHECKOUT_COMPLETE)
+        with pytest.raises(StripeServiceError, match="insufficient"):
+            svc.debit_units(_TEST_ORG, 10, StripeUnitEventReason.METERED_SYNC)
 
     def test_debit_units_zero_raises(self, svc: StripeService) -> None:
         with pytest.raises(StripeServiceError):
@@ -458,6 +538,10 @@ class TestUnitBalanceLedger:
         svc.credit_units(_TEST_ORG, _PKG_TEAM_UNITS, StripeUnitEventReason.MANUAL_CREDIT)
         resp = svc.get_unit_balance(_TEST_ORG)
         assert resp.balance == _PKG_TEAM_UNITS
+
+    def test_get_unit_balance_returns_unit_balance_response(self, svc: StripeService) -> None:
+        resp = svc.get_unit_balance(_TEST_ORG)
+        assert isinstance(resp, UnitBalanceResponse)
 
     def test_adjust_unit_balance_sets_exact_value(self, svc: StripeService) -> None:
         svc.credit_units(_TEST_ORG, _PKG_STARTER_UNITS, StripeUnitEventReason.CHECKOUT_COMPLETE)
@@ -511,6 +595,19 @@ class TestUnitBalanceLedger:
         for t in threads:
             t.join()
         assert errors == []
+
+    def test_insufficient_units_callback_invoked(self) -> None:
+        cb_calls: list[tuple[str, int, int]] = []
+
+        def _cb(org_id: str, have: int, need: int) -> None:
+            cb_calls.append((org_id, have, need))
+
+        svc = StripeService(on_insufficient_units=_cb)
+        svc.credit_units(_TEST_ORG, 5, StripeUnitEventReason.CHECKOUT_COMPLETE)
+        with pytest.raises(StripeInsufficientUnitsError):
+            svc.debit_units(_TEST_ORG, 10, StripeUnitEventReason.METERED_SYNC)
+        assert len(cb_calls) == 1
+        assert cb_calls[0] == (_TEST_ORG, 5, 10)
 
 
 # ===========================================================================
@@ -573,6 +670,10 @@ class TestSubscriptionLifecycle:
         self._upsert(svc, status=StripeSubscriptionStatus.TRIALING)
         assert svc.get_active_subscription_for_org(_TEST_ORG) is not None
 
+    def test_get_active_subscription_past_due_included(self, svc: StripeService) -> None:
+        self._upsert(svc, status=StripeSubscriptionStatus.PAST_DUE)
+        assert svc.get_active_subscription_for_org(_TEST_ORG) is not None
+
     def test_cancel_subscription_marks_canceled(self, svc: StripeService) -> None:
         self._upsert(svc)
         resp = svc.cancel_subscription(_TEST_SUB_ID)
@@ -609,6 +710,10 @@ class TestSubscriptionLifecycle:
         mock_client.post.assert_called_once()
         call_path = mock_client.post.call_args[0][0]
         assert _TEST_SUB_ID in call_path
+
+    def test_subscription_response_has_schema_version(self, svc: StripeService) -> None:
+        resp = self._upsert(svc)
+        assert resp.schema_version == "1.0"
 
 
 # ===========================================================================
@@ -687,6 +792,11 @@ class TestMeteredUsage:
         call_kwargs = mock_client.post.call_args[1]
         assert call_kwargs.get("idempotency_key") == "idem-abc-123"
 
+    def test_report_metered_usage_response_has_schema_version(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = {"id": "mbur_sv"}
+        resp = svc_with_client.report_metered_usage(_TEST_ORG, "si_sv", quantity=1)
+        assert resp.schema_version == "1.0"
+
 
 # ===========================================================================
 # Section 9 — Webhook signature verification
@@ -714,6 +824,13 @@ class TestWebhookSignatureVerification:
         assert result.valid is True
         assert result.event_type == "checkout.session.completed"
         assert result.event_id == "evt_1"
+
+    def test_verify_webhook_returns_webhook_verify_result(self, svc: StripeService) -> None:
+        payload = b'{"id":"evt_vr","type":"invoice.paid","data":{"object":{}}}'
+        sig = _make_stripe_sig(_TEST_WEBHOOK_SECRET, payload)
+        with patch("app.services.stripe_service.vault", self._patch_vault()):
+            result = svc.verify_webhook_signature(payload, sig)
+        assert isinstance(result, WebhookVerifyResult)
 
     def test_wrong_secret_returns_invalid(self, svc: StripeService) -> None:
         payload = b'{"id":"evt_2","type":"invoice.paid","data":{"object":{}}}'
@@ -897,6 +1014,22 @@ class TestWebhookEventDispatch:
         assert result["action"] == "error"
         assert "boom" in result["error"]
 
+    def test_customer_created_registers_mapping(self, svc: StripeService) -> None:
+        obj = {"id": _TEST_CUSTOMER_ID, "metadata": {"org_id": _TEST_ORG}}
+        svc.handle_webhook_event(self._event("customer.created", obj))
+        assert svc.resolve_org_from_customer(_TEST_CUSTOMER_ID) == _TEST_ORG
+
+    def test_charge_refunded_credits_units(self, svc: StripeService) -> None:
+        svc.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        svc.credit_units(_TEST_ORG, _PKG_STARTER_UNITS, StripeUnitEventReason.CHECKOUT_COMPLETE)
+        obj = {
+            "id": "ch_refund_1",
+            "customer": _TEST_CUSTOMER_ID,
+            "metadata": {"unit_credits": str(_PKG_STARTER_UNITS)},
+        }
+        result = svc.handle_webhook_event(self._event("charge.refunded", obj))
+        assert result["action"] in ("processed", "ignored")
+
 
 # ===========================================================================
 # Section 11 — Reset / state isolation
@@ -938,6 +1071,19 @@ class TestServiceReset:
         svc._override_client(mock_client)
         svc.reset()
         assert svc._client is None
+
+    def test_reset_clears_payment_methods(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = _mock_pm_resp()
+        svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
+        svc_with_client.reset()
+        assert svc_with_client.list_payment_methods(_TEST_CUSTOMER_ID) == []
+
+    def test_reset_clears_invoice_cache(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        svc_with_client.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        mock_client.get.return_value = _mock_invoice_list()
+        svc_with_client.get_invoices_for_org(_TEST_ORG)
+        svc_with_client.reset()
+        assert svc_with_client._invoice_cache == {}
 
     def test_module_reset_clears_singleton_state(self) -> None:
         svc = get_stripe_service()
@@ -1019,6 +1165,29 @@ class TestStripeHTTPClient:
 
         assert exc_info.value.http_status == 404
 
+    def test_stripe_api_error_stores_http_status(self) -> None:
+        err = StripeAPIError("rate limited", http_status=429, stripe_code="rate_limit")
+        assert err.http_status == 429
+        assert err.stripe_code == "rate_limit"
+
+    def test_stripe_api_error_is_stripe_service_error(self) -> None:
+        err = StripeAPIError("oops")
+        assert isinstance(err, StripeServiceError)
+
+    def test_delete_raises_stripe_api_error_on_http_error(self) -> None:
+        import urllib.error
+
+        client = _StripeHTTPClient(_TEST_API_KEY)
+        error_body = json.dumps({"error": {"message": "forbidden", "code": "forbidden"}}).encode()
+        http_err = urllib.error.HTTPError(url="", code=403, msg="Forbidden", hdrs=None, fp=None)  # type: ignore[arg-type]
+        http_err.read = lambda: error_body  # type: ignore[method-assign]
+
+        with patch("urllib.request.urlopen", side_effect=http_err):
+            with pytest.raises(StripeAPIError) as exc_info:
+                client.delete("/payment_methods/pm_gone")
+
+        assert exc_info.value.http_status == 403
+
 
 # ===========================================================================
 # Section 13 — Package catalogue correctness
@@ -1071,6 +1240,23 @@ class TestPackageCatalogue:
     def test_tier_ordering_by_price(self) -> None:
         assert _PKG_STARTER_PRICE_USD < _PKG_TEAM_PRICE_USD < _PKG_ENTERPRISE_PRICE_USD
 
+    def test_package_catalogue_has_three_tiers(self) -> None:
+        assert set(PACKAGE_CATALOGUE.keys()) == {"starter", "team", "enterprise"}
+
+    def test_package_catalogue_starter_units_match_constant(self) -> None:
+        assert PACKAGE_CATALOGUE["starter"]["units"] == _PKG_STARTER_UNITS
+
+    def test_package_catalogue_team_price_matches_constant(self) -> None:
+        assert PACKAGE_CATALOGUE["team"]["price_usd"] == _PKG_TEAM_PRICE_USD
+
+    def test_package_catalogue_enterprise_tokens_per_unit(self) -> None:
+        assert PACKAGE_CATALOGUE["enterprise"]["tokens_per_unit"] == _TOKENS_PER_UNIT
+
+    def test_all_tiers_have_required_keys(self) -> None:
+        required = {"label", "units", "price_usd", "tokens_per_unit", "notes"}
+        for tier, data in PACKAGE_CATALOGUE.items():
+            assert required.issubset(data.keys()), f"tier {tier!r} missing keys"
+
 
 # ===========================================================================
 # Section 14 — units_for_tokens() boundary conditions
@@ -1079,61 +1265,325 @@ class TestPackageCatalogue:
 
 class TestUnitsForTokens:
     """
-    Each protection unit covers exactly TOKENS_PER_UNIT (25,000) tokens.
-    Any partial chunk beyond a full unit consumes an additional whole unit
-    (ceiling division). This section validates every boundary condition.
+    Tests call the canonical units_for_tokens() imported from stripe_service
+    directly — not a local re-implementation — so changes to the function
+    are caught here automatically.
     """
 
-    def _units_for_tokens(self, token_count: int) -> int:
-        if token_count <= 0:
-            return 0
-        return math.ceil(token_count / _TOKENS_PER_UNIT)
-
     def test_zero_tokens_requires_zero_units(self) -> None:
-        assert self._units_for_tokens(0) == 0
+        assert units_for_tokens(0) == 0
 
     def test_negative_tokens_requires_zero_units(self) -> None:
-        assert self._units_for_tokens(-1) == 0
+        assert units_for_tokens(-1) == 0
 
     def test_one_token_requires_one_unit(self) -> None:
-        assert self._units_for_tokens(1) == 1
+        assert units_for_tokens(1) == 1
 
     def test_exact_one_chunk_requires_one_unit(self) -> None:
-        assert self._units_for_tokens(25_000) == 1
+        assert units_for_tokens(25_000) == 1
 
     def test_one_over_first_chunk_requires_two_units(self) -> None:
-        assert self._units_for_tokens(25_001) == 2
+        assert units_for_tokens(25_001) == 2
 
     def test_exact_two_chunks_requires_two_units(self) -> None:
-        assert self._units_for_tokens(50_000) == 2
+        assert units_for_tokens(50_000) == 2
 
     def test_one_over_two_chunks_requires_three_units(self) -> None:
-        assert self._units_for_tokens(50_001) == 3
+        assert units_for_tokens(50_001) == 3
 
     def test_exact_three_chunks_requires_three_units(self) -> None:
-        assert self._units_for_tokens(75_000) == 3
+        assert units_for_tokens(75_000) == 3
 
     def test_one_over_three_chunks_requires_four_units(self) -> None:
-        assert self._units_for_tokens(75_001) == 4
+        assert units_for_tokens(75_001) == 4
 
     def test_non_multiple_mid_chunk(self) -> None:
-        assert self._units_for_tokens(12_500) == 1
+        assert units_for_tokens(12_500) == 1
 
     def test_non_multiple_straddles_boundary(self) -> None:
-        assert self._units_for_tokens(37_500) == 2
+        assert units_for_tokens(37_500) == 2
 
     def test_starter_package_token_ceiling(self) -> None:
         max_tokens = _PKG_STARTER_UNITS * _TOKENS_PER_UNIT
-        assert self._units_for_tokens(max_tokens) == _PKG_STARTER_UNITS
+        assert units_for_tokens(max_tokens) == _PKG_STARTER_UNITS
 
     def test_starter_package_one_over_ceiling(self) -> None:
         max_tokens = _PKG_STARTER_UNITS * _TOKENS_PER_UNIT
-        assert self._units_for_tokens(max_tokens + 1) == _PKG_STARTER_UNITS + 1
+        assert units_for_tokens(max_tokens + 1) == _PKG_STARTER_UNITS + 1
 
     def test_team_package_token_ceiling(self) -> None:
         max_tokens = _PKG_TEAM_UNITS * _TOKENS_PER_UNIT
-        assert self._units_for_tokens(max_tokens) == _PKG_TEAM_UNITS
+        assert units_for_tokens(max_tokens) == _PKG_TEAM_UNITS
 
     def test_enterprise_package_token_ceiling(self) -> None:
         max_tokens = _PKG_ENTERPRISE_UNITS * _TOKENS_PER_UNIT
-        assert self._units_for_tokens(max_tokens) == _PKG_ENTERPRISE_UNITS
+        assert units_for_tokens(max_tokens) == _PKG_ENTERPRISE_UNITS
+
+    def test_large_token_count_scales_correctly(self) -> None:
+        assert units_for_tokens(1_000_000) == 40
+
+    def test_result_is_ceiling_division(self) -> None:
+        for n in range(1, 5):
+            for offset in range(0, _TOKENS_PER_UNIT + 1, 1000):
+                token_count = (n - 1) * _TOKENS_PER_UNIT + offset
+                expected = math.ceil(token_count / _TOKENS_PER_UNIT) if token_count > 0 else 0
+                assert units_for_tokens(token_count) == expected
+
+
+# ===========================================================================
+# Section 15 — Exception shapes
+# ===========================================================================
+
+
+class TestExceptionShapes:
+    def test_stripe_insufficient_units_error_attributes(self) -> None:
+        err = StripeInsufficientUnitsError("org-x", have=10, need=20)
+        assert err.org_id == "org-x"
+        assert err.have == 10
+        assert err.need == 20
+        assert isinstance(err, StripeServiceError)
+
+    def test_stripe_insufficient_units_message(self) -> None:
+        err = StripeInsufficientUnitsError("org-y", have=0, need=5)
+        assert "insufficient" in str(err).lower()
+        assert "org-y" in str(err)
+
+    def test_stripe_payment_method_not_found_attributes(self) -> None:
+        err = StripePaymentMethodNotFoundError("pm_missing")
+        assert err.payment_method_id == "pm_missing"
+        assert isinstance(err, StripeServiceError)
+
+    def test_stripe_idempotency_error_attributes(self) -> None:
+        err = StripeIdempotencyError("idem-key-123", "conflicting payload")
+        assert err.idempotency_key == "idem-key-123"
+        assert isinstance(err, StripeServiceError)
+
+    def test_stripe_webhook_signature_error_is_service_error(self) -> None:
+        err = StripeWebhookSignatureError("bad sig")
+        assert isinstance(err, StripeServiceError)
+
+    def test_stripe_config_error_is_service_error(self) -> None:
+        err = StripeConfigError("no key")
+        assert isinstance(err, StripeServiceError)
+
+    def test_stripe_session_not_found_is_service_error(self) -> None:
+        from app.services.stripe_service import StripeSessionNotFoundError
+
+        err = StripeSessionNotFoundError("cs_gone")
+        assert isinstance(err, StripeServiceError)
+
+    def test_stripe_subscription_not_found_is_service_error(self) -> None:
+        from app.services.stripe_service import StripeSubscriptionNotFoundError
+
+        err = StripeSubscriptionNotFoundError("sub_gone")
+        assert isinstance(err, StripeServiceError)
+
+    def test_stripe_api_error_raw_defaults_to_empty_dict(self) -> None:
+        err = StripeAPIError("msg")
+        assert err.raw == {}
+
+    def test_stripe_api_error_http_status_defaults_zero(self) -> None:
+        err = StripeAPIError("msg")
+        assert err.http_status == 0
+
+
+# ===========================================================================
+# Section 16 — Payment methods
+# ===========================================================================
+
+
+class TestPaymentMethods:
+    def test_attach_payment_method_returns_response(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = _mock_pm_resp()
+        resp = svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
+        assert isinstance(resp, PaymentMethodResponse)
+        assert resp.payment_method_id == _TEST_PM_ID
+        assert resp.customer_id == _TEST_CUSTOMER_ID
+
+    def test_attach_payment_method_stores_locally(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = _mock_pm_resp()
+        svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
+        methods = svc_with_client.list_payment_methods(_TEST_CUSTOMER_ID)
+        assert any(m.payment_method_id == _TEST_PM_ID for m in methods)
+
+    def test_attach_payment_method_calls_stripe(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = _mock_pm_resp()
+        svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
+        call_path = mock_client.post.call_args[0][0]
+        assert "/attach" in call_path
+        assert _TEST_PM_ID in call_path
+
+    def test_attach_payment_method_idempotent_same_payload(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = _mock_pm_resp()
+        r1 = svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
+        r2 = svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
+        assert r1.payment_method_id == r2.payment_method_id
+        assert mock_client.post.call_count == 1
+
+    def test_attach_payment_method_set_as_default(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = _mock_pm_resp()
+        resp = svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID, set_as_default=True)
+        assert resp.is_default is True
+
+    def test_detach_payment_method_removes_from_cache(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = _mock_pm_resp()
+        svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
+        mock_client.post.return_value = {}
+        svc_with_client.detach_payment_method(_TEST_PM_ID)
+        methods = svc_with_client.list_payment_methods(_TEST_CUSTOMER_ID)
+        assert all(m.payment_method_id != _TEST_PM_ID for m in methods)
+
+    def test_detach_payment_method_not_found_raises(self, svc: StripeService) -> None:
+        with pytest.raises(StripePaymentMethodNotFoundError):
+            svc.detach_payment_method("pm_nonexistent")
+
+    def test_list_payment_methods_empty_when_none_attached(self, svc: StripeService) -> None:
+        assert svc.list_payment_methods("cus_empty") == []
+
+    def test_list_payment_methods_filters_by_customer(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.side_effect = [_mock_pm_resp(_TEST_PM_ID, "cus_A"), _mock_pm_resp(_TEST_PM_ID_2, "cus_B")]
+        svc_with_client.attach_payment_method("cus_A", _TEST_PM_ID)
+        svc_with_client.attach_payment_method("cus_B", _TEST_PM_ID_2)
+        methods_a = svc_with_client.list_payment_methods("cus_A")
+        assert len(methods_a) == 1
+        assert methods_a[0].customer_id == "cus_A"
+
+    def test_set_default_payment_method_marks_default(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.side_effect = [
+            _mock_pm_resp(_TEST_PM_ID),
+            _mock_pm_resp(_TEST_PM_ID_2),
+            {},  # customer update call
+        ]
+        svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
+        svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID_2)
+        resp = svc_with_client.set_default_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID_2)
+        assert resp.is_default is True
+
+    def test_set_default_clears_previous_default(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.side_effect = [
+            _mock_pm_resp(_TEST_PM_ID),
+            _mock_pm_resp(_TEST_PM_ID_2),
+            {},  # customer update call
+        ]
+        svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID, set_as_default=True)
+        svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID_2)
+        svc_with_client.set_default_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID_2)
+        methods = svc_with_client.list_payment_methods(_TEST_CUSTOMER_ID)
+        defaults = [m for m in methods if m.is_default]
+        assert len(defaults) == 1
+        assert defaults[0].payment_method_id == _TEST_PM_ID_2
+
+    def test_set_default_not_found_raises(self, svc: StripeService) -> None:
+        with pytest.raises(StripePaymentMethodNotFoundError):
+            svc.set_default_payment_method(_TEST_CUSTOMER_ID, "pm_ghost")
+
+    def test_payment_method_response_has_schema_version(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = _mock_pm_resp()
+        resp = svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
+        assert resp.schema_version == "1.0"
+
+    def test_payment_method_response_to_dict(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = _mock_pm_resp()
+        resp = svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
+        d = resp.to_dict()
+        assert d["payment_method_id"] == _TEST_PM_ID
+        assert d["brand"] == "visa"
+        assert d["last4"] == "4242"
+
+
+# ===========================================================================
+# Section 17 — Invoices
+# ===========================================================================
+
+
+class TestInvoices:
+    def test_get_invoices_returns_list(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        svc_with_client.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        mock_client.get.return_value = _mock_invoice_list()
+        results = svc_with_client.get_invoices_for_org(_TEST_ORG)
+        assert isinstance(results, list)
+        assert len(results) == 2
+
+    def test_get_invoices_returns_invoice_response_objects(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        svc_with_client.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        mock_client.get.return_value = _mock_invoice_list()
+        results = svc_with_client.get_invoices_for_org(_TEST_ORG)
+        assert all(isinstance(r, InvoiceResponse) for r in results)
+
+    def test_get_invoices_cached_on_second_call(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        svc_with_client.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        mock_client.get.return_value = _mock_invoice_list()
+        svc_with_client.get_invoices_for_org(_TEST_ORG)
+        svc_with_client.get_invoices_for_org(_TEST_ORG)
+        assert mock_client.get.call_count == 1
+
+    def test_get_invoices_force_refresh_bypasses_cache(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        svc_with_client.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        mock_client.get.return_value = _mock_invoice_list()
+        svc_with_client.get_invoices_for_org(_TEST_ORG)
+        svc_with_client.get_invoices_for_org(_TEST_ORG, force_refresh=True)
+        assert mock_client.get.call_count == 2
+
+    def test_get_invoices_empty_when_no_customer_mapping(self, svc_with_client: StripeService) -> None:
+        results = svc_with_client.get_invoices_for_org("org-no-customer")
+        assert results == []
+
+    def test_get_invoices_org_id_set_correctly(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        svc_with_client.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        mock_client.get.return_value = _mock_invoice_list()
+        results = svc_with_client.get_invoices_for_org(_TEST_ORG)
+        assert all(r.org_id == _TEST_ORG for r in results)
+
+    def test_invalidate_invoice_cache_specific_org(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        svc_with_client.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        mock_client.get.return_value = _mock_invoice_list()
+        svc_with_client.get_invoices_for_org(_TEST_ORG)
+        svc_with_client.invalidate_invoice_cache(_TEST_ORG)
+        svc_with_client.get_invoices_for_org(_TEST_ORG)
+        assert mock_client.get.call_count == 2
+
+    def test_invalidate_invoice_cache_all(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        for org in ("org-inv-1", "org-inv-2"):
+            svc_with_client.register_customer_mapping(org, f"cus_{org}")
+            mock_client.get.return_value = _mock_invoice_list(f"cus_{org}")
+            svc_with_client.get_invoices_for_org(org)
+        svc_with_client.invalidate_invoice_cache()
+        assert svc_with_client._invoice_cache == {}
+
+    def test_invoice_response_has_schema_version(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        svc_with_client.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        mock_client.get.return_value = _mock_invoice_list()
+        results = svc_with_client.get_invoices_for_org(_TEST_ORG)
+        assert all(r.schema_version == "1.0" for r in results)
+
+    def test_invoice_response_to_dict(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        svc_with_client.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        mock_client.get.return_value = _mock_invoice_list()
+        results = svc_with_client.get_invoices_for_org(_TEST_ORG)
+        d = results[0].to_dict()
+        assert "invoice_id" in d
+        assert "org_id" in d
+        assert d["currency"] == "usd"
+
+
+# ===========================================================================
+# Section 18 — StripeWebhookEventType enum
+# ===========================================================================
+
+
+class TestStripeWebhookEventType:
+    def test_checkout_session_completed_value(self) -> None:
+        assert StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED == "checkout.session.completed"
+
+    def test_invoice_paid_value(self) -> None:
+        assert StripeWebhookEventType.INVOICE_PAID == "invoice.paid"
+
+    def test_customer_subscription_deleted_value(self) -> None:
+        assert StripeWebhookEventType.CUSTOMER_SUBSCRIPTION_DELETED == "customer.subscription.deleted"
+
+    def test_charge_refunded_value(self) -> None:
+        assert StripeWebhookEventType.CHARGE_REFUNDED == "charge.refunded"
+
+    def test_all_event_types_are_strings(self) -> None:
+        for member in StripeWebhookEventType:
+            assert isinstance(member.value, str)
