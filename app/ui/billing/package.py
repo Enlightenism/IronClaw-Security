@@ -590,15 +590,14 @@ def get_billing_packages(
     page: int = Query(default=1, ge=1),
     pagesize: int = Query(default=25, ge=1, le=100),
 ) -> BillingPackageListResponse:
-    # Validate enum-like query params to return 422 instead of silent empty results
     if status is not None and status not in _VALID_STATUSES:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail=f"Invalid status '{status}'. Valid values: {sorted(_VALID_STATUSES)}",
         )
     if plan is not None and plan not in _VALID_PLANS:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail=f"Invalid plan '{plan}'. Valid values: {sorted(_VALID_PLANS)}",
         )
 
