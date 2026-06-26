@@ -6,30 +6,36 @@ from datetime import UTC, datetime
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.supabaseclient import (
+    BILLING_TIER_5K_PRICE_USD,
+    BILLING_TIER_5K_UNITS,
+    BILLING_TIER_25K_PRICE_USD,
+    BILLING_TIER_25K_UNITS,
+    BILLING_TIER_60K_PRICE_USD,
+    BILLING_TIER_60K_UNITS,
+    TOKENS_PER_UNIT,
+)
+from app.ui.billing.package import (
+    StripeStatus,
+    _get_environment,
+    _get_stripe_status,
+)
+
 router = APIRouter(
     prefix="/ui/billing",
     tags=["billing-overview"],
 )
 
-
-_TOKENS_PER_UNIT = 25_000
-
 _PLAN_PRICES_CENTS: dict[str, int] = {
-    "starter": 2_000,
-    "team": 9_000,
-    "enterprise": 18_000,
+    "starter": BILLING_TIER_5K_PRICE_USD * 100,
+    "team": BILLING_TIER_25K_PRICE_USD * 100,
+    "enterprise": BILLING_TIER_60K_PRICE_USD * 100,
 }
 
 _PLAN_INCLUDED_UNITS: dict[str, dict[str, int]] = {
-    "starter": {
-        "protectionunits": 5_000,
-    },
-    "team": {
-        "protectionunits": 25_000,
-    },
-    "enterprise": {
-        "protectionunits": 60_000,
-    },
+    "starter": {"protectionunits": BILLING_TIER_5K_UNITS},
+    "team": {"protectionunits": BILLING_TIER_25K_UNITS},
+    "enterprise": {"protectionunits": BILLING_TIER_60K_UNITS},
 }
 
 _UNIT_LABELS: dict[str, str] = {
@@ -99,6 +105,7 @@ class BillingInvoiceStatusCount(BaseModel):
 class BillingOverviewResponse(BaseModel):
     generatedat: str
     environment: str
+    stripe: StripeStatus
     overallstatus: str
     kpis: list[BillingKpiView] = Field(default_factory=list)
     plancounts: list[BillingPlanCount] = Field(default_factory=list)
@@ -251,6 +258,7 @@ def _build_invoice_status_counts(
 
 @router.get("/overview", response_model=BillingOverviewResponse)
 def get_billing_overview() -> BillingOverviewResponse:
+    stripe = _get_stripe_status()
     packages = _sample_packages()
     invoices = _sample_invoices()
 
@@ -295,7 +303,8 @@ def get_billing_overview() -> BillingOverviewResponse:
 
     return BillingOverviewResponse(
         generatedat=datetime.now(UTC).isoformat(),
-        environment="local",
+        environment=_get_environment(),
+        stripe=stripe,
         overallstatus=overallstatus,
         kpis=kpis,
         plancounts=_build_plan_counts(packages),
@@ -304,12 +313,13 @@ def get_billing_overview() -> BillingOverviewResponse:
         invoices=invoices,
         notes=[
             "Billing overview exposes prepaid package state, package pricing, usage against included unit limits, and invoice lifecycle visibility.",
-            "Package pricing is Starter $20 for 5,000 units, Team $90 for 25,000 units, and Enterprise $180 for 60,000 units.",
-            f"Each protection unit covers up to {_TOKENS_PER_UNIT:,} tokens; larger token volumes consume additional units in {_TOKENS_PER_UNIT:,}-token chunks.",
+            f"Package pricing is Starter ${BILLING_TIER_5K_PRICE_USD} for {BILLING_TIER_5K_UNITS:,} units, Team ${BILLING_TIER_25K_PRICE_USD} for {BILLING_TIER_25K_UNITS:,} units, and Enterprise ${BILLING_TIER_60K_PRICE_USD} for {BILLING_TIER_60K_UNITS:,} units.",
+            f"Each protection unit covers up to {TOKENS_PER_UNIT:,} tokens; larger token volumes consume additional units in {TOKENS_PER_UNIT:,}-token chunks.",
             "planchangeurl on each package provides a direct link to the plan-change surface for that organization's current package.",
             "overallstatus is 'attention' when any package is past_due, 'notice' when any package is trialing, 'healthy' otherwise.",
             "totalrevenuecents KPI counts paid invoices only — draft and past_due invoices are excluded.",
             "Dedicated invoice list surface available at /ui/billing/invoices.",
+            stripe.note,
             "All values are placeholder UI contract data for the current local-first Gen1 build.",
         ],
     )
