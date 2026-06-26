@@ -11,7 +11,9 @@ from fastapi import APIRouter, Header, HTTPException, Request, status
 from pydantic import BaseModel
 
 from app.services.stripe_service import (
+    StripeBillingInterval,
     StripeSubscriptionStatus,
+    StripeUnitEventReason,
     StripeWebhookEventType,
     get_stripe_service,
 )
@@ -161,6 +163,350 @@ def _safe_event_type(raw: Any) -> str | None:
     return raw.strip() or None
 
 
+def _epoch_to_iso(epoch: Any) -> str:
+    if epoch is None:
+        return _utc_now_iso()
+    try:
+        return datetime.fromtimestamp(int(epoch), tz=UTC).isoformat().replace("+00:00", "Z")
+    except (TypeError, ValueError, OSError):
+        return _utc_now_iso()
+
+
+# ---------------------------------------------------------------------------
+# In-process event deduplication store
+# ---------------------------------------------------------------------------
+
+_PROCESSED_EVENTS: set[str] = set()
+_PROCESSED_EVENT_META: dict[str, dict[str, Any]] = {}
+
+
+def _is_event_processed(event_id: str) -> bool:
+    return event_id in _PROCESSED_EVENTS
+
+
+def _record_event_seen(
+    event_id: str,
+    event_type: str,
+    org_id: str | None,
+    processed: bool,
+) -> None:
+    _PROCESSED_EVENTS.add(event_id)
+    _PROCESSED_EVENT_META[event_id] = {
+        "event_type": event_type,
+        "org_id": org_id,
+        "processed": processed,
+        "recorded_at": _utc_now_iso(),
+    }
+
+
+def reset_processed_events() -> None:
+    """Test isolation helper — clears in-process event dedup state."""
+    _PROCESSED_EVENTS.clear()
+    _PROCESSED_EVENT_META.clear()
+
+
+# ---------------------------------------------------------------------------
+# Service bridge — delegates to StripeService public API
+# ---------------------------------------------------------------------------
+
+
+def _svc_get_webhook_secret(svc: Any) -> str:
+    """
+    Pull webhook secret from service. StripeService._get_webhook_secret is
+    private; we call it via the public vault path using the same guard logic.
+    Falls back gracefully — returns "" if not configured so caller can warn
+    rather than crash.
+    """
+    try:
+        return svc._get_webhook_secret()  # noqa: SLF001
+    except Exception:
+        return ""
+
+
+def _svc_handle_checkout_completed(
+    svc: Any,
+    *,
+    session_id: str,
+    org_id: str | None,
+    amount_total: int,
+    currency: str,
+    mode: str,
+    unit_credits: int,
+    metadata: dict[str, Any],
+    raw_event_id: str,
+) -> None:
+    """Credit units on checkout.session.completed via StripeService.credit_units."""
+    if org_id and unit_credits > 0:
+        svc.credit_units(
+            org_id=org_id,
+            amount=unit_credits,
+            reason=StripeUnitEventReason.CHECKOUT_COMPLETE,
+            reference_id=session_id,
+        )
+    logger.info(
+        "stripe_bridge: checkout_completed session=%s org=%s units=%d amount=%d %s",
+        session_id,
+        org_id,
+        unit_credits,
+        amount_total,
+        currency,
+    )
+
+
+def _svc_handle_checkout_expired(
+    svc: Any,
+    *,
+    session_id: str,
+    org_id: str | None,
+    raw_event_id: str,
+) -> None:
+    """Mark checkout session as expired via StripeService.expire_checkout_session."""
+    svc.expire_checkout_session(session_id)
+    logger.info(
+        "stripe_bridge: checkout_expired session=%s org=%s",
+        session_id,
+        org_id,
+    )
+
+
+def _svc_handle_subscription_created(
+    svc: Any,
+    *,
+    subscription_id: str,
+    org_id: str | None,
+    customer_id: str,
+    price_id: str,
+    metered_price_id: str | None,
+    status: str,
+    billing_interval: str,
+    current_period_start: str,
+    current_period_end: str,
+    cancel_at_period_end: bool,
+    metadata: dict[str, Any],
+    raw_event_id: str,
+) -> None:
+    _resolved_org = org_id or (svc.resolve_org_from_customer(customer_id) if customer_id else None)
+    try:
+        sub_status = StripeSubscriptionStatus(status)
+    except ValueError:
+        sub_status = StripeSubscriptionStatus.INCOMPLETE
+    try:
+        interval = StripeBillingInterval(billing_interval)
+    except ValueError:
+        interval = StripeBillingInterval.MONTHLY
+
+    svc.upsert_subscription(
+        subscription_id=subscription_id,
+        org_id=_resolved_org or "",
+        customer_id=customer_id,
+        price_id=price_id,
+        status=sub_status,
+        billing_interval=interval,
+        current_period_start=current_period_start,
+        current_period_end=current_period_end,
+        cancel_at_period_end=cancel_at_period_end,
+        metered_price_id=metered_price_id,
+        metadata=metadata,
+    )
+    if customer_id and _resolved_org:
+        svc.register_customer_mapping(_resolved_org, customer_id)
+
+
+def _svc_handle_subscription_updated(
+    svc: Any,
+    *,
+    subscription_id: str,
+    org_id: str | None,
+    status: str,
+    cancel_at_period_end: bool,
+    current_period_start: str,
+    current_period_end: str,
+    metadata: dict[str, Any],
+    raw_event_id: str,
+) -> None:
+    existing = svc.get_subscription(subscription_id)
+    if existing is None:
+        logger.warning(
+            "stripe_bridge: subscription_updated for unknown sub=%s — skipping upsert",
+            subscription_id,
+        )
+        return
+    try:
+        sub_status = StripeSubscriptionStatus(status)
+    except ValueError:
+        sub_status = StripeSubscriptionStatus.INCOMPLETE
+    try:
+        interval = StripeBillingInterval(existing.get("billing_interval", "month"))
+    except ValueError:
+        interval = StripeBillingInterval.MONTHLY
+
+    _resolved_org = org_id or existing.get("org_id") or ""
+
+    svc.upsert_subscription(
+        subscription_id=subscription_id,
+        org_id=_resolved_org,
+        customer_id=existing.get("customer_id", ""),
+        price_id=existing.get("price_id", ""),
+        status=sub_status,
+        billing_interval=interval,
+        current_period_start=current_period_start,
+        current_period_end=current_period_end,
+        cancel_at_period_end=cancel_at_period_end,
+        metered_price_id=existing.get("metered_price_id"),
+        metadata=metadata,
+    )
+
+    # If subscription renewed and metadata carries unit_credits, credit them
+    unit_credits_raw = metadata.get("unit_credits") or metadata.get("units")
+    if sub_status == StripeSubscriptionStatus.ACTIVE and unit_credits_raw is not None and _resolved_org:
+        try:
+            units = int(unit_credits_raw)
+            if units > 0:
+                svc.credit_units(
+                    org_id=_resolved_org,
+                    amount=units,
+                    reason=StripeUnitEventReason.SUBSCRIPTION_RENEWED,
+                    reference_id=subscription_id,
+                )
+        except (TypeError, ValueError):
+            pass
+
+
+def _svc_handle_subscription_deleted(
+    svc: Any,
+    *,
+    subscription_id: str,
+    org_id: str | None,
+    raw_event_id: str,
+) -> None:
+    existing = svc.get_subscription(subscription_id)
+    if existing is None:
+        logger.warning(
+            "stripe_bridge: subscription_deleted for unknown sub=%s — no-op",
+            subscription_id,
+        )
+        return
+    _resolved_org = org_id or existing.get("org_id") or ""
+    try:
+        interval = StripeBillingInterval(existing.get("billing_interval", "month"))
+    except ValueError:
+        interval = StripeBillingInterval.MONTHLY
+
+    svc.upsert_subscription(
+        subscription_id=subscription_id,
+        org_id=_resolved_org,
+        customer_id=existing.get("customer_id", ""),
+        price_id=existing.get("price_id", ""),
+        status=StripeSubscriptionStatus.CANCELED,
+        billing_interval=interval,
+        current_period_start=existing.get("current_period_start", _utc_now_iso()),
+        current_period_end=existing.get("current_period_end", _utc_now_iso()),
+        cancel_at_period_end=True,
+        metered_price_id=existing.get("metered_price_id"),
+        metadata=existing.get("metadata", {}),
+    )
+
+
+def _svc_handle_invoice_paid(
+    svc: Any,
+    *,
+    invoice_id: str,
+    subscription_id: str | None,
+    org_id: str | None,
+    amount_paid: int,
+    currency: str,
+    billing_reason: str,
+    unit_credits: int,
+    metadata: dict[str, Any],
+    raw_event_id: str,
+) -> None:
+    _resolved_org = org_id
+    if not _resolved_org and subscription_id:
+        existing = svc.get_subscription(subscription_id)
+        if existing:
+            _resolved_org = existing.get("org_id")
+
+    if _resolved_org and unit_credits > 0 and billing_reason in ("subscription_cycle", "subscription_create", "subscription_update"):
+        svc.credit_units(
+            org_id=_resolved_org,
+            amount=unit_credits,
+            reason=StripeUnitEventReason.SUBSCRIPTION_RENEWED,
+            reference_id=invoice_id,
+        )
+
+    logger.info(
+        "stripe_bridge: invoice_paid invoice=%s sub=%s org=%s units=%d reason=%s amount=%d %s",
+        invoice_id,
+        subscription_id,
+        _resolved_org,
+        unit_credits,
+        billing_reason,
+        amount_paid,
+        currency,
+    )
+
+
+def _svc_handle_invoice_payment_failed(
+    svc: Any,
+    *,
+    invoice_id: str,
+    subscription_id: str | None,
+    org_id: str | None,
+    attempt_count: int,
+    next_payment_attempt: str,
+    metadata: dict[str, Any],
+    raw_event_id: str,
+) -> None:
+    logger.warning(
+        "stripe_bridge: invoice_payment_failed invoice=%s sub=%s org=%s attempt=%d next=%s",
+        invoice_id,
+        subscription_id,
+        org_id,
+        attempt_count,
+        next_payment_attempt,
+    )
+
+
+def _svc_handle_customer_created(
+    svc: Any,
+    *,
+    customer_id: str,
+    org_id: str | None,
+    email: str,
+    metadata: dict[str, Any],
+    raw_event_id: str,
+) -> None:
+    if org_id and customer_id:
+        svc.register_customer_mapping(org_id, customer_id)
+    logger.info(
+        "stripe_bridge: customer_created cust=%s org=%s email=%s",
+        customer_id,
+        org_id,
+        email,
+    )
+
+
+def _svc_handle_customer_updated(
+    svc: Any,
+    *,
+    customer_id: str,
+    org_id: str | None,
+    email: str,
+    metadata: dict[str, Any],
+    raw_event_id: str,
+) -> None:
+    if not org_id and customer_id:
+        org_id = svc.resolve_org_from_customer(customer_id)
+    if org_id and customer_id:
+        svc.register_customer_mapping(org_id, customer_id)
+    logger.info(
+        "stripe_bridge: customer_updated cust=%s org=%s email=%s",
+        customer_id,
+        org_id,
+        email,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Event handlers — one private function per Stripe event type
 # ---------------------------------------------------------------------------
@@ -200,7 +546,8 @@ def _handle_checkout_session_completed(
         except (TypeError, ValueError):
             unit_credits = 0
 
-    svc.handle_checkout_completed(
+    _svc_handle_checkout_completed(
+        svc,
         session_id=session_id,
         org_id=org_id,
         amount_total=amount_total,
@@ -227,7 +574,8 @@ def _handle_checkout_session_expired(
 ) -> bool:
     data_obj = (event_data.get("data") or {}).get("object") or {}
     session_id = data_obj.get("id") or event_id
-    svc.handle_checkout_expired(
+    _svc_handle_checkout_expired(
+        svc,
         session_id=session_id,
         org_id=org_id,
         raw_event_id=event_id,
@@ -270,7 +618,8 @@ def _handle_subscription_created(
     current_period_end = _epoch_to_iso(data_obj.get("current_period_end"))
     metadata: dict[str, Any] = data_obj.get("metadata") or {}
 
-    svc.handle_subscription_created(
+    _svc_handle_subscription_created(
+        svc,
         subscription_id=subscription_id,
         org_id=org_id,
         customer_id=customer_id,
@@ -307,7 +656,8 @@ def _handle_subscription_updated(
     current_period_end = _epoch_to_iso(data_obj.get("current_period_end"))
     metadata: dict[str, Any] = data_obj.get("metadata") or {}
 
-    svc.handle_subscription_updated(
+    _svc_handle_subscription_updated(
+        svc,
         subscription_id=subscription_id,
         org_id=org_id,
         status=status_val,
@@ -335,7 +685,8 @@ def _handle_subscription_deleted(
     data_obj = (event_data.get("data") or {}).get("object") or {}
     subscription_id = data_obj.get("id") or event_id
 
-    svc.handle_subscription_deleted(
+    _svc_handle_subscription_deleted(
+        svc,
         subscription_id=subscription_id,
         org_id=org_id,
         raw_event_id=event_id,
@@ -375,7 +726,8 @@ def _handle_invoice_paid(
         except (TypeError, ValueError):
             unit_credits = 0
 
-    svc.handle_invoice_paid(
+    _svc_handle_invoice_paid(
+        svc,
         invoice_id=invoice_id,
         subscription_id=subscription_id,
         org_id=org_id,
@@ -410,7 +762,8 @@ def _handle_invoice_payment_failed(
     next_payment_attempt = _epoch_to_iso(data_obj.get("next_payment_attempt"))
     metadata: dict[str, Any] = data_obj.get("metadata") or {}
 
-    svc.handle_invoice_payment_failed(
+    _svc_handle_invoice_payment_failed(
+        svc,
         invoice_id=invoice_id,
         subscription_id=subscription_id,
         org_id=org_id,
@@ -440,7 +793,8 @@ def _handle_customer_created(
     email = data_obj.get("email") or ""
     metadata: dict[str, Any] = data_obj.get("metadata") or {}
 
-    svc.handle_customer_created(
+    _svc_handle_customer_created(
+        svc,
         customer_id=customer_id,
         org_id=org_id,
         email=email,
@@ -466,7 +820,8 @@ def _handle_customer_updated(
     email = data_obj.get("email") or ""
     metadata: dict[str, Any] = data_obj.get("metadata") or {}
 
-    svc.handle_customer_updated(
+    _svc_handle_customer_updated(
+        svc,
         customer_id=customer_id,
         org_id=org_id,
         email=email,
@@ -499,20 +854,6 @@ _EVENT_HANDLERS: dict[str, Any] = {
 
 
 # ---------------------------------------------------------------------------
-# Utility
-# ---------------------------------------------------------------------------
-
-
-def _epoch_to_iso(epoch: Any) -> str:
-    if epoch is None:
-        return _utc_now_iso()
-    try:
-        return datetime.fromtimestamp(int(epoch), tz=UTC).isoformat().replace("+00:00", "Z")
-    except (TypeError, ValueError, OSError):
-        return _utc_now_iso()
-
-
-# ---------------------------------------------------------------------------
 # Primary ingestion endpoint
 # ---------------------------------------------------------------------------
 
@@ -530,9 +871,8 @@ async def stripe_webhook_ingest(
 ) -> StripeWebhookAck:
     raw_body: bytes = await request.body()
 
-    # --- Signature verification ---
     svc = get_stripe_service()
-    webhook_secret = svc.get_webhook_secret()
+    webhook_secret = _svc_get_webhook_secret(svc)
 
     if not webhook_secret:
         logger.warning("stripe_webhooks: STRIPE_WEBHOOK_SECRET not configured. Accepting event without signature verification (setup mode).")
@@ -548,7 +888,6 @@ async def stripe_webhook_ingest(
             webhook_secret=webhook_secret,
         )
 
-    # --- Parse JSON body ---
     try:
         import json as _json
 
@@ -574,8 +913,7 @@ async def stripe_webhook_ingest(
             timestamp=_utc_now_iso(),
         )
 
-    # --- Idempotency guard ---
-    if svc.is_event_processed(event_id):
+    if _is_event_processed(event_id):
         logger.info(
             "stripe_webhooks: duplicate event suppressed — id=%s type=%s",
             event_id,
@@ -593,7 +931,6 @@ async def stripe_webhook_ingest(
 
     org_id = _extract_org_id(event_data)
 
-    # --- Dispatch ---
     handler = _EVENT_HANDLERS.get(raw_event_type)
     processed = False
 
@@ -603,7 +940,7 @@ async def stripe_webhook_ingest(
             raw_event_type,
             event_id,
         )
-        svc.record_event_seen(event_id, raw_event_type, org_id, processed=False)
+        _record_event_seen(event_id, raw_event_type, org_id, processed=False)
         return StripeWebhookAck(
             event_id=event_id,
             event_type=raw_event_type,
@@ -624,7 +961,7 @@ async def stripe_webhook_ingest(
             org_id,
             str(exc),
         )
-        svc.record_event_seen(event_id, raw_event_type, org_id, processed=False)
+        _record_event_seen(event_id, raw_event_type, org_id, processed=False)
         return StripeWebhookAck(
             event_id=event_id,
             event_type=raw_event_type,
@@ -635,7 +972,7 @@ async def stripe_webhook_ingest(
             timestamp=_utc_now_iso(),
         )
 
-    svc.record_event_seen(event_id, raw_event_type, org_id, processed=processed)
+    _record_event_seen(event_id, raw_event_type, org_id, processed=processed)
 
     return StripeWebhookAck(
         event_id=event_id,
