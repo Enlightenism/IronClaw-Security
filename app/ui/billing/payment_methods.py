@@ -8,15 +8,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.supabaseclient import (
-    BILLING_TIER_5K_PRICE_USD,
-    BILLING_TIER_5K_UNITS,
-    BILLING_TIER_25K_PRICE_USD,
-    BILLING_TIER_25K_UNITS,
-    BILLING_TIER_60K_PRICE_USD,
-    BILLING_TIER_60K_UNITS,
     TOKENS_PER_UNIT,
     get_supabase_client,
     is_supabase_configured,
+)
+from app.ui.billing.package import (
+    PACKAGE_CATALOGUE,
+    StripeStatus,
+    _get_stripe_status,
 )
 
 router = APIRouter(
@@ -41,74 +40,9 @@ _BRAND_DISPLAY: dict[str, str] = {
     "bank_account": "Bank Account",
 }
 
-# ---------------------------------------------------------------------------
-# Package catalogue — single source of truth imported from supabaseclient
-# Starter   :  5,000 units → $20 USD
-# Team      : 25,000 units → $90 USD
-# Enterprise: 60,000 units → $180 USD
-# Each protection unit covers up to TOKENS_PER_UNIT (25,000) tokens.
-# stripe_price_id must be set in the environment or Stripe dashboard and
-# stored here as a reference; populate via STRIPE_PRICE_ID_* env vars.
-# ---------------------------------------------------------------------------
-
-PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
-    "starter": {
-        "label": "Starter",
-        "units": BILLING_TIER_5K_UNITS,
-        "price_usd": BILLING_TIER_5K_PRICE_USD,
-        "price_cents": BILLING_TIER_5K_PRICE_USD * 100,
-        "tokens_per_unit": TOKENS_PER_UNIT,
-        "token_coverage": BILLING_TIER_5K_UNITS * TOKENS_PER_UNIT,
-        "stripe_price_id": os.environ.get("STRIPE_PRICE_ID_STARTER", ""),
-        "notes": (f"{BILLING_TIER_5K_UNITS:,} units · ${BILLING_TIER_5K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
-    },
-    "team": {
-        "label": "Team",
-        "units": BILLING_TIER_25K_UNITS,
-        "price_usd": BILLING_TIER_25K_PRICE_USD,
-        "price_cents": BILLING_TIER_25K_PRICE_USD * 100,
-        "tokens_per_unit": TOKENS_PER_UNIT,
-        "token_coverage": BILLING_TIER_25K_UNITS * TOKENS_PER_UNIT,
-        "stripe_price_id": os.environ.get("STRIPE_PRICE_ID_TEAM", ""),
-        "notes": (f"{BILLING_TIER_25K_UNITS:,} units · ${BILLING_TIER_25K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
-    },
-    "enterprise": {
-        "label": "Enterprise",
-        "units": BILLING_TIER_60K_UNITS,
-        "price_usd": BILLING_TIER_60K_PRICE_USD,
-        "price_cents": BILLING_TIER_60K_PRICE_USD * 100,
-        "tokens_per_unit": TOKENS_PER_UNIT,
-        "token_coverage": BILLING_TIER_60K_UNITS * TOKENS_PER_UNIT,
-        "stripe_price_id": os.environ.get("STRIPE_PRICE_ID_ENTERPRISE", ""),
-        "notes": (f"{BILLING_TIER_60K_UNITS:,} units · ${BILLING_TIER_60K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
-    },
-}
-
 
 def _get_environment() -> str:
     return os.environ.get("IRONCLAW_ENV", os.environ.get("APP_ENV", "production"))
-
-
-# ---------------------------------------------------------------------------
-# Stripe helpers
-# ---------------------------------------------------------------------------
-
-
-def _stripe_mode() -> str | None:
-    """Return 'live', 'test', or None when the key is absent/invalid."""
-    key = os.environ.get("STRIPE_API_KEY", "")
-    if key.startswith("sk_live_"):
-        return "live"
-    if key.startswith("sk_test_"):
-        return "test"
-    return None
-
-
-def _stripe_connection_note() -> str:
-    mode = _stripe_mode()
-    if mode:
-        return f"Stripe is connected and active (mode: {mode})."
-    return "Stripe API key is not configured — payment processing is unavailable."
 
 
 def _stripe_webhook_secret_note() -> str:
@@ -162,6 +96,7 @@ class BillingPaymentMethodsResponse(BaseModel):
     organizationid: str
     organizationname: str
     stripe_customer_id: str | None
+    stripe: StripeStatus
     stripe_mode: str | None
     defaultmethodid: str | None
     methods: list[BillingPaymentMethodView] = Field(default_factory=list)
@@ -297,11 +232,6 @@ def _build_status_counts(
 def _fetch_org_payment_methods(
     organizationid: str,
 ) -> list[BillingPaymentMethodView] | None:
-    """
-    Query Supabase for payment methods belonging to the given organizationid.
-    Returns a list of BillingPaymentMethodView on success, or None if Supabase
-    is not configured or the query fails.
-    """
     if not is_supabase_configured():
         return None
     try:
@@ -331,9 +261,6 @@ def _fetch_org_payment_methods(
 
 
 def _fetch_org_name(organizationid: str) -> str | None:
-    """
-    Query Supabase for the organization name. Returns None if unavailable.
-    """
     if not is_supabase_configured():
         return None
     try:
@@ -347,10 +274,6 @@ def _fetch_org_name(organizationid: str) -> str | None:
 
 
 def _fetch_stripe_customer_id(organizationid: str) -> str | None:
-    """
-    Query Supabase for the stripe_customer_id on the organization record.
-    Returns None if unavailable or not set.
-    """
     if not is_supabase_configured():
         return None
     try:
@@ -369,11 +292,6 @@ def _insert_payment_method_record(
     stripe_payment_method_id: str,
     set_as_default: bool,
 ) -> str | None:
-    """
-    Insert a payment_methods row into Supabase and return the new row id.
-    If set_as_default is True, clears is_default on all existing rows first.
-    Returns the new row's id string or None on failure.
-    """
     if not is_supabase_configured():
         return None
     try:
@@ -404,10 +322,6 @@ def _set_default_method_in_db(
     organizationid: str,
     methodid: str,
 ) -> bool:
-    """
-    Set is_default=True on the target row and False on all others.
-    Returns True on success, False on failure.
-    """
     if not is_supabase_configured():
         return False
     try:
@@ -423,10 +337,6 @@ def _delete_method_from_db(
     organizationid: str,
     methodid: str,
 ) -> bool:
-    """
-    Delete the payment_methods row matching methodid and organizationid.
-    Returns True on success, False on failure.
-    """
     if not is_supabase_configured():
         return False
     try:
@@ -489,6 +399,8 @@ def get_payment_methods(
     revoked_count = sum(1 for m in methods if m.status == "revoked")
     pending_count = sum(1 for m in methods if m.status == "pending")
 
+    stripe_status: StripeStatus = _get_stripe_status()
+
     notes = [
         f"Organization '{organizationid}' has {methodcount} payment method(s) on file.",
         f"Active: {active_count}. Expired: {expired_count}. Revoked: {revoked_count}. Pending: {pending_count}.",
@@ -496,7 +408,7 @@ def get_payment_methods(
         f"canaddnew is {'true' if canaddnew else 'false'} — organization {'can' if canaddnew else 'cannot'} add new payment methods.",
         "statuscolor maps payment method status to a UI hint: success (active), warning (expired), error (revoked), info (pending).",
         f"Each protection unit covers up to {TOKENS_PER_UNIT:,} tokens. Partial token chunks consume a full additional unit.",
-        _stripe_connection_note(),
+        stripe_status.note,
         _stripe_webhook_secret_note(),
     ]
 
@@ -507,7 +419,15 @@ def get_payment_methods(
     if pending_count > 0:
         notes.append("One or more payment methods are pending verification.")
 
-    catalogue_out: dict[str, PackageCatalogueEntry] = {k: PackageCatalogueEntry(**v) for k, v in PACKAGE_CATALOGUE.items()}
+    # Build catalogue with stripe_price_id injected at render time
+    catalogue_out: dict[str, PackageCatalogueEntry] = {}
+    for k, v in PACKAGE_CATALOGUE.items():
+        entry_data = dict(v)
+        entry_data.setdefault(
+            "stripe_price_id",
+            os.environ.get(f"STRIPE_PRICE_ID_{k.upper()}", ""),
+        )
+        catalogue_out[k] = PackageCatalogueEntry(**entry_data)
 
     return BillingPaymentMethodsResponse(
         generatedat=datetime.now(UTC).isoformat(),
@@ -515,7 +435,8 @@ def get_payment_methods(
         organizationid=organizationid,
         organizationname=org_name,
         stripe_customer_id=sb_stripe_customer_id,
-        stripe_mode=_stripe_mode(),
+        stripe=stripe_status,
+        stripe_mode=stripe_status.mode if stripe_status.configured else None,
         defaultmethodid=defaultmethodid,
         methods=methods,
         methodcount=methodcount,
