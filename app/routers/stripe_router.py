@@ -92,7 +92,7 @@ class SetDefaultPaymentMethodRequest(BaseModel):
 class MeteredUsageSyncRequest(BaseModel):
     subscription_item_id: str = Field(
         ...,
-        description="Stripe subscription item ID with a metered price (si_xxx). This is the subscription item, not the subscription ID.",
+        description=("Stripe subscription item ID with a metered price (si_xxx). This is the subscription item, not the subscription ID."),
     )
     quantity: int = Field(..., ge=0, description="Usage quantity to report")
     action: str = Field(default="increment", description="increment | set")
@@ -125,7 +125,6 @@ def _stripe_error_response(exc: StripeServiceError, detail: str, http_status: in
 
 # ---------------------------------------------------------------------------
 # GET /billing/catalogue
-# Return billing tier catalogue — no auth required (public pricing endpoint)
 # ---------------------------------------------------------------------------
 
 
@@ -150,7 +149,6 @@ async def get_billing_catalogue() -> JSONResponse:
 
 # ---------------------------------------------------------------------------
 # POST /billing/units/calculate
-# Convert a raw token count to the number of units required
 # ---------------------------------------------------------------------------
 
 
@@ -178,7 +176,6 @@ async def calculate_units(
 
 # ---------------------------------------------------------------------------
 # POST /billing/customers
-# Get or create Stripe customer for the authenticated org
 # ---------------------------------------------------------------------------
 
 
@@ -218,7 +215,6 @@ async def get_or_create_customer(
 
 # ---------------------------------------------------------------------------
 # POST /billing/checkout/sessions
-# Create a Stripe Checkout Session
 # ---------------------------------------------------------------------------
 
 
@@ -244,7 +240,7 @@ async def create_checkout_session(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"invalid mode '{body.mode}': must be payment | subscription | setup",
-        )
+        ) from None
 
     try:
         result = svc.create_checkout_session(
@@ -269,7 +265,6 @@ async def create_checkout_session(
 
 # ---------------------------------------------------------------------------
 # GET /billing/checkout/sessions/{session_id}
-# Retrieve a checkout session by ID
 # ---------------------------------------------------------------------------
 
 
@@ -295,7 +290,6 @@ async def get_checkout_session(
 
 # ---------------------------------------------------------------------------
 # POST /billing/checkout/sessions/{session_id}/complete
-# Manually complete a checkout session (internal / test use)
 # ---------------------------------------------------------------------------
 
 
@@ -327,7 +321,6 @@ async def complete_checkout_session(
 
 # ---------------------------------------------------------------------------
 # GET /billing/subscriptions/{subscription_id}
-# Retrieve a subscription record
 # ---------------------------------------------------------------------------
 
 
@@ -354,7 +347,6 @@ async def get_subscription(
 
 # ---------------------------------------------------------------------------
 # GET /billing/units/balance
-# Return the org's current protection unit balance
 # ---------------------------------------------------------------------------
 
 
@@ -379,7 +371,6 @@ async def get_unit_balance(
 
 # ---------------------------------------------------------------------------
 # POST /billing/units/debit
-# Debit units for a token-consuming operation
 # ---------------------------------------------------------------------------
 
 
@@ -426,7 +417,6 @@ async def debit_units(
 
 # ---------------------------------------------------------------------------
 # POST /billing/units/credit
-# Manually credit units to an org wallet (admin/internal)
 # ---------------------------------------------------------------------------
 
 
@@ -466,7 +456,6 @@ async def credit_units(
 
 # ---------------------------------------------------------------------------
 # GET /billing/units/ledger
-# Return the full unit ledger for an org
 # ---------------------------------------------------------------------------
 
 
@@ -497,7 +486,6 @@ async def get_unit_ledger(
 
 # ---------------------------------------------------------------------------
 # POST /billing/metered/sync
-# Report metered usage to Stripe via subscription item ID
 # ---------------------------------------------------------------------------
 
 
@@ -528,7 +516,6 @@ async def sync_metered_usage(
     except StripeServiceError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"metered_sync_error: {exc}") from exc
 
-    # Debit org unit balance for reported quantity using the correct signature.
     if body.quantity > 0:
         try:
             svc.debit_units(
@@ -551,7 +538,6 @@ async def sync_metered_usage(
 
 # ---------------------------------------------------------------------------
 # GET /billing/metered/log
-# Return the in-memory metered usage log for the org
 # ---------------------------------------------------------------------------
 
 
@@ -579,7 +565,6 @@ async def get_metered_usage_log(
 
 # ---------------------------------------------------------------------------
 # POST /billing/payment-methods/attach
-# Attach a Stripe PaymentMethod to the org's customer
 # ---------------------------------------------------------------------------
 
 
@@ -619,7 +604,6 @@ async def attach_payment_method(
 
 # ---------------------------------------------------------------------------
 # POST /billing/payment-methods/{payment_method_id}/detach
-# Detach a PaymentMethod from a customer
 # ---------------------------------------------------------------------------
 
 
@@ -646,7 +630,6 @@ async def detach_payment_method(
 
 # ---------------------------------------------------------------------------
 # GET /billing/payment-methods
-# List all payment methods for the org's customer
 # ---------------------------------------------------------------------------
 
 
@@ -685,7 +668,6 @@ async def list_payment_methods(
 
 # ---------------------------------------------------------------------------
 # POST /billing/payment-methods/{payment_method_id}/set-default
-# Set a payment method as the customer default
 # ---------------------------------------------------------------------------
 
 
@@ -723,7 +705,6 @@ async def set_default_payment_method(
 
 # ---------------------------------------------------------------------------
 # GET /billing/invoices
-# List invoices for the authenticated org
 # ---------------------------------------------------------------------------
 
 
@@ -761,7 +742,6 @@ async def list_invoices(
 
 # ---------------------------------------------------------------------------
 # DELETE /billing/invoices/cache
-# Invalidate invoice cache for the org
 # ---------------------------------------------------------------------------
 
 
