@@ -844,6 +844,10 @@ class StripeService:
         with self._lock:
             return self._customer_org_map.get(customer_id)
 
+    def resolve_customer_id(self, org_id: str) -> str | None:
+        with self._lock:
+            return self._org_customer_map.get(org_id)
+
     # ------------------------------------------------------------------
     # Payment methods
     # ------------------------------------------------------------------
