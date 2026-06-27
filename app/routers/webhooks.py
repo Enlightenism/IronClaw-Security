@@ -65,6 +65,24 @@ _SUPPORTED_EVENTS: set[str] = {e.value for e in WebhookEventType if e.value != "
 
 _STRIPE_DISPATCHABLE_EVENTS: frozenset[str] = frozenset(e.value for e in StripeWebhookEventType)
 
+# ---------------------------------------------------------------------------
+# Stripe service dependency — injected so tests can patch
+# app.routers.webhooks.get_stripe_service without touching internals.
+# ---------------------------------------------------------------------------
+
+_stripe_service_instance: StripeService | None = None
+
+
+def get_stripe_service() -> StripeService:
+    """
+    Return the shared StripeService singleton for this process.
+    Tests patch ``app.routers.webhooks.get_stripe_service`` to inject a mock.
+    """
+    global _stripe_service_instance  # noqa: PLW0603
+    if _stripe_service_instance is None:
+        _stripe_service_instance = StripeService()
+    return _stripe_service_instance
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -129,6 +147,7 @@ def _build_list_item(row: dict[str, Any]) -> dict[str, Any]:
 async def stripe_webhook_receiver(
     request: Request,
     stripe_signature: str | None = Header(default=None, alias="stripe-signature"),
+    stripe_svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
     raw_body: bytes = await request.body()
 
@@ -137,8 +156,6 @@ async def stripe_webhook_receiver(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="stripe_webhook_empty_body",
         )
-
-    stripe_svc = StripeService()
 
     # --- Signature verification (fail-closed) ---
     verified_payload: dict[str, Any] | None = None
