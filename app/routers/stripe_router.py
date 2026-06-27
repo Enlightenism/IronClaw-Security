@@ -16,6 +16,7 @@ from app.services.stripe_service import (
     StripeServiceError,
     StripeSessionNotFoundError,
     StripeSubscriptionNotFoundError,
+    StripeUnitEventReason,
     units_for_tokens,
 )
 
@@ -41,6 +42,16 @@ def get_stripe_service() -> StripeService:
 def _resolve_org_id(auth: AuthContext) -> str:
     oid = getattr(auth, "org_id", None) or getattr(auth, "tenant_id", None) or ""
     return str(oid)
+
+
+def _resolve_customer_id(svc: StripeService, org_id: str) -> str | None:
+    """
+    Look up the Stripe customer_id for an org.
+    Uses the internal mapping directly — resolve_customer_id is not a public
+    method on StripeService; the canonical lookup is _org_customer_map.
+    """
+    with svc._lock:  # noqa: SLF001
+        return svc._org_customer_map.get(org_id)  # noqa: SLF001
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +90,10 @@ class SetDefaultPaymentMethodRequest(BaseModel):
 
 
 class MeteredUsageSyncRequest(BaseModel):
-    subscription_id: str = Field(..., description="Stripe subscription ID with a metered price")
+    subscription_item_id: str = Field(
+        ...,
+        description="Stripe subscription item ID with a metered price (si_xxx). This is the subscription item, not the subscription ID.",
+    )
     quantity: int = Field(..., ge=0, description="Usage quantity to report")
     action: str = Field(default="increment", description="increment | set")
     idempotency_key: str | None = Field(default=None, description="Optional idempotency key for deduplication")
@@ -119,11 +133,7 @@ def _stripe_error_response(exc: StripeServiceError, detail: str, http_status: in
     "/catalogue",
     status_code=status.HTTP_200_OK,
     summary="Return IronClaw billing tier catalogue",
-    description=(
-        "Returns all available IronClaw protection unit packages with pricing. "
-        "Starter 5,000 units / $20 · Team 25,000 units / $90 · Enterprise 60,000 units / $180. "
-        "Each unit covers up to 25,000 tokens with no scan ceiling. Public endpoint — no auth required."
-    ),
+    description=("Returns all available IronClaw protection unit packages with pricing. Starter 5,000 units / $20 · Team 25,000 units / $90 · Enterprise 60,000 units / $180. Each unit covers up to 25,000 tokens with no scan ceiling. Public endpoint — no auth required."),
 )
 async def get_billing_catalogue() -> JSONResponse:
     from app.services.stripe_service import PACKAGE_CATALOGUE, TOKENS_PER_UNIT
@@ -216,11 +226,7 @@ async def get_or_create_customer(
     "/checkout/sessions",
     status_code=status.HTTP_201_CREATED,
     summary="Create a Stripe Checkout Session",
-    description=(
-        "Creates a Stripe Checkout session for one-time payment or subscription. "
-        "On checkout.session.completed, IronClaw credits unit_credits protection units to the org wallet. "
-        "Starter: 5,000 units/$20 · Team: 25,000 units/$90 · Enterprise: 60,000 units/$180."
-    ),
+    description=("Creates a Stripe Checkout session for one-time payment or subscription. On checkout.session.completed, IronClaw credits unit_credits protection units to the org wallet. Starter: 5,000 units/$20 · Team: 25,000 units/$90 · Enterprise: 60,000 units/$180."),
     tags=["billing", "checkout"],
 )
 async def create_checkout_session(
@@ -381,11 +387,7 @@ async def get_unit_balance(
     "/units/debit",
     status_code=status.HTTP_200_OK,
     summary="Debit protection units for a token-consuming operation",
-    description=(
-        "Converts token_count to required units via ceiling division at 25,000 tokens/unit, "
-        "then debits the org wallet. Raises 402 if balance is insufficient. "
-        "Scans have no ceiling — units must simply be available."
-    ),
+    description=("Converts token_count to required units via ceiling division at 25,000 tokens/unit, then debits the org wallet. Raises 402 if balance is insufficient. Scans have no ceiling — units must simply be available."),
     tags=["billing", "units"],
 )
 async def debit_units(
@@ -397,12 +399,13 @@ async def debit_units(
     if not org_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
 
-    units = units_for_tokens(body.token_count)
+    amount = units_for_tokens(body.token_count)
 
     try:
         result = svc.debit_units(
             org_id=org_id,
-            units=units,
+            amount=amount,
+            reason=StripeUnitEventReason.METERED_SYNC,
             reference_id=body.reference_id,
         )
     except StripeInsufficientUnitsError as exc:
@@ -444,8 +447,6 @@ async def credit_units(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
 
     try:
-        from app.services.stripe_service import StripeUnitEventReason
-
         try:
             reason_enum = StripeUnitEventReason(body.reason)
         except ValueError:
@@ -496,15 +497,15 @@ async def get_unit_ledger(
 
 # ---------------------------------------------------------------------------
 # POST /billing/metered/sync
-# Report metered usage to Stripe
+# Report metered usage to Stripe via subscription item ID
 # ---------------------------------------------------------------------------
 
 
 @router.post(
     "/metered/sync",
     status_code=status.HTTP_200_OK,
-    summary="Sync metered usage to Stripe for a subscription",
-    description="Reports usage quantity to Stripe for a metered-price subscription item. Idempotent when idempotency_key is supplied.",
+    summary="Sync metered usage to Stripe for a subscription item",
+    description=("Reports usage quantity to Stripe for a metered-price subscription item (si_xxx). Uses subscription_item_id — not subscription ID. Idempotent when idempotency_key is supplied. Also debits org unit balance via StripeUnitEventReason.METERED_SYNC."),
     tags=["billing", "metered"],
 )
 async def sync_metered_usage(
@@ -517,15 +518,33 @@ async def sync_metered_usage(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
 
     try:
-        result = svc.sync_metered_usage(
+        result = svc.report_metered_usage(
             org_id=org_id,
-            subscription_id=body.subscription_id,
+            subscription_item_id=body.subscription_item_id,
             quantity=body.quantity,
             action=body.action,
             idempotency_key=body.idempotency_key,
         )
     except StripeServiceError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"metered_sync_error: {exc}") from exc
+
+    # Debit org unit balance for reported quantity using the correct signature.
+    if body.quantity > 0:
+        try:
+            svc.debit_units(
+                org_id=org_id,
+                amount=body.quantity,
+                reason=StripeUnitEventReason.METERED_SYNC,
+                reference_id=result.idempotency_key if hasattr(result, "idempotency_key") else None,
+            )
+        except StripeInsufficientUnitsError:
+            logger.warning(
+                "stripe_router.metered_sync insufficient_units org=%s quantity=%d — usage reported to Stripe but debit skipped",
+                org_id,
+                body.quantity,
+            )
+        except StripeServiceError as exc:
+            logger.error("stripe_router.metered_sync debit_error org=%s error=%s", org_id, exc)
 
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
@@ -579,7 +598,7 @@ async def attach_payment_method(
     if not org_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
 
-    customer_id = svc.resolve_customer_id(org_id)
+    customer_id = _resolve_customer_id(svc, org_id)
     if not customer_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -599,7 +618,7 @@ async def attach_payment_method(
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/payment-methods/detach
+# POST /billing/payment-methods/{payment_method_id}/detach
 # Detach a PaymentMethod from a customer
 # ---------------------------------------------------------------------------
 
@@ -645,7 +664,7 @@ async def list_payment_methods(
     if not org_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
 
-    customer_id = svc.resolve_customer_id(org_id)
+    customer_id = _resolve_customer_id(svc, org_id)
     if not customer_id:
         return JSONResponse(
             status_code=status.HTTP_200_OK,
@@ -685,7 +704,7 @@ async def set_default_payment_method(
     if not org_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
 
-    customer_id = svc.resolve_customer_id(org_id)
+    customer_id = _resolve_customer_id(svc, org_id)
     if not customer_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no_stripe_customer_for_org")
 
