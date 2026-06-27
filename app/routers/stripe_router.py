@@ -1,0 +1,767 @@
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+
+from app.core.auth import AuthContext, get_auth_context
+from app.services.stripe_service import (
+    StripeCheckoutMode,
+    StripeInsufficientUnitsError,
+    StripePaymentMethodNotFoundError,
+    StripeService,
+    StripeServiceError,
+    StripeSessionNotFoundError,
+    StripeSubscriptionNotFoundError,
+    units_for_tokens,
+)
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/billing", tags=["billing"])
+
+# ---------------------------------------------------------------------------
+# StripeService dependency — injected so tests can patch without touching
+# app internals. Tests patch app.routers.stripe_router.get_stripe_service.
+# ---------------------------------------------------------------------------
+
+_stripe_service_instance: StripeService | None = None
+
+
+def get_stripe_service() -> StripeService:
+    global _stripe_service_instance  # noqa: PLW0603
+    if _stripe_service_instance is None:
+        _stripe_service_instance = StripeService()
+    return _stripe_service_instance
+
+
+def _resolve_org_id(auth: AuthContext) -> str:
+    oid = getattr(auth, "org_id", None) or getattr(auth, "tenant_id", None) or ""
+    return str(oid)
+
+
+# ---------------------------------------------------------------------------
+# Request / Response schemas (router-local — stripe_service owns data shapes)
+# ---------------------------------------------------------------------------
+
+
+class CheckoutSessionCreateRequest(BaseModel):
+    price_id: str = Field(..., description="Stripe Price ID for the line item")
+    mode: str = Field(default="payment", description="checkout mode: payment | subscription | setup")
+    quantity: int = Field(default=1, ge=1)
+    unit_credits: int = Field(default=0, ge=0, description="IronClaw protection units to credit on completion")
+    success_url: str = Field(..., description="Redirect URL on successful payment")
+    cancel_url: str = Field(..., description="Redirect URL on cancelled payment")
+    customer_id: str | None = Field(default=None, description="Existing Stripe customer_id, if known")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CheckoutSessionCompleteRequest(BaseModel):
+    customer_id: str | None = Field(default=None, description="Stripe customer_id returned by Stripe webhook")
+
+
+class CustomerCreateRequest(BaseModel):
+    email: str | None = Field(default=None)
+    name: str | None = Field(default=None)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AttachPaymentMethodRequest(BaseModel):
+    payment_method_id: str = Field(..., description="Stripe PaymentMethod ID to attach")
+    set_as_default: bool = Field(default=False)
+
+
+class SetDefaultPaymentMethodRequest(BaseModel):
+    payment_method_id: str = Field(..., description="Stripe PaymentMethod ID to set as default")
+
+
+class MeteredUsageSyncRequest(BaseModel):
+    subscription_id: str = Field(..., description="Stripe subscription ID with a metered price")
+    quantity: int = Field(..., ge=0, description="Usage quantity to report")
+    action: str = Field(default="increment", description="increment | set")
+    idempotency_key: str | None = Field(default=None, description="Optional idempotency key for deduplication")
+
+
+class UnitDebitRequest(BaseModel):
+    token_count: int = Field(..., ge=1, description="Number of tokens to debit units for")
+    reference_id: str | None = Field(default=None)
+
+
+class UnitCreditRequest(BaseModel):
+    units: int = Field(..., ge=1, description="Number of units to credit to the org wallet")
+    reason: str = Field(default="manual.credit")
+    reference_id: str | None = Field(default=None)
+
+
+# ---------------------------------------------------------------------------
+# Utility helpers
+# ---------------------------------------------------------------------------
+
+
+def _stripe_error_response(exc: StripeServiceError, detail: str, http_status: int) -> JSONResponse:
+    logger.error("stripe_router.error detail=%s error=%s", detail, exc)
+    return JSONResponse(
+        status_code=http_status,
+        content={"error": detail, "message": str(exc)},
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /billing/catalogue
+# Return billing tier catalogue — no auth required (public pricing endpoint)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/catalogue",
+    status_code=status.HTTP_200_OK,
+    summary="Return IronClaw billing tier catalogue",
+    description=(
+        "Returns all available IronClaw protection unit packages with pricing. "
+        "Starter 5,000 units / $20 · Team 25,000 units / $90 · Enterprise 60,000 units / $180. "
+        "Each unit covers up to 25,000 tokens with no scan ceiling. Public endpoint — no auth required."
+    ),
+)
+async def get_billing_catalogue() -> JSONResponse:
+    from app.services.stripe_service import PACKAGE_CATALOGUE, TOKENS_PER_UNIT
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "packages": PACKAGE_CATALOGUE,
+            "tokens_per_unit": TOKENS_PER_UNIT,
+            "notes": "Each protection unit covers up to tokens_per_unit tokens. Scans are unlimited — units auto-deduct per chunk.",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/units/calculate
+# Convert a raw token count to the number of units required
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/units/calculate",
+    status_code=status.HTTP_200_OK,
+    summary="Calculate units required for a token count",
+    description="Returns how many IronClaw protection units are needed to cover a given token count. Uses ceiling division at 25,000 tokens per unit.",
+)
+async def calculate_units(
+    token_count: int = Query(..., ge=1, description="Number of tokens to cover"),
+) -> JSONResponse:
+    units = units_for_tokens(token_count)
+    from app.services.stripe_service import TOKENS_PER_UNIT
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "token_count": token_count,
+            "units_required": units,
+            "tokens_per_unit": TOKENS_PER_UNIT,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/customers
+# Get or create Stripe customer for the authenticated org
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/customers",
+    status_code=status.HTTP_200_OK,
+    summary="Get or create a Stripe customer for the authenticated org",
+    description="Returns existing Stripe customer_id if already registered. Creates a new one if not. Idempotent per org.",
+)
+async def get_or_create_customer(
+    body: CustomerCreateRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    org_id = _resolve_org_id(auth)
+    if not org_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
+
+    try:
+        customer_id = svc.get_or_create_stripe_customer(
+            org_id=org_id,
+            email=body.email,
+            name=body.name,
+            metadata=body.metadata,
+        )
+    except StripeServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"stripe_customer_error: {exc}",
+        ) from exc
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={"org_id": org_id, "customer_id": customer_id},
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/checkout/sessions
+# Create a Stripe Checkout Session
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/checkout/sessions",
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a Stripe Checkout Session",
+    description=(
+        "Creates a Stripe Checkout session for one-time payment or subscription. "
+        "On checkout.session.completed, IronClaw credits unit_credits protection units to the org wallet. "
+        "Starter: 5,000 units/$20 · Team: 25,000 units/$90 · Enterprise: 60,000 units/$180."
+    ),
+    tags=["billing", "checkout"],
+)
+async def create_checkout_session(
+    body: CheckoutSessionCreateRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    org_id = _resolve_org_id(auth)
+    if not org_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
+
+    try:
+        mode = StripeCheckoutMode(body.mode)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"invalid mode '{body.mode}': must be payment | subscription | setup",
+        )
+
+    try:
+        result = svc.create_checkout_session(
+            org_id=org_id,
+            price_id=body.price_id,
+            mode=mode,
+            quantity=body.quantity,
+            unit_credits=body.unit_credits,
+            success_url=body.success_url,
+            cancel_url=body.cancel_url,
+            customer_id=body.customer_id,
+            metadata=body.metadata,
+        )
+    except StripeServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"stripe_checkout_error: {exc}",
+        ) from exc
+
+    return JSONResponse(status_code=status.HTTP_201_CREATED, content=result.to_dict())
+
+
+# ---------------------------------------------------------------------------
+# GET /billing/checkout/sessions/{session_id}
+# Retrieve a checkout session by ID
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/checkout/sessions/{session_id}",
+    status_code=status.HTTP_200_OK,
+    summary="Get a checkout session by ID",
+    tags=["billing", "checkout"],
+)
+async def get_checkout_session(
+    session_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    org_id = _resolve_org_id(auth)
+    record = svc.get_checkout_session(session_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="checkout_session_not_found")
+    if org_id and record.get("org_id") != org_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="checkout_session_not_accessible")
+    return JSONResponse(status_code=status.HTTP_200_OK, content=record)
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/checkout/sessions/{session_id}/complete
+# Manually complete a checkout session (internal / test use)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/checkout/sessions/{session_id}/complete",
+    status_code=status.HTTP_200_OK,
+    summary="Manually complete a checkout session and credit units",
+    description="Idempotent. Credits unit_credits to the org wallet. Intended for internal tooling and integration tests. Production fulfillment is driven by the Stripe webhook at POST /webhooks/stripe.",
+    tags=["billing", "checkout"],
+)
+async def complete_checkout_session(
+    session_id: str,
+    body: CheckoutSessionCompleteRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    try:
+        result = svc.complete_checkout_session(
+            session_id=session_id,
+            customer_id=body.customer_id,
+        )
+    except StripeSessionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="checkout_session_not_found") from exc
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"complete_error: {exc}") from exc
+
+    return JSONResponse(status_code=status.HTTP_200_OK, content=result)
+
+
+# ---------------------------------------------------------------------------
+# GET /billing/subscriptions/{subscription_id}
+# Retrieve a subscription record
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/subscriptions/{subscription_id}",
+    status_code=status.HTTP_200_OK,
+    summary="Get a subscription record by ID",
+    tags=["billing", "subscriptions"],
+)
+async def get_subscription(
+    subscription_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    try:
+        result = svc.get_subscription(subscription_id)
+    except StripeSubscriptionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="subscription_not_found") from exc
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"subscription_fetch_error: {exc}") from exc
+
+    return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
+
+
+# ---------------------------------------------------------------------------
+# GET /billing/units/balance
+# Return the org's current protection unit balance
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/units/balance",
+    status_code=status.HTTP_200_OK,
+    summary="Get the org's current protection unit balance",
+    description="Returns current unit balance and full ledger history. Each unit covers up to 25,000 tokens with no scan ceiling.",
+    tags=["billing", "units"],
+)
+async def get_unit_balance(
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    org_id = _resolve_org_id(auth)
+    if not org_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
+
+    result = svc.get_unit_balance(org_id)
+    return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/units/debit
+# Debit units for a token-consuming operation
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/units/debit",
+    status_code=status.HTTP_200_OK,
+    summary="Debit protection units for a token-consuming operation",
+    description=(
+        "Converts token_count to required units via ceiling division at 25,000 tokens/unit, "
+        "then debits the org wallet. Raises 402 if balance is insufficient. "
+        "Scans have no ceiling — units must simply be available."
+    ),
+    tags=["billing", "units"],
+)
+async def debit_units(
+    body: UnitDebitRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    org_id = _resolve_org_id(auth)
+    if not org_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
+
+    units = units_for_tokens(body.token_count)
+
+    try:
+        result = svc.debit_units(
+            org_id=org_id,
+            units=units,
+            reference_id=body.reference_id,
+        )
+    except StripeInsufficientUnitsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "error": "insufficient_units",
+                "have": exc.have,
+                "need": exc.need,
+                "org_id": exc.org_id,
+            },
+        ) from exc
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"debit_error: {exc}") from exc
+
+    return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/units/credit
+# Manually credit units to an org wallet (admin/internal)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/units/credit",
+    status_code=status.HTTP_200_OK,
+    summary="Credit protection units to an org wallet",
+    description="Admin/internal endpoint. Credits the specified number of units to the org. Use reason to describe the credit source.",
+    tags=["billing", "units"],
+)
+async def credit_units(
+    body: UnitCreditRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    org_id = _resolve_org_id(auth)
+    if not org_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
+
+    try:
+        from app.services.stripe_service import StripeUnitEventReason
+
+        try:
+            reason_enum = StripeUnitEventReason(body.reason)
+        except ValueError:
+            reason_enum = StripeUnitEventReason.MANUAL_CREDIT
+
+        result = svc.credit_units(
+            org_id=org_id,
+            units=body.units,
+            reason=reason_enum,
+            reference_id=body.reference_id,
+        )
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"credit_error: {exc}") from exc
+
+    return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
+
+
+# ---------------------------------------------------------------------------
+# GET /billing/units/ledger
+# Return the full unit ledger for an org
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/units/ledger",
+    status_code=status.HTTP_200_OK,
+    summary="Get the full unit ledger for the authenticated org",
+    tags=["billing", "units"],
+)
+async def get_unit_ledger(
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    org_id = _resolve_org_id(auth)
+    if not org_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
+
+    result = svc.get_unit_balance(org_id)
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "org_id": org_id,
+            "balance": result.balance,
+            "ledger": result.ledger_entries,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/metered/sync
+# Report metered usage to Stripe
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/metered/sync",
+    status_code=status.HTTP_200_OK,
+    summary="Sync metered usage to Stripe for a subscription",
+    description="Reports usage quantity to Stripe for a metered-price subscription item. Idempotent when idempotency_key is supplied.",
+    tags=["billing", "metered"],
+)
+async def sync_metered_usage(
+    body: MeteredUsageSyncRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    org_id = _resolve_org_id(auth)
+    if not org_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
+
+    try:
+        result = svc.sync_metered_usage(
+            org_id=org_id,
+            subscription_id=body.subscription_id,
+            quantity=body.quantity,
+            action=body.action,
+            idempotency_key=body.idempotency_key,
+        )
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"metered_sync_error: {exc}") from exc
+
+    return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
+
+
+# ---------------------------------------------------------------------------
+# GET /billing/metered/log
+# Return the in-memory metered usage log for the org
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/metered/log",
+    status_code=status.HTTP_200_OK,
+    summary="Get metered usage log for the org",
+    tags=["billing", "metered"],
+)
+async def get_metered_usage_log(
+    limit: int = Query(default=50, ge=1, le=200),
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    org_id = _resolve_org_id(auth)
+    if not org_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
+
+    entries = svc.get_metered_usage_log(org_id=org_id, limit=limit)
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={"org_id": org_id, "count": len(entries), "entries": entries},
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/payment-methods/attach
+# Attach a Stripe PaymentMethod to the org's customer
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/payment-methods/attach",
+    status_code=status.HTTP_200_OK,
+    summary="Attach a Stripe PaymentMethod to the org customer",
+    tags=["billing", "payment-methods"],
+)
+async def attach_payment_method(
+    body: AttachPaymentMethodRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    org_id = _resolve_org_id(auth)
+    if not org_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
+
+    customer_id = svc.resolve_customer_id(org_id)
+    if not customer_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="no_stripe_customer_for_org — call POST /billing/customers first",
+        )
+
+    try:
+        result = svc.attach_payment_method(
+            customer_id=customer_id,
+            payment_method_id=body.payment_method_id,
+            set_as_default=body.set_as_default,
+        )
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"attach_error: {exc}") from exc
+
+    return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/payment-methods/detach
+# Detach a PaymentMethod from a customer
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/payment-methods/{payment_method_id}/detach",
+    status_code=status.HTTP_200_OK,
+    summary="Detach a PaymentMethod from its customer",
+    tags=["billing", "payment-methods"],
+)
+async def detach_payment_method(
+    payment_method_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    try:
+        result = svc.detach_payment_method(payment_method_id=payment_method_id)
+    except StripePaymentMethodNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="payment_method_not_found") from exc
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"detach_error: {exc}") from exc
+
+    return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
+
+
+# ---------------------------------------------------------------------------
+# GET /billing/payment-methods
+# List all payment methods for the org's customer
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/payment-methods",
+    status_code=status.HTTP_200_OK,
+    summary="List payment methods for the org",
+    tags=["billing", "payment-methods"],
+)
+async def list_payment_methods(
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    org_id = _resolve_org_id(auth)
+    if not org_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
+
+    customer_id = svc.resolve_customer_id(org_id)
+    if not customer_id:
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"org_id": org_id, "customer_id": None, "payment_methods": []},
+        )
+
+    results = svc.list_payment_methods(customer_id=customer_id)
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "org_id": org_id,
+            "customer_id": customer_id,
+            "count": len(results),
+            "payment_methods": [r.to_dict() for r in results],
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/payment-methods/{payment_method_id}/set-default
+# Set a payment method as the customer default
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/payment-methods/{payment_method_id}/set-default",
+    status_code=status.HTTP_200_OK,
+    summary="Set a payment method as the default for the org customer",
+    tags=["billing", "payment-methods"],
+)
+async def set_default_payment_method(
+    payment_method_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    org_id = _resolve_org_id(auth)
+    if not org_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
+
+    customer_id = svc.resolve_customer_id(org_id)
+    if not customer_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no_stripe_customer_for_org")
+
+    try:
+        result = svc.set_default_payment_method(
+            customer_id=customer_id,
+            payment_method_id=payment_method_id,
+        )
+    except StripePaymentMethodNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="payment_method_not_found") from exc
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"set_default_error: {exc}") from exc
+
+    return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
+
+
+# ---------------------------------------------------------------------------
+# GET /billing/invoices
+# List invoices for the authenticated org
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/invoices",
+    status_code=status.HTTP_200_OK,
+    summary="List invoices for the org",
+    description="Returns cached invoice list for the org. Pass force_refresh=true to bypass cache and re-fetch from Stripe.",
+    tags=["billing", "invoices"],
+)
+async def list_invoices(
+    limit: int = Query(default=20, ge=1, le=100),
+    force_refresh: bool = Query(default=False),
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    org_id = _resolve_org_id(auth)
+    if not org_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
+
+    try:
+        results = svc.get_invoices_for_org(org_id=org_id, limit=limit, force_refresh=force_refresh)
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"invoice_fetch_error: {exc}") from exc
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "org_id": org_id,
+            "count": len(results),
+            "invoices": [r.to_dict() for r in results],
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# DELETE /billing/invoices/cache
+# Invalidate invoice cache for the org
+# ---------------------------------------------------------------------------
+
+
+@router.delete(
+    "/invoices/cache",
+    status_code=status.HTTP_200_OK,
+    summary="Invalidate the invoice cache for the org",
+    tags=["billing", "invoices"],
+)
+async def invalidate_invoice_cache(
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    org_id = _resolve_org_id(auth)
+    if not org_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
+
+    svc.invalidate_invoice_cache(org_id=org_id)
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={"invalidated": True, "org_id": org_id},
+    )
