@@ -249,6 +249,11 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
             _optional_router("app.worker.remediation_worker"),
             {"dependencies": dependencies},
         ),
+        # Payment processing — Stripe billing router
+        (
+            _optional_router("app.routers.stripe_router"),
+            {"dependencies": dependencies},
+        ),
     ]
 
 
