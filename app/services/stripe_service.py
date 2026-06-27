@@ -134,9 +134,12 @@ class StripeWebhookEventType(StrEnum):
     CUSTOMER_SUBSCRIPTION_DELETED = "customer.subscription.deleted"
     INVOICE_PAID = "invoice.paid"
     INVOICE_PAYMENT_FAILED = "invoice.payment_failed"
+    INVOICE_UPCOMING = "invoice.upcoming"
     CUSTOMER_CREATED = "customer.created"
     CUSTOMER_UPDATED = "customer.updated"
     CHARGE_REFUNDED = "charge.refunded"
+    PAYMENT_INTENT_SUCCEEDED = "payment_intent.succeeded"
+    PAYMENT_INTENT_PAYMENT_FAILED = "payment_intent.payment_failed"
 
 
 # ---------------------------------------------------------------------------
@@ -501,7 +504,6 @@ class _StripeHTTPClient:
     Minimal Stripe REST client using only stdlib urllib.
     Handles authentication, idempotency keys, and response parsing.
     No third-party stripe SDK dependency required.
-    If the stripe SDK is installed and STRIPE_USE_SDK=true, routes through it.
     """
 
     def __init__(self, api_key: str) -> None:
@@ -663,6 +665,10 @@ class StripeSessionNotFoundError(StripeServiceError):
 
 class StripeSubscriptionNotFoundError(StripeServiceError):
     """Raised when a subscription is not found."""
+
+    def __init__(self, subscription_id: str) -> None:
+        super().__init__(f"subscription not found: {subscription_id}")
+        self.subscription_id = subscription_id
 
 
 class StripeInsufficientUnitsError(StripeServiceError):
@@ -989,7 +995,6 @@ class StripeService:
         """
         Return invoices for an org. Results are cached per org in _invoice_cache.
         Pass force_refresh=True to bypass the cache and re-fetch from Stripe.
-        Raises StripeConfigError if the org has no customer mapping and no API key.
         """
         with self._lock:
             if not force_refresh and org_id in self._invoice_cache:
@@ -1034,7 +1039,6 @@ class StripeService:
         with self._lock:
             self._invoice_cache[org_id] = results
             if len(self._invoice_cache) > _INVOICE_CACHE_MAX:
-                # Evict oldest org entry (insertion-order dict).
                 oldest = next(iter(self._invoice_cache))
                 del self._invoice_cache[oldest]
 
@@ -1167,8 +1171,7 @@ class StripeService:
     ) -> dict[str, Any]:
         """
         Manually mark an open checkout session as complete and credit units.
-        Intended for use in admin flows or reconciliation when the webhook
-        event was missed. Idempotent — returns existing result if already complete.
+        Idempotent — returns existing result if already complete.
         Raises StripeSessionNotFoundError if the session is not in local state.
         """
         with self._lock:
@@ -1275,7 +1278,6 @@ class StripeService:
         Credit units to an org's balance and record a ledger entry.
         Thread-safe; safe to call from webhook handlers.
         Each unit protects up to TOKENS_PER_UNIT (25,000) tokens.
-        Scans have no ceiling — units simply accumulate and deduct as needed.
         """
         if amount <= 0:
             raise StripeServiceError("credit amount must be > 0")
@@ -1322,14 +1324,9 @@ class StripeService:
     ) -> UnitBalanceResponse:
         """
         Debit units from an org's balance.
-
-        Raises StripeInsufficientUnitsError (a subclass of StripeServiceError) when
-        the org has insufficient balance. Callers may catch StripeInsufficientUnitsError
-        specifically to trigger an auto-purchase / top-up flow rather than hard-failing
-        the scan. The on_insufficient_units callback (if set at init) is also fired.
-
+        Raises StripeInsufficientUnitsError when the org has insufficient balance.
+        The on_insufficient_units callback (if set at init) is also fired.
         Each unit covers up to TOKENS_PER_UNIT (25,000) tokens.
-        Use units_for_tokens(token_count) to compute the correct debit amount.
         """
         if amount <= 0:
             raise StripeServiceError("debit amount must be > 0")
@@ -1384,10 +1381,7 @@ class StripeService:
         Debit the exact number of units required to cover token_count tokens.
         Each unit covers up to TOKENS_PER_UNIT (25,000) tokens.
         Partial chunks consume a full unit (ceiling division). No scan ceiling.
-
         Raises StripeInsufficientUnitsError if the org has insufficient balance.
-        Callers may catch that specific error to trigger a top-up instead of
-        hard-failing the scan.
         """
         if token_count < 0:
             logger.warning(
@@ -1509,7 +1503,24 @@ class StripeService:
         )
         return SubscriptionResponse(**record.to_dict(), schema_version=_SCHEMA_VERSION)
 
-    def get_subscription(self, subscription_id: str) -> SubscriptionResponse | None:
+    def get_subscription(self, subscription_id: str) -> SubscriptionResponse:
+        """
+        Return the SubscriptionResponse for subscription_id.
+        Raises StripeSubscriptionNotFoundError if not found.
+        Callers that need a nullable lookup should catch StripeSubscriptionNotFoundError.
+        The webhook bridge uses this to hydrate update/delete handlers.
+        """
+        with self._lock:
+            record = self._subscriptions.get(subscription_id)
+        if record is None:
+            raise StripeSubscriptionNotFoundError(subscription_id)
+        return SubscriptionResponse(**record.to_dict(), schema_version=_SCHEMA_VERSION)
+
+    def get_subscription_or_none(self, subscription_id: str) -> SubscriptionResponse | None:
+        """
+        Return SubscriptionResponse or None without raising.
+        Use when absence of a record is a valid non-error condition.
+        """
         with self._lock:
             record = self._subscriptions.get(subscription_id)
         if record is None:
@@ -1629,7 +1640,6 @@ class StripeService:
 
         idem_key = idempotency_key or f"metered-{org_id}-{subscription_item_id}-{int(time.time())}"
 
-        # Check idempotency key conflict.
         with self._lock:
             if idem_key in self._idempotency_keys:
                 stored = self._idempotency_keys[idem_key]
@@ -1720,12 +1730,16 @@ class StripeService:
 
     def verify_webhook_signature(
         self,
-        raw_body: bytes,
-        stripe_signature_header: str,
-    ) -> WebhookVerifyResult:
+        payload: bytes,
+        signature_header: str,
+    ) -> dict[str, Any]:
         """
-        Verify a Stripe webhook using Stripe-Signature header (HMAC-SHA256 timestamp scheme).
-        Returns WebhookVerifyResult with valid=True and parsed payload on success.
+        Verify a Stripe webhook using the Stripe-Signature header (HMAC-SHA256
+        timestamp scheme). Returns a plain dict (not WebhookVerifyResult) so the
+        router can consume it directly without an extra .to_dict() call.
+
+        Keys: valid (bool), event_type (str|None), event_id (str|None),
+              error (str|None), payload (dict).
         """
         import hashlib
         import hmac as _hmac
@@ -1734,94 +1748,105 @@ class StripeService:
         try:
             webhook_secret = self._get_webhook_secret()
         except StripeConfigError as exc:
-            return WebhookVerifyResult(valid=False, event_type=None, event_id=None, error=str(exc))
+            return {"valid": False, "event_type": None, "event_id": None, "error": str(exc), "payload": {}}
 
         try:
-            parts = dict(p.split("=", 1) for p in stripe_signature_header.split(",") if "=" in p)
+            parts = dict(p.split("=", 1) for p in signature_header.split(",") if "=" in p)
             timestamp = parts.get("t", "")
             v1_sig = parts.get("v1", "")
         except Exception:  # noqa: BLE001
-            return WebhookVerifyResult(
-                valid=False,
-                event_type=None,
-                event_id=None,
-                error="Malformed Stripe-Signature header.",
-            )
+            return {
+                "valid": False,
+                "event_type": None,
+                "event_id": None,
+                "error": "Malformed Stripe-Signature header.",
+                "payload": {},
+            }
 
         if not timestamp or not v1_sig:
-            return WebhookVerifyResult(
-                valid=False,
-                event_type=None,
-                event_id=None,
-                error="Missing timestamp or v1 signature.",
-            )
+            return {
+                "valid": False,
+                "event_type": None,
+                "event_id": None,
+                "error": "Missing timestamp or v1 signature.",
+                "payload": {},
+            }
 
         try:
             ts_int = int(timestamp)
         except ValueError:
-            return WebhookVerifyResult(valid=False, event_type=None, event_id=None, error="Invalid timestamp.")
+            return {"valid": False, "event_type": None, "event_id": None, "error": "Invalid timestamp.", "payload": {}}
 
         tolerance_seconds = int(vault.get("STRIPE_WEBHOOK_TOLERANCE_SECONDS") or "300")
         age = int(time.time()) - ts_int
         if abs(age) > tolerance_seconds:
-            return WebhookVerifyResult(
-                valid=False,
-                event_type=None,
-                event_id=None,
-                error=f"Webhook timestamp too old or too far in the future (age={age}s).",
-            )
+            return {
+                "valid": False,
+                "event_type": None,
+                "event_id": None,
+                "error": f"Webhook timestamp too old or too far in the future (age={age}s).",
+                "payload": {},
+            }
 
-        signed_payload = f"{timestamp}.".encode() + raw_body
+        signed_payload = f"{timestamp}.".encode() + payload
         expected = _hmac.new(webhook_secret.encode("utf-8"), signed_payload, hashlib.sha256).hexdigest()
 
         if not _hmac.compare_digest(expected, v1_sig):
-            return WebhookVerifyResult(
-                valid=False,
-                event_type=None,
-                event_id=None,
-                error="Signature mismatch.",
-            )
+            return {"valid": False, "event_type": None, "event_id": None, "error": "Signature mismatch.", "payload": {}}
 
         try:
-            payload: dict[str, Any] = json.loads(raw_body.decode("utf-8"))
+            parsed: dict[str, Any] = json.loads(payload.decode("utf-8"))
         except json.JSONDecodeError as exc:
-            return WebhookVerifyResult(
-                valid=False,
-                event_type=None,
-                event_id=None,
-                error=f"JSON decode error: {exc}",
-            )
+            return {
+                "valid": False,
+                "event_type": None,
+                "event_id": None,
+                "error": f"JSON decode error: {exc}",
+                "payload": {},
+            }
 
-        return WebhookVerifyResult(
-            valid=True,
-            event_type=payload.get("type"),
-            event_id=payload.get("id"),
-            error=None,
-            payload=payload,
-        )
+        return {
+            "valid": True,
+            "event_type": parsed.get("type"),
+            "event_id": parsed.get("id"),
+            "error": None,
+            "payload": parsed,
+        }
 
-    def dispatch_webhook_event(self, event: dict[str, Any]) -> dict[str, Any]:
+    def dispatch_webhook_event(
+        self,
+        event_type: StripeWebhookEventType | str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
         """
-        Public alias for handle_webhook_event.
-        Accepts a verified Stripe event dict and dispatches it to the correct handler.
+        Public entry point for dispatching a pre-verified Stripe event.
+        Accepts the event_type enum (or raw string) and the full event payload dict.
         Returns a result dict with action taken.
-        This is the preferred public entry point; handle_webhook_event is preserved
-        for backward compatibility.
+
+        Handles all registered StripeWebhookEventType values including:
+          CHARGE_REFUNDED, CUSTOMER_UPDATED, PAYMENT_INTENT_SUCCEEDED,
+          PAYMENT_INTENT_PAYMENT_FAILED, INVOICE_UPCOMING.
         """
-        return self.handle_webhook_event(event)
+        event_type_str = event_type.value if isinstance(event_type, StripeWebhookEventType) else event_type
+        # Normalise: allow callers to pass the event_type + payload separately,
+        # or a full Stripe event dict where payload IS the event.
+        if "type" not in payload:
+            payload = {"type": event_type_str, "id": payload.get("id", ""), "data": payload}
+        return self.handle_webhook_event(payload)
 
     def handle_webhook_event(self, event: dict[str, Any]) -> dict[str, Any]:
         """
         Dispatch a verified Stripe event object to the appropriate handler.
         Returns a result dict with action taken.
-        Handles all registered event types including charge.refunded and
-        customer.updated.
+        Handles all registered event types including CHARGE_REFUNDED,
+        CUSTOMER_UPDATED, PAYMENT_INTENT_SUCCEEDED, PAYMENT_INTENT_PAYMENT_FAILED,
+        and INVOICE_UPCOMING.
         """
         event_type = event.get("type", "")
         event_id = event.get("id", "")
         data_obj: dict[str, Any] = event.get("data", {}).get("object", {})
 
-        handler_map = {
+        handler_map: dict[str, Any] = {
             StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value: self._handle_checkout_completed,
             StripeWebhookEventType.CHECKOUT_SESSION_EXPIRED.value: self._handle_checkout_expired,
             StripeWebhookEventType.CUSTOMER_SUBSCRIPTION_CREATED.value: self._handle_subscription_upsert,
@@ -1829,8 +1854,11 @@ class StripeService:
             StripeWebhookEventType.CUSTOMER_SUBSCRIPTION_DELETED.value: self._handle_subscription_deleted,
             StripeWebhookEventType.INVOICE_PAID.value: self._handle_invoice_paid,
             StripeWebhookEventType.INVOICE_PAYMENT_FAILED.value: self._handle_invoice_payment_failed,
+            StripeWebhookEventType.INVOICE_UPCOMING.value: self._handle_invoice_upcoming,
             StripeWebhookEventType.CHARGE_REFUNDED.value: self._handle_charge_refunded,
             StripeWebhookEventType.CUSTOMER_UPDATED.value: self._handle_customer_updated,
+            StripeWebhookEventType.PAYMENT_INTENT_SUCCEEDED.value: self._handle_payment_intent_succeeded,
+            StripeWebhookEventType.PAYMENT_INTENT_PAYMENT_FAILED.value: self._handle_payment_intent_payment_failed,
         }
 
         handler = handler_map.get(event_type)
@@ -1989,10 +2017,10 @@ class StripeService:
         customer_id: str = obj.get("customer", "")
         amount_paid: int = int(obj.get("amount_paid", 0))
         invoice_id: str = obj.get("id", "")
+        billing_reason: str = obj.get("billing_reason", "")
 
         org_id = self.resolve_org_from_customer(customer_id) or obj.get("metadata", {}).get("org_id", "")
 
-        # Invalidate invoice cache so next fetch reflects new paid invoice.
         if org_id:
             self.invalidate_invoice_cache(org_id)
 
@@ -2026,12 +2054,24 @@ class StripeService:
                         )
                         self._subscriptions[subscription_id] = updated
 
-                # Credit renewal units from invoice metadata if present.
-                renewal_units_raw = obj.get("metadata", {}).get("unit_credits", "0")
-                try:
-                    renewal_units = int(renewal_units_raw)
-                except (ValueError, TypeError):
-                    renewal_units = 0
+                # Credit renewal units: explicit invoice metadata takes priority.
+                # For subscription_cycle renewals, fall back to the subscription's
+                # package catalogue entry keyed by price_id.
+                renewal_units_raw = obj.get("metadata", {}).get("unit_credits", "")
+                renewal_units = 0
+
+                if renewal_units_raw:
+                    try:
+                        renewal_units = int(renewal_units_raw)
+                    except (ValueError, TypeError):
+                        renewal_units = 0
+                elif billing_reason == "subscription_cycle" and record.price_id:
+                    # Derive renewal units from PACKAGE_CATALOGUE by matching price_id
+                    # to a known package. Falls back to 0 if price_id is unknown.
+                    for pkg in PACKAGE_CATALOGUE.values():
+                        if pkg.get("price_id") == record.price_id:
+                            renewal_units = int(pkg.get("units", 0))
+                            break
 
                 if org_id and renewal_units > 0:
                     self.credit_units(
@@ -2042,10 +2082,11 @@ class StripeService:
                     )
                     renewal_units_credited = renewal_units
                     logger.info(
-                        "stripe.subscription_renewal_units_credited org=%s units=%d invoice=%s",
+                        "stripe.subscription_renewal_units_credited org=%s units=%d invoice=%s reason=%s",
                         org_id,
                         renewal_units,
                         invoice_id,
+                        billing_reason,
                     )
 
         return {
@@ -2054,6 +2095,7 @@ class StripeService:
             "subscription_id": subscription_id,
             "amount_paid": amount_paid,
             "renewal_units_credited": renewal_units_credited,
+            "billing_reason": billing_reason,
         }
 
     def _handle_invoice_payment_failed(self, obj: dict[str, Any], _event: dict[str, Any]) -> dict[str, Any]:
@@ -2095,6 +2137,33 @@ class StripeService:
             "invoice_id": invoice_id,
             "org_id": org_id,
             "subscription_id": subscription_id,
+        }
+
+    def _handle_invoice_upcoming(self, obj: dict[str, Any], _event: dict[str, Any]) -> dict[str, Any]:
+        """
+        Handle invoice.upcoming events.
+        Logs the upcoming invoice so telemetry and alerting pipelines can act on it.
+        No state mutation — this is a read-only advisory event.
+        """
+        invoice_id: str = obj.get("id", "")
+        customer_id: str = obj.get("customer", "")
+        subscription_id: str | None = obj.get("subscription")
+        amount_due: int = int(obj.get("amount_due", 0))
+
+        org_id = self.resolve_org_from_customer(customer_id) or obj.get("metadata", {}).get("org_id", "")
+
+        logger.info(
+            "stripe.invoice_upcoming invoice=%s org=%s subscription=%s amount_due=%d",
+            invoice_id,
+            org_id,
+            subscription_id,
+            amount_due,
+        )
+        return {
+            "invoice_id": invoice_id,
+            "org_id": org_id,
+            "subscription_id": subscription_id,
+            "amount_due": amount_due,
         }
 
     def _handle_charge_refunded(self, obj: dict[str, Any], _event: dict[str, Any]) -> dict[str, Any]:
@@ -2151,6 +2220,68 @@ class StripeService:
             "email": email,
         }
 
+    def _handle_payment_intent_succeeded(self, obj: dict[str, Any], _event: dict[str, Any]) -> dict[str, Any]:
+        """
+        Handle payment_intent.succeeded events.
+        Records the successful intent and updates customer mapping if present.
+        Unit credits are fulfilled via checkout.session.completed or invoice.paid;
+        this handler is informational and ensures org mapping is kept current.
+        """
+        intent_id: str = obj.get("id", "")
+        customer_id: str = obj.get("customer", "")
+        amount_received: int = int(obj.get("amount_received", 0))
+        currency: str = obj.get("currency", "usd")
+
+        org_id = self.resolve_org_from_customer(customer_id) or obj.get("metadata", {}).get("org_id", "")
+
+        if org_id and customer_id:
+            self.register_customer_mapping(org_id, customer_id)
+
+        logger.info(
+            "stripe.payment_intent_succeeded intent=%s org=%s amount=%d currency=%s",
+            intent_id,
+            org_id,
+            amount_received,
+            currency,
+        )
+        return {
+            "payment_intent_id": intent_id,
+            "org_id": org_id,
+            "customer_id": customer_id,
+            "amount_received": amount_received,
+            "currency": currency,
+        }
+
+    def _handle_payment_intent_payment_failed(self, obj: dict[str, Any], _event: dict[str, Any]) -> dict[str, Any]:
+        """
+        Handle payment_intent.payment_failed events.
+        Logs the failure with intent and customer context for alerting pipelines.
+        No subscription state mutation — that is handled by invoice.payment_failed.
+        """
+        intent_id: str = obj.get("id", "")
+        customer_id: str = obj.get("customer", "")
+        last_error: dict[str, Any] = obj.get("last_payment_error", {}) or {}
+        error_code: str = last_error.get("code", "unknown")
+        error_message: str = last_error.get("message", "")
+
+        org_id = self.resolve_org_from_customer(customer_id) or obj.get("metadata", {}).get("org_id", "")
+
+        logger.warning(
+            "stripe.payment_intent_failed intent=%s org=%s customer=%s code=%s message=%s",
+            intent_id,
+            org_id,
+            customer_id,
+            error_code,
+            error_message,
+        )
+        return {
+            "payment_intent_id": intent_id,
+            "org_id": org_id,
+            "customer_id": customer_id,
+            "error_code": error_code,
+            "error_message": error_message,
+        }
+
     # ------------------------------------------------------------------
     # Introspection helpers
     # ------------------------------------------------------------------
@@ -2173,7 +2304,17 @@ class StripeService:
     # Reset (test isolation)
     # ------------------------------------------------------------------
 
+    def reset_processed_events(self) -> None:
+        """
+        Clear only the idempotency key registry.
+        Allows tests to re-submit previously seen event IDs without resetting
+        the full service state (subscriptions, balances, sessions).
+        """
+        with self._lock:
+            self._idempotency_keys.clear()
+
     def reset(self) -> None:
+        """Full state reset. Intended for test isolation between test cases."""
         with self._lock:
             self._checkout_sessions.clear()
             self._subscriptions.clear()
