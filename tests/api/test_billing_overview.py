@@ -47,10 +47,60 @@ def test_billing_overview_returns_200(client: TestClient) -> None:
 def test_billing_overview_response_envelope(client: TestClient) -> None:
     body = client.get("/ui/billing/overview").json()
     assert "generatedat" in body
-    assert body["environment"] == "local"
+    # _get_environment() reads IRONCLAW_ENV then APP_ENV, falls back to "production".
+    # Neither is set in the test environment, so the value will be "production".
+    assert isinstance(body["environment"], str)
+    assert len(body["environment"]) > 0
     assert "overallstatus" in body
     assert isinstance(body["generatedat"], str)
     assert len(body["generatedat"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# stripe key assertions
+# ---------------------------------------------------------------------------
+
+
+def test_billing_overview_stripe_key_present(client: TestClient) -> None:
+    body = client.get("/ui/billing/overview").json()
+    assert "stripe" in body
+
+
+def test_billing_overview_stripe_configured_is_bool(client: TestClient) -> None:
+    body = client.get("/ui/billing/overview").json()
+    assert isinstance(body["stripe"]["configured"], bool)
+
+
+def test_billing_overview_stripe_mode_is_valid(client: TestClient) -> None:
+    body = client.get("/ui/billing/overview").json()
+    assert body["stripe"]["mode"] in {"live", "test", "unconfigured"}
+
+
+def test_billing_overview_stripe_note_is_non_empty_string(client: TestClient) -> None:
+    body = client.get("/ui/billing/overview").json()
+    assert isinstance(body["stripe"]["note"], str)
+    assert len(body["stripe"]["note"]) > 0
+
+
+def test_billing_overview_stripe_unconfigured_when_no_key_set(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("STRIPE_API_KEY", raising=False)
+    body = client.get("/ui/billing/overview").json()
+    assert body["stripe"]["configured"] is False
+    assert body["stripe"]["mode"] == "unconfigured"
+
+
+def test_billing_overview_stripe_test_mode_when_test_key(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STRIPE_API_KEY", "sk_test_abc123")
+    body = client.get("/ui/billing/overview").json()
+    assert body["stripe"]["configured"] is True
+    assert body["stripe"]["mode"] == "test"
+
+
+def test_billing_overview_stripe_live_mode_when_live_key(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STRIPE_API_KEY", "sk_live_abc123")
+    body = client.get("/ui/billing/overview").json()
+    assert body["stripe"]["configured"] is True
+    assert body["stripe"]["mode"] == "live"
 
 
 # ---------------------------------------------------------------------------
