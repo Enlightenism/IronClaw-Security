@@ -1685,7 +1685,11 @@ class TestPaymentMethods:
         assert mock_client.post.call_count == 1
 
     def test_attach_payment_method_set_as_default(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
-        mock_client.post.return_value = _mock_pm_resp()
+        # attach (1 post) + set_default customer update (1 post) = 2 total
+        mock_client.post.side_effect = [
+            _mock_pm_resp(),
+            {},  # /customers/{id} update from set_default_payment_method
+        ]
         resp = svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID, set_as_default=True)
         assert resp.is_default is True
 
@@ -1716,7 +1720,7 @@ class TestPaymentMethods:
         mock_client.post.side_effect = [
             _mock_pm_resp(_TEST_PM_ID),
             _mock_pm_resp(_TEST_PM_ID_2),
-            {},  # customer update call
+            {},  # /customers/{id} update from set_default_payment_method
         ]
         svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
         svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID_2)
@@ -1724,10 +1728,16 @@ class TestPaymentMethods:
         assert resp.is_default is True
 
     def test_set_default_clears_previous_default(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        # Call sequence:
+        # 1. attach pm1 → /payment_methods/pm1/attach
+        # 2. set_default (triggered by set_as_default=True) → /customers/{id}
+        # 3. attach pm2 → /payment_methods/pm2/attach
+        # 4. set_default pm2 → /customers/{id}
         mock_client.post.side_effect = [
-            _mock_pm_resp(_TEST_PM_ID),
-            _mock_pm_resp(_TEST_PM_ID_2),
-            {},  # customer update call
+            _mock_pm_resp(_TEST_PM_ID),  # call 1: attach pm1
+            {},  # call 2: /customers/{id} for set_default of pm1
+            _mock_pm_resp(_TEST_PM_ID_2),  # call 3: attach pm2
+            {},  # call 4: /customers/{id} for set_default of pm2
         ]
         svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID, set_as_default=True)
         svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID_2)
