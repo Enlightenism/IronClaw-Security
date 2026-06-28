@@ -18,6 +18,32 @@ from app.ui.billing.package import (
     _get_stripe_status,
 )
 
+# Re-export PACKAGE_CATALOGUE so tests can import it directly from this module.
+__all__ = [
+    "PACKAGE_CATALOGUE",
+    "StripeStatus",
+    "_get_stripe_status",
+    "_stripe_mode",
+    "_stripe_connection_note",
+    "_stripe_webhook_secret_note",
+    "_brand_display",
+    "_build_method",
+    "_build_status_counts",
+    "_exp_display",
+    "_resolve_default_method_id",
+    "_BRAND_DISPLAY",
+    "_MAX_METHODS",
+    "_STATUS_COLOR",
+    "AddPaymentMethodRequest",
+    "AddPaymentMethodResponse",
+    "BillingPaymentMethodsResponse",
+    "BillingPaymentMethodStatusCount",
+    "BillingPaymentMethodView",
+    "DeletePaymentMethodResponse",
+    "PackageCatalogueEntry",
+    "SetDefaultPaymentMethodResponse",
+]
+
 router = APIRouter(
     prefix="/ui/billing",
     tags=["billing-payment-methods"],
@@ -43,6 +69,36 @@ _BRAND_DISPLAY: dict[str, str] = {
 
 def _get_environment() -> str:
     return os.environ.get("IRONCLAW_ENV", os.environ.get("APP_ENV", "production"))
+
+
+# ---------------------------------------------------------------------------
+# Stripe helpers
+# ---------------------------------------------------------------------------
+
+
+def _stripe_mode() -> str | None:
+    """
+    Inspect STRIPE_API_KEY and return the mode string.
+    Returns "live" for sk_live_* keys, "test" for sk_test_* keys, None otherwise.
+    """
+    key = os.environ.get("STRIPE_API_KEY", "").strip()
+    if key.startswith("sk_live_"):
+        return "live"
+    if key.startswith("sk_test_"):
+        return "test"
+    return None
+
+
+def _stripe_connection_note() -> str:
+    """
+    Return a human-readable Stripe connection note based on the current API key.
+    """
+    mode = _stripe_mode()
+    if mode == "live":
+        return "Stripe is connected and active (mode: live). Real payment processing is enabled."
+    if mode == "test":
+        return "Stripe is connected in test mode (mode: test). Switch to a live key before going to production."
+    return "Stripe API key is not configured — payment processing is unavailable."
 
 
 def _stripe_webhook_secret_note() -> str:
@@ -96,7 +152,7 @@ class BillingPaymentMethodsResponse(BaseModel):
     organizationid: str
     organizationname: str
     stripe_customer_id: str | None
-    stripe: StripeStatus
+    stripe: StripeStatus = Field(default_factory=_get_stripe_status)
     stripe_mode: str | None
     defaultmethodid: str | None
     methods: list[BillingPaymentMethodView] = Field(default_factory=list)
@@ -458,11 +514,6 @@ def add_payment_method(
     body: AddPaymentMethodRequest,
     organizationid: str = "org-001",
 ) -> AddPaymentMethodResponse:
-    """
-    Attach a Stripe PaymentMethod to the organization and persist the record
-    in Supabase. The caller must supply the Stripe PaymentMethod ID (pm_...)
-    obtained from Stripe.js or the Stripe API before calling this endpoint.
-    """
     if not organizationid or not organizationid.strip():
         raise HTTPException(status_code=422, detail="organizationid is required.")
 
@@ -512,10 +563,6 @@ def set_default_payment_method(
     methodid: str,
     organizationid: str = "org-001",
 ) -> SetDefaultPaymentMethodResponse:
-    """
-    Set the specified payment method as the default for the organization.
-    Clears is_default on all other methods for this organization.
-    """
     if not organizationid or not organizationid.strip():
         raise HTTPException(status_code=422, detail="organizationid is required.")
 
@@ -552,11 +599,6 @@ def delete_payment_method(
     methodid: str,
     organizationid: str = "org-001",
 ) -> DeletePaymentMethodResponse:
-    """
-    Remove a payment method record from Supabase.
-    Does not call Stripe directly — the caller is responsible for detaching
-    the PaymentMethod in Stripe before or after this call.
-    """
     if not organizationid or not organizationid.strip():
         raise HTTPException(status_code=422, detail="organizationid is required.")
 
