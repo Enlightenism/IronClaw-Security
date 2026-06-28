@@ -31,6 +31,8 @@ from app.services.stripe_service import (
     StripePaymentMethodNotFoundError,
     StripeService,
     StripeServiceError,
+    StripeSessionNotFoundError,
+    StripeSubscriptionNotFoundError,
     StripeSubscriptionStatus,
     StripeUnitEventReason,
     StripeWebhookEventType,
@@ -206,7 +208,6 @@ def svc_wired(svc: StripeService, mock_client: MagicMock) -> StripeService:
 
 @pytest.fixture()
 def svc_with_sub(svc: StripeService) -> StripeService:
-    """Service with a registered customer mapping and active subscription."""
     svc.register_customer_mapping(_ORG, _CUSTOMER_ID)
     svc.upsert_subscription(
         subscription_id=_SUB_ID,
@@ -561,6 +562,18 @@ class TestHandleInvoicePaid:
         assert entry is not None
         assert entry["reference_id"] == _SUB_ID or entry["reference_id"] == _INVOICE_ID
 
+    def test_handle_webhook_event_duplicate_event_id_returns_duplicate_action(self, svc_with_sub: StripeService) -> None:
+        event = _build_invoice_paid_event(unit_credits=100)
+        svc_with_sub.handle_webhook_event(event)
+        result = svc_with_sub.handle_webhook_event(event)
+        assert result["action"] == "duplicate"
+
+    def test_handle_webhook_event_duplicate_does_not_double_credit(self, svc_with_sub: StripeService) -> None:
+        event = _build_invoice_paid_event(unit_credits=100)
+        svc_with_sub.handle_webhook_event(event)
+        svc_with_sub.handle_webhook_event(event)
+        assert svc_with_sub.get_unit_balance(_ORG).balance == 100
+
 
 # ===========================================================================
 # Section G — _handle_checkout_completed credits units and returns tokens_covered
@@ -602,6 +615,18 @@ class TestHandleCheckoutCompleted:
         for _ in range(3):
             svc.handle_webhook_event(_build_checkout_completed_event(unit_credits=100))
         assert svc.get_unit_balance(_ORG).balance == 300
+
+    def test_handle_webhook_event_duplicate_checkout_returns_duplicate_action(self, svc: StripeService) -> None:
+        event = _build_checkout_completed_event(unit_credits=200)
+        svc.handle_webhook_event(event)
+        result = svc.handle_webhook_event(event)
+        assert result["action"] == "duplicate"
+
+    def test_handle_webhook_event_duplicate_checkout_does_not_double_credit(self, svc: StripeService) -> None:
+        event = _build_checkout_completed_event(unit_credits=200)
+        svc.handle_webhook_event(event)
+        svc.handle_webhook_event(event)
+        assert svc.get_unit_balance(_ORG).balance == 200
 
 
 # ===========================================================================
@@ -768,23 +793,34 @@ class TestResetClearsAllState:
         assert svc.get_unit_balance(_ORG).balance == 100
 
     def test_reset_clears_payment_methods(self, svc: StripeService) -> None:
-        """reset() must clear _payment_methods store."""
         svc._payment_methods[_PM_ID] = _build_payment_method_record()
         svc.reset()
         assert svc._payment_methods == {}
 
     def test_reset_clears_invoice_cache(self, svc: StripeService) -> None:
-        """reset() must clear _invoice_cache store."""
         svc._invoice_cache[_ORG] = [{"id": "in_dummy"}]
         svc.reset()
         assert svc._invoice_cache == {}
 
     def test_reset_clears_idempotency_store(self, svc: StripeService) -> None:
-        """reset() must clear idempotency key dedup store if present."""
         if hasattr(svc, "_idempotency_keys"):
             svc._idempotency_keys["idem-key-001"] = "result"
             svc.reset()
             assert svc._idempotency_keys == {}
+
+    def test_reset_clears_processed_event_ids(self, svc: StripeService) -> None:
+        event = _build_checkout_completed_event(unit_credits=100)
+        svc.handle_webhook_event(event)
+        svc.reset()
+        assert svc._processed_event_ids == set()
+
+    def test_reset_allows_event_reprocessing_after_clear(self, svc: StripeService) -> None:
+        event = _build_checkout_completed_event(unit_credits=100)
+        svc.handle_webhook_event(event)
+        svc.reset()
+        result = svc.handle_webhook_event(event)
+        assert result["action"] == "processed"
+        assert svc.get_unit_balance(_ORG).balance == 100
 
 
 # ===========================================================================
@@ -1355,8 +1391,6 @@ class TestCompleteCheckoutSession:
         assert record["status"] == "complete"
 
     def test_complete_checkout_session_missing_session_raises(self, svc: StripeService) -> None:
-        from app.services.stripe_service import StripeSessionNotFoundError
-
         with pytest.raises(StripeSessionNotFoundError):
             svc.complete_checkout_session(session_id="cs_ghost_999", org_id=_ORG)
 
@@ -1408,6 +1442,18 @@ class TestDispatchWebhookEvent:
         event = {"id": "evt_unknown_001", "type": "payment_intent.created", "data": {"object": {}}}
         result = svc.dispatch_webhook_event(event)
         assert result["action"] in ("ignored", "skipped", "noop")
+
+    def test_dispatch_duplicate_event_id_returns_duplicate_action(self, svc: StripeService) -> None:
+        event = _build_checkout_completed_event(unit_credits=500)
+        svc.dispatch_webhook_event(event)
+        result = svc.dispatch_webhook_event(event)
+        assert result["action"] == "duplicate"
+
+    def test_dispatch_duplicate_event_does_not_double_credit(self, svc: StripeService) -> None:
+        event = _build_checkout_completed_event(unit_credits=500)
+        svc.dispatch_webhook_event(event)
+        svc.dispatch_webhook_event(event)
+        assert svc.get_unit_balance(_ORG).balance == 500
 
     def test_dispatch_checkout_session_expired_marks_session_expired(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
         session_id = "cs_exp_dispatch_001"
@@ -1494,7 +1540,6 @@ class TestStripeIdempotencyError:
         assert "idem-key-abc-123" in str(err)
 
     def test_raised_on_duplicate_idempotency_key(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
-        """Submitting the same idempotency key twice for a non-idempotent operation raises."""
         if not hasattr(svc_wired, "_idempotency_keys"):
             pytest.skip("Service does not expose _idempotency_keys — implementation-specific gate")
         mock_client.post.return_value = {"id": "mbur_idem_001"}
@@ -1502,3 +1547,43 @@ class TestStripeIdempotencyError:
         svc_wired.report_metered_usage(_ORG, "si_idem_001", quantity=10, idempotency_key=key)
         with pytest.raises(StripeIdempotencyError):
             svc_wired.report_metered_usage(_ORG, "si_idem_001", quantity=10, idempotency_key=key)
+
+
+# ===========================================================================
+# Section X — get_subscription_strict raises StripeSubscriptionNotFoundError
+# ===========================================================================
+
+
+class TestGetSubscriptionStrict:
+    def test_get_subscription_strict_returns_subscription_response_when_found(self, svc_with_sub: StripeService) -> None:
+        result = svc_with_sub.get_subscription_strict(_SUB_ID)
+        assert isinstance(result, SubscriptionResponse)
+        assert result.subscription_id == _SUB_ID
+
+    def test_get_subscription_strict_raises_when_not_found(self, svc: StripeService) -> None:
+        with pytest.raises(StripeSubscriptionNotFoundError):
+            svc.get_subscription_strict("sub_does_not_exist")
+
+    def test_get_subscription_strict_error_is_subclass_of_service_error(self, svc: StripeService) -> None:
+        with pytest.raises(StripeServiceError):
+            svc.get_subscription_strict("sub_ghost_999")
+
+    def test_get_subscription_strict_error_carries_subscription_id(self, svc: StripeService) -> None:
+        missing_id = "sub_strict_missing_001"
+        with pytest.raises(StripeSubscriptionNotFoundError) as exc_info:
+            svc.get_subscription_strict(missing_id)
+        assert exc_info.value.subscription_id == missing_id
+
+    def test_get_subscription_strict_message_contains_subscription_id(self, svc: StripeService) -> None:
+        missing_id = "sub_strict_msg_001"
+        with pytest.raises(StripeSubscriptionNotFoundError) as exc_info:
+            svc.get_subscription_strict(missing_id)
+        assert missing_id in str(exc_info.value)
+
+    def test_get_subscription_non_strict_returns_none_when_not_found(self, svc: StripeService) -> None:
+        result = svc.get_subscription("sub_does_not_exist")
+        assert result is None
+
+    def test_get_subscription_non_strict_does_not_raise(self, svc: StripeService) -> None:
+        result = svc.get_subscription("sub_does_not_exist_no_raise")
+        assert result is None
