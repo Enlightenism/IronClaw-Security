@@ -411,6 +411,7 @@ def _delete_method_from_db(
 @router.get(
     "/payment-methods",
     response_model=BillingPaymentMethodsResponse | BillingPaymentMethodsNotFoundResponse,
+    operation_id="ui_get_payment_methods",
 )
 def get_payment_methods(
     organizationid: str = "org-001",
@@ -475,7 +476,6 @@ def get_payment_methods(
     if pending_count > 0:
         notes.append("One or more payment methods are pending verification.")
 
-    # Build catalogue with stripe_price_id injected at render time
     catalogue_out: dict[str, PackageCatalogueEntry] = {}
     for k, v in PACKAGE_CATALOGUE.items():
         entry_data = dict(v)
@@ -509,6 +509,7 @@ def get_payment_methods(
     "/payment-methods",
     response_model=AddPaymentMethodResponse,
     status_code=201,
+    operation_id="ui_add_payment_method",
 )
 def add_payment_method(
     body: AddPaymentMethodRequest,
@@ -558,6 +559,7 @@ def add_payment_method(
 @router.patch(
     "/payment-methods/{methodid}/default",
     response_model=SetDefaultPaymentMethodResponse,
+    operation_id="ui_set_default_payment_method",
 )
 def set_default_payment_method(
     methodid: str,
@@ -594,6 +596,7 @@ def set_default_payment_method(
 @router.delete(
     "/payment-methods/{methodid}",
     response_model=DeletePaymentMethodResponse,
+    operation_id="ui_delete_payment_method",
 )
 def delete_payment_method(
     methodid: str,
