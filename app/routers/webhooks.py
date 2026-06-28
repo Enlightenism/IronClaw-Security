@@ -59,34 +59,16 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 _SUPPORTED_EVENTS: set[str] = {e.value for e in WebhookEventType if e.value != "*"}
 
-# ---------------------------------------------------------------------------
-# Stripe webhook event types that this router dispatches through stripe_service
-# ---------------------------------------------------------------------------
-
 _STRIPE_DISPATCHABLE_EVENTS: frozenset[str] = frozenset(e.value for e in StripeWebhookEventType)
-
-# ---------------------------------------------------------------------------
-# Stripe service dependency — injected so tests can patch
-# app.routers.webhooks.get_stripe_service without touching internals.
-# ---------------------------------------------------------------------------
 
 _stripe_service_instance: StripeService | None = None
 
 
 def get_stripe_service() -> StripeService:
-    """
-    Return the shared StripeService singleton for this process.
-    Tests patch ``app.routers.webhooks.get_stripe_service`` to inject a mock.
-    """
     global _stripe_service_instance  # noqa: PLW0603
     if _stripe_service_instance is None:
         _stripe_service_instance = StripeService()
     return _stripe_service_instance
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
 
 
 def _generate_id() -> str:
@@ -124,12 +106,6 @@ def _build_list_item(row: dict[str, Any]) -> dict[str, Any]:
     return item
 
 
-# ---------------------------------------------------------------------------
-# POST /webhooks/stripe
-# Stripe inbound webhook endpoint — signature verification + dispatch
-# ---------------------------------------------------------------------------
-
-
 @router.post(
     "/stripe",
     status_code=status.HTTP_200_OK,
@@ -157,10 +133,8 @@ async def stripe_webhook_receiver(
             detail="stripe_webhook_empty_body",
         )
 
-    # --- Signature verification (fail-closed) ---
-    verified_payload: dict[str, Any] | None = None
     try:
-        verified_payload = stripe_svc.verify_webhook_signature(
+        verify_result = stripe_svc.verify_webhook_signature(
             payload=raw_body,
             signature_header=stripe_signature or "",
         )
@@ -171,12 +145,17 @@ async def stripe_webhook_receiver(
             detail="stripe_webhook_signature_invalid",
         ) from exc
 
-    if not verified_payload:
-        logger.warning("stripe_webhook.signature_verification_returned_none")
+    if not verify_result.valid:
+        logger.warning(
+            "stripe_webhook.signature_invalid error=%s",
+            verify_result.error,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="stripe_webhook_signature_invalid",
         )
+
+    verified_payload: dict[str, Any] = verify_result.payload
 
     event_type_raw: str = verified_payload.get("type", "")
     event_id: str = verified_payload.get("id", _generate_id())
@@ -187,13 +166,9 @@ async def stripe_webhook_receiver(
         event_type_raw,
     )
 
-    # --- Dispatch through stripe_service for all known StripeWebhookEventType values ---
     if event_type_raw in _STRIPE_DISPATCHABLE_EVENTS:
         try:
-            stripe_svc.dispatch_webhook_event(
-                event_type=StripeWebhookEventType(event_type_raw),
-                payload=verified_payload,
-            )
+            stripe_svc.dispatch_webhook_event(verified_payload)
             logger.info(
                 "stripe_webhook.dispatched event_id=%s event_type=%s",
                 event_id,
@@ -206,17 +181,10 @@ async def stripe_webhook_receiver(
                 event_type_raw,
                 exc,
             )
-            # Acknowledge to Stripe but log the internal failure — do not return 5xx
-            # (Stripe would retry, causing duplicate processing)
-            return JSONResponse(
-                status_code=status.HTTP_200_OK,
-                content={
-                    "received": True,
-                    "event_id": event_id,
-                    "event_type": event_type_raw,
-                    "dispatch_status": "internal_error_logged",
-                },
-            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="stripe_webhook_dispatch_failed",
+            ) from exc
     else:
         logger.info(
             "stripe_webhook.unrecognised_event_type event_id=%s event_type=%s — acknowledged without dispatch",
@@ -232,11 +200,6 @@ async def stripe_webhook_receiver(
             "event_type": event_type_raw,
         },
     )
-
-
-# ---------------------------------------------------------------------------
-# POST /webhooks/subscriptions
-# ---------------------------------------------------------------------------
 
 
 @router.post(
@@ -308,11 +271,6 @@ async def create_webhook_subscription(
     )
 
 
-# ---------------------------------------------------------------------------
-# GET /webhooks/subscriptions
-# ---------------------------------------------------------------------------
-
-
 @router.get(
     "/subscriptions",
     status_code=status.HTTP_200_OK,
@@ -353,11 +311,6 @@ async def list_webhook_subscriptions(
     )
 
 
-# ---------------------------------------------------------------------------
-# GET /webhooks/subscriptions/{subscription_id}
-# ---------------------------------------------------------------------------
-
-
 @router.get(
     "/subscriptions/{subscription_id}",
     status_code=status.HTTP_200_OK,
@@ -388,11 +341,6 @@ async def get_webhook_subscription(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="subscription_not_found")
 
     return JSONResponse(status_code=status.HTTP_200_OK, content=_build_list_item(row))
-
-
-# ---------------------------------------------------------------------------
-# PATCH /webhooks/subscriptions/{subscription_id}
-# ---------------------------------------------------------------------------
 
 
 @router.patch(
@@ -479,11 +427,6 @@ async def update_webhook_subscription(
     return JSONResponse(status_code=status.HTTP_200_OK, content=_build_list_item(updated))
 
 
-# ---------------------------------------------------------------------------
-# DELETE /webhooks/subscriptions/{subscription_id}
-# ---------------------------------------------------------------------------
-
-
 @router.delete(
     "/subscriptions/{subscription_id}",
     status_code=status.HTTP_200_OK,
@@ -525,11 +468,6 @@ async def delete_webhook_subscription(
         status_code=status.HTTP_200_OK,
         content={"deleted": True, "id": subscription_id},
     )
-
-
-# ---------------------------------------------------------------------------
-# POST /webhooks/subscriptions/{subscription_id}/rotate-secret
-# ---------------------------------------------------------------------------
 
 
 @router.post(
@@ -589,11 +527,6 @@ async def rotate_webhook_secret(
     )
 
 
-# ---------------------------------------------------------------------------
-# POST /webhooks/test
-# ---------------------------------------------------------------------------
-
-
 @router.post(
     "/test",
     status_code=status.HTTP_200_OK,
@@ -628,11 +561,6 @@ async def test_webhook_dispatch(
     except Exception as exc:
         logger.error("webhooks.test_dispatch tenant_id=%s error=%s", tenant_id, exc)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="dispatch_failed") from exc
-
-
-# ---------------------------------------------------------------------------
-# GET /webhooks/deliveries
-# ---------------------------------------------------------------------------
 
 
 @router.get(
@@ -679,11 +607,6 @@ async def list_webhook_deliveries(
     )
 
 
-# ---------------------------------------------------------------------------
-# GET /webhooks/deliveries/retryable
-# ---------------------------------------------------------------------------
-
-
 @router.get(
     "/deliveries/retryable",
     status_code=status.HTTP_200_OK,
@@ -703,11 +626,6 @@ async def list_retryable_webhook_deliveries(
     except Exception as exc:
         logger.error("webhooks.list_retryable_deliveries error=%s", exc)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="list_failed") from exc
-
-
-# ---------------------------------------------------------------------------
-# POST /webhooks/deliveries/{delivery_id}/retry
-# ---------------------------------------------------------------------------
 
 
 @router.post(
@@ -763,11 +681,6 @@ async def retry_webhook_delivery(
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
 
-# ---------------------------------------------------------------------------
-# GET /webhooks/events
-# ---------------------------------------------------------------------------
-
-
 @router.get(
     "/events",
     status_code=status.HTTP_200_OK,
@@ -780,11 +693,6 @@ async def list_supported_events(
         status_code=status.HTTP_200_OK,
         content={"events": sorted(_SUPPORTED_EVENTS)},
     )
-
-
-# ---------------------------------------------------------------------------
-# GET /webhooks/stripe/events
-# ---------------------------------------------------------------------------
 
 
 @router.get(
