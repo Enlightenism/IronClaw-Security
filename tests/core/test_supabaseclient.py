@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Generator
 import importlib
 import sys
 from unittest.mock import MagicMock
@@ -427,7 +428,7 @@ class TestIsSupabaseConfigured:
 
 class TestSingleton:
     @pytest.fixture(autouse=True)
-    def _clear_singleton(self) -> None:
+    def _clear_singleton(self) -> Generator[None, None, None]:
         reset_supabase_client()
         yield
         reset_supabase_client()

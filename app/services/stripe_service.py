@@ -760,9 +760,6 @@ class StripeService:
         self._payment_methods: dict[str, _PaymentMethodRecord] = {}
         self._invoice_cache: dict[str, list[dict[str, Any]]] = {}
         self._idempotency_keys: dict[str, Any] = {}
-        # Dedicated event-level idempotency set — tracks Stripe event IDs that
-        # have already been fully processed by handle_webhook_event.
-        # reset_processed_events() clears only this set (Section 11 contract).
         self._processed_event_ids: set[str] = set()
         self._client: _StripeHTTPClient | None = None
         self._on_insufficient_units = on_insufficient_units
@@ -952,7 +949,6 @@ class StripeService:
             record = self._payment_methods.get(payment_method_id)
             if record is None:
                 raise StripePaymentMethodNotFoundError(payment_method_id)
-            # Clear existing default for this customer.
             for pm_id, pm_record in self._payment_methods.items():
                 if pm_record.customer_id == customer_id and pm_record.is_default:
                     updated = _PaymentMethodRecord(
@@ -967,7 +963,6 @@ class StripeService:
                         created_at=pm_record.created_at,
                     )
                     self._payment_methods[pm_id] = updated
-            # Set new default.
             new_default = _PaymentMethodRecord(
                 payment_method_id=record.payment_method_id,
                 customer_id=record.customer_id,
@@ -1653,8 +1648,6 @@ class StripeService:
         if quantity < 0:
             raise StripeServiceError("metered usage quantity must be >= 0")
 
-        # FIX: use uuid4 hex suffix instead of int(time.time()) to prevent
-        # key collisions for calls within the same second with different payloads.
         idem_key = idempotency_key or f"metered-{org_id}-{subscription_item_id}-{uuid4().hex[:12]}"
 
         with self._lock:
@@ -1854,7 +1847,6 @@ class StripeService:
         event_id = event.get("id", "")
         data_obj: dict[str, Any] = event.get("data", {}).get("object", {})
 
-        # --- Event-level idempotency guard ---
         if event_id:
             with self._lock:
                 if event_id in self._processed_event_ids:
@@ -2013,9 +2005,6 @@ class StripeService:
         except (ValueError, TypeError):
             pass
 
-        # Resolve org_id: prefer customer→org mapping, then metadata, then
-        # fall back to existing subscription record's org_id to handle
-        # updated events where the customer mapping may not yet be registered.
         org_id = self.resolve_org_from_customer(customer_id) or obj.get("metadata", {}).get("org_id", "")
         if not org_id:
             with self._lock:
@@ -2040,27 +2029,39 @@ class StripeService:
 
     def _handle_subscription_deleted(self, obj: dict[str, Any], _event: dict[str, Any]) -> dict[str, Any]:
         subscription_id: str = obj.get("id", "")
-        # Ensure org_id is resolved before canceling so cancel_subscription
-        # mutates the correct record.
         customer_id: str = obj.get("customer", "")
+
         org_id = self.resolve_org_from_customer(customer_id) or obj.get("metadata", {}).get("org_id", "")
         if not org_id:
             with self._lock:
                 existing_record = self._subscriptions.get(subscription_id)
             if existing_record:
                 org_id = existing_record.org_id
-        # If the record is stored under a blank org_id due to a previous
-        # upsert with unresolved org, re-seed the customer mapping now.
-        if org_id and customer_id:
-            self.register_customer_mapping(org_id, customer_id)
-        self.cancel_subscription(subscription_id)
+
+        with self._lock:
+            record = self._subscriptions.get(subscription_id)
+            if record is not None:
+                updated = _SubscriptionRecord(
+                    subscription_id=record.subscription_id,
+                    org_id=org_id or record.org_id,
+                    customer_id=record.customer_id,
+                    price_id=record.price_id,
+                    status=StripeSubscriptionStatus.CANCELED.value,
+                    billing_interval=record.billing_interval,
+                    current_period_start=record.current_period_start,
+                    current_period_end=record.current_period_end,
+                    cancel_at_period_end=True,
+                    metered_price_id=record.metered_price_id,
+                    metadata=record.metadata,
+                    created_at=record.created_at,
+                    updated_at=_utcnow_iso(),
+                )
+                self._subscriptions[subscription_id] = updated
+
+        logger.info("stripe.subscription_deleted id=%s", subscription_id)
         return {"subscription_id": subscription_id, "status": "canceled"}
 
     def _handle_customer_created(self, obj: dict[str, Any], _event: dict[str, Any]) -> dict[str, Any]:
-        """
-        Handle customer.created events.
-        Registers the customer→org mapping from the customer object's metadata.
-        """
         customer_id: str = obj.get("id", "")
         org_id: str = obj.get("metadata", {}).get("org_id", "")
 
