@@ -36,6 +36,8 @@ from app.services.stripe_service import (
     StripePaymentMethodNotFoundError,
     StripeService,
     StripeServiceError,
+    StripeSessionNotFoundError,
+    StripeSubscriptionNotFoundError,
     StripeSubscriptionStatus,
     StripeUnitEventReason,
     StripeWebhookEventType,
@@ -65,10 +67,12 @@ from app.supabaseclient import (
 # ---------------------------------------------------------------------------
 
 _TEST_ORG = "org-test-stripe-001"
+_TEST_ORG_2 = "org-test-stripe-002"
 _TEST_PRICE_ID = "price_test_abc123"
 _TEST_SUCCESS_URL = "https://example.com/success"
 _TEST_CANCEL_URL = "https://example.com/cancel"
 _TEST_CUSTOMER_ID = "cus_test_abc123"
+_TEST_CUSTOMER_ID_2 = "cus_test_def456"
 _TEST_SUB_ID = "sub_test_abc123"
 _TEST_SESSION_ID = "cs_test_abc123"
 _TEST_WEBHOOK_SECRET = "whsec_testsecret1234567890abcdefghij"
@@ -196,6 +200,64 @@ def _mock_invoice_list(
             }
             for i in range(count)
         ]
+    }
+
+
+def _make_payment_intent_obj(
+    pi_id: str = "pi_test_001",
+    customer_id: str = _TEST_CUSTOMER_ID,
+    amount: int = 2000,
+    currency: str = "usd",
+    status: str = "succeeded",
+    org_id: str = _TEST_ORG,
+) -> dict[str, Any]:
+    return {
+        "id": pi_id,
+        "customer": customer_id,
+        "amount": amount,
+        "currency": currency,
+        "status": status,
+        "metadata": {"org_id": org_id},
+    }
+
+
+def _make_charge_refunded_obj(
+    charge_id: str = "ch_refund_1",
+    customer_id: str = _TEST_CUSTOMER_ID,
+    org_id: str = _TEST_ORG,
+    unit_credits: int = _PKG_STARTER_UNITS,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return {
+        "id": charge_id,
+        "customer": customer_id,
+        "metadata": {"unit_credits": str(unit_credits), "org_id": org_id},
+    }
+
+
+def _make_invoice_upcoming_obj(
+    invoice_id: str = "in_upcoming_1",
+    customer_id: str = _TEST_CUSTOMER_ID,
+    subscription_id: str = _TEST_SUB_ID,
+    amount_due: int = 9000,
+) -> dict[str, Any]:
+    return {
+        "id": invoice_id,
+        "customer": customer_id,
+        "subscription": subscription_id,
+        "amount_due": amount_due,
+        "currency": "usd",
+    }
+
+
+def _make_customer_updated_obj(
+    customer_id: str = _TEST_CUSTOMER_ID,
+    org_id: str = _TEST_ORG,
+    email: str = "updated@example.com",
+) -> dict[str, Any]:
+    return {
+        "id": customer_id,
+        "email": email,
+        "metadata": {"org_id": org_id},
     }
 
 
@@ -365,6 +427,29 @@ class TestCustomerManagement:
         svc_with_client.get_or_create_stripe_customer("org-mapped")
         assert svc_with_client.resolve_org_from_customer("cus_mapped") == "org-mapped"
 
+    # --- resolve_customer_id ---
+
+    def test_resolve_customer_id_happy_path(self, svc: StripeService) -> None:
+        svc.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        result = svc.resolve_customer_id(_TEST_ORG)
+        assert result == _TEST_CUSTOMER_ID
+
+    def test_resolve_customer_id_missing_returns_none(self, svc: StripeService) -> None:
+        result = svc.resolve_customer_id("org-never-registered")
+        assert result is None
+
+    def test_resolve_customer_id_after_stripe_create(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = {"id": "cus_stripe_id_lookup"}
+        svc_with_client.get_or_create_stripe_customer("org-lookup")
+        result = svc_with_client.resolve_customer_id("org-lookup")
+        assert result == "cus_stripe_id_lookup"
+
+    def test_resolve_customer_id_multiple_orgs_isolated(self, svc: StripeService) -> None:
+        svc.register_customer_mapping("org-aa", "cus_aa")
+        svc.register_customer_mapping("org-bb", "cus_bb")
+        assert svc.resolve_customer_id("org-aa") == "cus_aa"
+        assert svc.resolve_customer_id("org-bb") == "cus_bb"
+
 
 # ===========================================================================
 # Section 5 — Checkout session creation
@@ -508,6 +593,8 @@ class TestUnitBalanceLedger:
         with pytest.raises(StripeServiceError):
             svc.credit_units(_TEST_ORG, -1, StripeUnitEventReason.MANUAL_CREDIT)
 
+    # --- debit_units ---
+
     def test_debit_units_decreases_balance(self, svc: StripeService) -> None:
         svc.credit_units(_TEST_ORG, _PKG_TEAM_UNITS, StripeUnitEventReason.CHECKOUT_COMPLETE)
         resp = svc.debit_units(_TEST_ORG, _PKG_STARTER_UNITS, StripeUnitEventReason.METERED_SYNC)
@@ -529,6 +616,18 @@ class TestUnitBalanceLedger:
     def test_debit_units_zero_raises(self, svc: StripeService) -> None:
         with pytest.raises(StripeServiceError):
             svc.debit_units(_TEST_ORG, 0, StripeUnitEventReason.METERED_SYNC)
+
+    def test_debit_units_unknown_org_is_insufficient(self, svc: StripeService) -> None:
+        """Org with no balance at all → StripeInsufficientUnitsError (balance=0)."""
+        with pytest.raises(StripeInsufficientUnitsError) as exc_info:
+            svc.debit_units("org-brand-new-unknown", 1, StripeUnitEventReason.METERED_SYNC)
+        assert exc_info.value.have == 0
+        assert exc_info.value.need == 1
+
+    def test_debit_units_exact_balance_succeeds(self, svc: StripeService) -> None:
+        svc.credit_units(_TEST_ORG, 50, StripeUnitEventReason.CHECKOUT_COMPLETE)
+        resp = svc.debit_units(_TEST_ORG, 50, StripeUnitEventReason.METERED_SYNC)
+        assert resp.balance == 0
 
     def test_get_unit_balance_default_zero(self, svc: StripeService) -> None:
         resp = svc.get_unit_balance("org-new-unknown")
@@ -771,6 +870,25 @@ class TestMeteredUsage:
         log = svc_with_client.get_metered_usage_log(org_id=_TEST_ORG)
         assert len(log) == 1
         assert log[0]["quantity"] == 25
+
+    def test_get_metered_usage_log_returns_entries(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = {"id": "mbur_entries"}
+        for i in range(3):
+            svc_with_client.report_metered_usage(_TEST_ORG, "si_entries", quantity=i + 1)
+        log = svc_with_client.get_metered_usage_log(org_id=_TEST_ORG)
+        assert len(log) == 3
+        quantities = {e["quantity"] for e in log}
+        assert quantities == {1, 2, 3}
+
+    def test_get_metered_usage_log_empty_log(self, svc: StripeService) -> None:
+        log = svc.get_metered_usage_log()
+        assert log == []
+
+    def test_get_metered_usage_log_empty_for_org_with_no_entries(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        mock_client.post.return_value = {"id": "mbur_other"}
+        svc_with_client.report_metered_usage("org-other", "si_other", quantity=5)
+        log = svc_with_client.get_metered_usage_log(org_id="org-no-entries")
+        assert log == []
 
     def test_get_metered_usage_log_filter_org(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
         mock_client.post.return_value = {"id": "mbur_x"}
@@ -1019,16 +1137,124 @@ class TestWebhookEventDispatch:
         svc.handle_webhook_event(self._event("customer.created", obj))
         assert svc.resolve_org_from_customer(_TEST_CUSTOMER_ID) == _TEST_ORG
 
-    def test_charge_refunded_credits_units(self, svc: StripeService) -> None:
+    # --- charge.refunded ---
+
+    def test_charge_refunded_action_is_valid(self, svc: StripeService) -> None:
         svc.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
         svc.credit_units(_TEST_ORG, _PKG_STARTER_UNITS, StripeUnitEventReason.CHECKOUT_COMPLETE)
-        obj = {
-            "id": "ch_refund_1",
-            "customer": _TEST_CUSTOMER_ID,
-            "metadata": {"unit_credits": str(_PKG_STARTER_UNITS)},
-        }
+        obj = _make_charge_refunded_obj()
         result = svc.handle_webhook_event(self._event("charge.refunded", obj))
         assert result["action"] in ("processed", "ignored")
+
+    def test_charge_refunded_event_type_enum_value(self) -> None:
+        assert StripeWebhookEventType.CHARGE_REFUNDED == "charge.refunded"
+
+    # --- payment_intent.succeeded ---
+
+    def test_payment_intent_succeeded_event_type_enum_value(self) -> None:
+        assert StripeWebhookEventType.PAYMENT_INTENT_SUCCEEDED == "payment_intent.succeeded"
+
+    def test_payment_intent_succeeded_dispatched_without_exception(self, svc: StripeService) -> None:
+        svc.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        obj = _make_payment_intent_obj(status="succeeded")
+        result = svc.handle_webhook_event(self._event("payment_intent.succeeded", obj))
+        assert result["action"] in ("processed", "ignored")
+
+    def test_payment_intent_succeeded_does_not_corrupt_balance(self, svc: StripeService) -> None:
+        svc.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        svc.credit_units(_TEST_ORG, _PKG_STARTER_UNITS, StripeUnitEventReason.CHECKOUT_COMPLETE)
+        obj = _make_payment_intent_obj(status="succeeded")
+        svc.handle_webhook_event(self._event("payment_intent.succeeded", obj))
+        assert svc.get_unit_balance(_TEST_ORG).balance == _PKG_STARTER_UNITS
+
+    # --- payment_intent.payment_failed ---
+
+    def test_payment_intent_payment_failed_event_type_enum_value(self) -> None:
+        assert StripeWebhookEventType.PAYMENT_INTENT_PAYMENT_FAILED == "payment_intent.payment_failed"
+
+    def test_payment_intent_payment_failed_dispatched_without_exception(self, svc: StripeService) -> None:
+        svc.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        obj = _make_payment_intent_obj(status="requires_payment_method")
+        result = svc.handle_webhook_event(self._event("payment_intent.payment_failed", obj))
+        assert result["action"] in ("processed", "ignored")
+
+    def test_payment_intent_payment_failed_does_not_corrupt_balance(self, svc: StripeService) -> None:
+        svc.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        svc.credit_units(_TEST_ORG, _PKG_TEAM_UNITS, StripeUnitEventReason.CHECKOUT_COMPLETE)
+        obj = _make_payment_intent_obj(status="requires_payment_method")
+        svc.handle_webhook_event(self._event("payment_intent.payment_failed", obj))
+        assert svc.get_unit_balance(_TEST_ORG).balance == _PKG_TEAM_UNITS
+
+    # --- invoice.upcoming ---
+
+    def test_invoice_upcoming_event_type_enum_value(self) -> None:
+        assert StripeWebhookEventType.INVOICE_UPCOMING == "invoice.upcoming"
+
+    def test_invoice_upcoming_dispatched_without_exception(self, svc: StripeService) -> None:
+        svc.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        svc.upsert_subscription(
+            subscription_id=_TEST_SUB_ID,
+            org_id=_TEST_ORG,
+            customer_id=_TEST_CUSTOMER_ID,
+            price_id=_TEST_PRICE_ID,
+            status=StripeSubscriptionStatus.ACTIVE,
+            billing_interval=StripeBillingInterval.MONTHLY,
+            current_period_start="2025-01-01T00:00:00Z",
+            current_period_end="2025-02-01T00:00:00Z",
+        )
+        obj = _make_invoice_upcoming_obj()
+        result = svc.handle_webhook_event(self._event("invoice.upcoming", obj))
+        assert result["action"] in ("processed", "ignored")
+
+    def test_invoice_upcoming_does_not_alter_subscription_status(self, svc: StripeService) -> None:
+        svc.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        svc.upsert_subscription(
+            subscription_id=_TEST_SUB_ID,
+            org_id=_TEST_ORG,
+            customer_id=_TEST_CUSTOMER_ID,
+            price_id=_TEST_PRICE_ID,
+            status=StripeSubscriptionStatus.ACTIVE,
+            billing_interval=StripeBillingInterval.MONTHLY,
+            current_period_start="2025-01-01T00:00:00Z",
+            current_period_end="2025-02-01T00:00:00Z",
+        )
+        obj = _make_invoice_upcoming_obj()
+        svc.handle_webhook_event(self._event("invoice.upcoming", obj))
+        sub = svc.get_subscription(_TEST_SUB_ID)
+        assert sub is not None
+        assert sub.status == "active"
+
+    # --- customer.updated ---
+
+    def test_customer_updated_event_type_enum_value(self) -> None:
+        assert StripeWebhookEventType.CUSTOMER_UPDATED == "customer.updated"
+
+    def test_customer_updated_dispatched_without_exception(self, svc: StripeService) -> None:
+        svc.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        obj = _make_customer_updated_obj()
+        result = svc.handle_webhook_event(self._event("customer.updated", obj))
+        assert result["action"] in ("processed", "ignored")
+
+    def test_customer_updated_preserves_org_mapping(self, svc: StripeService) -> None:
+        svc.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        obj = _make_customer_updated_obj()
+        svc.handle_webhook_event(self._event("customer.updated", obj))
+        assert svc.resolve_org_from_customer(_TEST_CUSTOMER_ID) == _TEST_ORG
+
+    # --- idempotency: duplicate event_id is ignored ---
+
+    def test_duplicate_event_id_is_idempotent(self, svc: StripeService) -> None:
+        obj = {
+            "id": "cs_idem",
+            "mode": "payment",
+            "customer": _TEST_CUSTOMER_ID,
+            "metadata": {"org_id": _TEST_ORG, "unit_credits": str(_PKG_STARTER_UNITS)},
+        }
+        event = self._event("checkout.session.completed", obj, event_id="evt_idempotent_1")
+        svc.handle_webhook_event(event)
+        svc.handle_webhook_event(event)
+        # Balance must not double-credit
+        assert svc.get_unit_balance(_TEST_ORG).balance == _PKG_STARTER_UNITS
 
 
 # ===========================================================================
@@ -1090,6 +1316,48 @@ class TestServiceReset:
         svc.credit_units("org-module-reset", _PKG_STARTER_UNITS, StripeUnitEventReason.MANUAL_CREDIT)
         reset_stripe_service()
         assert get_stripe_service().get_unit_balance("org-module-reset").balance == 0
+
+    # --- reset_processed_events ---
+
+    def test_reset_processed_events_clears_event_set(self, svc: StripeService) -> None:
+        """After processing an event, reset_processed_events() must allow re-dispatch."""
+        obj = {
+            "id": "cs_re_process",
+            "mode": "payment",
+            "customer": _TEST_CUSTOMER_ID,
+            "metadata": {"org_id": _TEST_ORG, "unit_credits": str(_PKG_STARTER_UNITS)},
+        }
+        event = {"id": "evt_to_clear", "type": "checkout.session.completed", "data": {"object": obj}}
+        svc.handle_webhook_event(event)
+        # Balance = PKG_STARTER_UNITS now
+        svc.reset_processed_events()
+        # After clearing, re-dispatch same event must be re-processed
+        svc.handle_webhook_event(event)
+        assert svc.get_unit_balance(_TEST_ORG).balance == _PKG_STARTER_UNITS * 2
+
+    def test_reset_processed_events_is_idempotent(self, svc: StripeService) -> None:
+        """Calling reset_processed_events() on an already-empty set must not raise."""
+        svc.reset_processed_events()
+        svc.reset_processed_events()
+
+    def test_reset_processed_events_does_not_clear_balances(self, svc: StripeService) -> None:
+        svc.credit_units(_TEST_ORG, _PKG_TEAM_UNITS, StripeUnitEventReason.MANUAL_CREDIT)
+        svc.reset_processed_events()
+        assert svc.get_unit_balance(_TEST_ORG).balance == _PKG_TEAM_UNITS
+
+    def test_reset_processed_events_does_not_clear_subscriptions(self, svc: StripeService) -> None:
+        svc.upsert_subscription(
+            subscription_id=_TEST_SUB_ID,
+            org_id=_TEST_ORG,
+            customer_id=_TEST_CUSTOMER_ID,
+            price_id=_TEST_PRICE_ID,
+            status=StripeSubscriptionStatus.ACTIVE,
+            billing_interval=StripeBillingInterval.MONTHLY,
+            current_period_start="2025-01-01T00:00:00Z",
+            current_period_end="2025-02-01T00:00:00Z",
+        )
+        svc.reset_processed_events()
+        assert svc.get_subscription(_TEST_SUB_ID) is not None
 
 
 # ===========================================================================
@@ -1367,14 +1635,10 @@ class TestExceptionShapes:
         assert isinstance(err, StripeServiceError)
 
     def test_stripe_session_not_found_is_service_error(self) -> None:
-        from app.services.stripe_service import StripeSessionNotFoundError
-
         err = StripeSessionNotFoundError("cs_gone")
         assert isinstance(err, StripeServiceError)
 
     def test_stripe_subscription_not_found_is_service_error(self) -> None:
-        from app.services.stripe_service import StripeSubscriptionNotFoundError
-
         err = StripeSubscriptionNotFoundError("sub_gone")
         assert isinstance(err, StripeServiceError)
 
@@ -1567,7 +1831,7 @@ class TestInvoices:
 
 
 # ===========================================================================
-# Section 18 — StripeWebhookEventType enum
+# Section 18 — StripeWebhookEventType enum completeness
 # ===========================================================================
 
 
@@ -1575,15 +1839,46 @@ class TestStripeWebhookEventType:
     def test_checkout_session_completed_value(self) -> None:
         assert StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED == "checkout.session.completed"
 
+    def test_checkout_session_expired_value(self) -> None:
+        assert StripeWebhookEventType.CHECKOUT_SESSION_EXPIRED == "checkout.session.expired"
+
     def test_invoice_paid_value(self) -> None:
         assert StripeWebhookEventType.INVOICE_PAID == "invoice.paid"
+
+    def test_invoice_payment_failed_value(self) -> None:
+        assert StripeWebhookEventType.INVOICE_PAYMENT_FAILED == "invoice.payment_failed"
+
+    def test_invoice_upcoming_value(self) -> None:
+        assert StripeWebhookEventType.INVOICE_UPCOMING == "invoice.upcoming"
+
+    def test_customer_subscription_created_value(self) -> None:
+        assert StripeWebhookEventType.CUSTOMER_SUBSCRIPTION_CREATED == "customer.subscription.created"
+
+    def test_customer_subscription_updated_value(self) -> None:
+        assert StripeWebhookEventType.CUSTOMER_SUBSCRIPTION_UPDATED == "customer.subscription.updated"
 
     def test_customer_subscription_deleted_value(self) -> None:
         assert StripeWebhookEventType.CUSTOMER_SUBSCRIPTION_DELETED == "customer.subscription.deleted"
 
+    def test_customer_created_value(self) -> None:
+        assert StripeWebhookEventType.CUSTOMER_CREATED == "customer.created"
+
+    def test_customer_updated_value(self) -> None:
+        assert StripeWebhookEventType.CUSTOMER_UPDATED == "customer.updated"
+
     def test_charge_refunded_value(self) -> None:
         assert StripeWebhookEventType.CHARGE_REFUNDED == "charge.refunded"
+
+    def test_payment_intent_succeeded_value(self) -> None:
+        assert StripeWebhookEventType.PAYMENT_INTENT_SUCCEEDED == "payment_intent.succeeded"
+
+    def test_payment_intent_payment_failed_value(self) -> None:
+        assert StripeWebhookEventType.PAYMENT_INTENT_PAYMENT_FAILED == "payment_intent.payment_failed"
 
     def test_all_event_types_are_strings(self) -> None:
         for member in StripeWebhookEventType:
             assert isinstance(member.value, str)
+
+    def test_all_event_types_count(self) -> None:
+        # 13 enum members — assert completeness
+        assert len(list(StripeWebhookEventType)) == 13
