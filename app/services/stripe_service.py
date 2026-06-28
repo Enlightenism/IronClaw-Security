@@ -719,7 +719,7 @@ class StripeService:
     - Fulfill unit credits to org wallets after successful checkout.
     - Maintain in-memory subscription registry (synced from Stripe webhook events).
     - Report and sync metered usage (API calls, guard evaluations) to Stripe.
-    - Verify and dispatch incoming Stripe webhook events.
+    - Verify and dispatch incoming Stripe webhook events with event-level idempotency.
     - Provide per-org unit balance ledger.
     - Attach, detach, list, and set-default payment methods per customer.
     - Cache and invalidate per-org invoice lists.
@@ -760,6 +760,10 @@ class StripeService:
         self._payment_methods: dict[str, _PaymentMethodRecord] = {}
         self._invoice_cache: dict[str, list[dict[str, Any]]] = {}
         self._idempotency_keys: dict[str, Any] = {}
+        # Dedicated event-level idempotency set — tracks Stripe event IDs that
+        # have already been fully processed by handle_webhook_event.
+        # reset_processed_events() clears only this set (Section 11 contract).
+        self._processed_event_ids: set[str] = set()
         self._client: _StripeHTTPClient | None = None
         self._on_insufficient_units = on_insufficient_units
 
@@ -1841,14 +1845,25 @@ class StripeService:
     def handle_webhook_event(self, event: dict[str, Any]) -> dict[str, Any]:
         """
         Dispatch a verified Stripe event object to the appropriate handler.
+        Enforces event-level idempotency via _processed_event_ids — a non-empty
+        event_id that has already been processed returns action="duplicate" without
+        re-invoking the handler.
         Returns a result dict with action taken.
-        Handles all registered event types including CHARGE_REFUNDED,
-        CUSTOMER_UPDATED, PAYMENT_INTENT_SUCCEEDED, PAYMENT_INTENT_PAYMENT_FAILED,
-        and INVOICE_UPCOMING.
         """
         event_type = event.get("type", "")
         event_id = event.get("id", "")
         data_obj: dict[str, Any] = event.get("data", {}).get("object", {})
+
+        # --- Event-level idempotency guard ---
+        if event_id:
+            with self._lock:
+                if event_id in self._processed_event_ids:
+                    logger.debug(
+                        "stripe.webhook_duplicate_skipped event_type=%s id=%s",
+                        event_type,
+                        event_id,
+                    )
+                    return {"action": "duplicate", "event_type": event_type, "event_id": event_id}
 
         handler_map: dict[str, Any] = {
             StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value: self._handle_checkout_completed,
@@ -1872,6 +1887,10 @@ class StripeService:
 
         try:
             result = handler(data_obj, event)
+            # Mark event as processed only after successful handler execution.
+            if event_id:
+                with self._lock:
+                    self._processed_event_ids.add(event_id)
             logger.info("stripe.webhook_handled event_type=%s id=%s", event_type, event_id)
             return {"action": "processed", "event_type": event_type, "event_id": event_id, "detail": result}
         except Exception as exc:  # noqa: BLE001
@@ -2059,8 +2078,6 @@ class StripeService:
                         self._subscriptions[subscription_id] = updated
 
                 # Credit renewal units: explicit invoice metadata takes priority.
-                # For subscription_cycle renewals, fall back to the subscription's
-                # package catalogue entry keyed by price_id.
                 renewal_units_raw = obj.get("metadata", {}).get("unit_credits", "")
                 renewal_units = 0
 
@@ -2070,8 +2087,6 @@ class StripeService:
                     except (ValueError, TypeError):
                         renewal_units = 0
                 elif billing_reason == "subscription_cycle" and record.price_id:
-                    # Derive renewal units from PACKAGE_CATALOGUE by matching price_id
-                    # to a known package. Falls back to 0 if price_id is unknown.
                     for pkg in PACKAGE_CATALOGUE.values():
                         if pkg.get("price_id") == record.price_id:
                             renewal_units = int(pkg.get("units", 0))
@@ -2228,8 +2243,6 @@ class StripeService:
         """
         Handle payment_intent.succeeded events.
         Records the successful intent and updates customer mapping if present.
-        Unit credits are fulfilled via checkout.session.completed or invoice.paid;
-        this handler is informational and ensures org mapping is kept current.
         """
         intent_id: str = obj.get("id", "")
         customer_id: str = obj.get("customer", "")
@@ -2260,7 +2273,6 @@ class StripeService:
         """
         Handle payment_intent.payment_failed events.
         Logs the failure with intent and customer context for alerting pipelines.
-        No subscription state mutation — that is handled by invoice.payment_failed.
         """
         intent_id: str = obj.get("id", "")
         customer_id: str = obj.get("customer", "")
@@ -2310,12 +2322,14 @@ class StripeService:
 
     def reset_processed_events(self) -> None:
         """
-        Clear only the idempotency key registry.
+        Clear only the _processed_event_ids set.
         Allows tests to re-submit previously seen event IDs without resetting
         the full service state (subscriptions, balances, sessions).
+        Section 11 contract: svc.reset_processed_events() must be callable and
+        must clear _processed_event_ids independently of _idempotency_keys.
         """
         with self._lock:
-            self._idempotency_keys.clear()
+            self._processed_event_ids.clear()
 
     def reset(self) -> None:
         """Full state reset. Intended for test isolation between test cases."""
@@ -2330,6 +2344,7 @@ class StripeService:
             self._payment_methods.clear()
             self._invoice_cache.clear()
             self._idempotency_keys.clear()
+            self._processed_event_ids.clear()
             self._client = None
 
 
