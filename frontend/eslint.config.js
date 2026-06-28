@@ -5,6 +5,7 @@ import globals from "globals";
 
 export default [
   js.configs.recommended,
+  // ── Source files ────────────────────────────────────────────────────────────
   {
     files: ["src/**/*.{js,jsx}"],
     ignores: ["src/**/*.test.{js,jsx}", "src/**/*.spec.{js,jsx}"],
@@ -26,13 +27,14 @@ export default [
       ...reactHooksPlugin.configs.recommended.rules,
       "react/react-in-jsx-scope": "off",
       "react/prop-types": "off",
-      "no-unused-vars": "warn",
+      "no-unused-vars": ["warn", { varsIgnorePattern: "^_", argsIgnorePattern: "^_" }],
       "no-console": "warn",
     },
     settings: {
       react: { version: "detect" },
     },
   },
+  // ── Test files ──────────────────────────────────────────────────────────────
   {
     files: ["src/**/*.test.{js,jsx}", "src/**/*.spec.{js,jsx}"],
     plugins: {
@@ -53,11 +55,20 @@ export default [
       ...reactPlugin.configs.recommended.rules,
       "react/react-in-jsx-scope": "off",
       "react/prop-types": "off",
-      "no-unused-vars": "warn",
+      "no-unused-vars": ["warn", { varsIgnorePattern: "^_", argsIgnorePattern: "^_" }],
       "no-console": "warn",
     },
     settings: {
       react: { version: "detect" },
+    },
+  },
+  // ── CommonJS mock files (Jest stubs) ────────────────────────────────────────
+  {
+    files: ["src/__mocks__/**/*.{js,jsx}"],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
     },
   },
 ];
