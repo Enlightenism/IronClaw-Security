@@ -179,7 +179,6 @@ describe("loading spinner", () => {
   });
 
   it("renders spinner when loadingData is true and data is null", async () => {
-    // Hang the API so loadingData stays true
     mockApiGet.mockReturnValue(new Promise(() => {}));
 
     await act(async () => {
@@ -229,7 +228,7 @@ describe("WalletCard organizationId prop", () => {
   });
 
   it("passes organizationId='org-001' fallback when API response has no organization_id", async () => {
-    const { organization_id: _removed, ...dashWithoutOrg } = DEFAULT_DASH;
+    const { organization_id: _, ...dashWithoutOrg } = DEFAULT_DASH;
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard")
         return Promise.resolve({ data: dashWithoutOrg });
@@ -281,8 +280,7 @@ describe("session_id payment polling", () => {
     mockLocation.search = "?session_id=cs_test_abc";
 
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard")
-        return Promise.resolve({ data: DEFAULT_DASH });
+      if (url === "/dashboard") return Promise.resolve({ data: DEFAULT_DASH });
       if (url === "/integrations/token")
         return Promise.resolve({ data: DEFAULT_TOKENS });
       if (url === "/payments/status/cs_test_abc")
@@ -308,8 +306,7 @@ describe("session_id payment polling", () => {
     mockLocation.search = "?session_id=cs_test_abc";
 
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard")
-        return Promise.resolve({ data: DEFAULT_DASH });
+      if (url === "/dashboard") return Promise.resolve({ data: DEFAULT_DASH });
       if (url === "/integrations/token")
         return Promise.resolve({ data: DEFAULT_TOKENS });
       if (url === "/payments/status/cs_test_abc")

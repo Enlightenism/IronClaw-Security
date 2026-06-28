@@ -342,7 +342,9 @@ describe("tier purchase buttons — onPurchase guard", () => {
       render(<WalletCard {...DEFAULT_PROPS} onPurchase={onPurchase} />);
     });
     await waitFor(() => {
-      expect(screen.getByTestId("payment-method-row-pm_default")).toBeInTheDocument();
+      expect(
+        screen.getByTestId("payment-method-row-pm_default"),
+      ).toBeInTheDocument();
     });
 
     // All recorded calls must use only valid IDs
@@ -461,9 +463,7 @@ describe("PaymentMethodPanel — empty state", () => {
       render(<WalletCard {...DEFAULT_PROPS} organizationId="org-001" />);
     });
     await waitFor(() => {
-      expect(
-        screen.getByText(/No payment method on file/),
-      ).toBeInTheDocument();
+      expect(screen.getByText(/No payment method on file/)).toBeInTheDocument();
     });
   });
 
@@ -522,7 +522,9 @@ describe("PaymentMethodPanel — methods list", () => {
       ).toBeInTheDocument();
     });
     expect(screen.getByText(/default/i)).toBeInTheDocument();
-    expect(screen.queryByTestId("set-default-pm_default")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("set-default-pm_default"),
+    ).not.toBeInTheDocument();
   });
 
   it("non-default row renders star and delete buttons", async () => {
@@ -540,7 +542,9 @@ describe("PaymentMethodPanel — methods list", () => {
       render(<WalletCard {...DEFAULT_PROPS} />);
     });
     await waitFor(() => {
-      expect(screen.getByTestId("delete-method-pm_default")).toBeInTheDocument();
+      expect(
+        screen.getByTestId("delete-method-pm_default"),
+      ).toBeInTheDocument();
     });
   });
 
@@ -817,9 +821,7 @@ describe("api.get silent failure", () => {
     });
     await waitFor(() => {
       expect(screen.getByTestId("wallet-card")).toBeInTheDocument();
-      expect(
-        screen.getByText(/No payment method on file/),
-      ).toBeInTheDocument();
+      expect(screen.getByText(/No payment method on file/)).toBeInTheDocument();
     });
   });
 

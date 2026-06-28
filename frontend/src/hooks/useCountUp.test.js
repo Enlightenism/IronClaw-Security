@@ -163,7 +163,7 @@ describe("useCountUp", () => {
     it("restarts animation when `end` prop is updated", () => {
       const { result, rerender } = renderHook(
         ({ end }) => useCountUp(end, 500, [end], 0),
-        { initialProps: { end: 50 } }
+        { initialProps: { end: 50 } },
       );
 
       // Complete first animation
@@ -187,7 +187,7 @@ describe("useCountUp", () => {
       let trigger = 0;
       const { result, rerender } = renderHook(
         () => useCountUp(100, 500, [trigger], 0),
-        { initialProps: {} }
+        { initialProps: {} },
       );
 
       act(() => flushRaf(0));
