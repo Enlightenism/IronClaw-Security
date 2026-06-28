@@ -185,7 +185,9 @@ const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
       toast.success("Default payment method updated.");
       await fetchMethods();
     } catch (e) {
-      toast.error(e?.response?.data?.detail ?? "Could not update default method.");
+      toast.error(
+        e?.response?.data?.detail ?? "Could not update default method.",
+      );
     } finally {
       setActionId(null);
     }
@@ -200,7 +202,9 @@ const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
       toast.success("Payment method removed.");
       await fetchMethods();
     } catch (e) {
-      toast.error(e?.response?.data?.detail ?? "Could not remove payment method.");
+      toast.error(
+        e?.response?.data?.detail ?? "Could not remove payment method.",
+      );
     } finally {
       setActionId(null);
     }

@@ -12,20 +12,20 @@ import axios from "axios";
 // the factory.  We expose a shared `mockInstance` so individual tests can
 // inspect / override method implementations.
 
-const mockGet    = jest.fn();
-const mockPost   = jest.fn();
-const mockPatch  = jest.fn();
+const mockGet = jest.fn();
+const mockPost = jest.fn();
+const mockPatch = jest.fn();
 const mockDelete = jest.fn();
 
 const mockResponseInterceptorUse = jest.fn();
 
 const mockAxiosInstance = {
-  get:    mockGet,
-  post:   mockPost,
-  patch:  mockPatch,
+  get: mockGet,
+  post: mockPost,
+  patch: mockPatch,
   delete: mockDelete,
   interceptors: {
-    request:  { use: jest.fn() },
+    request: { use: jest.fn() },
     response: { use: mockResponseInterceptorUse },
   },
 };
@@ -252,9 +252,7 @@ describe("paymentMethods.setDefault", () => {
     mockPatch.mockResolvedValueOnce({ data: {} });
     paymentMethods.setDefault("pm-001", "org/001 x");
     const [url] = mockPatch.mock.calls[0];
-    expect(url).toContain(
-      `organizationid=${encodeURIComponent("org/001 x")}`,
-    );
+    expect(url).toContain(`organizationid=${encodeURIComponent("org/001 x")}`);
   });
 
   it("URL-encodes both methodId and orgId independently", () => {
@@ -308,9 +306,7 @@ describe("paymentMethods.delete", () => {
     mockDelete.mockResolvedValueOnce({ data: {} });
     paymentMethods.delete("pm-001", "org/001 x");
     const [url] = mockDelete.mock.calls[0];
-    expect(url).toContain(
-      `organizationid=${encodeURIComponent("org/001 x")}`,
-    );
+    expect(url).toContain(`organizationid=${encodeURIComponent("org/001 x")}`);
   });
 
   it("URL-encodes both methodId and orgId independently", () => {
@@ -359,7 +355,9 @@ describe("payments.createCheckout", () => {
   });
 
   it("returns the axios promise", () => {
-    const fakePromise = Promise.resolve({ data: { url: "https://stripe.example" } });
+    const fakePromise = Promise.resolve({
+      data: { url: "https://stripe.example" },
+    });
     mockPost.mockReturnValueOnce(fakePromise);
     expect(payments.createCheckout({})).toBe(fakePromise);
   });
