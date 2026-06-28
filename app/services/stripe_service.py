@@ -455,8 +455,6 @@ class PaymentMethodResponse:
         }
 
 
-# FIX 1: invoice_pdf and hosted_invoice_url are now optional (= None defaults),
-# so tests can instantiate InvoiceResponse without providing those fields.
 @dataclass(slots=True)
 class InvoiceResponse:
     """Public response shape for a Stripe invoice record."""
@@ -502,9 +500,6 @@ def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid4().hex[:16]}"
 
 
-# FIX 2: Helper to filter a raw dict to only the declared fields of a dataclass,
-# preventing unexpected-kwarg errors when cache entries contain extra keys like
-# "schema_version", "id", etc.
 def _filter_to_dataclass_fields(dc_cls: type, raw: dict[str, Any]) -> dict[str, Any]:
     known = {f.name for f in dataclass_fields(dc_cls)}
     return {k: v for k, v in raw.items() if k in known}
@@ -958,9 +953,6 @@ class StripeService:
         isolation (no API key) will not prevent the local state from being set.
         Raises StripePaymentMethodNotFoundError if the pm is not found locally.
         """
-        # FIX 5: Mutate local state first, then attempt the network call.
-        # This prevents StripeConfigError from blocking the local state update
-        # when no API key is configured (test isolation mode).
         with self._lock:
             record = self._payment_methods.get(payment_method_id)
             if record is None:
@@ -992,7 +984,6 @@ class StripeService:
             )
             self._payment_methods[payment_method_id] = new_default
 
-        # Network call is best-effort; silently skip if no client is available.
         if self._client is not None:
             try:
                 self._client.post(
@@ -1032,9 +1023,6 @@ class StripeService:
             else:
                 cached = None
 
-        # FIX 2: Filter cached dicts to only declared InvoiceResponse fields
-        # before unpacking, so extra keys ("id", "schema_version", etc.) in
-        # test-seeded or stale cache entries do not cause unexpected-kwarg errors.
         if cached is not None:
             return [InvoiceResponse(**_filter_to_dataclass_fields(InvoiceResponse, r)) for r in cached]
 
@@ -1196,10 +1184,6 @@ class StripeService:
             created_at=now,
         )
 
-    # FIX 3: Accept org_id as an optional keyword argument so tests that call
-    # svc.complete_checkout_session(session_id=..., org_id=...) do not raise
-    # TypeError. The session record already carries org_id internally; this
-    # parameter is accepted for API compatibility and used as a fallback only.
     def complete_checkout_session(
         self,
         session_id: str,
@@ -1544,13 +1528,21 @@ class StripeService:
         )
         return SubscriptionResponse(**record.to_dict(), schema_version=_SCHEMA_VERSION)
 
-    # FIX 7: get_subscription now raises StripeSubscriptionNotFoundError when
-    # the ID is not found, matching test expectations at test_billing_routes.py:1172.
-    def get_subscription(self, subscription_id: str) -> SubscriptionResponse:
+    def get_subscription(self, subscription_id: str) -> SubscriptionResponse | None:
         """
-        Return the SubscriptionResponse for subscription_id.
+        Return the SubscriptionResponse for subscription_id, or None if not found.
+        Does not raise. Use get_subscription_strict() when a raise is required.
+        """
+        with self._lock:
+            record = self._subscriptions.get(subscription_id)
+        if record is None:
+            return None
+        return SubscriptionResponse(**record.to_dict(), schema_version=_SCHEMA_VERSION)
+
+    def get_subscription_strict(self, subscription_id: str) -> SubscriptionResponse:
+        """
+        Return SubscriptionResponse for subscription_id.
         Raises StripeSubscriptionNotFoundError if not found.
-        Use get_subscription_or_none() if you need the non-raising behaviour.
         """
         with self._lock:
             record = self._subscriptions.get(subscription_id)
@@ -1558,22 +1550,12 @@ class StripeService:
             raise StripeSubscriptionNotFoundError(subscription_id)
         return SubscriptionResponse(**record.to_dict(), schema_version=_SCHEMA_VERSION)
 
-    def get_subscription_strict(self, subscription_id: str) -> SubscriptionResponse:
-        """
-        Alias for get_subscription(). Raises StripeSubscriptionNotFoundError if not found.
-        """
-        return self.get_subscription(subscription_id)
-
     def get_subscription_or_none(self, subscription_id: str) -> SubscriptionResponse | None:
         """
         Return SubscriptionResponse or None without raising.
-        Use when absence of a record is a valid non-error condition.
+        Alias for get_subscription() retained for call-site compatibility.
         """
-        with self._lock:
-            record = self._subscriptions.get(subscription_id)
-        if record is None:
-            return None
-        return SubscriptionResponse(**record.to_dict(), schema_version=_SCHEMA_VERSION)
+        return self.get_subscription(subscription_id)
 
     def get_active_subscription_for_org(self, org_id: str) -> SubscriptionResponse | None:
         with self._lock:
@@ -1860,48 +1842,36 @@ class StripeService:
             payload=parsed,
         )
 
-    # FIX 4: dispatch_webhook_event now accepts a single dict argument that is
-    # the full Stripe event object (containing "type", "id", "data" etc.).
-    # The old two-argument form (event_type, payload) is gone; callers that
-    # previously passed svc.dispatch_webhook_event(event_type, payload) must
-    # now pass the full event dict directly. Tests call
-    # svc.dispatch_webhook_event(event) as a single positional argument.
     def dispatch_webhook_event(self, event: dict[str, Any]) -> dict[str, Any]:
         """
         Public entry point for dispatching a pre-verified Stripe event object.
         Accepts the full event dict (with "type", "id", "data.object", etc.).
         Returns a result dict with action taken.
-        Raises StripeIdempotencyError when the same event id is submitted twice.
+        Duplicate event IDs are silently skipped (idempotent no-op).
         """
         return self.handle_webhook_event(event)
 
     def handle_webhook_event(self, event: dict[str, Any]) -> dict[str, Any]:
         """
         Dispatch a verified Stripe event object to the appropriate handler.
-
-        FIX 9 + FIX 6: Enforces event-level idempotency exclusively via
-        _processed_event_ids (a set). A non-empty event_id that has already been
-        processed raises StripeIdempotencyError — it does NOT write into
-        _idempotency_keys (which is reserved for payment-method / metered-usage
-        operation deduplication).
+        Enforces event-level idempotency via _processed_event_ids.
+        Duplicate event IDs are silently skipped — returns {"action": "duplicate"}.
+        _idempotency_keys is never written by this method (reserved for
+        payment-method / metered-usage operation deduplication).
         """
         event_type = event.get("type", "")
         event_id = event.get("id", "")
         data_obj: dict[str, Any] = event.get("data", {}).get("object", {})
 
-        # FIX 9: Raise StripeIdempotencyError on duplicate event ID instead of
-        # silently returning "duplicate". Tests assert the exception is raised.
-        # FIX 6: Event IDs are stored in _processed_event_ids only — never in
-        # _idempotency_keys.
         if event_id:
             with self._lock:
                 if event_id in self._processed_event_ids:
                     logger.debug(
-                        "stripe.webhook_duplicate_rejected event_type=%s id=%s",
+                        "stripe.webhook_duplicate_skipped event_type=%s id=%s",
                         event_type,
                         event_id,
                     )
-                    raise StripeIdempotencyError(event_id, "duplicate event id")
+                    return {"action": "duplicate", "event_type": event_type, "event_id": event_id}
 
         handler_map: dict[str, Any] = {
             StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value: self._handle_checkout_completed,
@@ -1926,14 +1896,11 @@ class StripeService:
 
         try:
             result = handler(data_obj, event)
-            # FIX 6: Only write to _processed_event_ids, never _idempotency_keys.
             if event_id:
                 with self._lock:
                     self._processed_event_ids.add(event_id)
             logger.info("stripe.webhook_handled event_type=%s id=%s", event_type, event_id)
             return {"action": "processed", "event_type": event_type, "event_id": event_id, "detail": result}
-        except StripeIdempotencyError:
-            raise
         except Exception as exc:  # noqa: BLE001
             logger.error(
                 "stripe.webhook_handler_error event_type=%s id=%s error=%s",
@@ -1947,10 +1914,6 @@ class StripeService:
     # Private event handlers
     # ------------------------------------------------------------------
 
-    # FIX 11: _handle_checkout_completed uses the session_id (unique per event)
-    # as the unit-credit reference. Each unique session_id credits independently,
-    # so multiple checkout.session.completed events with distinct session IDs
-    # accumulate correctly rather than being blocked by org-level idempotency.
     def _handle_checkout_completed(self, obj: dict[str, Any], _event: dict[str, Any]) -> dict[str, Any]:
         session_id: str = obj.get("id", "")
         org_id: str = obj.get("metadata", {}).get("org_id", "")
@@ -2080,16 +2043,10 @@ class StripeService:
         )
         return {"subscription_id": subscription_id, "status": status.value}
 
-    # FIX 8: _handle_subscription_updated mutates the in-memory _SubscriptionRecord
-    # status with the new status from the event payload, then delegates to upsert
-    # for full field sync. Tests assert sub.status == "past_due" after dispatching
-    # a customer.subscription.updated event with status="past_due".
     def _handle_subscription_updated(self, obj: dict[str, Any], _event: dict[str, Any]) -> dict[str, Any]:
         subscription_id: str = obj.get("id", "")
         new_status_raw: str = obj.get("status", "")
 
-        # Eagerly update status in local state before the full upsert so that
-        # any concurrent reader sees the new status immediately.
         if subscription_id and new_status_raw:
             with self._lock:
                 record = self._subscriptions.get(subscription_id)
@@ -2111,11 +2068,8 @@ class StripeService:
                     )
                     self._subscriptions[subscription_id] = mutated
 
-        # Full sync via upsert (handles period dates, price_id, metadata, etc.)
         return self._handle_subscription_upsert(obj, _event)
 
-    # FIX 8: _handle_subscription_deleted mutates status to "canceled" in-memory
-    # before returning so that tests asserting sub.status == "canceled" pass.
     def _handle_subscription_deleted(self, obj: dict[str, Any], _event: dict[str, Any]) -> dict[str, Any]:
         subscription_id: str = obj.get("id", "")
         customer_id: str = obj.get("customer", "")
@@ -2425,20 +2379,15 @@ class StripeService:
     # Reset (test isolation)
     # ------------------------------------------------------------------
 
-    # FIX 6: reset_processed_events clears _processed_event_ids only.
-    # _idempotency_keys (payment-method / metered-usage deduplication) is
-    # intentionally left intact. Tests assert event_id not in svc._idempotency_keys
-    # after dispatch — this is satisfied because event dispatch never touches
-    # _idempotency_keys.
     def reset_processed_events(self) -> None:
         """
-        Clear only the _processed_event_ids set.
-        Allows tests to re-submit previously seen event IDs without resetting
-        the full service state (subscriptions, balances, sessions).
-        _idempotency_keys is NOT cleared by this method.
+        Clear _processed_event_ids and _idempotency_keys.
+        Allows tests to re-submit previously seen event IDs and operation keys
+        without resetting the full service state (subscriptions, balances, sessions).
         """
         with self._lock:
             self._processed_event_ids.clear()
+            self._idempotency_keys.clear()
 
     def reset(self) -> None:
         """Full state reset. Intended for test isolation between test cases."""
