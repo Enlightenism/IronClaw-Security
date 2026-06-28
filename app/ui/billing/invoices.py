@@ -301,7 +301,7 @@ def _total_revenue(invoices: list[BillingInvoiceListItem]) -> BillingCurrencyAmo
     return _usd(cents)
 
 
-@router.get("/invoices", response_model=BillingInvoiceListResponse)
+@router.get("/invoices", response_model=BillingInvoiceListResponse, operation_id="ui_get_billing_invoices")
 def get_billing_invoices(
     status: str | None = None,
     organizationid: str | None = None,
@@ -360,6 +360,7 @@ def get_billing_invoices(
 @router.get(
     "/invoices/{invoiceid}/download",
     response_model=BillingInvoiceDownloadResponse,
+    operation_id="ui_get_invoice_download",
 )
 def get_invoice_download(invoiceid: str) -> BillingInvoiceDownloadResponse:
     if invoiceid not in _VALID_INVOICE_IDS:
