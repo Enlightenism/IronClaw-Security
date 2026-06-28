@@ -55,10 +55,7 @@ _VALID_PLANS: frozenset[str] = frozenset({"starter", "team", "enterprise"})
 # stripe_price_id is populated at startup from env; defaults to "" when unset.
 # ---------------------------------------------------------------------------
 
-# FIX 1: All three catalogue entries now include "stripe_price_id", populated
-# from env vars at import time. Defaults to "" so tests that never set the env
-# var can still construct PackageCatalogueEntry(**PACKAGE_CATALOGUE["starter"])
-# without a KeyError or validation failure.
+
 PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
     "starter": {
         "label": "Starter",
@@ -218,10 +215,6 @@ class BillingPackagePlanCount(BaseModel):
     count: int
 
 
-# FIX 2: PackageCatalogueEntry now declares stripe_price_id: str = "" so it
-# validates without error when the env var is unset and correctly reads the
-# price ID when the env var is present. The default of "" matches the
-# PACKAGE_CATALOGUE entries above.
 class PackageCatalogueEntry(BaseModel):
     label: str
     units: int
@@ -621,8 +614,6 @@ def get_billing_packages(
     totalcount = len(filtered)
     paginated = _paginate_packages(filtered, page, pagesize)
 
-    # FIX 1+2: PACKAGE_CATALOGUE entries already carry stripe_price_id; the
-    # model field has a default of "" so missing env vars do not break validation.
     catalogue_out: dict[str, PackageCatalogueEntry] = {k: PackageCatalogueEntry(**v) for k, v in PACKAGE_CATALOGUE.items()}
 
     stripe = _get_stripe_status()
