@@ -52,8 +52,13 @@ _VALID_PLANS: frozenset[str] = frozenset({"starter", "team", "enterprise"})
 # team       : 25,000 units → $90 USD
 # enterprise : 60,000 units → $180 USD
 # Each protection unit covers up to TOKENS_PER_UNIT (25,000) tokens.
+# stripe_price_id is populated at startup from env; defaults to "" when unset.
 # ---------------------------------------------------------------------------
 
+# FIX 1: All three catalogue entries now include "stripe_price_id", populated
+# from env vars at import time. Defaults to "" so tests that never set the env
+# var can still construct PackageCatalogueEntry(**PACKAGE_CATALOGUE["starter"])
+# without a KeyError or validation failure.
 PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
     "starter": {
         "label": "Starter",
@@ -62,6 +67,7 @@ PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
         "price_cents": BILLING_TIER_5K_PRICE_USD * 100,
         "tokens_per_unit": TOKENS_PER_UNIT,
         "token_coverage": BILLING_TIER_5K_UNITS * TOKENS_PER_UNIT,
+        "stripe_price_id": os.environ.get("STRIPE_PRICE_ID_STARTER", ""),
         "notes": (f"{BILLING_TIER_5K_UNITS:,} units · ${BILLING_TIER_5K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
     },
     "team": {
@@ -71,6 +77,7 @@ PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
         "price_cents": BILLING_TIER_25K_PRICE_USD * 100,
         "tokens_per_unit": TOKENS_PER_UNIT,
         "token_coverage": BILLING_TIER_25K_UNITS * TOKENS_PER_UNIT,
+        "stripe_price_id": os.environ.get("STRIPE_PRICE_ID_TEAM", ""),
         "notes": (f"{BILLING_TIER_25K_UNITS:,} units · ${BILLING_TIER_25K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
     },
     "enterprise": {
@@ -80,6 +87,7 @@ PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
         "price_cents": BILLING_TIER_60K_PRICE_USD * 100,
         "tokens_per_unit": TOKENS_PER_UNIT,
         "token_coverage": BILLING_TIER_60K_UNITS * TOKENS_PER_UNIT,
+        "stripe_price_id": os.environ.get("STRIPE_PRICE_ID_ENTERPRISE", ""),
         "notes": (f"{BILLING_TIER_60K_UNITS:,} units · ${BILLING_TIER_60K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
     },
 }
@@ -210,6 +218,10 @@ class BillingPackagePlanCount(BaseModel):
     count: int
 
 
+# FIX 2: PackageCatalogueEntry now declares stripe_price_id: str = "" so it
+# validates without error when the env var is unset and correctly reads the
+# price ID when the env var is present. The default of "" matches the
+# PACKAGE_CATALOGUE entries above.
 class PackageCatalogueEntry(BaseModel):
     label: str
     units: int
@@ -217,6 +229,7 @@ class PackageCatalogueEntry(BaseModel):
     price_cents: int
     tokens_per_unit: int
     token_coverage: int
+    stripe_price_id: str = ""
     notes: str
 
 
@@ -608,6 +621,8 @@ def get_billing_packages(
     totalcount = len(filtered)
     paginated = _paginate_packages(filtered, page, pagesize)
 
+    # FIX 1+2: PACKAGE_CATALOGUE entries already carry stripe_price_id; the
+    # model field has a default of "" so missing env vars do not break validation.
     catalogue_out: dict[str, PackageCatalogueEntry] = {k: PackageCatalogueEntry(**v) for k, v in PACKAGE_CATALOGUE.items()}
 
     stripe = _get_stripe_status()
