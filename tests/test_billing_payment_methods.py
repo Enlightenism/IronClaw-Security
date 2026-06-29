@@ -69,6 +69,176 @@ def _make_method(
 
 
 # ---------------------------------------------------------------------------
+# _build_method — instance type and field correctness
+# ---------------------------------------------------------------------------
+
+
+class TestBuildMethod:
+    def test_returns_billing_payment_method_view_instance(self) -> None:
+        result = _build_method(
+            methodid="pm-001",
+            type="card",
+            brand="visa",
+            last4="4242",
+            expmonth=12,
+            expyear=2027,
+            isdefault=False,
+            status="active",
+            createdat="2025-01-01T00:00:00+00:00",
+            organizationid="org-001",
+        )
+        assert isinstance(result, BillingPaymentMethodView)
+
+    def test_build_method_all_fields_populated(self) -> None:
+        result = _build_method(
+            methodid="pm-999",
+            type="card",
+            brand="mastercard",
+            last4="1234",
+            expmonth=3,
+            expyear=2029,
+            isdefault=True,
+            status="active",
+            createdat="2026-06-01T00:00:00+00:00",
+            organizationid="org-abc",
+        )
+        assert result.methodid == "pm-999"
+        assert result.type == "card"
+        assert result.brand == "mastercard"
+        assert result.last4 == "1234"
+        assert result.expmonth == 3
+        assert result.expyear == 2029
+        assert result.isdefault is True
+        assert result.status == "active"
+        assert result.createdat == "2026-06-01T00:00:00+00:00"
+        assert result.organizationid == "org-abc"
+        assert result.branddisplay == "Mastercard"
+        assert result.expdisplay == "03/2029"
+        assert result.statuscolor == "success"
+
+    def test_branddisplay_derived_from_brand(self) -> None:
+        result = _build_method(
+            methodid="pm-001",
+            type="card",
+            brand="amex",
+            last4="0005",
+            expmonth=1,
+            expyear=2028,
+            isdefault=False,
+            status="active",
+            createdat="2025-01-01T00:00:00+00:00",
+            organizationid="org-001",
+        )
+        assert result.branddisplay == "American Express"
+
+    def test_expdisplay_derived_from_expmonth_expyear(self) -> None:
+        result = _build_method(
+            methodid="pm-001",
+            type="card",
+            brand="visa",
+            last4="4242",
+            expmonth=7,
+            expyear=2031,
+            isdefault=False,
+            status="active",
+            createdat="2025-01-01T00:00:00+00:00",
+            organizationid="org-001",
+        )
+        assert result.expdisplay == "07/2031"
+
+    def test_statuscolor_derived_from_status(self) -> None:
+        for status, expected_color in _STATUS_COLOR.items():
+            result = _build_method(
+                methodid="pm-001",
+                type="card",
+                brand="visa",
+                last4="4242",
+                expmonth=12,
+                expyear=2027,
+                isdefault=False,
+                status=status,
+                createdat="2025-01-01T00:00:00+00:00",
+                organizationid="org-001",
+            )
+            assert result.statuscolor == expected_color
+
+    def test_unknown_status_statuscolor_is_neutral(self) -> None:
+        result = _build_method(
+            methodid="pm-001",
+            type="card",
+            brand="visa",
+            last4="4242",
+            expmonth=12,
+            expyear=2027,
+            isdefault=False,
+            status="unrecognized_status",
+            createdat="2025-01-01T00:00:00+00:00",
+            organizationid="org-001",
+        )
+        assert result.statuscolor == "neutral"
+
+    def test_isdefault_false_propagates(self) -> None:
+        result = _build_method(
+            methodid="pm-001",
+            type="card",
+            brand="visa",
+            last4="4242",
+            expmonth=12,
+            expyear=2027,
+            isdefault=False,
+            status="active",
+            createdat="2025-01-01T00:00:00+00:00",
+            organizationid="org-001",
+        )
+        assert result.isdefault is False
+
+    def test_isdefault_true_propagates(self) -> None:
+        result = _build_method(
+            methodid="pm-002",
+            type="card",
+            brand="visa",
+            last4="0000",
+            expmonth=6,
+            expyear=2030,
+            isdefault=True,
+            status="active",
+            createdat="2025-01-01T00:00:00+00:00",
+            organizationid="org-001",
+        )
+        assert result.isdefault is True
+
+    def test_unknown_brand_falls_back_to_title_in_branddisplay(self) -> None:
+        result = _build_method(
+            methodid="pm-001",
+            type="card",
+            brand="unionpay",
+            last4="4242",
+            expmonth=12,
+            expyear=2027,
+            isdefault=False,
+            status="active",
+            createdat="2025-01-01T00:00:00+00:00",
+            organizationid="org-001",
+        )
+        assert result.branddisplay == "Unionpay"
+
+    def test_single_digit_month_zero_padded_in_expdisplay(self) -> None:
+        result = _build_method(
+            methodid="pm-001",
+            type="card",
+            brand="visa",
+            last4="4242",
+            expmonth=1,
+            expyear=2030,
+            isdefault=False,
+            status="active",
+            createdat="2025-01-01T00:00:00+00:00",
+            organizationid="org-001",
+        )
+        assert result.expdisplay == "01/2030"
+
+
+# ---------------------------------------------------------------------------
 # PackageCatalogueEntry — field validation
 # ---------------------------------------------------------------------------
 
