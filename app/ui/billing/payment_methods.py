@@ -262,7 +262,7 @@ def _build_method(
     status: str,
     createdat: str,
     organizationid: str,
-) -> "BillingPaymentMethodView":
+) -> BillingPaymentMethodView:
     return BillingPaymentMethodView(
         methodid=methodid,
         type=type,

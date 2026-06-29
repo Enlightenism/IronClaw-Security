@@ -72,6 +72,7 @@ from app.ui.billing.package import (
     router as package_router,
 )
 from app.ui.billing.payment_methods import (
+    PACKAGE_CATALOGUE,
     AddPaymentMethodRequest,
     AddPaymentMethodResponse,
     BillingPaymentMethodsNotFoundResponse,
@@ -79,6 +80,7 @@ from app.ui.billing.payment_methods import (
     BillingPaymentMethodStatusCount,
     BillingPaymentMethodView,
     DeletePaymentMethodResponse,
+    PackageCatalogueEntry,
     SetDefaultPaymentMethodResponse,
     get_payment_methods,
 )
@@ -146,6 +148,8 @@ __all__ = [
     "InvoiceDetailUsageBucketView",
     "get_invoice_detail",
     # payment methods
+    "PACKAGE_CATALOGUE",
+    "PackageCatalogueEntry",
     "BillingPaymentMethodView",
     "BillingPaymentMethodStatusCount",
     "BillingPaymentMethodsResponse",
