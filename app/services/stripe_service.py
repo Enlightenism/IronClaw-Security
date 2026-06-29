@@ -824,7 +824,7 @@ class StripeService:
         Resolution order (first non-empty wins):
           1. ``override`` parameter (call-site injection — highest priority).
           2. ``self._webhook_secret_override`` (constructor injection — for test stubs).
-          3. vault.get("STRIPE_WEBHOOK_SECRET") read at call time (production path).
+          3. vault.get(\"STRIPE_WEBHOOK_SECRET\") read at call time (production path).
 
         Raises StripeConfigError when no source yields a non-empty value.
         """
@@ -1566,16 +1566,23 @@ class StripeService:
         )
         return SubscriptionResponse(**record.to_dict(), schema_version=_SCHEMA_VERSION)
 
-    def get_subscription(self, subscription_id: str) -> SubscriptionResponse:
+    def get_subscription(
+        self,
+        subscription_id: str,
+        strict: bool = True,
+    ) -> SubscriptionResponse | None:
         """
         Return SubscriptionResponse for subscription_id.
-        Raises StripeSubscriptionNotFoundError when the subscription is not found
-        (including after deletion by the customer.subscription.deleted handler).
+
+        When strict=True (default): raises StripeSubscriptionNotFoundError if not found.
+        When strict=False: returns None instead of raising.
         """
         with self._lock:
             record = self._subscriptions.get(subscription_id)
         if record is None:
-            raise StripeSubscriptionNotFoundError(subscription_id)
+            if strict:
+                raise StripeSubscriptionNotFoundError(subscription_id)
+            return None
         return SubscriptionResponse(**record.to_dict(), schema_version=_SCHEMA_VERSION)
 
     def get_subscription_or_none(self, subscription_id: str) -> SubscriptionResponse | None:
@@ -1583,18 +1590,14 @@ class StripeService:
         Return SubscriptionResponse or None without raising.
         Use when absence of a subscription is a valid non-error condition.
         """
-        with self._lock:
-            record = self._subscriptions.get(subscription_id)
-        if record is None:
-            return None
-        return SubscriptionResponse(**record.to_dict(), schema_version=_SCHEMA_VERSION)
+        return self.get_subscription(subscription_id, strict=False)
 
     def get_subscription_strict(self, subscription_id: str) -> SubscriptionResponse:
         """
-        Alias for get_subscription(). Raises StripeSubscriptionNotFoundError if not found.
+        Alias for get_subscription(strict=True). Raises StripeSubscriptionNotFoundError if not found.
         Retained for call-site compatibility.
         """
-        return self.get_subscription(subscription_id)
+        return self.get_subscription(subscription_id, strict=True)
 
     def get_active_subscription_for_org(self, org_id: str) -> SubscriptionResponse | None:
         with self._lock:
@@ -1826,7 +1829,7 @@ class StripeService:
         Secret resolution order:
           1. webhook_secret parameter (call-site injection).
           2. self._webhook_secret_override (constructor injection / set_webhook_secret).
-          3. vault.get("STRIPE_WEBHOOK_SECRET") read at call time.
+          3. vault.get(\"STRIPE_WEBHOOK_SECRET\") read at call time.
         """
         import hashlib
         import hmac as _hmac
@@ -2150,9 +2153,10 @@ class StripeService:
             if existing_record:
                 org_id = existing_record.org_id
 
-        # Mark as canceled and REMOVE from the registry so that subsequent
-        # get_subscription() calls raise StripeSubscriptionNotFoundError,
-        # which is what tests assert after a deletion event.
+        # Mark as canceled and retain the record in the registry so that
+        # get_subscription() can return the final canceled state.
+        # Callers that want strict not-found behavior after deletion should
+        # use get_subscription(strict=True) and check status == "canceled".
         with self._lock:
             record = self._subscriptions.get(subscription_id)
             if record is not None:
@@ -2171,11 +2175,7 @@ class StripeService:
                     created_at=record.created_at,
                     updated_at=_utcnow_iso(),
                 )
-                # Persist the canceled record briefly so callers that want the
-                # final state can read it, then remove it from the live registry
-                # so get_subscription() raises NotFound as expected by tests.
                 self._subscriptions[subscription_id] = canceled
-                del self._subscriptions[subscription_id]
 
         logger.info("stripe.subscription_deleted id=%s", subscription_id)
         return {"subscription_id": subscription_id, "status": "canceled"}
