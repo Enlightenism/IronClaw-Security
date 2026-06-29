@@ -209,9 +209,14 @@ class DeletePaymentMethodResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Module-level PACKAGE_CATALOGUE with env-resolved stripe_price_id.
-# Rebuilt every time this module is (re)loaded so importlib.reload picks up
-# patched env vars in tests.
+# PACKAGE_CATALOGUE — built fresh on every call so env patches in tests are
+# always picked up. The module-level symbol is kept for import compatibility
+# but routes call _build_package_catalogue() directly rather than reading the
+# frozen module-level dict.
+#
+# stripe_price_id resolution: always reads os.environ at call time; the base
+# catalogue value is intentionally ignored so that an unset env var always
+# yields "" — never a stale hardcoded default from _BASE_PACKAGE_CATALOGUE.
 # ---------------------------------------------------------------------------
 
 
@@ -219,14 +224,15 @@ def _build_package_catalogue() -> dict[str, dict]:
     catalogue: dict[str, dict] = {}
     for key, base in _BASE_PACKAGE_CATALOGUE.items():
         entry = dict(base)
-        entry["stripe_price_id"] = os.environ.get(
-            f"STRIPE_PRICE_ID_{key.upper()}",
-            base.get("stripe_price_id", ""),
-        )
+        # Always resolve from env at call time; ignore base.get("stripe_price_id")
+        # so that an unset var always produces "" rather than a stale default.
+        entry["stripe_price_id"] = os.environ.get(f"STRIPE_PRICE_ID_{key.upper()}", "")
         catalogue[key] = entry
     return catalogue
 
 
+# Module-level symbol preserved for direct imports; routes call
+# _build_package_catalogue() fresh so env patches are always reflected.
 PACKAGE_CATALOGUE: dict[str, dict] = _build_package_catalogue()
 
 
@@ -439,6 +445,9 @@ def get_payment_methods(
 
     env = _get_environment()
 
+    # Build catalogue fresh on every request so env patches are always picked up.
+    live_catalogue = _build_package_catalogue()
+
     sb_methods = _fetch_org_payment_methods(organizationid)
     sb_org_name = _fetch_org_name(organizationid)
     sb_stripe_customer_id = _fetch_stripe_customer_id(organizationid)
@@ -495,7 +504,7 @@ def get_payment_methods(
         notes.append("One or more payment methods are pending verification.")
 
     catalogue_out: dict[str, PackageCatalogueEntry] = {}
-    for k, v in PACKAGE_CATALOGUE.items():
+    for k, v in live_catalogue.items():
         catalogue_out[k] = PackageCatalogueEntry(**v)
 
     return BillingPaymentMethodsResponse(
