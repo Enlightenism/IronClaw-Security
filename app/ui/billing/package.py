@@ -47,16 +47,16 @@ _VALID_STATUSES: frozenset[str] = frozenset(_STATUS_COLOR.keys())
 _VALID_PLANS: frozenset[str] = frozenset({"starter", "team", "enterprise"})
 
 # ---------------------------------------------------------------------------
-# Package catalogue — single source of truth imported from supabaseclient
+# Base package catalogue — no stripe_price_id defaults.
+# stripe_price_id is always resolved from env at call time via
+# _build_package_catalogue(); the base dict intentionally omits the key so
+# that an unset env var always produces "" and never a stale hardcoded value.
 # starter    :  5,000 units → $20 USD
 # team       : 25,000 units → $90 USD
 # enterprise : 60,000 units → $180 USD
-# Each protection unit covers up to TOKENS_PER_UNIT (25,000) tokens.
-# stripe_price_id is populated at startup from env; defaults to "" when unset.
 # ---------------------------------------------------------------------------
 
-
-PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
+_BASE_PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
     "starter": {
         "label": "Starter",
         "units": BILLING_TIER_5K_UNITS,
@@ -64,7 +64,6 @@ PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
         "price_cents": BILLING_TIER_5K_PRICE_USD * 100,
         "tokens_per_unit": TOKENS_PER_UNIT,
         "token_coverage": BILLING_TIER_5K_UNITS * TOKENS_PER_UNIT,
-        "stripe_price_id": os.environ.get("STRIPE_PRICE_ID_STARTER", ""),
         "notes": (f"{BILLING_TIER_5K_UNITS:,} units · ${BILLING_TIER_5K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
     },
     "team": {
@@ -74,7 +73,6 @@ PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
         "price_cents": BILLING_TIER_25K_PRICE_USD * 100,
         "tokens_per_unit": TOKENS_PER_UNIT,
         "token_coverage": BILLING_TIER_25K_UNITS * TOKENS_PER_UNIT,
-        "stripe_price_id": os.environ.get("STRIPE_PRICE_ID_TEAM", ""),
         "notes": (f"{BILLING_TIER_25K_UNITS:,} units · ${BILLING_TIER_25K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
     },
     "enterprise": {
@@ -84,13 +82,33 @@ PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
         "price_cents": BILLING_TIER_60K_PRICE_USD * 100,
         "tokens_per_unit": TOKENS_PER_UNIT,
         "token_coverage": BILLING_TIER_60K_UNITS * TOKENS_PER_UNIT,
-        "stripe_price_id": os.environ.get("STRIPE_PRICE_ID_ENTERPRISE", ""),
         "notes": (f"{BILLING_TIER_60K_UNITS:,} units · ${BILLING_TIER_60K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
     },
 }
 
-_PLAN_UNITS: dict[str, int] = {plan: meta["units"] for plan, meta in PACKAGE_CATALOGUE.items()}
-_PLAN_PRICE_CENTS: dict[str, int] = {plan: meta["price_cents"] for plan, meta in PACKAGE_CATALOGUE.items()}
+
+def _build_package_catalogue() -> dict[str, dict[str, Any]]:
+    """
+    Build the package catalogue fresh on every call.
+    stripe_price_id is always resolved from os.environ at call time;
+    the base dict is intentionally omitted so that an unset env var
+    always produces "" — never a stale hardcoded default.
+    """
+    catalogue: dict[str, dict[str, Any]] = {}
+    for key, base in _BASE_PACKAGE_CATALOGUE.items():
+        entry = dict(base)
+        entry["stripe_price_id"] = os.environ.get(f"STRIPE_PRICE_ID_{key.upper()}", "")
+        catalogue[key] = entry
+    return catalogue
+
+
+# Module-level symbol kept for direct imports and backward compatibility.
+# Routes always call _build_package_catalogue() directly so env patches are
+# picked up on every request.
+PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = _build_package_catalogue()
+
+_PLAN_UNITS: dict[str, int] = {plan: meta["units"] for plan, meta in _BASE_PACKAGE_CATALOGUE.items()}
+_PLAN_PRICE_CENTS: dict[str, int] = {plan: meta["price_cents"] for plan, meta in _BASE_PACKAGE_CATALOGUE.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -614,7 +632,9 @@ def get_billing_packages(
     totalcount = len(filtered)
     paginated = _paginate_packages(filtered, page, pagesize)
 
-    catalogue_out: dict[str, PackageCatalogueEntry] = {k: PackageCatalogueEntry(**v) for k, v in PACKAGE_CATALOGUE.items()}
+    # Build fresh on every request so env patches in tests are always picked up.
+    live_catalogue = _build_package_catalogue()
+    catalogue_out: dict[str, PackageCatalogueEntry] = {k: PackageCatalogueEntry(**v) for k, v in live_catalogue.items()}
 
     stripe = _get_stripe_status()
 
