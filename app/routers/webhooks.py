@@ -44,6 +44,7 @@ from app.models.webhook import (
     WebhookSubscriptionUpdateRequest,
 )
 from app.services.stripe_service import (
+    StripeConfigError,
     StripeService,
     StripeWebhookEventType,
 )
@@ -128,11 +129,23 @@ async def stripe_webhook_receiver(
             detail="stripe_webhook_empty_body",
         )
 
+    if not stripe_signature:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="stripe_webhook_missing_signature",
+        )
+
     try:
         verify_result = stripe_svc.verify_webhook_signature(
             payload=raw_body,
-            signature_header=stripe_signature or "",
+            signature_header=stripe_signature,
         )
+    except StripeConfigError as exc:
+        logger.error("stripe_webhook.config_error error=%s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="stripe_webhook_not_configured",
+        ) from exc
     except Exception as exc:
         logger.warning("stripe_webhook.signature_verification_failed error=%s", exc)
         raise HTTPException(
