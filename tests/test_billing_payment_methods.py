@@ -295,32 +295,26 @@ class TestPackageCatalogueEntry:
             entry = PackageCatalogueEntry(**PACKAGE_CATALOGUE[key])
             assert isinstance(entry.stripe_price_id, str)
 
-    def test_starter_stripe_price_id_defaults_empty_when_env_unset(self) -> None:
-        env = {k: v for k, v in os.environ.items() if k != "STRIPE_PRICE_ID_STARTER"}
-        with patch.dict(os.environ, env, clear=True):
-            import importlib
+    def test_get_payment_methods_package_catalogue_stripe_price_id_empty_when_env_unset(self, monkeypatch: pytest.MonkeyPatch, test_client: TestClient) -> None:
+        monkeypatch.delenv("STRIPE_PRICE_ID_STARTER", raising=False)
+        monkeypatch.delenv("STRIPE_PRICE_ID_TEAM", raising=False)
+        monkeypatch.delenv("STRIPE_PRICE_ID_ENTERPRISE", raising=False)
+        resp = test_client.get("/ui/billing/payment-methods")
+        body = resp.json()
+        catalogue = body.get("package_catalogue", {})
+        for plan in ("starter", "team", "enterprise"):
+            assert catalogue.get(plan, {}).get("stripe_price_id", "MISSING") == "", f"Expected empty stripe_price_id for plan '{plan}' when env unset, got: {catalogue.get(plan, {}).get('stripe_price_id')}"
 
-            import app.ui.billing.payment_methods as pm_mod
-
-            importlib.reload(pm_mod)
-            try:
-                entry = pm_mod.PackageCatalogueEntry(**pm_mod.PACKAGE_CATALOGUE["starter"])
-                assert isinstance(entry.stripe_price_id, str)
-            finally:
-                importlib.reload(pm_mod)
-
-    def test_stripe_price_id_read_from_env(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_PRICE_ID_STARTER": "price_test_abc"}, clear=False):
-            import importlib
-
-            import app.ui.billing.payment_methods as pm_mod
-
-            importlib.reload(pm_mod)
-            try:
-                entry = pm_mod.PackageCatalogueEntry(**pm_mod.PACKAGE_CATALOGUE["starter"])
-                assert entry.stripe_price_id == "price_test_abc"
-            finally:
-                importlib.reload(pm_mod)
+    def test_get_payment_methods_package_catalogue_stripe_price_id_from_env(self, monkeypatch: pytest.MonkeyPatch, test_client: TestClient) -> None:
+        monkeypatch.setenv("STRIPE_PRICE_ID_STARTER", "price_test_starter_abc")
+        monkeypatch.setenv("STRIPE_PRICE_ID_TEAM", "price_test_team_abc")
+        monkeypatch.setenv("STRIPE_PRICE_ID_ENTERPRISE", "price_test_enterprise_abc")
+        resp = test_client.get("/ui/billing/payment-methods")
+        body = resp.json()
+        catalogue = body.get("package_catalogue", {})
+        assert catalogue.get("starter", {}).get("stripe_price_id") == "price_test_starter_abc"
+        assert catalogue.get("team", {}).get("stripe_price_id") == "price_test_team_abc"
+        assert catalogue.get("enterprise", {}).get("stripe_price_id") == "price_test_enterprise_abc"
 
 
 # ---------------------------------------------------------------------------
