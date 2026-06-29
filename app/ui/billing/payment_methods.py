@@ -20,11 +20,11 @@ from app.ui.billing.package import (
     _get_stripe_status,
 )
 
-# Re-export PACKAGE_CATALOGUE so tests can import it directly from this module.
 __all__ = [
     "PACKAGE_CATALOGUE",
     "StripeStatus",
     "_get_stripe_status",
+    "_get_environment",
     "_stripe_mode",
     "_stripe_connection_note",
     "_stripe_webhook_secret_note",
@@ -38,6 +38,7 @@ __all__ = [
     "_STATUS_COLOR",
     "AddPaymentMethodRequest",
     "AddPaymentMethodResponse",
+    "BillingPaymentMethodsNotFoundResponse",
     "BillingPaymentMethodsResponse",
     "BillingPaymentMethodStatusCount",
     "BillingPaymentMethodView",
@@ -261,7 +262,7 @@ def _build_method(
     status: str,
     createdat: str,
     organizationid: str,
-) -> BillingPaymentMethodView:
+) -> "BillingPaymentMethodView":
     return BillingPaymentMethodView(
         methodid=methodid,
         type=type,
