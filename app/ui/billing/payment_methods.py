@@ -23,6 +23,7 @@ from app.ui.billing.package import (
 __all__ = [
     "PACKAGE_CATALOGUE",
     "StripeStatus",
+    "_build_package_catalogue",
     "_get_stripe_status",
     "_get_environment",
     "_stripe_mode",
