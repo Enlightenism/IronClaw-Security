@@ -109,9 +109,10 @@ def _build_checkout_completed_event(
     customer_id: str = _CUSTOMER_ID,
     unit_credits: int = 0,
     session_id: str = "cs_svctest_001",
+    event_id: str = "evt_co_done",
 ) -> dict[str, Any]:
     return {
-        "id": "evt_co_done",
+        "id": event_id,
         "type": StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value,
         "data": {
             "object": {
@@ -612,8 +613,14 @@ class TestHandleCheckoutCompleted:
         assert resolved == _ORG
 
     def test_checkout_completed_multiple_events_accumulate_balance(self, svc: StripeService) -> None:
-        for _ in range(3):
-            svc.handle_webhook_event(_build_checkout_completed_event(unit_credits=100))
+        for i in range(3):
+            svc.handle_webhook_event(
+                _build_checkout_completed_event(
+                    unit_credits=100,
+                    session_id=f"cs_svctest_multi_{i:03d}",
+                    event_id=f"evt_co_done_{i:03d}",
+                )
+            )
         assert svc.get_unit_balance(_ORG).balance == 300
 
     def test_handle_webhook_event_duplicate_checkout_returns_duplicate_action(self, svc: StripeService) -> None:

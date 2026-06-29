@@ -505,6 +505,38 @@ def _filter_to_dataclass_fields(dc_cls: type, raw: dict[str, Any]) -> dict[str, 
     return {k: v for k, v in raw.items() if k in known}
 
 
+def _normalize_stripe_invoice(raw: dict[str, Any], org_id: str, customer_id: str) -> dict[str, Any]:
+    """
+    Normalize a raw Stripe-shaped invoice dict (keys: id, customer, subscription,
+    created, amount_paid, currency, status, invoice_pdf, hosted_invoice_url) into
+    the InvoiceResponse field layout.  Safe to call on already-normalized dicts —
+    if invoice_id is already present it is preserved.
+    """
+    if "invoice_id" in raw:
+        # Already normalized — return as-is (idempotent).
+        return raw
+
+    created_ts = raw.get("created", 0)
+    try:
+        created_iso = datetime.fromtimestamp(int(created_ts), tz=UTC).isoformat().replace("+00:00", "Z")
+    except (ValueError, TypeError):
+        created_iso = _utcnow_iso()
+
+    return {
+        "invoice_id": raw.get("id", ""),
+        "org_id": org_id,
+        "customer_id": raw.get("customer", customer_id),
+        "subscription_id": raw.get("subscription"),
+        "amount_paid": int(raw.get("amount_paid", 0)),
+        "currency": raw.get("currency", "usd"),
+        "status": raw.get("status", "unknown"),
+        "invoice_pdf": raw.get("invoice_pdf"),
+        "hosted_invoice_url": raw.get("hosted_invoice_url"),
+        "created_at": created_iso,
+        "schema_version": _SCHEMA_VERSION,
+    }
+
+
 class _StripeHTTPClient:
     """
     Minimal Stripe REST client using only stdlib urllib.
@@ -1014,8 +1046,9 @@ class StripeService:
         """
         Return invoices for an org. Results are cached per org in _invoice_cache.
         Pass force_refresh=True to bypass the cache and re-fetch from Stripe.
-        Cache entries are filtered to known InvoiceResponse fields before
-        reconstruction to guard against schema drift or test-seeded extra keys.
+        Cache entries stored as raw Stripe dicts are normalized through
+        _normalize_stripe_invoice before reconstruction to guard against
+        key-mapping mismatches when the cache was seeded with raw Stripe shapes.
         """
         with self._lock:
             if not force_refresh and org_id in self._invoice_cache:
@@ -1024,10 +1057,13 @@ class StripeService:
                 cached = None
 
         if cached is not None:
-            return [InvoiceResponse(**_filter_to_dataclass_fields(InvoiceResponse, r)) for r in cached]
+            with self._lock:
+                customer_id = self._org_customer_map.get(org_id, "")
+            normalized = [_normalize_stripe_invoice(r, org_id, customer_id) for r in cached]
+            return [InvoiceResponse(**_filter_to_dataclass_fields(InvoiceResponse, r)) for r in normalized]
 
         with self._lock:
-            customer_id = self._org_customer_map.get(org_id)
+            customer_id = self._org_customer_map.get(org_id, "")
         if not customer_id:
             logger.warning("stripe.get_invoices_for_org no customer mapping org=%s", org_id)
             return []
@@ -1035,27 +1071,7 @@ class StripeService:
         resp = self._get_client().get("/invoices", {"customer": customer_id, "limit": str(limit)})
         raw_invoices: list[dict[str, Any]] = resp.get("data", [])
 
-        results: list[dict[str, Any]] = []
-        for inv in raw_invoices:
-            created_ts = inv.get("created", 0)
-            try:
-                created_iso = datetime.fromtimestamp(int(created_ts), tz=UTC).isoformat().replace("+00:00", "Z")
-            except (ValueError, TypeError):
-                created_iso = _utcnow_iso()
-            entry = {
-                "invoice_id": inv.get("id", ""),
-                "org_id": org_id,
-                "customer_id": customer_id,
-                "subscription_id": inv.get("subscription"),
-                "amount_paid": int(inv.get("amount_paid", 0)),
-                "currency": inv.get("currency", "usd"),
-                "status": inv.get("status", "unknown"),
-                "invoice_pdf": inv.get("invoice_pdf"),
-                "hosted_invoice_url": inv.get("hosted_invoice_url"),
-                "created_at": created_iso,
-                "schema_version": _SCHEMA_VERSION,
-            }
-            results.append(entry)
+        results: list[dict[str, Any]] = [_normalize_stripe_invoice(inv, org_id, customer_id) for inv in raw_invoices]
 
         with self._lock:
             self._invoice_cache[org_id] = results
@@ -1663,7 +1679,7 @@ class StripeService:
         """
         Report metered usage to Stripe for a subscription item.
         Idempotency key prevents duplicate reports within Stripe's dedup window.
-        Raises StripeIdempotencyError on key conflict with different payload.
+        Raises StripeIdempotencyError on duplicate key before any network call.
         Default key uses uuid4 suffix so successive calls within the same second
         always get distinct keys.
         """
@@ -1672,11 +1688,21 @@ class StripeService:
 
         idem_key = idempotency_key or f"metered-{org_id}-{subscription_item_id}-{uuid4().hex[:12]}"
 
-        with self._lock:
-            if idem_key in self._idempotency_keys:
-                stored = self._idempotency_keys[idem_key]
-                if stored.get("quantity") != quantity or stored.get("action") != action:
-                    raise StripeIdempotencyError(idem_key, "conflicting metered usage payload")
+        # Fix: raise StripeIdempotencyError on duplicate caller-supplied key
+        # before any network call — regardless of payload match.
+        if idempotency_key is not None:
+            with self._lock:
+                if idem_key in self._idempotency_keys:
+                    stored = self._idempotency_keys[idem_key]
+                    if stored.get("quantity") != quantity or stored.get("action") != action:
+                        raise StripeIdempotencyError(idem_key, "conflicting metered usage payload")
+                    raise StripeIdempotencyError(idem_key)
+        else:
+            with self._lock:
+                if idem_key in self._idempotency_keys:
+                    stored = self._idempotency_keys[idem_key]
+                    if stored.get("quantity") != quantity or stored.get("action") != action:
+                        raise StripeIdempotencyError(idem_key, "conflicting metered usage payload")
 
         now = _utcnow_iso()
         params: dict[str, Any] = {
@@ -1926,7 +1952,13 @@ class StripeService:
         except (ValueError, TypeError):
             unit_credits = 0
 
+        # Use session_id as the idempotency key for checkout completed credit
+        # so that distinct envelope events for the same session do not
+        # double-credit, but different sessions always credit independently.
+        checkout_idem_key = f"checkout_completed:{session_id}"
+
         with self._lock:
+            already_credited = checkout_idem_key in self._processed_event_ids
             record = self._checkout_sessions.get(session_id)
             if record is not None:
                 updated = _CheckoutSessionRecord(
@@ -1956,13 +1988,15 @@ class StripeService:
             "tokens_per_unit": TOKENS_PER_UNIT,
         }
 
-        if org_id and unit_credits > 0:
+        if org_id and unit_credits > 0 and not already_credited:
             self.credit_units(
                 org_id,
                 unit_credits,
                 StripeUnitEventReason.CHECKOUT_COMPLETE,
                 reference_id=session_id,
             )
+            with self._lock:
+                self._processed_event_ids.add(checkout_idem_key)
             result["units_credited"] = unit_credits
             result["tokens_covered"] = unit_credits * TOKENS_PER_UNIT
 
