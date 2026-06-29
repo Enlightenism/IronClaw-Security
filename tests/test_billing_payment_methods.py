@@ -23,7 +23,6 @@ from app.ui.billing.payment_methods import (
     AddPaymentMethodRequest,
     AddPaymentMethodResponse,
     BillingPaymentMethodsResponse,
-    BillingPaymentMethodStatusCount,
     BillingPaymentMethodView,
     DeletePaymentMethodResponse,
     PackageCatalogueEntry,
@@ -134,8 +133,11 @@ class TestPackageCatalogueEntry:
             import app.ui.billing.payment_methods as pm_mod
 
             importlib.reload(pm_mod)
-            entry = pm_mod.PackageCatalogueEntry(**pm_mod.PACKAGE_CATALOGUE["starter"])
-            assert isinstance(entry.stripe_price_id, str)
+            try:
+                entry = pm_mod.PackageCatalogueEntry(**pm_mod.PACKAGE_CATALOGUE["starter"])
+                assert isinstance(entry.stripe_price_id, str)
+            finally:
+                importlib.reload(pm_mod)
 
     def test_stripe_price_id_read_from_env(self) -> None:
         with patch.dict(os.environ, {"STRIPE_PRICE_ID_STARTER": "price_test_abc"}, clear=False):
@@ -144,8 +146,11 @@ class TestPackageCatalogueEntry:
             import app.ui.billing.payment_methods as pm_mod
 
             importlib.reload(pm_mod)
-            entry = pm_mod.PackageCatalogueEntry(**pm_mod.PACKAGE_CATALOGUE["starter"])
-            assert entry.stripe_price_id == "price_test_abc"
+            try:
+                entry = pm_mod.PackageCatalogueEntry(**pm_mod.PACKAGE_CATALOGUE["starter"])
+                assert entry.stripe_price_id == "price_test_abc"
+            finally:
+                importlib.reload(pm_mod)
 
 
 # ---------------------------------------------------------------------------
@@ -302,9 +307,11 @@ class TestBuildStatusCounts:
         assert result[0].statuscolor == "neutral"
 
     def test_returns_list_of_billing_payment_method_status_count(self) -> None:
+        import app.ui.billing.payment_methods as pm_mod
+
         methods = [_make_method(status="active")]
-        result = _build_status_counts(methods)
-        assert all(isinstance(r, BillingPaymentMethodStatusCount) for r in result)
+        result = pm_mod._build_status_counts(methods)
+        assert all(isinstance(r, pm_mod.BillingPaymentMethodStatusCount) for r in result)
 
     def test_pending_counted_alongside_active(self) -> None:
         methods = [
@@ -895,9 +902,8 @@ class TestCanAddNew:
         can_add = len(methods) < _MAX_METHODS
         assert can_add is True
 
-    def test_canaddnew_true_with_zero_methods(self) -> None:
-        methods: list[BillingPaymentMethodView] = []
-        can_add = len(methods) < _MAX_METHODS
+    def test_canaddnew_true_when_empty(self) -> None:
+        can_add = len([]) < _MAX_METHODS
         assert can_add is True
 
     def test_canaddnew_true_with_one_method(self) -> None:
