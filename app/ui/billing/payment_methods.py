@@ -142,7 +142,7 @@ class PackageCatalogueEntry(BaseModel):
     price_cents: int
     tokens_per_unit: int
     token_coverage: int
-    stripe_price_id: str
+    stripe_price_id: str = ""
     notes: str
 
 
@@ -403,6 +403,22 @@ def _delete_method_from_db(
         return False
 
 
+def _build_package_catalogue() -> dict[str, PackageCatalogueEntry]:
+    """
+    Build the package catalogue for response output.
+    stripe_price_id is read from env at call time (not import time) so that
+    tests and runtime env overrides are always respected.
+    """
+    catalogue_out: dict[str, PackageCatalogueEntry] = {}
+    for tier, v in PACKAGE_CATALOGUE.items():
+        entry_data = dict(v)
+        # Always read from env at call time — PACKAGE_CATALOGUE froze the value
+        # at import time, so setdefault / the cached dict value cannot be trusted.
+        entry_data["stripe_price_id"] = os.environ.get(f"STRIPE_PRICE_ID_{tier.upper()}", "")
+        catalogue_out[tier] = PackageCatalogueEntry(**entry_data)
+    return catalogue_out
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -476,15 +492,6 @@ def get_payment_methods(
     if pending_count > 0:
         notes.append("One or more payment methods are pending verification.")
 
-    catalogue_out: dict[str, PackageCatalogueEntry] = {}
-    for k, v in PACKAGE_CATALOGUE.items():
-        entry_data = dict(v)
-        entry_data.setdefault(
-            "stripe_price_id",
-            os.environ.get(f"STRIPE_PRICE_ID_{k.upper()}", ""),
-        )
-        catalogue_out[k] = PackageCatalogueEntry(**entry_data)
-
     return BillingPaymentMethodsResponse(
         generatedat=datetime.now(UTC).isoformat(),
         environment=env,
@@ -500,7 +507,7 @@ def get_payment_methods(
         maxmethods=_MAX_METHODS,
         statuscounts=statuscounts,
         tokens_per_unit=TOKENS_PER_UNIT,
-        package_catalogue=catalogue_out,
+        package_catalogue=_build_package_catalogue(),
         notes=notes,
     )
 
