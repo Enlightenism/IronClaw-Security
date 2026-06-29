@@ -69,7 +69,7 @@ class BillingInvoiceListFilters(BaseModel):
     status: str | None = None
     organizationid: str | None = None
     page: int = 1
-    pagesize: int = 25
+    pagesize: int = Field(default=25, ge=1, le=100)
     sortby: str = "issuedat"
     sortdir: Literal["asc", "desc"] = "desc"
 
@@ -301,7 +301,11 @@ def _total_revenue(invoices: list[BillingInvoiceListItem]) -> BillingCurrencyAmo
     return _usd(cents)
 
 
-@router.get("/invoices", response_model=BillingInvoiceListResponse, operation_id="ui_get_billing_invoices")
+@router.get(
+    "/invoices",
+    response_model=BillingInvoiceListResponse,
+    operation_id="ui_billing_invoices_list",
+)
 def get_billing_invoices(
     status: str | None = None,
     organizationid: str | None = None,
@@ -360,7 +364,7 @@ def get_billing_invoices(
 @router.get(
     "/invoices/{invoiceid}/download",
     response_model=BillingInvoiceDownloadResponse,
-    operation_id="ui_get_invoice_download",
+    operation_id="ui_billing_invoices_download",
 )
 def get_invoice_download(invoiceid: str) -> BillingInvoiceDownloadResponse:
     if invoiceid not in _VALID_INVOICE_IDS:

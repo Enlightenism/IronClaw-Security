@@ -16,12 +16,9 @@ os.environ.setdefault("SUPABASE_KEY", "")
 os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
 from app.main import app as _app
-from app.ui.billing.invoices import router as _invoices_router
 
 _MOCK_API_KEY = "test-api-key"
 _AUTH_HEADERS = {"X-API-Key": _MOCK_API_KEY}
-
-_app.include_router(_invoices_router)
 
 # Full unfiltered seed counts (10 invoices):
 # paid: inv-001, inv-004, inv-005, inv-008  → 4
@@ -82,8 +79,6 @@ def test_billing_invoices_envelope_generatedat(client: TestClient) -> None:
 def test_billing_invoices_envelope_environment_is_non_empty_string(
     client: TestClient,
 ) -> None:
-    # _get_environment() reads IRONCLAW_ENV then APP_ENV; falls back to "production".
-    # Neither is set in the test environment.
     body = client.get("/ui/billing/invoices").json()
     assert isinstance(body["environment"], str)
     assert len(body["environment"]) > 0
@@ -166,8 +161,6 @@ def test_billing_invoices_stripe_live_mode_when_live_key(client: TestClient, mon
 def test_billing_invoices_statuscounts_reflects_full_unfiltered_set(
     client: TestClient,
 ) -> None:
-    # statuscounts must always reflect all 10 seeded invoices, even when filters
-    # are applied at the list level.
     body = client.get("/ui/billing/invoices").json()
     status_map = {e["status"]: e["count"] for e in body["statuscounts"]}
     assert status_map.get("paid") == _PAID_COUNT
@@ -181,7 +174,6 @@ def test_billing_invoices_statuscounts_unaffected_by_status_filter(
 ) -> None:
     body = client.get("/ui/billing/invoices?status=paid").json()
     status_map = {e["status"]: e["count"] for e in body["statuscounts"]}
-    # statuscounts must NOT be filtered — still full 10-invoice counts
     assert status_map.get("paid") == _PAID_COUNT
     assert status_map.get("draft") == _DRAFT_COUNT
 
@@ -257,7 +249,6 @@ def test_billing_invoices_filter_org004_returns_correct_count(
 def test_billing_invoices_filter_combined_status_and_org(
     client: TestClient,
 ) -> None:
-    # org-001 has 2 invoices, both paid
     body = client.get("/ui/billing/invoices?status=paid&organizationid=org-001").json()
     assert body["totalcount"] == _ORG_001_COUNT
     assert all(inv["status"] == "paid" and inv["organizationid"] == "org-001" for inv in body["invoices"])
@@ -281,12 +272,10 @@ def test_billing_invoices_default_pagination_values(client: TestClient) -> None:
     assert body["page"] == 1
     assert body["pagesize"] == 25
     assert body["totalcount"] == _TOTAL_SEED
-    # ceil(10 / 25) = 1
     assert body["totalpages"] == 1
 
 
 def test_billing_invoices_pagination_pagesize_3_totalpages(client: TestClient) -> None:
-    # ceil(10 / 3) = 4
     body = client.get("/ui/billing/invoices?pagesize=3").json()
     assert body["pagesize"] == 3
     assert body["totalcount"] == _TOTAL_SEED
@@ -305,7 +294,6 @@ def test_billing_invoices_pagination_page2_pagesize3_returns_correct_slice(
 def test_billing_invoices_pagination_last_page_partial_slice(
     client: TestClient,
 ) -> None:
-    # page=4, pagesize=3 → items 10-10 → 1 item (10 % 3 == 1)
     body = client.get("/ui/billing/invoices?page=4&pagesize=3").json()
     assert body["page"] == 4
     assert len(body["invoices"]) == 1
@@ -494,7 +482,6 @@ def test_invoice_download_unknown_id_message_non_empty(client: TestClient) -> No
 
 
 def test_invoice_download_draft_invoice_available_false(client: TestClient) -> None:
-    # inv-002 is draft → no downloadurl → available: false
     body = client.get("/ui/billing/invoices/inv-002/download").json()
     assert body["invoiceid"] == "inv-002"
     assert body["available"] is False
@@ -502,7 +489,6 @@ def test_invoice_download_draft_invoice_available_false(client: TestClient) -> N
 
 
 def test_invoice_download_void_invoice_available_false(client: TestClient) -> None:
-    # inv-007 is void → no downloadurl → available: false
     body = client.get("/ui/billing/invoices/inv-007/download").json()
     assert body["invoiceid"] == "inv-007"
     assert body["available"] is False
@@ -512,7 +498,6 @@ def test_invoice_download_void_invoice_available_false(client: TestClient) -> No
 def test_invoice_download_past_due_invoice_available_true(
     client: TestClient,
 ) -> None:
-    # inv-003 is past_due but has a downloadurl in the seed
     body = client.get("/ui/billing/invoices/inv-003/download").json()
     assert body["invoiceid"] == "inv-003"
     assert body["available"] is True
