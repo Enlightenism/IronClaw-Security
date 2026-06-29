@@ -186,6 +186,11 @@ def _post_stripe(
     return client.post("/webhooks/stripe", content=body, headers=headers)
 
 
+def _override_stripe_svc(svc: MagicMock) -> None:
+    """Wire get_stripe_service dependency override on the test app."""
+    _app.dependency_overrides[get_stripe_service] = lambda: svc
+
+
 # ---------------------------------------------------------------------------
 # POST /webhooks/stripe — Stripe signature verification
 # ---------------------------------------------------------------------------
@@ -204,8 +209,8 @@ class TestStripeWebhookSignatureVerification:
             payload=_stripe_event(StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value),
         )
         mock_svc.dispatch_webhook_event.return_value = {"action": "processed"}
-        with patch(f"{_PERSISTENCE_MODULE}.get_stripe_service", return_value=mock_svc):
-            resp = _post_stripe(client, StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value)
+        _override_stripe_svc(mock_svc)
+        resp = _post_stripe(client, StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value)
         assert resp.status_code == 200
 
     def test_missing_signature_header_returns_400(self, client: TestClient):
@@ -222,12 +227,12 @@ class TestStripeWebhookSignatureVerification:
             error="Signature mismatch.",
             payload={},
         )
-        with patch(f"{_PERSISTENCE_MODULE}.get_stripe_service", return_value=mock_svc):
-            resp = _post_stripe(
-                client,
-                "checkout.session.completed",
-                sig_header="t=9999999999,v1=badhash",
-            )
+        _override_stripe_svc(mock_svc)
+        resp = _post_stripe(
+            client,
+            "checkout.session.completed",
+            sig_header="t=9999999999,v1=badhash",
+        )
         assert resp.status_code == 400
 
     def test_invalid_signature_fail_closed_detail(self, client: TestClient):
@@ -239,12 +244,12 @@ class TestStripeWebhookSignatureVerification:
             error="Signature mismatch.",
             payload={},
         )
-        with patch(f"{_PERSISTENCE_MODULE}.get_stripe_service", return_value=mock_svc):
-            resp = _post_stripe(
-                client,
-                "checkout.session.completed",
-                sig_header="t=9999999999,v1=badhash",
-            )
+        _override_stripe_svc(mock_svc)
+        resp = _post_stripe(
+            client,
+            "checkout.session.completed",
+            sig_header="t=9999999999,v1=badhash",
+        )
         body = resp.json()
         assert "detail" in body
 
@@ -258,9 +263,9 @@ class TestStripeWebhookSignatureVerification:
 
     def test_missing_signature_does_not_dispatch(self, client: TestClient):
         mock_svc = MagicMock()
+        _override_stripe_svc(mock_svc)
         body = json.dumps(_stripe_event("checkout.session.completed")).encode()
-        with patch(f"{_PERSISTENCE_MODULE}.get_stripe_service", return_value=mock_svc):
-            client.post("/webhooks/stripe", content=body)
+        client.post("/webhooks/stripe", content=body)
         mock_svc.dispatch_webhook_event.assert_not_called()
 
 
@@ -283,8 +288,8 @@ class TestStripeWebhookDispatchAllEventTypes:
             payload=_stripe_event(event_type),
         )
         mock_svc.dispatch_webhook_event.return_value = {"action": "processed", "event_type": event_type}
-        with patch(f"{_PERSISTENCE_MODULE}.get_stripe_service", return_value=mock_svc):
-            resp = _post_stripe(client, event_type)
+        _override_stripe_svc(mock_svc)
+        resp = _post_stripe(client, event_type)
         assert resp.status_code == 200
         mock_svc.dispatch_webhook_event.assert_called_once()
 
@@ -300,8 +305,8 @@ class TestStripeWebhookDispatchAllEventTypes:
             payload=event_payload,
         )
         mock_svc.dispatch_webhook_event.return_value = {"action": "processed"}
-        with patch(f"{_PERSISTENCE_MODULE}.get_stripe_service", return_value=mock_svc):
-            _post_stripe(client, event_type)
+        _override_stripe_svc(mock_svc)
+        _post_stripe(client, event_type)
         call_arg = mock_svc.dispatch_webhook_event.call_args[0][0]
         assert call_arg.get("type") == event_type
 
@@ -338,8 +343,8 @@ class TestStripeWebhookUnknownEventType:
             error=None,
             payload=_stripe_event("radar.early_fraud_warning.created"),
         )
-        with patch(f"{_PERSISTENCE_MODULE}.get_stripe_service", return_value=mock_svc):
-            resp = _post_stripe(client, "radar.early_fraud_warning.created")
+        _override_stripe_svc(mock_svc)
+        resp = _post_stripe(client, "radar.early_fraud_warning.created")
         assert resp.status_code == 200
 
     def test_unknown_event_type_dispatch_not_called(self, client: TestClient):
@@ -351,8 +356,8 @@ class TestStripeWebhookUnknownEventType:
             error=None,
             payload=_stripe_event("payment_intent.created"),
         )
-        with patch(f"{_PERSISTENCE_MODULE}.get_stripe_service", return_value=mock_svc):
-            _post_stripe(client, "payment_intent.created")
+        _override_stripe_svc(mock_svc)
+        _post_stripe(client, "payment_intent.created")
         mock_svc.dispatch_webhook_event.assert_not_called()
 
     def test_unknown_event_type_response_acknowledged(self, client: TestClient):
@@ -364,8 +369,8 @@ class TestStripeWebhookUnknownEventType:
             error=None,
             payload=_stripe_event("unknown.future.event"),
         )
-        with patch(f"{_PERSISTENCE_MODULE}.get_stripe_service", return_value=mock_svc):
-            resp = _post_stripe(client, "unknown.future.event")
+        _override_stripe_svc(mock_svc)
+        resp = _post_stripe(client, "unknown.future.event")
         body = resp.json()
         assert "acknowledged" in str(body).lower() or resp.status_code == 200
 
@@ -378,8 +383,8 @@ class TestStripeWebhookUnknownEventType:
             error=None,
             payload={"id": "evt_empty_type", "type": "", "data": {"object": {}}},
         )
-        with patch(f"{_PERSISTENCE_MODULE}.get_stripe_service", return_value=mock_svc):
-            resp = _post_stripe(client, "")
+        _override_stripe_svc(mock_svc)
+        resp = _post_stripe(client, "")
         assert resp.status_code == 200
         mock_svc.dispatch_webhook_event.assert_not_called()
 
@@ -395,8 +400,8 @@ class TestStripeWebhookConfigError:
 
         mock_svc = MagicMock()
         mock_svc.verify_webhook_signature.side_effect = StripeConfigError("STRIPE_WEBHOOK_SECRET not set")
-        with patch(f"{_PERSISTENCE_MODULE}.get_stripe_service", return_value=mock_svc):
-            resp = _post_stripe(client, "checkout.session.completed")
+        _override_stripe_svc(mock_svc)
+        resp = _post_stripe(client, "checkout.session.completed")
         assert resp.status_code in (400, 500)
 
     def test_dispatch_error_returns_500(self, client: TestClient):
@@ -409,8 +414,8 @@ class TestStripeWebhookConfigError:
             payload=_stripe_event(StripeWebhookEventType.INVOICE_PAID.value),
         )
         mock_svc.dispatch_webhook_event.side_effect = RuntimeError("internal dispatch failure")
-        with patch(f"{_PERSISTENCE_MODULE}.get_stripe_service", return_value=mock_svc):
-            resp = _post_stripe(client, StripeWebhookEventType.INVOICE_PAID.value)
+        _override_stripe_svc(mock_svc)
+        resp = _post_stripe(client, StripeWebhookEventType.INVOICE_PAID.value)
         assert resp.status_code == 500
 
 
@@ -436,9 +441,6 @@ class TestStripeWebhookReceiver:
         svc.dispatch_webhook_event.return_value = {"action": "processed"}
         return svc
 
-    def _override_stripe_svc(self, svc: MagicMock) -> None:
-        _app.dependency_overrides[get_stripe_service] = lambda: svc
-
     def test_empty_body_returns_400(self, client: TestClient):
         resp = client.post(self._URL, content=b"", headers={"stripe-signature": "t=1,v1=abc"})
         assert resp.status_code == 400
@@ -446,7 +448,7 @@ class TestStripeWebhookReceiver:
     def test_verify_raises_returns_400(self, client: TestClient):
         svc = self._mock_svc()
         svc.verify_webhook_signature.side_effect = ValueError("bad sig")
-        self._override_stripe_svc(svc)
+        _override_stripe_svc(svc)
         resp = client.post(
             self._URL,
             content=b'{"id":"evt_001","type":"checkout.session.completed"}',
@@ -463,7 +465,7 @@ class TestStripeWebhookReceiver:
             error="Signature mismatch.",
             payload={},
         )
-        self._override_stripe_svc(svc)
+        _override_stripe_svc(svc)
         resp = client.post(
             self._URL,
             content=b'{"id":"evt_001","type":"checkout.session.completed"}',
@@ -473,7 +475,7 @@ class TestStripeWebhookReceiver:
 
     def test_known_event_returns_200_received_true(self, client: TestClient):
         svc = self._mock_svc()
-        self._override_stripe_svc(svc)
+        _override_stripe_svc(svc)
         resp = client.post(
             self._URL,
             content=json.dumps(_stripe_event(StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value)).encode(),
@@ -491,7 +493,7 @@ class TestStripeWebhookReceiver:
             error=None,
             payload=_stripe_event("some.unknown.event"),
         )
-        self._override_stripe_svc(svc)
+        _override_stripe_svc(svc)
         resp = client.post(
             self._URL,
             content=json.dumps(_stripe_event("some.unknown.event")).encode(),
@@ -503,7 +505,7 @@ class TestStripeWebhookReceiver:
     def test_dispatch_raises_returns_500(self, client: TestClient):
         svc = self._mock_svc()
         svc.dispatch_webhook_event.side_effect = RuntimeError("billing service down")
-        self._override_stripe_svc(svc)
+        _override_stripe_svc(svc)
         resp = client.post(
             self._URL,
             content=json.dumps(_stripe_event(StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value)).encode(),

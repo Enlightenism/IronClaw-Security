@@ -101,6 +101,14 @@ def test_stripe_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     yield
 
 
+@pytest.fixture()
+def stripe_price_ids_seeded(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    monkeypatch.setenv("STRIPE_PRICE_ID_STARTER", "price_test_starter_xxx")
+    monkeypatch.setenv("STRIPE_PRICE_ID_TEAM", "price_test_team_xxx")
+    monkeypatch.setenv("STRIPE_PRICE_ID_ENTERPRISE", "price_test_enterprise_xxx")
+    yield
+
+
 # ---------------------------------------------------------------------------
 # GET /ui/billing/packages — happy path
 # ---------------------------------------------------------------------------
@@ -576,11 +584,24 @@ def test_package_catalogue_keys() -> None:
     assert set(PACKAGE_CATALOGUE.keys()) == {"starter", "team", "enterprise"}
 
 
-def test_package_catalogue_price_cents_consistency() -> None:
-    for plan, meta in PACKAGE_CATALOGUE.items():
+def test_package_catalogue_price_cents_consistency(client: TestClient, stripe_price_ids_seeded: None) -> None:
+    r = client.get(_ROUTE)
+    assert r.status_code == 200
+    catalogue = r.json()["package_catalogue"]
+    for plan in ("starter", "team", "enterprise"):
+        meta = catalogue[plan]
+        assert "price_cents" in meta, f"{plan} missing price_cents in response"
+        assert "price_usd" in meta, f"{plan} missing price_usd in response"
         assert meta["price_cents"] == meta["price_usd"] * 100, f"{plan} price_cents mismatch"
 
 
-def test_package_catalogue_token_coverage_consistency() -> None:
-    for plan, meta in PACKAGE_CATALOGUE.items():
+def test_package_catalogue_token_coverage_consistency(client: TestClient, stripe_price_ids_seeded: None) -> None:
+    r = client.get(_ROUTE)
+    assert r.status_code == 200
+    catalogue = r.json()["package_catalogue"]
+    for plan in ("starter", "team", "enterprise"):
+        meta = catalogue[plan]
+        assert "token_coverage" in meta, f"{plan} missing token_coverage in response"
+        assert "units" in meta, f"{plan} missing units in response"
+        assert "tokens_per_unit" in meta, f"{plan} missing tokens_per_unit in response"
         assert meta["token_coverage"] == meta["units"] * meta["tokens_per_unit"], f"{plan} token_coverage mismatch"

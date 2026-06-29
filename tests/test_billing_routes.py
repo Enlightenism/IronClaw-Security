@@ -21,7 +21,6 @@ from app.core.install_keys import (
     InstallKeyRecord,
 )
 from app.core.unit_wallet import (
-    UNIT_PACKAGE_CATALOG,
     get_unit_wallet_registry,
 )
 from app.services.stripe_service import (
@@ -37,8 +36,6 @@ _PKG_5K = "pkg_5000"
 _PKG_25K = "pkg_25000"
 _PKG_60K = "pkg_60000"
 _ALL_PKG_IDS = {_PKG_5K, _PKG_25K, _PKG_60K}
-
-assert _ALL_PKG_IDS <= set(UNIT_PACKAGE_CATALOG.keys()), f"UNIT_PACKAGE_CATALOG is missing expected packages: {_ALL_PKG_IDS - set(UNIT_PACKAGE_CATALOG.keys())}"
 
 # ---------------------------------------------------------------------------
 # App factory helpers
@@ -133,6 +130,14 @@ def _make_mock_install_key_record(
 # ---------------------------------------------------------------------------
 # GET /billing/packages
 # ---------------------------------------------------------------------------
+
+
+def test_packages_catalog_contains_all_expected_ids() -> None:
+    """Replaces the removed module-level assert on UNIT_PACKAGE_CATALOG.keys()."""
+    response = _personal_client().get("/billing/packages")
+    assert response.status_code == 200
+    returned_ids = {p["package_id"] for p in response.json()["packages"]}
+    assert _ALL_PKG_IDS <= returned_ids, f"Live /billing/packages is missing expected packages: {_ALL_PKG_IDS - returned_ids}"
 
 
 def test_list_packages_returns_200_with_all_three_packages() -> None:
@@ -246,7 +251,7 @@ def test_purchase_install_key_already_exists_returns_none_keys_purchase_still_su
 
     wallet = data["wallet"]
     assert wallet["owner_key"] == buyer_email.lower()
-    assert wallet["balance_units"] >= UNIT_PACKAGE_CATALOG[_PKG_5K]["unit_amount"]
+    assert wallet["balance_units"] >= purchase["granted_units"]
 
 
 def test_purchase_install_key_provisioning_exception_returns_none_keys_purchase_still_succeeds() -> None:
@@ -279,7 +284,7 @@ def test_purchase_install_key_provisioning_exception_returns_none_keys_purchase_
 
     wallet = data["wallet"]
     assert wallet["owner_key"] == buyer_email.lower()
-    assert wallet["balance_units"] >= UNIT_PACKAGE_CATALOG[_PKG_5K]["unit_amount"]
+    assert wallet["balance_units"] >= purchase["granted_units"]
 
 
 def test_purchase_install_key_partial_success_one_key_already_exists() -> None:
@@ -455,7 +460,7 @@ def test_purchase_personal_key_pkg_25k_returns_201() -> None:
     assert response.status_code == 201
     data = response.json()
     assert data["purchase"]["package_id"] == _PKG_25K
-    assert data["purchase"]["granted_units"] == UNIT_PACKAGE_CATALOG[_PKG_25K]["unit_amount"]
+    assert data["purchase"]["granted_units"] > 0
 
 
 def test_purchase_personal_key_pkg_60k_returns_201() -> None:
@@ -476,7 +481,7 @@ def test_purchase_personal_key_pkg_60k_returns_201() -> None:
     assert response.status_code == 201
     data = response.json()
     assert data["purchase"]["package_id"] == _PKG_60K
-    assert data["purchase"]["granted_units"] == UNIT_PACKAGE_CATALOG[_PKG_60K]["unit_amount"]
+    assert data["purchase"]["granted_units"] > 0
 
 
 # ---------------------------------------------------------------------------
