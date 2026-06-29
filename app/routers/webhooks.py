@@ -61,14 +61,9 @@ _SUPPORTED_EVENTS: set[str] = {e.value for e in WebhookEventType if e.value != "
 
 _STRIPE_DISPATCHABLE_EVENTS: frozenset[str] = frozenset(e.value for e in StripeWebhookEventType)
 
-_stripe_service_instance: StripeService | None = None
-
 
 def get_stripe_service() -> StripeService:
-    global _stripe_service_instance  # noqa: PLW0603
-    if _stripe_service_instance is None:
-        _stripe_service_instance = StripeService()
-    return _stripe_service_instance
+    return StripeService()
 
 
 def _generate_id() -> str:
