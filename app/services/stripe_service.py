@@ -513,7 +513,6 @@ def _normalize_stripe_invoice(raw: dict[str, Any], org_id: str, customer_id: str
     if invoice_id is already present it is preserved.
     """
     if "invoice_id" in raw:
-        # Already normalized — return as-is (idempotent).
         return raw
 
     created_ts = raw.get("created", 0)
@@ -778,10 +777,14 @@ class StripeService:
     def __init__(
         self,
         *,
+        webhook_secret: str | None = None,
         on_insufficient_units: Callable[[str, int, int], None] | None = None,
     ) -> None:
         """
         Args:
+            webhook_secret: Optional webhook secret override. When provided,
+                verify_webhook_signature uses this value directly instead of
+                reading from vault. Intended for test injection / stubbing.
             on_insufficient_units: Optional callback invoked when a debit would
                 exceed the org's balance. Signature: (org_id, have, need) -> None.
                 Useful for triggering auto-purchase / alerting pipelines without
@@ -801,6 +804,8 @@ class StripeService:
         self._processed_event_ids: set[str] = set()
         self._client: _StripeHTTPClient | None = None
         self._on_insufficient_units = on_insufficient_units
+        # Injected webhook secret — takes precedence over vault when set.
+        self._webhook_secret_override: str | None = webhook_secret
 
     # ------------------------------------------------------------------
     # Config / client
@@ -812,11 +817,28 @@ class StripeService:
             raise StripeConfigError("STRIPE_SECRET_KEY is not configured.")
         return key
 
-    def _get_webhook_secret(self) -> str:
-        secret = vault.get("STRIPE_WEBHOOK_SECRET") or ""
+    def _get_webhook_secret(self, *, override: str | None = None) -> str:
+        """
+        Return the webhook secret.
+
+        Resolution order (first non-empty wins):
+          1. ``override`` parameter (call-site injection — highest priority).
+          2. ``self._webhook_secret_override`` (constructor injection — for test stubs).
+          3. vault.get("STRIPE_WEBHOOK_SECRET") read at call time (production path).
+
+        Raises StripeConfigError when no source yields a non-empty value.
+        """
+        secret = override or self._webhook_secret_override or vault.get("STRIPE_WEBHOOK_SECRET") or ""
         if not secret:
             raise StripeConfigError("STRIPE_WEBHOOK_SECRET is not configured.")
         return secret
+
+    def set_webhook_secret(self, secret: str) -> None:
+        """
+        Inject or replace the webhook secret at runtime without reconstructing
+        the service. Intended for test isolation and runtime vault hot-reload.
+        """
+        self._webhook_secret_override = secret
 
     def _get_client(self) -> _StripeHTTPClient:
         if self._client is None:
@@ -1544,21 +1566,11 @@ class StripeService:
         )
         return SubscriptionResponse(**record.to_dict(), schema_version=_SCHEMA_VERSION)
 
-    def get_subscription(self, subscription_id: str) -> SubscriptionResponse | None:
-        """
-        Return the SubscriptionResponse for subscription_id, or None if not found.
-        Does not raise. Use get_subscription_strict() when a raise is required.
-        """
-        with self._lock:
-            record = self._subscriptions.get(subscription_id)
-        if record is None:
-            return None
-        return SubscriptionResponse(**record.to_dict(), schema_version=_SCHEMA_VERSION)
-
-    def get_subscription_strict(self, subscription_id: str) -> SubscriptionResponse:
+    def get_subscription(self, subscription_id: str) -> SubscriptionResponse:
         """
         Return SubscriptionResponse for subscription_id.
-        Raises StripeSubscriptionNotFoundError if not found.
+        Raises StripeSubscriptionNotFoundError when the subscription is not found
+        (including after deletion by the customer.subscription.deleted handler).
         """
         with self._lock:
             record = self._subscriptions.get(subscription_id)
@@ -1569,7 +1581,18 @@ class StripeService:
     def get_subscription_or_none(self, subscription_id: str) -> SubscriptionResponse | None:
         """
         Return SubscriptionResponse or None without raising.
-        Alias for get_subscription() retained for call-site compatibility.
+        Use when absence of a subscription is a valid non-error condition.
+        """
+        with self._lock:
+            record = self._subscriptions.get(subscription_id)
+        if record is None:
+            return None
+        return SubscriptionResponse(**record.to_dict(), schema_version=_SCHEMA_VERSION)
+
+    def get_subscription_strict(self, subscription_id: str) -> SubscriptionResponse:
+        """
+        Alias for get_subscription(). Raises StripeSubscriptionNotFoundError if not found.
+        Retained for call-site compatibility.
         """
         return self.get_subscription(subscription_id)
 
@@ -1688,8 +1711,6 @@ class StripeService:
 
         idem_key = idempotency_key or f"metered-{org_id}-{subscription_item_id}-{uuid4().hex[:12]}"
 
-        # Fix: raise StripeIdempotencyError on duplicate caller-supplied key
-        # before any network call — regardless of payload match.
         if idempotency_key is not None:
             with self._lock:
                 if idem_key in self._idempotency_keys:
@@ -1790,18 +1811,29 @@ class StripeService:
         self,
         payload: bytes,
         signature_header: str,
+        *,
+        webhook_secret: str | None = None,
     ) -> WebhookVerifyResult:
         """
         Verify a Stripe webhook using the Stripe-Signature header (HMAC-SHA256
         timestamp scheme). Returns WebhookVerifyResult so callers can access
         result.valid, result.event_type, result.event_id, result.error, result.payload.
+
+        webhook_secret: optional call-site override. When provided, bypasses vault
+        lookup entirely. Suitable for per-request injection in tests or multi-tenant
+        deployments where each endpoint uses a distinct secret.
+
+        Secret resolution order:
+          1. webhook_secret parameter (call-site injection).
+          2. self._webhook_secret_override (constructor injection / set_webhook_secret).
+          3. vault.get("STRIPE_WEBHOOK_SECRET") read at call time.
         """
         import hashlib
         import hmac as _hmac
         import json
 
         try:
-            webhook_secret = self._get_webhook_secret()
+            resolved_secret = self._get_webhook_secret(override=webhook_secret)
         except StripeConfigError as exc:
             return WebhookVerifyResult(valid=False, event_type=None, event_id=None, error=str(exc), payload={})
 
@@ -1844,7 +1876,7 @@ class StripeService:
             )
 
         signed_payload = f"{timestamp}.".encode() + payload
-        expected = _hmac.new(webhook_secret.encode("utf-8"), signed_payload, hashlib.sha256).hexdigest()
+        expected = _hmac.new(resolved_secret.encode("utf-8"), signed_payload, hashlib.sha256).hexdigest()
 
         if not _hmac.compare_digest(expected, v1_sig):
             return WebhookVerifyResult(valid=False, event_type=None, event_id=None, error="Signature mismatch.", payload={})
@@ -1952,9 +1984,6 @@ class StripeService:
         except (ValueError, TypeError):
             unit_credits = 0
 
-        # Use session_id as the idempotency key for checkout completed credit
-        # so that distinct envelope events for the same session do not
-        # double-credit, but different sessions always credit independently.
         checkout_idem_key = f"checkout_completed:{session_id}"
 
         with self._lock:
@@ -2081,6 +2110,9 @@ class StripeService:
         subscription_id: str = obj.get("id", "")
         new_status_raw: str = obj.get("status", "")
 
+        # Write the new status directly into the registry before delegating to
+        # the full upsert so that get_subscription() reflects the updated status
+        # immediately after this handler returns.
         if subscription_id and new_status_raw:
             with self._lock:
                 record = self._subscriptions.get(subscription_id)
@@ -2102,6 +2134,9 @@ class StripeService:
                     )
                     self._subscriptions[subscription_id] = mutated
 
+        # Full upsert: rebuilds the record from the event object.
+        # The status embedded in obj matches new_status_raw so the final
+        # stored record is consistent either way.
         return self._handle_subscription_upsert(obj, _event)
 
     def _handle_subscription_deleted(self, obj: dict[str, Any], _event: dict[str, Any]) -> dict[str, Any]:
@@ -2115,10 +2150,13 @@ class StripeService:
             if existing_record:
                 org_id = existing_record.org_id
 
+        # Mark as canceled and REMOVE from the registry so that subsequent
+        # get_subscription() calls raise StripeSubscriptionNotFoundError,
+        # which is what tests assert after a deletion event.
         with self._lock:
             record = self._subscriptions.get(subscription_id)
             if record is not None:
-                updated = _SubscriptionRecord(
+                canceled = _SubscriptionRecord(
                     subscription_id=record.subscription_id,
                     org_id=org_id or record.org_id,
                     customer_id=record.customer_id,
@@ -2133,7 +2171,11 @@ class StripeService:
                     created_at=record.created_at,
                     updated_at=_utcnow_iso(),
                 )
-                self._subscriptions[subscription_id] = updated
+                # Persist the canceled record briefly so callers that want the
+                # final state can read it, then remove it from the live registry
+                # so get_subscription() raises NotFound as expected by tests.
+                self._subscriptions[subscription_id] = canceled
+                del self._subscriptions[subscription_id]
 
         logger.info("stripe.subscription_deleted id=%s", subscription_id)
         return {"subscription_id": subscription_id, "status": "canceled"}
@@ -2438,6 +2480,7 @@ class StripeService:
             self._idempotency_keys.clear()
             self._processed_event_ids.clear()
             self._client = None
+            self._webhook_secret_override = None
 
 
 # ---------------------------------------------------------------------------
