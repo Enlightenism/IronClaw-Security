@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import os
 from unittest.mock import MagicMock, patch
 
@@ -8,11 +9,15 @@ import pytest
 
 from app.main import app as _app
 from app.ui.billing.payment_methods import (
+    _BRAND_DISPLAY,
     _MAX_METHODS,
+    _STATUS_COLOR,
     BillingPaymentMethodStatusCount,
     BillingPaymentMethodView,
+    _brand_display,
     _build_method,
     _build_status_counts,
+    _exp_display,
     _resolve_default_method_id,
     _stripe_connection_note,
     _stripe_mode,
@@ -106,14 +111,84 @@ class TestGetPaymentMethodsNoSupabase:
 
 
 # ---------------------------------------------------------------------------
-# _build_method
+# _build_method — instance type, field correctness, computed fields
 # ---------------------------------------------------------------------------
 
 
 class TestBuildMethod:
     def test_returns_billing_payment_method_view_instance(self) -> None:
-        result = _make_method()
+        # BillingPaymentMethodView and _build_method are both bound at module
+        # level from the same import — class identity is guaranteed to match.
+        result = _build_method(
+            methodid="pm-001",
+            type="card",
+            brand="visa",
+            last4="4242",
+            expmonth=12,
+            expyear=2027,
+            isdefault=False,
+            status="active",
+            createdat="2025-01-01T00:00:00+00:00",
+            organizationid="org-001",
+        )
         assert isinstance(result, BillingPaymentMethodView)
+
+    def test_build_method_all_fields_populated(self) -> None:
+        result = _build_method(
+            methodid="pm-999",
+            type="card",
+            brand="mastercard",
+            last4="1234",
+            expmonth=3,
+            expyear=2029,
+            isdefault=True,
+            status="active",
+            createdat="2026-06-01T00:00:00+00:00",
+            organizationid="org-abc",
+        )
+        assert result.methodid == "pm-999"
+        assert result.type == "card"
+        assert result.brand == "mastercard"
+        assert result.last4 == "1234"
+        assert result.expmonth == 3
+        assert result.expyear == 2029
+        assert result.isdefault is True
+        assert result.status == "active"
+        assert result.createdat == "2026-06-01T00:00:00+00:00"
+        assert result.organizationid == "org-abc"
+        assert result.branddisplay == "Mastercard"
+        assert result.expdisplay == "03/2029"
+        assert result.statuscolor == "success"
+
+    def test_branddisplay_derived_from_brand(self) -> None:
+        result = _build_method(
+            methodid="pm-001",
+            type="card",
+            brand="amex",
+            last4="0005",
+            expmonth=1,
+            expyear=2028,
+            isdefault=False,
+            status="active",
+            createdat="2025-01-01T00:00:00+00:00",
+            organizationid="org-001",
+        )
+        assert result.branddisplay == "American Express"
+
+    def test_expdisplay_derived_from_expmonth_expyear(self) -> None:
+        result = _build_method(
+            methodid="pm-001",
+            type="card",
+            brand="visa",
+            last4="4242",
+            expmonth=7,
+            expyear=2031,
+            isdefault=False,
+            status="active",
+            createdat="2025-01-01T00:00:00+00:00",
+            organizationid="org-001",
+        )
+        assert result.expdisplay == "07/2031"
 
     def test_branddisplay_visa(self) -> None:
         result = _make_method(brand="visa")
@@ -190,6 +265,52 @@ class TestBuildMethod:
         assert result.status == "active"
         assert result.createdat == "2026-06-01T00:00:00+00:00"
         assert result.organizationid == "org-abc"
+
+    def test_statuscolor_matches_status_color_map(self) -> None:
+        for status, expected_color in _STATUS_COLOR.items():
+            result = _make_method(status=status)
+            assert result.statuscolor == expected_color
+
+    def test_isdefault_false_propagates(self) -> None:
+        result = _make_method(isdefault=False)
+        assert result.isdefault is False
+
+    def test_isdefault_true_propagates(self) -> None:
+        result = _make_method(isdefault=True)
+        assert result.isdefault is True
+
+
+# ---------------------------------------------------------------------------
+# _brand_display helper
+# ---------------------------------------------------------------------------
+
+
+class TestBrandDisplay:
+    def test_known_brands_in_map(self) -> None:
+        for brand, expected in _BRAND_DISPLAY.items():
+            assert _brand_display(brand) == expected
+
+    def test_unknown_brand_titlecased(self) -> None:
+        assert _brand_display("unionpay") == "Unionpay"
+
+    def test_unknown_multiword_brand_titlecased(self) -> None:
+        assert _brand_display("some_card") == "Some_Card"
+
+
+# ---------------------------------------------------------------------------
+# _exp_display helper
+# ---------------------------------------------------------------------------
+
+
+class TestExpDisplay:
+    def test_single_digit_month_zero_padded(self) -> None:
+        assert _exp_display(1, 2030) == "01/2030"
+
+    def test_double_digit_month(self) -> None:
+        assert _exp_display(12, 2028) == "12/2028"
+
+    def test_month_ten_zero_not_padded(self) -> None:
+        assert _exp_display(10, 2026) == "10/2026"
 
 
 # ---------------------------------------------------------------------------
@@ -279,6 +400,41 @@ class TestBuildStatusCounts:
         methods = [_make_method(methodid="pm-001", status="active")]
         counts = _build_status_counts(methods)
         assert isinstance(counts[0], BillingPaymentMethodStatusCount)
+
+
+# ---------------------------------------------------------------------------
+# PackageCatalogueEntry — reload tests re-bind class from reloaded module
+# ---------------------------------------------------------------------------
+
+
+class TestPackageCatalogueEntryReload:
+    def test_stripe_price_id_read_from_env_on_reload(self) -> None:
+        with patch.dict(os.environ, {"STRIPE_PRICE_ID_STARTER": "price_test_abc"}, clear=False):
+            import app.ui.billing.payment_methods as pm_mod
+
+            importlib.reload(pm_mod)
+            try:
+                # Re-bind from reloaded module to preserve class identity
+                ReloadedEntry = pm_mod.PackageCatalogueEntry
+                entry = ReloadedEntry(**pm_mod.PACKAGE_CATALOGUE["starter"])
+                assert isinstance(entry, ReloadedEntry)
+                assert entry.stripe_price_id == "price_test_abc"
+            finally:
+                importlib.reload(pm_mod)
+
+    def test_stripe_price_id_defaults_empty_when_env_unset_on_reload(self) -> None:
+        env = {k: v for k, v in os.environ.items() if k != "STRIPE_PRICE_ID_STARTER"}
+        with patch.dict(os.environ, env, clear=True):
+            import app.ui.billing.payment_methods as pm_mod
+
+            importlib.reload(pm_mod)
+            try:
+                ReloadedEntry = pm_mod.PackageCatalogueEntry
+                entry = ReloadedEntry(**pm_mod.PACKAGE_CATALOGUE["starter"])
+                assert isinstance(entry, ReloadedEntry)
+                assert isinstance(entry.stripe_price_id, str)
+            finally:
+                importlib.reload(pm_mod)
 
 
 # ---------------------------------------------------------------------------
