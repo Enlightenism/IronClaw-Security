@@ -13,7 +13,6 @@ from fastapi.responses import JSONResponse
 import stripe as stripe_lib
 
 from app.core.auth import AuthContext, get_auth_context
-from app.core.supabase import get_supabase_service_client
 from app.core.supabase_persistence import (
     PersistenceError,
 )
@@ -22,6 +21,9 @@ from app.core.supabase_persistence import (
 )
 from app.core.supabase_persistence import (
     delete_webhook_subscription as _persist_delete_subscription,
+)
+from app.core.supabase_persistence import (
+    fulfill_checkout_session as _persist_fulfill_checkout,
 )
 from app.core.supabase_persistence import (
     get_webhook_delivery_log as _persist_get_delivery_log,
@@ -114,6 +116,7 @@ def _fulfill_checkout_session(session: dict[str, Any]) -> None:
     """
     Idempotent fulfillment for a completed Stripe Checkout session.
 
+    Delegates all DB access to the persistence layer.
     Steps:
     1. Look up payment_transactions row by stripe_session_id.
     2. Skip if already credited (idempotency guard).
@@ -127,88 +130,8 @@ def _fulfill_checkout_session(session: dict[str, Any]) -> None:
         logger.error("stripe_webhook.fulfill missing session.id — skipping")
         return
 
-    now_iso = datetime.now(UTC).isoformat()
-
     try:
-        db = get_supabase_service_client()
-
-        # Fetch the payment_transactions row
-        tx_resp = db.table("payment_transactions").select("id, user_id, units, credited, payment_status").eq("stripe_session_id", session_id).limit(1).execute()
-        rows = tx_resp.data if tx_resp and tx_resp.data else []
-
-        if not rows:
-            logger.warning(
-                "stripe_webhook.fulfill no payment_transaction found for session_id=%s — skipping",
-                session_id,
-            )
-            return
-
-        tx = rows[0]
-        tx_id: str = tx["id"]
-        user_id: str | None = tx.get("user_id")
-
-        # Idempotency guard
-        if tx.get("credited"):
-            logger.info(
-                "stripe_webhook.fulfill already credited tx_id=%s session_id=%s — skipping",
-                tx_id,
-                session_id,
-            )
-            return
-
-        # Resolve units: prefer DB row, fall back to session metadata
-        units: int = int(tx.get("units") or 0)
-        if units <= 0:
-            meta_units = session.get("metadata", {}).get("unit_credits", "0")
-            try:
-                units = int(meta_units)
-            except (ValueError, TypeError):
-                units = 0
-
-        if units <= 0:
-            logger.warning(
-                "stripe_webhook.fulfill units=0 for tx_id=%s session_id=%s — marking paid but no wallet credit",
-                tx_id,
-                session_id,
-            )
-
-        # Mark transaction paid and credited
-        db.table("payment_transactions").update(
-            {
-                "payment_status": "paid",
-                "credited": True,
-                "credited_at": now_iso,
-            }
-        ).eq("id", tx_id).execute()
-
-        # Increment user wallet_units
-        if user_id and units > 0:
-            wallet_resp = db.table("users").select("id, wallet_units").eq("id", user_id).limit(1).execute()
-            user_rows = wallet_resp.data if wallet_resp and wallet_resp.data else []
-            if user_rows:
-                current: int = int(user_rows[0].get("wallet_units") or 0)
-                db.table("users").update({"wallet_units": current + units}).eq("id", user_id).execute()
-                logger.info(
-                    "stripe_webhook.fulfill wallet_credited user_id=%s units=%d new_balance=%d tx_id=%s",
-                    user_id,
-                    units,
-                    current + units,
-                    tx_id,
-                )
-            else:
-                logger.warning(
-                    "stripe_webhook.fulfill user_not_found user_id=%s tx_id=%s — units not credited",
-                    user_id,
-                    tx_id,
-                )
-
-        logger.info(
-            "stripe_webhook.fulfill completed tx_id=%s session_id=%s units=%d",
-            tx_id,
-            session_id,
-            units,
-        )
-
+        _persist_fulfill_checkout(session_id=session_id, session_metadata=session.get("metadata", {}))
     except Exception as exc:
         logger.error(
             "stripe_webhook.fulfill error session_id=%s error=%s",
@@ -264,7 +187,6 @@ async def stripe_webhook_receiver(
     webhook_secret: str = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 
     # Construct and verify event via stripe.Webhook.construct_event
-    # This is the canonical HMAC verification path Stripe requires.
     try:
         if webhook_secret:
             event = stripe_lib.Webhook.construct_event(
