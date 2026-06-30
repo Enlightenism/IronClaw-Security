@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import calendar
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from threading import Lock
@@ -13,6 +14,17 @@ MeterEventType = Literal["scan", "guard_request", "execution", "incident", "quar
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def _period_end_for(dt: datetime) -> datetime:
+    """Return the last second of the month containing dt, UTC."""
+    last_day = calendar.monthrange(dt.year, dt.month)[1]
+    return dt.replace(day=last_day, hour=23, minute=59, second=59, microsecond=0)
+
+
+def _period_start_for(dt: datetime) -> datetime:
+    """Return midnight on the first of the month containing dt, UTC."""
+    return dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +60,7 @@ class SubscriptionRecord:
     used_units: int
     overage_units: int
     price_usd_monthly: int
+    overage_rate_usd: int = 0  # cents per overage unit; 0 = no metered overage
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -58,10 +71,7 @@ class SubscriptionRecord:
 
 
 # ---------------------------------------------------------------------------
-# SubscriptionMeterStore  (renamed from BillingStore to eliminate collision
-# with billingstore.BillingStore — the two classes own completely different
-# domains: this file owns subscriptions + metering; billingstore.py owns
-# billing-transaction records / invoices / payments)
+# SubscriptionMeterStore
 # ---------------------------------------------------------------------------
 
 
@@ -81,8 +91,8 @@ class SubscriptionMeterStore:
                 return
 
             now = _utcnow()
-            period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            period_end = now.replace(day=28, hour=23, minute=59, second=59, microsecond=0)
+            period_start = _period_start_for(now)
+            period_end = _period_end_for(now)
 
             self._subscriptions.extend(
                 [
@@ -98,6 +108,7 @@ class SubscriptionMeterStore:
                         used_units=28_440,
                         overage_units=0,
                         price_usd_monthly=2499,
+                        overage_rate_usd=0,
                         metadata={"seeded": True},
                     ),
                     SubscriptionRecord(
@@ -112,6 +123,7 @@ class SubscriptionMeterStore:
                         used_units=2_140,
                         overage_units=0,
                         price_usd_monthly=299,
+                        overage_rate_usd=0,
                         metadata={"seeded": True},
                     ),
                 ]
@@ -173,11 +185,12 @@ class SubscriptionMeterStore:
         billing_email: str,
         included_units: int,
         price_usd_monthly: int,
+        overage_rate_usd: int = 0,
         metadata: dict[str, Any] | None = None,
     ) -> SubscriptionRecord:
         now = _utcnow()
-        period_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        period_end = now.replace(day=28, hour=23, minute=59, second=59, microsecond=0)
+        period_start = _period_start_for(now)
+        period_end = _period_end_for(now)
 
         record = SubscriptionRecord(
             subscription_id=f"sub-{uuid4().hex[:12]}",
@@ -191,6 +204,7 @@ class SubscriptionMeterStore:
             used_units=0,
             overage_units=0,
             price_usd_monthly=price_usd_monthly,
+            overage_rate_usd=overage_rate_usd,
             metadata=dict(metadata or {}),
         )
         with self._lock:
@@ -204,6 +218,9 @@ class SubscriptionMeterStore:
         status: SubscriptionStatus,
         plan_name: PlanName | None = None,
         billing_email: str | None = None,
+        included_units: int | None = None,
+        price_usd_monthly: int | None = None,
+        overage_rate_usd: int | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> SubscriptionRecord | None:
         with self._lock:
@@ -218,10 +235,11 @@ class SubscriptionMeterStore:
                     billing_email=billing_email.strip() if billing_email is not None else item.billing_email,
                     period_start=item.period_start,
                     period_end=item.period_end,
-                    included_units=item.included_units,
+                    included_units=included_units if included_units is not None else item.included_units,
                     used_units=item.used_units,
                     overage_units=item.overage_units,
-                    price_usd_monthly=item.price_usd_monthly,
+                    price_usd_monthly=price_usd_monthly if price_usd_monthly is not None else item.price_usd_monthly,
+                    overage_rate_usd=overage_rate_usd if overage_rate_usd is not None else item.overage_rate_usd,
                     metadata={**item.metadata, **dict(metadata or {})},
                 )
                 self._subscriptions[index] = updated
@@ -281,6 +299,7 @@ class SubscriptionMeterStore:
                     used_units=used_units,
                     overage_units=overage_units,
                     price_usd_monthly=item.price_usd_monthly,
+                    overage_rate_usd=item.overage_rate_usd,
                     metadata=dict(item.metadata),
                 )
         return event
@@ -293,6 +312,11 @@ class SubscriptionMeterStore:
         with self._lock:
             self._subscriptions.clear()
             self._meter_events.clear()
+
+    def reset_and_reseed(self) -> None:
+        """Full reset followed by seed_defaults. Use in tests that require clean seeded state."""
+        self.reset()
+        self.seed_defaults()
 
     def is_ready(self) -> bool:
         return True
@@ -307,10 +331,7 @@ class SubscriptionMeterStore:
 
 
 # ---------------------------------------------------------------------------
-# Back-compat shim — any import of `BillingStore` from this module resolves
-# to SubscriptionMeterStore so existing test references don't hard-break
-# before the rename sweep is complete.  Remove after grep confirms no
-# remaining consumers reference billing_store.BillingStore directly.
+# Back-compat shim
 # ---------------------------------------------------------------------------
 BillingStore = SubscriptionMeterStore
 
@@ -328,11 +349,10 @@ def get_subscription_meter_store() -> SubscriptionMeterStore:
 
 
 def reset_subscription_meter_store() -> None:
-    _SUBSCRIPTION_METER_STORE.reset()
-    _SUBSCRIPTION_METER_STORE.seed_defaults()
+    _SUBSCRIPTION_METER_STORE.reset_and_reseed()
 
 
-# Back-compat factory aliases — remove after consumer sweep
+# Back-compat factory aliases
 def get_billing_store() -> SubscriptionMeterStore:
     return _SUBSCRIPTION_METER_STORE
 
