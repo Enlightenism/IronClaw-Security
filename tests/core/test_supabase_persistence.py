@@ -9,6 +9,8 @@ from app.core.supabase_persistence import (
     create_webhook_subscription,
     delete_rate_limit_state,
     delete_webhook_subscription,
+    fulfill_checkout_session,
+    get_payment_transaction_by_session,
     get_policy_set,
     get_rate_limit_state,
     get_scan_by_id,
@@ -16,8 +18,10 @@ from app.core.supabase_persistence import (
     get_webhook_delivery_log,
     get_webhook_delivery_record,
     get_webhook_subscription,
+    increment_user_wallet_units,
     list_scans,
     list_webhook_subscriptions,
+    mark_payment_transaction_paid,
     update_webhook_delivery,
     update_webhook_subscription,
     upsert_audit_event,
@@ -186,6 +190,16 @@ _WEBHOOK_DELIVERY_ROW: dict = {
     "subscription_id": "sub-001",
     "event_type": "scan.completed",
     "status": "delivered",
+    "created_at": "2026-06-08T00:00:00+00:00",
+}
+
+_PAYMENT_TXN_ROW: dict = {
+    "id": "txn-001",
+    "stripe_session_id": "cs_test_abc123",
+    "user_id": "user-001",
+    "units": 100,
+    "payment_status": "pending",
+    "credited": False,
     "created_at": "2026-06-08T00:00:00+00:00",
 }
 
@@ -2386,4 +2400,244 @@ class TestGetWebhookDeliveryLog:
         with patch(_PATCH_TARGET, return_value=client):
             with pytest.raises(PersistenceError) as exc_info:
                 get_webhook_delivery_log("tenant-001")
+        assert exc_info.value.cause is original
+
+
+# ===========================================================================
+# fulfill_checkout_session
+# ===========================================================================
+
+_FULFILL_PATCH_GET = "app.core.supabase_persistence.get_payment_transaction_by_session"
+_FULFILL_PATCH_MARK = "app.core.supabase_persistence.mark_payment_transaction_paid"
+_FULFILL_PATCH_INCREMENT = "app.core.supabase_persistence.increment_user_wallet_units"
+
+
+class TestFulfillCheckoutSession:
+    # -------------------------------------------------------------------
+    # (1) Happy path — full fulfillment
+    # -------------------------------------------------------------------
+
+    def test_happy_path_calls_mark_and_increment_with_correct_args(self):
+        txn = {**_PAYMENT_TXN_ROW}
+        with (
+            patch(_FULFILL_PATCH_GET, return_value=txn),
+            patch(_FULFILL_PATCH_MARK) as mock_mark,
+            patch(_FULFILL_PATCH_INCREMENT) as mock_incr,
+        ):
+            fulfill_checkout_session("cs_test_abc123", {})
+
+        mock_mark.assert_called_once_with("txn-001")
+        mock_incr.assert_called_once_with("user-001", 100)
+
+    def test_happy_path_get_called_with_session_id(self):
+        txn = {**_PAYMENT_TXN_ROW}
+        with (
+            patch(_FULFILL_PATCH_GET, return_value=txn) as mock_get,
+            patch(_FULFILL_PATCH_MARK),
+            patch(_FULFILL_PATCH_INCREMENT),
+        ):
+            fulfill_checkout_session("cs_test_abc123", {})
+
+        mock_get.assert_called_once_with("cs_test_abc123")
+
+    def test_happy_path_returns_none(self):
+        txn = {**_PAYMENT_TXN_ROW}
+        with (
+            patch(_FULFILL_PATCH_GET, return_value=txn),
+            patch(_FULFILL_PATCH_MARK),
+            patch(_FULFILL_PATCH_INCREMENT),
+        ):
+            result = fulfill_checkout_session("cs_test_abc123", {})
+
+        assert result is None
+
+    def test_happy_path_units_from_session_metadata_when_absent_on_txn(self):
+        txn = {k: v for k, v in _PAYMENT_TXN_ROW.items() if k != "units"}
+        with (
+            patch(_FULFILL_PATCH_GET, return_value=txn),
+            patch(_FULFILL_PATCH_MARK),
+            patch(_FULFILL_PATCH_INCREMENT) as mock_incr,
+        ):
+            fulfill_checkout_session("cs_test_abc123", {"units": 50})
+
+        mock_incr.assert_called_once_with("user-001", 50)
+
+    # -------------------------------------------------------------------
+    # (2) Idempotency guard — already credited
+    # -------------------------------------------------------------------
+
+    def test_idempotency_guard_skips_mark_and_increment_when_credited_true(self):
+        txn = {**_PAYMENT_TXN_ROW, "credited": True}
+        with (
+            patch(_FULFILL_PATCH_GET, return_value=txn),
+            patch(_FULFILL_PATCH_MARK) as mock_mark,
+            patch(_FULFILL_PATCH_INCREMENT) as mock_incr,
+        ):
+            fulfill_checkout_session("cs_test_abc123", {})
+
+        mock_mark.assert_not_called()
+        mock_incr.assert_not_called()
+
+    def test_idempotency_guard_returns_none_without_error(self):
+        txn = {**_PAYMENT_TXN_ROW, "credited": True}
+        with (
+            patch(_FULFILL_PATCH_GET, return_value=txn),
+            patch(_FULFILL_PATCH_MARK),
+            patch(_FULFILL_PATCH_INCREMENT),
+        ):
+            result = fulfill_checkout_session("cs_test_abc123", {})
+
+        assert result is None
+
+    # -------------------------------------------------------------------
+    # (3) Missing transaction raises ValueError
+    # -------------------------------------------------------------------
+
+    def test_missing_transaction_raises_value_error(self):
+        with patch(_FULFILL_PATCH_GET, return_value=None):
+            with pytest.raises(ValueError, match="no payment_transaction found"):
+                fulfill_checkout_session("cs_test_missing", {})
+
+    def test_missing_transaction_error_contains_session_id(self):
+        with patch(_FULFILL_PATCH_GET, return_value=None):
+            with pytest.raises(ValueError) as exc_info:
+                fulfill_checkout_session("cs_test_missing", {})
+
+        assert "cs_test_missing" in str(exc_info.value)
+
+    # -------------------------------------------------------------------
+    # (4) Zero/missing units — logs warning, skips wallet increment
+    # -------------------------------------------------------------------
+
+    def test_zero_units_skips_increment_and_logs_warning(self):
+        txn = {**_PAYMENT_TXN_ROW, "units": 0}
+        with (
+            patch(_FULFILL_PATCH_GET, return_value=txn),
+            patch(_FULFILL_PATCH_MARK),
+            patch(_FULFILL_PATCH_INCREMENT) as mock_incr,
+            patch("app.core.supabase_persistence._logger") as mock_logger,
+        ):
+            fulfill_checkout_session("cs_test_abc123", {})
+
+        mock_incr.assert_not_called()
+        mock_logger.warning.assert_called_once()
+
+    def test_missing_units_skips_increment_and_logs_warning(self):
+        txn = {k: v for k, v in _PAYMENT_TXN_ROW.items() if k != "units"}
+        with (
+            patch(_FULFILL_PATCH_GET, return_value=txn),
+            patch(_FULFILL_PATCH_MARK),
+            patch(_FULFILL_PATCH_INCREMENT) as mock_incr,
+            patch("app.core.supabase_persistence._logger") as mock_logger,
+        ):
+            fulfill_checkout_session("cs_test_abc123", {})
+
+        mock_incr.assert_not_called()
+        mock_logger.warning.assert_called_once()
+
+    def test_zero_units_still_calls_mark_paid(self):
+        txn = {**_PAYMENT_TXN_ROW, "units": 0}
+        with (
+            patch(_FULFILL_PATCH_GET, return_value=txn),
+            patch(_FULFILL_PATCH_MARK) as mock_mark,
+            patch(_FULFILL_PATCH_INCREMENT),
+            patch("app.core.supabase_persistence._logger"),
+        ):
+            fulfill_checkout_session("cs_test_abc123", {})
+
+        mock_mark.assert_called_once_with("txn-001")
+
+    # -------------------------------------------------------------------
+    # (5) get_payment_transaction_by_session raises PersistenceError on SupabaseAPIError
+    # -------------------------------------------------------------------
+
+    def test_get_payment_transaction_raises_persistence_error_on_supabase_api_error(self):
+        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
+
+        client = _make_client(side_effect=SupabaseAPIError("db fail"))
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                get_payment_transaction_by_session("cs_test_abc123")
+
+        assert exc_info.value.operation == "get_payment_transaction_by_session"
+
+    def test_get_payment_transaction_persistence_error_cause_is_original(self):
+        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
+
+        original = SupabaseAPIError("db fail")
+        client = _make_client(side_effect=original)
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                get_payment_transaction_by_session("cs_test_abc123")
+
+        assert exc_info.value.cause is original
+
+    # -------------------------------------------------------------------
+    # (6) mark_payment_transaction_paid raises PersistenceError on SupabaseAPIError
+    # -------------------------------------------------------------------
+
+    def test_mark_payment_transaction_paid_raises_persistence_error_on_supabase_api_error(self):
+        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
+
+        client = _make_client(side_effect=SupabaseAPIError("write fail"))
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                mark_payment_transaction_paid("txn-001")
+
+        assert exc_info.value.operation == "mark_payment_transaction_paid"
+
+    def test_mark_payment_transaction_paid_persistence_error_cause_is_original(self):
+        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
+
+        original = SupabaseAPIError("write fail")
+        client = _make_client(side_effect=original)
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                mark_payment_transaction_paid("txn-001")
+
+        assert exc_info.value.cause is original
+
+    def test_mark_payment_transaction_paid_empty_txn_id_raises_persistence_error(self):
+        with pytest.raises(PersistenceError):
+            mark_payment_transaction_paid("")
+
+    # -------------------------------------------------------------------
+    # (7) increment_user_wallet_units raises PersistenceError on delta < 1 and missing user_id
+    # -------------------------------------------------------------------
+
+    def test_increment_user_wallet_units_raises_persistence_error_on_delta_less_than_1(self):
+        with pytest.raises(PersistenceError):
+            increment_user_wallet_units("user-001", 0)
+
+    def test_increment_user_wallet_units_raises_persistence_error_on_negative_delta(self):
+        with pytest.raises(PersistenceError):
+            increment_user_wallet_units("user-001", -5)
+
+    def test_increment_user_wallet_units_raises_persistence_error_on_missing_user_id(self):
+        with pytest.raises(PersistenceError):
+            increment_user_wallet_units("", 10)
+
+    def test_increment_user_wallet_units_raises_persistence_error_on_whitespace_user_id(self):
+        with pytest.raises(PersistenceError):
+            increment_user_wallet_units("   ", 10)
+
+    def test_increment_user_wallet_units_raises_persistence_error_on_supabase_api_error(self):
+        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
+
+        client = _make_client(side_effect=SupabaseAPIError("rpc fail"))
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                increment_user_wallet_units("user-001", 10)
+
+        assert exc_info.value.operation == "increment_user_wallet_units"
+
+    def test_increment_user_wallet_units_persistence_error_cause_is_original(self):
+        from app.supabaseclient import SupabaseAPIError  # noqa: PLC0415
+
+        original = SupabaseAPIError("rpc fail")
+        client = _make_client(side_effect=original)
+        with patch(_PATCH_TARGET, return_value=client):
+            with pytest.raises(PersistenceError) as exc_info:
+                increment_user_wallet_units("user-001", 10)
+
         assert exc_info.value.cause is original
