@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import calendar
+from datetime import datetime
 import os
 
 os.environ.setdefault("IRONCLAW_PERSISTENCE_MODE", "memory")
@@ -17,10 +19,21 @@ from app.services.billing_store import (
     SubscriptionMeterStore,
     get_billing_store,
     get_subscription_meter_store,
+    reset_billing_store,
+    reset_subscription_meter_store,
 )
 
 # ---------------------------------------------------------------------------
-# Fixture — isolated store instance per test; never touches the singleton
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _last_day_of_month(dt: datetime) -> int:
+    return calendar.monthrange(dt.year, dt.month)[1]
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
 # ---------------------------------------------------------------------------
 
 
@@ -101,6 +114,73 @@ def test_seeded_subscriptions_have_subscription_id_prefix(store: SubscriptionMet
 def test_seeded_meter_events_have_event_id_prefix(store: SubscriptionMeterStore) -> None:
     for event in store.list_meter_events():
         assert event.event_id.startswith("mtr-")
+
+
+def test_seeded_subscriptions_have_overage_rate_usd_zero(store: SubscriptionMeterStore) -> None:
+    for sub in store.list_subscriptions():
+        assert sub.overage_rate_usd == 0
+
+
+# ---------------------------------------------------------------------------
+# period_start / period_end — correct calendar boundaries
+# ---------------------------------------------------------------------------
+
+
+def test_seeded_period_start_is_first_of_month(store: SubscriptionMeterStore) -> None:
+    for sub in store.list_subscriptions():
+        assert sub.period_start.day == 1
+        assert sub.period_start.hour == 0
+        assert sub.period_start.minute == 0
+        assert sub.period_start.second == 0
+
+
+def test_seeded_period_end_is_last_real_day_of_month(store: SubscriptionMeterStore) -> None:
+    for sub in store.list_subscriptions():
+        expected_last_day = _last_day_of_month(sub.period_end)
+        assert sub.period_end.day == expected_last_day
+        assert sub.period_end.hour == 23
+        assert sub.period_end.minute == 59
+        assert sub.period_end.second == 59
+
+
+def test_created_subscription_period_end_is_last_real_day_of_month(
+    empty_store: SubscriptionMeterStore,
+) -> None:
+    record = empty_store.create_subscription(
+        org_id="org-period-check",
+        plan_name="pro",
+        status="active",
+        billing_email="period@test.dev",
+        included_units=25_000,
+        price_usd_monthly=299,
+    )
+    expected_last_day = _last_day_of_month(record.period_end)
+    assert record.period_end.day == expected_last_day
+    assert record.period_end.hour == 23
+    assert record.period_end.minute == 59
+    assert record.period_end.second == 59
+
+
+def test_created_subscription_period_start_is_first_of_month(
+    empty_store: SubscriptionMeterStore,
+) -> None:
+    record = empty_store.create_subscription(
+        org_id="org-period-start-check",
+        plan_name="free",
+        status="trialing",
+        billing_email="start@test.dev",
+        included_units=5_000,
+        price_usd_monthly=0,
+    )
+    assert record.period_start.day == 1
+    assert record.period_start.hour == 0
+    assert record.period_start.minute == 0
+    assert record.period_start.second == 0
+
+
+def test_period_start_before_period_end(store: SubscriptionMeterStore) -> None:
+    for sub in store.list_subscriptions():
+        assert sub.period_start < sub.period_end
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +293,55 @@ def test_create_subscription_is_retrievable_by_get(store: SubscriptionMeterStore
     assert fetched.subscription_id == record.subscription_id
 
 
+def test_create_subscription_overage_rate_usd_defaults_to_zero(empty_store: SubscriptionMeterStore) -> None:
+    record = empty_store.create_subscription(
+        org_id="org-rate-default",
+        plan_name="free",
+        status="trialing",
+        billing_email="rate@test.dev",
+        included_units=5_000,
+        price_usd_monthly=0,
+    )
+    assert record.overage_rate_usd == 0
+
+
+def test_create_subscription_overage_rate_usd_is_stored(empty_store: SubscriptionMeterStore) -> None:
+    record = empty_store.create_subscription(
+        org_id="org-rate-set",
+        plan_name="enterprise",
+        status="active",
+        billing_email="rateset@test.dev",
+        included_units=60_000,
+        price_usd_monthly=2499,
+        overage_rate_usd=5,
+    )
+    assert record.overage_rate_usd == 5
+
+
+def test_create_subscription_whitespace_stripped_from_org_id(empty_store: SubscriptionMeterStore) -> None:
+    record = empty_store.create_subscription(
+        org_id="  org-strip-test  ",
+        plan_name="free",
+        status="trialing",
+        billing_email="strip@test.dev",
+        included_units=1_000,
+        price_usd_monthly=0,
+    )
+    assert record.org_id == "org-strip-test"
+
+
+def test_create_subscription_whitespace_stripped_from_email(empty_store: SubscriptionMeterStore) -> None:
+    record = empty_store.create_subscription(
+        org_id="org-email-strip",
+        plan_name="free",
+        status="trialing",
+        billing_email="  email@test.dev  ",
+        included_units=1_000,
+        price_usd_monthly=0,
+    )
+    assert record.billing_email == "email@test.dev"
+
+
 # ---------------------------------------------------------------------------
 # update_subscription
 # ---------------------------------------------------------------------------
@@ -239,6 +368,36 @@ def test_update_subscription_mutates_billing_email(store: SubscriptionMeterStore
     assert updated.billing_email == "updated@test.dev"
 
 
+def test_update_subscription_mutates_included_units(store: SubscriptionMeterStore) -> None:
+    sub = store.list_subscriptions(org_id="org-seed-001")[0]
+    updated = store.update_subscription(sub.subscription_id, status=sub.status, included_units=100_000)
+    assert updated is not None
+    assert updated.included_units == 100_000
+
+
+def test_update_subscription_mutates_price_usd_monthly(store: SubscriptionMeterStore) -> None:
+    sub = store.list_subscriptions(org_id="org-seed-001")[0]
+    updated = store.update_subscription(sub.subscription_id, status=sub.status, price_usd_monthly=3999)
+    assert updated is not None
+    assert updated.price_usd_monthly == 3999
+
+
+def test_update_subscription_mutates_overage_rate_usd(store: SubscriptionMeterStore) -> None:
+    sub = store.list_subscriptions(org_id="org-seed-001")[0]
+    updated = store.update_subscription(sub.subscription_id, status=sub.status, overage_rate_usd=10)
+    assert updated is not None
+    assert updated.overage_rate_usd == 10
+
+
+def test_update_subscription_overage_rate_usd_to_zero(store: SubscriptionMeterStore) -> None:
+    sub = store.list_subscriptions(org_id="org-seed-001")[0]
+    # set to non-zero first
+    store.update_subscription(sub.subscription_id, status=sub.status, overage_rate_usd=7)
+    updated = store.update_subscription(sub.subscription_id, status=sub.status, overage_rate_usd=0)
+    assert updated is not None
+    assert updated.overage_rate_usd == 0
+
+
 def test_update_subscription_merges_metadata(store: SubscriptionMeterStore) -> None:
     sub = store.list_subscriptions(org_id="org-seed-001")[0]
     updated = store.update_subscription(
@@ -262,6 +421,27 @@ def test_update_subscription_persists_in_list(store: SubscriptionMeterStore) -> 
     reloaded = store.get_subscription(sub.subscription_id)
     assert reloaded is not None
     assert reloaded.status == "past_due"
+
+
+def test_update_subscription_preserves_used_and_overage_units(store: SubscriptionMeterStore) -> None:
+    sub = store.list_subscriptions(org_id="org-seed-001")[0]
+    used_before = sub.used_units
+    overage_before = sub.overage_units
+    updated = store.update_subscription(sub.subscription_id, status="active")
+    assert updated is not None
+    assert updated.used_units == used_before
+    assert updated.overage_units == overage_before
+
+
+def test_update_subscription_billing_email_stripped(store: SubscriptionMeterStore) -> None:
+    sub = store.list_subscriptions(org_id="org-seed-001")[0]
+    updated = store.update_subscription(
+        sub.subscription_id,
+        status=sub.status,
+        billing_email="  stripped@test.dev  ",
+    )
+    assert updated is not None
+    assert updated.billing_email == "stripped@test.dev"
 
 
 # ---------------------------------------------------------------------------
@@ -323,10 +503,9 @@ def test_record_meter_event_does_not_affect_other_orgs(store: SubscriptionMeterS
 
 
 def test_record_meter_event_computes_overage_when_usage_exceeds_included_units(
-    store: SubscriptionMeterStore,
+    empty_store: SubscriptionMeterStore,
 ) -> None:
-    fresh_store = SubscriptionMeterStore()
-    sub = fresh_store.create_subscription(
+    sub = empty_store.create_subscription(
         org_id="org-overage-test",
         plan_name="pro",
         status="active",
@@ -334,22 +513,21 @@ def test_record_meter_event_computes_overage_when_usage_exceeds_included_units(
         included_units=100,
         price_usd_monthly=299,
     )
-    fresh_store.record_meter_event(
+    empty_store.record_meter_event(
         org_id="org-overage-test",
         event_type="scan",
         quantity=150,
     )
-    updated = fresh_store.get_subscription(sub.subscription_id)
+    updated = empty_store.get_subscription(sub.subscription_id)
     assert updated is not None
     assert updated.used_units == 150
     assert updated.overage_units == 50
 
 
 def test_record_meter_event_overage_is_zero_when_within_included_units(
-    store: SubscriptionMeterStore,
+    empty_store: SubscriptionMeterStore,
 ) -> None:
-    fresh_store = SubscriptionMeterStore()
-    sub = fresh_store.create_subscription(
+    sub = empty_store.create_subscription(
         org_id="org-no-overage",
         plan_name="pro",
         status="active",
@@ -357,14 +535,48 @@ def test_record_meter_event_overage_is_zero_when_within_included_units(
         included_units=1_000,
         price_usd_monthly=299,
     )
-    fresh_store.record_meter_event(
+    empty_store.record_meter_event(
         org_id="org-no-overage",
         event_type="scan",
         quantity=500,
     )
-    updated = fresh_store.get_subscription(sub.subscription_id)
+    updated = empty_store.get_subscription(sub.subscription_id)
     assert updated is not None
     assert updated.overage_units == 0
+
+
+def test_record_meter_event_exact_boundary_no_overage(empty_store: SubscriptionMeterStore) -> None:
+    sub = empty_store.create_subscription(
+        org_id="org-exact-boundary",
+        plan_name="free",
+        status="active",
+        billing_email="boundary@test.dev",
+        included_units=200,
+        price_usd_monthly=0,
+    )
+    empty_store.record_meter_event(
+        org_id="org-exact-boundary",
+        event_type="scan",
+        quantity=200,
+    )
+    updated = empty_store.get_subscription(sub.subscription_id)
+    assert updated is not None
+    assert updated.used_units == 200
+    assert updated.overage_units == 0
+
+
+def test_record_meter_event_zero_quantity_no_change(store: SubscriptionMeterStore) -> None:
+    sub_before = store.list_subscriptions(org_id="org-seed-001")[0]
+    used_before = sub_before.used_units
+    before_events = len(store.list_meter_events())
+    store.record_meter_event(
+        org_id="org-seed-001",
+        event_type="scan",
+        quantity=0,
+    )
+    sub_after = store.list_subscriptions(org_id="org-seed-001")[0]
+    assert sub_after.used_units == used_before
+    assert len(store.list_meter_events()) == before_events + 1
 
 
 # ---------------------------------------------------------------------------
@@ -432,6 +644,43 @@ def test_reset_allows_re_seed(store: SubscriptionMeterStore) -> None:
 
 
 # ---------------------------------------------------------------------------
+# reset_and_reseed()
+# ---------------------------------------------------------------------------
+
+
+def test_reset_and_reseed_clears_then_repopulates(store: SubscriptionMeterStore) -> None:
+    store.create_subscription(
+        org_id="org-extra",
+        plan_name="free",
+        status="trialing",
+        billing_email="extra@test.dev",
+        included_units=1_000,
+        price_usd_monthly=0,
+    )
+    assert len(store.list_subscriptions()) == 3
+    store.reset_and_reseed()
+    assert len(store.list_subscriptions()) == 2
+    assert len(store.list_meter_events()) == 3
+
+
+def test_reset_and_reseed_produces_clean_seeded_state(store: SubscriptionMeterStore) -> None:
+    store.reset_and_reseed()
+    subs = store.list_subscriptions()
+    assert len(subs) == 2
+    org_ids = {s.org_id for s in subs}
+    assert "org-seed-001" in org_ids
+    assert "org-seed-002" in org_ids
+
+
+def test_reset_and_reseed_called_on_empty_store_seeds_correctly(
+    empty_store: SubscriptionMeterStore,
+) -> None:
+    empty_store.reset_and_reseed()
+    assert len(empty_store.list_subscriptions()) == 2
+    assert len(empty_store.list_meter_events()) == 3
+
+
+# ---------------------------------------------------------------------------
 # as_dict()
 # ---------------------------------------------------------------------------
 
@@ -469,6 +718,27 @@ def test_as_dict_after_reset_returns_zeros(store: SubscriptionMeterStore) -> Non
     assert d["meter_events"] == 0
 
 
+def test_as_dict_after_reset_and_reseed_returns_seed_counts(store: SubscriptionMeterStore) -> None:
+    store.reset_and_reseed()
+    d = store.as_dict()
+    assert d["subscriptions"] == 2
+    assert d["meter_events"] == 3
+    assert d["ready"] is True
+
+
+# ---------------------------------------------------------------------------
+# is_ready()
+# ---------------------------------------------------------------------------
+
+
+def test_is_ready_always_returns_true(store: SubscriptionMeterStore) -> None:
+    assert store.is_ready() is True
+
+
+def test_is_ready_returns_true_on_empty_store(empty_store: SubscriptionMeterStore) -> None:
+    assert empty_store.is_ready() is True
+
+
 # ---------------------------------------------------------------------------
 # BillingStore shim and singleton accessors
 # ---------------------------------------------------------------------------
@@ -489,3 +759,17 @@ def test_singleton_is_subscription_meter_store_instance() -> None:
 def test_singleton_is_already_seeded() -> None:
     store_inst = get_subscription_meter_store()
     assert len(store_inst.list_subscriptions()) >= 2
+
+
+def test_reset_billing_store_and_reset_subscription_meter_store_are_equivalent() -> None:
+    s1 = get_billing_store()
+    reset_billing_store()
+    s2 = get_subscription_meter_store()
+    assert s1 is s2
+    assert len(s1.list_subscriptions()) >= 2
+
+
+def test_module_level_reset_reseeds_singleton(store: SubscriptionMeterStore) -> None:
+    reset_subscription_meter_store()
+    singleton = get_subscription_meter_store()
+    assert len(singleton.list_subscriptions()) >= 2
