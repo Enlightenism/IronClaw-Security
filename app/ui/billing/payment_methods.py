@@ -435,6 +435,7 @@ def _delete_method_from_db(
 
 @router.get(
     "/payment-methods",
+    operation_id="billing_get_payment_methods",
     response_model=BillingPaymentMethodsResponse | BillingPaymentMethodsNotFoundResponse,
 )
 def get_payment_methods(
@@ -529,6 +530,7 @@ def get_payment_methods(
 
 @router.post(
     "/payment-methods",
+    operation_id="billing_add_payment_method",
     response_model=AddPaymentMethodResponse,
     status_code=201,
 )
@@ -579,6 +581,7 @@ def add_payment_method(
 
 @router.patch(
     "/payment-methods/{methodid}/default",
+    operation_id="billing_set_default_payment_method",
     response_model=SetDefaultPaymentMethodResponse,
 )
 def set_default_payment_method(
@@ -615,6 +618,7 @@ def set_default_payment_method(
 
 @router.delete(
     "/payment-methods/{methodid}",
+    operation_id="billing_delete_payment_method",
     response_model=DeletePaymentMethodResponse,
 )
 def delete_payment_method(

@@ -17,12 +17,9 @@ os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
 from app.main import app as _app
 from app.ui.billing.package import PACKAGE_CATALOGUE, _get_stripe_status
-from app.ui.billing.payment_methods import router as _pm_router
 
 _MOCK_API_KEY = "test-api-key"
 _AUTH_HEADERS = {"X-API-Key": _MOCK_API_KEY}
-
-_app.include_router(_pm_router)
 
 
 @pytest.fixture()
