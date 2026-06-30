@@ -84,7 +84,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Stripe
     # ------------------------------------------------------------------
-    stripe_api_key: str = Field(default="", alias="STRIPE_API_KEY")
+    stripe_secret_key: str = Field(default="", alias="STRIPE_SECRET_KEY")
     stripe_publishable_key: str = Field(default="", alias="STRIPE_PUBLISHABLE_KEY")
     stripe_webhook_secret: str = Field(default="", alias="STRIPE_WEBHOOK_SECRET")
 
