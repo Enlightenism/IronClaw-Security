@@ -3,12 +3,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import hashlib
 import logging
+import os
 import secrets
 from typing import Any
 import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
+import stripe as stripe_lib
 
 from app.core.auth import AuthContext, get_auth_context
 from app.core.supabase_persistence import (
@@ -102,6 +104,135 @@ def _build_list_item(row: dict[str, Any]) -> dict[str, Any]:
     return item
 
 
+# ---------------------------------------------------------------------------
+# Supabase fulfillment helpers — called on checkout.session.completed
+# ---------------------------------------------------------------------------
+
+
+def _get_supabase_client():
+    """Return a Supabase client using the service-role key (bypasses RLS)."""
+    from supabase import create_client  # type: ignore[import]
+
+    url = os.environ.get("SUPABASE_URL", "")
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    if not url or not key:
+        raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set")
+    return create_client(url, key)
+
+
+def _fulfill_checkout_session(session: dict[str, Any]) -> None:
+    """
+    Idempotent fulfillment for a completed Stripe Checkout session.
+
+    Steps:
+    1. Look up payment_transactions row by stripe_session_id.
+    2. Skip if already credited (idempotency guard).
+    3. Update payment_transactions.payment_status = 'paid',
+       credited = true, credited_at = now.
+    4. Increment users.wallet_units by the package units value
+       (read from payment_transactions.units OR session metadata).
+    """
+    session_id: str = session.get("id", "")
+    if not session_id:
+        logger.error("stripe_webhook.fulfill missing session.id — skipping")
+        return
+
+    now_iso = datetime.now(UTC).isoformat()
+
+    try:
+        db = _get_supabase_client()
+
+        # Fetch the payment_transactions row
+        tx_resp = db.table("payment_transactions").select("id, user_id, units, credited, payment_status").eq("stripe_session_id", session_id).limit(1).execute()
+        rows = tx_resp.data if tx_resp and tx_resp.data else []
+
+        if not rows:
+            logger.warning(
+                "stripe_webhook.fulfill no payment_transaction found for session_id=%s — skipping",
+                session_id,
+            )
+            return
+
+        tx = rows[0]
+        tx_id: str = tx["id"]
+        user_id: str | None = tx.get("user_id")
+
+        # Idempotency guard
+        if tx.get("credited"):
+            logger.info(
+                "stripe_webhook.fulfill already credited tx_id=%s session_id=%s — skipping",
+                tx_id,
+                session_id,
+            )
+            return
+
+        # Resolve units: prefer DB row, fall back to session metadata
+        units: int = int(tx.get("units") or 0)
+        if units <= 0:
+            meta_units = session.get("metadata", {}).get("unit_credits", "0")
+            try:
+                units = int(meta_units)
+            except (ValueError, TypeError):
+                units = 0
+
+        if units <= 0:
+            logger.warning(
+                "stripe_webhook.fulfill units=0 for tx_id=%s session_id=%s — marking paid but no wallet credit",
+                tx_id,
+                session_id,
+            )
+
+        # Mark transaction paid and credited
+        db.table("payment_transactions").update(
+            {
+                "payment_status": "paid",
+                "credited": True,
+                "credited_at": now_iso,
+            }
+        ).eq("id", tx_id).execute()
+
+        # Increment user wallet_units
+        if user_id and units > 0:
+            wallet_resp = db.table("users").select("id, wallet_units").eq("id", user_id).limit(1).execute()
+            user_rows = wallet_resp.data if wallet_resp and wallet_resp.data else []
+            if user_rows:
+                current: int = int(user_rows[0].get("wallet_units") or 0)
+                db.table("users").update({"wallet_units": current + units}).eq("id", user_id).execute()
+                logger.info(
+                    "stripe_webhook.fulfill wallet_credited user_id=%s units=%d new_balance=%d tx_id=%s",
+                    user_id,
+                    units,
+                    current + units,
+                    tx_id,
+                )
+            else:
+                logger.warning(
+                    "stripe_webhook.fulfill user_not_found user_id=%s tx_id=%s — units not credited",
+                    user_id,
+                    tx_id,
+                )
+
+        logger.info(
+            "stripe_webhook.fulfill completed tx_id=%s session_id=%s units=%d",
+            tx_id,
+            session_id,
+            units,
+        )
+
+    except Exception as exc:
+        logger.error(
+            "stripe_webhook.fulfill error session_id=%s error=%s",
+            session_id,
+            exc,
+        )
+        raise
+
+
+# ---------------------------------------------------------------------------
+# POST /webhooks/stripe
+# ---------------------------------------------------------------------------
+
+
 @router.post(
     "/stripe",
     status_code=status.HTTP_200_OK,
@@ -109,10 +240,13 @@ def _build_list_item(row: dict[str, Any]) -> dict[str, Any]:
     summary="Inbound Stripe webhook receiver",
     description=(
         "Receives raw Stripe webhook events. Verifies the Stripe-Signature header "
-        "using the configured webhook secret, then dispatches all recognised "
-        "StripeWebhookEventType values through stripe_service.dispatch_webhook_event. "
-        "Unknown event types are acknowledged and logged without dispatch. "
-        "Signature failures return 400 immediately (fail-closed)."
+        "using stripe.Webhook.construct_event with the configured webhook secret, "
+        "then dispatches all recognised StripeWebhookEventType values. "
+        "On checkout.session.completed: marks payment_transactions.payment_status='paid', "
+        "flips credited=true/credited_at, and increments users.wallet_units. "
+        "Signature failures return 400 immediately (fail-closed). "
+        "Raw body is read directly from Request — no Pydantic body parser is used "
+        "to preserve HMAC signature integrity."
     ),
     tags=["webhooks", "billing"],
 )
@@ -121,6 +255,7 @@ async def stripe_webhook_receiver(
     stripe_signature: str | None = Header(default=None, alias="stripe-signature"),
     stripe_svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
+    # Must read raw bytes — Pydantic body parsing would corrupt the HMAC check
     raw_body: bytes = await request.body()
 
     if not raw_body:
@@ -135,35 +270,56 @@ async def stripe_webhook_receiver(
             detail="stripe_webhook_missing_signature",
         )
 
+    # Resolve webhook secret
+    webhook_secret: str = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+
+    # Construct and verify event via stripe.Webhook.construct_event
+    # This is the canonical HMAC verification path Stripe requires.
     try:
-        verify_result = stripe_svc.verify_webhook_signature(
-            payload=raw_body,
-            signature_header=stripe_signature,
-        )
+        if webhook_secret:
+            event = stripe_lib.Webhook.construct_event(
+                payload=raw_body,
+                sig_header=stripe_signature,
+                secret=webhook_secret,
+            )
+            verified_payload: dict[str, Any] = dict(event)
+        else:
+            # Fallback to service-layer verification when secret is managed there
+            verify_result = stripe_svc.verify_webhook_signature(
+                payload=raw_body,
+                signature_header=stripe_signature,
+            )
+            if not verify_result.valid:
+                logger.warning(
+                    "stripe_webhook.signature_invalid error=%s",
+                    verify_result.error,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="stripe_webhook_signature_invalid",
+                )
+            verified_payload = verify_result.payload
+
+    except stripe_lib.error.SignatureVerificationError as exc:
+        logger.warning("stripe_webhook.signature_verification_failed error=%s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="stripe_webhook_signature_invalid",
+        ) from exc
     except StripeConfigError as exc:
         logger.error("stripe_webhook.config_error error=%s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="stripe_webhook_not_configured",
         ) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.warning("stripe_webhook.signature_verification_failed error=%s", exc)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="stripe_webhook_signature_invalid",
         ) from exc
-
-    if not verify_result.valid:
-        logger.warning(
-            "stripe_webhook.signature_invalid error=%s",
-            verify_result.error,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="stripe_webhook_signature_invalid",
-        )
-
-    verified_payload: dict[str, Any] = verify_result.payload
 
     event_type_raw: str = verified_payload.get("type", "")
     event_id: str = verified_payload.get("id", _generate_id())
@@ -174,6 +330,27 @@ async def stripe_webhook_receiver(
         event_type_raw,
     )
 
+    # ---------------------------------------------------------------------------
+    # checkout.session.completed — primary fulfillment path
+    # ---------------------------------------------------------------------------
+    if event_type_raw == "checkout.session.completed":
+        session_obj = verified_payload.get("data", {}).get("object", {})
+        try:
+            _fulfill_checkout_session(session_obj)
+        except Exception as exc:
+            logger.error(
+                "stripe_webhook.fulfill_failed event_id=%s error=%s",
+                event_id,
+                exc,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="stripe_webhook_fulfill_failed",
+            ) from exc
+
+    # ---------------------------------------------------------------------------
+    # Dispatch remaining recognised event types through StripeService
+    # ---------------------------------------------------------------------------
     if event_type_raw in _STRIPE_DISPATCHABLE_EVENTS:
         try:
             stripe_svc.dispatch_webhook_event(verified_payload)
@@ -208,6 +385,11 @@ async def stripe_webhook_receiver(
             "event_type": event_type_raw,
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /webhooks/subscriptions
+# ---------------------------------------------------------------------------
 
 
 @router.post(
@@ -279,6 +461,11 @@ async def create_webhook_subscription(
     )
 
 
+# ---------------------------------------------------------------------------
+# GET /webhooks/subscriptions
+# ---------------------------------------------------------------------------
+
+
 @router.get(
     "/subscriptions",
     status_code=status.HTTP_200_OK,
@@ -319,6 +506,11 @@ async def list_webhook_subscriptions(
     )
 
 
+# ---------------------------------------------------------------------------
+# GET /webhooks/subscriptions/{subscription_id}
+# ---------------------------------------------------------------------------
+
+
 @router.get(
     "/subscriptions/{subscription_id}",
     status_code=status.HTTP_200_OK,
@@ -349,6 +541,11 @@ async def get_webhook_subscription(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="subscription_not_found")
 
     return JSONResponse(status_code=status.HTTP_200_OK, content=_build_list_item(row))
+
+
+# ---------------------------------------------------------------------------
+# PATCH /webhooks/subscriptions/{subscription_id}
+# ---------------------------------------------------------------------------
 
 
 @router.patch(
@@ -435,6 +632,11 @@ async def update_webhook_subscription(
     return JSONResponse(status_code=status.HTTP_200_OK, content=_build_list_item(updated))
 
 
+# ---------------------------------------------------------------------------
+# DELETE /webhooks/subscriptions/{subscription_id}
+# ---------------------------------------------------------------------------
+
+
 @router.delete(
     "/subscriptions/{subscription_id}",
     status_code=status.HTTP_200_OK,
@@ -476,6 +678,11 @@ async def delete_webhook_subscription(
         status_code=status.HTTP_200_OK,
         content={"deleted": True, "id": subscription_id},
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /webhooks/subscriptions/{subscription_id}/rotate-secret
+# ---------------------------------------------------------------------------
 
 
 @router.post(
@@ -535,6 +742,11 @@ async def rotate_webhook_secret(
     )
 
 
+# ---------------------------------------------------------------------------
+# POST /webhooks/test
+# ---------------------------------------------------------------------------
+
+
 @router.post(
     "/test",
     status_code=status.HTTP_200_OK,
@@ -569,6 +781,11 @@ async def test_webhook_dispatch(
     except Exception as exc:
         logger.error("webhooks.test_dispatch tenant_id=%s error=%s", tenant_id, exc)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="dispatch_failed") from exc
+
+
+# ---------------------------------------------------------------------------
+# GET /webhooks/deliveries
+# ---------------------------------------------------------------------------
 
 
 @router.get(
@@ -615,6 +832,11 @@ async def list_webhook_deliveries(
     )
 
 
+# ---------------------------------------------------------------------------
+# GET /webhooks/deliveries/retryable
+# ---------------------------------------------------------------------------
+
+
 @router.get(
     "/deliveries/retryable",
     status_code=status.HTTP_200_OK,
@@ -634,6 +856,11 @@ async def list_retryable_webhook_deliveries(
     except Exception as exc:
         logger.error("webhooks.list_retryable_deliveries error=%s", exc)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="list_failed") from exc
+
+
+# ---------------------------------------------------------------------------
+# POST /webhooks/deliveries/{delivery_id}/retry
+# ---------------------------------------------------------------------------
 
 
 @router.post(
@@ -689,6 +916,11 @@ async def retry_webhook_delivery(
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
 
+# ---------------------------------------------------------------------------
+# GET /webhooks/events
+# ---------------------------------------------------------------------------
+
+
 @router.get(
     "/events",
     status_code=status.HTTP_200_OK,
@@ -701,6 +933,11 @@ async def list_supported_events(
         status_code=status.HTTP_200_OK,
         content={"events": sorted(_SUPPORTED_EVENTS)},
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /webhooks/stripe/events
+# ---------------------------------------------------------------------------
 
 
 @router.get(
