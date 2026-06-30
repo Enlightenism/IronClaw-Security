@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 import stripe as stripe_lib
 
 from app.core.auth import AuthContext, get_auth_context
+from app.core.supabase import get_supabase_service_client
 from app.core.supabase_persistence import (
     PersistenceError,
 )
@@ -109,17 +110,6 @@ def _build_list_item(row: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _get_supabase_client():
-    """Return a Supabase client using the service-role key (bypasses RLS)."""
-    from supabase import create_client  # type: ignore[import]
-
-    url = os.environ.get("SUPABASE_URL", "")
-    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
-    if not url or not key:
-        raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set")
-    return create_client(url, key)
-
-
 def _fulfill_checkout_session(session: dict[str, Any]) -> None:
     """
     Idempotent fulfillment for a completed Stripe Checkout session.
@@ -140,7 +130,7 @@ def _fulfill_checkout_session(session: dict[str, Any]) -> None:
     now_iso = datetime.now(UTC).isoformat()
 
     try:
-        db = _get_supabase_client()
+        db = get_supabase_service_client()
 
         # Fetch the payment_transactions row
         tx_resp = db.table("payment_transactions").select("id, user_id, units, credited, payment_status").eq("stripe_session_id", session_id).limit(1).execute()
