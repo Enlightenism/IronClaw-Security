@@ -128,16 +128,15 @@ def _router_label(ui_router: APIRouter) -> str:
     return f"{prefix} ({route_count} routes)"
 
 
-def _route_key(route: object) -> tuple[str, tuple[str, ...], str | None]:
+def _route_key(route: object) -> tuple[str, tuple[str, ...]]:
     path = str(getattr(route, "path", ""))
     methods = tuple(sorted(cast("set[str]", getattr(route, "methods", set()) or set())))
-    operation_id: str | None = getattr(route, "operation_id", None)
-    return (path, methods, operation_id)
+    return (path, methods)
 
 
 def validate_ui_routers() -> None:
     seen_router_objects: set[int] = set()
-    seen_route_keys: dict[tuple[str, tuple[str, ...], str | None], str] = {}
+    seen_route_keys: dict[tuple[str, tuple[str, ...]], str] = {}
 
     for ui_router in UI_ROUTERS:
         router_id = id(ui_router)
@@ -157,8 +156,8 @@ def validate_ui_routers() -> None:
 
             key = _route_key(route)
             if key in seen_route_keys:
-                path_str, methods_tuple, op_id = key
-                raise ValueError(f"duplicate UI route registration detected: {path_str} {list(methods_tuple)} (operation_id={op_id!r}) already registered under {seen_route_keys[key]}")
+                path_str, methods_tuple = key
+                raise ValueError(f"duplicate UI route registration detected: {path_str} {list(methods_tuple)} already registered under {seen_route_keys[key]}")
 
             seen_route_keys[key] = label
 
