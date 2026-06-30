@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -24,9 +24,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
+# Public webhook router — NO auth dependency; Stripe signature is the auth.
+webhook_router = APIRouter(tags=["billing"])
+
 # ---------------------------------------------------------------------------
-# StripeService dependency — injected so tests can patch without touching
-# app internals. Tests patch app.routers.stripe_router.get_stripe_service.
+# StripeService dependency
 # ---------------------------------------------------------------------------
 
 _stripe_service_instance: StripeService | None = None
@@ -45,17 +47,12 @@ def _resolve_org_id(auth: AuthContext) -> str:
 
 
 def _resolve_customer_id(svc: StripeService, org_id: str) -> str | None:
-    """
-    Look up the Stripe customer_id for an org.
-    Uses the internal mapping directly — resolve_customer_id is not a public
-    method on StripeService; the canonical lookup is _org_customer_map.
-    """
     with svc._lock:  # noqa: SLF001
         return svc._org_customer_map.get(org_id)  # noqa: SLF001
 
 
 # ---------------------------------------------------------------------------
-# Request / Response schemas (router-local — stripe_service owns data shapes)
+# Request / Response schemas
 # ---------------------------------------------------------------------------
 
 
@@ -121,6 +118,37 @@ def _stripe_error_response(exc: StripeServiceError, detail: str, http_status: in
         status_code=http_status,
         content={"error": detail, "message": str(exc)},
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /webhooks/stripe  — Stripe inbound webhook (NO auth dependency)
+# ---------------------------------------------------------------------------
+
+
+@webhook_router.post(
+    "/webhooks/stripe",
+    status_code=status.HTTP_200_OK,
+    summary="Receive and process Stripe webhook events",
+    description=("Inbound endpoint for Stripe webhook delivery. Verifies the stripe-signature header using STRIPE_WEBHOOK_SECRET. Handles: checkout.session.completed (credits units), invoice.payment_succeeded, customer.subscription.deleted, payment_intent.succeeded, charge.succeeded."),
+    tags=["billing"],
+)
+async def stripe_webhook(
+    request: Request,
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+
+    try:
+        result = svc.handle_webhook(payload=payload, sig_header=sig_header)
+    except StripeServiceError as exc:
+        logger.warning("stripe_webhook.rejected error=%s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"webhook_rejected: {exc}",
+        ) from exc
+
+    return JSONResponse(status_code=status.HTTP_200_OK, content=result)
 
 
 # ---------------------------------------------------------------------------

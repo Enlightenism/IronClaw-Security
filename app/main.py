@@ -127,6 +127,7 @@ def _agent_protected_dependencies(agent_id_param: str = "agent_id") -> list[Any]
 
 def _public_router_configs() -> list[tuple[Any, dict[str, Any]]]:
     scan_router = _optional_router("app.api.scan")
+    stripe_webhook_router = _optional_attr("app.routers.stripe_router", "webhook_router")
     return [
         (_optional_router("app.api.system"), {}),
         (_optional_router("app.api.ui_status"), {}),
@@ -137,6 +138,7 @@ def _public_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (_optional_router("app.api.router"), {}),
         (_optional_router("app.api.actionusage"), {}),
         (_optional_router("app.api.region_status"), {}),
+        (stripe_webhook_router, {}),
     ]
 
 
