@@ -150,6 +150,30 @@ class _SecretsVault:
         return os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
     # ------------------------------------------------------------------
+    # Stripe
+    # ------------------------------------------------------------------
+    @staticmethod
+    def stripe_secret_key() -> str:
+        """Stripe secret key (sk_test_... or sk_live_...).
+        Env var: STRIPE_SECRET_KEY — must match .env exactly.
+        Used by stripe_service.py for all Stripe API calls."""
+        return os.getenv("STRIPE_SECRET_KEY", "")
+
+    @staticmethod
+    def stripe_publishable_key() -> str:
+        """Stripe publishable key (pk_test_... or pk_live_...).
+        Env var: STRIPE_PUBLISHABLE_KEY — must match .env exactly.
+        Returned to frontend for Stripe.js initialisation."""
+        return os.getenv("STRIPE_PUBLISHABLE_KEY", "")
+
+    @staticmethod
+    def stripe_webhook_secret() -> str:
+        """Stripe webhook signing secret (whsec_...).
+        Env var: STRIPE_WEBHOOK_SECRET — must match .env exactly.
+        Used by stripe_service.py for HMAC webhook signature verification."""
+        return os.getenv("STRIPE_WEBHOOK_SECRET", "")
+
+    # ------------------------------------------------------------------
     # Groq / AI
     # ------------------------------------------------------------------
     @staticmethod
