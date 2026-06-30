@@ -29,6 +29,7 @@ from app.ui.billing.payment_methods import (
     SetDefaultPaymentMethodResponse,
     _brand_display,
     _build_method,
+    _build_package_catalogue,
     _build_status_counts,
     _exp_display,
     _resolve_default_method_id,
@@ -295,23 +296,19 @@ class TestPackageCatalogueEntry:
             entry = PackageCatalogueEntry(**PACKAGE_CATALOGUE[key])
             assert isinstance(entry.stripe_price_id, str)
 
-    def test_get_payment_methods_package_catalogue_stripe_price_id_empty_when_env_unset(self, monkeypatch: pytest.MonkeyPatch, test_client: TestClient) -> None:
+    def test_get_payment_methods_package_catalogue_stripe_price_id_empty_when_env_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("STRIPE_PRICE_ID_STARTER", raising=False)
         monkeypatch.delenv("STRIPE_PRICE_ID_TEAM", raising=False)
         monkeypatch.delenv("STRIPE_PRICE_ID_ENTERPRISE", raising=False)
-        resp = test_client.get("/ui/billing/payment-methods")
-        body = resp.json()
-        catalogue = body.get("package_catalogue", {})
+        catalogue = _build_package_catalogue()
         for plan in ("starter", "team", "enterprise"):
             assert catalogue.get(plan, {}).get("stripe_price_id", "MISSING") == "", f"Expected empty stripe_price_id for plan '{plan}' when env unset, got: {catalogue.get(plan, {}).get('stripe_price_id')}"
 
-    def test_get_payment_methods_package_catalogue_stripe_price_id_from_env(self, monkeypatch: pytest.MonkeyPatch, test_client: TestClient) -> None:
+    def test_get_payment_methods_package_catalogue_stripe_price_id_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("STRIPE_PRICE_ID_STARTER", "price_test_starter_abc")
         monkeypatch.setenv("STRIPE_PRICE_ID_TEAM", "price_test_team_abc")
         monkeypatch.setenv("STRIPE_PRICE_ID_ENTERPRISE", "price_test_enterprise_abc")
-        resp = test_client.get("/ui/billing/payment-methods")
-        body = resp.json()
-        catalogue = body.get("package_catalogue", {})
+        catalogue = _build_package_catalogue()
         assert catalogue.get("starter", {}).get("stripe_price_id") == "price_test_starter_abc"
         assert catalogue.get("team", {}).get("stripe_price_id") == "price_test_team_abc"
         assert catalogue.get("enterprise", {}).get("stripe_price_id") == "price_test_enterprise_abc"

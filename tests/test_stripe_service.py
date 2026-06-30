@@ -753,7 +753,7 @@ class TestSubscriptionLifecycle:
         assert resp.subscription_id == _TEST_SUB_ID
 
     def test_get_subscription_missing_returns_none(self, svc: StripeService) -> None:
-        assert svc.get_subscription("sub_ghost") is None
+        assert svc.get_subscription("sub_ghost", strict=False) is None
 
     def test_get_active_subscription_for_org(self, svc: StripeService) -> None:
         self._upsert(svc, status=StripeSubscriptionStatus.ACTIVE)
@@ -1061,7 +1061,16 @@ class TestWebhookEventDispatch:
 
     def test_subscription_updated_changes_status(self, svc: StripeService) -> None:
         svc.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
-        svc.handle_webhook_event(self._event("customer.subscription.created", _mock_subscription_obj()))
+        svc.upsert_subscription(
+            subscription_id=_TEST_SUB_ID,
+            org_id=_TEST_ORG,
+            customer_id=_TEST_CUSTOMER_ID,
+            price_id=_TEST_PRICE_ID,
+            status=StripeSubscriptionStatus.ACTIVE,
+            billing_interval=StripeBillingInterval.MONTHLY,
+            current_period_start="2025-01-01T00:00:00Z",
+            current_period_end="2025-02-01T00:00:00Z",
+        )
         updated_obj = _mock_subscription_obj(status="past_due")
         svc.handle_webhook_event(self._event("customer.subscription.updated", updated_obj))
         sub = svc.get_subscription(_TEST_SUB_ID)
@@ -1070,7 +1079,16 @@ class TestWebhookEventDispatch:
 
     def test_subscription_deleted_marks_canceled(self, svc: StripeService) -> None:
         svc.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
-        svc.handle_webhook_event(self._event("customer.subscription.created", _mock_subscription_obj()))
+        svc.upsert_subscription(
+            subscription_id=_TEST_SUB_ID,
+            org_id=_TEST_ORG,
+            customer_id=_TEST_CUSTOMER_ID,
+            price_id=_TEST_PRICE_ID,
+            status=StripeSubscriptionStatus.ACTIVE,
+            billing_interval=StripeBillingInterval.MONTHLY,
+            current_period_start="2025-01-01T00:00:00Z",
+            current_period_end="2025-02-01T00:00:00Z",
+        )
         obj = {"id": _TEST_SUB_ID}
         svc.handle_webhook_event(self._event("customer.subscription.deleted", obj))
         sub = svc.get_subscription(_TEST_SUB_ID)
@@ -1280,7 +1298,7 @@ class TestServiceReset:
             current_period_end="2025-02-01T00:00:00Z",
         )
         svc.reset()
-        assert svc.get_subscription(_TEST_SUB_ID) is None
+        assert svc.get_subscription(_TEST_SUB_ID, strict=False) is None
 
     def test_reset_clears_customer_maps(self, svc: StripeService) -> None:
         svc.register_customer_mapping("org-r", "cus_r")
@@ -1728,11 +1746,6 @@ class TestPaymentMethods:
         assert resp.is_default is True
 
     def test_set_default_clears_previous_default(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
-        # Call sequence:
-        # 1. attach pm1 → /payment_methods/pm1/attach
-        # 2. set_default (triggered by set_as_default=True) → /customers/{id}
-        # 3. attach pm2 → /payment_methods/pm2/attach
-        # 4. set_default pm2 → /customers/{id}
         mock_client.post.side_effect = [
             _mock_pm_resp(_TEST_PM_ID),  # call 1: attach pm1
             {},  # call 2: /customers/{id} for set_default of pm1

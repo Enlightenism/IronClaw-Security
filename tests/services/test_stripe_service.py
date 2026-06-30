@@ -755,7 +755,7 @@ class TestResetClearsAllState:
             current_period_end="2026-02-01T00:00:00Z",
         )
         svc.reset()
-        assert svc.get_subscription(_SUB_ID) is None
+        assert svc.get_subscription(_SUB_ID, strict=False) is None
 
     def test_reset_clears_customer_org_maps(self, svc: StripeService) -> None:
         svc.register_customer_mapping("org-rst-a", "cus_rst_a")
@@ -1588,9 +1588,9 @@ class TestGetSubscriptionStrict:
         assert missing_id in str(exc_info.value)
 
     def test_get_subscription_non_strict_returns_none_when_not_found(self, svc: StripeService) -> None:
-        result = svc.get_subscription("sub_does_not_exist")
+        result = svc.get_subscription("sub_does_not_exist", strict=False)
         assert result is None
 
     def test_get_subscription_non_strict_does_not_raise(self, svc: StripeService) -> None:
-        result = svc.get_subscription("sub_does_not_exist_no_raise")
+        result = svc.get_subscription("sub_does_not_exist_no_raise", strict=False)
         assert result is None
