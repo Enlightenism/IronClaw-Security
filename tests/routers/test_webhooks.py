@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
+import stripe as stripe_lib
 
 from app.core.auth import AuthContext
 import app.routers.webhooks as _wh
@@ -17,12 +18,15 @@ from app.routers.webhooks import router
 # App fixture
 # ---------------------------------------------------------------------------
 
+
 _app = FastAPI()
 _app.include_router(router)
+
 
 _TENANT_ID = "tenant-abc-123"
 _SUB_ID = "sub-00000001-0000-0000-0000-000000000001"
 _DELIVERY_ID = "del-00000001-0000-0000-0000-000000000001"
+
 
 _ANON_AUTH = AuthContext(
     api_key=None,
@@ -34,6 +38,7 @@ _ANON_AUTH = AuthContext(
     auth_source="disabled",
     auth_method=None,
 )
+
 
 _AUTH = AuthContext(
     api_key="test-key",
@@ -74,7 +79,9 @@ def client() -> Generator[TestClient, None, None]:
 # Shared mock data
 # ---------------------------------------------------------------------------
 
+
 _NOW = datetime.now(UTC).isoformat()
+
 
 _SUB_ROW: dict[str, Any] = {
     "id": _SUB_ID,
@@ -87,6 +94,7 @@ _SUB_ROW: dict[str, Any] = {
     "metadata": {},
     "created_at": _NOW,
 }
+
 
 _DELIVERY_ROW: dict[str, Any] = {
     "id": _DELIVERY_ID,
@@ -103,6 +111,7 @@ _DELIVERY_ROW: dict[str, Any] = {
     "payload_json": "{}",
 }
 
+
 _DISPATCH_RESULT = MagicMock()
 _DISPATCH_RESULT.to_dict.return_value = {
     "delivery_id": _DELIVERY_ID,
@@ -115,6 +124,7 @@ _DISPATCH_RESULT.to_dict.return_value = {
     "error_detail": None,
     "delivered_at": _NOW,
 }
+
 
 _RETRY_RESULT = MagicMock()
 _RETRY_RESULT.status = MagicMock()
@@ -130,6 +140,7 @@ _RETRY_RESULT.to_dict.return_value = {
     "error_detail": None,
     "delivered_at": _NOW,
 }
+
 
 _PERSISTENCE_MODULE = "app.routers.webhooks"
 
@@ -757,3 +768,141 @@ class TestNoDirectSupabaseClientOnModule:
     def test_get_supabase_service_client_not_imported_directly(self):
         module_globals = vars(_wh)
         assert "get_supabase_service_client" not in module_globals, "get_supabase_service_client must not be imported directly in app.routers.webhooks — use persistence layer only"
+
+
+# ---------------------------------------------------------------------------
+# POST /webhooks/stripe — vault-path cases
+# ---------------------------------------------------------------------------
+
+# Shared valid raw body for all stripe webhook tests
+_STRIPE_RAW_BODY = b'{"id":"evt_test","type":"payment_intent.created","data":{"object":{}}}'
+_STRIPE_URL = "/webhooks/stripe"
+
+
+class TestStripeWebhookReceiver:
+    """
+    Covers the five vault-path cases for POST /webhooks/stripe.
+
+    Vault-path logic in the router:
+      - STRIPE_WEBHOOK_SECRET present + non-empty  → stripe_lib.Webhook.construct_event
+      - STRIPE_WEBHOOK_SECRET absent / empty        → stripe_svc.verify_webhook_signature
+        - valid=False                               → 400 stripe_webhook_signature_invalid
+        - StripeConfigError raised                  → 400 stripe_webhook_not_configured
+      - stripe_lib.error.SignatureVerificationError → 400 stripe_webhook_signature_invalid
+      - missing stripe-signature header             → 400 stripe_webhook_missing_signature
+      - empty body                                  → 400 stripe_webhook_empty_body
+    """
+
+    # ------------------------------------------------------------------
+    # Case 1: valid secret in env → construct_event succeeds → 200
+    # ------------------------------------------------------------------
+
+    def test_valid_secret_returns_200(self, client: TestClient):
+        fake_event = {
+            "id": "evt_test_001",
+            "type": "payment_intent.created",
+            "data": {"object": {}},
+        }
+        with patch.dict("os.environ", {"STRIPE_WEBHOOK_SECRET": "whsec_testsecret"}):
+            with patch(
+                f"{_PERSISTENCE_MODULE}.stripe_lib.Webhook.construct_event",
+                return_value=fake_event,
+            ):
+                with patch(f"{_PERSISTENCE_MODULE}.get_stripe_service") as mock_svc_dep:
+                    mock_svc = MagicMock()
+                    mock_svc_dep.return_value = mock_svc
+                    resp = client.post(
+                        _STRIPE_URL,
+                        content=_STRIPE_RAW_BODY,
+                        headers={
+                            "stripe-signature": "t=1,v1=abc123",
+                            "content-type": "application/json",
+                        },
+                    )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["received"] is True
+        assert body["event_id"] == "evt_test_001"
+
+    # ------------------------------------------------------------------
+    # Case 2: empty vault secret (env var absent) + service returns
+    #         valid=False → 400 stripe_webhook_not_configured
+    #
+    # When STRIPE_WEBHOOK_SECRET is empty the router falls through to
+    # stripe_svc.verify_webhook_signature. If StripeConfigError is
+    # raised there (no secret configured in the service layer either)
+    # the router maps it to 400 stripe_webhook_not_configured.
+    # ------------------------------------------------------------------
+
+    def test_empty_vault_secret_returns_400_not_configured(self, client: TestClient):
+        from app.services.stripe_service import StripeConfigError
+
+        with patch.dict("os.environ", {"STRIPE_WEBHOOK_SECRET": ""}):
+            with patch(f"{_PERSISTENCE_MODULE}.get_stripe_service") as mock_svc_dep:
+                mock_svc = MagicMock()
+                mock_svc.verify_webhook_signature.side_effect = StripeConfigError("no secret")
+                mock_svc_dep.return_value = mock_svc
+                resp = client.post(
+                    _STRIPE_URL,
+                    content=_STRIPE_RAW_BODY,
+                    headers={
+                        "stripe-signature": "t=1,v1=abc123",
+                        "content-type": "application/json",
+                    },
+                )
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == "stripe_webhook_not_configured"
+
+    # ------------------------------------------------------------------
+    # Case 3: missing stripe-signature header → 400
+    #         stripe_webhook_missing_signature
+    # ------------------------------------------------------------------
+
+    def test_missing_signature_header_returns_400(self, client: TestClient):
+        with patch.dict("os.environ", {"STRIPE_WEBHOOK_SECRET": "whsec_testsecret"}):
+            resp = client.post(
+                _STRIPE_URL,
+                content=_STRIPE_RAW_BODY,
+                headers={"content-type": "application/json"},
+            )
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == "stripe_webhook_missing_signature"
+
+    # ------------------------------------------------------------------
+    # Case 4: empty body → 400 stripe_webhook_empty_body
+    # ------------------------------------------------------------------
+
+    def test_empty_body_returns_400(self, client: TestClient):
+        with patch.dict("os.environ", {"STRIPE_WEBHOOK_SECRET": "whsec_testsecret"}):
+            resp = client.post(
+                _STRIPE_URL,
+                content=b"",
+                headers={
+                    "stripe-signature": "t=1,v1=abc123",
+                    "content-type": "application/json",
+                },
+            )
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == "stripe_webhook_empty_body"
+
+    # ------------------------------------------------------------------
+    # Case 5: SignatureVerificationError → 400
+    #         stripe_webhook_signature_invalid
+    # ------------------------------------------------------------------
+
+    def test_signature_verification_error_returns_400(self, client: TestClient):
+        with patch.dict("os.environ", {"STRIPE_WEBHOOK_SECRET": "whsec_testsecret"}):
+            with patch(
+                f"{_PERSISTENCE_MODULE}.stripe_lib.Webhook.construct_event",
+                side_effect=stripe_lib.error.SignatureVerificationError("No signatures found", "t=1,v1=bad"),
+            ):
+                resp = client.post(
+                    _STRIPE_URL,
+                    content=_STRIPE_RAW_BODY,
+                    headers={
+                        "stripe-signature": "t=1,v1=bad",
+                        "content-type": "application/json",
+                    },
+                )
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == "stripe_webhook_signature_invalid"

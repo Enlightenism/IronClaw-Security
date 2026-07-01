@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import hashlib
 import logging
-import os
 import secrets
 from typing import Any
 import uuid
@@ -48,8 +47,8 @@ from app.models.webhook import (
     WebhookSubscriptionResponse,
     WebhookSubscriptionUpdateRequest,
 )
+from app.services.secrets_vault import vault
 from app.services.stripe_service import (
-    StripeConfigError,
     StripeService,
     StripeWebhookEventType,
 )
@@ -179,11 +178,12 @@ def _fulfill_checkout_session(session: dict[str, Any]) -> bool:
     summary="Inbound Stripe webhook receiver",
     description=(
         "Receives raw Stripe webhook events. Verifies the Stripe-Signature header "
-        "using stripe.Webhook.construct_event with the configured webhook secret, "
-        "then dispatches all recognised StripeWebhookEventType values. "
+        "using stripe.Webhook.construct_event with the configured webhook secret "
+        "read exclusively from the secrets vault. "
         "On checkout.session.completed: marks payment_transactions.payment_status='paid', "
         "flips credited=true/credited_at, and increments users.wallet_units. "
         "Signature failures return 400 immediately (fail-closed). "
+        "Empty or missing STRIPE_WEBHOOK_SECRET returns 400 immediately. "
         "Raw body is read directly from Request — no Pydantic body parser is used "
         "to preserve HMAC signature integrity."
     ),
@@ -209,46 +209,30 @@ async def stripe_webhook_receiver(
             detail="stripe_webhook_missing_signature",
         )
 
-    # Resolve webhook secret
-    webhook_secret: str = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+    # Resolve webhook secret exclusively from vault — single source of truth
+    webhook_secret: str = vault.stripe_webhook_secret()
 
-    # Construct and verify event via stripe.Webhook.construct_event
+    if not webhook_secret:
+        logger.error("stripe_webhook.config_error error=STRIPE_WEBHOOK_SECRET is not configured")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="stripe_webhook_not_configured",
+        )
+
+    # Single verification path — no dual-path branch
     try:
-        if webhook_secret:
-            event = stripe_lib.Webhook.construct_event(
-                payload=raw_body,
-                sig_header=stripe_signature,
-                secret=webhook_secret,
-            )
-            verified_payload: dict[str, Any] = dict(event)
-        else:
-            # Fallback to service-layer verification when secret is managed there
-            verify_result = stripe_svc.verify_webhook_signature(
-                payload=raw_body,
-                signature_header=stripe_signature,
-            )
-            if not verify_result.valid:
-                logger.warning(
-                    "stripe_webhook.signature_invalid error=%s",
-                    verify_result.error,
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="stripe_webhook_signature_invalid",
-                )
-            verified_payload = verify_result.payload
+        event = stripe_lib.Webhook.construct_event(
+            payload=raw_body,
+            sig_header=stripe_signature,
+            secret=webhook_secret,
+        )
+        verified_payload: dict[str, Any] = dict(event)
 
     except stripe_lib.error.SignatureVerificationError as exc:
         logger.warning("stripe_webhook.signature_verification_failed error=%s", exc)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="stripe_webhook_signature_invalid",
-        ) from exc
-    except StripeConfigError as exc:
-        logger.error("stripe_webhook.config_error error=%s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="stripe_webhook_not_configured",
         ) from exc
     except HTTPException:
         raise
