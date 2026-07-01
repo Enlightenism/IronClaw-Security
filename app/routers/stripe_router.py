@@ -140,7 +140,7 @@ async def stripe_webhook(
     sig_header = request.headers.get("stripe-signature", "")
 
     try:
-        result = svc.handle_webhook(payload=payload, sig_header=sig_header)
+        result = svc.handle_webhook_event(payload=payload, sig_header=sig_header)
     except StripeServiceError as exc:
         logger.warning("stripe_webhook.rejected error=%s", exc)
         raise HTTPException(
