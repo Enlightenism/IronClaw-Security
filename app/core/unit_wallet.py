@@ -342,9 +342,9 @@ class SupabaseUnitWalletRepository:
     _LEDGER_TABLE = "unit_ledger"
 
     def __init__(self) -> None:
-        from app.supabaseclient import supabaseclient
+        from app.supabaseclient import get_supabase_client
 
-        self._client = supabaseclient()
+        self._client = get_supabase_client()
 
     def upsert_wallet(self, wallet: RegistryUnitWallet) -> None:
         self._client.table(self._WALLETS_TABLE).upsert(

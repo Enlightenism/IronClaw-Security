@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.auth import AuthContext, get_auth_context
 from app.services.stripe_service import (
+    PACKAGE_CATALOGUE,
+    TOKENS_PER_UNIT,
     StripeCheckoutMode,
     StripeInsufficientUnitsError,
     StripePaymentMethodNotFoundError,
@@ -55,6 +57,9 @@ def _resolve_customer_id(svc: StripeService, org_id: str) -> str | None:
 # Request / Response schemas
 # ---------------------------------------------------------------------------
 
+_VALID_CHECKOUT_MODES: frozenset[str] = frozenset(m.value for m in StripeCheckoutMode)
+_VALID_METERED_ACTIONS: frozenset[str] = frozenset({"increment", "set"})
+
 
 class CheckoutSessionCreateRequest(BaseModel):
     price_id: str = Field(..., description="Stripe Price ID for the line item")
@@ -65,6 +70,13 @@ class CheckoutSessionCreateRequest(BaseModel):
     cancel_url: str = Field(..., description="Redirect URL on cancelled payment")
     customer_id: str | None = Field(default=None, description="Existing Stripe customer_id, if known")
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, v: str) -> str:
+        if v not in _VALID_CHECKOUT_MODES:
+            raise ValueError(f"invalid mode '{v}': must be payment | subscription | setup")
+        return v
 
 
 class CheckoutSessionCompleteRequest(BaseModel):
@@ -89,10 +101,10 @@ class SetDefaultPaymentMethodRequest(BaseModel):
 class MeteredUsageSyncRequest(BaseModel):
     subscription_item_id: str = Field(
         ...,
-        description=("Stripe subscription item ID with a metered price (si_xxx). This is the subscription item, not the subscription ID."),
+        description="Stripe subscription item ID with a metered price (si_xxx). This is the subscription item, not the subscription ID.",
     )
     quantity: int = Field(..., ge=0, description="Usage quantity to report")
-    action: str = Field(default="increment", description="increment | set")
+    action: Literal["increment", "set"] = Field(default="increment", description="increment | set")
     idempotency_key: str | None = Field(default=None, description="Optional idempotency key for deduplication")
 
 
@@ -110,6 +122,25 @@ class UnitCreditRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Utility helpers
 # ---------------------------------------------------------------------------
+
+
+def _require_org_id(auth: AuthContext) -> str:
+    """Resolve org_id and raise 400 if missing. Single source of truth for this guard."""
+    org_id = _resolve_org_id(auth)
+    if not org_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
+    return org_id
+
+
+def _require_customer_id(svc: StripeService, org_id: str) -> str:
+    """Resolve customer_id and raise 404 if not registered. Single source of truth for this guard."""
+    customer_id = _resolve_customer_id(svc, org_id)
+    if not customer_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="no_stripe_customer_for_org — call POST /billing/customers first",
+        )
+    return customer_id
 
 
 def _stripe_error_response(exc: StripeServiceError, detail: str, http_status: int) -> JSONResponse:
@@ -163,8 +194,6 @@ async def stripe_webhook(
     description=("Returns all available IronClaw protection unit packages with pricing. Starter 5,000 units / $20 · Team 25,000 units / $90 · Enterprise 60,000 units / $180. Each unit covers up to 25,000 tokens with no scan ceiling. Public endpoint — no auth required."),
 )
 async def get_billing_catalogue() -> JSONResponse:
-    from app.services.stripe_service import PACKAGE_CATALOGUE, TOKENS_PER_UNIT
-
     return JSONResponse(
         status_code=status.HTTP_200_OK,
         content={
@@ -190,8 +219,6 @@ async def calculate_units(
     token_count: int = Query(..., ge=1, description="Number of tokens to cover"),
 ) -> JSONResponse:
     units = units_for_tokens(token_count)
-    from app.services.stripe_service import TOKENS_PER_UNIT
-
     return JSONResponse(
         status_code=status.HTTP_200_OK,
         content={
@@ -218,9 +245,7 @@ async def get_or_create_customer(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _resolve_org_id(auth)
-    if not org_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
+    org_id = _require_org_id(auth)
 
     try:
         customer_id = svc.get_or_create_stripe_customer(
@@ -258,17 +283,9 @@ async def create_checkout_session(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _resolve_org_id(auth)
-    if not org_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
-
-    try:
-        mode = StripeCheckoutMode(body.mode)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"invalid mode '{body.mode}': must be payment | subscription | setup",
-        ) from None
+    org_id = _require_org_id(auth)
+    # mode is already validated by CheckoutSessionCreateRequest.validate_mode
+    mode = StripeCheckoutMode(body.mode)
 
     try:
         result = svc.create_checkout_session(
@@ -325,7 +342,7 @@ async def get_checkout_session(
     "/checkout/sessions/{session_id}/complete",
     status_code=status.HTTP_200_OK,
     summary="Manually complete a checkout session and credit units",
-    description="Idempotent. Credits unit_credits to the org wallet. Intended for internal tooling and integration tests. Production fulfillment is driven by the Stripe webhook at POST /webhooks/stripe.",
+    description=("Idempotent. Credits unit_credits to the org wallet. Intended for internal tooling and integration tests. Production fulfillment is driven by the Stripe webhook at POST /webhooks/stripe."),
     tags=["billing", "checkout"],
 )
 async def complete_checkout_session(
@@ -389,10 +406,7 @@ async def get_unit_balance(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _resolve_org_id(auth)
-    if not org_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
-
+    org_id = _require_org_id(auth)
     result = svc.get_unit_balance(org_id)
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
@@ -414,10 +428,7 @@ async def debit_units(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _resolve_org_id(auth)
-    if not org_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
-
+    org_id = _require_org_id(auth)
     amount = units_for_tokens(body.token_count)
 
     try:
@@ -460,16 +471,14 @@ async def credit_units(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _resolve_org_id(auth)
-    if not org_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
+    org_id = _require_org_id(auth)
 
     try:
-        try:
-            reason_enum = StripeUnitEventReason(body.reason)
-        except ValueError:
-            reason_enum = StripeUnitEventReason.MANUAL_CREDIT
+        reason_enum = StripeUnitEventReason(body.reason)
+    except ValueError:
+        reason_enum = StripeUnitEventReason.MANUAL_CREDIT
 
+    try:
         result = svc.credit_units(
             org_id=org_id,
             units=body.units,
@@ -497,10 +506,7 @@ async def get_unit_ledger(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _resolve_org_id(auth)
-    if not org_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
-
+    org_id = _require_org_id(auth)
     result = svc.get_unit_balance(org_id)
     return JSONResponse(
         status_code=status.HTTP_200_OK,
@@ -529,9 +535,7 @@ async def sync_metered_usage(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _resolve_org_id(auth)
-    if not org_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
+    org_id = _require_org_id(auth)
 
     try:
         result = svc.report_metered_usage(
@@ -545,12 +549,13 @@ async def sync_metered_usage(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"metered_sync_error: {exc}") from exc
 
     if body.quantity > 0:
+        ref = getattr(result, "idempotency_key", None)
         try:
             svc.debit_units(
                 org_id=org_id,
                 amount=body.quantity,
                 reason=StripeUnitEventReason.METERED_SYNC,
-                reference_id=result.idempotency_key if hasattr(result, "idempotency_key") else None,
+                reference_id=ref,
             )
         except StripeInsufficientUnitsError:
             logger.warning(
@@ -580,10 +585,7 @@ async def get_metered_usage_log(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _resolve_org_id(auth)
-    if not org_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
-
+    org_id = _require_org_id(auth)
     entries = svc.get_metered_usage_log(org_id=org_id, limit=limit)
     return JSONResponse(
         status_code=status.HTTP_200_OK,
@@ -607,16 +609,8 @@ async def attach_payment_method(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _resolve_org_id(auth)
-    if not org_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
-
-    customer_id = _resolve_customer_id(svc, org_id)
-    if not customer_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="no_stripe_customer_for_org — call POST /billing/customers first",
-        )
+    org_id = _require_org_id(auth)
+    customer_id = _require_customer_id(svc, org_id)
 
     try:
         result = svc.attach_payment_method(
@@ -671,10 +665,7 @@ async def list_payment_methods(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _resolve_org_id(auth)
-    if not org_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
-
+    org_id = _require_org_id(auth)
     customer_id = _resolve_customer_id(svc, org_id)
     if not customer_id:
         return JSONResponse(
@@ -710,13 +701,8 @@ async def set_default_payment_method(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _resolve_org_id(auth)
-    if not org_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
-
-    customer_id = _resolve_customer_id(svc, org_id)
-    if not customer_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no_stripe_customer_for_org")
+    org_id = _require_org_id(auth)
+    customer_id = _require_customer_id(svc, org_id)
 
     try:
         result = svc.set_default_payment_method(
@@ -749,9 +735,7 @@ async def list_invoices(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _resolve_org_id(auth)
-    if not org_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
+    org_id = _require_org_id(auth)
 
     try:
         results = svc.get_invoices_for_org(org_id=org_id, limit=limit, force_refresh=force_refresh)
@@ -783,10 +767,7 @@ async def invalidate_invoice_cache(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _resolve_org_id(auth)
-    if not org_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
-
+    org_id = _require_org_id(auth)
     svc.invalidate_invoice_cache(org_id=org_id)
     return JSONResponse(
         status_code=status.HTTP_200_OK,
