@@ -170,13 +170,21 @@ async def stripe_webhook(
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature", "")
 
-    try:
-        result = svc.handle_webhook_event(payload=payload, sig_header=sig_header)
-    except StripeServiceError as exc:
-        logger.warning("stripe_webhook.rejected error=%s", exc)
+    verify_result = svc.verify_webhook_signature(payload=payload, signature_header=sig_header)
+    if not verify_result.valid:
+        logger.warning("stripe_webhook.signature_rejected error=%s", verify_result.error)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"webhook_rejected: {exc}",
+            detail=f"webhook_signature_invalid: {verify_result.error}",
+        )
+
+    try:
+        result = svc.handle_webhook_event(verify_result.payload)
+    except StripeServiceError as exc:
+        logger.warning("stripe_webhook.dispatch_error error=%s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"webhook_dispatch_error: {exc}",
         ) from exc
 
     return JSONResponse(status_code=status.HTTP_200_OK, content=result)
@@ -284,7 +292,6 @@ async def create_checkout_session(
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
     org_id = _require_org_id(auth)
-    # mode is already validated by CheckoutSessionCreateRequest.validate_mode
     mode = StripeCheckoutMode(body.mode)
 
     try:
@@ -481,7 +488,7 @@ async def credit_units(
     try:
         result = svc.credit_units(
             org_id=org_id,
-            units=body.units,
+            amount=body.units,
             reason=reason_enum,
             reference_id=body.reference_id,
         )
