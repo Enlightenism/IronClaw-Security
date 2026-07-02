@@ -264,7 +264,7 @@ class TestJWTDefaults:
 # ---------------------------------------------------------------------------
 
 
-class TestIronClawAuthEdgeFn:
+class TestIronClawAuthEdgeFnSettings:
     def test_ironclaw_auth_edge_fn_path_default(self, monkeypatch):
         get_settings.cache_clear()
         monkeypatch.delenv("IRONCLAW_AUTH_EDGE_FN_PATH", raising=False)
