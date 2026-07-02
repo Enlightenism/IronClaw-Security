@@ -447,7 +447,7 @@ class TestInsertTrustEvent:
 # ===========================================================================
 
 
-class TestListTrustEvents:
+class TestListTrustEventsPersistence:
     def test_returns_list_of_rows(self):
         events = [_EVENT_ROW, {**_EVENT_ROW, "event_id": "evt-abc-002"}]
         client = _make_client(events)
