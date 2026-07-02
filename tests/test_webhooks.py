@@ -443,16 +443,21 @@ class TestStripeWebhookUnknownEventType:
 
 class TestStripeWebhookConfigError:
     def test_missing_webhook_secret_returns_500(self, client: TestClient):
-        from app.services.stripe_service import StripeConfigError
-
-        mock_svc = MagicMock()
-        mock_svc.verify_webhook_signature.side_effect = StripeConfigError("STRIPE_WEBHOOK_SECRET not set")
-        _override_stripe_svc(mock_svc)
-        try:
-            resp = _post_stripe(client, "checkout.session.completed")
-            assert resp.status_code in (400, 500)
-        finally:
-            _clear_stripe_patches()
+        # The router reads vault.stripe_webhook_secret() before any stripe_svc call.
+        # Patch vault to return "" so the router's 400 guard fires — that is the
+        # correct observable behaviour: no secret → 400 (fail-closed).
+        # stripe_svc is NOT involved in this path (router calls stripe_lib directly).
+        with patch(
+            "app.routers.webhooks.vault.stripe_webhook_secret",
+            return_value="",
+        ):
+            body = json.dumps(_stripe_event("checkout.session.completed")).encode()
+            resp = client.post(
+                "/webhooks/stripe",
+                content=body,
+                headers={"stripe-signature": "t=1,v1=abc"},
+            )
+        assert resp.status_code in (400, 500)
 
     def test_dispatch_error_returns_500(self, client: TestClient):
         mock_svc = MagicMock()
@@ -533,35 +538,39 @@ class TestStripeWebhookReceiver:
             _clear_stripe_patches()
 
     def test_known_event_returns_200_received_true(self, client: TestClient):
+        # Router calls stripe_lib.Webhook.construct_event directly — bypass real HMAC.
         svc = self._mock_svc()
+        event_dict = _stripe_event(StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value)
         _override_stripe_svc(svc)
         try:
-            resp = client.post(
-                self._URL,
-                content=json.dumps(_stripe_event(StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value)).encode(),
-                headers={"stripe-signature": "t=1,v1=abc"},
-            )
+            with patch(
+                "stripe.Webhook.construct_event",
+                return_value=event_dict,
+            ):
+                resp = client.post(
+                    self._URL,
+                    content=json.dumps(event_dict).encode(),
+                    headers={"stripe-signature": "t=1,v1=abc"},
+                )
             assert resp.status_code == 200
-            assert resp.json().get("received") is True or resp.json().get("status") in ("processed", "acknowledged", None) or True
+            assert resp.json().get("received") is True
         finally:
             _clear_stripe_patches()
 
     def test_unknown_event_type_returns_200_acknowledged(self, client: TestClient):
         svc = self._mock_svc()
-        svc.verify_webhook_signature.return_value = MagicMock(
-            valid=True,
-            event_type="some.unknown.event",
-            event_id="evt_unknown_001",
-            error=None,
-            payload=_stripe_event("some.unknown.event"),
-        )
+        event_dict = _stripe_event("some.unknown.event", "evt_unknown_001")
         _override_stripe_svc(svc)
         try:
-            resp = client.post(
-                self._URL,
-                content=json.dumps(_stripe_event("some.unknown.event")).encode(),
-                headers={"stripe-signature": "t=1,v1=abc"},
-            )
+            with patch(
+                "stripe.Webhook.construct_event",
+                return_value=event_dict,
+            ):
+                resp = client.post(
+                    self._URL,
+                    content=json.dumps(event_dict).encode(),
+                    headers={"stripe-signature": "t=1,v1=abc"},
+                )
             assert resp.status_code == 200
             svc.dispatch_webhook_event.assert_not_called()
         finally:
@@ -570,13 +579,18 @@ class TestStripeWebhookReceiver:
     def test_dispatch_raises_returns_500(self, client: TestClient):
         svc = self._mock_svc()
         svc.dispatch_webhook_event.side_effect = RuntimeError("billing service down")
+        event_dict = _stripe_event(StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value)
         _override_stripe_svc(svc)
         try:
-            resp = client.post(
-                self._URL,
-                content=json.dumps(_stripe_event(StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value)).encode(),
-                headers={"stripe-signature": "t=1,v1=abc"},
-            )
+            with patch(
+                "stripe.Webhook.construct_event",
+                return_value=event_dict,
+            ):
+                resp = client.post(
+                    self._URL,
+                    content=json.dumps(event_dict).encode(),
+                    headers={"stripe-signature": "t=1,v1=abc"},
+                )
             assert resp.status_code == 500
         finally:
             _clear_stripe_patches()
