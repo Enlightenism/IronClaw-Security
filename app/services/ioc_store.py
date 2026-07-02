@@ -561,7 +561,24 @@ class IOCStore:
             return False
         try:
             table = client.table(_TABLE_INGEST_LOG)
-            table.insert(_ingest_result_to_row(result)).execute()
+            row = _ingest_result_to_row(result)
+            try:
+                table.upsert(row, on_conflict="ingest_id").execute()
+            except Exception:
+                # upsert not supported by this client version — fall back to
+                # insert and silently swallow the duplicate-key 409 so the
+                # scheduler can re-trigger without crashing.
+                try:
+                    table.insert(row).execute()
+                except Exception as inner_exc:
+                    err_str = str(inner_exc)
+                    if "409" in err_str or "duplicate key" in err_str or "unique constraint" in err_str:
+                        logger.debug(
+                            "ioc_store.persist_ingest_result.duplicate_skipped ingest_id=%s",
+                            result.ingest_id,
+                        )
+                        return True
+                    raise
             return True
         except Exception as exc:
             logger.error(
@@ -679,6 +696,7 @@ CREATE TABLE IF NOT EXISTS ioc_records (
 );
 
 
+
 CREATE INDEX IF NOT EXISTS idx_ioc_records_value       ON ioc_records (value);
 CREATE INDEX IF NOT EXISTS idx_ioc_records_ioc_type    ON ioc_records (ioc_type);
 CREATE INDEX IF NOT EXISTS idx_ioc_records_source      ON ioc_records (source);
@@ -690,6 +708,7 @@ CREATE INDEX IF NOT EXISTS idx_ioc_records_cve_id      ON ioc_records (cve_id);
 CREATE INDEX IF NOT EXISTS idx_ioc_records_expiry      ON ioc_records (expiry) WHERE expiry IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_ioc_records_ingest_id   ON ioc_records (feed_ingest_id);
 CREATE INDEX IF NOT EXISTS idx_ioc_records_tags        ON ioc_records USING GIN (tags);
+
 
 
 -- ============================================================
@@ -709,6 +728,7 @@ CREATE TABLE IF NOT EXISTS feed_ingest_log (
     org_id          TEXT,
     metadata        JSONB NOT NULL DEFAULT '{}'
 );
+
 
 
 CREATE INDEX IF NOT EXISTS idx_feed_ingest_log_source     ON feed_ingest_log (source);
