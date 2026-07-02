@@ -42,7 +42,7 @@ def _patch_no_fallback():
 # ---------------------------------------------------------------------------
 
 
-class TestGetSecretKeySentinel:
+class TestGetSecretKeySentinelAuthSecrets:
     def test_exact_sentinel_returns_none(self) -> None:
         assert _get_secret_key(_req(SimpleNamespace(secret_key=_SECRET_KEY_SENTINEL))) is None
 
@@ -83,7 +83,7 @@ class TestGetSecretKeySentinel:
 # ---------------------------------------------------------------------------
 
 
-class TestGetSecretKeyRealValue:
+class TestGetSecretKeyRealValueAuthSecrets:
     def test_real_key_is_returned(self) -> None:
         real = "ironclaw-real-secret-key-xyzabc!"
         assert _get_secret_key(_req(SimpleNamespace(secret_key=real))) == real
@@ -118,7 +118,7 @@ class TestGetSecretKeyRealValue:
 # ---------------------------------------------------------------------------
 
 
-class TestGetJwtSecretSentinel:
+class TestGetJwtSecretSentinelAuthSecrets:
     def test_exact_sentinel_returns_none(self) -> None:
         assert _get_jwt_secret(_req(SimpleNamespace(jwt_secret=_JWT_SECRET_SENTINEL))) is None
 
@@ -159,7 +159,7 @@ class TestGetJwtSecretSentinel:
 # ---------------------------------------------------------------------------
 
 
-class TestGetJwtSecretRealValue:
+class TestGetJwtSecretRealValueAuthSecrets:
     def test_real_jwt_secret_is_returned(self) -> None:
         real = "ironclaw-real-jwt-secret-xyzabc!"
         assert _get_jwt_secret(_req(SimpleNamespace(jwt_secret=real))) == real

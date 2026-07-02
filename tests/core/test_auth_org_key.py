@@ -103,7 +103,7 @@ def test_create_org_key_returns_record_with_key_type_org(org_id: str) -> None:
     assert record.key_type == "org"
 
 
-def test_create_org_key_sets_org_id(org_id: str) -> None:
+def test_create_org_key_sets_org_id_auth_org_key(org_id: str) -> None:
     record = create_org_key(org_id, "Test Org Key")
     assert record.org_id == org_id
 
