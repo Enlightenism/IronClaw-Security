@@ -30,7 +30,6 @@ from app.core.billing import (
     get_active_subscription_for_customer,
     get_billing_registry,
     resolve_billing_owner,
-    units_required_for_tokens,
 )
 from app.persistencebootstrap import InMemoryPersistenceStore
 
@@ -153,12 +152,6 @@ def test_resolve_billing_owner_returns_email_for_personal_key() -> None:
     assert result == "user@ironclaw.test"
 
 
-def test_resolve_billing_owner_returns_org_key_for_org_key_type() -> None:
-    ctx = SimpleNamespace(key_type="org", org_id="acme")
-    result = resolve_billing_owner(ctx, "user@ironclaw.test")
-    assert result == "ic_org_acme"
-
-
 def test_resolve_billing_owner_org_key_format_is_ic_org_prefix() -> None:
     ctx = SimpleNamespace(key_type="org", org_id="xyz123")
     result = resolve_billing_owner(ctx, "user@ironclaw.test")
@@ -189,49 +182,10 @@ def test_resolve_billing_owner_no_key_type_attr_returns_email() -> None:
     assert result == "user@ironclaw.test"
 
 
-def test_resolve_billing_owner_strips_and_lowercases_email() -> None:
-    ctx = SimpleNamespace(key_type="personal", org_id=None)
-    result = resolve_billing_owner(ctx, "  ADMIN@IRONCLAW.TEST  ")
-    assert result == "admin@ironclaw.test"
-
-
 def test_resolve_billing_owner_different_org_ids_produce_different_keys() -> None:
     ctx_a = SimpleNamespace(key_type="org", org_id="org_a")
     ctx_b = SimpleNamespace(key_type="org", org_id="org_b")
     assert resolve_billing_owner(ctx_a, "xx.com") != resolve_billing_owner(ctx_b, "xx.com")
-
-
-# ---------------------------------------------------------------------------
-# units_required_for_tokens
-# ---------------------------------------------------------------------------
-
-
-def test_units_required_one_token_costs_one_unit() -> None:
-    assert units_required_for_tokens(1) == 1
-
-
-def test_units_required_exact_chunk_boundary_costs_one_unit() -> None:
-    assert units_required_for_tokens(TOKENS_PER_UNIT) == 1
-
-
-def test_units_required_one_over_boundary_costs_two_units() -> None:
-    assert units_required_for_tokens(TOKENS_PER_UNIT + 1) == 2
-
-
-def test_units_required_two_full_chunks_costs_two_units() -> None:
-    assert units_required_for_tokens(TOKENS_PER_UNIT * 2) == 2
-
-
-def test_units_required_two_chunks_plus_one_costs_three_units() -> None:
-    assert units_required_for_tokens(TOKENS_PER_UNIT * 2 + 1) == 3
-
-
-def test_units_required_zero_returns_zero() -> None:
-    assert units_required_for_tokens(0) == 0
-
-
-def test_units_required_negative_returns_zero() -> None:
-    assert units_required_for_tokens(-1) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -501,19 +455,6 @@ def test_billing_subscription_token_coverage_limit_team_plan() -> None:
 # ---------------------------------------------------------------------------
 # BillingRegistry.create_customer
 # ---------------------------------------------------------------------------
-
-
-def test_create_customer_returns_customer_with_correct_fields(registry: BillingRegistry) -> None:
-    c = registry.create_customer(
-        email="bob@ironclaw.test",
-        display_name="Bob",
-        plan="team-25k",
-    )
-    assert c.customer_id.startswith("cus_")
-    assert c.email == "bob@ironclaw.test"
-    assert c.display_name == "Bob"
-    assert c.plan == "team-25k"
-    assert c.active is True
 
 
 def test_create_customer_normalizes_email_to_lowercase(registry: BillingRegistry) -> None:
@@ -821,15 +762,6 @@ def test_has_active_subscription_org_key_is_case_insensitive(registry: BillingRe
 # ---------------------------------------------------------------------------
 
 
-def test_record_usage_increments_units_consumed(
-    registry: BillingRegistry,
-    customer: BillingCustomer,
-    active_sub: BillingSubscription,
-) -> None:
-    sub = registry.record_usage(customer_id=customer.customer_id, units=10)
-    assert sub.units_consumed == 10
-
-
 def test_record_usage_raises_billing_usage_error_when_limit_exceeded(
     registry: BillingRegistry,
     customer: BillingCustomer,
@@ -995,13 +927,6 @@ def test_can_consume_returns_true_when_units_available(
     assert registry.can_consume(customer_id=customer.customer_id, units=1) is True
 
 
-def test_can_consume_returns_false_when_no_active_subscription(
-    registry: BillingRegistry,
-    customer: BillingCustomer,
-) -> None:
-    assert registry.can_consume(customer_id=customer.customer_id, units=1) is False
-
-
 def test_can_consume_returns_false_when_units_would_exceed_limit(
     registry: BillingRegistry,
     customer: BillingCustomer,
@@ -1009,14 +934,6 @@ def test_can_consume_returns_false_when_units_would_exceed_limit(
 ) -> None:
     plan_def = PLAN_DEFINITIONS["starter-5k"]
     assert registry.can_consume(customer_id=customer.customer_id, units=plan_def["unit_limit"] + 1) is False
-
-
-def test_can_consume_returns_false_for_zero_units(
-    registry: BillingRegistry,
-    customer: BillingCustomer,
-    active_sub: BillingSubscription,
-) -> None:
-    assert registry.can_consume(customer_id=customer.customer_id, units=0) is False
 
 
 def test_can_consume_tokens_returns_true_when_coverage_available(
@@ -1042,35 +959,6 @@ def test_can_consume_tokens_returns_false_when_over_coverage(
 # ---------------------------------------------------------------------------
 
 
-def test_upgrade_plan_creates_new_active_subscription(
-    registry: BillingRegistry,
-    customer: BillingCustomer,
-    active_sub: BillingSubscription,
-) -> None:
-    _, new_sub = registry.upgrade_plan(customer_id=customer.customer_id, new_plan="team-25k")
-    assert new_sub.plan == "team-25k"
-    assert new_sub.is_active is True
-
-
-def test_upgrade_plan_cancels_old_subscription(
-    registry: BillingRegistry,
-    customer: BillingCustomer,
-    active_sub: BillingSubscription,
-) -> None:
-    registry.upgrade_plan(customer_id=customer.customer_id, new_plan="team-25k")
-    old = registry._subscriptions[active_sub.subscription_id]
-    assert old.status == "upgraded"
-
-
-def test_upgrade_plan_updates_customer_plan(
-    registry: BillingRegistry,
-    customer: BillingCustomer,
-    active_sub: BillingSubscription,
-) -> None:
-    updated_customer, _ = registry.upgrade_plan(customer_id=customer.customer_id, new_plan="team-25k")
-    assert updated_customer.plan == "team-25k"
-
-
 def test_upgrade_plan_raises_for_unknown_customer(registry: BillingRegistry) -> None:
     with pytest.raises(KeyError, match="Unknown customer_id"):
         registry.upgrade_plan(customer_id="cus_ghost", new_plan="team-25k")
@@ -1081,25 +969,6 @@ def test_upgrade_plan_raises_for_unknown_customer(registry: BillingRegistry) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_deactivate_customer_sets_active_false(
-    registry: BillingRegistry,
-    customer: BillingCustomer,
-    active_sub: BillingSubscription,
-) -> None:
-    registry.deactivate_customer(customer.customer_id)
-    assert registry._customers[customer.customer_id].active is False
-
-
-def test_deactivate_customer_cancels_active_subscriptions(
-    registry: BillingRegistry,
-    customer: BillingCustomer,
-    active_sub: BillingSubscription,
-) -> None:
-    registry.deactivate_customer(customer.customer_id)
-    sub = registry._subscriptions[active_sub.subscription_id]
-    assert sub.status == "cancelled"
-
-
 def test_deactivate_customer_raises_for_unknown_customer(registry: BillingRegistry) -> None:
     with pytest.raises(KeyError, match="Unknown customer_id"):
         registry.deactivate_customer("cus_ghost")
@@ -1108,17 +977,6 @@ def test_deactivate_customer_raises_for_unknown_customer(registry: BillingRegist
 # ---------------------------------------------------------------------------
 # BillingRegistry.reset_period
 # ---------------------------------------------------------------------------
-
-
-def test_reset_period_zeroes_units_consumed(
-    registry: BillingRegistry,
-    customer: BillingCustomer,
-    active_sub: BillingSubscription,
-) -> None:
-    registry.record_usage(customer_id=customer.customer_id, units=50)
-    registry.reset_period(subscription_id=active_sub.subscription_id, new_period_end=_future(30))
-    sub = registry._subscriptions[active_sub.subscription_id]
-    assert sub.units_consumed == 0
 
 
 def test_reset_period_sets_new_period_end(

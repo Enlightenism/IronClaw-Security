@@ -213,6 +213,40 @@ async def get_billing_catalogue() -> JSONResponse:
 
 
 # ---------------------------------------------------------------------------
+# GET /billing/success
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/success",
+    status_code=status.HTTP_200_OK,
+    summary="Checkout success confirmation",
+    description="Called by Stripe redirect after a successful checkout. Returns session confirmation. Frontend should use this to verify and display unit balance.",
+    tags=["billing", "checkout"],
+)
+async def checkout_success(
+    session_id: str = Query(..., description="Stripe checkout session ID"),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    record = svc.get_checkout_session(session_id)
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="checkout_session_not_found",
+        )
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "status": "success",
+            "session_id": session_id,
+            "org_id": record.get("org_id"),
+            "unit_credits": record.get("unit_credits", 0),
+            "units_credited": record.get("units_credited", False),
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # POST /billing/units/calculate
 # ---------------------------------------------------------------------------
 
