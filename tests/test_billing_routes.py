@@ -558,7 +558,7 @@ def test_purchase_unknown_package_id_returns_404() -> None:
     assert response.status_code == 404
 
 
-def test_purchase_empty_package_id_returns_422() -> None:
+def test_purchase_empty_package_id_returns_422_routes() -> None:
     response = _personal_client().post(
         "/billing/purchase",
         json={
