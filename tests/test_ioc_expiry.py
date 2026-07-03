@@ -1209,7 +1209,7 @@ class TestReactivation:
 # ---------------------------------------------------------------------------
 
 
-class TestAuditTrailIntegrity:
+class TestAuditTrailIntegrityIocExpiry:
     def test_ingest_always_records_ingested_event(self, engine: IOCExpiryEngine, feed_id: str) -> None:
         ind = engine.add_indicator(
             indicator_type="ip",
