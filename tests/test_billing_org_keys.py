@@ -170,7 +170,7 @@ def _ledger(client: TestClient, *, owner_key: str, limit: int = 50) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def test_stale_purchase_path_returns_404_or_405(client: TestClient) -> None:
+def test_stale_purchase_path_404_405_org_key(client: TestClient) -> None:
     """POST /billing/packages/purchase is NOT a valid route and must never resolve."""
     resp = client.post(
         "/billing/packages/purchase",
