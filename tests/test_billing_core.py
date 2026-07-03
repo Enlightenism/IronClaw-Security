@@ -123,7 +123,7 @@ class TestUnitPackageCatalog:
 # ---------------------------------------------------------------------------
 
 
-class TestUnitsRequiredForTokens:
+class TestUnitsRequiredForTokensCore:
     def test_zero_tokens_returns_zero(self) -> None:
         assert units_required_for_tokens(0) == 0
 
@@ -148,7 +148,7 @@ class TestUnitsRequiredForTokens:
 # ---------------------------------------------------------------------------
 
 
-class TestResolveBillingOwner:
+class TestResolveBillingOwnerCore:
     def _ctx(self, key_type: str | None = None, org_id: str | None = None) -> Any:
         ctx = MagicMock()
         ctx.key_type = key_type
