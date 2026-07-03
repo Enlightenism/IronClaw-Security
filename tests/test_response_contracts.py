@@ -250,7 +250,7 @@ def test_history_events_contract(client: TestClient) -> None:
     assert isinstance(body, list)
 
 
-def test_history_events_unauthenticated_rejected() -> None:
+def test_history_events_unauthenticated_rejected_contracts() -> None:
     bare = TestClient(app, raise_server_exceptions=True)
     response = bare.get("/history/events")
     assert response.status_code in (401, 403)
