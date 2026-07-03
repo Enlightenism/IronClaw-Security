@@ -134,7 +134,7 @@ def test_adapt_policy_decision_allow() -> None:
     assert decision.platform == "malwi"
 
 
-def test_adapt_policy_decision_verdicts_are_consistent() -> None:
+def test_adapt_policy_decision_verdicts_are_consistent_malwi() -> None:
     req = build_malwi_adapter_request(action_type="lookup_ip", target="10.0.0.1")
     resp = evaluate_malwi_request(_ENGINE, req, mode="monitor")
     assert resp.should_allow == (resp.verdict == "allow")
@@ -144,7 +144,7 @@ def test_adapt_policy_decision_verdicts_are_consistent() -> None:
     assert resp.should_hold == (resp.verdict in {"warn", "quarantine", "block"})
 
 
-def test_adapt_policy_decision_trace_id_propagated() -> None:
+def test_adapt_policy_decision_trace_id_propagated_malwi() -> None:
     req = build_malwi_adapter_request(action_type="lookup_url", target="http://bad.com")
     from app.orchestrator.policy_enforcer import evaluate_policy
 
@@ -154,7 +154,7 @@ def test_adapt_policy_decision_trace_id_propagated() -> None:
     assert resp.request["action_type"] == "lookup_url"
 
 
-def test_adapt_policy_decision_no_request() -> None:
+def test_adapt_policy_decision_no_request_malwi() -> None:
     req = build_malwi_adapter_request(action_type="lookup_hash", target="abc")
     from app.orchestrator.policy_enforcer import evaluate_policy
 
