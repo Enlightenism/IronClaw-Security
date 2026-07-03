@@ -127,7 +127,7 @@ def test_build_cape_adapter_request_whitespace_only_raises() -> None:
 # ---------- CapeAdapterRequest.to_policy_input ----------
 
 
-def test_to_policy_input_basic() -> None:
+def test_to_policy_input_basic_cape() -> None:
     req = _make_request()
     policy_input = req.to_policy_input()
     assert policy_input.action_type == "submit_sample"
