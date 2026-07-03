@@ -100,7 +100,7 @@ def test_scan_rejects_wrong_types(client: TestClient) -> None:
     _assert_validation_failure(response)
 
 
-def test_scan_rejects_invalid_target_type_enum(client: TestClient) -> None:
+def test_scan_rejects_invalid_target_type_enum_validation(client: TestClient) -> None:
     response = client.post(
         "/api/scan/",
         json={
@@ -111,7 +111,7 @@ def test_scan_rejects_invalid_target_type_enum(client: TestClient) -> None:
     _assert_validation_failure(response)
 
 
-def test_scan_rejects_empty_target_value(client: TestClient) -> None:
+def test_scan_rejects_empty_target_value_validation(client: TestClient) -> None:
     response = client.post(
         "/api/scan/",
         json={
@@ -233,12 +233,12 @@ def test_policy_guard_bundle_rejects_whitespace_only_fields(client: TestClient) 
 # ===========================================================================
 
 
-def test_scan_unauthenticated_rejected(bare_client: TestClient) -> None:
+def test_scan_unauthenticated_rejected_validation(bare_client: TestClient) -> None:
     response = bare_client.post("/api/scan/", json={})
     _assert_auth_rejected(response)
 
 
-def test_scan_batch_unauthenticated_rejected(bare_client: TestClient) -> None:
+def test_scan_batch_unauthenticated_rejected_validation(bare_client: TestClient) -> None:
     response = bare_client.post("/api/scan/batch", json={})
     _assert_auth_rejected(response)
 
@@ -253,7 +253,7 @@ def test_history_review_unauthenticated_rejected(bare_client: TestClient) -> Non
     _assert_auth_rejected(response)
 
 
-def test_scan_invalid_api_key_rejected(bare_client: TestClient) -> None:
+def test_scan_invalid_api_key_rejected_validation(bare_client: TestClient) -> None:
     response = bare_client.post(
         "/api/scan/",
         headers={"X-API-Key": "wrong-key"},
