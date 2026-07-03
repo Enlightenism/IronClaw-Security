@@ -1,5 +1,3 @@
-# tests/test_threat_detection_engine.py
-
 from __future__ import annotations
 
 from typing import Any
@@ -84,11 +82,11 @@ def _make_request(**kwargs: Any) -> DetectionRequest:
 
 
 # ---------------------------------------------------------------------------
-# TestThreatScoringEngine
+# TestThreatScoringEngine_detection_engine
 # ---------------------------------------------------------------------------
 
 
-class TestThreatScoringEngine:
+class TestThreatScoringEngine_detection_engine:
     def setup_method(self) -> None:
         self.engine = ThreatScoringEngine()
 
@@ -212,11 +210,11 @@ class TestThreatScoringEngine:
 
 
 # ---------------------------------------------------------------------------
-# TestScoreResult
+# TestScoreResult_detection_engine
 # ---------------------------------------------------------------------------
 
 
-class TestScoreResult:
+class TestScoreResult_detection_engine:
     def test_fields_accessible(self) -> None:
         r = ScoreResult(
             raw_score=0.85,
@@ -798,11 +796,11 @@ class TestSingletons:
 
 
 # ---------------------------------------------------------------------------
-# TestEndToEndScenarios
+# TestEndToEndScenarios_detection_engine
 # ---------------------------------------------------------------------------
 
 
-class TestEndToEndScenarios:
+class TestEndToEndScenarios_detection_engine:
     """Integration-style tests exercising the full pipeline with mocked I/O."""
 
     def setup_method(self) -> None:
