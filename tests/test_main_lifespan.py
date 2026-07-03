@@ -110,7 +110,7 @@ class TestPatternRegistryStartup:
 # ---------------------------------------------------------------------------
 
 
-class TestTrustEngineCacheShutdown:
+class TestTrustEngineCacheShutdownLifespan:
     def test_profile_cache_cleared_on_shutdown(self) -> None:
         import app.core.trust_engine as trust_engine_mod  # noqa: PLC0415
 
