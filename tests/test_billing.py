@@ -233,7 +233,7 @@ def test_packages_no_auth_header_returns_401() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_purchase_old_path_returns_404_or_405(client: TestClient) -> None:
+def test_stale_purchase_path_returns_404_or_405(client: TestClient) -> None:
     """Guard: the stale /billing/packages/purchase path must never resolve."""
     payload = {
         "package_id": "pkg_5000",
@@ -284,7 +284,7 @@ def test_purchase_enterprise_package_credits_wallet(client: TestClient) -> None:
     assert body["wallet"]["balance_units"] == 60_000
 
 
-def test_purchase_unknown_package_returns_404(client: TestClient) -> None:
+def test_purchase_unknown_package_id_returns_404(client: TestClient) -> None:
     payload = {
         "package_id": "pkg_invalid",
         "buyer_name": "X",
@@ -299,7 +299,7 @@ def test_purchase_missing_required_fields_returns_422(client: TestClient) -> Non
     assert resp.status_code == 422
 
 
-def test_purchase_no_auth_returns_401() -> None:
+def test_purchase_unauthenticated_returns_401() -> None:
     _app.dependency_overrides.clear()
     with TestClient(_app, raise_server_exceptions=False) as c:
         resp = c.post(
@@ -637,7 +637,7 @@ def test_ledger_returns_entries_after_credit(client: TestClient) -> None:
     assert len(body["entries"]) >= 1
 
 
-def test_ledger_limit_param_respected(client: TestClient) -> None:
+def test_ledger_limit_param_honored(client: TestClient) -> None:
     registry = _unit_wallet_module._unit_wallet_registry
     for _ in range(5):
         _seed_wallet(registry, "lim@ironclaw.test", 10)
@@ -653,7 +653,7 @@ def test_ledger_requires_auth_context() -> None:
     assert resp.status_code == 401
 
 
-def test_ledger_empty_for_new_wallet_after_purchase(client: TestClient) -> None:
+def test_ledger_populated_after_purchase(client: TestClient) -> None:
     payload = {
         "package_id": "pkg_5000",
         "buyer_name": "Ledger User",
