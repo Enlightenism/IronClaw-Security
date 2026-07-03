@@ -35,17 +35,17 @@ _FEATURED_PACKAGE_ID = "pkg_25000"
 # ---------------------------------------------------------------------------
 
 
-def test_billing_manifest_returns_200(test_client: TestClient) -> None:
+def test_billing_manifest_returns_200_manifest(test_client: TestClient) -> None:
     response = test_client.get("/billing-manifest")
     assert response.status_code == 200
 
 
-def test_billing_manifest_content_type_is_json(test_client: TestClient) -> None:
+def test_billing_manifest_content_type_is_json_manifest(test_client: TestClient) -> None:
     response = test_client.get("/billing-manifest")
     assert "application/json" in response.headers.get("content-type", "")
 
 
-def test_billing_manifest_response_is_object(test_client: TestClient) -> None:
+def test_billing_manifest_response_is_object_manifest(test_client: TestClient) -> None:
     response = test_client.get("/billing-manifest")
     assert isinstance(response.json(), dict)
 
@@ -55,12 +55,12 @@ def test_billing_manifest_response_is_object(test_client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_billing_manifest_status_is_ok(test_client: TestClient) -> None:
+def test_billing_manifest_status_is_ok_manifest(test_client: TestClient) -> None:
     response = test_client.get("/billing-manifest")
     assert response.json()["status"] == "ok"
 
 
-def test_billing_manifest_service_is_ironclaw(test_client: TestClient) -> None:
+def test_billing_manifest_service_is_ironclaw_manifest(test_client: TestClient) -> None:
     response = test_client.get("/billing-manifest")
     assert response.json()["service"] == "IronClaw-Security"
 
