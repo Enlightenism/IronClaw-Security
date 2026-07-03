@@ -299,7 +299,7 @@ class TestExtractOpenAPISchema:
 # ---------------------------------------------------------------------------
 
 
-class TestMain:
+class TestMainExportOpenApi:
     def _run_main(self, argv: list[str], mock_app=None) -> int:
         target_app = mock_app if mock_app is not None else _make_mock_app()
         with patch("sys.argv", ["export_openapi"] + argv):
