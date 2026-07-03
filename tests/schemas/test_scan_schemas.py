@@ -235,7 +235,7 @@ def test_batch_scan_request_over_limit_rejected():
         BatchScanRequest(items=items)
 
 
-def test_batch_scan_response_shape():
+def test_batch_scan_response_shape_schemas():
     r = ScanResponse(**_BASE_RESPONSE)
     resp = BatchScanResponse(count=1, items=[r])
     assert resp.count == 1
