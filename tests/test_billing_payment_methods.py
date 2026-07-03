@@ -74,7 +74,7 @@ def _make_method(
 # ---------------------------------------------------------------------------
 
 
-class TestBuildMethod:
+class TestBuildMethod_billing_pm:
     def test_returns_billing_payment_method_view_instance(self) -> None:
         result = _build_method(
             methodid="pm-001",
@@ -399,7 +399,7 @@ class TestPackageCatalogueConsistency:
 # ---------------------------------------------------------------------------
 
 
-class TestBuildStatusCounts:
+class TestBuildStatusCounts_billing_pm:
     def test_empty_list_returns_empty(self) -> None:
         result = _build_status_counts([])
         assert result == []
@@ -491,7 +491,7 @@ class TestBuildStatusCounts:
 # ---------------------------------------------------------------------------
 
 
-class TestResolveDefaultMethodId:
+class TestResolveDefaultMethodId_billing_pm:
     def test_returns_none_when_no_methods(self) -> None:
         assert _resolve_default_method_id([]) is None
 
@@ -531,7 +531,7 @@ class TestResolveDefaultMethodId:
 # ---------------------------------------------------------------------------
 
 
-class TestExpDisplay:
+class TestExpDisplay_billing_pm:
     def test_single_digit_month_zero_padded(self) -> None:
         assert _exp_display(1, 2027) == "01/2027"
 
@@ -560,7 +560,7 @@ class TestExpDisplay:
 # ---------------------------------------------------------------------------
 
 
-class TestBrandDisplay:
+class TestBrandDisplay_billing_pm:
     def test_visa_returns_visa(self) -> None:
         assert _brand_display("visa") == "Visa"
 
@@ -605,7 +605,7 @@ class TestBrandDisplay:
 # ---------------------------------------------------------------------------
 
 
-class TestStripeMode:
+class TestStripeMode_billing_pm:
     def test_live_key_returns_live(self) -> None:
         with patch.dict(os.environ, {"STRIPE_API_KEY": "sk_live_abc123"}, clear=False):
             assert _stripe_mode() == "live"
@@ -638,7 +638,7 @@ class TestStripeMode:
 # ---------------------------------------------------------------------------
 
 
-class TestStripeWebhookSecretNote:
+class TestStripeWebhookSecretNote_billing_pm:
     def test_valid_secret_returns_configured_note(self) -> None:
         with patch.dict(os.environ, {"STRIPE_WEBHOOK_SECRET": "whsec_abc123"}, clear=False):
             note = _stripe_webhook_secret_note()
@@ -677,7 +677,7 @@ class TestStripeWebhookSecretNote:
 # ---------------------------------------------------------------------------
 
 
-class TestStripeConnectionNote:
+class TestStripeConnectionNote_billing_pm:
     def test_live_key_returns_live_note(self) -> None:
         with patch.dict(os.environ, {"STRIPE_API_KEY": "sk_live_abc123"}, clear=False):
             note = _stripe_connection_note()
@@ -1044,7 +1044,7 @@ class TestDeletePaymentMethodEndpoint:
 # ---------------------------------------------------------------------------
 
 
-class TestCanAddNew:
+class TestCanAddNew_billing_pm:
     def test_max_methods_constant_is_four(self) -> None:
         assert _MAX_METHODS == 4
 
