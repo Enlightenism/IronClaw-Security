@@ -62,7 +62,7 @@ def test_policy_status_returns_current_policy_state(client: TestClient) -> None:
     assert len(data) >= 1
 
 
-def test_policy_status_unauthenticated_rejected() -> None:
+def test_policy_status_unauthenticated_rejected_policy_api() -> None:
     bare = TestClient(app, raise_server_exceptions=True)
     response = bare.get("/policy/status")
     assert response.status_code in (401, 403)
@@ -151,7 +151,7 @@ def test_guard_bundle_accepts_all_fields(client: TestClient) -> None:
     assert "should_warn" in data
 
 
-def test_guard_bundle_accepts_user_prompt_and_retrieved_doc(client: TestClient) -> None:
+def test_guard_bundle_accepts_user_prompt_and_retrieved_doc_policy_api(client: TestClient) -> None:
     response = client.post(
         "/policy/guard-bundle",
         json={
@@ -169,12 +169,12 @@ def test_guard_bundle_accepts_user_prompt_and_retrieved_doc(client: TestClient) 
 # ===========================================================================
 
 
-def test_guard_bundle_rejects_empty_payload(client: TestClient) -> None:
+def test_guard_bundle_rejects_empty_payload_policy_api(client: TestClient) -> None:
     response = client.post("/policy/guard-bundle", json={})
     assert response.status_code == 400
 
 
-def test_guard_bundle_rejects_all_none_fields(client: TestClient) -> None:
+def test_guard_bundle_rejects_all_none_fields_policy_api(client: TestClient) -> None:
     response = client.post(
         "/policy/guard-bundle",
         json={
@@ -187,7 +187,7 @@ def test_guard_bundle_rejects_all_none_fields(client: TestClient) -> None:
     assert response.status_code == 400
 
 
-def test_guard_bundle_rejects_whitespace_only_fields(client: TestClient) -> None:
+def test_guard_bundle_rejects_whitespace_only_fields_policy_api(client: TestClient) -> None:
     response = client.post(
         "/policy/guard-bundle",
         json={
@@ -198,7 +198,7 @@ def test_guard_bundle_rejects_whitespace_only_fields(client: TestClient) -> None
     assert response.status_code == 400
 
 
-def test_guard_bundle_unauthenticated_rejected() -> None:
+def test_guard_bundle_unauthenticated_rejected_policy_api() -> None:
     bare = TestClient(app, raise_server_exceptions=True)
     response = bare.post(
         "/policy/guard-bundle",
