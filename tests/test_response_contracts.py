@@ -178,7 +178,7 @@ def test_policy_status_contract(client: TestClient) -> None:
     assert body, "Policy status response should not be empty"
 
 
-def test_policy_status_unauthenticated_rejected() -> None:
+def test_policy_status_contract_unauthenticated_rejected() -> None:
     bare = TestClient(app, raise_server_exceptions=True)
     response = bare.get("/policy/status")
     assert response.status_code in (401, 403)
