@@ -404,8 +404,8 @@ const Landing = () => {
             className="mt-2 font-tech text-sm text-[#FFD700]"
             data-testid="agents-protected-line"
           >
-            5,000 units = 5,000 agents protected up to 25,000 tokens, against
-            unsafe behavior. No subscription. No recurring charge. Idle time
+            5,000 units = 5,000 agent calls protected up to 25,000 tokens each, against multiple layers of
+            unsafe behavior. That is up to 125,000,000 tokens protected by IronClaw-Security python defense. No subscription. No recurring charge. Idle time
             cost nothing per month. Scale instantly.
           </p>
 
