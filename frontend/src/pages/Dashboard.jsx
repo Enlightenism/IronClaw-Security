@@ -1,4 +1,11 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import {
+  useEffect,
+  useState,
+  useCallback,
+  useRef,
+  useMemo,
+  memo,
+} from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import {
   ShieldCheck,
@@ -7,6 +14,8 @@ import {
   RefreshCw,
   FileSearch,
   ScrollText,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import api from "@/lib/api";
@@ -15,6 +24,138 @@ import WalletCard from "@/components/dashboard/WalletCard";
 import SecurityAnalysis from "@/components/dashboard/SecurityAnalysis";
 import IntegrationCard from "@/components/dashboard/IntegrationCard";
 
+const ATTACKS_PAGE_SIZE = 25;
+const VALID_PACKAGES = ["pkg_5000", "pkg_25000", "pkg_60000"];
+
+const MemoWalletCard = memo(WalletCard);
+const MemoSecurityAnalysis = memo(SecurityAnalysis);
+const MemoIntegrationCard = memo(IntegrationCard);
+
+const AttackFeed = memo(function AttackFeed({ attacks }) {
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    setPage(1);
+  }, [attacks]);
+
+  const totalPages = Math.max(1, Math.ceil(attacks.length / ATTACKS_PAGE_SIZE));
+
+  const paginatedAttacks = useMemo(() => {
+    const start = (page - 1) * ATTACKS_PAGE_SIZE;
+    return attacks.slice(start, start + ATTACKS_PAGE_SIZE);
+  }, [attacks, page]);
+
+  const startItem = attacks.length === 0 ? 0 : (page - 1) * ATTACKS_PAGE_SIZE + 1;
+  const endItem = Math.min(page * ATTACKS_PAGE_SIZE, attacks.length);
+
+  return (
+    <section
+      className="rounded-2xl border border-white/10 bg-white/[0.03] p-5"
+      data-testid="attack-feed"
+    >
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight">Attack Feed</h2>
+          <p className="mt-1 text-sm text-[#BFC1C2]">
+            Paginated results to keep large incident sets lightweight.
+          </p>
+        </div>
+        <div
+          className="font-tech text-xs text-[#BFC1C2]"
+          data-testid="attack-feed-summary"
+        >
+          {startItem}-{endItem} of {attacks.length}
+        </div>
+      </div>
+
+      {attacks.length === 0 ? (
+        <div
+          className="rounded-xl border border-dashed border-white/10 bg-black/20 px-4 py-8 text-center text-sm text-[#BFC1C2]"
+          data-testid="attack-feed-empty"
+        >
+          No attack events available.
+        </div>
+      ) : (
+        <>
+          <div className="space-y-3">
+            {paginatedAttacks.map((attack, index) => {
+              const key =
+                attack?.id ??
+                attack?.timestamp ??
+                attack?.created_at ??
+                `${page}-${index}`;
+
+              return (
+                <article
+                  key={key}
+                  className="rounded-xl border border-white/10 bg-black/20 p-4"
+                  data-testid="attack-feed-item"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-white">
+                        {attack?.title ||
+                          attack?.type ||
+                          attack?.name ||
+                          "Security event"}
+                      </div>
+                      <div className="mt-1 text-xs text-[#BFC1C2]">
+                        {attack?.description ||
+                          attack?.summary ||
+                          attack?.details ||
+                          "No additional event details provided."}
+                      </div>
+                    </div>
+                    <div className="text-right text-xs text-[#BFC1C2]">
+                      <div>{attack?.severity || attack?.status || "observed"}</div>
+                      <div className="mt-1">
+                        {attack?.timestamp || attack?.created_at || ""}
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              disabled={page === 1}
+              data-testid="attack-feed-prev"
+              className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-3 py-2 text-sm text-[#BFC1C2] transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <ChevronLeft size={16} />
+              Prev
+            </button>
+
+            <div
+              className="font-tech text-xs text-[#BFC1C2]"
+              data-testid="attack-feed-page"
+            >
+              Page {page} / {totalPages}
+            </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                setPage((current) => Math.min(totalPages, current + 1))
+              }
+              disabled={page === totalPages}
+              data-testid="attack-feed-next"
+              className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-3 py-2 text-sm text-[#BFC1C2] transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Next
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        </>
+      )}
+    </section>
+  );
+});
+
 const Dashboard = () => {
   const { user, loading, logout } = useAuth();
   const navigate = useNavigate();
@@ -22,10 +163,13 @@ const Dashboard = () => {
   const [data, setData] = useState(null);
   const [tokens, setTokens] = useState(null);
   const [loadingData, setLoadingData] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [purchasingId, setPurchasingId] = useState(null);
   const polledRef = useRef(false);
 
-  const fetchDashboard = useCallback(async () => {
+  const fetchDashboard = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoadingData(true);
+
     try {
       const [dash, tok] = await Promise.all([
         api.get("/dashboard"),
@@ -37,6 +181,7 @@ const Dashboard = () => {
       // handled by interceptor
     } finally {
       setLoadingData(false);
+      setRefreshing(false);
     }
   }, []);
 
@@ -50,15 +195,20 @@ const Dashboard = () => {
 
   useEffect(() => {
     if (!user) return;
-    const refresh = setInterval(fetchDashboard, 5 * 60 * 1000);
+
+    const refresh = setInterval(() => {
+      fetchDashboard({ silent: true });
+    }, 5 * 60 * 1000);
+
     const live = setInterval(async () => {
       try {
         await api.post("/events/simulate");
-        fetchDashboard();
+        fetchDashboard({ silent: true });
       } catch {
         // handled by interceptor
       }
     }, 20000);
+
     return () => {
       clearInterval(refresh);
       clearInterval(live);
@@ -73,8 +223,10 @@ const Dashboard = () => {
         toast.error("Payment status check timed out. Refresh in a moment.");
         return;
       }
+
       try {
         const { data: status } = await api.get(`/payments/status/${sessionId}`);
+
         if (status.payment_status === "paid") {
           toast.dismiss("pay");
           toast.success(
@@ -83,11 +235,13 @@ const Dashboard = () => {
           await fetchDashboard();
           return;
         }
+
         if (status.status === "expired") {
           toast.dismiss("pay");
           toast.error("Payment session expired. Please try again.");
           return;
         }
+
         setTimeout(() => pollPayment(sessionId, attempts + 1), 2000);
       } catch {
         setTimeout(() => pollPayment(sessionId, attempts + 1), 2000);
@@ -99,6 +253,7 @@ const Dashboard = () => {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const sessionId = params.get("session_id");
+
     if (sessionId && !polledRef.current) {
       polledRef.current = true;
       toast.loading("Verifying your payment...", { id: "pay" });
@@ -108,13 +263,13 @@ const Dashboard = () => {
   }, [location.search, pollPayment, navigate]);
 
   const handlePurchase = async (packageId) => {
-    // Guard: only accept known package IDs — must match WalletCard TIERS catalogue
-    const validPackages = ["pkg_5000", "pkg_25000", "pkg_60000"];
-    if (!validPackages.includes(packageId)) {
+    if (!VALID_PACKAGES.includes(packageId)) {
       toast.error("Invalid package selected.");
       return;
     }
+
     setPurchasingId(packageId);
+
     try {
       const { data: res } = await api.post("/payments/create-checkout", {
         package_id: packageId,
@@ -131,6 +286,59 @@ const Dashboard = () => {
     logout();
     navigate("/");
   };
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchDashboard();
+  }, [fetchDashboard]);
+
+  const walletProps = useMemo(
+    () => ({
+      balance: data?.wallet_units ?? 0,
+      lastPayment: data?.last_payment,
+      hasPaid: data?.has_paid,
+      onPurchase: handlePurchase,
+      purchasingId,
+      organizationId: data?.organization_id ?? "org-001",
+    }),
+    [
+      data?.wallet_units,
+      data?.last_payment,
+      data?.has_paid,
+      data?.organization_id,
+      purchasingId,
+    ],
+  );
+
+  const securityProps = useMemo(
+    () => ({
+      unitsToday: data?.units_today ?? 0,
+      unitsWeek: data?.units_week ?? 0,
+      dailyUsage: data?.daily_usage ?? [],
+      attacks: data?.attacks ?? [],
+    }),
+    [data?.units_today, data?.units_week, data?.daily_usage, data?.attacks],
+  );
+
+  const integrationCards = useMemo(
+    () => [
+      {
+        title: "Claude Code",
+        command: tokens?.claude_code_command,
+        tint: "gold",
+        testid: "claude-code-card",
+      },
+      {
+        title: "Open Claw",
+        command: tokens?.openclaw_command,
+        tint: "platinum",
+        testid: "openclaw-card",
+      },
+    ],
+    [tokens?.claude_code_command, tokens?.openclaw_command],
+  );
+
+  const attackFeedItems = useMemo(() => data?.attacks ?? [], [data?.attacks]);
 
   if (loading || (loadingData && !data)) {
     return (
@@ -199,51 +407,41 @@ const Dashboard = () => {
               Enforcement Control Room
             </h1>
             <p className="mt-1 text-sm text-[#BFC1C2]">
-              Live verdicts, unit draw, and blocked attacks across your
-              installs.
+              Live verdicts, unit draw, and blocked attacks across your installs.
             </p>
           </div>
           <button
             type="button"
-            onClick={fetchDashboard}
+            onClick={handleRefresh}
             data-testid="refresh-btn"
             className="hidden items-center gap-2 rounded-lg border border-white/15 px-4 py-2 text-sm text-[#BFC1C2] transition hover:text-white sm:flex"
           >
-            <RefreshCw size={15} /> Refresh
+            <RefreshCw
+              size={15}
+              className={refreshing ? "animate-spin" : undefined}
+            />
+            Refresh
           </button>
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <WalletCard
-            balance={data?.wallet_units ?? 0}
-            lastPayment={data?.last_payment}
-            hasPaid={data?.has_paid}
-            onPurchase={handlePurchase}
-            purchasingId={purchasingId}
-            organizationId={data?.organization_id ?? "org-001"}
-          />
-          <div className="lg:row-span-2">
-            <SecurityAnalysis
-              unitsToday={data?.units_today ?? 0}
-              unitsWeek={data?.units_week ?? 0}
-              dailyUsage={data?.daily_usage ?? []}
-              attacks={data?.attacks ?? []}
-            />
+          <MemoWalletCard {...walletProps} />
+
+          <div className="space-y-6 lg:row-span-2">
+            <MemoSecurityAnalysis {...securityProps} />
+            <AttackFeed attacks={attackFeedItems} />
           </div>
 
           <div className="grid grid-cols-1 gap-6">
-            <IntegrationCard
-              title="Claude Code"
-              command={tokens?.claude_code_command}
-              tint="gold"
-              testid="claude-code-card"
-            />
-            <IntegrationCard
-              title="Open Claw"
-              command={tokens?.openclaw_command}
-              tint="platinum"
-              testid="openclaw-card"
-            />
+            {integrationCards.map((card) => (
+              <MemoIntegrationCard
+                key={card.testid}
+                title={card.title}
+                command={card.command}
+                tint={card.tint}
+                testid={card.testid}
+              />
+            ))}
           </div>
         </div>
       </main>

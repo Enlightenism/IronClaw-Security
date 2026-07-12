@@ -1,15 +1,17 @@
 import "@/App.css";
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/context/AuthContext";
 import { useAuth } from "@/context/AuthContext";
-import Landing from "@/pages/Landing";
-import Dashboard from "@/pages/Dashboard";
-import PromptInspector from "@/pages/PromptInspector";
-import PolicyManager from "@/pages/PolicyManager";
-import Privacy from "@/pages/Privacy";
-import Terms from "@/pages/Terms";
-import NotFound from "@/pages/NotFound";
+
+const Landing = lazy(() => import("@/pages/Landing"));
+const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const PromptInspector = lazy(() => import("@/pages/PromptInspector"));
+const PolicyManager = lazy(() => import("@/pages/PolicyManager"));
+const Privacy = lazy(() => import("@/pages/Privacy"));
+const Terms = lazy(() => import("@/pages/Terms"));
+const NotFound = lazy(() => import("@/pages/NotFound"));
 
 // Blocks unauthenticated access. Shows nothing while session is resolving.
 const PrivateRoute = ({ children }) => {
@@ -18,41 +20,50 @@ const PrivateRoute = ({ children }) => {
   return user ? children : <Navigate to="/" replace />;
 };
 
+const RouteFallback = () => null;
+
 function App() {
   return (
     <div className="App">
-      <BrowserRouter>
+      <BrowserRouter
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true,
+        }}
+      >
         <AuthProvider>
-          <Routes>
-            <Route path="/" element={<Landing />} />
-            <Route
-              path="/dashboard"
-              element={
-                <PrivateRoute>
-                  <Dashboard />
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/inspector"
-              element={
-                <PrivateRoute>
-                  <PromptInspector />
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/policies"
-              element={
-                <PrivateRoute>
-                  <PolicyManager />
-                </PrivateRoute>
-              }
-            />
-            <Route path="/privacy" element={<Privacy />} />
-            <Route path="/terms" element={<Terms />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
+          <Suspense fallback={<RouteFallback />}>
+            <Routes>
+              <Route path="/" element={<Landing />} />
+              <Route
+                path="/dashboard"
+                element={
+                  <PrivateRoute>
+                    <Dashboard />
+                  </PrivateRoute>
+                }
+              />
+              <Route
+                path="/inspector"
+                element={
+                  <PrivateRoute>
+                    <PromptInspector />
+                  </PrivateRoute>
+                }
+              />
+              <Route
+                path="/policies"
+                element={
+                  <PrivateRoute>
+                    <PolicyManager />
+                  </PrivateRoute>
+                }
+              />
+              <Route path="/privacy" element={<Privacy />} />
+              <Route path="/terms" element={<Terms />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </Suspense>
           <Toaster
             theme="dark"
             position="top-right"

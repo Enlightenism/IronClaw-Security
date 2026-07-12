@@ -1,5 +1,5 @@
 /* global process */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Wallet,
   CreditCard,
@@ -75,6 +75,8 @@ const TIERS = [
 // and Dashboard.jsx handlePurchase guard.
 const VALID_PACKAGE_IDS = new Set(TIERS.map((t) => t.id));
 
+const paymentMethodCache = new Map();
+
 // ---------------------------------------------------------------------------
 // EnterpriseBadge — floats above the Enterprise card, never inside it.
 // Gold shimmer pulse matching IronClaw brand style.
@@ -149,31 +151,77 @@ const StripeKeyWarning = () => {
 // set a default or remove a method.
 // ---------------------------------------------------------------------------
 const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
-  const [methods, setMethods] = useState([]);
-  const [defaultId, setDefaultId] = useState(null);
-  const [loadingMethods, setLoadingMethods] = useState(false);
-  const [actionId, setActionId] = useState(null);
+  const cachedEntry = useMemo(
+    () => (organizationId ? paymentMethodCache.get(organizationId) ?? null : null),
+    [organizationId],
+  );
 
-  const fetchMethods = useCallback(async () => {
-    if (!organizationId) return;
-    setLoadingMethods(true);
-    try {
-      const { data } = await api.get(
-        `/ui/billing/payment-methods?organizationid=${encodeURIComponent(organizationId)}`,
-      );
-      if (data?.status === "ok") {
-        setMethods(data.methods ?? []);
-        setDefaultId(data.defaultmethodid ?? null);
+  const [methods, setMethods] = useState(() => cachedEntry?.methods ?? []);
+  const [defaultId, setDefaultId] = useState(() => cachedEntry?.defaultId ?? null);
+  const [loadingMethods, setLoadingMethods] = useState(() => !cachedEntry && !!organizationId);
+  const [actionId, setActionId] = useState(null);
+  const hasFetchedRef = useRef(!!cachedEntry);
+
+  const syncCache = useCallback(
+    (nextMethods, nextDefaultId) => {
+      if (!organizationId) return;
+      paymentMethodCache.set(organizationId, {
+        methods: nextMethods,
+        defaultId: nextDefaultId,
+      });
+    },
+    [organizationId],
+  );
+
+  const fetchMethods = useCallback(
+    async ({ force = false } = {}) => {
+      if (!organizationId) return;
+      if (!force && hasFetchedRef.current) return;
+
+      setLoadingMethods(true);
+      try {
+        const { data } = await api.get(
+          `/ui/billing/payment-methods?organizationid=${encodeURIComponent(organizationId)}`,
+        );
+
+        if (data?.status === "ok") {
+          const nextMethods = data.methods ?? [];
+          const nextDefaultId = data.defaultmethodid ?? null;
+          setMethods(nextMethods);
+          setDefaultId(nextDefaultId);
+          syncCache(nextMethods, nextDefaultId);
+          hasFetchedRef.current = true;
+        }
+      } catch {
+        // silently fail — payment method list is non-critical UI
+      } finally {
+        setLoadingMethods(false);
       }
-    } catch {
-      // silently fail — payment method list is non-critical UI
-    } finally {
-      setLoadingMethods(false);
-    }
-  }, [organizationId]);
+    },
+    [organizationId, syncCache],
+  );
 
   useEffect(() => {
+    if (!organizationId) return;
+
+    const nextCachedEntry = paymentMethodCache.get(organizationId) ?? null;
+    if (nextCachedEntry) {
+      setMethods(nextCachedEntry.methods ?? []);
+      setDefaultId(nextCachedEntry.defaultId ?? null);
+      setLoadingMethods(false);
+      hasFetchedRef.current = true;
+      return;
+    }
+
+    hasFetchedRef.current = false;
+    setMethods([]);
+    setDefaultId(null);
+    setLoadingMethods(true);
     fetchMethods();
+  }, [organizationId, fetchMethods]);
+
+  const refreshMethods = useCallback(async () => {
+    await fetchMethods({ force: true });
   }, [fetchMethods]);
 
   const handleSetDefault = async (methodId) => {
@@ -183,7 +231,7 @@ const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
         `/ui/billing/payment-methods/${encodeURIComponent(methodId)}/default?organizationid=${encodeURIComponent(organizationId)}`,
       );
       toast.success("Default payment method updated.");
-      await fetchMethods();
+      await refreshMethods();
     } catch (e) {
       toast.error(
         e?.response?.data?.detail ?? "Could not update default method.",
@@ -200,7 +248,7 @@ const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
         `/ui/billing/payment-methods/${encodeURIComponent(methodId)}?organizationid=${encodeURIComponent(organizationId)}`,
       );
       toast.success("Payment method removed.");
-      await fetchMethods();
+      await refreshMethods();
     } catch (e) {
       toast.error(
         e?.response?.data?.detail ?? "Could not remove payment method.",
@@ -392,7 +440,6 @@ const WalletCard = ({
                 <EnterpriseBadge />
               </div>
             ) : (
-              /* Reserve same vertical space so all three cards align */
               <div className="mb-1.5 h-[22px]" />
             )}
             <button
@@ -429,9 +476,6 @@ const WalletCard = ({
         ))}
       </div>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Payment method panel                                                */}
-      {/* ------------------------------------------------------------------ */}
       <div
         className="mt-6 rounded-xl border border-white/10 bg-black/30 p-4"
         data-testid="saved-payment-method"

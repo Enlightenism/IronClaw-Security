@@ -6,7 +6,7 @@
  */
 
 import React from "react";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 // ── react-router-dom mock ─────────────────────────────────────────────────────
@@ -25,7 +25,11 @@ jest.mock("react-router-dom", () => ({
 
 // ── AuthContext mock ──────────────────────────────────────────────────────────
 const mockLogout = jest.fn();
-let mockAuthState = { user: { email: "test@ironclaw.io" }, loading: false };
+let mockAuthState = {
+  user: { email: "test@ironclaw.io" },
+  loading: false,
+  logout: mockLogout,
+};
 
 jest.mock("@/context/AuthContext", () => ({
   useAuth: () => mockAuthState,
@@ -69,17 +73,22 @@ jest.mock("@/components/dashboard/WalletCard", () => ({
   },
 }));
 
-// ── SecurityAnalysis stub ────────────────────────────────────────────────────
+// ── SecurityAnalysis stub — captures props ───────────────────────────────────
+let capturedSecurityProps = null;
+
 jest.mock("@/components/dashboard/SecurityAnalysis", () => ({
   __esModule: true,
-  default: () => <div data-testid="security-analysis">SecurityAnalysis</div>,
+  default: (props) => {
+    capturedSecurityProps = props;
+    return <div data-testid="security-analysis">SecurityAnalysis</div>;
+  },
 }));
 
 // ── IntegrationCard stub ─────────────────────────────────────────────────────
 jest.mock("@/components/dashboard/IntegrationCard", () => ({
   __esModule: true,
-  default: ({ title }) => (
-    <div data-testid={`integration-card-${title}`}>{title}</div>
+  default: ({ title, testid }) => (
+    <div data-testid={testid || `integration-card-${title}`}>{title}</div>
   ),
 }));
 
@@ -103,6 +112,16 @@ const DEFAULT_TOKENS = {
   openclaw_command: "openclaw --token xyz",
 };
 
+function makeAttack(index) {
+  return {
+    id: `attack-${index}`,
+    title: `Attack ${index}`,
+    description: `Attack description ${index}`,
+    severity: index % 2 === 0 ? "high" : "medium",
+    timestamp: `2026-07-12T00:${String(index).padStart(2, "0")}:00Z`,
+  };
+}
+
 function setupDefaultApis() {
   mockApiGet.mockImplementation((url) => {
     if (url === "/dashboard") return Promise.resolve({ data: DEFAULT_DASH });
@@ -117,6 +136,7 @@ function setupDefaultApis() {
 beforeEach(() => {
   jest.clearAllMocks();
   capturedWalletProps = null;
+  capturedSecurityProps = null;
   mockLocation.search = "";
   mockAuthState = {
     user: { email: "test@ironclaw.io" },
@@ -228,7 +248,7 @@ describe("WalletCard organizationId prop", () => {
   });
 
   it("passes organizationId='org-001' fallback when API response has no organization_id", async () => {
-    const { organization_id: _, ...dashWithoutOrg } = DEFAULT_DASH;
+    const { organization_id: _unused, ...dashWithoutOrg } = DEFAULT_DASH;
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard")
         return Promise.resolve({ data: dashWithoutOrg });
@@ -335,7 +355,10 @@ describe("session_id payment polling", () => {
         return Promise.resolve({
           data: { payment_status: "paid", units: 5000 },
         });
-      return Promise.resolve({ data: DEFAULT_DASH });
+      if (url === "/dashboard") return Promise.resolve({ data: DEFAULT_DASH });
+      if (url === "/integrations/token")
+        return Promise.resolve({ data: DEFAULT_TOKENS });
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
     await act(async () => {
@@ -363,7 +386,7 @@ describe("handlePurchase — invalid package", () => {
     });
 
     await act(async () => {
-      capturedWalletProps.onPurchase("pkg_invalid");
+      await capturedWalletProps.onPurchase("pkg_invalid");
     });
 
     expect(mockToastError).toHaveBeenCalledWith(
@@ -383,7 +406,7 @@ describe("handlePurchase — invalid package", () => {
     const postCallsBefore = mockApiPost.mock.calls.length;
 
     await act(async () => {
-      capturedWalletProps.onPurchase("pkg_invalid");
+      await capturedWalletProps.onPurchase("pkg_invalid");
     });
 
     expect(mockApiPost.mock.calls.length).toBe(postCallsBefore);
@@ -409,7 +432,7 @@ describe("handlePurchase — valid package", () => {
     });
 
     await act(async () => {
-      capturedWalletProps.onPurchase("pkg_5000");
+      await capturedWalletProps.onPurchase("pkg_5000");
     });
 
     expect(mockApiPost).toHaveBeenCalledWith(
@@ -431,7 +454,7 @@ describe("handlePurchase — valid package", () => {
     });
 
     await act(async () => {
-      capturedWalletProps.onPurchase("pkg_5000");
+      await capturedWalletProps.onPurchase("pkg_5000");
     });
 
     await waitFor(() => {
@@ -444,6 +467,8 @@ describe("handlePurchase — valid package", () => {
 
     for (const pkgId of validIds) {
       jest.clearAllMocks();
+      capturedWalletProps = null;
+      capturedSecurityProps = null;
       setupDefaultApis();
       mockApiPost.mockResolvedValueOnce({
         data: { url: "https://checkout.stripe.com/pay/x" },
@@ -458,7 +483,7 @@ describe("handlePurchase — valid package", () => {
       });
 
       await act(async () => {
-        capturedWalletProps.onPurchase(pkgId);
+        await capturedWalletProps.onPurchase(pkgId);
       });
 
       expect(mockToastError).not.toHaveBeenCalled();
@@ -479,7 +504,7 @@ describe("handlePurchase — valid package", () => {
     });
 
     await act(async () => {
-      capturedWalletProps.onPurchase("pkg_5000");
+      await capturedWalletProps.onPurchase("pkg_5000");
     });
 
     await waitFor(() => {
@@ -496,6 +521,8 @@ describe("handlePurchase — valid package", () => {
 
 describe("sign out", () => {
   it("calls logout() when Sign Out is clicked", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+
     await act(async () => {
       render(<Dashboard />);
     });
@@ -504,12 +531,14 @@ describe("sign out", () => {
       expect(screen.getByTestId("signout-btn")).toBeInTheDocument();
     });
 
-    await userEvent.click(screen.getByTestId("signout-btn"));
+    await user.click(screen.getByTestId("signout-btn"));
 
     expect(mockLogout).toHaveBeenCalledTimes(1);
   });
 
   it("calls navigate('/') when Sign Out is clicked", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+
     await act(async () => {
       render(<Dashboard />);
     });
@@ -518,7 +547,7 @@ describe("sign out", () => {
       expect(screen.getByTestId("signout-btn")).toBeInTheDocument();
     });
 
-    await userEvent.click(screen.getByTestId("signout-btn"));
+    await user.click(screen.getByTestId("signout-btn"));
 
     expect(mockNavigate).toHaveBeenCalledWith("/");
   });
@@ -567,7 +596,9 @@ describe("dashboard structure", () => {
         return Promise.resolve({
           data: { ...DEFAULT_DASH, wallet_units: 9999 },
         });
-      return Promise.resolve({ data: DEFAULT_TOKENS });
+      if (url === "/integrations/token")
+        return Promise.resolve({ data: DEFAULT_TOKENS });
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
     await act(async () => {
@@ -579,5 +610,295 @@ describe("dashboard structure", () => {
     });
 
     expect(capturedWalletProps.balance).toBe(9999);
+  });
+
+  it("renders integration cards after data loads", async () => {
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
+      expect(screen.getByTestId("openclaw-card")).toBeInTheDocument();
+    });
+  });
+
+  it("passes attack and usage data to SecurityAnalysis", async () => {
+    const attacks = [makeAttack(1), makeAttack(2)];
+    const dailyUsage = [
+      { day: "Mon", units: 10 },
+      { day: "Tue", units: 20 },
+    ];
+
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard")
+        return Promise.resolve({
+          data: {
+            ...DEFAULT_DASH,
+            units_today: 11,
+            units_week: 77,
+            daily_usage: dailyUsage,
+            attacks,
+          },
+        });
+      if (url === "/integrations/token")
+        return Promise.resolve({ data: DEFAULT_TOKENS });
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    await waitFor(() => {
+      expect(capturedSecurityProps).not.toBeNull();
+    });
+
+    expect(capturedSecurityProps.unitsToday).toBe(11);
+    expect(capturedSecurityProps.unitsWeek).toBe(77);
+    expect(capturedSecurityProps.dailyUsage).toEqual(dailyUsage);
+    expect(capturedSecurityProps.attacks).toEqual(attacks);
+  });
+});
+
+// =============================================================================
+// Attack feed pagination
+// =============================================================================
+
+describe("attack feed pagination", () => {
+  it("renders empty state when no attacks are available", async () => {
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("attack-feed")).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId("attack-feed-empty")).toBeInTheDocument();
+    expect(screen.getByTestId("attack-feed-summary")).toHaveTextContent(
+      "0-0 of 0",
+    );
+    expect(screen.queryAllByTestId("attack-feed-item")).toHaveLength(0);
+  });
+
+  it("renders only the first 25 attacks on page 1", async () => {
+    const attacks = Array.from({ length: 30 }, (_, index) =>
+      makeAttack(index + 1),
+    );
+
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard")
+        return Promise.resolve({
+          data: { ...DEFAULT_DASH, attacks },
+        });
+      if (url === "/integrations/token")
+        return Promise.resolve({ data: DEFAULT_TOKENS });
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("attack-feed-item")).toHaveLength(25);
+    });
+
+    expect(screen.getByTestId("attack-feed-summary")).toHaveTextContent(
+      "1-25 of 30",
+    );
+    expect(screen.getByTestId("attack-feed-page")).toHaveTextContent(
+      "Page 1 / 2",
+    );
+    expect(screen.getByText("Attack 1")).toBeInTheDocument();
+    expect(screen.getByText("Attack 25")).toBeInTheDocument();
+    expect(screen.queryByText("Attack 26")).not.toBeInTheDocument();
+  });
+
+  it("moves to the next page when Next is clicked", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    const attacks = Array.from({ length: 30 }, (_, index) =>
+      makeAttack(index + 1),
+    );
+
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard")
+        return Promise.resolve({
+          data: { ...DEFAULT_DASH, attacks },
+        });
+      if (url === "/integrations/token")
+        return Promise.resolve({ data: DEFAULT_TOKENS });
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("attack-feed-next")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId("attack-feed-next"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("attack-feed-page")).toHaveTextContent(
+        "Page 2 / 2",
+      );
+    });
+
+    expect(screen.getByTestId("attack-feed-summary")).toHaveTextContent(
+      "26-30 of 30",
+    );
+    expect(screen.getAllByTestId("attack-feed-item")).toHaveLength(5);
+    expect(screen.getByText("Attack 26")).toBeInTheDocument();
+    expect(screen.getByText("Attack 30")).toBeInTheDocument();
+    expect(screen.queryByText("Attack 25")).not.toBeInTheDocument();
+  });
+
+  it("disables Prev on the first page and Next on the last page", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    const attacks = Array.from({ length: 30 }, (_, index) =>
+      makeAttack(index + 1),
+    );
+
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard")
+        return Promise.resolve({
+          data: { ...DEFAULT_DASH, attacks },
+        });
+      if (url === "/integrations/token")
+        return Promise.resolve({ data: DEFAULT_TOKENS });
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("attack-feed-prev")).toBeDisabled();
+      expect(screen.getByTestId("attack-feed-next")).not.toBeDisabled();
+    });
+
+    await user.click(screen.getByTestId("attack-feed-next"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("attack-feed-prev")).not.toBeDisabled();
+      expect(screen.getByTestId("attack-feed-next")).toBeDisabled();
+    });
+  });
+
+  it("resets attack feed to page 1 after a refresh loads a new attack set", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    const firstAttackSet = Array.from({ length: 30 }, (_, index) =>
+      makeAttack(index + 1),
+    );
+    const refreshedAttackSet = Array.from({ length: 5 }, (_, index) =>
+      makeAttack(index + 101),
+    );
+
+    mockApiGet
+      .mockResolvedValueOnce({ data: { ...DEFAULT_DASH, attacks: firstAttackSet } })
+      .mockResolvedValueOnce({ data: DEFAULT_TOKENS })
+      .mockResolvedValueOnce({
+        data: { ...DEFAULT_DASH, attacks: refreshedAttackSet },
+      })
+      .mockResolvedValueOnce({ data: DEFAULT_TOKENS });
+
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("attack-feed-next")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId("attack-feed-next"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("attack-feed-page")).toHaveTextContent(
+        "Page 2 / 2",
+      );
+    });
+
+    await user.click(screen.getByTestId("refresh-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("attack-feed-page")).toHaveTextContent(
+        "Page 1 / 1",
+      );
+    });
+
+    const feed = screen.getByTestId("attack-feed");
+    expect(within(feed).getByText("Attack 101")).toBeInTheDocument();
+    expect(within(feed).queryByText("Attack 26")).not.toBeInTheDocument();
+  });
+});
+
+// =============================================================================
+// Refresh behavior
+// =============================================================================
+
+describe("refresh behavior", () => {
+  it("re-fetches dashboard data when Refresh is clicked", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("refresh-btn")).toBeInTheDocument();
+    });
+
+    const dashboardCallsBefore = mockApiGet.mock.calls.filter(
+      ([url]) => url === "/dashboard",
+    ).length;
+
+    await user.click(screen.getByTestId("refresh-btn"));
+
+    await waitFor(() => {
+      const dashboardCallsAfter = mockApiGet.mock.calls.filter(
+        ([url]) => url === "/dashboard",
+      ).length;
+      expect(dashboardCallsAfter).toBeGreaterThan(dashboardCallsBefore);
+    });
+  });
+
+  it("starts the live polling interval and posts to /events/simulate", async () => {
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    await act(async () => {
+      jest.advanceTimersByTime(20000);
+    });
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith("/events/simulate");
+    });
+  });
+
+  it("starts the refresh interval and re-fetches /dashboard after 5 minutes", async () => {
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    const dashboardCallsBefore = mockApiGet.mock.calls.filter(
+      ([url]) => url === "/dashboard",
+    ).length;
+
+    await act(async () => {
+      jest.advanceTimersByTime(5 * 60 * 1000);
+    });
+
+    await waitFor(() => {
+      const dashboardCallsAfter = mockApiGet.mock.calls.filter(
+        ([url]) => url === "/dashboard",
+      ).length;
+      expect(dashboardCallsAfter).toBeGreaterThan(dashboardCallsBefore);
+    });
   });
 });
