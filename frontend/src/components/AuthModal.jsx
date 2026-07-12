@@ -4,30 +4,98 @@ import { ShieldCheck, Loader2, X, Mail, Lock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
+import { useDebounce } from "@/hooks/useDebounce";
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
   const [mode, setMode] = useState(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [emailTouched, setEmailTouched] = useState(false);
+  const [emailError, setEmailError] = useState("");
+  const [emailStatus, setEmailStatus] = useState("");
   const { authenticate, register } = useAuth();
   const navigate = useNavigate();
+  const debouncedEmail = useDebounce(email, 400);
 
   useEffect(() => {
-    if (open) setMode(initialMode);
+    if (open) {
+      setMode(initialMode);
+      setEmail("");
+      setPassword("");
+      setLoading(false);
+      setEmailTouched(false);
+      setEmailError("");
+      setEmailStatus("");
+    }
   }, [initialMode, open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const trimmedEmail = email.trim();
+
+    if (!emailTouched) {
+      setEmailError("");
+      setEmailStatus("");
+      return;
+    }
+
+    if (!trimmedEmail) {
+      setEmailError("Email is required.");
+      setEmailStatus("");
+      return;
+    }
+
+    if (!EMAIL_REGEX.test(trimmedEmail)) {
+      setEmailError("Enter a valid email address.");
+      setEmailStatus("");
+      return;
+    }
+
+    setEmailError("");
+
+    if (debouncedEmail.trim() !== trimmedEmail) {
+      setEmailStatus("Validating email...");
+      return;
+    }
+
+    setEmailStatus("Email looks good.");
+  }, [email, debouncedEmail, emailTouched, open]);
 
   if (!open) return null;
 
   const submit = async (e) => {
     e.preventDefault();
+
+    const trimmedEmail = email.trim();
+
+    setEmailTouched(true);
+
+    if (!trimmedEmail) {
+      setEmailError("Email is required.");
+      setEmailStatus("");
+      return;
+    }
+
+    if (!EMAIL_REGEX.test(trimmedEmail)) {
+      setEmailError("Enter a valid email address.");
+      setEmailStatus("");
+      return;
+    }
+
+    setEmailError("");
+    setEmailStatus("Email looks good.");
     setLoading(true);
+
     try {
       if (mode === "signup") {
-        await register(email, password);
+        await register(trimmedEmail, password);
         toast.success("Account created. Defenses online.");
       } else {
-        await authenticate(email, password);
+        await authenticate(trimmedEmail, password);
         toast.success("Welcome back, operator.");
       }
       onClose();
@@ -42,6 +110,9 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
 
   const switchMode = (m) => {
     setMode(m);
+    setEmailTouched(false);
+    setEmailError("");
+    setEmailStatus("");
   };
 
   return (
@@ -96,12 +167,36 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
                 type="email"
                 required
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (!emailTouched) setEmailTouched(true);
+                }}
+                onBlur={() => setEmailTouched(true)}
                 placeholder="you@company.com"
                 data-testid="auth-email-input"
-                className="w-full rounded-lg border border-white/15 bg-white/5 py-3 pl-11 pr-4 text-sm text-white placeholder-white/40 outline-none transition focus:border-[#FFD700]/50 focus:ring-2 focus:ring-[#FFD700]/20"
+                aria-invalid={emailError ? "true" : "false"}
+                className={`w-full rounded-lg border bg-white/5 py-3 pl-11 pr-4 text-sm text-white placeholder-white/40 outline-none transition focus:ring-2 ${
+                  emailError
+                    ? "border-red-400/60 focus:border-red-400/60 focus:ring-red-400/20"
+                    : "border-white/15 focus:border-[#FFD700]/50 focus:ring-[#FFD700]/20"
+                }`}
               />
             </div>
+
+            {(emailError || emailStatus) && (
+              <div
+                data-testid="auth-email-status"
+                className={`flex min-h-[20px] items-center gap-2 text-xs ${
+                  emailError ? "text-red-300" : "text-[#BFC1C2]"
+                }`}
+              >
+                {!emailError && emailStatus === "Validating email..." && (
+                  <Loader2 className="animate-spin" size={14} />
+                )}
+                <span>{emailError || emailStatus}</span>
+              </div>
+            )}
+
             <div className="relative">
               <Lock
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40"
@@ -126,8 +221,27 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
               className="btn-shimmer flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-[#C9A84C] to-[#FFD700] py-3 font-semibold text-black transition hover:shadow-[0_0_24px_rgba(255,215,0,0.4)] disabled:opacity-60"
             >
               {loading && <Loader2 className="animate-spin" size={18} />}
-              {mode === "signup" ? "Create account" : "Sign in"}
+              {loading
+                ? mode === "signup"
+                  ? "Creating account..."
+                  : "Signing in..."
+                : mode === "signup"
+                ? "Create account"
+                : "Sign in"}
             </button>
+
+            {loading && (
+              <div
+                data-testid="auth-loading-state"
+                className="rounded-lg border border-white/10 bg-white/5 p-3 text-xs text-[#BFC1C2]"
+              >
+                <div className="mb-2 flex items-center gap-2">
+                  <Loader2 className="animate-spin" size={14} />
+                  <span>Securing authentication request...</span>
+                </div>
+                <div className="h-2 w-full animate-pulse rounded-full bg-white/10" />
+              </div>
+            )}
           </form>
 
           <div className="mt-6 text-center text-sm text-[#BFC1C2]">

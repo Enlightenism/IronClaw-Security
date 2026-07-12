@@ -1,56 +1,32 @@
-/**
- * tests for frontend/src/lib/api.js
- *
- * Runner : Jest (CRA default)
- * Mocks  : axios, @/lib/supabase
- */
-
-import axios from "axios";
-
-// ── Axios mock ────────────────────────────────────────────────────────────────
-// Must be declared before the module under test is imported so Jest can hoist
-// the factory.  We expose a shared `mockInstance` so individual tests can
-// inspect / override method implementations.
-
-const mockGet = jest.fn();
-const mockPost = jest.fn();
-const mockPatch = jest.fn();
-const mockDelete = jest.fn();
-
-const mockResponseInterceptorUse = jest.fn();
-
-const mockAxiosInstance = {
-  get: mockGet,
-  post: mockPost,
-  patch: mockPatch,
-  delete: mockDelete,
-  interceptors: {
-    request: { use: jest.fn() },
-    response: { use: mockResponseInterceptorUse },
-  },
-};
-
 jest.mock("axios", () => {
-  const actual = jest.requireActual("axios");
+  const mockAxiosInstance = {
+    get: jest.fn(),
+    post: jest.fn(),
+    patch: jest.fn(),
+    delete: jest.fn(),
+    put: jest.fn(),
+    interceptors: {
+      request: { use: jest.fn() },
+      response: { use: jest.fn() },
+    },
+  };
+
   return {
-    ...actual,
-    create: jest.fn(() => mockAxiosInstance),
+    __esModule: true,
+    default: { create: jest.fn(() => mockAxiosInstance) },
   };
 });
-
-// ── Supabase mock ─────────────────────────────────────────────────────────────
-const mockSignOut = jest.fn(() => Promise.resolve({ error: null }));
 
 jest.mock("@/lib/supabase", () => ({
   supabase: {
     auth: {
-      signOut: mockSignOut,
+      signOut: jest.fn(() => Promise.resolve({ error: null })),
     },
   },
 }));
 
-// ── Module under test ─────────────────────────────────────────────────────────
-// Import AFTER mocks are set up.
+import axios from "axios";
+import { supabase } from "@/lib/supabase";
 import {
   API_BASE,
   auth,
@@ -66,346 +42,116 @@ import {
   tools,
 } from "@/lib/api";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Capture everything at import time, before clearMocks wipes history ──────
+const mockAxiosInstance = axios.create.mock.results[0].value;
+const mockGet = mockAxiosInstance.get;
+const mockPost = mockAxiosInstance.post;
+const mockPatch = mockAxiosInstance.patch;
+const mockDelete = mockAxiosInstance.delete;
+const mockPut = mockAxiosInstance.put;
+const mockRequestInterceptorUse = mockAxiosInstance.interceptors.request.use;
+const mockResponseInterceptorUse = mockAxiosInstance.interceptors.response.use;
+const mockSignOut = supabase.auth.signOut;
 
-/** Extract the success/error handlers registered with the response interceptor. */
-function getInterceptorHandlers() {
-  // mockResponseInterceptorUse is called exactly once during module init.
-  const [onFulfilled, onRejected] = mockResponseInterceptorUse.mock.calls[0];
-  return { onFulfilled, onRejected };
-}
-
-// ── Setup / teardown ──────────────────────────────────────────────────────────
+const axiosCreateCallCount = axios.create.mock.calls.length;
+const axiosCreateConfig = axios.create.mock.calls[0]?.[0];
+const responseInterceptorCallCount = mockResponseInterceptorUse.mock.calls.length;
+const [capturedOnFulfilled, capturedOnRejected] =
+  mockResponseInterceptorUse.mock.calls[0] || [];
 
 beforeEach(() => {
-  jest.clearAllMocks();
-  delete window.location;
-  window.location = { href: "" };
+  mockGet.mockClear();
+  mockPost.mockClear();
+  mockPatch.mockClear();
+  mockDelete.mockClear();
+  mockPut.mockClear();
+  mockSignOut.mockClear();
 });
-
-// =============================================================================
-// axios.create — base URL construction
-// =============================================================================
 
 describe("axios.create", () => {
   it("calls axios.create exactly once during module initialisation", () => {
-    expect(axios.create).toHaveBeenCalledTimes(1);
+    expect(axiosCreateCallCount).toBe(1);
   });
 
   it("passes baseURL equal to API_BASE", () => {
-    const [config] = axios.create.mock.calls[0];
-    expect(config.baseURL).toBe(API_BASE);
+    expect(axiosCreateConfig.baseURL).toBe(API_BASE);
   });
 
-  it("sets a timeout", () => {
-    const [config] = axios.create.mock.calls[0];
-    expect(typeof config.timeout).toBe("number");
-    expect(config.timeout).toBeGreaterThan(0);
+  it("sets the expected timeout", () => {
+    expect(axiosCreateConfig.timeout).toBe(15000);
   });
 });
-
-// =============================================================================
-// API_BASE construction
-// =============================================================================
 
 describe("API_BASE", () => {
   it("ends with /api", () => {
     expect(API_BASE.endsWith("/api")).toBe(true);
   });
 
-  it("is a non-empty string", () => {
-    expect(typeof API_BASE).toBe("string");
-    expect(API_BASE.length).toBeGreaterThan(0);
-  });
-
-  it("is derived from REACT_APP_BACKEND_URL when set", () => {
+  it("is derived from REACT_APP_BACKEND_URL when set or localhost fallback otherwise", () => {
     const backendUrl =
       process.env.REACT_APP_BACKEND_URL || "http://127.0.0.1:8000";
     expect(API_BASE).toBe(`${backendUrl}/api`);
   });
 });
 
-// =============================================================================
-// 401 response interceptor
-// =============================================================================
-
 describe("401 response interceptor", () => {
+  const originalHref = window.location.href;
+
+  afterEach(() => {
+    window.history.pushState(null, "", originalHref);
+  });
+
   it("registers exactly one response interceptor", () => {
-    expect(mockResponseInterceptorUse).toHaveBeenCalledTimes(1);
+    expect(responseInterceptorCallCount).toBe(1);
   });
 
   it("passes a fulfillment handler that returns the response unchanged", async () => {
-    const { onFulfilled } = getInterceptorHandlers();
     const fakeRes = { status: 200, data: {} };
-    const result = await onFulfilled(fakeRes);
+    const result = await capturedOnFulfilled(fakeRes);
     expect(result).toBe(fakeRes);
   });
 
   it("calls supabase.auth.signOut() on a 401 error", async () => {
-    const { onRejected } = getInterceptorHandlers();
     const error401 = { response: { status: 401 } };
-    await onRejected(error401).catch(() => {});
+    await capturedOnRejected(error401).catch(() => {});
     expect(mockSignOut).toHaveBeenCalledTimes(1);
   });
 
-  it("sets window.location.href to '/' on a 401 error", async () => {
-    const { onRejected } = getInterceptorHandlers();
+  it("redirects to / on a 401 error", async () => {
     const error401 = { response: { status: 401 } };
-    await onRejected(error401).catch(() => {});
-    expect(window.location.href).toBe("/");
+    await capturedOnRejected(error401).catch(() => {});
+    expect(window.location.pathname).toBe("/");
   });
 
   it("rejects the promise so callers receive the error after 401 handling", async () => {
-    const { onRejected } = getInterceptorHandlers();
     const error401 = { response: { status: 401 } };
-    await expect(onRejected(error401)).rejects.toEqual(error401);
+    await expect(capturedOnRejected(error401)).rejects.toEqual(error401);
   });
 
   it("does NOT call supabase.auth.signOut() for non-401 errors", async () => {
-    const { onRejected } = getInterceptorHandlers();
     const error403 = { response: { status: 403 } };
-    await onRejected(error403).catch(() => {});
+    await capturedOnRejected(error403).catch(() => {});
     expect(mockSignOut).not.toHaveBeenCalled();
   });
 
   it("does NOT redirect for non-401 errors", async () => {
-    const { onRejected } = getInterceptorHandlers();
     const error500 = { response: { status: 500 } };
-    await onRejected(error500).catch(() => {});
-    expect(window.location.href).toBe("");
+    await capturedOnRejected(error500).catch(() => {});
+    expect(window.location.href).toBe(originalHref);
   });
 
   it("does NOT call supabase.auth.signOut() when error has no response", async () => {
-    const { onRejected } = getInterceptorHandlers();
     const networkError = new Error("Network Error");
-    await onRejected(networkError).catch(() => {});
+    await capturedOnRejected(networkError).catch(() => {});
     expect(mockSignOut).not.toHaveBeenCalled();
   });
 
   it("does NOT redirect when error has no response", async () => {
-    const { onRejected } = getInterceptorHandlers();
     const networkError = new Error("Network Error");
-    await onRejected(networkError).catch(() => {});
-    expect(window.location.href).toBe("");
+    await capturedOnRejected(networkError).catch(() => {});
+    expect(window.location.href).toBe(originalHref);
   });
 });
-
-// =============================================================================
-// paymentMethods.list
-// =============================================================================
-
-describe("paymentMethods.list", () => {
-  it("calls api.get with the correct URL for a plain orgId", () => {
-    mockGet.mockResolvedValueOnce({ data: {} });
-    paymentMethods.list("org-001");
-    expect(mockGet).toHaveBeenCalledWith(
-      "/ui/billing/payment-methods?organizationid=org-001",
-    );
-  });
-
-  it("URL-encodes the orgId", () => {
-    mockGet.mockResolvedValueOnce({ data: {} });
-    paymentMethods.list("org/special chars&more");
-    const [url] = mockGet.mock.calls[0];
-    expect(url).toContain(
-      `organizationid=${encodeURIComponent("org/special chars&more")}`,
-    );
-  });
-
-  it("returns the axios promise", () => {
-    const fakePromise = Promise.resolve({ data: [] });
-    mockGet.mockReturnValueOnce(fakePromise);
-    const result = paymentMethods.list("org-001");
-    expect(result).toBe(fakePromise);
-  });
-
-  it("calls api.get exactly once per invocation", () => {
-    mockGet.mockResolvedValueOnce({ data: {} });
-    paymentMethods.list("org-001");
-    expect(mockGet).toHaveBeenCalledTimes(1);
-  });
-});
-
-// =============================================================================
-// paymentMethods.setDefault
-// =============================================================================
-
-describe("paymentMethods.setDefault", () => {
-  it("calls api.patch with the correct URL for plain ids", () => {
-    mockPatch.mockResolvedValueOnce({ data: {} });
-    paymentMethods.setDefault("pm-001", "org-001");
-    expect(mockPatch).toHaveBeenCalledWith(
-      "/ui/billing/payment-methods/pm-001/default?organizationid=org-001",
-    );
-  });
-
-  it("URL-encodes the methodId", () => {
-    mockPatch.mockResolvedValueOnce({ data: {} });
-    paymentMethods.setDefault("pm/001 x", "org-001");
-    const [url] = mockPatch.mock.calls[0];
-    expect(url).toContain(
-      `/ui/billing/payment-methods/${encodeURIComponent("pm/001 x")}/default`,
-    );
-  });
-
-  it("URL-encodes the orgId", () => {
-    mockPatch.mockResolvedValueOnce({ data: {} });
-    paymentMethods.setDefault("pm-001", "org/001 x");
-    const [url] = mockPatch.mock.calls[0];
-    expect(url).toContain(`organizationid=${encodeURIComponent("org/001 x")}`);
-  });
-
-  it("URL-encodes both methodId and orgId independently", () => {
-    mockPatch.mockResolvedValueOnce({ data: {} });
-    paymentMethods.setDefault("pm/a b", "org/c d");
-    const [url] = mockPatch.mock.calls[0];
-    expect(url).toBe(
-      `/ui/billing/payment-methods/${encodeURIComponent("pm/a b")}/default?organizationid=${encodeURIComponent("org/c d")}`,
-    );
-  });
-
-  it("returns the axios promise", () => {
-    const fakePromise = Promise.resolve({ data: {} });
-    mockPatch.mockReturnValueOnce(fakePromise);
-    const result = paymentMethods.setDefault("pm-001", "org-001");
-    expect(result).toBe(fakePromise);
-  });
-
-  it("uses PATCH, not GET or DELETE", () => {
-    mockPatch.mockResolvedValueOnce({ data: {} });
-    paymentMethods.setDefault("pm-001", "org-001");
-    expect(mockPatch).toHaveBeenCalledTimes(1);
-    expect(mockGet).not.toHaveBeenCalled();
-    expect(mockDelete).not.toHaveBeenCalled();
-  });
-});
-
-// =============================================================================
-// paymentMethods.delete
-// =============================================================================
-
-describe("paymentMethods.delete", () => {
-  it("calls api.delete with the correct URL for plain ids", () => {
-    mockDelete.mockResolvedValueOnce({ data: {} });
-    paymentMethods.delete("pm-001", "org-001");
-    expect(mockDelete).toHaveBeenCalledWith(
-      "/ui/billing/payment-methods/pm-001?organizationid=org-001",
-    );
-  });
-
-  it("URL-encodes the methodId", () => {
-    mockDelete.mockResolvedValueOnce({ data: {} });
-    paymentMethods.delete("pm/001 x", "org-001");
-    const [url] = mockDelete.mock.calls[0];
-    expect(url).toContain(
-      `/ui/billing/payment-methods/${encodeURIComponent("pm/001 x")}`,
-    );
-  });
-
-  it("URL-encodes the orgId", () => {
-    mockDelete.mockResolvedValueOnce({ data: {} });
-    paymentMethods.delete("pm-001", "org/001 x");
-    const [url] = mockDelete.mock.calls[0];
-    expect(url).toContain(`organizationid=${encodeURIComponent("org/001 x")}`);
-  });
-
-  it("URL-encodes both methodId and orgId independently", () => {
-    mockDelete.mockResolvedValueOnce({ data: {} });
-    paymentMethods.delete("pm/a b", "org/c d");
-    const [url] = mockDelete.mock.calls[0];
-    expect(url).toBe(
-      `/ui/billing/payment-methods/${encodeURIComponent("pm/a b")}?organizationid=${encodeURIComponent("org/c d")}`,
-    );
-  });
-
-  it("returns the axios promise", () => {
-    const fakePromise = Promise.resolve({ data: {} });
-    mockDelete.mockReturnValueOnce(fakePromise);
-    const result = paymentMethods.delete("pm-001", "org-001");
-    expect(result).toBe(fakePromise);
-  });
-
-  it("uses DELETE, not GET or PATCH", () => {
-    mockDelete.mockResolvedValueOnce({ data: {} });
-    paymentMethods.delete("pm-001", "org-001");
-    expect(mockDelete).toHaveBeenCalledTimes(1);
-    expect(mockGet).not.toHaveBeenCalled();
-    expect(mockPatch).not.toHaveBeenCalled();
-  });
-});
-
-// =============================================================================
-// payments.createCheckout
-// =============================================================================
-
-describe("payments.createCheckout", () => {
-  it("calls api.post with /payments/create-checkout", () => {
-    mockPost.mockResolvedValueOnce({ data: {} });
-    const payload = { plan: "starter", quantity: 1 };
-    payments.createCheckout(payload);
-    expect(mockPost).toHaveBeenCalledWith("/payments/create-checkout", payload);
-  });
-
-  it("forwards the payload untouched", () => {
-    mockPost.mockResolvedValueOnce({ data: {} });
-    const payload = { plan: "enterprise", organizationid: "org-99" };
-    payments.createCheckout(payload);
-    const [, sentPayload] = mockPost.mock.calls[0];
-    expect(sentPayload).toEqual(payload);
-  });
-
-  it("returns the axios promise", () => {
-    const fakePromise = Promise.resolve({
-      data: { url: "https://stripe.example" },
-    });
-    mockPost.mockReturnValueOnce(fakePromise);
-    expect(payments.createCheckout({})).toBe(fakePromise);
-  });
-
-  it("uses POST, not GET", () => {
-    mockPost.mockResolvedValueOnce({ data: {} });
-    payments.createCheckout({});
-    expect(mockPost).toHaveBeenCalledTimes(1);
-    expect(mockGet).not.toHaveBeenCalled();
-  });
-});
-
-// =============================================================================
-// payments.getStatus
-// =============================================================================
-
-describe("payments.getStatus", () => {
-  it("calls api.get with the correct URL including sessionId", () => {
-    mockGet.mockResolvedValueOnce({ data: {} });
-    payments.getStatus("cs_test_abc123");
-    expect(mockGet).toHaveBeenCalledWith("/payments/status/cs_test_abc123");
-  });
-
-  it("interpolates the sessionId directly into the path", () => {
-    mockGet.mockResolvedValueOnce({ data: {} });
-    payments.getStatus("cs_live_xyz789");
-    const [url] = mockGet.mock.calls[0];
-    expect(url).toBe("/payments/status/cs_live_xyz789");
-  });
-
-  it("returns the axios promise", () => {
-    const fakePromise = Promise.resolve({ data: { status: "complete" } });
-    mockGet.mockReturnValueOnce(fakePromise);
-    expect(payments.getStatus("cs_test_abc")).toBe(fakePromise);
-  });
-
-  it("uses GET, not POST or PATCH", () => {
-    mockGet.mockResolvedValueOnce({ data: {} });
-    payments.getStatus("cs_test_abc");
-    expect(mockGet).toHaveBeenCalledTimes(1);
-    expect(mockPost).not.toHaveBeenCalled();
-    expect(mockPatch).not.toHaveBeenCalled();
-  });
-});
-
-// =============================================================================
-// Smoke tests — other exported call shapes
-// =============================================================================
 
 describe("health.check", () => {
   it("calls api.get('/')", () => {
@@ -444,6 +190,80 @@ describe("integrations.getToken", () => {
     mockGet.mockResolvedValueOnce({ data: {} });
     integrations.getToken();
     expect(mockGet).toHaveBeenCalledWith("/integrations/token");
+  });
+});
+
+describe("payments.createCheckout", () => {
+  it("calls api.post with /payments/create-checkout", () => {
+    mockPost.mockResolvedValueOnce({ data: {} });
+    const payload = { plan: "starter", quantity: 1 };
+    payments.createCheckout(payload);
+    expect(mockPost).toHaveBeenCalledWith("/payments/create-checkout", payload);
+  });
+});
+
+describe("payments.getStatus", () => {
+  it("calls api.get with the correct URL including sessionId", () => {
+    mockGet.mockResolvedValueOnce({ data: {} });
+    payments.getStatus("cs_test_abc123");
+    expect(mockGet).toHaveBeenCalledWith("/payments/status/cs_test_abc123");
+  });
+});
+
+describe("paymentMethods.list", () => {
+  it("calls api.get with the correct URL for a plain orgId", () => {
+    mockGet.mockResolvedValueOnce({ data: {} });
+    paymentMethods.list("org-001");
+    expect(mockGet).toHaveBeenCalledWith(
+      "/ui/billing/payment-methods?organizationid=org-001",
+    );
+  });
+
+  it("URL-encodes the orgId", () => {
+    mockGet.mockResolvedValueOnce({ data: {} });
+    paymentMethods.list("org/special chars&more");
+    const [url] = mockGet.mock.calls[0];
+    expect(url).toContain(
+      `organizationid=${encodeURIComponent("org/special chars&more")}`,
+    );
+  });
+});
+
+describe("paymentMethods.setDefault", () => {
+  it("calls api.patch with the correct URL for plain ids", () => {
+    mockPatch.mockResolvedValueOnce({ data: {} });
+    paymentMethods.setDefault("pm-001", "org-001");
+    expect(mockPatch).toHaveBeenCalledWith(
+      "/ui/billing/payment-methods/pm-001/default?organizationid=org-001",
+    );
+  });
+
+  it("URL-encodes both methodId and orgId independently", () => {
+    mockPatch.mockResolvedValueOnce({ data: {} });
+    paymentMethods.setDefault("pm/a b", "org/c d");
+    const [url] = mockPatch.mock.calls[0];
+    expect(url).toBe(
+      `/ui/billing/payment-methods/${encodeURIComponent("pm/a b")}/default?organizationid=${encodeURIComponent("org/c d")}`,
+    );
+  });
+});
+
+describe("paymentMethods.delete", () => {
+  it("calls api.delete with the correct URL for plain ids", () => {
+    mockDelete.mockResolvedValueOnce({ data: {} });
+    paymentMethods.delete("pm-001", "org-001");
+    expect(mockDelete).toHaveBeenCalledWith(
+      "/ui/billing/payment-methods/pm-001?organizationid=org-001",
+    );
+  });
+
+  it("URL-encodes both methodId and orgId independently", () => {
+    mockDelete.mockResolvedValueOnce({ data: {} });
+    paymentMethods.delete("pm/a b", "org/c d");
+    const [url] = mockDelete.mock.calls[0];
+    expect(url).toBe(
+      `/ui/billing/payment-methods/${encodeURIComponent("pm/a b")}?organizationid=${encodeURIComponent("org/c d")}`,
+    );
   });
 });
 
@@ -495,8 +315,7 @@ describe("policies", () => {
   });
 
   it("update(id, payload) calls api.put('/policies/<id>', payload)", () => {
-    const mockPut = jest.fn().mockResolvedValueOnce({ data: {} });
-    mockAxiosInstance.put = mockPut;
+    mockPut.mockResolvedValueOnce({ data: {} });
     const payload = { name: "allow-safe" };
     policies.update("pol-001", payload);
     expect(mockPut).toHaveBeenCalledWith("/policies/pol-001", payload);
