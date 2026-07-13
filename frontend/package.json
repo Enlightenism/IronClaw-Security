@@ -65,7 +65,10 @@
   "scripts": {
     "start": "craco start",
     "build": "craco build",
-    "test": "craco test"
+    "build:prod": "NODE_ENV=production craco build",
+    "test": "craco test",
+    "analyze": "source-map-explorer 'build/static/js/*.js'",
+    "analyze:build": "NODE_ENV=production craco build && source-map-explorer 'build/static/js/*.js'"
   },
   "browserslist": {
     "production": [
@@ -99,6 +102,7 @@
     "jest-environment-jsdom": "^29.7.0",
     "postcss": "8.4.49",
     "react-router-dom": "^6.30.4",
+    "source-map-explorer": "^2.5.3",
     "tailwindcss": "3.4.17"
   },
   "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
