@@ -5,6 +5,7 @@ import functools
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
+
 SECRET_KEY_SENTINEL = "changeme-32-chars-minimum!!!!!"
 JWT_SECRET_SENTINEL = "changeme-jwt-32-chars-minimum!!"
 
@@ -171,4 +172,4 @@ class Settings(BaseSettings):
 
 @functools.lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    return Settings()
+    return Settings(debug=False, reload=False)

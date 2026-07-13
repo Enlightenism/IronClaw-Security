@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from app.core.settings import Settings, get_settings
+from app.core.settings import (
+    JWT_SECRET_SENTINEL,
+    SECRET_KEY_SENTINEL,
+    Settings,
+    get_settings,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -105,12 +110,12 @@ class TestCoreIdentityOverrides:
 
     def test_debug_override_true(self, monkeypatch):
         s = _fresh(monkeypatch, DEBUG="true")
-        assert s.debug is True
+        assert s.debug is False
         assert isinstance(s.debug, bool)
 
     def test_reload_override_true(self, monkeypatch):
         s = _fresh(monkeypatch, RELOAD="1")
-        assert s.reload is True
+        assert s.reload is False
         assert isinstance(s.reload, bool)
 
 
@@ -225,14 +230,14 @@ class TestJWTDefaults:
         get_settings.cache_clear()
         monkeypatch.delenv("IRONCLAW_SECRET_KEY", raising=False)
         s = get_settings()
-        assert s.secret_key == "changeme-32-chars-minimum!!!!!"
+        assert s.secret_key == SECRET_KEY_SENTINEL
         assert isinstance(s.secret_key, str)
 
     def test_jwt_secret_default(self, monkeypatch):
         get_settings.cache_clear()
         monkeypatch.delenv("JWT_SECRET", raising=False)
         s = get_settings()
-        assert s.jwt_secret == "changeme-jwt-32-chars-minimum!!"
+        assert s.jwt_secret == JWT_SECRET_SENTINEL
         assert isinstance(s.jwt_secret, str)
 
     def test_jwt_algorithm_default(self, monkeypatch):
@@ -257,6 +262,22 @@ class TestJWTDefaults:
         s = _fresh(monkeypatch, ACCESS_TOKEN_EXPIRE_MINUTES="60")
         assert s.access_token_expire_minutes == 60
         assert isinstance(s.access_token_expire_minutes, int)
+
+    def test_effective_secret_key_returns_empty_for_sentinel(self):
+        s = Settings(IRONCLAW_SECRET_KEY=SECRET_KEY_SENTINEL)
+        assert s.effective_secret_key == ""
+
+    def test_effective_secret_key_returns_trimmed_value(self):
+        s = Settings(IRONCLAW_SECRET_KEY="  real-secret-key  ")
+        assert s.effective_secret_key == "real-secret-key"
+
+    def test_effective_jwt_secret_returns_empty_for_sentinel(self):
+        s = Settings(JWT_SECRET=JWT_SECRET_SENTINEL)
+        assert s.effective_jwt_secret == ""
+
+    def test_effective_jwt_secret_returns_trimmed_value(self):
+        s = Settings(JWT_SECRET="  real-jwt-secret  ")
+        assert s.effective_jwt_secret == "real-jwt-secret"
 
 
 # ---------------------------------------------------------------------------
@@ -669,6 +690,45 @@ class TestEngineDefaults:
 
 
 # ---------------------------------------------------------------------------
+# Effective key resolution
+# ---------------------------------------------------------------------------
+
+
+class TestEffectiveKeyResolution:
+    def test_effective_api_key_prefers_first_non_empty_value(self):
+        s = Settings(
+            API_KEY="api-key",
+            ADMIN_API_KEY="admin-key",
+            PLATFORM_API_KEY="platform-key",
+            INTERNAL_PLATFORM_API_KEY="internal-key",
+            IRONCLAW_API_KEY="ironclaw-key",
+        )
+        assert s.effective_api_key == "ironclaw-key"
+        assert s.effective_platform_api_key == "ironclaw-key"
+
+    def test_effective_api_key_skips_blank_values(self):
+        s = Settings(
+            IRONCLAW_API_KEY="   ",
+            INTERNAL_PLATFORM_API_KEY="",
+            PLATFORM_API_KEY=" platform-key ",
+            ADMIN_API_KEY="admin-key",
+            API_KEY="api-key",
+        )
+        assert s.effective_api_key == "platform-key"
+
+    def test_effective_api_key_returns_empty_when_all_values_blank(self):
+        s = Settings(
+            IRONCLAW_API_KEY="   ",
+            INTERNAL_PLATFORM_API_KEY="",
+            PLATFORM_API_KEY="  ",
+            ADMIN_API_KEY="",
+            API_KEY="",
+        )
+        assert s.effective_api_key == ""
+        assert s.effective_platform_api_key == ""
+
+
+# ---------------------------------------------------------------------------
 # get_settings() cache invalidation
 # ---------------------------------------------------------------------------
 
@@ -723,6 +783,21 @@ class TestGetSettingsCache:
         info = get_settings.cache_info()
         assert info.currsize == 1
 
+    def test_get_settings_forces_debug_false_even_when_env_true(self, monkeypatch):
+        s = _fresh(monkeypatch, DEBUG="true")
+        assert s.debug is False
+        assert isinstance(s.debug, bool)
+
+    def test_get_settings_forces_reload_false_even_when_env_true(self, monkeypatch):
+        s = _fresh(monkeypatch, RELOAD="true")
+        assert s.reload is False
+        assert isinstance(s.reload, bool)
+
+    def test_get_settings_forces_both_debug_and_reload_false(self, monkeypatch):
+        s = _fresh(monkeypatch, DEBUG="true", RELOAD="1")
+        assert s.debug is False
+        assert s.reload is False
+
 
 # ---------------------------------------------------------------------------
 # Settings model direct instantiation with explicit kwargs
@@ -743,6 +818,11 @@ class TestSettingsDirectInstantiation:
         s = Settings(DEBUG=True)
         assert s.debug is True
         assert isinstance(s.debug, bool)
+
+    def test_instantiate_with_explicit_reload_true(self):
+        s = Settings(RELOAD=True)
+        assert s.reload is True
+        assert isinstance(s.reload, bool)
 
     def test_instantiate_with_explicit_edge_fn_path(self):
         s = Settings(IRONCLAW_AUTH_EDGE_FN_PATH="/functions/v1/test-auth")
