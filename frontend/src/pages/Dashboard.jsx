@@ -45,7 +45,8 @@ const AttackFeed = memo(function AttackFeed({ attacks }) {
     return attacks.slice(start, start + ATTACKS_PAGE_SIZE);
   }, [attacks, page]);
 
-  const startItem = attacks.length === 0 ? 0 : (page - 1) * ATTACKS_PAGE_SIZE + 1;
+  const startItem =
+    attacks.length === 0 ? 0 : (page - 1) * ATTACKS_PAGE_SIZE + 1;
   const endItem = Math.min(page * ATTACKS_PAGE_SIZE, attacks.length);
 
   return (
@@ -167,6 +168,19 @@ const Dashboard = () => {
   const [purchasingId, setPurchasingId] = useState(null);
   const polledRef = useRef(false);
 
+  const getPackagePriceId = useCallback((packageId) => {
+    switch (packageId) {
+      case "pkg_5000":
+        return process.env.REACT_APP_STRIPE_PRICE_ID_PKG_5000 || "";
+      case "pkg_25000":
+        return process.env.REACT_APP_STRIPE_PRICE_ID_PKG_25000 || "";
+      case "pkg_60000":
+        return process.env.REACT_APP_STRIPE_PRICE_ID_PKG_60000 || "";
+      default:
+        return "";
+    }
+  }, []);
+
   const fetchDashboard = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoadingData(true);
 
@@ -218,6 +232,13 @@ const Dashboard = () => {
   const pollPayment = useCallback(
     async (sessionId, attempts = 0) => {
       const maxAttempts = 6;
+
+      if (!sessionId) {
+        toast.dismiss("pay");
+        toast.error("Missing payment session.");
+        return;
+      }
+
       if (attempts >= maxAttempts) {
         toast.dismiss("pay");
         toast.error("Payment status check timed out. Refresh in a moment.");
@@ -233,12 +254,14 @@ const Dashboard = () => {
             `Payment confirmed — ${status.units.toLocaleString()} units added!`,
           );
           await fetchDashboard();
+          setPurchasingId(null);
           return;
         }
 
         if (status.status === "expired") {
           toast.dismiss("pay");
           toast.error("Payment session expired. Please try again.");
+          setPurchasingId(null);
           return;
         }
 
@@ -253,6 +276,22 @@ const Dashboard = () => {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const sessionId = params.get("session_id");
+    const checkoutState = params.get("checkout");
+
+    if (checkoutState === "cancel") {
+      toast.error("Checkout canceled.");
+      navigate("/dashboard", { replace: true });
+      setPurchasingId(null);
+      return;
+    }
+
+    if (checkoutState === "success" && !sessionId) {
+      toast.success("Checkout completed. Refreshing billing state...");
+      fetchDashboard();
+      navigate("/dashboard", { replace: true });
+      setPurchasingId(null);
+      return;
+    }
 
     if (sessionId && !polledRef.current) {
       polledRef.current = true;
@@ -260,7 +299,7 @@ const Dashboard = () => {
       pollPayment(sessionId);
       navigate("/dashboard", { replace: true });
     }
-  }, [location.search, pollPayment, navigate]);
+  }, [location.search, pollPayment, navigate, fetchDashboard]);
 
   const handlePurchase = async (packageId) => {
     if (!VALID_PACKAGES.includes(packageId)) {
@@ -268,16 +307,35 @@ const Dashboard = () => {
       return;
     }
 
+    const priceId = getPackagePriceId(packageId);
+
+    if (!priceId) {
+      toast.error("Package price not configured.");
+      return;
+    }
+
     setPurchasingId(packageId);
 
     try {
-      const { data: res } = await api.post("/payments/create-checkout", {
-        package_id: packageId,
-        origin_url: window.location.origin,
+      const { data: res } = await api.post("/billing/checkout/sessions", {
+        price_id: priceId,
+        success_url: `${window.location.origin}/dashboard?checkout=success`,
+        cancel_url: `${window.location.origin}/dashboard?checkout=cancel`,
       });
-      window.location.href = res.url;
+
+      if (!res?.url) {
+        throw new Error("Missing checkout URL.");
+      }
+
+      if (typeof window.location.assign === "function") {
+        window.location.assign(res.url);
+      } else {
+        window.location.href = res.url;
+      }
     } catch (e) {
-      toast.error(e?.response?.data?.detail || "Could not start checkout.");
+      toast.error(
+        e?.response?.data?.detail || e?.message || "Could not start checkout.",
+      );
       setPurchasingId(null);
     }
   };
@@ -307,6 +365,7 @@ const Dashboard = () => {
       data?.has_paid,
       data?.organization_id,
       purchasingId,
+      handlePurchase,
     ],
   );
 

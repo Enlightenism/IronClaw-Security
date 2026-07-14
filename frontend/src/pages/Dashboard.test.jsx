@@ -6,7 +6,7 @@
  */
 
 import React from "react";
-import { render, screen, waitFor, act, within } from "@testing-library/react";
+import { render, screen, waitFor, act, within, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 // ── react-router-dom mock ─────────────────────────────────────────────────────
@@ -112,6 +112,12 @@ const DEFAULT_TOKENS = {
   openclaw_command: "openclaw --token xyz",
 };
 
+const DEFAULT_PRICE_IDS = {
+  REACT_APP_STRIPE_PRICE_ID_PKG_5000: "price_test_5000",
+  REACT_APP_STRIPE_PRICE_ID_PKG_25000: "price_test_25000",
+  REACT_APP_STRIPE_PRICE_ID_PKG_60000: "price_test_60000",
+};
+
 function makeAttack(index) {
   return {
     id: `attack-${index}`,
@@ -125,16 +131,30 @@ function makeAttack(index) {
 function setupDefaultApis() {
   mockApiGet.mockImplementation((url) => {
     if (url === "/dashboard") return Promise.resolve({ data: DEFAULT_DASH });
-    if (url === "/integrations/token")
+    if (url === "/integrations/token") {
       return Promise.resolve({ data: DEFAULT_TOKENS });
+    }
     return Promise.reject(new Error(`Unexpected GET ${url}`));
   });
   mockApiPost.mockResolvedValue({ data: {} });
 }
 
+function setPriceIdEnv(overrides = {}) {
+  process.env.REACT_APP_STRIPE_PRICE_ID_PKG_5000 =
+    overrides.REACT_APP_STRIPE_PRICE_ID_PKG_5000 ??
+    DEFAULT_PRICE_IDS.REACT_APP_STRIPE_PRICE_ID_PKG_5000;
+  process.env.REACT_APP_STRIPE_PRICE_ID_PKG_25000 =
+    overrides.REACT_APP_STRIPE_PRICE_ID_PKG_25000 ??
+    DEFAULT_PRICE_IDS.REACT_APP_STRIPE_PRICE_ID_PKG_25000;
+  process.env.REACT_APP_STRIPE_PRICE_ID_PKG_60000 =
+    overrides.REACT_APP_STRIPE_PRICE_ID_PKG_60000 ??
+    DEFAULT_PRICE_IDS.REACT_APP_STRIPE_PRICE_ID_PKG_60000;
+}
+
 // ── Setup / teardown ──────────────────────────────────────────────────────────
 beforeEach(() => {
   jest.clearAllMocks();
+  cleanup();
   capturedWalletProps = null;
   capturedSecurityProps = null;
   mockLocation.search = "";
@@ -144,9 +164,16 @@ beforeEach(() => {
     logout: mockLogout,
   };
   setupDefaultApis();
+  setPriceIdEnv();
 
   delete window.location;
-  window.location = { href: "", origin: "http://localhost" };
+  window.location = {
+    href: "",
+    origin: "http://localhost",
+    assign: jest.fn((url) => {
+      window.location.href = url;
+    }),
+  };
 
   jest.useFakeTimers();
 });
@@ -227,12 +254,14 @@ describe("loading spinner", () => {
 describe("WalletCard organizationId prop", () => {
   it("passes organizationId from dashboard API response to WalletCard", async () => {
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard")
+      if (url === "/dashboard") {
         return Promise.resolve({
           data: { ...DEFAULT_DASH, organization_id: "org-abc" },
         });
-      if (url === "/integrations/token")
+      }
+      if (url === "/integrations/token") {
         return Promise.resolve({ data: DEFAULT_TOKENS });
+      }
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
@@ -250,10 +279,12 @@ describe("WalletCard organizationId prop", () => {
   it("passes organizationId='org-001' fallback when API response has no organization_id", async () => {
     const { organization_id: _unused, ...dashWithoutOrg } = DEFAULT_DASH;
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard")
+      if (url === "/dashboard") {
         return Promise.resolve({ data: dashWithoutOrg });
-      if (url === "/integrations/token")
+      }
+      if (url === "/integrations/token") {
         return Promise.resolve({ data: DEFAULT_TOKENS });
+      }
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
@@ -270,12 +301,14 @@ describe("WalletCard organizationId prop", () => {
 
   it("passes organizationId='org-001' fallback when organization_id is null", async () => {
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard")
+      if (url === "/dashboard") {
         return Promise.resolve({
           data: { ...DEFAULT_DASH, organization_id: null },
         });
-      if (url === "/integrations/token")
+      }
+      if (url === "/integrations/token") {
         return Promise.resolve({ data: DEFAULT_TOKENS });
+      }
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
@@ -301,12 +334,14 @@ describe("session_id payment polling", () => {
 
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard") return Promise.resolve({ data: DEFAULT_DASH });
-      if (url === "/integrations/token")
+      if (url === "/integrations/token") {
         return Promise.resolve({ data: DEFAULT_TOKENS });
-      if (url === "/payments/status/cs_test_abc")
+      }
+      if (url === "/payments/status/cs_test_abc") {
         return Promise.resolve({
           data: { payment_status: "paid", units: 5000 },
         });
+      }
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
@@ -327,12 +362,14 @@ describe("session_id payment polling", () => {
 
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard") return Promise.resolve({ data: DEFAULT_DASH });
-      if (url === "/integrations/token")
+      if (url === "/integrations/token") {
         return Promise.resolve({ data: DEFAULT_TOKENS });
-      if (url === "/payments/status/cs_test_abc")
+      }
+      if (url === "/payments/status/cs_test_abc") {
         return Promise.resolve({
           data: { payment_status: "paid", units: 5000 },
         });
+      }
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
@@ -351,13 +388,15 @@ describe("session_id payment polling", () => {
     mockLocation.search = "?session_id=cs_test_abc";
 
     mockApiGet.mockImplementation((url) => {
-      if (url === "/payments/status/cs_test_abc")
+      if (url === "/payments/status/cs_test_abc") {
         return Promise.resolve({
           data: { payment_status: "paid", units: 5000 },
         });
+      }
       if (url === "/dashboard") return Promise.resolve({ data: DEFAULT_DASH });
-      if (url === "/integrations/token")
+      if (url === "/integrations/token") {
         return Promise.resolve({ data: DEFAULT_TOKENS });
+      }
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
@@ -418,7 +457,7 @@ describe("handlePurchase — invalid package", () => {
 // =============================================================================
 
 describe("handlePurchase — valid package", () => {
-  it("calls api.post /payments/create-checkout with the package ID", async () => {
+  it("calls api.post /billing/checkout/sessions with price_id and redirect URLs", async () => {
     mockApiPost.mockResolvedValueOnce({
       data: { url: "https://checkout.stripe.com/pay/cs_test_xyz" },
     });
@@ -436,8 +475,12 @@ describe("handlePurchase — valid package", () => {
     });
 
     expect(mockApiPost).toHaveBeenCalledWith(
-      "/payments/create-checkout",
-      expect.objectContaining({ package_id: "pkg_5000" }),
+      "/billing/checkout/sessions",
+      {
+        price_id: "price_test_5000",
+        success_url: "http://localhost/dashboard?checkout=success",
+        cancel_url: "http://localhost/dashboard?checkout=cancel",
+      },
     );
   });
 
@@ -458,6 +501,7 @@ describe("handlePurchase — valid package", () => {
     });
 
     await waitFor(() => {
+      expect(window.location.assign).toHaveBeenCalledWith(checkoutUrl);
       expect(window.location.href).toBe(checkoutUrl);
     });
   });
@@ -466,10 +510,15 @@ describe("handlePurchase — valid package", () => {
     const validIds = ["pkg_5000", "pkg_25000", "pkg_60000"];
 
     for (const pkgId of validIds) {
+      cleanup();
       jest.clearAllMocks();
       capturedWalletProps = null;
       capturedSecurityProps = null;
       setupDefaultApis();
+      setPriceIdEnv();
+      window.location.href = "";
+      window.location.assign.mockClear();
+
       mockApiPost.mockResolvedValueOnce({
         data: { url: "https://checkout.stripe.com/pay/x" },
       });
@@ -512,6 +561,30 @@ describe("handlePurchase — valid package", () => {
         expect.stringContaining("Checkout failed"),
       );
     });
+  });
+
+  it("calls toast.error when a valid package has no configured price ID", async () => {
+    process.env.REACT_APP_STRIPE_PRICE_ID_PKG_5000 = "";
+
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    await waitFor(() => {
+      expect(capturedWalletProps).not.toBeNull();
+    });
+
+    await act(async () => {
+      await capturedWalletProps.onPurchase("pkg_5000");
+    });
+
+    expect(mockApiPost).not.toHaveBeenCalledWith(
+      "/billing/checkout/sessions",
+      expect.anything(),
+    );
+    expect(mockToastError).toHaveBeenCalledWith(
+      expect.stringContaining("Package price not configured"),
+    );
   });
 });
 
@@ -592,12 +665,14 @@ describe("dashboard structure", () => {
 
   it("passes balance from wallet_units to WalletCard", async () => {
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard")
+      if (url === "/dashboard") {
         return Promise.resolve({
           data: { ...DEFAULT_DASH, wallet_units: 9999 },
         });
-      if (url === "/integrations/token")
+      }
+      if (url === "/integrations/token") {
         return Promise.resolve({ data: DEFAULT_TOKENS });
+      }
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
@@ -631,7 +706,7 @@ describe("dashboard structure", () => {
     ];
 
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard")
+      if (url === "/dashboard") {
         return Promise.resolve({
           data: {
             ...DEFAULT_DASH,
@@ -641,8 +716,10 @@ describe("dashboard structure", () => {
             attacks,
           },
         });
-      if (url === "/integrations/token")
+      }
+      if (url === "/integrations/token") {
         return Promise.resolve({ data: DEFAULT_TOKENS });
+      }
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
@@ -688,12 +765,14 @@ describe("attack feed pagination", () => {
     );
 
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard")
+      if (url === "/dashboard") {
         return Promise.resolve({
           data: { ...DEFAULT_DASH, attacks },
         });
-      if (url === "/integrations/token")
+      }
+      if (url === "/integrations/token") {
         return Promise.resolve({ data: DEFAULT_TOKENS });
+      }
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
@@ -723,12 +802,14 @@ describe("attack feed pagination", () => {
     );
 
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard")
+      if (url === "/dashboard") {
         return Promise.resolve({
           data: { ...DEFAULT_DASH, attacks },
         });
-      if (url === "/integrations/token")
+      }
+      if (url === "/integrations/token") {
         return Promise.resolve({ data: DEFAULT_TOKENS });
+      }
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
@@ -764,12 +845,14 @@ describe("attack feed pagination", () => {
     );
 
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard")
+      if (url === "/dashboard") {
         return Promise.resolve({
           data: { ...DEFAULT_DASH, attacks },
         });
-      if (url === "/integrations/token")
+      }
+      if (url === "/integrations/token") {
         return Promise.resolve({ data: DEFAULT_TOKENS });
+      }
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
