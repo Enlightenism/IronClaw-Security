@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ShieldCheck, Loader2, X, Mail, Lock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -20,6 +20,20 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
   const navigate = useNavigate();
   const debouncedEmail = useDebounce(email, 400);
 
+  const trimmedEmail = useMemo(() => email.trim(), [email]);
+
+  const validateEmail = useCallback((value) => {
+    if (!value) {
+      return "Email is required.";
+    }
+
+    if (!EMAIL_REGEX.test(value)) {
+      return "Enter a valid email address.";
+    }
+
+    return "";
+  }, []);
+
   useEffect(() => {
     if (open) {
       setMode(initialMode);
@@ -35,22 +49,16 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
   useEffect(() => {
     if (!open) return;
 
-    const trimmedEmail = email.trim();
-
     if (!emailTouched) {
       setEmailError("");
       setEmailStatus("");
       return;
     }
 
-    if (!trimmedEmail) {
-      setEmailError("Email is required.");
-      setEmailStatus("");
-      return;
-    }
+    const nextEmailError = validateEmail(trimmedEmail);
 
-    if (!EMAIL_REGEX.test(trimmedEmail)) {
-      setEmailError("Enter a valid email address.");
+    if (nextEmailError) {
+      setEmailError(nextEmailError);
       setEmailStatus("");
       return;
     }
@@ -63,25 +71,21 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
     }
 
     setEmailStatus("Email looks good.");
-  }, [email, debouncedEmail, emailTouched, open]);
+  }, [debouncedEmail, emailTouched, open, trimmedEmail, validateEmail]);
 
   if (!open) return null;
 
   const submit = async (e) => {
     e.preventDefault();
 
-    const trimmedEmail = email.trim();
+    if (loading) return;
 
     setEmailTouched(true);
 
-    if (!trimmedEmail) {
-      setEmailError("Email is required.");
-      setEmailStatus("");
-      return;
-    }
+    const nextEmailError = validateEmail(trimmedEmail);
 
-    if (!EMAIL_REGEX.test(trimmedEmail)) {
-      setEmailError("Enter a valid email address.");
+    if (nextEmailError) {
+      setEmailError(nextEmailError);
       setEmailStatus("");
       return;
     }
@@ -108,8 +112,10 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
     }
   };
 
-  const switchMode = (m) => {
-    setMode(m);
+  const switchMode = (nextMode) => {
+    if (loading) return;
+    setMode(nextMode);
+    setPassword("");
     setEmailTouched(false);
     setEmailError("");
     setEmailStatus("");
@@ -126,7 +132,7 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
       >
         <div
           className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-          onClick={onClose}
+          onClick={loading ? undefined : onClose}
         />
         <motion.div
           initial={{ scale: 0.94, y: 20, opacity: 0 }}
@@ -136,9 +142,11 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
           className="glass relative z-10 w-full max-w-md rounded-2xl p-8"
         >
           <button
+            type="button"
             onClick={onClose}
+            disabled={loading}
             data-testid="auth-modal-close"
-            className="absolute right-5 top-5 text-white/50 transition hover:text-white"
+            className="absolute right-5 top-5 text-white/50 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
             <X size={20} />
           </button>
@@ -166,6 +174,7 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
               <input
                 type="email"
                 required
+                autoComplete="email"
                 value={email}
                 onChange={(e) => {
                   setEmail(e.target.value);
@@ -175,6 +184,7 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
                 placeholder="you@company.com"
                 data-testid="auth-email-input"
                 aria-invalid={emailError ? "true" : "false"}
+                aria-describedby={emailError || emailStatus ? "auth-email-status" : undefined}
                 className={`w-full rounded-lg border bg-white/5 py-3 pl-11 pr-4 text-sm text-white placeholder-white/40 outline-none transition focus:ring-2 ${
                   emailError
                     ? "border-red-400/60 focus:border-red-400/60 focus:ring-red-400/20"
@@ -185,6 +195,7 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
 
             {(emailError || emailStatus) && (
               <div
+                id="auth-email-status"
                 data-testid="auth-email-status"
                 className={`flex min-h-[20px] items-center gap-2 text-xs ${
                   emailError ? "text-red-300" : "text-[#BFC1C2]"
@@ -206,6 +217,7 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
                 type="password"
                 required
                 minLength={6}
+                autoComplete={mode === "signup" ? "new-password" : "current-password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Password (min 6 chars)"
@@ -218,7 +230,7 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
               type="submit"
               disabled={loading}
               data-testid="auth-submit-btn"
-              className="btn-shimmer flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-[#C9A84C] to-[#FFD700] py-3 font-semibold text-black transition hover:shadow-[0_0_24px_rgba(255,215,0,0.4)] disabled:opacity-60"
+              className="btn-shimmer flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-[#C9A84C] to-[#FFD700] py-3 font-semibold text-black transition hover:shadow-[0_0_24px_rgba(255,215,0,0.4)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading && <Loader2 className="animate-spin" size={18} />}
               {loading
@@ -249,9 +261,11 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
               <>
                 Already protected?{" "}
                 <button
+                  type="button"
                   onClick={() => switchMode("signin")}
+                  disabled={loading}
                   data-testid="switch-to-signin"
-                  className="font-medium text-[#38BDF8] hover:underline"
+                  className="font-medium text-[#38BDF8] hover:underline disabled:opacity-50"
                 >
                   Sign in
                 </button>
@@ -260,9 +274,11 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
               <>
                 New operator?{" "}
                 <button
+                  type="button"
                   onClick={() => switchMode("signup")}
+                  disabled={loading}
                   data-testid="switch-to-signup"
-                  className="font-medium text-[#38BDF8] hover:underline"
+                  className="font-medium text-[#38BDF8] hover:underline disabled:opacity-50"
                 >
                   Create an account
                 </button>
