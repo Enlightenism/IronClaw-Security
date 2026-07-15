@@ -47,17 +47,27 @@ jest.mock("@/hooks/useCountUp", () => ({
   useCountUp: (value) => value,
 }));
 
-jest.mock("@/components/AuthModal", () => (props) => (
-  <div
-    data-testid="auth-modal"
-    data-open={props.open ? "true" : "false"}
-    data-mode={props.initialMode}
-  />
-));
+jest.mock("@/components/AuthModal", () => {
+  const MockAuthModal = (props) => (
+    <div
+      data-testid="auth-modal"
+      data-open={props.open ? "true" : "false"}
+      data-mode={props.initialMode}
+    />
+  );
 
-jest.mock("@/components/ParticleField", () => () => (
-  <div data-testid="particle-field" />
-));
+  MockAuthModal.displayName = "MockAuthModal";
+
+  return MockAuthModal;
+});
+
+jest.mock("@/components/ParticleField", () => {
+  const MockParticleField = () => <div data-testid="particle-field" />;
+
+  MockParticleField.displayName = "MockParticleField";
+
+  return MockParticleField;
+});
 
 jest.mock("@/context/AuthContext", () => ({
   useAuth: jest.fn(),
@@ -65,20 +75,25 @@ jest.mock("@/context/AuthContext", () => ({
 
 jest.mock("react-router-dom", () => {
   const actual = jest.requireActual("react-router-dom");
+
+  const MockMemoryRouter = ({ children, future }) => (
+    <actual.MemoryRouter
+      future={{
+        v7_startTransition: true,
+        v7_relativeSplatPath: true,
+        ...(future || {}),
+      }}
+    >
+      {children}
+    </actual.MemoryRouter>
+  );
+
+  MockMemoryRouter.displayName = "MockMemoryRouter";
+
   return {
     ...actual,
     useNavigate: () => mockNavigate,
-    MemoryRouter: ({ children, future }) => (
-      <actual.MemoryRouter
-        future={{
-          v7_startTransition: true,
-          v7_relativeSplatPath: true,
-          ...(future || {}),
-        }}
-      >
-        {children}
-      </actual.MemoryRouter>
-    ),
+    MemoryRouter: MockMemoryRouter,
   };
 });
 

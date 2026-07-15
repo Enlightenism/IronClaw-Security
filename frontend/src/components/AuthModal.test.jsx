@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import AuthModal from "@/components/AuthModal";
@@ -46,14 +46,18 @@ jest.mock("framer-motion", () => {
       {
         get: (_, tag) =>
           ({ children, ...props }) => {
-            const {
-              initial, animate, exit, transition,
-              whileHover, whileTap, ...rest
-            } = props;
+            const filteredProps = { ...props };
+            delete filteredProps.initial;
+            delete filteredProps.animate;
+            delete filteredProps.exit;
+            delete filteredProps.transition;
+            delete filteredProps.whileHover;
+            delete filteredProps.whileTap;
+
             const Tag = tag;
-            return <Tag {...rest}>{children}</Tag>;
+            return <Tag {...filteredProps}>{children}</Tag>;
           },
-      }
+      },
     ),
   };
 });
@@ -69,9 +73,11 @@ const renderModal = (props = {}) => {
     initialMode: "signin",
   };
   return render(
-    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <MemoryRouter
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
       <AuthModal {...defaults} {...props} />
-    </MemoryRouter>
+    </MemoryRouter>,
   );
 };
 
@@ -99,7 +105,6 @@ beforeEach(() => {
 });
 
 describe("AuthModal", () => {
-
   describe("visibility", () => {
     it("renders when open is true", () => {
       renderModal({ open: true });
@@ -142,13 +147,17 @@ describe("AuthModal", () => {
     it("updates email field on change", () => {
       renderModal();
       fillEmail("operator@ironclaw.io");
-      expect(screen.getByTestId("auth-email-input").value).toBe("operator@ironclaw.io");
+      expect(screen.getByTestId("auth-email-input").value).toBe(
+        "operator@ironclaw.io",
+      );
     });
 
     it("updates password field on change", () => {
       renderModal();
       fillPassword("SecurePass123!");
-      expect(screen.getByTestId("auth-password-input").value).toBe("SecurePass123!");
+      expect(screen.getByTestId("auth-password-input").value).toBe(
+        "SecurePass123!",
+      );
     });
   });
 
@@ -162,7 +171,7 @@ describe("AuthModal", () => {
       await waitFor(() => {
         expect(mockAuthenticate).toHaveBeenCalledWith(
           "operator@ironclaw.io",
-          "SecurePass123!"
+          "SecurePass123!",
         );
       });
     });
@@ -199,7 +208,10 @@ describe("AuthModal", () => {
       fillPassword("NewPass123!");
       submitForm();
       await waitFor(() => {
-        expect(mockRegister).toHaveBeenCalledWith("new@ironclaw.io", "NewPass123!");
+        expect(mockRegister).toHaveBeenCalledWith(
+          "new@ironclaw.io",
+          "NewPass123!",
+        );
       });
     });
 
@@ -210,7 +222,9 @@ describe("AuthModal", () => {
       fillPassword("NewPass123!");
       submitForm();
       await waitFor(() => {
-        expect(mockToastSuccess).toHaveBeenCalledWith("Account created. Defenses online.");
+        expect(mockToastSuccess).toHaveBeenCalledWith(
+          "Account created. Defenses online.",
+        );
         expect(mockNavigate).toHaveBeenCalledWith("/dashboard");
       });
     });
@@ -230,7 +244,7 @@ describe("AuthModal", () => {
   describe("loading state", () => {
     it("disables the submit button while loading", async () => {
       mockAuthenticate.mockImplementation(
-        () => new Promise((resolve) => setTimeout(resolve, 500))
+        () => new Promise((resolve) => setTimeout(resolve, 500)),
       );
       renderModal({ initialMode: "signin" });
       fillEmail("operator@ironclaw.io");
@@ -264,7 +278,9 @@ describe("AuthModal", () => {
       fillPassword("pass123");
       submitForm();
       await waitFor(() => {
-        expect(mockToastError).toHaveBeenCalledWith("Something went wrong. Try again.");
+        expect(mockToastError).toHaveBeenCalledWith(
+          "Something went wrong. Try again.",
+        );
       });
     });
   });

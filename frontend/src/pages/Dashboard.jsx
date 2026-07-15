@@ -1,28 +1,29 @@
 import {
-  useEffect,
-  useState,
-  useCallback,
-  useRef,
-  useMemo,
   memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
 } from "react";
-import { useNavigate, useLocation, Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
-  ShieldCheck,
-  LogOut,
-  Loader2,
-  RefreshCw,
-  FileSearch,
-  ScrollText,
   ChevronLeft,
   ChevronRight,
+  FileSearch,
+  Loader2,
+  LogOut,
+  RefreshCw,
+  ScrollText,
+  ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
-import api from "@/lib/api";
-import { useAuth } from "@/context/AuthContext";
-import WalletCard from "@/components/dashboard/WalletCard";
-import SecurityAnalysis from "@/components/dashboard/SecurityAnalysis";
+
 import IntegrationCard from "@/components/dashboard/IntegrationCard";
+import SecurityAnalysis from "@/components/dashboard/SecurityAnalysis";
+import WalletCard from "@/components/dashboard/WalletCard";
+import { useAuth } from "@/context/AuthContext";
+import api from "@/lib/api";
 
 const ATTACKS_PAGE_SIZE = 25;
 const VALID_PACKAGES = ["pkg_5000", "pkg_25000", "pkg_60000"];
@@ -30,6 +31,17 @@ const VALID_PACKAGES = ["pkg_5000", "pkg_25000", "pkg_60000"];
 const MemoWalletCard = memo(WalletCard);
 const MemoSecurityAnalysis = memo(SecurityAnalysis);
 const MemoIntegrationCard = memo(IntegrationCard);
+
+const getStripePriceIdMap = () => {
+  const env =
+    typeof process !== "undefined" && process?.env ? process.env : {};
+
+  return {
+    pkg_5000: env.REACT_APP_STRIPE_PRICE_ID_PKG_5000 || "",
+    pkg_25000: env.REACT_APP_STRIPE_PRICE_ID_PKG_25000 || "",
+    pkg_60000: env.REACT_APP_STRIPE_PRICE_ID_PKG_60000 || "",
+  };
+};
 
 const AttackFeed = memo(function AttackFeed({ attacks }) {
   const [page, setPage] = useState(1);
@@ -45,8 +57,7 @@ const AttackFeed = memo(function AttackFeed({ attacks }) {
     return attacks.slice(start, start + ATTACKS_PAGE_SIZE);
   }, [attacks, page]);
 
-  const startItem =
-    attacks.length === 0 ? 0 : (page - 1) * ATTACKS_PAGE_SIZE + 1;
+  const startItem = attacks.length === 0 ? 0 : (page - 1) * ATTACKS_PAGE_SIZE + 1;
   const endItem = Math.min(page * ATTACKS_PAGE_SIZE, attacks.length);
 
   return (
@@ -169,13 +180,15 @@ const Dashboard = () => {
   const polledRef = useRef(false);
 
   const getPackagePriceId = useCallback((packageId) => {
+    const priceIdMap = getStripePriceIdMap();
+
     switch (packageId) {
       case "pkg_5000":
-        return process.env.REACT_APP_STRIPE_PRICE_ID_PKG_5000 || "";
+        return priceIdMap.pkg_5000;
       case "pkg_25000":
-        return process.env.REACT_APP_STRIPE_PRICE_ID_PKG_25000 || "";
+        return priceIdMap.pkg_25000;
       case "pkg_60000":
-        return process.env.REACT_APP_STRIPE_PRICE_ID_PKG_60000 || "";
+        return priceIdMap.pkg_60000;
       default:
         return "";
     }
@@ -201,14 +214,14 @@ const Dashboard = () => {
 
   useEffect(() => {
     if (!loading && !user) navigate("/");
-  }, [loading, user, navigate]);
+  }, [loading, navigate, user]);
 
   useEffect(() => {
     if (user) fetchDashboard();
-  }, [user, fetchDashboard]);
+  }, [fetchDashboard, user]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) return undefined;
 
     const refresh = setInterval(() => {
       fetchDashboard({ silent: true });
@@ -227,7 +240,7 @@ const Dashboard = () => {
       clearInterval(refresh);
       clearInterval(live);
     };
-  }, [user, fetchDashboard]);
+  }, [fetchDashboard, user]);
 
   const pollPayment = useCallback(
     async (sessionId, attempts = 0) => {
@@ -299,51 +312,54 @@ const Dashboard = () => {
       pollPayment(sessionId);
       navigate("/dashboard", { replace: true });
     }
-  }, [location.search, pollPayment, navigate, fetchDashboard]);
+  }, [fetchDashboard, location.search, navigate, pollPayment]);
 
-  const handlePurchase = async (packageId) => {
-    if (!VALID_PACKAGES.includes(packageId)) {
-      toast.error("Invalid package selected.");
-      return;
-    }
-
-    const priceId = getPackagePriceId(packageId);
-
-    if (!priceId) {
-      toast.error("Package price not configured.");
-      return;
-    }
-
-    setPurchasingId(packageId);
-
-    try {
-      const { data: res } = await api.post("/billing/checkout/sessions", {
-        price_id: priceId,
-        success_url: `${window.location.origin}/dashboard?checkout=success`,
-        cancel_url: `${window.location.origin}/dashboard?checkout=cancel`,
-      });
-
-      if (!res?.url) {
-        throw new Error("Missing checkout URL.");
+  const handlePurchase = useCallback(
+    async (packageId) => {
+      if (!VALID_PACKAGES.includes(packageId)) {
+        toast.error("Invalid package selected.");
+        return;
       }
 
-      if (typeof window.location.assign === "function") {
-        window.location.assign(res.url);
-      } else {
-        window.location.href = res.url;
-      }
-    } catch (e) {
-      toast.error(
-        e?.response?.data?.detail || e?.message || "Could not start checkout.",
-      );
-      setPurchasingId(null);
-    }
-  };
+      const priceId = getPackagePriceId(packageId);
 
-  const handleSignOut = () => {
+      if (!priceId) {
+        toast.error("Package price not configured.");
+        return;
+      }
+
+      setPurchasingId(packageId);
+
+      try {
+        const { data: res } = await api.post("/billing/checkout/sessions", {
+          price_id: priceId,
+          success_url: `${window.location.origin}/dashboard?checkout=success`,
+          cancel_url: `${window.location.origin}/dashboard?checkout=cancel`,
+        });
+
+        if (!res?.url) {
+          throw new Error("Missing checkout URL.");
+        }
+
+        if (typeof window.location.assign === "function") {
+          window.location.assign(res.url);
+        } else {
+          window.location.href = res.url;
+        }
+      } catch (e) {
+        toast.error(
+          e?.response?.data?.detail || e?.message || "Could not start checkout.",
+        );
+        setPurchasingId(null);
+      }
+    },
+    [getPackagePriceId],
+  );
+
+  const handleSignOut = useCallback(() => {
     logout();
     navigate("/");
-  };
+  }, [logout, navigate]);
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
@@ -360,12 +376,12 @@ const Dashboard = () => {
       organizationId: data?.organization_id ?? "org-001",
     }),
     [
-      data?.wallet_units,
-      data?.last_payment,
       data?.has_paid,
+      data?.last_payment,
       data?.organization_id,
-      purchasingId,
+      data?.wallet_units,
       handlePurchase,
+      purchasingId,
     ],
   );
 
@@ -376,7 +392,7 @@ const Dashboard = () => {
       dailyUsage: data?.daily_usage ?? [],
       attacks: data?.attacks ?? [],
     }),
-    [data?.units_today, data?.units_week, data?.daily_usage, data?.attacks],
+    [data?.attacks, data?.daily_usage, data?.units_today, data?.units_week],
   );
 
   const integrationCards = useMemo(

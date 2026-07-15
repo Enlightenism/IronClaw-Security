@@ -49,7 +49,6 @@ const mockPost = mockAxiosInstance.post;
 const mockPatch = mockAxiosInstance.patch;
 const mockDelete = mockAxiosInstance.delete;
 const mockPut = mockAxiosInstance.put;
-const mockRequestInterceptorUse = mockAxiosInstance.interceptors.request.use;
 const mockResponseInterceptorUse = mockAxiosInstance.interceptors.response.use;
 const mockSignOut = supabase.auth.signOut;
 
