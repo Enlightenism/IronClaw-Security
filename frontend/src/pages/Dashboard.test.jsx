@@ -2,11 +2,18 @@
  * frontend/src/pages/Dashboard.test.jsx
  *
  * Test harness for Dashboard.jsx
- * Runner : Jest + @testing-library/react + @testing-library/jest-dom
+ * Runner: Jest + @testing-library/react + @testing-library/jest-dom
  */
 
 import React from "react";
-import { render, screen, waitFor, act, within, cleanup } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 // ── react-router-dom mock ─────────────────────────────────────────────────────
@@ -130,13 +137,21 @@ function makeAttack(index) {
 
 function setupDefaultApis() {
   mockApiGet.mockImplementation((url) => {
-    if (url === "/dashboard") return Promise.resolve({ data: DEFAULT_DASH });
+    if (url === "/dashboard") {
+      return Promise.resolve({ data: DEFAULT_DASH });
+    }
     if (url === "/integrations/token") {
       return Promise.resolve({ data: DEFAULT_TOKENS });
     }
     return Promise.reject(new Error(`Unexpected GET ${url}`));
   });
-  mockApiPost.mockResolvedValue({ data: {} });
+
+  mockApiPost.mockImplementation((url) => {
+    if (url === "/events/simulate") {
+      return Promise.resolve({ data: {} });
+    }
+    return Promise.resolve({ data: {} });
+  });
 }
 
 function setPriceIdEnv(overrides = {}) {
@@ -151,6 +166,17 @@ function setPriceIdEnv(overrides = {}) {
     DEFAULT_PRICE_IDS.REACT_APP_STRIPE_PRICE_ID_PKG_60000;
 }
 
+function resetWindowLocation() {
+  delete window.location;
+  window.location = {
+    href: "",
+    origin: "http://localhost",
+    assign: jest.fn((url) => {
+      window.location.href = url;
+    }),
+  };
+}
+
 // ── Setup / teardown ──────────────────────────────────────────────────────────
 beforeEach(() => {
   jest.clearAllMocks();
@@ -163,18 +189,9 @@ beforeEach(() => {
     loading: false,
     logout: mockLogout,
   };
-  setupDefaultApis();
   setPriceIdEnv();
-
-  delete window.location;
-  window.location = {
-    href: "",
-    origin: "http://localhost",
-    assign: jest.fn((url) => {
-      window.location.href = url;
-    }),
-  };
-
+  setupDefaultApis();
+  resetWindowLocation();
   jest.useFakeTimers();
 });
 
@@ -248,7 +265,7 @@ describe("loading spinner", () => {
 });
 
 // =============================================================================
-// WalletCard receives organizationId from API response
+// WalletCard organizationId prop
 // =============================================================================
 
 describe("WalletCard organizationId prop", () => {
@@ -278,6 +295,7 @@ describe("WalletCard organizationId prop", () => {
 
   it("passes organizationId='org-001' fallback when API response has no organization_id", async () => {
     const { organization_id: _unused, ...dashWithoutOrg } = DEFAULT_DASH;
+
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard") {
         return Promise.resolve({ data: dashWithoutOrg });
@@ -333,7 +351,9 @@ describe("session_id payment polling", () => {
     mockLocation.search = "?session_id=cs_test_abc";
 
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard") return Promise.resolve({ data: DEFAULT_DASH });
+      if (url === "/dashboard") {
+        return Promise.resolve({ data: DEFAULT_DASH });
+      }
       if (url === "/integrations/token") {
         return Promise.resolve({ data: DEFAULT_TOKENS });
       }
@@ -353,7 +373,6 @@ describe("session_id payment polling", () => {
       expect.stringContaining("Verifying"),
       expect.objectContaining({ id: "pay" }),
     );
-
     expect(mockNavigate).toHaveBeenCalledWith("/dashboard", { replace: true });
   });
 
@@ -361,7 +380,9 @@ describe("session_id payment polling", () => {
     mockLocation.search = "?session_id=cs_test_abc";
 
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard") return Promise.resolve({ data: DEFAULT_DASH });
+      if (url === "/dashboard") {
+        return Promise.resolve({ data: DEFAULT_DASH });
+      }
       if (url === "/integrations/token") {
         return Promise.resolve({ data: DEFAULT_TOKENS });
       }
@@ -393,7 +414,9 @@ describe("session_id payment polling", () => {
           data: { payment_status: "paid", units: 5000 },
         });
       }
-      if (url === "/dashboard") return Promise.resolve({ data: DEFAULT_DASH });
+      if (url === "/dashboard") {
+        return Promise.resolve({ data: DEFAULT_DASH });
+      }
       if (url === "/integrations/token") {
         return Promise.resolve({ data: DEFAULT_TOKENS });
       }
@@ -457,9 +480,17 @@ describe("handlePurchase — invalid package", () => {
 // =============================================================================
 
 describe("handlePurchase — valid package", () => {
-  it("calls api.post /billing/checkout/sessions with price_id and redirect URLs", async () => {
-    mockApiPost.mockResolvedValueOnce({
-      data: { url: "https://checkout.stripe.com/pay/cs_test_xyz" },
+  it("calls api.post /billing/checkout/sessions with the current request shape used by Dashboard", async () => {
+    mockApiPost.mockImplementation((url) => {
+      if (url === "/billing/checkout/sessions") {
+        return Promise.resolve({
+          data: { url: "https://checkout.stripe.com/pay/cs_test_xyz" },
+        });
+      }
+      if (url === "/events/simulate") {
+        return Promise.resolve({ data: {} });
+      }
+      return Promise.resolve({ data: {} });
     });
 
     await act(async () => {
@@ -474,19 +505,25 @@ describe("handlePurchase — valid package", () => {
       await capturedWalletProps.onPurchase("pkg_5000");
     });
 
-    expect(mockApiPost).toHaveBeenCalledWith(
-      "/billing/checkout/sessions",
-      {
-        price_id: "price_test_5000",
-        success_url: "http://localhost/dashboard?checkout=success",
-        cancel_url: "http://localhost/dashboard?checkout=cancel",
-      },
-    );
+    expect(mockApiPost).toHaveBeenCalledWith("/billing/checkout/sessions", {
+      price_id: "price_test_5000",
+      success_url: "http://localhost/dashboard?checkout=success",
+      cancel_url: "http://localhost/dashboard?checkout=cancel",
+    });
   });
 
-  it("sets window.location.href to the Stripe checkout URL on success", async () => {
+  it("redirects with window.location.assign when checkout response returns url", async () => {
     const checkoutUrl = "https://checkout.stripe.com/pay/cs_test_xyz";
-    mockApiPost.mockResolvedValueOnce({ data: { url: checkoutUrl } });
+
+    mockApiPost.mockImplementation((url) => {
+      if (url === "/billing/checkout/sessions") {
+        return Promise.resolve({ data: { url: checkoutUrl } });
+      }
+      if (url === "/events/simulate") {
+        return Promise.resolve({ data: {} });
+      }
+      return Promise.resolve({ data: {} });
+    });
 
     await act(async () => {
       render(<Dashboard />);
@@ -506,6 +543,72 @@ describe("handlePurchase — valid package", () => {
     });
   });
 
+  it("shows a checkout error when the response returns checkout_url instead of url", async () => {
+    const checkoutUrl = "https://checkout.stripe.com/pay/cs_test_checkout_url";
+
+    mockApiPost.mockImplementation((url) => {
+      if (url === "/billing/checkout/sessions") {
+        return Promise.resolve({ data: { checkout_url: checkoutUrl } });
+      }
+      if (url === "/events/simulate") {
+        return Promise.resolve({ data: {} });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    await waitFor(() => {
+      expect(capturedWalletProps).not.toBeNull();
+    });
+
+    await act(async () => {
+      await capturedWalletProps.onPurchase("pkg_25000");
+    });
+
+    await waitFor(() => {
+      expect(window.location.assign).not.toHaveBeenCalled();
+      expect(window.location.href).toBe("");
+      expect(mockToastError).toHaveBeenCalledWith(
+        expect.stringContaining("Missing checkout URL"),
+      );
+    });
+  });
+
+  it("falls back to window.location.href when window.location.assign is unavailable", async () => {
+    const checkoutUrl = "https://checkout.stripe.com/pay/cs_test_href_only";
+
+    window.location.assign = undefined;
+
+    mockApiPost.mockImplementation((url) => {
+      if (url === "/billing/checkout/sessions") {
+        return Promise.resolve({ data: { url: checkoutUrl } });
+      }
+      if (url === "/events/simulate") {
+        return Promise.resolve({ data: {} });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    await waitFor(() => {
+      expect(capturedWalletProps).not.toBeNull();
+    });
+
+    await act(async () => {
+      await capturedWalletProps.onPurchase("pkg_60000");
+    });
+
+    await waitFor(() => {
+      expect(window.location.href).toBe(checkoutUrl);
+    });
+  });
+
   it("accepts all three valid package IDs without toast.error", async () => {
     const validIds = ["pkg_5000", "pkg_25000", "pkg_60000"];
 
@@ -514,13 +617,26 @@ describe("handlePurchase — valid package", () => {
       jest.clearAllMocks();
       capturedWalletProps = null;
       capturedSecurityProps = null;
-      setupDefaultApis();
+      mockLocation.search = "";
+      mockAuthState = {
+        user: { email: "test@ironclaw.io" },
+        loading: false,
+        logout: mockLogout,
+      };
       setPriceIdEnv();
-      window.location.href = "";
-      window.location.assign.mockClear();
+      setupDefaultApis();
+      resetWindowLocation();
 
-      mockApiPost.mockResolvedValueOnce({
-        data: { url: "https://checkout.stripe.com/pay/x" },
+      mockApiPost.mockImplementation((url) => {
+        if (url === "/billing/checkout/sessions") {
+          return Promise.resolve({
+            data: { url: "https://checkout.stripe.com/pay/x" },
+          });
+        }
+        if (url === "/events/simulate") {
+          return Promise.resolve({ data: {} });
+        }
+        return Promise.resolve({ data: {} });
       });
 
       await act(async () => {
@@ -540,8 +656,16 @@ describe("handlePurchase — valid package", () => {
   });
 
   it("calls toast.error when api.post rejects", async () => {
-    mockApiPost.mockRejectedValueOnce({
-      response: { data: { detail: "Checkout failed" } },
+    mockApiPost.mockImplementation((url) => {
+      if (url === "/billing/checkout/sessions") {
+        return Promise.reject({
+          response: { data: { detail: "Checkout failed" } },
+        });
+      }
+      if (url === "/events/simulate") {
+        return Promise.resolve({ data: {} });
+      }
+      return Promise.resolve({ data: {} });
     });
 
     await act(async () => {
@@ -563,6 +687,36 @@ describe("handlePurchase — valid package", () => {
     });
   });
 
+  it("calls toast.error when checkout response has neither url nor checkout_url", async () => {
+    mockApiPost.mockImplementation((url) => {
+      if (url === "/billing/checkout/sessions") {
+        return Promise.resolve({ data: {} });
+      }
+      if (url === "/events/simulate") {
+        return Promise.resolve({ data: {} });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    await waitFor(() => {
+      expect(capturedWalletProps).not.toBeNull();
+    });
+
+    await act(async () => {
+      await capturedWalletProps.onPurchase("pkg_5000");
+    });
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(
+        expect.stringContaining("Missing checkout URL"),
+      );
+    });
+  });
+
   it("calls toast.error when a valid package has no configured price ID", async () => {
     process.env.REACT_APP_STRIPE_PRICE_ID_PKG_5000 = "";
 
@@ -578,10 +732,11 @@ describe("handlePurchase — valid package", () => {
       await capturedWalletProps.onPurchase("pkg_5000");
     });
 
-    expect(mockApiPost).not.toHaveBeenCalledWith(
-      "/billing/checkout/sessions",
-      expect.anything(),
-    );
+    expect(
+      mockApiPost.mock.calls.some(
+        ([url]) => url === "/billing/checkout/sessions",
+      ),
+    ).toBe(false);
     expect(mockToastError).toHaveBeenCalledWith(
       expect.stringContaining("Package price not configured"),
     );
@@ -883,7 +1038,9 @@ describe("attack feed pagination", () => {
     );
 
     mockApiGet
-      .mockResolvedValueOnce({ data: { ...DEFAULT_DASH, attacks: firstAttackSet } })
+      .mockResolvedValueOnce({
+        data: { ...DEFAULT_DASH, attacks: firstAttackSet },
+      })
       .mockResolvedValueOnce({ data: DEFAULT_TOKENS })
       .mockResolvedValueOnce({
         data: { ...DEFAULT_DASH, attacks: refreshedAttackSet },

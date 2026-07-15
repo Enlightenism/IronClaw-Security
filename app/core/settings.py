@@ -33,7 +33,10 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     environment: str = Field(default="development", alias="ENVIRONMENT")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
-    structured_logging_enabled: bool = Field(default=True, alias="STRUCTURED_LOGGING_ENABLED")
+    structured_logging_enabled: bool = Field(
+        default=True,
+        alias="STRUCTURED_LOGGING_ENABLED",
+    )
 
     # ------------------------------------------------------------------
     # Authentication
@@ -42,22 +45,37 @@ class Settings(BaseSettings):
     api_key: str = Field(default="", alias="API_KEY")
     admin_api_key: str = Field(default="", alias="ADMIN_API_KEY")
     platform_api_key: str = Field(default="", alias="PLATFORM_API_KEY")
-    internal_platform_api_key: str = Field(default="", alias="INTERNAL_PLATFORM_API_KEY")
+    internal_platform_api_key: str = Field(
+        default="",
+        alias="INTERNAL_PLATFORM_API_KEY",
+    )
     ironclaw_api_key: str = Field(default="", alias="IRONCLAW_API_KEY")
 
     # ------------------------------------------------------------------
     # Auth / JWT
     # ------------------------------------------------------------------
-    secret_key: str = Field(default=SECRET_KEY_SENTINEL, alias="IRONCLAW_SECRET_KEY")
+    secret_key: str = Field(
+        default=SECRET_KEY_SENTINEL,
+        alias="IRONCLAW_SECRET_KEY",
+    )
     jwt_secret: str = Field(default=JWT_SECRET_SENTINEL, alias="JWT_SECRET")
     jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
-    access_token_expire_minutes: int = Field(default=30, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
+    access_token_expire_minutes: int = Field(
+        default=30,
+        alias="ACCESS_TOKEN_EXPIRE_MINUTES",
+    )
 
     # ------------------------------------------------------------------
     # IronClaw Auth Edge Function
     # ------------------------------------------------------------------
-    ironclaw_auth_edge_fn_path: str = Field(default="", alias="IRONCLAW_AUTH_EDGE_FN_PATH")
-    ironclaw_auth_edge_fn_timeout_seconds: float = Field(default=10.0, alias="IRONCLAW_AUTH_EDGE_FN_TIMEOUT_SECONDS")
+    ironclaw_auth_edge_fn_path: str = Field(
+        default="",
+        alias="IRONCLAW_AUTH_EDGE_FN_PATH",
+    )
+    ironclaw_auth_edge_fn_timeout_seconds: float = Field(
+        default=10.0,
+        alias="IRONCLAW_AUTH_EDGE_FN_TIMEOUT_SECONDS",
+    )
 
     # ------------------------------------------------------------------
     # Supabase
@@ -65,8 +83,14 @@ class Settings(BaseSettings):
     supabase_url: str = Field(default="", alias="SUPABASE_URL")
     supabase_key: str = Field(default="", alias="SUPABASE_KEY")
     supabase_anon_key: str = Field(default="", alias="SUPABASE_ANON_KEY")
-    supabase_service_role_key: str = Field(default="", alias="SUPABASE_SERVICE_ROLE_KEY")
-    persistence_mode: str = Field(default="memory", alias="IRONCLAW_PERSISTENCE_MODE")
+    supabase_service_role_key: str = Field(
+        default="",
+        alias="SUPABASE_SERVICE_ROLE_KEY",
+    )
+    persistence_mode: str = Field(
+        default="memory",
+        alias="IRONCLAW_PERSISTENCE_MODE",
+    )
 
     # ------------------------------------------------------------------
     # Groq / AI
@@ -74,7 +98,10 @@ class Settings(BaseSettings):
     groq_enabled: bool = Field(default=False, alias="GROQ_ENABLED")
     groq_api_key: str = Field(default="", alias="GROQ_API_KEY")
     groq_model: str = Field(default="llama3-8b-8192", alias="GROQ_MODEL")
-    groq_timeout_seconds: float = Field(default=60.0, alias="GROQ_TIMEOUT_SECONDS")
+    groq_timeout_seconds: float = Field(
+        default=60.0,
+        alias="GROQ_TIMEOUT_SECONDS",
+    )
 
     # ------------------------------------------------------------------
     # OpenAI
@@ -85,28 +112,46 @@ class Settings(BaseSettings):
     # Stripe
     # ------------------------------------------------------------------
     stripe_secret_key: str = Field(default="", alias="STRIPE_SECRET_KEY")
-    stripe_publishable_key: str = Field(default="", alias="STRIPE_PUBLISHABLE_KEY")
+    stripe_publishable_key: str = Field(
+        default="",
+        alias="STRIPE_PUBLISHABLE_KEY",
+    )
     stripe_webhook_secret: str = Field(default="", alias="STRIPE_WEBHOOK_SECRET")
 
     # ------------------------------------------------------------------
     # Policy / verdict defaults
     # ------------------------------------------------------------------
     default_scan_verdict: str = Field(default="allow", alias="DEFAULT_SCAN_VERDICT")
-    default_review_status: str = Field(default="not_required", alias="DEFAULT_REVIEW_STATUS")
+    default_review_status: str = Field(
+        default="not_required",
+        alias="DEFAULT_REVIEW_STATUS",
+    )
 
     # ------------------------------------------------------------------
     # Risk thresholds
     # ------------------------------------------------------------------
-    risk_threshold_allow_max: int = Field(default=29, alias="RISK_THRESHOLD_ALLOW_MAX")
-    risk_threshold_quarantine_min: int = Field(default=30, alias="RISK_THRESHOLD_QUARANTINE_MIN")
-    risk_threshold_block_min: int = Field(default=70, alias="RISK_THRESHOLD_BLOCK_MIN")
+    risk_threshold_allow_max: int = Field(
+        default=29,
+        alias="RISK_THRESHOLD_ALLOW_MAX",
+    )
+    risk_threshold_quarantine_min: int = Field(
+        default=30,
+        alias="RISK_THRESHOLD_QUARANTINE_MIN",
+    )
+    risk_threshold_block_min: int = Field(
+        default=70,
+        alias="RISK_THRESHOLD_BLOCK_MIN",
+    )
 
     # ------------------------------------------------------------------
     # Input size limits
     # ------------------------------------------------------------------
     max_text_chars: int = Field(default=100_000, alias="MAX_TEXT_CHARS")
     max_url_length: int = Field(default=2048, alias="MAX_URL_LENGTH")
-    max_archive_name_length: int = Field(default=512, alias="MAX_ARCHIVE_NAME_LENGTH")
+    max_archive_name_length: int = Field(
+        default=512,
+        alias="MAX_ARCHIVE_NAME_LENGTH",
+    )
     max_repo_url_length: int = Field(default=2048, alias="MAX_REPO_URL_LENGTH")
 
     # ------------------------------------------------------------------
@@ -132,7 +177,10 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Engine
     # ------------------------------------------------------------------
-    engine_base_url: str = Field(default="http://127.0.0.1:8010", alias="ENGINE_BASE_URL")
+    engine_base_url: str = Field(
+        default="http://127.0.0.1:8010",
+        alias="ENGINE_BASE_URL",
+    )
 
     model_config = {"populate_by_name": True, "extra": "ignore"}
 

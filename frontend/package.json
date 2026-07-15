@@ -1,6 +1,5 @@
 {
   "name": "frontend",
-  "type": "module",
   "version": "0.1.0",
   "private": true,
   "dependencies": {
@@ -48,13 +47,14 @@
     "lodash": "4.18.1",
     "lucide-react": "0.516.0",
     "next-themes": "0.4.6",
-    "react": "19.0.0",
-    "react-day-picker": "8.10.1",
-    "react-dom": "19.0.0",
+    "react": "18.3.1",
+    "react-day-picker": "9.8.1",
+    "react-dom": "18.3.1",
     "react-hook-form": "7.56.2",
     "react-resizable-panels": "3.0.1",
     "react-scripts": "5.0.1",
     "recharts": "3.6.0",
+    "react-is": "19.1.1",
     "sonner": "2.0.3",
     "swr": "2.3.8",
     "tailwind-merge": "3.2.0",
@@ -65,13 +65,13 @@
   "scripts": {
     "start": "craco start",
     "build": "craco build",
-    "build:prod": "NODE_ENV=production craco build",
+    "build:prod": "cross-env NODE_ENV=production craco build",
     "dev": "craco start",
     "preview": "wrangler dev",
-    "deploy": "npm run build && wrangler deploy",
+    "deploy": "yarn build && wrangler deploy",
     "test": "craco test",
     "analyze": "source-map-explorer 'build/static/js/*.js'",
-    "analyze:build": "NODE_ENV=production craco build && source-map-explorer 'build/static/js/*.js'"
+    "analyze:build": "cross-env NODE_ENV=production craco build && source-map-explorer 'build/static/js/*.js'"
   },
   "browserslist": {
     "production": [
@@ -86,6 +86,7 @@
     ]
   },
   "devDependencies": {
+    "@babel/core": "^7.26.10",
     "@babel/plugin-proposal-private-property-in-object": "7.21.11",
     "@craco/craco": "7.1.0",
     "@eslint/js": "9.23.0",
@@ -94,7 +95,9 @@
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "14.5.2",
     "@types/lodash": "4.17.24",
+    "@types/node": "^22.15.30",
     "autoprefixer": "10.4.20",
+    "cross-env": "^7.0.3",
     "dotenv": "16.4.5",
     "eslint": "9.23.0",
     "eslint-plugin-import": "2.31.0",
@@ -107,6 +110,7 @@
     "react-router-dom": "^6.30.4",
     "source-map-explorer": "^2.5.3",
     "tailwindcss": "3.4.17",
+    "typescript": "^5.8.3",
     "wrangler": "^4.110.0"
   },
   "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
