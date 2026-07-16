@@ -39,6 +39,19 @@ const getStripePriceIdMap = () => ({
   pkg_60000: process.env.REACT_APP_STRIPE_PRICE_ID_PKG_60000 || "",
 });
 
+const getPackageUnits = (packageId) => {
+  switch (packageId) {
+    case "pkg_5000":
+      return 5000;
+    case "pkg_25000":
+      return 25000;
+    case "pkg_60000":
+      return 60000;
+    default:
+      return 0;
+  }
+};
+
 const AttackFeed = memo(function AttackFeed({ attacks }) {
   const [page, setPage] = useState(1);
 
@@ -53,7 +66,8 @@ const AttackFeed = memo(function AttackFeed({ attacks }) {
     return attacks.slice(start, start + ATTACKS_PAGE_SIZE);
   }, [attacks, page]);
 
-  const startItem = attacks.length === 0 ? 0 : (page - 1) * ATTACKS_PAGE_SIZE + 1;
+  const startItem =
+    attacks.length === 0 ? 0 : (page - 1) * ATTACKS_PAGE_SIZE + 1;
   const endItem = Math.min(page * ATTACKS_PAGE_SIZE, attacks.length);
 
   return (
@@ -257,17 +271,18 @@ const Dashboard = () => {
       try {
         const { data: status } = await api.get(`/payments/status/${sessionId}`);
 
-        if (status.payment_status === "paid") {
+        if (status?.payment_status === "paid") {
+          const units = Number(status?.units ?? 0);
           toast.dismiss("pay");
           toast.success(
-            `Payment confirmed — ${status.units.toLocaleString()} units added!`,
+            `Payment confirmed — ${units.toLocaleString()} units added!`,
           );
           await fetchDashboard();
           setPurchasingId(null);
           return;
         }
 
-        if (status.status === "expired") {
+        if (status?.status === "expired") {
           toast.dismiss("pay");
           toast.error("Payment session expired. Please try again.");
           setPurchasingId(null);
