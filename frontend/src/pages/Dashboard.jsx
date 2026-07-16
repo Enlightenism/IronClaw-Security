@@ -32,27 +32,11 @@ const MemoWalletCard = memo(WalletCard);
 const MemoSecurityAnalysis = memo(SecurityAnalysis);
 const MemoIntegrationCard = memo(IntegrationCard);
 
-const getFrontendEnv = () => {
-  if (typeof import.meta !== "undefined" && import.meta?.env) {
-    return import.meta.env;
-  }
-
-  if (typeof globalThis !== "undefined" && globalThis.__IRONCLAW_ENV__) {
-    return globalThis.__IRONCLAW_ENV__;
-  }
-
-  return {};
-};
-
-const getStripePriceIdMap = () => {
-  const env = getFrontendEnv();
-
-  return {
-    pkg_5000: env.REACT_APP_STRIPE_PRICE_ID_PKG_5000 || "",
-    pkg_25000: env.REACT_APP_STRIPE_PRICE_ID_PKG_25000 || "",
-    pkg_60000: env.REACT_APP_STRIPE_PRICE_ID_PKG_60000 || "",
-  };
-};
+const getStripePriceIdMap = () => ({
+  pkg_5000: process.env.REACT_APP_STRIPE_PRICE_ID_PKG_5000 || "",
+  pkg_25000: process.env.REACT_APP_STRIPE_PRICE_ID_PKG_25000 || "",
+  pkg_60000: process.env.REACT_APP_STRIPE_PRICE_ID_PKG_60000 || "",
+});
 
 const AttackFeed = memo(function AttackFeed({ attacks }) {
   const [page, setPage] = useState(1);

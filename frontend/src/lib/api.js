@@ -3,7 +3,7 @@ import axios from "axios";
 import { supabase } from "@/lib/supabase";
 
 const BACKEND_URL =
-  process.env.REACT_APP_BACKEND_URL || "http://127.0.0.1:8000";
+  process.env.REACT_APP_API_BASE_URL || "http://127.0.0.1:8000";
 
 export const API_BASE = `${BACKEND_URL}/api`;
 
@@ -56,7 +56,7 @@ export const integrations = {
 // ── Payments ──────────────────────────────────────────────────────────────────
 export const payments = {
   createCheckout: (payload) => api.post("/payments/create-checkout", payload),
-  getStatus: (sessionId) => api.get(`/payments/status/${sessionId}`),
+  getStatus: (sessionId) => api.get(`/billing/checkout/sessions/${sessionId}`),
 };
 
 // ── Payment Methods ───────────────────────────────────────────────────────────

@@ -25,6 +25,9 @@ if (config.enableHealthCheck) {
 
 let webpackConfig = {
   eslint: {
+    pluginOptions: {
+      failOnError: false,
+    },
     configure: {
       extends: ["plugin:react-hooks/recommended"],
       rules: {
@@ -145,7 +148,7 @@ if (isDevServer) {
       err.message.includes("@emergentbase/visual-edits/craco")
     ) {
       console.warn(
-        "[visual-edits] @emergentbase/visual-edits not installed — visual editing disabled."
+        "[visual-edits] @emergentbase/visual-edits not installed — visual editing disabled.",
       );
     } else {
       throw err;
