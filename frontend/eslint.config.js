@@ -5,7 +5,9 @@ import globals from "globals";
 
 export default [
   js.configs.recommended,
-  // ── Source files ────────────────────────────────────────────────────────────
+  {
+    ignores: ["build/**", "node_modules/**"],
+  },
   {
     files: ["src/**/*.{js,jsx}"],
     ignores: ["src/**/*.test.{js,jsx}", "src/**/*.spec.{js,jsx}"],
@@ -14,12 +16,15 @@ export default [
       "react-hooks": reactHooksPlugin,
     },
     languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
       globals: {
         ...globals.browser,
-        ...globals.es2021,
+    ...globals.es2021,
       },
       parserOptions: {
         ecmaFeatures: { jsx: true },
+        requireConfigFile: false,
       },
     },
     rules: {
@@ -34,13 +39,14 @@ export default [
       react: { version: "detect" },
     },
   },
-  // ── Test files ──────────────────────────────────────────────────────────────
   {
     files: ["src/**/*.test.{js,jsx}", "src/**/*.spec.{js,jsx}"],
     plugins: {
       react: reactPlugin,
     },
     languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
       globals: {
         ...globals.browser,
         ...globals.es2021,
@@ -49,6 +55,7 @@ export default [
       },
       parserOptions: {
         ecmaFeatures: { jsx: true },
+        requireConfigFile: false,
       },
     },
     rules: {
@@ -62,10 +69,11 @@ export default [
       react: { version: "detect" },
     },
   },
-  // ── CommonJS mock files (Jest stubs) ────────────────────────────────────────
   {
     files: ["src/__mocks__/**/*.{js,jsx}"],
     languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
       globals: {
         ...globals.node,
       },
