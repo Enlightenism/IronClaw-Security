@@ -6,6 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.settings import get_settings
 from app.persistencebootstrap import (
@@ -67,7 +68,9 @@ def assert_schema_completeness() -> frozenset[str]:
     registered = get_registered_tables()
     count = len(registered)
     if count != _EXPECTED_TABLE_COUNT:
-        raise RuntimeError(f"IronClaw schema completeness check failed: expected {_EXPECTED_TABLE_COUNT} tables, registry has {count}. Tables present: {sorted(registered)}")
+        raise RuntimeError(
+            f"IronClaw schema completeness check failed: expected {_EXPECTED_TABLE_COUNT} tables, registry has {count}. Tables present: {sorted(registered)}"
+        )
     _log.info(
         "bootstrap: schema completeness check passed — %d tables registered: %s",
         count,
@@ -113,6 +116,35 @@ def configure_app_state(app: FastAPI) -> FastAPI:
     if not hasattr(app.state, "action_execute_pipeline"):
         app.state.action_execute_pipeline = None
 
+    return app
+
+
+def _parse_allowed_origins(raw_value: str) -> list[str]:
+    origins = [origin.strip() for origin in raw_value.split(",") if origin.strip()]
+    return origins
+
+
+def add_cors_middleware(app: FastAPI) -> FastAPI:
+    if getattr(app.state, "_cors_middleware_installed", False):
+        return app
+
+    settings = get_settings()
+    allowed_origins = _parse_allowed_origins(settings.allowed_origins)
+
+    if allowed_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=allowed_origins,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            allow_headers=["*"],
+            expose_headers=["X-Request-ID", "X-Trace-ID", "X-Response-Time-Ms"],
+        )
+        _log.info("bootstrap: CORS enabled for origins: %s", allowed_origins)
+    else:
+        _log.warning("bootstrap: CORS not enabled because ALLOWED_ORIGINS is empty")
+
+    app.state._cors_middleware_installed = True
     return app
 
 
@@ -207,9 +239,6 @@ def bootstrap_app(app: FastAPI) -> FastAPI:
     if getattr(app.state, "_bootstrap_installed", False):
         return app
 
-    # Deferred: schema completeness check runs at server startup, not import time.
-    # This prevents CI crashes when env vars are absent during schema export or
-    # test collection.
     if not getattr(app.state, "_bootstrap_startup_registered", False):
 
         @app.on_event("startup")
@@ -221,6 +250,7 @@ def bootstrap_app(app: FastAPI) -> FastAPI:
         app.state._bootstrap_startup_registered = True
 
     app = configure_app_state(app)
+    app = add_cors_middleware(app)
     app = add_request_tracing_middleware(app)
     app = add_security_middleware(app)
 
