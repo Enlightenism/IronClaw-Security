@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from importlib import import_module
@@ -8,21 +7,17 @@ from inspect import isawaitable
 import logging
 from typing import Any, cast
 
-
 from fastapi import Depends, FastAPI
 from fastapi.openapi.utils import get_openapi
 from fastapi.routing import APIRoute
 
-
 from app.core.security import install_security_middleware
 from app.core.settings import get_settings
-
 
 ProtectedDependencyFactory = Callable[[], Any]
 
 
 _log = logging.getLogger(__name__)
-
 
 
 def _optional_module(module_path: str) -> Any | None:
@@ -34,7 +29,6 @@ def _optional_module(module_path: str) -> Any | None:
         return None
 
 
-
 def _optional_router(module_path: str) -> Any | None:
     module = _optional_module(module_path)
     if module is None:
@@ -42,13 +36,11 @@ def _optional_router(module_path: str) -> Any | None:
     return getattr(module, "router", None)
 
 
-
 def _optional_attr(module_path: str, attr_name: str) -> Any | None:
     module = _optional_module(module_path)
     if module is None:
         return None
     return getattr(module, attr_name, None)
-
 
 
 def _include_optional_router(
@@ -62,16 +54,13 @@ def _include_optional_router(
     if router is None:
         return
 
-
     kwargs: dict[str, Any] = {}
     if prefix is not None:
         kwargs["prefix"] = prefix
     if dependencies is not None:
         kwargs["dependencies"] = dependencies
 
-
     app.include_router(router, **kwargs)
-
 
 
 def _include_router_group(
@@ -84,12 +73,10 @@ def _include_router_group(
         app.include_router(router, **kwargs)
 
 
-
 def _normalize_dependency_metadata(app: FastAPI) -> None:
     for route in app.routes:
         if not isinstance(route, APIRoute):
             continue
-
 
         for dependant in route.dependant.dependencies:
             if getattr(dependant, "dependency", None) is None:
@@ -98,11 +85,9 @@ def _normalize_dependency_metadata(app: FastAPI) -> None:
                     dependant.dependency = call
 
 
-
 def _build_openapi(app: FastAPI) -> dict[str, Any]:
     if app.openapi_schema is not None:
         return cast("dict[str, Any]", app.openapi_schema)
-
 
     app.openapi_schema = get_openapi(
         title=app.title,
@@ -113,14 +98,11 @@ def _build_openapi(app: FastAPI) -> dict[str, Any]:
     return cast("dict[str, Any]", app.openapi_schema)
 
 
-
 def _install_openapi_factory(app: FastAPI) -> None:
     def custom_openapi() -> dict[str, Any]:
         return _build_openapi(app)
 
-
     app.openapi = custom_openapi
-
 
 
 def _protected_dependencies() -> list[Any]:
@@ -130,13 +112,11 @@ def _protected_dependencies() -> list[Any]:
     return [Depends(require_api_key)]
 
 
-
 def _agent_rate_limit_dep(agent_id_param: str = "agent_id") -> Any | None:
     agent_rate_limit_dependency = _optional_attr("app.core.rate_limiter", "agent_rate_limit_dependency")
     if not callable(agent_rate_limit_dependency):
         return None
     return Depends(agent_rate_limit_dependency(agent_id_param))
-
 
 
 def _agent_protected_dependencies(agent_id_param: str = "agent_id") -> list[Any]:
@@ -145,7 +125,6 @@ def _agent_protected_dependencies(agent_id_param: str = "agent_id") -> list[Any]
     if agent_rl is not None:
         deps = deps + [agent_rl]
     return deps
-
 
 
 def _public_router_configs() -> list[tuple[Any, dict[str, Any]]]:
@@ -163,7 +142,6 @@ def _public_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (_optional_router("app.api.region_status"), {}),
         (stripe_webhook_router, {}),
     ]
-
 
 
 def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
@@ -283,10 +261,8 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
     ]
 
 
-
 def _include_optional_protected_routers(app: FastAPI) -> None:
     dependencies = _protected_dependencies()
-
 
     legacy_modules = [
         "app.api.routes.billing",
@@ -300,7 +276,6 @@ def _include_optional_protected_routers(app: FastAPI) -> None:
     ]
     for module_path in legacy_modules:
         _include_optional_router(app, module_path, dependencies=dependencies)
-
 
     integration_modules = [
         "app.routes.integrations.claude_code",
@@ -318,16 +293,13 @@ def _include_optional_protected_routers(app: FastAPI) -> None:
         _include_optional_router(app, module_path, dependencies=dependencies)
 
 
-
 def _install_core_middleware(app: FastAPI) -> None:
     if getattr(app.state, "_core_middleware_installed", False):
         return
 
-
     request_id_middleware = _optional_attr("app.core.request_id", "RequestIDMiddleware")
     request_context_middleware = _optional_attr("app.core.logging", "RequestContextMiddleware")
     usage_metering_middleware = _optional_attr("app.core.middleware", "UsageMeteringMiddleware")
-
 
     for middleware_cls in (
         request_id_middleware,
@@ -337,9 +309,7 @@ def _install_core_middleware(app: FastAPI) -> None:
         if middleware_cls is not None:
             app.add_middleware(middleware_cls)
 
-
     app.state._core_middleware_installed = True
-
 
 
 def _safe_call(call: Callable[[], Any] | None, default: Any) -> Any:
@@ -351,14 +321,11 @@ def _safe_call(call: Callable[[], Any] | None, default: Any) -> Any:
         return default
 
 
-
 def _install_core_routes(app: FastAPI) -> None:
     if getattr(app.state, "_core_routes_installed", False):
         return
 
-
     settings = get_settings()
-
 
     get_system_status = _optional_attr("app.api.system", "get_system_status")
     get_ui_manifest = _optional_attr("app.api.ui_pages", "get_ui_manifest")
@@ -366,26 +333,21 @@ def _install_core_routes(app: FastAPI) -> None:
     if get_runtime_status is None:
         get_runtime_status = _optional_attr("app.ui.runtimestatus", "getruntimestatuspage")
 
-
     @app.get("/")
     def root() -> dict[str, str]:
         return {"status": "ok"}
-
 
     @app.get("/health", tags=["system"])
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-
     @app.get("/health/liveness", tags=["system"])
     def health_liveness() -> dict[str, str]:
         return {"status": "ok"}
 
-
     @app.get("/health/readiness", tags=["system"])
     def health_readiness() -> dict[str, str]:
         return {"status": "ok"}
-
 
     @app.get("/system/status", tags=["system"])
     def system_status() -> Any:
@@ -397,7 +359,6 @@ def _install_core_routes(app: FastAPI) -> None:
             },
         )
 
-
     @app.get("/ui/manifest", tags=["ui"])
     def ui_manifest() -> Any:
         return _safe_call(
@@ -408,7 +369,6 @@ def _install_core_routes(app: FastAPI) -> None:
                 "pages": [],
             },
         )
-
 
     @app.get("/runtime/status", tags=["ui"])
     def ui_runtime_status() -> Any:
@@ -422,28 +382,22 @@ def _install_core_routes(app: FastAPI) -> None:
             },
         )
 
-
     app.state._core_routes_installed = True
-
 
 
 def _install_all_routers(app: FastAPI) -> None:
     if getattr(app.state, "_routers_installed", False):
         return
 
-
     _include_router_group(app, _public_router_configs())
     _include_router_group(app, _protected_router_configs())
     _include_optional_protected_routers(app)
-
 
     include_ui_routers = _optional_attr("app.ui.router", "include_ui_routers")
     if callable(include_ui_routers):
         include_ui_routers(app)
 
-
     app.state._routers_installed = True
-
 
 
 def _initialize_scan_history_repository() -> None:
@@ -456,14 +410,12 @@ def _initialize_scan_history_repository() -> None:
         "build_scan_history_repository",
     )
 
-
     if callable(set_scan_history_repository) and callable(build_scan_history_repository):
         try:
             repository = build_scan_history_repository()
             set_scan_history_repository(repository)
         except Exception as exc:
             _log.warning("main: scan_history_repository init failed: %s", exc)
-
 
 
 async def _initialize_policy_rules() -> None:
@@ -483,7 +435,6 @@ async def _initialize_policy_rules() -> None:
         _log.error("main.lifespan: policy rules hydration failed: %s", exc)
 
 
-
 async def _initialize_scanner_rule_index() -> None:
     load_builtin_patterns_from_db = _optional_attr(
         "app.services.scanner",
@@ -501,7 +452,6 @@ async def _initialize_scanner_rule_index() -> None:
         _log.error("main.lifespan: scanner RULE_INDEX hydration failed: %s", exc)
 
 
-
 def _initialize_pattern_registry() -> None:
     load = _optional_attr("app.core.pattern_registry", "load")
     if not callable(load):
@@ -514,7 +464,6 @@ def _initialize_pattern_registry() -> None:
         _log.error("main.lifespan: pattern_registry.load failed: %s", exc)
 
 
-
 def _shutdown_pattern_registry() -> None:
     invalidate = _optional_attr("app.core.pattern_registry", "invalidate")
     if callable(invalidate):
@@ -523,7 +472,6 @@ def _shutdown_pattern_registry() -> None:
             _log.info("main.lifespan: pattern_registry cache invalidated on shutdown")
         except Exception as exc:
             _log.error("main.lifespan: pattern_registry.invalidate failed: %s", exc)
-
 
 
 def _shutdown_trust_engine_cache() -> None:
@@ -548,7 +496,6 @@ def _shutdown_trust_engine_cache() -> None:
             _log.error("main.lifespan: trust_engine cache clear failed: %s", exc)
 
 
-
 def _initialize_notification_engine() -> None:
     get_notification_engine = _optional_attr(
         "app.services.notification_engine",
@@ -564,11 +511,9 @@ def _initialize_notification_engine() -> None:
         _log.error("main.lifespan: notification_engine pre-warm failed: %s", exc)
 
 
-
 def _start_threat_feed_scheduler() -> None:
     try:
         from app.services.threat_feed_scheduler import start_scheduler  # noqa: PLC0415
-
 
         start_scheduler()
         _log.info("main.lifespan: threat_feed_scheduler started")
@@ -576,11 +521,9 @@ def _start_threat_feed_scheduler() -> None:
         _log.error("main.lifespan: threat_feed_scheduler failed to start: %s", exc)
 
 
-
 def _stop_threat_feed_scheduler() -> None:
     try:
         from app.services.threat_feed_scheduler import stop_scheduler  # noqa: PLC0415
-
 
         stop_scheduler()
         _log.info("main.lifespan: threat_feed_scheduler stopped")
@@ -588,11 +531,9 @@ def _stop_threat_feed_scheduler() -> None:
         _log.error("main.lifespan: threat_feed_scheduler failed to stop: %s", exc)
 
 
-
 def _start_remediation_scheduler() -> None:
     try:
         from app.worker.remediation_worker import start_remediation_scheduler  # noqa: PLC0415
-
 
         start_remediation_scheduler()
         _log.info("main.lifespan: remediation_scheduler started")
@@ -600,17 +541,14 @@ def _start_remediation_scheduler() -> None:
         _log.error("main.lifespan: remediation_scheduler failed to start: %s", exc)
 
 
-
 def _stop_remediation_scheduler() -> None:
     try:
         from app.worker.remediation_worker import stop_remediation_scheduler  # noqa: PLC0415
-
 
         stop_remediation_scheduler()
         _log.info("main.lifespan: remediation_scheduler stopped")
     except Exception as exc:
         _log.error("main.lifespan: remediation_scheduler failed to stop: %s", exc)
-
 
 
 @asynccontextmanager
@@ -633,26 +571,21 @@ async def lifespan(app: FastAPI):
         "reset_scan_history_repository",
     )
 
-
     _log.info("main.lifespan: startup begin")
-
 
     _initialize_scan_history_repository()
     await _initialize_policy_rules()
     await _initialize_scanner_rule_index()
-
 
     try:
         _initialize_pattern_registry()
     except Exception as exc:
         _log.error("main.lifespan: _initialize_pattern_registry raised unexpectedly: %s", exc)
 
-
     try:
         _initialize_notification_engine()
     except Exception as exc:
         _log.error("main.lifespan: _initialize_notification_engine raised unexpectedly: %s", exc)
-
 
     if callable(initialize_secure_runtime_pipeline):
         try:
@@ -665,44 +598,36 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             _log.error("main.lifespan: secure_runtime_pipeline init failed: %s", exc)
 
-
     app.state.action_execute_pipeline = pipeline
     if pipeline is not None and callable(set_action_execute_pipeline):
         set_action_execute_pipeline(pipeline)
-
 
     try:
         _start_threat_feed_scheduler()
     except Exception as exc:
         _log.error("main.lifespan: _start_threat_feed_scheduler raised unexpectedly: %s", exc)
 
-
     try:
         _start_remediation_scheduler()
     except Exception as exc:
         _log.error("main.lifespan: _start_remediation_scheduler raised unexpectedly: %s", exc)
 
-
     _log.info("main.lifespan: startup complete")
-
 
     try:
         yield
     finally:
         _log.info("main.lifespan: shutdown begin")
 
-
         try:
             _stop_remediation_scheduler()
         except Exception as exc:
             _log.error("main.lifespan: _stop_remediation_scheduler raised unexpectedly: %s", exc)
 
-
         try:
             _stop_threat_feed_scheduler()
         except Exception as exc:
             _log.error("main.lifespan: _stop_threat_feed_scheduler raised unexpectedly: %s", exc)
-
 
         try:
             close = getattr(pipeline, "close", None)
@@ -713,21 +638,17 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             _log.error("main.lifespan: pipeline close failed: %s", exc)
 
-
         try:
             _shutdown_trust_engine_cache()
         except Exception as exc:
             _log.error("main.lifespan: _shutdown_trust_engine_cache raised unexpectedly: %s", exc)
-
 
         try:
             _shutdown_pattern_registry()
         except Exception as exc:
             _log.error("main.lifespan: _shutdown_pattern_registry raised unexpectedly: %s", exc)
 
-
         app.state.action_execute_pipeline = None
-
 
         if callable(reset_action_execute_pipeline):
             try:
@@ -735,21 +656,17 @@ async def lifespan(app: FastAPI):
             except Exception as exc:
                 _log.error("main.lifespan: reset_action_execute_pipeline failed: %s", exc)
 
-
         if callable(reset_scan_history_repository):
             try:
                 reset_scan_history_repository()
             except Exception as exc:
                 _log.error("main.lifespan: reset_scan_history_repository failed: %s", exc)
 
-
         _log.info("main.lifespan: shutdown complete")
-
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
-
 
     app = FastAPI(
         title=settings.app_name,
@@ -761,39 +678,30 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-
     app.state.settings = settings
     install_security_middleware(app, settings)
 
-
     _install_openapi_factory(app)
     _install_core_middleware(app)
-
 
     bootstrap_app = _optional_attr("app.bootstrap", "bootstrap_app")
     if callable(bootstrap_app):
         bootstrap_app(app)
 
-
     register_exception_handlers = _optional_attr("app.core.errors", "register_exception_handlers")
     if callable(register_exception_handlers):
         register_exception_handlers(app)
 
-
     _install_core_routes(app)
     _install_all_routers(app)
-
 
     install_protected_docs = _optional_attr("app.core.docs", "install_protected_docs")
     if callable(install_protected_docs):
         install_protected_docs(app)
 
-
     _normalize_dependency_metadata(app)
 
-
     return app
-
 
 
 app = create_app()
