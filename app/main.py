@@ -13,6 +13,7 @@ from fastapi.routing import APIRoute
 
 from app.core.settings import get_settings
 
+
 ProtectedDependencyFactory = Callable[[], Any]
 
 _log = logging.getLogger(__name__)
@@ -104,14 +105,24 @@ def _install_openapi_factory(app: FastAPI) -> None:
 
 
 def _protected_dependencies() -> list[Any]:
+    settings = get_settings()
+    if not settings.auth_required:
+        return []
+
     require_api_key = _optional_attr("app.core.auth", "require_api_key")
     if require_api_key is None:
+        _log.warning(
+            "main: AUTH_REQUIRED is enabled but app.core.auth.require_api_key is unavailable",
+        )
         return []
     return [Depends(require_api_key)]
 
 
 def _agent_rate_limit_dep(agent_id_param: str = "agent_id") -> Any | None:
-    agent_rate_limit_dependency = _optional_attr("app.core.rate_limiter", "agent_rate_limit_dependency")
+    agent_rate_limit_dependency = _optional_attr(
+        "app.core.rate_limiter",
+        "agent_rate_limit_dependency",
+    )
     if not callable(agent_rate_limit_dependency):
         return None
     return Depends(agent_rate_limit_dependency(agent_id_param))
@@ -251,7 +262,6 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
             _optional_router("app.worker.remediation_worker"),
             {"dependencies": dependencies},
         ),
-        # Payment processing — Stripe billing router
         (
             _optional_router("app.routers.stripe_router"),
             {"dependencies": dependencies},
@@ -296,8 +306,23 @@ def _install_core_middleware(app: FastAPI) -> None:
         return
 
     request_id_middleware = _optional_attr("app.core.request_id", "RequestIDMiddleware")
-    request_context_middleware = _optional_attr("app.core.logging", "RequestContextMiddleware")
-    usage_metering_middleware = _optional_attr("app.core.middleware", "UsageMeteringMiddleware")
+    request_context_middleware = _optional_attr(
+        "app.core.logging",
+        "RequestContextMiddleware",
+    )
+    usage_metering_middleware = _optional_attr(
+        "app.core.middleware",
+        "UsageMeteringMiddleware",
+    )
+    install_security_middleware = _optional_attr(
+        "app.core.security",
+        "install_security_middleware",
+    )
+
+    settings = get_settings()
+
+    if callable(install_security_middleware):
+        install_security_middleware(app, settings)
 
     for middleware_cls in (
         request_id_middleware,
@@ -327,9 +352,15 @@ def _install_core_routes(app: FastAPI) -> None:
 
     get_system_status = _optional_attr("app.api.system", "get_system_status")
     get_ui_manifest = _optional_attr("app.api.ui_pages", "get_ui_manifest")
-    get_runtime_status = _optional_attr("app.ui.runtimestatus", "get_runtime_status_page")
+    get_runtime_status = _optional_attr(
+        "app.ui.runtimestatus",
+        "get_runtime_status_page",
+    )
     if get_runtime_status is None:
-        get_runtime_status = _optional_attr("app.ui.runtimestatus", "getruntimestatuspage")
+        get_runtime_status = _optional_attr(
+            "app.ui.runtimestatus",
+            "getruntimestatuspage",
+        )
 
     @app.get("/")
     def root() -> dict[str, str]:
@@ -422,7 +453,9 @@ async def _initialize_policy_rules() -> None:
         "load_builtin_policy_rules_from_db",
     )
     if not callable(load_builtin_policy_rules_from_db):
-        _log.debug("main.lifespan: load_builtin_policy_rules_from_db not available, skipping")
+        _log.debug(
+            "main.lifespan: load_builtin_policy_rules_from_db not available, skipping",
+        )
         return
     try:
         result = load_builtin_policy_rules_from_db()
@@ -439,7 +472,9 @@ async def _initialize_scanner_rule_index() -> None:
         "load_builtin_patterns_from_db",
     )
     if not callable(load_builtin_patterns_from_db):
-        _log.debug("main.lifespan: load_builtin_patterns_from_db not available, skipping")
+        _log.debug(
+            "main.lifespan: load_builtin_patterns_from_db not available, skipping",
+        )
         return
     try:
         result = load_builtin_patterns_from_db()
@@ -578,12 +613,18 @@ async def lifespan(app: FastAPI):
     try:
         _initialize_pattern_registry()
     except Exception as exc:
-        _log.error("main.lifespan: _initialize_pattern_registry raised unexpectedly: %s", exc)
+        _log.error(
+            "main.lifespan: _initialize_pattern_registry raised unexpectedly: %s",
+            exc,
+        )
 
     try:
         _initialize_notification_engine()
     except Exception as exc:
-        _log.error("main.lifespan: _initialize_notification_engine raised unexpectedly: %s", exc)
+        _log.error(
+            "main.lifespan: _initialize_notification_engine raised unexpectedly: %s",
+            exc,
+        )
 
     if callable(initialize_secure_runtime_pipeline):
         try:
@@ -603,12 +644,18 @@ async def lifespan(app: FastAPI):
     try:
         _start_threat_feed_scheduler()
     except Exception as exc:
-        _log.error("main.lifespan: _start_threat_feed_scheduler raised unexpectedly: %s", exc)
+        _log.error(
+            "main.lifespan: _start_threat_feed_scheduler raised unexpectedly: %s",
+            exc,
+        )
 
     try:
         _start_remediation_scheduler()
     except Exception as exc:
-        _log.error("main.lifespan: _start_remediation_scheduler raised unexpectedly: %s", exc)
+        _log.error(
+            "main.lifespan: _start_remediation_scheduler raised unexpectedly: %s",
+            exc,
+        )
 
     _log.info("main.lifespan: startup complete")
 
@@ -620,12 +667,18 @@ async def lifespan(app: FastAPI):
         try:
             _stop_remediation_scheduler()
         except Exception as exc:
-            _log.error("main.lifespan: _stop_remediation_scheduler raised unexpectedly: %s", exc)
+            _log.error(
+                "main.lifespan: _stop_remediation_scheduler raised unexpectedly: %s",
+                exc,
+            )
 
         try:
             _stop_threat_feed_scheduler()
         except Exception as exc:
-            _log.error("main.lifespan: _stop_threat_feed_scheduler raised unexpectedly: %s", exc)
+            _log.error(
+                "main.lifespan: _stop_threat_feed_scheduler raised unexpectedly: %s",
+                exc,
+            )
 
         try:
             close = getattr(pipeline, "close", None)
@@ -639,12 +692,18 @@ async def lifespan(app: FastAPI):
         try:
             _shutdown_trust_engine_cache()
         except Exception as exc:
-            _log.error("main.lifespan: _shutdown_trust_engine_cache raised unexpectedly: %s", exc)
+            _log.error(
+                "main.lifespan: _shutdown_trust_engine_cache raised unexpectedly: %s",
+                exc,
+            )
 
         try:
             _shutdown_pattern_registry()
         except Exception as exc:
-            _log.error("main.lifespan: _shutdown_pattern_registry raised unexpectedly: %s", exc)
+            _log.error(
+                "main.lifespan: _shutdown_pattern_registry raised unexpectedly: %s",
+                exc,
+            )
 
         app.state.action_execute_pipeline = None
 
@@ -669,7 +728,10 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        description=("Local-first AI security API for prompt inspection, guarded execution, and protected runtime controls."),
+        description=(
+            "Local-first AI security API for prompt inspection, guarded execution, "
+            "and protected runtime controls."
+        ),
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
@@ -685,7 +747,10 @@ def create_app() -> FastAPI:
     if callable(bootstrap_app):
         bootstrap_app(app)
 
-    register_exception_handlers = _optional_attr("app.core.errors", "register_exception_handlers")
+    register_exception_handlers = _optional_attr(
+        "app.core.errors",
+        "register_exception_handlers",
+    )
     if callable(register_exception_handlers):
         register_exception_handlers(app)
 
