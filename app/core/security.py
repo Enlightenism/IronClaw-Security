@@ -11,7 +11,6 @@ from starlette.responses import Response
 from app.core.settings import Settings
 
 _DEFAULT_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; script-src 'self'; object-src 'none'"
-
 _DEFAULT_ALLOWED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 _DEFAULT_ALLOWED_HEADERS = ["Authorization", "Content-Type", "X-API-Key", "X-Request-ID"]
 _DEFAULT_EXPOSE_HEADERS = ["X-Request-ID"]
@@ -91,8 +90,8 @@ def _normalize_unique(values: Sequence[str]) -> list[str]:
 
 
 def get_allowed_origins(settings: Settings) -> list[str]:
-    raw = getattr(settings, "cors_allowed_origins", None)
-    origins = _coerce_list(raw, default=["*"])
+    raw = getattr(settings, "effective_allowed_origins", None)
+    origins = _coerce_list(raw, default=["http://localhost"])
     return _normalize_unique(origins)
 
 
@@ -115,7 +114,7 @@ def get_exposed_headers(settings: Settings) -> list[str]:
 
 
 def get_allowed_hosts(settings: Settings) -> list[str]:
-    raw = getattr(settings, "trusted_hosts", None)
+    raw = getattr(settings, "effective_trusted_hosts", None)
     hosts = _coerce_list(raw, default=["*"])
     return _normalize_unique(hosts)
 
@@ -150,9 +149,10 @@ def install_security_middleware(app: FastAPI, settings: Settings) -> None:
 
     include_hsts = bool(getattr(settings, "enable_hsts", True))
     csp = getattr(settings, "content_security_policy", None)
+    normalized_csp = csp.strip() if isinstance(csp, str) and csp.strip() else None
 
     app.add_middleware(
         SecurityHeadersMiddleware,
         include_hsts=include_hsts,
-        csp=csp,
+        csp=normalized_csp,
     )

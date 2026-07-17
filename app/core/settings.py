@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+from urllib.parse import urlparse
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
@@ -13,6 +14,52 @@ def _normalize_string(value: str | None) -> str:
     if not isinstance(value, str):
         return ""
     return value.strip()
+
+
+def _csv_to_list(value: str | None) -> list[str]:
+    normalized = _normalize_string(value)
+    if not normalized:
+        return []
+    return [item.strip() for item in normalized.split(",") if item.strip()]
+
+
+def _normalize_unique(values: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        item = _normalize_string(value)
+        if not item:
+            continue
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(item)
+    return normalized
+
+
+def _normalize_origin(origin: str) -> str:
+    value = _normalize_string(origin)
+    if not value:
+        return ""
+
+    parsed = urlparse(value)
+    if not parsed.scheme or not parsed.netloc:
+        return value.rstrip("/")
+
+    return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
+
+
+def _normalize_host(value: str) -> str:
+    host = _normalize_string(value)
+    if not host:
+        return ""
+
+    if "://" in host:
+        parsed = urlparse(host)
+        host = parsed.netloc or parsed.path
+
+    return host.strip().strip("/").lower()
 
 
 class Settings(BaseSettings):
@@ -167,6 +214,21 @@ class Settings(BaseSettings):
     # CORS
     # ------------------------------------------------------------------
     allowed_origins: str = Field(default="http://localhost", alias="ALLOWED_ORIGINS")
+    cors_origins: str = Field(default="", alias="CORS_ORIGINS")
+    cors_allowed_methods: str = Field(default="", alias="CORS_ALLOWED_METHODS")
+    cors_allowed_headers: str = Field(default="", alias="CORS_ALLOWED_HEADERS")
+    cors_expose_headers: str = Field(default="", alias="CORS_EXPOSE_HEADERS")
+    cors_allow_credentials: bool | None = Field(
+        default=None,
+        alias="CORS_ALLOW_CREDENTIALS",
+    )
+
+    # ------------------------------------------------------------------
+    # Trusted hosts / response hardening
+    # ------------------------------------------------------------------
+    trusted_hosts: str = Field(default="*", alias="TRUSTED_HOSTS")
+    enable_hsts: bool = Field(default=True, alias="ENABLE_HSTS")
+    content_security_policy: str = Field(default="", alias="CONTENT_SECURITY_POLICY")
 
     # ------------------------------------------------------------------
     # Optional integrations
@@ -215,6 +277,48 @@ class Settings(BaseSettings):
         if not value or value == JWT_SECRET_SENTINEL:
             return ""
         return value
+
+    @property
+    def normalized_app_base_url(self) -> str:
+        return _normalize_origin(self.app_base_url)
+
+    @property
+    def normalized_engine_base_url(self) -> str:
+        return _normalize_origin(self.engine_base_url)
+
+    @property
+    def effective_allowed_origins(self) -> list[str]:
+        origins = _csv_to_list(self.allowed_origins)
+        legacy_origins = _csv_to_list(self.cors_origins)
+        normalized = [_normalize_origin(item) for item in [*origins, *legacy_origins]]
+        return _normalize_unique([item for item in normalized if item])
+
+    @property
+    def effective_trusted_hosts(self) -> list[str]:
+        configured_hosts = _csv_to_list(self.trusted_hosts)
+        if configured_hosts:
+            return _normalize_unique(
+                [host for host in (_normalize_host(item) for item in configured_hosts) if host],
+            )
+
+        derived_hosts: list[str] = []
+        for origin in self.effective_allowed_origins:
+            if origin == "*":
+                return ["*"]
+            parsed = urlparse(origin)
+            host = _normalize_host(parsed.netloc)
+            if host:
+                derived_hosts.append(host)
+
+        for base_url in (self.normalized_app_base_url, self.normalized_engine_base_url):
+            if not base_url:
+                continue
+            parsed = urlparse(base_url)
+            host = _normalize_host(parsed.netloc)
+            if host:
+                derived_hosts.append(host)
+
+        return _normalize_unique(derived_hosts) or ["*"]
 
 
 @functools.lru_cache(maxsize=1)
