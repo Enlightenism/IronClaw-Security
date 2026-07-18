@@ -31,6 +31,9 @@ PM_ID = "pm_test_001"
 # Must match conftest.py IRONCLAW_API_KEY env value exactly
 _API_KEY = "test-api-key"
 
+# Stripe router is mounted in app.main.py under the /api prefix.
+_BILLING_BASE = "/api/billing"
+
 # ---------------------------------------------------------------------------
 # Auth override — mirrors conftest.py exactly
 # ---------------------------------------------------------------------------
@@ -60,6 +63,11 @@ def _override_require_auth_context() -> AuthContext:
 
 def _auth_headers() -> dict[str, str]:
     return {"X-API-Key": _API_KEY, "X-Org-Id": ORG_ID}
+
+
+def _billing_path(path: str) -> str:
+    normalized = path if path.startswith("/") else f"/{path}"
+    return f"{_BILLING_BASE}{normalized}"
 
 
 def _make_balance_response(org_id: str = ORG_ID, balance: int = 500) -> UnitBalanceResponse:
@@ -113,7 +121,7 @@ def client(mock_svc: MagicMock) -> Generator[TestClient, None, None]:
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/metered/sync
+# POST /api/billing/metered/sync
 # ---------------------------------------------------------------------------
 
 
@@ -129,7 +137,7 @@ class TestMeteredSync:
             "quantity": 5,
             "action": "increment",
         }
-        resp = client.post("/billing/metered/sync", json=payload, headers=_auth_headers())
+        resp = client.post(_billing_path("/metered/sync"), json=payload, headers=_auth_headers())
 
         assert resp.status_code == 200
         mock_svc.report_metered_usage.assert_called_once_with(
@@ -147,7 +155,7 @@ class TestMeteredSync:
         mock_svc.debit_units.return_value = _make_balance_response()
 
         payload = {"subscription_item_id": SUB_ITEM_ID, "quantity": 7}
-        resp = client.post("/billing/metered/sync", json=payload, headers=_auth_headers())
+        resp = client.post(_billing_path("/metered/sync"), json=payload, headers=_auth_headers())
 
         assert resp.status_code == 200
         call_kwargs = mock_svc.debit_units.call_args
@@ -161,7 +169,7 @@ class TestMeteredSync:
         mock_svc.report_metered_usage.return_value = _make_metered_response(quantity=0)
 
         payload = {"subscription_item_id": SUB_ITEM_ID, "quantity": 0}
-        resp = client.post("/billing/metered/sync", json=payload, headers=_auth_headers())
+        resp = client.post(_billing_path("/metered/sync"), json=payload, headers=_auth_headers())
 
         assert resp.status_code == 200
         mock_svc.debit_units.assert_not_called()
@@ -172,7 +180,7 @@ class TestMeteredSync:
         mock_svc.debit_units.side_effect = StripeInsufficientUnitsError(org_id=ORG_ID, have=0, need=99)
 
         payload = {"subscription_item_id": SUB_ITEM_ID, "quantity": 99}
-        resp = client.post("/billing/metered/sync", json=payload, headers=_auth_headers())
+        resp = client.post(_billing_path("/metered/sync"), json=payload, headers=_auth_headers())
 
         assert resp.status_code == 200
 
@@ -186,7 +194,7 @@ class TestMeteredSync:
             "quantity": 3,
             "idempotency_key": "custom-key-abc",
         }
-        resp = client.post("/billing/metered/sync", json=payload, headers=_auth_headers())
+        resp = client.post(_billing_path("/metered/sync"), json=payload, headers=_auth_headers())
 
         assert resp.status_code == 200
         mock_svc.report_metered_usage.assert_called_once_with(
@@ -208,7 +216,7 @@ class TestResolveCustomerIdNone:
         mock_svc._org_customer_map.clear()
 
         resp = client.post(
-            "/billing/payment-methods/attach",
+            _billing_path("/payment-methods/attach"),
             json={"payment_method_id": PM_ID, "set_as_default": False},
             headers=_auth_headers(),
         )
@@ -221,7 +229,7 @@ class TestResolveCustomerIdNone:
         mock_svc._org_customer_map.clear()
 
         resp = client.post(
-            f"/billing/payment-methods/{PM_ID}/set-default",
+            _billing_path(f"/payment-methods/{PM_ID}/set-default"),
             headers=_auth_headers(),
         )
 
@@ -232,7 +240,7 @@ class TestResolveCustomerIdNone:
     def test_list_payment_methods_no_customer_returns_empty_list(self, client: TestClient, mock_svc: MagicMock) -> None:
         mock_svc._org_customer_map.clear()
 
-        resp = client.get("/billing/payment-methods", headers=_auth_headers())
+        resp = client.get(_billing_path("/payment-methods"), headers=_auth_headers())
 
         assert resp.status_code == 200
         body = resp.json()
@@ -241,7 +249,7 @@ class TestResolveCustomerIdNone:
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/units/debit
+# POST /api/billing/units/debit
 # ---------------------------------------------------------------------------
 
 
@@ -252,7 +260,7 @@ class TestDebitUnits:
 
         token_count = 25_000
         resp = client.post(
-            "/billing/units/debit",
+            _billing_path("/units/debit"),
             json={"token_count": token_count},
             headers=_auth_headers(),
         )
@@ -269,7 +277,7 @@ class TestDebitUnits:
         mock_svc.debit_units.side_effect = StripeInsufficientUnitsError(org_id=ORG_ID, have=0, need=5)
 
         resp = client.post(
-            "/billing/units/debit",
+            _billing_path("/units/debit"),
             json={"token_count": 125_000},
             headers=_auth_headers(),
         )
@@ -287,7 +295,7 @@ class TestDebitUnits:
         mock_svc.debit_units.return_value = _make_balance_response(balance=499)
 
         resp = client.post(
-            "/billing/units/debit",
+            _billing_path("/units/debit"),
             json={"token_count": 1},
             headers=_auth_headers(),
         )
@@ -301,7 +309,7 @@ class TestDebitUnits:
         mock_svc.debit_units.return_value = _make_balance_response(balance=498)
 
         resp = client.post(
-            "/billing/units/debit",
+            _billing_path("/units/debit"),
             json={"token_count": 50_000, "reference_id": "scan-ref-abc"},
             headers=_auth_headers(),
         )
@@ -311,7 +319,6 @@ class TestDebitUnits:
         assert call_kwargs.kwargs.get("reference_id") == "scan-ref-abc"
 
     def test_debit_units_missing_org_id_returns_error(self, client: TestClient, mock_svc: MagicMock) -> None:
-        # Override auth context to one with no org_id to simulate missing org
         no_org_context = AuthContext(
             api_key=_API_KEY,
             principal_type="api_key",
@@ -327,7 +334,7 @@ class TestDebitUnits:
         app.dependency_overrides[require_auth_context] = lambda: no_org_context
         try:
             resp = client.post(
-                "/billing/units/debit",
+                _billing_path("/units/debit"),
                 json={"token_count": 1},
                 headers={"X-API-Key": _API_KEY},
             )
@@ -344,7 +351,7 @@ class TestDebitUnits:
 class TestPatchObjectLockAndMap:
     """
     StripeService.__new__ skips __init__ so _lock/_org_customer_map do not
-    exist on the bare instance.  We set them directly before patch.object.
+    exist on the bare instance. We set them directly before patch.object.
     """
 
     def _bare_svc_with_attrs(self) -> StripeService:
@@ -382,7 +389,7 @@ class TestPatchObjectLockAndMap:
         try:
             c = TestClient(app, raise_server_exceptions=False)
             resp = c.post(
-                "/billing/payment-methods/attach",
+                _billing_path("/payment-methods/attach"),
                 json={"payment_method_id": PM_ID},
                 headers=_auth_headers(),
             )
@@ -398,7 +405,7 @@ class TestPatchObjectLockAndMap:
         try:
             c = TestClient(app, raise_server_exceptions=False)
             resp = c.post(
-                f"/billing/payment-methods/{PM_ID}/set-default",
+                _billing_path(f"/payment-methods/{PM_ID}/set-default"),
                 headers=_auth_headers(),
             )
             assert resp.status_code == 404
@@ -412,7 +419,7 @@ class TestPatchObjectLockAndMap:
         app.dependency_overrides[require_auth_context] = _override_require_auth_context
         try:
             c = TestClient(app, raise_server_exceptions=False)
-            resp = c.get("/billing/payment-methods", headers=_auth_headers())
+            resp = c.get(_billing_path("/payment-methods"), headers=_auth_headers())
             assert resp.status_code == 200
             assert resp.json()["payment_methods"] == []
         finally:
@@ -427,7 +434,7 @@ class TestPatchObjectLockAndMap:
 
 class TestAncillaryRoutes:
     def test_get_billing_catalogue_no_auth_required(self, client: TestClient) -> None:
-        resp = client.get("/billing/catalogue", headers=_auth_headers())
+        resp = client.get(_billing_path("/catalogue"), headers=_auth_headers())
         assert resp.status_code == 200
         body = resp.json()
         assert "packages" in body
@@ -435,7 +442,7 @@ class TestAncillaryRoutes:
 
     def test_get_unit_balance(self, client: TestClient, mock_svc: MagicMock) -> None:
         mock_svc.get_unit_balance.return_value = _make_balance_response(balance=250)
-        resp = client.get("/billing/units/balance", headers=_auth_headers())
+        resp = client.get(_billing_path("/units/balance"), headers=_auth_headers())
         assert resp.status_code == 200
         assert resp.json()["balance"] == 250
 
@@ -446,14 +453,14 @@ class TestAncillaryRoutes:
             ledger_entries=[{"entry_id": "ule-001", "delta": 100}],
         )
         mock_svc.get_unit_balance.return_value = balance_resp
-        resp = client.get("/billing/units/ledger", headers=_auth_headers())
+        resp = client.get(_billing_path("/units/ledger"), headers=_auth_headers())
         assert resp.status_code == 200
         body = resp.json()
         assert body["balance"] == 100
         assert len(body["ledger"]) == 1
 
     def test_calculate_units_endpoint(self, client: TestClient) -> None:
-        resp = client.post("/billing/units/calculate?token_count=50000", headers=_auth_headers())
+        resp = client.post(_billing_path("/units/calculate?token_count=50000"), headers=_auth_headers())
         assert resp.status_code == 200
         body = resp.json()
         assert body["units_required"] == 2

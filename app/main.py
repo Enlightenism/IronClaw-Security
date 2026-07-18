@@ -16,7 +16,6 @@ from app.core.settings import get_settings
 
 ProtectedDependencyFactory = Callable[[], Any]
 
-
 _log = logging.getLogger(__name__)
 
 
@@ -169,6 +168,7 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
     dependencies = _protected_dependencies()
     agent_dependencies = _agent_protected_dependencies("agent_id")
     action_execute_router = _optional_router("app.api.action_execute")
+    stripe_router = _optional_router("app.routers.stripe_router")
     return [
         (_optional_router("app.api.requestcontext"), {"dependencies": dependencies}),
         (
@@ -275,7 +275,11 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
             {"dependencies": dependencies},
         ),
         (
-            _optional_router("app.routers.stripe_router"),
+            stripe_router,
+            {"dependencies": dependencies},
+        ),
+        (
+            stripe_router,
             {"prefix": "/api", "dependencies": dependencies},
         ),
     ]
