@@ -213,10 +213,7 @@ def _matches_capability(record: Any, capability: str | None) -> bool:
     if not capability:
         return True
     target = capability.strip().lower()
-    return any(
-        str(item.name).strip().lower() == target and bool(item.enabled)
-        for item in record.capabilities
-    )
+    return any(str(item.name).strip().lower() == target and bool(item.enabled) for item in record.capabilities)
 
 
 def _serialize_record(record: Any) -> IntegrationRecordResponse:
@@ -370,9 +367,7 @@ def read_integrations_summary() -> IntegrationRegistrySummaryResponse:
     capabilities = sorted(
         {str(capability.name) for item in items for capability in item.capabilities if capability.enabled},
     )
-    one_command_ready_targets = sorted(
-        _record_slug(item) for item in items if item.status in ("available", "ready")
-    )
+    one_command_ready_targets = sorted(_record_slug(item) for item in items if item.status in ("available", "ready"))
     return IntegrationRegistrySummaryResponse(
         total_integrations=summary["total_integrations"],
         statuses=summary,
@@ -393,11 +388,7 @@ def read_integrations(
     capability: str | None = Query(default=None),
 ) -> IntegrationRegistryResponse:
     registry = get_integration_registry()
-    items = [
-        item
-        for item in registry.list_integrations()
-        if _matches_platform(item, platform) and _matches_capability(item, capability)
-    ]
+    items = [item for item in registry.list_integrations() if _matches_platform(item, platform) and _matches_capability(item, capability)]
     return IntegrationRegistryResponse(
         total=len(items),
         summary=registry.integration_summary(),

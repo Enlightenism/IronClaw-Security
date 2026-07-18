@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from typing import Any
+
+from fastapi import APIRouter, Depends
+
+from app.core.auth import get_auth_context
 
 router = APIRouter(tags=["integration-routes"])
 
@@ -110,4 +114,14 @@ def get_integration_observability(integration_id: str) -> dict[str, object]:
         "integration_id": integration_id,
         "status": "available",
         "signals": [],
+    }
+
+
+@router.get("/integrations/token")
+async def get_integrations_token(auth: Any = Depends(get_auth_context)) -> dict[str, str]:
+    token = auth.api_key
+    return {
+        "user_token": token,
+        "claude_code_command": f"npx ironclaw-install --key {token} --platform claude-code",
+        "openclaw_command": f"npx ironclaw-install --key {token} --platform openclaw",
     }
