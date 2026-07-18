@@ -98,7 +98,7 @@ def _unit_credits_for_package(package_id: str) -> int:
     return units
 
 
-def _normalize_checkout_inputs(body: "CheckoutSessionCreateRequest") -> tuple[str, int]:
+def _normalize_checkout_inputs(body: CheckoutSessionCreateRequest) -> tuple[str, int]:
     package_id = (body.package_id or "").strip()
     price_id = (body.price_id or "").strip()
 
