@@ -6,9 +6,9 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.services.integrationinstaller import get_integration_installer
-from app.services.integrationregistry import get_integration_registry
-from app.services.integrationverifier import get_integration_verifier
+from app.services.integration_installer import get_integration_installer
+from app.services.integration_registry import get_integration_registry
+from app.services.integration_verifier import get_integration_verifier
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 
@@ -175,6 +175,14 @@ class IntegrationObservabilityResponse(BaseModel):
     traces: list[dict[str, Any]]
 
 
+class IntegrationTokenResponse(BaseModel):
+    status: str
+    service: str
+    timestamp: str
+    claude_code_command: str
+    openclaw_command: str
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -187,7 +195,7 @@ def _record_slug(record: Any) -> str:
     platform = str(record.platform).strip().lower()
     if platform == "claude":
         return "claude-code"
-    return str(record.integrationid).strip().lower().replace("_", "-")
+    return str(record.integration_id).strip().lower().replace("_", "-")
 
 
 def _integration_type(record: Any) -> str:
@@ -205,26 +213,29 @@ def _matches_capability(record: Any, capability: str | None) -> bool:
     if not capability:
         return True
     target = capability.strip().lower()
-    return any(str(item.name).strip().lower() == target and bool(item.enabled) for item in record.capabilities)
+    return any(
+        str(item.name).strip().lower() == target and bool(item.enabled)
+        for item in record.capabilities
+    )
 
 
 def _serialize_record(record: Any) -> IntegrationRecordResponse:
     slug = _record_slug(record)
     return IntegrationRecordResponse(
-        integration_id=record.integrationid,
+        integration_id=record.integration_id,
         slug=slug,
         platform=slug,
         integration_type=_integration_type(record),
-        display_name=record.displayname,
+        display_name=record.display_name,
         status=record.status,
         description=record.description,
         version=record.version,
-        adapter_module=record.adaptermodule,
-        verification_route=record.verificationroute,
-        settings_route=record.settingsroute,
-        manifest_route=record.manifestroute,
-        installed_at=record.installedat,
-        verified_at=record.verifiedat,
+        adapter_module=record.adapter_module,
+        verification_route=record.verification_route,
+        settings_route=record.settings_route,
+        manifest_route=record.manifest_route,
+        installed_at=record.installed_at,
+        verified_at=record.verified_at,
         tags=list(record.tags),
         capabilities=[
             IntegrationCapabilityResponse(
@@ -243,7 +254,7 @@ def _find_record(integration_id: str) -> Any | None:
     registry = get_integration_registry()
     normalized = integration_id.strip().lower()
     for record in registry.list_integrations():
-        if str(record.integrationid).strip().lower() == normalized:
+        if str(record.integration_id).strip().lower() == normalized:
             return record
         if _record_slug(record) == normalized:
             return record
@@ -277,6 +288,10 @@ def _require_record(integration_id: str) -> Any:
     if record is None:
         raise HTTPException(status_code=404, detail="integration not found")
     return record
+
+
+def _build_command(slug: str) -> str:
+    return f"npx ironclaw integrate {slug}"
 
 
 # ---------------------------------------------------------------------------
@@ -326,6 +341,22 @@ def get_verifier(integration_id: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Token helper for frontend dashboard
+# ---------------------------------------------------------------------------
+
+
+@router.get("/token", response_model=IntegrationTokenResponse)
+def get_integrations_token() -> IntegrationTokenResponse:
+    return IntegrationTokenResponse(
+        status="ok",
+        service="IronClaw-Security",
+        timestamp=_now(),
+        claude_code_command=_build_command("claude-code"),
+        openclaw_command=_build_command("openclaw"),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Summary  (before /{integration_id} catch-all)
 # ---------------------------------------------------------------------------
 
@@ -339,7 +370,9 @@ def read_integrations_summary() -> IntegrationRegistrySummaryResponse:
     capabilities = sorted(
         {str(capability.name) for item in items for capability in item.capabilities if capability.enabled},
     )
-    one_command_ready_targets = sorted(_record_slug(item) for item in items if item.status in ("available", "ready"))
+    one_command_ready_targets = sorted(
+        _record_slug(item) for item in items if item.status in ("available", "ready")
+    )
     return IntegrationRegistrySummaryResponse(
         total_integrations=summary["total_integrations"],
         statuses=summary,
@@ -360,7 +393,11 @@ def read_integrations(
     capability: str | None = Query(default=None),
 ) -> IntegrationRegistryResponse:
     registry = get_integration_registry()
-    items = [item for item in registry.list_integrations() if _matches_platform(item, platform) and _matches_capability(item, capability)]
+    items = [
+        item
+        for item in registry.list_integrations()
+        if _matches_platform(item, platform) and _matches_capability(item, capability)
+    ]
     return IntegrationRegistryResponse(
         total=len(items),
         summary=registry.integration_summary(),
@@ -380,7 +417,7 @@ def read_integrations(
 def get_integration_compatibility(integration_id: str) -> IntegrationCompatibilityResponse:
     record = _require_record(integration_id)
     return IntegrationCompatibilityResponse(
-        integration_id=record.integrationid,
+        integration_id=record.integration_id,
         compatible=record.status in ("active", "available", "ready"),
         notes=[],
     )
@@ -393,7 +430,7 @@ def get_integration_compatibility(integration_id: str) -> IntegrationCompatibili
 def get_integration_secrets(integration_id: str) -> IntegrationSecretsResponse:
     record = _require_record(integration_id)
     return IntegrationSecretsResponse(
-        integration_id=record.integrationid,
+        integration_id=record.integration_id,
         secrets=[],
     )
 
@@ -405,7 +442,7 @@ def get_integration_secrets(integration_id: str) -> IntegrationSecretsResponse:
 def get_integration_rollouts(integration_id: str) -> IntegrationRolloutsResponse:
     record = _require_record(integration_id)
     return IntegrationRolloutsResponse(
-        integration_id=record.integrationid,
+        integration_id=record.integration_id,
         rollouts=[],
     )
 
@@ -417,7 +454,7 @@ def get_integration_rollouts(integration_id: str) -> IntegrationRolloutsResponse
 def get_integration_telemetry(integration_id: str) -> IntegrationTelemetryResponse:
     record = _require_record(integration_id)
     return IntegrationTelemetryResponse(
-        integration_id=record.integrationid,
+        integration_id=record.integration_id,
         telemetry={},
     )
 
@@ -429,7 +466,7 @@ def get_integration_telemetry(integration_id: str) -> IntegrationTelemetryRespon
 def get_integration_health(integration_id: str) -> IntegrationHealthResponse:
     record = _require_record(integration_id)
     return IntegrationHealthResponse(
-        integration_id=record.integrationid,
+        integration_id=record.integration_id,
         healthy=record.status in ("active", "available", "ready"),
         checks=[],
     )
@@ -442,7 +479,7 @@ def get_integration_health(integration_id: str) -> IntegrationHealthResponse:
 def get_integration_lifecycle(integration_id: str) -> IntegrationLifecycleResponse:
     record = _require_record(integration_id)
     return IntegrationLifecycleResponse(
-        integration_id=record.integrationid,
+        integration_id=record.integration_id,
         lifecycle_state=record.status,
         events=[],
     )
@@ -455,7 +492,7 @@ def get_integration_lifecycle(integration_id: str) -> IntegrationLifecycleRespon
 def get_integration_readiness(integration_id: str) -> IntegrationReadinessResponse:
     record = _require_record(integration_id)
     return IntegrationReadinessResponse(
-        integration_id=record.integrationid,
+        integration_id=record.integration_id,
         ready=record.status in ("active", "available", "ready"),
         conditions=[],
     )
@@ -468,7 +505,7 @@ def get_integration_readiness(integration_id: str) -> IntegrationReadinessRespon
 def get_integration_observability(integration_id: str) -> IntegrationObservabilityResponse:
     record = _require_record(integration_id)
     return IntegrationObservabilityResponse(
-        integration_id=record.integrationid,
+        integration_id=record.integration_id,
         metrics={},
         traces=[],
     )
@@ -502,31 +539,31 @@ def verify_integration_route(
 
     verifier = get_integration_verifier()
     result = verifier.verify_integration(
-        record.integrationid,
+        record.integration_id,
         strict=strict,
-        requestedby=requested_by,
+        requested_by=requested_by,
     )
     if result is None:
         raise HTTPException(status_code=404, detail="integration not found")
 
     return IntegrationVerificationResponse(
-        integration_id=result.integrationid,
+        integration_id=result.integration_id,
         platform=_record_slug(record),
         status=result.status,
         verified=result.verified,
-        verified_at=result.verifiedat,
-        requested_by=result.requestedby,
+        verified_at=result.verified_at,
+        requested_by=result.requested_by,
         strict=result.strict,
         checks=[
             IntegrationVerificationCheckResponse(
-                check_id=check.checkid,
+                check_id=check.check_id,
                 label=check.label,
                 passed=check.passed,
                 detail=check.detail,
             )
             for check in result.checks
         ],
-        missing_capabilities=list(result.missingcapabilities),
+        missing_capabilities=list(result.missing_capabilities),
         summary=result.summary,
     )
 
@@ -545,22 +582,22 @@ def install_integration_route(
 
     installer = get_integration_installer()
     result = installer.install_integration(
-        record.integrationid,
-        requestedby=payload.requested_by or "system",
+        record.integration_id,
+        requested_by=payload.requested_by or "system",
     )
     if result is None:
         raise HTTPException(status_code=404, detail="integration not found")
 
     return IntegrationInstallResponse(
-        integration_id=result.integrationid,
+        integration_id=result.integration_id,
         platform=_record_slug(record),
         status=result.status,
         installed=result.installed,
-        installed_at=result.installedat,
-        requested_by=result.requestedby,
+        installed_at=result.installed_at,
+        requested_by=result.requested_by,
         steps=[
             IntegrationInstallStepResponse(
-                step_id=step.stepid,
+                step_id=step.step_id,
                 label=step.label,
                 completed=step.completed,
                 detail=step.detail,
