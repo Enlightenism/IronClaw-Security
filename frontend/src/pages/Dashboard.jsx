@@ -209,7 +209,7 @@ const Dashboard = () => {
 
     try {
       const [dash, tok] = await Promise.all([
-        api.get("/dashboard"),
+        api.get("/dashboard/overview"),
         api.get("/integrations/token"),
       ]);
       setData(dash.data);

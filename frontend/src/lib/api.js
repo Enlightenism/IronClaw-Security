@@ -40,7 +40,7 @@ export const auth = {
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 export const dashboard = {
-  get: () => api.get("/dashboard"),
+  get: () => api.get("/dashboard/overview"),
 };
 
 // ── Events ────────────────────────────────────────────────────────────────────
