@@ -6,6 +6,13 @@ from app.main import app
 
 client = TestClient(app, raise_server_exceptions=False)
 
+_BILLING_BASE = "/api/billing"
+
+
+def _billing_path(path: str) -> str:
+    normalized = path if path.startswith("/") else f"/{path}"
+    return f"{_BILLING_BASE}{normalized}"
+
 
 def test_main_root_returns_ok() -> None:
     response = client.get("/")
@@ -49,36 +56,36 @@ def test_docs_endpoint_is_available_or_protected() -> None:
 
 
 def test_billing_catalogue_route_is_registered() -> None:
-    """GET /billing/catalogue — confirms route is registered; auth may be applied at router level."""
-    response = client.get("/billing/catalogue")
+    """GET /api/billing/catalogue — confirms route is registered; auth may be applied at router level."""
+    response = client.get(_billing_path("/catalogue"))
     assert response.status_code in {200, 401, 403}
 
 
 def test_billing_unit_balance_route_is_registered() -> None:
-    """GET /billing/units/balance is auth-protected — 401/403 confirms route exists."""
-    response = client.get("/billing/units/balance")
+    """GET /api/billing/units/balance is auth-protected — 401/403 confirms route exists."""
+    response = client.get(_billing_path("/units/balance"))
     assert response.status_code in {200, 401, 403}
 
 
 def test_billing_unit_ledger_route_is_registered() -> None:
-    """GET /billing/units/ledger is auth-protected — 401/403 confirms route exists."""
-    response = client.get("/billing/units/ledger")
+    """GET /api/billing/units/ledger is auth-protected — 401/403 confirms route exists."""
+    response = client.get(_billing_path("/units/ledger"))
     assert response.status_code in {200, 401, 403}
 
 
 def test_billing_metered_log_route_is_registered() -> None:
-    """GET /billing/metered/log is auth-protected — 401/403 confirms route exists."""
-    response = client.get("/billing/metered/log")
+    """GET /api/billing/metered/log is auth-protected — 401/403 confirms route exists."""
+    response = client.get(_billing_path("/metered/log"))
     assert response.status_code in {200, 401, 403}
 
 
 def test_billing_payment_methods_route_is_registered() -> None:
-    """GET /billing/payment-methods is auth-protected — 401/403 confirms route exists."""
-    response = client.get("/billing/payment-methods")
+    """GET /api/billing/payment-methods is auth-protected — 401/403 confirms route exists."""
+    response = client.get(_billing_path("/payment-methods"))
     assert response.status_code in {200, 401, 403}
 
 
 def test_billing_invoices_route_is_registered() -> None:
-    """GET /billing/invoices is auth-protected — 401/403 confirms route exists."""
-    response = client.get("/billing/invoices")
+    """GET /api/billing/invoices is auth-protected — 401/403 confirms route exists."""
+    response = client.get(_billing_path("/invoices"))
     assert response.status_code in {200, 401, 403}
