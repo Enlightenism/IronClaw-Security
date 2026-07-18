@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
 from app.core.auth import AuthContext, get_auth_context
+from app.services.secrets_vault import vault
 from app.services.stripe_service import (
     PACKAGE_CATALOGUE,
     TOKENS_PER_UNIT,
@@ -54,15 +55,85 @@ def _resolve_customer_id(svc: StripeService, org_id: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Billing package / price mapping
+# ---------------------------------------------------------------------------
+
+_PACKAGE_PRICE_ENV_MAP: dict[str, str] = {
+    "pkg_5000": "BILLING_TIER_5K_PRICE_ID",
+    "pkg_25000": "BILLING_TIER_25K_PRICE_ID",
+    "pkg_60000": "BILLING_TIER_60K_PRICE_ID",
+}
+
+_PACKAGE_UNIT_CREDITS: dict[str, int] = {
+    "pkg_5000": 5000,
+    "pkg_25000": 25000,
+    "pkg_60000": 60000,
+}
+
+
+def _configured_price_id_for_package(package_id: str) -> str:
+    env_key = _PACKAGE_PRICE_ENV_MAP.get(package_id)
+    if not env_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"unsupported_package_id: {package_id}",
+        )
+
+    price_id = (vault.get(env_key) or "").strip()
+    if not price_id:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"billing_price_not_configured: {env_key}",
+        )
+    return price_id
+
+
+def _unit_credits_for_package(package_id: str) -> int:
+    units = _PACKAGE_UNIT_CREDITS.get(package_id)
+    if units is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"unsupported_package_id: {package_id}",
+        )
+    return units
+
+
+def _normalize_checkout_inputs(body: "CheckoutSessionCreateRequest") -> tuple[str, int]:
+    package_id = (body.package_id or "").strip()
+    price_id = (body.price_id or "").strip()
+
+    if package_id:
+        resolved_price_id = _configured_price_id_for_package(package_id)
+        resolved_unit_credits = body.unit_credits if body.unit_credits > 0 else _unit_credits_for_package(package_id)
+        return resolved_price_id, resolved_unit_credits
+
+    if price_id:
+        return price_id, body.unit_credits
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="price_id_or_package_id_required",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Request / Response schemas
 # ---------------------------------------------------------------------------
 
 _VALID_CHECKOUT_MODES: frozenset[str] = frozenset(m.value for m in StripeCheckoutMode)
 _VALID_METERED_ACTIONS: frozenset[str] = frozenset({"increment", "set"})
+_VALID_PACKAGE_IDS: frozenset[str] = frozenset(_PACKAGE_PRICE_ENV_MAP.keys())
 
 
 class CheckoutSessionCreateRequest(BaseModel):
-    price_id: str = Field(..., description="Stripe Price ID for the line item")
+    package_id: str | None = Field(
+        default=None,
+        description="IronClaw package identifier: pkg_5000 | pkg_25000 | pkg_60000",
+    )
+    price_id: str = Field(
+        default="",
+        description="Stripe Price ID for the line item; optional when package_id is supplied",
+    )
     mode: str = Field(default="payment", description="checkout mode: payment | subscription | setup")
     quantity: int = Field(default=1, ge=1)
     unit_credits: int = Field(default=0, ge=0, description="IronClaw protection units to credit on completion")
@@ -77,6 +148,23 @@ class CheckoutSessionCreateRequest(BaseModel):
         if v not in _VALID_CHECKOUT_MODES:
             raise ValueError(f"invalid mode '{v}': must be payment | subscription | setup")
         return v
+
+    @field_validator("package_id")
+    @classmethod
+    def validate_package_id(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        normalized = v.strip()
+        if not normalized:
+            return None
+        if normalized not in _VALID_PACKAGE_IDS:
+            raise ValueError("invalid package_id: must be pkg_5000 | pkg_25000 | pkg_60000")
+        return normalized
+
+    @field_validator("price_id")
+    @classmethod
+    def normalize_price_id(cls, v: str) -> str:
+        return v.strip()
 
 
 class CheckoutSessionCompleteRequest(BaseModel):
@@ -125,7 +213,6 @@ class UnitCreditRequest(BaseModel):
 
 
 def _require_org_id(auth: AuthContext) -> str:
-    """Resolve org_id and raise 400 if missing. Single source of truth for this guard."""
     org_id = _resolve_org_id(auth)
     if not org_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="org_id could not be resolved")
@@ -133,7 +220,6 @@ def _require_org_id(auth: AuthContext) -> str:
 
 
 def _require_customer_id(svc: StripeService, org_id: str) -> str:
-    """Resolve customer_id and raise 404 if not registered. Single source of truth for this guard."""
     customer_id = _resolve_customer_id(svc, org_id)
     if not customer_id:
         raise HTTPException(
@@ -152,7 +238,7 @@ def _stripe_error_response(exc: StripeServiceError, detail: str, http_status: in
 
 
 # ---------------------------------------------------------------------------
-# POST /webhooks/stripe  — Stripe inbound webhook (NO auth dependency)
+# POST /webhooks/stripe — Stripe inbound webhook (NO auth dependency)
 # ---------------------------------------------------------------------------
 
 
@@ -160,7 +246,12 @@ def _stripe_error_response(exc: StripeServiceError, detail: str, http_status: in
     "/webhooks/stripe",
     status_code=status.HTTP_200_OK,
     summary="Receive and process Stripe webhook events",
-    description=("Inbound endpoint for Stripe webhook delivery. Verifies the stripe-signature header using STRIPE_WEBHOOK_SECRET. Handles: checkout.session.completed (credits units), invoice.payment_succeeded, customer.subscription.deleted, payment_intent.succeeded, charge.succeeded."),
+    description=(
+        "Inbound endpoint for Stripe webhook delivery. Verifies the stripe-signature "
+        "header using STRIPE_WEBHOOK_SECRET. Handles: checkout.session.completed "
+        "(credits units), invoice.payment_succeeded, customer.subscription.deleted, "
+        "payment_intent.succeeded, charge.succeeded."
+    ),
     tags=["billing"],
 )
 async def stripe_webhook(
@@ -183,7 +274,7 @@ async def stripe_webhook(
     except StripeServiceError as exc:
         logger.warning("stripe_webhook.dispatch_error error=%s", exc)
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_400_BAD_GATEWAY,
             detail=f"webhook_dispatch_error: {exc}",
         ) from exc
 
@@ -199,7 +290,11 @@ async def stripe_webhook(
     "/catalogue",
     status_code=status.HTTP_200_OK,
     summary="Return IronClaw billing tier catalogue",
-    description=("Returns all available IronClaw protection unit packages with pricing. Starter 5,000 units / $20 · Team 25,000 units / $90 · Enterprise 60,000 units / $180. Each unit covers up to 25,000 tokens with no scan ceiling. Public endpoint — no auth required."),
+    description=(
+        "Returns all available IronClaw protection unit packages with pricing. "
+        "Starter 5,000 units / $20 · Team 25,000 units / $90 · Enterprise 60,000 units / $180. "
+        "Each unit covers up to 25,000 tokens with no scan ceiling. Public endpoint — no auth required."
+    ),
 )
 async def get_billing_catalogue() -> JSONResponse:
     return JSONResponse(
@@ -317,7 +412,13 @@ async def get_or_create_customer(
     "/checkout/sessions",
     status_code=status.HTTP_201_CREATED,
     summary="Create a Stripe Checkout Session",
-    description=("Creates a Stripe Checkout session for one-time payment or subscription. On checkout.session.completed, IronClaw credits unit_credits protection units to the org wallet. Starter: 5,000 units/$20 · Team: 25,000 units/$90 · Enterprise: 60,000 units/$180."),
+    description=(
+        "Creates a Stripe Checkout session for one-time payment or subscription. "
+        "Accepts either a direct Stripe price_id or an IronClaw package_id. "
+        "When package_id is supplied, the backend resolves the Stripe price from "
+        "BILLING_TIER_5K_PRICE_ID / BILLING_TIER_25K_PRICE_ID / BILLING_TIER_60K_PRICE_ID. "
+        "On checkout.session.completed, IronClaw credits unit_credits protection units to the org wallet."
+    ),
     tags=["billing", "checkout"],
 )
 async def create_checkout_session(
@@ -327,18 +428,23 @@ async def create_checkout_session(
 ) -> JSONResponse:
     org_id = _require_org_id(auth)
     mode = StripeCheckoutMode(body.mode)
+    resolved_price_id, resolved_unit_credits = _normalize_checkout_inputs(body)
+
+    metadata = dict(body.metadata)
+    if body.package_id:
+        metadata.setdefault("package_id", body.package_id)
 
     try:
         result = svc.create_checkout_session(
             org_id=org_id,
-            price_id=body.price_id,
+            price_id=resolved_price_id,
             mode=mode,
             quantity=body.quantity,
-            unit_credits=body.unit_credits,
+            unit_credits=resolved_unit_credits,
             success_url=body.success_url,
             cancel_url=body.cancel_url,
             customer_id=body.customer_id,
-            metadata=body.metadata,
+            metadata=metadata,
         )
     except StripeServiceError as exc:
         raise HTTPException(
@@ -383,7 +489,10 @@ async def get_checkout_session(
     "/checkout/sessions/{session_id}/complete",
     status_code=status.HTTP_200_OK,
     summary="Manually complete a checkout session and credit units",
-    description=("Idempotent. Credits unit_credits to the org wallet. Intended for internal tooling and integration tests. Production fulfillment is driven by the Stripe webhook at POST /webhooks/stripe."),
+    description=(
+        "Idempotent. Credits unit_credits to the org wallet. Intended for internal tooling "
+        "and integration tests. Production fulfillment is driven by the Stripe webhook at POST /webhooks/stripe."
+    ),
     tags=["billing", "checkout"],
 )
 async def complete_checkout_session(
@@ -461,7 +570,11 @@ async def get_unit_balance(
     "/units/debit",
     status_code=status.HTTP_200_OK,
     summary="Debit protection units for a token-consuming operation",
-    description=("Converts token_count to required units via ceiling division at 25,000 tokens/unit, then debits the org wallet. Raises 402 if balance is insufficient. Scans have no ceiling — units must simply be available."),
+    description=(
+        "Converts token_count to required units via ceiling division at 25,000 tokens/unit, "
+        "then debits the org wallet. Raises 402 if balance is insufficient. "
+        "Scans have no ceiling — units must simply be available."
+    ),
     tags=["billing", "units"],
 )
 async def debit_units(
@@ -568,7 +681,11 @@ async def get_unit_ledger(
     "/metered/sync",
     status_code=status.HTTP_200_OK,
     summary="Sync metered usage to Stripe for a subscription item",
-    description=("Reports usage quantity to Stripe for a metered-price subscription item (si_xxx). Uses subscription_item_id — not subscription ID. Idempotent when idempotency_key is supplied. Also debits org unit balance via StripeUnitEventReason.METERED_SYNC."),
+    description=(
+        "Reports usage quantity to Stripe for a metered-price subscription item (si_xxx). "
+        "Uses subscription_item_id — not subscription ID. Idempotent when idempotency_key is supplied. "
+        "Also debits org unit balance via StripeUnitEventReason.METERED_SYNC."
+    ),
     tags=["billing", "metered"],
 )
 async def sync_metered_usage(

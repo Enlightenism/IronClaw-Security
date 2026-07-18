@@ -26,7 +26,7 @@ api.interceptors.response.use(
   },
 );
 
-// ── Health ────────────────────────────────────────────────────────────────────
+// ── Health ──────────────────────────���─────────────────────────────────────────
 export const health = {
   check: () => api.get("/"),
 };
@@ -53,9 +53,9 @@ export const integrations = {
   getToken: () => api.get("/integrations/token"),
 };
 
-// ── Payments ──────────────────────────────────────────────────────────────────
+// ── Payments / Billing ────────────────────────────────────────────────────────
 export const payments = {
-  createCheckout: (payload) => api.post("/payments/create-checkout", payload),
+  createCheckout: (payload) => api.post("/billing/checkout/sessions", payload),
   getStatus: (sessionId) => api.get(`/billing/checkout/sessions/${sessionId}`),
 };
 

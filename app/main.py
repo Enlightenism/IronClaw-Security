@@ -16,7 +16,6 @@ from app.core.settings import get_settings
 
 ProtectedDependencyFactory = Callable[[], Any]
 
-
 _log = logging.getLogger(__name__)
 
 
@@ -24,16 +23,29 @@ def _optional_module(module_path: str) -> Any | None:
     try:
         return import_module(module_path)
     except ModuleNotFoundError as exc:
-        if exc.name != module_path:
-            raise
-        return None
+        missing_name = getattr(exc, "name", "") or ""
+        if missing_name == module_path:
+            _log.debug("main: optional module not found: %s", module_path)
+            return None
+        _log.exception(
+            "main: optional module import failed for %s due to missing nested dependency %s",
+            module_path,
+            missing_name,
+        )
+        raise
+    except Exception:
+        _log.exception("main: optional module import failed for %s", module_path)
+        raise
 
 
 def _optional_router(module_path: str) -> Any | None:
     module = _optional_module(module_path)
     if module is None:
         return None
-    return getattr(module, "router", None)
+    router = getattr(module, "router", None)
+    if router is None:
+        _log.debug("main: module %s has no router attribute", module_path)
+    return router
 
 
 def _optional_attr(module_path: str, attr_name: str) -> Any | None:
@@ -61,6 +73,11 @@ def _include_optional_router(
         kwargs["dependencies"] = dependencies
 
     app.include_router(router, **kwargs)
+    _log.info(
+        "main: included router from %s%s",
+        module_path,
+        f" with prefix {prefix}" if prefix is not None else "",
+    )
 
 
 def _include_router_group(
@@ -113,7 +130,10 @@ def _protected_dependencies() -> list[Any]:
 
 
 def _agent_rate_limit_dep(agent_id_param: str = "agent_id") -> Any | None:
-    agent_rate_limit_dependency = _optional_attr("app.core.rate_limiter", "agent_rate_limit_dependency")
+    agent_rate_limit_dependency = _optional_attr(
+        "app.core.rate_limiter",
+        "agent_rate_limit_dependency",
+    )
     if not callable(agent_rate_limit_dependency):
         return None
     return Depends(agent_rate_limit_dependency(agent_id_param))
@@ -253,7 +273,6 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
             _optional_router("app.worker.remediation_worker"),
             {"dependencies": dependencies},
         ),
-        # Payment processing — Stripe billing router
         (
             _optional_router("app.routers.stripe_router"),
             {"dependencies": dependencies},
@@ -671,7 +690,10 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        description=("Local-first AI security API for prompt inspection, guarded execution, and protected runtime controls."),
+        description=(
+            "Local-first AI security API for prompt inspection, guarded execution, "
+            "and protected runtime controls."
+        ),
         docs_url=None,
         redoc_url=None,
         openapi_url=None,

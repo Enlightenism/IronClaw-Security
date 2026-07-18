@@ -86,9 +86,9 @@ describe("API_BASE", () => {
     expect(API_BASE.endsWith("/api")).toBe(true);
   });
 
-  it("is derived from REACT_APP_BACKEND_URL when set or localhost fallback otherwise", () => {
+  it("is derived from REACT_APP_API_BASE_URL when set or localhost fallback otherwise", () => {
     const backendUrl =
-      process.env.REACT_APP_BACKEND_URL || "http://127.0.0.1:8000";
+      process.env.REACT_APP_API_BASE_URL || "http://127.0.0.1:8000";
     expect(API_BASE).toBe(`${backendUrl}/api`);
   });
 });
@@ -193,11 +193,11 @@ describe("integrations.getToken", () => {
 });
 
 describe("payments.createCheckout", () => {
-  it("calls api.post with /payments/create-checkout", () => {
+  it("calls api.post with /billing/checkout/sessions", () => {
     mockPost.mockResolvedValueOnce({ data: {} });
     const payload = { plan: "starter", quantity: 1 };
     payments.createCheckout(payload);
-    expect(mockPost).toHaveBeenCalledWith("/payments/create-checkout", payload);
+    expect(mockPost).toHaveBeenCalledWith("/billing/checkout/sessions", payload);
   });
 });
 
@@ -205,7 +205,7 @@ describe("payments.getStatus", () => {
   it("calls api.get with the correct URL including sessionId", () => {
     mockGet.mockResolvedValueOnce({ data: {} });
     payments.getStatus("cs_test_abc123");
-    expect(mockGet).toHaveBeenCalledWith("/payments/status/cs_test_abc123");
+    expect(mockGet).toHaveBeenCalledWith("/billing/checkout/sessions/cs_test_abc123");
   });
 });
 
