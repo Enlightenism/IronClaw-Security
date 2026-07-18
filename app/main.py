@@ -690,10 +690,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        description=(
-            "Local-first AI security API for prompt inspection, guarded execution, "
-            "and protected runtime controls."
-        ),
+        description=("Local-first AI security API for prompt inspection, guarded execution, and protected runtime controls."),
         docs_url=None,
         redoc_url=None,
         openapi_url=None,

@@ -246,12 +246,7 @@ def _stripe_error_response(exc: StripeServiceError, detail: str, http_status: in
     "/webhooks/stripe",
     status_code=status.HTTP_200_OK,
     summary="Receive and process Stripe webhook events",
-    description=(
-        "Inbound endpoint for Stripe webhook delivery. Verifies the stripe-signature "
-        "header using STRIPE_WEBHOOK_SECRET. Handles: checkout.session.completed "
-        "(credits units), invoice.payment_succeeded, customer.subscription.deleted, "
-        "payment_intent.succeeded, charge.succeeded."
-    ),
+    description=("Inbound endpoint for Stripe webhook delivery. Verifies the stripe-signature header using STRIPE_WEBHOOK_SECRET. Handles: checkout.session.completed (credits units), invoice.payment_succeeded, customer.subscription.deleted, payment_intent.succeeded, charge.succeeded."),
     tags=["billing"],
 )
 async def stripe_webhook(
@@ -290,11 +285,7 @@ async def stripe_webhook(
     "/catalogue",
     status_code=status.HTTP_200_OK,
     summary="Return IronClaw billing tier catalogue",
-    description=(
-        "Returns all available IronClaw protection unit packages with pricing. "
-        "Starter 5,000 units / $20 · Team 25,000 units / $90 · Enterprise 60,000 units / $180. "
-        "Each unit covers up to 25,000 tokens with no scan ceiling. Public endpoint — no auth required."
-    ),
+    description=("Returns all available IronClaw protection unit packages with pricing. Starter 5,000 units / $20 · Team 25,000 units / $90 · Enterprise 60,000 units / $180. Each unit covers up to 25,000 tokens with no scan ceiling. Public endpoint — no auth required."),
 )
 async def get_billing_catalogue() -> JSONResponse:
     return JSONResponse(
@@ -489,10 +480,7 @@ async def get_checkout_session(
     "/checkout/sessions/{session_id}/complete",
     status_code=status.HTTP_200_OK,
     summary="Manually complete a checkout session and credit units",
-    description=(
-        "Idempotent. Credits unit_credits to the org wallet. Intended for internal tooling "
-        "and integration tests. Production fulfillment is driven by the Stripe webhook at POST /webhooks/stripe."
-    ),
+    description=("Idempotent. Credits unit_credits to the org wallet. Intended for internal tooling and integration tests. Production fulfillment is driven by the Stripe webhook at POST /webhooks/stripe."),
     tags=["billing", "checkout"],
 )
 async def complete_checkout_session(
@@ -570,11 +558,7 @@ async def get_unit_balance(
     "/units/debit",
     status_code=status.HTTP_200_OK,
     summary="Debit protection units for a token-consuming operation",
-    description=(
-        "Converts token_count to required units via ceiling division at 25,000 tokens/unit, "
-        "then debits the org wallet. Raises 402 if balance is insufficient. "
-        "Scans have no ceiling — units must simply be available."
-    ),
+    description=("Converts token_count to required units via ceiling division at 25,000 tokens/unit, then debits the org wallet. Raises 402 if balance is insufficient. Scans have no ceiling — units must simply be available."),
     tags=["billing", "units"],
 )
 async def debit_units(
@@ -681,11 +665,7 @@ async def get_unit_ledger(
     "/metered/sync",
     status_code=status.HTTP_200_OK,
     summary="Sync metered usage to Stripe for a subscription item",
-    description=(
-        "Reports usage quantity to Stripe for a metered-price subscription item (si_xxx). "
-        "Uses subscription_item_id — not subscription ID. Idempotent when idempotency_key is supplied. "
-        "Also debits org unit balance via StripeUnitEventReason.METERED_SYNC."
-    ),
+    description=("Reports usage quantity to Stripe for a metered-price subscription item (si_xxx). Uses subscription_item_id — not subscription ID. Idempotent when idempotency_key is supplied. Also debits org unit balance via StripeUnitEventReason.METERED_SYNC."),
     tags=["billing", "metered"],
 )
 async def sync_metered_usage(
