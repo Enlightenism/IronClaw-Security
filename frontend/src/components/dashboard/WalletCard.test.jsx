@@ -138,9 +138,9 @@ describe("WalletCard — no Stripe key", () => {
 
   it("all three purchase buttons remain enabled", async () => {
     await renderWalletCard();
-    expect(screen.getByTestId("purchase-pkg_5000")).not.toBeDisabled();
-    expect(screen.getByTestId("purchase-pkg_25000")).not.toBeDisabled();
-    expect(screen.getByTestId("purchase-pkg_60000")).not.toBeDisabled();
+    expect(screen.getByTestId("purchase-pkg5000")).not.toBeDisabled();
+    expect(screen.getByTestId("purchase-pkg25000")).not.toBeDisabled();
+    expect(screen.getByTestId("purchase-pkg60000")).not.toBeDisabled();
   });
 
   it("StripeModeTag still renders Stripe test and not Stripe live", async () => {
@@ -173,16 +173,16 @@ describe("WalletCard — test Stripe key", () => {
 
   it("all three purchase buttons are enabled when purchasingId is null", async () => {
     await renderWalletCard({ purchasingId: null });
-    expect(screen.getByTestId("purchase-pkg_5000")).not.toBeDisabled();
-    expect(screen.getByTestId("purchase-pkg_25000")).not.toBeDisabled();
-    expect(screen.getByTestId("purchase-pkg_60000")).not.toBeDisabled();
+    expect(screen.getByTestId("purchase-pkg5000")).not.toBeDisabled();
+    expect(screen.getByTestId("purchase-pkg25000")).not.toBeDisabled();
+    expect(screen.getByTestId("purchase-pkg60000")).not.toBeDisabled();
   });
 
   it("purchase buttons are disabled when purchasingId is set to a tier ID", async () => {
-    await renderWalletCard({ purchasingId: "pkg_5000" });
-    expect(screen.getByTestId("purchase-pkg_5000")).toBeDisabled();
-    expect(screen.getByTestId("purchase-pkg_25000")).toBeDisabled();
-    expect(screen.getByTestId("purchase-pkg_60000")).toBeDisabled();
+    await renderWalletCard({ purchasingId: "pkg5000" });
+    expect(screen.getByTestId("purchase-pkg5000")).toBeDisabled();
+    expect(screen.getByTestId("purchase-pkg25000")).toBeDisabled();
+    expect(screen.getByTestId("purchase-pkg60000")).toBeDisabled();
   });
 });
 
@@ -224,36 +224,36 @@ describe("balance display", () => {
 // =============================================================================
 
 describe("tier purchase buttons", () => {
-  it("clicking purchase-pkg_5000 calls onPurchase with exactly 'pkg_5000'", async () => {
+  it("clicking purchase-pkg5000 calls onPurchase with exactly 'pkg5000'", async () => {
     const user = userEvent.setup();
     const onPurchase = jest.fn();
 
     await renderWalletCard({ onPurchase });
 
-    await user.click(screen.getByTestId("purchase-pkg_5000"));
-    expect(onPurchase).toHaveBeenCalledWith("pkg_5000");
+    await user.click(screen.getByTestId("purchase-pkg5000"));
+    expect(onPurchase).toHaveBeenCalledWith("pkg5000");
     expect(onPurchase).toHaveBeenCalledTimes(1);
   });
 
-  it("clicking purchase-pkg_25000 calls onPurchase with exactly 'pkg_25000'", async () => {
+  it("clicking purchase-pkg_25000 calls onPurchase with exactly 'pkg25000'", async () => {
     const user = userEvent.setup();
     const onPurchase = jest.fn();
 
     await renderWalletCard({ onPurchase });
 
-    await user.click(screen.getByTestId("purchase-pkg_25000"));
-    expect(onPurchase).toHaveBeenCalledWith("pkg_25000");
+    await user.click(screen.getByTestId("purchase-pkg25000"));
+    expect(onPurchase).toHaveBeenCalledWith("pkg25000");
     expect(onPurchase).toHaveBeenCalledTimes(1);
   });
 
-  it("clicking purchase-pkg_60000 calls onPurchase with exactly 'pkg_60000'", async () => {
+  it("clicking purchase-pkg_60000 calls onPurchase with exactly 'pkg60000'", async () => {
     const user = userEvent.setup();
     const onPurchase = jest.fn();
 
     await renderWalletCard({ onPurchase });
 
-    await user.click(screen.getByTestId("purchase-pkg_60000"));
-    expect(onPurchase).toHaveBeenCalledWith("pkg_60000");
+    await user.click(screen.getByTestId("purchase-pkg60000"));
+    expect(onPurchase).toHaveBeenCalledWith("pkg60000");
     expect(onPurchase).toHaveBeenCalledTimes(1);
   });
 
@@ -263,7 +263,7 @@ describe("tier purchase buttons", () => {
     await renderWalletCard({ onPurchase: undefined });
 
     await expect(
-      user.click(screen.getByTestId("purchase-pkg_5000")),
+      user.click(screen.getByTestId("purchase-pkg5000")),
     ).resolves.toBeUndefined();
   });
 });
