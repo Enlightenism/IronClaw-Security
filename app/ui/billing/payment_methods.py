@@ -46,11 +46,12 @@ __all__ = [
     "DeletePaymentMethodResponse",
     "PackageCatalogueEntry",
     "SetDefaultPaymentMethodResponse",
+    "router",
 ]
 
 
 router = APIRouter(
-    prefix="/api/ui/billing",
+    prefix="/ui/billing",
     tags=["billing-payment-methods"],
 )
 
@@ -177,6 +178,7 @@ class BillingPaymentMethodsNotFoundResponse(BaseModel):
 class AddPaymentMethodRequest(BaseModel):
     stripe_payment_method_id: str = Field(
         ...,
+        min_length=1,
         description="Stripe PaymentMethod ID (pm_...) returned by Stripe.js or the Stripe API.",
     )
     set_as_default: bool = Field(
@@ -214,19 +216,12 @@ class DeletePaymentMethodResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# PACKAGE_CATALOGUE — built fresh on every call so env patches in tests are
-# always picked up. The module-level symbol is kept for import compatibility
-# but routes call _build_package_catalogue() directly rather than reading the
-# frozen module-level dict.
-#
-# stripe_price_id resolution: always reads os.environ at call time; the base
-# catalogue value is intentionally ignored so that an unset env var always
-# yields "" — never a stale hardcoded default from _BASE_PACKAGE_CATALOGUE.
+# PACKAGE_CATALOGUE
 # ---------------------------------------------------------------------------
 
 
-def _build_package_catalogue() -> dict[str, dict]:
-    catalogue: dict[str, dict] = {}
+def _build_package_catalogue() -> dict[str, dict[str, Any]]:
+    catalogue: dict[str, dict[str, Any]] = {}
     for key, base in _BASE_PACKAGE_CATALOGUE.items():
         entry = dict(base)
         entry["stripe_price_id"] = os.environ.get(f"STRIPE_PRICE_ID_{key.upper()}", "")
@@ -234,16 +229,12 @@ def _build_package_catalogue() -> dict[str, dict]:
     return catalogue
 
 
-PACKAGE_CATALOGUE: dict[str, dict] = _build_package_catalogue()
+PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = _build_package_catalogue()
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-
-def _utc_iso(year: int, month: int, day: int, hour: int, minute: int = 0) -> str:
-    return datetime(year, month, day, hour, minute, 0, tzinfo=UTC).isoformat()
 
 
 def _status_color(status: str) -> str:
@@ -298,8 +289,8 @@ def _build_status_counts(
     methods: list[BillingPaymentMethodView],
 ) -> list[BillingPaymentMethodStatusCount]:
     counts: dict[str, int] = {}
-    for m in methods:
-        counts[m.status] = counts.get(m.status, 0) + 1
+    for method in methods:
+        counts[method.status] = counts.get(method.status, 0) + 1
     return [
         BillingPaymentMethodStatusCount(
             status=status,
@@ -308,6 +299,11 @@ def _build_status_counts(
         )
         for status, count in sorted(counts.items())
     ]
+
+
+def _normalized_organizationid(organizationid: str | None) -> str:
+    value = (organizationid or "").strip()
+    return value or "org-001"
 
 
 def _fetch_org_payment_methods(
@@ -328,8 +324,8 @@ def _fetch_org_payment_methods(
                     type=str(row.get("type", "card")),
                     brand=str(row.get("brand", "")),
                     last4=str(row.get("last4", "")),
-                    expmonth=int(row.get("exp_month", 0)),
-                    expyear=int(row.get("exp_year", 0)),
+                    expmonth=int(row.get("exp_month", 0) or 0),
+                    expyear=int(row.get("exp_year", 0) or 0),
                     isdefault=bool(row.get("is_default", False)),
                     status=str(row.get("status", "active")),
                     createdat=str(row.get("created_at", datetime.now(UTC).isoformat())),
@@ -361,8 +357,8 @@ def _fetch_stripe_customer_id(organizationid: str) -> str | None:
         client = get_supabase_client()
         rows = client.table("organizations").select("stripe_customer_id").eq("id", organizationid).limit(1).execute().data
         if rows:
-            val = rows[0].get("stripe_customer_id")
-            return str(val) if val else None
+            value = rows[0].get("stripe_customer_id")
+            return str(value) if value else None
         return None
     except Exception:
         return None
@@ -441,10 +437,9 @@ def _delete_method_from_db(
 def get_payment_methods(
     organizationid: str = "org-001",
 ) -> BillingPaymentMethodsResponse | BillingPaymentMethodsNotFoundResponse:
-    if not organizationid or not organizationid.strip():
-        organizationid = "org-001"
-
+    organizationid = _normalized_organizationid(organizationid)
     env = _get_environment()
+    generatedat = datetime.now(UTC).isoformat()
     live_catalogue = _build_package_catalogue()
 
     sb_methods = _fetch_org_payment_methods(organizationid)
@@ -456,7 +451,7 @@ def get_payment_methods(
             status="not_found",
             organizationid=organizationid,
             message=(f"Organization '{organizationid}' could not be resolved. Supabase is not configured — connect SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."),
-            generatedat=datetime.now(UTC).isoformat(),
+            generatedat=generatedat,
             environment=env,
         )
 
@@ -464,25 +459,24 @@ def get_payment_methods(
         return BillingPaymentMethodsNotFoundResponse(
             status="not_found",
             organizationid=organizationid,
-            message=(f"Organization '{organizationid}' was not found or returned no data from Supabase."),
-            generatedat=datetime.now(UTC).isoformat(),
+            message=f"Organization '{organizationid}' was not found or returned no data from Supabase.",
+            generatedat=generatedat,
             environment=env,
         )
 
-    methods: list[BillingPaymentMethodView] = sb_methods
-    org_name: str = sb_org_name or organizationid
-
+    methods = sb_methods
+    org_name = sb_org_name or organizationid
     methodcount = len(methods)
     defaultmethodid = _resolve_default_method_id(methods)
     canaddnew = methodcount < _MAX_METHODS
     statuscounts = _build_status_counts(methods)
 
-    active_count = sum(1 for m in methods if m.status == "active")
-    expired_count = sum(1 for m in methods if m.status == "expired")
-    revoked_count = sum(1 for m in methods if m.status == "revoked")
-    pending_count = sum(1 for m in methods if m.status == "pending")
+    active_count = sum(1 for method in methods if method.status == "active")
+    expired_count = sum(1 for method in methods if method.status == "expired")
+    revoked_count = sum(1 for method in methods if method.status == "revoked")
+    pending_count = sum(1 for method in methods if method.status == "pending")
 
-    stripe_status: StripeStatus = _get_stripe_status()
+    stripe_status = _get_stripe_status()
 
     notes = [
         f"Organization '{organizationid}' has {methodcount} payment method(s) on file.",
@@ -492,6 +486,7 @@ def get_payment_methods(
         "statuscolor maps payment method status to a UI hint: success (active), warning (expired), error (revoked), info (pending).",
         f"Each protection unit covers up to {TOKENS_PER_UNIT:,} tokens. Partial token chunks consume a full additional unit.",
         stripe_status.note,
+        _stripe_connection_note(),
         _stripe_webhook_secret_note(),
     ]
 
@@ -503,11 +498,11 @@ def get_payment_methods(
         notes.append("One or more payment methods are pending verification.")
 
     catalogue_out: dict[str, PackageCatalogueEntry] = {}
-    for k, v in live_catalogue.items():
-        catalogue_out[k] = PackageCatalogueEntry(**v)
+    for key, value in live_catalogue.items():
+        catalogue_out[key] = PackageCatalogueEntry(**value)
 
     return BillingPaymentMethodsResponse(
-        generatedat=datetime.now(UTC).isoformat(),
+        generatedat=generatedat,
         environment=env,
         organizationid=organizationid,
         organizationname=org_name,
@@ -536,10 +531,9 @@ def add_payment_method(
     body: AddPaymentMethodRequest,
     organizationid: str = "org-001",
 ) -> AddPaymentMethodResponse:
-    if not organizationid or not organizationid.strip():
-        raise HTTPException(status_code=422, detail="organizationid is required.")
-
+    organizationid = _normalized_organizationid(organizationid)
     env = _get_environment()
+    generatedat = datetime.now(UTC).isoformat()
 
     if not is_supabase_configured():
         raise HTTPException(
@@ -571,7 +565,7 @@ def add_payment_method(
         methodid=new_id,
         organizationid=organizationid,
         set_as_default=body.set_as_default,
-        generatedat=datetime.now(UTC).isoformat(),
+        generatedat=generatedat,
         environment=env,
         message=(f"Payment method '{new_id}' has been added to organization '{organizationid}'." + (" Set as default." if body.set_as_default else "")),
     )
@@ -586,10 +580,9 @@ def set_default_payment_method(
     methodid: str,
     organizationid: str = "org-001",
 ) -> SetDefaultPaymentMethodResponse:
-    if not organizationid or not organizationid.strip():
-        raise HTTPException(status_code=422, detail="organizationid is required.")
-
+    organizationid = _normalized_organizationid(organizationid)
     env = _get_environment()
+    generatedat = datetime.now(UTC).isoformat()
 
     if not is_supabase_configured():
         raise HTTPException(
@@ -608,7 +601,7 @@ def set_default_payment_method(
         status="updated",
         methodid=methodid,
         organizationid=organizationid,
-        generatedat=datetime.now(UTC).isoformat(),
+        generatedat=generatedat,
         environment=env,
         message=f"Payment method '{methodid}' is now the default for organization '{organizationid}'.",
     )
@@ -623,10 +616,9 @@ def delete_payment_method(
     methodid: str,
     organizationid: str = "org-001",
 ) -> DeletePaymentMethodResponse:
-    if not organizationid or not organizationid.strip():
-        raise HTTPException(status_code=422, detail="organizationid is required.")
-
+    organizationid = _normalized_organizationid(organizationid)
     env = _get_environment()
+    generatedat = datetime.now(UTC).isoformat()
 
     if not is_supabase_configured():
         raise HTTPException(
@@ -645,7 +637,7 @@ def delete_payment_method(
         status="deleted",
         methodid=methodid,
         organizationid=organizationid,
-        generatedat=datetime.now(UTC).isoformat(),
+        generatedat=generatedat,
         environment=env,
         message=f"Payment method '{methodid}' has been removed from organization '{organizationid}'.",
     )
