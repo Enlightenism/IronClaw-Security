@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 webhook_router = APIRouter(tags=["billing"])
+api_router = APIRouter(prefix="/api/billing", tags=["billing"])
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +345,19 @@ async def stripe_webhook_legacy_alias(
     return await stripe_webhook(request=request, svc=svc)
 
 
+@webhook_router.post(
+    "/api/billing/webhooks/stripe",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for Stripe webhook events",
+    tags=["billing"],
+)
+async def stripe_webhook_api_alias(
+    request: Request,
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await stripe_webhook(request=request, svc=svc)
+
+
 # ---------------------------------------------------------------------------
 # Public catalogue / redirect helpers
 # ---------------------------------------------------------------------------
@@ -376,6 +390,26 @@ async def get_billing_catalogue_alias() -> JSONResponse:
     return await get_billing_catalogue()
 
 
+@api_router.get(
+    "/catalogue",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for billing catalogue",
+    tags=["billing"],
+)
+async def get_billing_catalogue_api_alias() -> JSONResponse:
+    return await get_billing_catalogue()
+
+
+@api_router.get(
+    "/billing-catalogue",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for billing catalogue",
+    tags=["billing"],
+)
+async def get_billing_catalogue_api_legacy_alias() -> JSONResponse:
+    return await get_billing_catalogue()
+
+
 @router.get(
     "/success",
     status_code=status.HTTP_200_OK,
@@ -403,6 +437,19 @@ async def checkout_success(
             "units_credited": record.get("units_credited", False),
         },
     )
+
+
+@api_router.get(
+    "/success",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for checkout success",
+    tags=["billing", "checkout"],
+)
+async def checkout_success_api_alias(
+    session_id: str = Query(..., description="Stripe checkout session ID"),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await checkout_success(session_id=session_id, svc=svc)
 
 
 # ---------------------------------------------------------------------------
@@ -442,6 +489,30 @@ async def calculate_units_get(
     return await calculate_units(token_count=token_count)
 
 
+@api_router.post(
+    "/units/calculate",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for calculate units",
+    tags=["billing", "units"],
+)
+async def calculate_units_api(
+    token_count: int = Query(..., ge=1, description="Number of tokens to cover"),
+) -> JSONResponse:
+    return await calculate_units(token_count=token_count)
+
+
+@api_router.get(
+    "/units/calculate",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for calculate units",
+    tags=["billing", "units"],
+)
+async def calculate_units_get_api(
+    token_count: int = Query(..., ge=1, description="Number of tokens to cover"),
+) -> JSONResponse:
+    return await calculate_units(token_count=token_count)
+
+
 @router.get(
     "/units/balance",
     status_code=status.HTTP_200_OK,
@@ -465,6 +536,32 @@ async def get_unit_balance(
     tags=["billing", "units"],
 )
 async def get_unit_balance_alias(
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await get_unit_balance(auth=auth, svc=svc)
+
+
+@api_router.get(
+    "/units/balance",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for unit balance",
+    tags=["billing", "units"],
+)
+async def get_unit_balance_api(
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await get_unit_balance(auth=auth, svc=svc)
+
+
+@api_router.get(
+    "/unit-balance",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for unit balance",
+    tags=["billing", "units"],
+)
+async def get_unit_balance_api_alias(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
@@ -524,6 +621,34 @@ async def debit_units_alias(
     return await debit_units(body=body, auth=auth, svc=svc)
 
 
+@api_router.post(
+    "/units/debit",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for debit units",
+    tags=["billing", "units"],
+)
+async def debit_units_api(
+    body: UnitDebitRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await debit_units(body=body, auth=auth, svc=svc)
+
+
+@api_router.post(
+    "/debit-units",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for debit units",
+    tags=["billing", "units"],
+)
+async def debit_units_api_alias(
+    body: UnitDebitRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await debit_units(body=body, auth=auth, svc=svc)
+
+
 @router.post(
     "/units/credit",
     status_code=status.HTTP_200_OK,
@@ -557,6 +682,20 @@ async def credit_units(
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
 
+@api_router.post(
+    "/units/credit",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for credit units",
+    tags=["billing", "units"],
+)
+async def credit_units_api(
+    body: UnitCreditRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await credit_units(body=body, auth=auth, svc=svc)
+
+
 @router.get(
     "/units/ledger",
     status_code=status.HTTP_200_OK,
@@ -586,6 +725,32 @@ async def get_unit_ledger(
     tags=["billing", "units"],
 )
 async def get_unit_ledger_alias(
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await get_unit_ledger(auth=auth, svc=svc)
+
+
+@api_router.get(
+    "/units/ledger",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for unit ledger",
+    tags=["billing", "units"],
+)
+async def get_unit_ledger_api(
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await get_unit_ledger(auth=auth, svc=svc)
+
+
+@api_router.get(
+    "/unit-ledger",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for unit ledger",
+    tags=["billing", "units"],
+)
+async def get_unit_ledger_api_alias(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
@@ -625,6 +790,20 @@ async def get_or_create_customer(
         status_code=status.HTTP_200_OK,
         content={"org_id": org_id, "customer_id": customer_id},
     )
+
+
+@api_router.post(
+    "/customers",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for customers",
+    tags=["billing"],
+)
+async def get_or_create_customer_api(
+    body: CustomerCreateRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await get_or_create_customer(body=body, auth=auth, svc=svc)
 
 
 @router.post(
@@ -672,6 +851,20 @@ async def create_checkout_session(
     return JSONResponse(status_code=status.HTTP_201_CREATED, content=result.to_dict())
 
 
+@api_router.post(
+    "/checkout/sessions",
+    status_code=status.HTTP_201_CREATED,
+    summary="API-prefixed compatibility alias for checkout sessions",
+    tags=["billing", "checkout"],
+)
+async def create_checkout_session_api(
+    body: CheckoutSessionCreateRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await create_checkout_session(body=body, auth=auth, svc=svc)
+
+
 @router.get(
     "/checkout/sessions/{session_id}",
     status_code=status.HTTP_200_OK,
@@ -685,6 +878,20 @@ async def get_checkout_session(
 ) -> JSONResponse:
     record = _get_checkout_session_record_for_auth(session_id=session_id, auth=auth, svc=svc)
     return JSONResponse(status_code=status.HTTP_200_OK, content=record)
+
+
+@api_router.get(
+    "/checkout/sessions/{session_id}",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for checkout session lookup",
+    tags=["billing", "checkout"],
+)
+async def get_checkout_session_api(
+    session_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await get_checkout_session(session_id=session_id, auth=auth, svc=svc)
 
 
 @router.get(
@@ -705,6 +912,20 @@ async def get_checkout_session_status(
     )
 
 
+@api_router.get(
+    "/checkout/sessions/{session_id}/status",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for checkout session status",
+    tags=["billing", "checkout"],
+)
+async def get_checkout_session_status_api(
+    session_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await get_checkout_session_status(session_id=session_id, auth=auth, svc=svc)
+
+
 @router.get(
     "/checkout/status",
     status_code=status.HTTP_200_OK,
@@ -721,6 +942,20 @@ async def get_checkout_status_by_query(
         status_code=status.HTTP_200_OK,
         content=_checkout_session_status_payload(session_id=session_id, record=record),
     )
+
+
+@api_router.get(
+    "/checkout/status",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for checkout status",
+    tags=["billing", "checkout"],
+)
+async def get_checkout_status_by_query_api(
+    session_id: str = Query(..., description="Stripe checkout session ID"),
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await get_checkout_status_by_query(session_id=session_id, auth=auth, svc=svc)
 
 
 @router.post(
@@ -754,6 +989,21 @@ async def complete_checkout_session(
     return JSONResponse(status_code=status.HTTP_200_OK, content=result)
 
 
+@api_router.post(
+    "/checkout/sessions/{session_id}/complete",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for checkout completion",
+    tags=["billing", "checkout"],
+)
+async def complete_checkout_session_api(
+    session_id: str,
+    body: CheckoutSessionCompleteRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await complete_checkout_session(session_id=session_id, body=body, auth=auth, svc=svc)
+
+
 @router.get(
     "/subscriptions/{subscription_id}",
     status_code=status.HTTP_200_OK,
@@ -778,6 +1028,20 @@ async def get_subscription(
             detail=f"subscription_fetch_error: {exc}",
         ) from exc
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
+
+
+@api_router.get(
+    "/subscriptions/{subscription_id}",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for subscription lookup",
+    tags=["billing", "subscriptions"],
+)
+async def get_subscription_api(
+    subscription_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await get_subscription(subscription_id=subscription_id, auth=auth, svc=svc)
 
 
 # ---------------------------------------------------------------------------
@@ -851,6 +1115,34 @@ async def sync_metered_usage_alias(
     return await sync_metered_usage(body=body, auth=auth, svc=svc)
 
 
+@api_router.post(
+    "/metered/sync",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for metered sync",
+    tags=["billing", "metered"],
+)
+async def sync_metered_usage_api(
+    body: MeteredUsageSyncRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await sync_metered_usage(body=body, auth=auth, svc=svc)
+
+
+@api_router.post(
+    "/metered-sync",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for metered sync",
+    tags=["billing", "metered"],
+)
+async def sync_metered_usage_api_alias(
+    body: MeteredUsageSyncRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await sync_metered_usage(body=body, auth=auth, svc=svc)
+
+
 @router.get(
     "/metered/log",
     status_code=status.HTTP_200_OK,
@@ -868,6 +1160,20 @@ async def get_metered_usage_log(
         status_code=status.HTTP_200_OK,
         content={"org_id": org_id, "count": len(entries), "entries": entries},
     )
+
+
+@api_router.get(
+    "/metered/log",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for metered usage log",
+    tags=["billing", "metered"],
+)
+async def get_metered_usage_log_api(
+    limit: int = Query(default=50, ge=1, le=200),
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await get_metered_usage_log(limit=limit, auth=auth, svc=svc)
 
 
 # ---------------------------------------------------------------------------
@@ -916,6 +1222,34 @@ async def attach_payment_method_alias(
     return await attach_payment_method(body=body, auth=auth, svc=svc)
 
 
+@api_router.post(
+    "/payment-methods/attach",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for attach payment method",
+    tags=["billing", "payment-methods"],
+)
+async def attach_payment_method_api(
+    body: AttachPaymentMethodRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await attach_payment_method(body=body, auth=auth, svc=svc)
+
+
+@api_router.post(
+    "/payment-methods",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for attach payment method",
+    tags=["billing", "payment-methods"],
+)
+async def attach_payment_method_api_alias(
+    body: AttachPaymentMethodRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await attach_payment_method(body=body, auth=auth, svc=svc)
+
+
 @router.post(
     "/payment-methods/{payment_method_id}/detach",
     status_code=status.HTTP_200_OK,
@@ -940,6 +1274,20 @@ async def detach_payment_method(
             detail=f"detach_error: {exc}",
         ) from exc
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
+
+
+@api_router.post(
+    "/payment-methods/{payment_method_id}/detach",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for detach payment method",
+    tags=["billing", "payment-methods"],
+)
+async def detach_payment_method_api(
+    payment_method_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await detach_payment_method(payment_method_id=payment_method_id, auth=auth, svc=svc)
 
 
 @router.get(
@@ -974,6 +1322,19 @@ async def list_payment_methods(
             "payment_methods": [r.to_dict() for r in results],
         },
     )
+
+
+@api_router.get(
+    "/payment-methods",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for list payment methods",
+    tags=["billing", "payment-methods"],
+)
+async def list_payment_methods_api(
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await list_payment_methods(auth=auth, svc=svc)
 
 
 @router.post(
@@ -1023,6 +1384,34 @@ async def set_default_payment_method_alias(
         auth=auth,
         svc=svc,
     )
+
+
+@api_router.post(
+    "/payment-methods/{payment_method_id}/set-default",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for set default payment method",
+    tags=["billing", "payment-methods"],
+)
+async def set_default_payment_method_api(
+    payment_method_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await set_default_payment_method(payment_method_id=payment_method_id, auth=auth, svc=svc)
+
+
+@api_router.post(
+    "/payment-methods/default",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for set default payment method",
+    tags=["billing", "payment-methods"],
+)
+async def set_default_payment_method_api_alias(
+    body: SetDefaultPaymentMethodRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await set_default_payment_method_alias(body=body, auth=auth, svc=svc)
 
 
 # ---------------------------------------------------------------------------
@@ -1085,6 +1474,36 @@ async def list_invoices_alias(
     )
 
 
+@api_router.get(
+    "/invoices",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for invoices",
+    tags=["billing", "invoices"],
+)
+async def list_invoices_api(
+    limit: int = Query(default=20, ge=1, le=100),
+    force_refresh: bool = Query(default=False),
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await list_invoices(limit=limit, force_refresh=force_refresh, auth=auth, svc=svc)
+
+
+@api_router.get(
+    "/invoice-history",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for invoice history",
+    tags=["billing", "invoices"],
+)
+async def list_invoices_api_alias(
+    limit: int = Query(default=20, ge=1, le=100),
+    force_refresh: bool = Query(default=False),
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await list_invoices(limit=limit, force_refresh=force_refresh, auth=auth, svc=svc)
+
+
 @router.delete(
     "/invoices/cache",
     status_code=status.HTTP_200_OK,
@@ -1101,3 +1520,19 @@ async def invalidate_invoice_cache(
         status_code=status.HTTP_200_OK,
         content={"invalidated": True, "org_id": org_id},
     )
+
+
+@api_router.delete(
+    "/invoices/cache",
+    status_code=status.HTTP_200_OK,
+    summary="API-prefixed compatibility alias for invoice cache invalidation",
+    tags=["billing", "invoices"],
+)
+async def invalidate_invoice_cache_api(
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await invalidate_invoice_cache(auth=auth, svc=svc)
+
+
+router.include_router(api_router)

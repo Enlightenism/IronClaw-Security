@@ -49,15 +49,9 @@ __all__ = [
     "router",
 ]
 
-
-router = APIRouter(
-    prefix="/api/ui/billing",
-    tags=["billing-payment-methods"],
-)
-
+router = APIRouter(tags=["billing-payment-methods"])
 
 _MAX_METHODS = 4
-
 
 _STATUS_COLOR: dict[str, str] = {
     "active": "success",
@@ -65,7 +59,6 @@ _STATUS_COLOR: dict[str, str] = {
     "revoked": "error",
     "pending": "info",
 }
-
 
 _BRAND_DISPLAY: dict[str, str] = {
     "visa": "Visa",
@@ -374,7 +367,7 @@ def _insert_payment_method_record(
     try:
         client = get_supabase_client()
         if set_as_default:
-            client.table("payment_methods").update({"is_default": False}).eq("organization_id", organizationid).execute()
+            (client.table("payment_methods").update({"is_default": False}).eq("organization_id", organizationid).execute())
         payload: dict[str, Any] = {
             "organization_id": organizationid,
             "stripe_payment_method_id": stripe_payment_method_id,
@@ -403,8 +396,8 @@ def _set_default_method_in_db(
         return False
     try:
         client = get_supabase_client()
-        client.table("payment_methods").update({"is_default": False}).eq("organization_id", organizationid).execute()
-        client.table("payment_methods").update({"is_default": True}).eq("id", methodid).eq("organization_id", organizationid).execute()
+        (client.table("payment_methods").update({"is_default": False}).eq("organization_id", organizationid).execute())
+        (client.table("payment_methods").update({"is_default": True}).eq("id", methodid).eq("organization_id", organizationid).execute())
         return True
     except Exception:
         return False
@@ -418,7 +411,7 @@ def _delete_method_from_db(
         return False
     try:
         client = get_supabase_client()
-        client.table("payment_methods").delete().eq("id", methodid).eq("organization_id", organizationid).execute()
+        (client.table("payment_methods").delete().eq("id", methodid).eq("organization_id", organizationid).execute())
         return True
     except Exception:
         return False
@@ -430,8 +423,23 @@ def _delete_method_from_db(
 
 
 @router.get(
-    "/payment-methods",
+    "/api/ui/billing/payment-methods",
     operation_id="billing_get_payment_methods",
+    response_model=BillingPaymentMethodsResponse | BillingPaymentMethodsNotFoundResponse,
+)
+@router.get(
+    "/ui/billing/payment-methods",
+    include_in_schema=False,
+    response_model=BillingPaymentMethodsResponse | BillingPaymentMethodsNotFoundResponse,
+)
+@router.get(
+    "/api/ui/billing/payment-method",
+    include_in_schema=False,
+    response_model=BillingPaymentMethodsResponse | BillingPaymentMethodsNotFoundResponse,
+)
+@router.get(
+    "/ui/billing/payment-method",
+    include_in_schema=False,
     response_model=BillingPaymentMethodsResponse | BillingPaymentMethodsNotFoundResponse,
 )
 def get_payment_methods(
@@ -522,8 +530,26 @@ def get_payment_methods(
 
 
 @router.post(
-    "/payment-methods",
+    "/api/ui/billing/payment-methods",
     operation_id="billing_add_payment_method",
+    response_model=AddPaymentMethodResponse,
+    status_code=201,
+)
+@router.post(
+    "/ui/billing/payment-methods",
+    include_in_schema=False,
+    response_model=AddPaymentMethodResponse,
+    status_code=201,
+)
+@router.post(
+    "/api/ui/billing/payment-method",
+    include_in_schema=False,
+    response_model=AddPaymentMethodResponse,
+    status_code=201,
+)
+@router.post(
+    "/ui/billing/payment-method",
+    include_in_schema=False,
     response_model=AddPaymentMethodResponse,
     status_code=201,
 )
@@ -572,8 +598,23 @@ def add_payment_method(
 
 
 @router.patch(
-    "/payment-methods/{methodid}/default",
+    "/api/ui/billing/payment-methods/{methodid}/default",
     operation_id="billing_set_default_payment_method",
+    response_model=SetDefaultPaymentMethodResponse,
+)
+@router.patch(
+    "/ui/billing/payment-methods/{methodid}/default",
+    include_in_schema=False,
+    response_model=SetDefaultPaymentMethodResponse,
+)
+@router.patch(
+    "/api/ui/billing/payment-methods/set-default/{methodid}",
+    include_in_schema=False,
+    response_model=SetDefaultPaymentMethodResponse,
+)
+@router.patch(
+    "/ui/billing/payment-methods/set-default/{methodid}",
+    include_in_schema=False,
     response_model=SetDefaultPaymentMethodResponse,
 )
 def set_default_payment_method(
@@ -608,8 +649,23 @@ def set_default_payment_method(
 
 
 @router.delete(
-    "/payment-methods/{methodid}",
+    "/api/ui/billing/payment-methods/{methodid}",
     operation_id="billing_delete_payment_method",
+    response_model=DeletePaymentMethodResponse,
+)
+@router.delete(
+    "/ui/billing/payment-methods/{methodid}",
+    include_in_schema=False,
+    response_model=DeletePaymentMethodResponse,
+)
+@router.delete(
+    "/api/ui/billing/payment-methods/delete/{methodid}",
+    include_in_schema=False,
+    response_model=DeletePaymentMethodResponse,
+)
+@router.delete(
+    "/ui/billing/payment-methods/delete/{methodid}",
+    include_in_schema=False,
     response_model=DeletePaymentMethodResponse,
 )
 def delete_payment_method(
