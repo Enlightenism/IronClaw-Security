@@ -8,6 +8,7 @@ from app.services.integration_registry import (
     IntegrationRecord,
     IntegrationRegistry,
     get_integration,
+    get_integration_registry,
     update_integration_status,
 )
 
@@ -186,3 +187,28 @@ def summarize_install_result(result: IntegrationInstallResult) -> dict[str, Any]
         "command_name": result.command_name,
         "install_target": result.install_target,
     }
+
+
+def get_integration_installer() -> Any:
+    registry = get_integration_registry()
+
+    class _IntegrationInstaller:
+        def install_integration(
+            self,
+            integration_id: str,
+            *,
+            dry_run: bool = False,
+            requested_by: str | None = None,
+            install_target: str | None = None,
+            extra_metadata: dict[str, Any] | None = None,
+        ) -> IntegrationInstallResult:
+            return install_integration(
+                registry,
+                integration_id,
+                dry_run=dry_run,
+                requested_by=requested_by,
+                install_target=install_target,
+                extra_metadata=extra_metadata,
+            )
+
+    return _IntegrationInstaller()

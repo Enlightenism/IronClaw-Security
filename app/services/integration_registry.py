@@ -93,6 +93,23 @@ class IntegrationRegistry:
             "items": [record.to_dict() for record in records],
         }
 
+    def list_integrations(
+        self,
+        *,
+        status: IntegrationStatus | None = None,
+        platform: str | None = None,
+        capability: CapabilityName | None = None,
+    ) -> list[IntegrationRecord]:
+        return list_integrations(
+            self,
+            status=status,
+            platform=platform,
+            capability=capability,
+        )
+
+    def integration_summary(self) -> dict[str, Any]:
+        return summarize_integration_registry(self)
+
 
 def initialize_integration_registry() -> IntegrationRegistry:
     registry = IntegrationRegistry()
@@ -365,3 +382,13 @@ def summarize_integration_registry(registry: IntegrationRegistry) -> dict[str, A
         "capabilities": capability_counts,
         "one_command_ready_targets": [record.slug for record in records if record.command_name],
     }
+
+
+_REGISTRY: IntegrationRegistry | None = None
+
+
+def get_integration_registry() -> IntegrationRegistry:
+    global _REGISTRY
+    if _REGISTRY is None:
+        _REGISTRY = initialize_integration_registry()
+    return _REGISTRY

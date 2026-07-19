@@ -48,12 +48,15 @@ __all__ = [
     "SetDefaultPaymentMethodResponse",
 ]
 
+
 router = APIRouter(
-    prefix="/ui/billing",
+    prefix="/api/ui/billing",
     tags=["billing-payment-methods"],
 )
 
+
 _MAX_METHODS = 4
+
 
 _STATUS_COLOR: dict[str, str] = {
     "active": "success",
@@ -61,6 +64,7 @@ _STATUS_COLOR: dict[str, str] = {
     "revoked": "error",
     "pending": "info",
 }
+
 
 _BRAND_DISPLAY: dict[str, str] = {
     "visa": "Visa",
@@ -225,15 +229,11 @@ def _build_package_catalogue() -> dict[str, dict]:
     catalogue: dict[str, dict] = {}
     for key, base in _BASE_PACKAGE_CATALOGUE.items():
         entry = dict(base)
-        # Always resolve from env at call time; ignore base.get("stripe_price_id")
-        # so that an unset var always produces "" rather than a stale default.
         entry["stripe_price_id"] = os.environ.get(f"STRIPE_PRICE_ID_{key.upper()}", "")
         catalogue[key] = entry
     return catalogue
 
 
-# Module-level symbol preserved for direct imports; routes call
-# _build_package_catalogue() fresh so env patches are always reflected.
 PACKAGE_CATALOGUE: dict[str, dict] = _build_package_catalogue()
 
 
@@ -445,8 +445,6 @@ def get_payment_methods(
         organizationid = "org-001"
 
     env = _get_environment()
-
-    # Build catalogue fresh on every request so env patches are always picked up.
     live_catalogue = _build_package_catalogue()
 
     sb_methods = _fetch_org_payment_methods(organizationid)

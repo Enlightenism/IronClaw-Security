@@ -8,6 +8,7 @@ from app.services.integration_registry import (
     IntegrationRecord,
     IntegrationRegistry,
     get_integration,
+    get_integration_registry,
 )
 
 VerificationState = Literal["pass", "warn", "fail"]
@@ -172,3 +173,55 @@ def summarize_verification_result(
         "fail_count": fail_count,
         "checked_at": result.checked_at,
     }
+
+
+class IntegrationVerifier:
+    def __init__(self, registry: IntegrationRegistry | None = None) -> None:
+        self._registry = registry or get_integration_registry()
+
+    def verify_integration(
+        self,
+        integration_id: str,
+        *,
+        strict: bool = False,
+        requestedby: str | None = None,
+        extra_metadata: dict[str, Any] | None = None,
+    ) -> Any:
+        result = verify_integration(
+            self._registry,
+            integration_id,
+            requested_by=requestedby,
+            strict=strict,
+            extra_metadata=extra_metadata,
+        )
+        return type(
+            "VerifierResponse",
+            (),
+            {
+                "integrationid": result.integration_id,
+                "status": result.status,
+                "verified": result.verified,
+                "verifiedat": result.checked_at,
+                "requestedby": requestedby or "system",
+                "strict": strict,
+                "checks": [
+                    type(
+                        "VerificationCheck",
+                        (),
+                        {
+                            "checkid": check.name,
+                            "label": check.name,
+                            "passed": check.state == "pass",
+                            "detail": check.message,
+                        },
+                    )()
+                    for check in result.checks
+                ],
+                "missingcapabilities": [],
+                "summary": (f"Integration '{result.slug}' verification {'passed' if result.verified else 'requires attention'}."),
+            },
+        )()
+
+
+def get_integration_verifier() -> IntegrationVerifier:
+    return IntegrationVerifier()
