@@ -15,55 +15,40 @@ import { useCountUp } from "@/hooks/useCountUp";
 import api from "@/lib/api";
 import { toast } from "sonner";
 
-// ---------------------------------------------------------------------------
-// Stripe publishable key — read from env at module load.
-// Required for any future Stripe Elements/PaymentIntent flow.
-// The current flow uses Checkout redirect (no Elements needed), but the key
-// is validated here so misconfiguration is caught at render time, not at
-// checkout attempt.
-// ---------------------------------------------------------------------------
 const STRIPE_PK = process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY ?? "";
 
 const STRIPE_MODE = STRIPE_PK.startsWith("pk_live_")
   ? "live"
   : STRIPE_PK.startsWith("pk_test_")
     ? "test"
-    : null;
-
-// ---------------------------------------------------------------------------
-// Package catalogue — single source of truth for this component.
-// Starter    : pkg_5000  —  5,000 units — $20   — 25,000 tokens / unit
-// Team       : pkg_25000 — 25,000 units — $90   — 25,000 tokens / unit
-// Enterprise : pkg_60000 — 60,000 units — $180  — 25,000 tokens / unit
-//
-// Each protection unit covers up to TOKENS_PER_UNIT (25,000) tokens.
-// Any request exceeding the boundary consumes one additional unit per
-// additional 25,000-token chunk (ceiling division).
-// ---------------------------------------------------------------------------
+    : "unconfigured";
 
 const TOKENS_PER_UNIT = 25_000;
 
 const TIERS = [
   {
-    id: "pkg_5000",
+    id: "pkg5000",
     name: "Starter",
     units: "5,000",
+    unitCount: 5000,
     price: "$20",
     priceUsd: 20,
     tokensPerUnit: TOKENS_PER_UNIT,
   },
   {
-    id: "pkg_25000",
+    id: "pkg25000",
     name: "Team",
     units: "25,000",
+    unitCount: 25000,
     price: "$90",
     priceUsd: 90,
     tokensPerUnit: TOKENS_PER_UNIT,
   },
   {
-    id: "pkg_60000",
+    id: "pkg60000",
     name: "Enterprise",
     units: "60,000",
+    unitCount: 60000,
     price: "$180",
     priceUsd: 180,
     bestDeal: true,
@@ -71,16 +56,119 @@ const TIERS = [
   },
 ];
 
-// Valid package IDs — must exactly match backend PackageCatalogueEntry keys
-// and Dashboard.jsx handlePurchase guard.
+const DEFAULT_ADD_CARD_PACKAGE_ID = "pkg5000";
 const VALID_PACKAGE_IDS = new Set(TIERS.map((t) => t.id));
-
 const paymentMethodCache = new Map();
 
-// ---------------------------------------------------------------------------
-// EnterpriseBadge — floats above the Enterprise card, never inside it.
-// Gold shimmer pulse matching IronClaw brand style.
-// ---------------------------------------------------------------------------
+const getFirstString = (...values) => {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+};
+
+const getFirstNumber = (...values) => {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim() !== "") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return null;
+};
+
+const normalizePaymentMethod = (method, fallbackDefaultId = "") => {
+  const methodId = getFirstString(
+    method?.methodid,
+    method?.paymentmethodid,
+    method?.id,
+  );
+
+  const expMonth = getFirstNumber(
+    method?.expmonth,
+    method?.expMonth,
+    method?.card?.exp_month,
+  );
+  const expYear = getFirstNumber(
+    method?.expyear,
+    method?.expYear,
+    method?.card?.exp_year,
+  );
+
+  const brand = getFirstString(
+    method?.brand_display,
+    method?.branddisplay,
+    method?.brand,
+    method?.card?.brand,
+  );
+
+  const expDisplay = getFirstString(
+    method?.exp_display,
+    method?.expdisplay,
+  );
+
+  const last4 = getFirstString(
+    method?.last4,
+    method?.card?.last4,
+  );
+
+  const status = getFirstString(method?.status);
+  const inferredDefault =
+    method?.isdefault === true ||
+    method?.is_default === true ||
+    method?.default === true ||
+    (methodId && fallbackDefaultId && methodId === fallbackDefaultId);
+
+  return {
+    raw: method,
+    methodid: methodId,
+    brand,
+    brandDisplay: brand,
+    last4,
+    expmonth: expMonth,
+    expyear: expYear,
+    expDisplay:
+      expDisplay ||
+      (expMonth && expYear ? `${String(expMonth).padStart(2, "0")}/${String(expYear).slice(-2)}` : ""),
+    status,
+    isDefault: inferredDefault,
+  };
+};
+
+const normalizePaymentMethodsResponse = (data) => {
+  const rawMethods = Array.isArray(data?.methods)
+    ? data.methods
+    : Array.isArray(data?.paymentmethods)
+      ? data.paymentmethods
+      : Array.isArray(data?.results)
+        ? data.results
+        : [];
+
+  const defaultId = getFirstString(
+    data?.defaultmethodid,
+    data?.default_method_id,
+    data?.defaultpaymentmethodid,
+  );
+
+  const methods = rawMethods
+    .map((method) => normalizePaymentMethod(method, defaultId))
+    .filter((method) => method.methodid);
+
+  const resolvedDefaultId =
+    defaultId ||
+    methods.find((method) => method.isDefault)?.methodid ||
+    "";
+
+  return {
+    methods: methods.map((method) => ({
+      ...method,
+      isDefault: resolvedDefaultId ? method.methodid === resolvedDefaultId : method.isDefault,
+    })),
+    defaultId: resolvedDefaultId || null,
+  };
+};
+
 const EnterpriseBadge = () => (
   <div className="flex justify-center">
     <span
@@ -96,7 +184,7 @@ const EnterpriseBadge = () => (
     <style>{`
       @keyframes ic-badge-pulse {
         0%, 100% { box-shadow: 0 0 10px rgba(255,215,0,0.40); }
-        50%       { box-shadow: 0 0 22px rgba(255,215,0,0.75), 0 0 6px rgba(255,215,0,0.30); }
+        50%      { box-shadow: 0 0 22px rgba(255,215,0,0.75), 0 0 6px rgba(255,215,0,0.30); }
       }
       @keyframes ic-badge-shimmer {
         0%   { background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.18) 50%, transparent 100%); background-size: 200% 100%; background-position: -100% 0; }
@@ -107,12 +195,18 @@ const EnterpriseBadge = () => (
   </div>
 );
 
-// ---------------------------------------------------------------------------
-// StripeModeTag — rendered in the payment method panel header when a key
-// is configured. Signals live vs. test mode to the operator at a glance.
-// ---------------------------------------------------------------------------
 const StripeModeTag = () => {
-  if (!STRIPE_MODE) return null;
+  if (STRIPE_MODE === "unconfigured") {
+    return (
+      <span
+        className="ml-2 rounded-full border border-[#F59E0B]/40 bg-[#F59E0B]/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-[#F59E0B]"
+        title="Stripe publishable key is not configured in the frontend build"
+      >
+        Stripe unavailable
+      </span>
+    );
+  }
+
   const isLive = STRIPE_MODE === "live";
   return (
     <span
@@ -128,28 +222,21 @@ const StripeModeTag = () => {
   );
 };
 
-// ---------------------------------------------------------------------------
-// StripeKeyWarning — shown when no publishable key is configured so the
-// operator knows payment processing is not ready.
-// ---------------------------------------------------------------------------
 const StripeKeyWarning = () => {
-  if (STRIPE_MODE !== null) return null;
+  if (STRIPE_MODE !== "unconfigured") return null;
+
   return (
-    <div className="mb-4 flex items-center gap-2 rounded-lg border border-[#EF4444]/30 bg-[#EF4444]/10 px-3 py-2 text-xs text-[#EF4444]">
-      <AlertTriangle size={13} />
+    <div className="mb-4 flex items-start gap-2 rounded-lg border border-[#F59E0B]/30 bg-[#F59E0B]/10 px-3 py-2 text-xs text-[#FDE68A]">
+      <AlertTriangle size={13} className="mt-0.5 shrink-0 text-[#F59E0B]" />
       <span>
-        <strong>REACT_APP_STRIPE_PUBLISHABLE_KEY</strong> is not set. Payment
-        processing is unavailable.
+        Stripe publishable key is not present in the frontend build. Billing actions may fail until
+        <strong className="ml-1 text-white">REACT_APP_STRIPE_PUBLISHABLE_KEY</strong>
+        is set in the deployed frontend environment.
       </span>
     </div>
   );
 };
 
-// ---------------------------------------------------------------------------
-// PaymentMethodPanel — fetches and displays saved payment methods for the
-// organization via GET /ui/billing/payment-methods, and allows the user to
-// set a default or remove a method.
-// ---------------------------------------------------------------------------
 const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
   const cachedEntry = useMemo(
     () => (organizationId ? paymentMethodCache.get(organizationId) ?? null : null),
@@ -181,19 +268,17 @@ const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
       setLoadingMethods(true);
       try {
         const { data } = await api.get(
-          `/ui/billing/payment-methods?organizationid=${encodeURIComponent(organizationId)}`,
+          `/api/ui/billing/payment-methods?organizationid=${encodeURIComponent(organizationId)}`,
         );
 
-        if (data?.status === "ok") {
-          const nextMethods = data.methods ?? [];
-          const nextDefaultId = data.defaultmethodid ?? null;
-          setMethods(nextMethods);
-          setDefaultId(nextDefaultId);
-          syncCache(nextMethods, nextDefaultId);
-          hasFetchedRef.current = true;
-        }
+        const normalized = normalizePaymentMethodsResponse(data);
+        setMethods(normalized.methods);
+        setDefaultId(normalized.defaultId);
+        syncCache(normalized.methods, normalized.defaultId);
+        hasFetchedRef.current = true;
       } catch {
-        // silently fail — payment method list is non-critical UI
+        setMethods([]);
+        setDefaultId(null);
       } finally {
         setLoadingMethods(false);
       }
@@ -225,34 +310,58 @@ const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
   }, [fetchMethods]);
 
   const handleSetDefault = async (methodId) => {
+    if (!organizationId || !methodId) return;
+
     setActionId(methodId);
     try {
       await api.patch(
-        `/ui/billing/payment-methods/${encodeURIComponent(methodId)}/default?organizationid=${encodeURIComponent(organizationId)}`,
+        `/api/ui/billing/payment-methods/${encodeURIComponent(methodId)}/default?organizationid=${encodeURIComponent(organizationId)}`,
       );
       toast.success("Default payment method updated.");
       await refreshMethods();
     } catch (e) {
-      toast.error(
-        e?.response?.data?.detail ?? "Could not update default method.",
-      );
+      try {
+        await api.post(
+          `/api/billing/payment-methods/${encodeURIComponent(methodId)}/set-default?organizationid=${encodeURIComponent(organizationId)}`,
+        );
+        toast.success("Default payment method updated.");
+        await refreshMethods();
+      } catch (fallbackError) {
+        toast.error(
+          fallbackError?.response?.data?.detail ??
+            e?.response?.data?.detail ??
+            "Could not update default method.",
+        );
+      }
     } finally {
       setActionId(null);
     }
   };
 
   const handleDelete = async (methodId) => {
+    if (!organizationId || !methodId) return;
+
     setActionId(methodId);
     try {
       await api.delete(
-        `/ui/billing/payment-methods/${encodeURIComponent(methodId)}?organizationid=${encodeURIComponent(organizationId)}`,
+        `/api/ui/billing/payment-methods/${encodeURIComponent(methodId)}?organizationid=${encodeURIComponent(organizationId)}`,
       );
       toast.success("Payment method removed.");
       await refreshMethods();
     } catch (e) {
-      toast.error(
-        e?.response?.data?.detail ?? "Could not remove payment method.",
-      );
+      try {
+        await api.post(
+          `/api/billing/payment-methods/${encodeURIComponent(methodId)}/detach?organizationid=${encodeURIComponent(organizationId)}`,
+        );
+        toast.success("Payment method removed.");
+        await refreshMethods();
+      } catch (fallbackError) {
+        toast.error(
+          fallbackError?.response?.data?.detail ??
+            e?.response?.data?.detail ??
+            "Could not remove payment method.",
+        );
+      }
     } finally {
       setActionId(null);
     }
@@ -270,8 +379,7 @@ const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
     return (
       <div className="flex items-center gap-2 text-xs text-[#737373]">
         <Zap size={14} className="text-[#FFD700]" />
-        No payment method on file yet. Complete a purchase to securely save one
-        with Stripe.
+        No payment method on file yet. Complete a purchase to securely save one with Stripe.
       </div>
     );
   }
@@ -279,8 +387,9 @@ const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
   return (
     <div className="flex flex-col gap-2">
       {methods.map((m) => {
-        const isDefault = m.methodid === defaultId;
+        const isDefault = m.methodid === defaultId || m.isDefault;
         const busy = actionId === m.methodid;
+
         return (
           <div
             key={m.methodid}
@@ -307,7 +416,7 @@ const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
               </div>
               <div>
                 <div className="font-tech text-sm text-white">
-                  {m.brand_display ?? m.brand} ····{m.last4}
+                  {m.brandDisplay || "Card"} {m.last4 ? `····${m.last4}` : ""}
                   {isDefault && (
                     <span className="ml-1.5 rounded-full border border-[#FFD700]/40 bg-[#FFD700]/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#FFD700]">
                       default
@@ -315,15 +424,18 @@ const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
                   )}
                 </div>
                 <div className="text-[#737373]">
-                  Expires {m.exp_display ?? `${m.expmonth}/${m.expyear}`}
+                  {m.expDisplay
+                    ? `Expires ${m.expDisplay}`
+                    : m.expmonth && m.expyear
+                      ? `Expires ${String(m.expmonth).padStart(2, "0")}/${String(m.expyear).slice(-2)}`
+                      : "Expiration unavailable"}
                   {m.status && m.status !== "active" && (
-                    <span className="ml-2 capitalize text-[#EF4444]">
-                      {m.status}
-                    </span>
+                    <span className="ml-2 capitalize text-[#EF4444]">{m.status}</span>
                   )}
                 </div>
               </div>
             </div>
+
             <div className="flex items-center gap-1.5">
               {!isDefault && (
                 <button
@@ -359,10 +471,13 @@ const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
           </div>
         );
       })}
+
       <button
         type="button"
         onClick={() => {
-          if (VALID_PACKAGE_IDS.has("pkg_5000")) onPurchase("pkg_5000");
+          if (VALID_PACKAGE_IDS.has(DEFAULT_ADD_CARD_PACKAGE_ID)) {
+            onPurchase(DEFAULT_ADD_CARD_PACKAGE_ID);
+          }
         }}
         disabled={!!purchasingId}
         data-testid="add-new-card-btn"
@@ -374,10 +489,6 @@ const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
   );
 };
 
-// ---------------------------------------------------------------------------
-// WalletCard
-// ---------------------------------------------------------------------------
-
 const WalletCard = ({
   balance = 0,
   lastPayment,
@@ -388,14 +499,19 @@ const WalletCard = ({
 }) => {
   const animated = useCountUp(balance, 1500, [balance]);
 
-  // Guard: onPurchase must only ever be called with a valid package ID.
   const handleTierPurchase = useCallback(
     (tierId) => {
       if (!VALID_PACKAGE_IDS.has(tierId)) {
         toast.error("Invalid package selected.");
         return;
       }
-      if (typeof onPurchase === "function") onPurchase(tierId);
+
+      if (typeof onPurchase !== "function") {
+        toast.error("Purchase action is unavailable.");
+        return;
+      }
+
+      onPurchase(tierId);
     },
     [onPurchase],
   );
@@ -445,11 +561,11 @@ const WalletCard = ({
             <button
               type="button"
               onClick={() => handleTierPurchase(t.id)}
-              disabled={!!purchasingId || STRIPE_MODE === null}
+              disabled={!!purchasingId}
               data-testid={`purchase-${t.id}`}
               title={
-                STRIPE_MODE === null
-                  ? "Payment processing unavailable — Stripe key not configured"
+                STRIPE_MODE === "unconfigured"
+                  ? "Stripe publishable key is missing from the frontend build, but purchase will still be attempted through the configured checkout flow."
                   : undefined
               }
               className="btn-shimmer flex flex-col items-center justify-center rounded-xl border border-[#E5E4E2]/25 bg-white/5 px-3 py-4 text-center transition hover:border-[#FFD700]/60 hover:bg-white/[0.08] disabled:opacity-60"
@@ -489,8 +605,7 @@ const WalletCard = ({
           <div className="mb-3 flex items-center gap-2 rounded-lg border border-[#22C55E]/20 bg-[#22C55E]/5 px-3 py-2 text-xs">
             <ShieldCheck size={13} className="text-[#22C55E]" />
             <span className="text-[#22C55E]">
-              Last purchase:{" "}
-              <span className="font-semibold">{lastPayment.label}</span> · $
+              Last purchase: <span className="font-semibold">{lastPayment.label}</span> · $
               {Number(lastPayment.amount).toFixed(2)}
             </span>
           </div>

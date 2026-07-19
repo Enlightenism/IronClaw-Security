@@ -51,7 +51,7 @@ __all__ = [
 
 
 router = APIRouter(
-    prefix="/ui/billing",
+    prefix="/api/ui/billing",
     tags=["billing-payment-methods"],
 )
 
