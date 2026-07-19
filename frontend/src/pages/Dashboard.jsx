@@ -27,25 +27,35 @@ import { useAuth } from "@/context/AuthContext";
 import api from "@/lib/api";
 
 const ATTACKS_PAGE_SIZE = 25;
-const VALID_PACKAGES = ["pkg_5000", "pkg_25000", "pkg_60000"];
+const VALID_PACKAGES = ["pkg5000", "pkg25000", "pkg60000"];
 
 const MemoWalletCard = memo(WalletCard);
 const MemoSecurityAnalysis = memo(SecurityAnalysis);
 const MemoIntegrationCard = memo(IntegrationCard);
 
-const getStripePriceIdMap = () => ({
-  pkg_5000: process.env.REACT_APP_STRIPE_PRICE_ID_PKG_5000 || "",
-  pkg_25000: process.env.REACT_APP_STRIPE_PRICE_ID_PKG_25000 || "",
-  pkg_60000: process.env.REACT_APP_STRIPE_PRICE_ID_PKG_60000 || "",
-});
-
-const getPackageUnits = (packageId) => {
+const normalizePackageId = (packageId) => {
   switch (packageId) {
     case "pkg_5000":
-      return 5000;
+    case "pkg5000":
+      return "pkg5000";
     case "pkg_25000":
-      return 25000;
+    case "pkg25000":
+      return "pkg25000";
     case "pkg_60000":
+    case "pkg60000":
+      return "pkg60000";
+    default:
+      return "";
+  }
+};
+
+const getPackageUnits = (packageId) => {
+  switch (normalizePackageId(packageId)) {
+    case "pkg5000":
+      return 5000;
+    case "pkg25000":
+      return 25000;
+    case "pkg60000":
       return 60000;
     default:
       return 0;
@@ -189,21 +199,6 @@ const Dashboard = () => {
   const [purchasingId, setPurchasingId] = useState(null);
   const polledRef = useRef(false);
 
-  const getPackagePriceId = useCallback((packageId) => {
-    const priceIdMap = getStripePriceIdMap();
-
-    switch (packageId) {
-      case "pkg_5000":
-        return priceIdMap.pkg_5000;
-      case "pkg_25000":
-        return priceIdMap.pkg_25000;
-      case "pkg_60000":
-        return priceIdMap.pkg_60000;
-      default:
-        return "";
-    }
-  }, []);
-
   const fetchDashboard = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoadingData(true);
 
@@ -325,47 +320,39 @@ const Dashboard = () => {
     }
   }, [fetchDashboard, location.search, navigate, pollPayment]);
 
-  const handlePurchase = useCallback(
-    async (packageId) => {
-      if (!VALID_PACKAGES.includes(packageId)) {
-        toast.error("Invalid package selected.");
-        return;
+  const handlePurchase = useCallback(async (rawPackageId) => {
+    const packageId = normalizePackageId(rawPackageId);
+
+    if (!VALID_PACKAGES.includes(packageId)) {
+      toast.error("Invalid package selected.");
+      return;
+    }
+
+    setPurchasingId(packageId);
+
+    try {
+      const { data: res } = await api.post("/billing/checkout/sessions", {
+        package_id: packageId,
+        success_url: `${window.location.origin}/dashboard?checkout=success`,
+        cancel_url: `${window.location.origin}/dashboard?checkout=cancel`,
+      });
+
+      if (!res?.url) {
+        throw new Error("Missing checkout URL.");
       }
 
-      const priceId = getPackagePriceId(packageId);
-
-      if (!priceId) {
-        toast.error("Package price not configured.");
-        return;
+      if (typeof window.location.assign === "function") {
+        window.location.assign(res.url);
+      } else {
+        window.location.href = res.url;
       }
-
-      setPurchasingId(packageId);
-
-      try {
-        const { data: res } = await api.post("/billing/checkout/sessions", {
-          price_id: priceId,
-          success_url: `${window.location.origin}/dashboard?checkout=success`,
-          cancel_url: `${window.location.origin}/dashboard?checkout=cancel`,
-        });
-
-        if (!res?.url) {
-          throw new Error("Missing checkout URL.");
-        }
-
-        if (typeof window.location.assign === "function") {
-          window.location.assign(res.url);
-        } else {
-          window.location.href = res.url;
-        }
-      } catch (e) {
-        toast.error(
-          e?.response?.data?.detail || e?.message || "Could not start checkout.",
-        );
-        setPurchasingId(null);
-      }
-    },
-    [getPackagePriceId],
-  );
+    } catch (e) {
+      toast.error(
+        e?.response?.data?.detail || e?.message || "Could not start checkout.",
+      );
+      setPurchasingId(null);
+    }
+  }, []);
 
   const handleSignOut = useCallback(() => {
     logout();
