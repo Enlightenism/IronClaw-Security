@@ -38,7 +38,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "Permissions-Policy",
             "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
         )
-        response.headers.setdefault("Content-Security-Policy", self.csp)
+        if request.method.upper() != "OPTIONS":
+            response.headers.setdefault("Content-Security-Policy", self.csp)
         response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
         response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
         response.headers.setdefault("Cross-Origin-Embedder-Policy", "require-corp")
