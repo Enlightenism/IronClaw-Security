@@ -12,7 +12,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { useCountUp } from "@/hooks/useCountUp";
-import api from "@/lib/api";
+import api, { paymentMethods } from "@/lib/api";
 import { toast } from "sonner";
 
 const STRIPE_PK = process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY ?? "";
@@ -130,7 +130,9 @@ const normalizePaymentMethod = (method, fallbackDefaultId = "") => {
     expyear: expYear,
     expDisplay:
       expDisplay ||
-      (expMonth && expYear ? `${String(expMonth).padStart(2, "0")}/${String(expYear).slice(-2)}` : ""),
+      (expMonth && expYear
+        ? `${String(expMonth).padStart(2, "0")}/${String(expYear).slice(-2)}`
+        : ""),
     status,
     isDefault: inferredDefault,
   };
@@ -163,7 +165,9 @@ const normalizePaymentMethodsResponse = (data) => {
   return {
     methods: methods.map((method) => ({
       ...method,
-      isDefault: resolvedDefaultId ? method.methodid === resolvedDefaultId : method.isDefault,
+      isDefault: resolvedDefaultId
+        ? method.methodid === resolvedDefaultId
+        : method.isDefault,
     })),
     defaultId: resolvedDefaultId || null,
   };
@@ -267,10 +271,7 @@ const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
 
       setLoadingMethods(true);
       try {
-        const { data } = await api.get(
-          `/api/ui/billing/payment-methods?organizationid=${encodeURIComponent(organizationId)}`,
-        );
-
+        const { data } = await paymentMethods.list(organizationId);
         const normalized = normalizePaymentMethodsResponse(data);
         setMethods(normalized.methods);
         setDefaultId(normalized.defaultId);
@@ -306,6 +307,7 @@ const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
   }, [organizationId, fetchMethods]);
 
   const refreshMethods = useCallback(async () => {
+    hasFetchedRef.current = false;
     await fetchMethods({ force: true });
   }, [fetchMethods]);
 
@@ -314,15 +316,13 @@ const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
 
     setActionId(methodId);
     try {
-      await api.patch(
-        `/api/ui/billing/payment-methods/${encodeURIComponent(methodId)}/default?organizationid=${encodeURIComponent(organizationId)}`,
-      );
+      await paymentMethods.setDefault(methodId, organizationId);
       toast.success("Default payment method updated.");
       await refreshMethods();
     } catch (e) {
       try {
         await api.post(
-          `/api/billing/payment-methods/${encodeURIComponent(methodId)}/set-default?organizationid=${encodeURIComponent(organizationId)}`,
+          `/billing/payment-methods/${encodeURIComponent(methodId)}/set-default?organizationid=${encodeURIComponent(organizationId)}`,
         );
         toast.success("Default payment method updated.");
         await refreshMethods();
@@ -343,15 +343,13 @@ const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
 
     setActionId(methodId);
     try {
-      await api.delete(
-        `/api/ui/billing/payment-methods/${encodeURIComponent(methodId)}?organizationid=${encodeURIComponent(organizationId)}`,
-      );
+      await paymentMethods.delete(methodId, organizationId);
       toast.success("Payment method removed.");
       await refreshMethods();
     } catch (e) {
       try {
         await api.post(
-          `/api/billing/payment-methods/${encodeURIComponent(methodId)}/detach?organizationid=${encodeURIComponent(organizationId)}`,
+          `/billing/payment-methods/${encodeURIComponent(methodId)}/detach?organizationid=${encodeURIComponent(organizationId)}`,
         );
         toast.success("Payment method removed.");
         await refreshMethods();

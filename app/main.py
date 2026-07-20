@@ -80,6 +80,34 @@ def _include_optional_router(
     )
 
 
+def _route_signature(route: APIRoute) -> tuple[str, tuple[str, ...]]:
+    return (
+        route.path,
+        tuple(sorted((method or "").upper() for method in route.methods or set())),
+    )
+
+
+def _include_router_once(
+    app: FastAPI,
+    router: Any,
+    **kwargs: Any,
+) -> None:
+    if router is None:
+        return
+
+    existing = {_route_signature(route) for route in app.routes if isinstance(route, APIRoute)}
+
+    app.include_router(router, **kwargs)
+
+    new_routes = [route for route in app.routes if isinstance(route, APIRoute) and _route_signature(route) not in existing]
+
+    if not new_routes:
+        _log.warning(
+            "main: router include produced no new routes (possible duplicate): %s",
+            getattr(router, "prefix", "<no-prefix>"),
+        )
+
+
 def _include_router_group(
     app: FastAPI,
     routers: list[tuple[Any, dict[str, Any]]],
@@ -87,7 +115,7 @@ def _include_router_group(
     for router, kwargs in routers:
         if router is None:
             continue
-        app.include_router(router, **kwargs)
+        _include_router_once(app, router, **kwargs)
 
 
 def _normalize_dependency_metadata(app: FastAPI) -> None:
@@ -695,7 +723,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        description=("Local-first AI security API for prompt inspection, guarded execution, and protected runtime controls."),
+        description="Local-first AI security API for prompt inspection, guarded execution, and protected runtime controls.",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,

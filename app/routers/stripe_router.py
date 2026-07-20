@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
@@ -29,11 +30,6 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 webhook_router = APIRouter(tags=["billing"])
 api_router = APIRouter(prefix="/api/billing", tags=["billing"])
 
-
-# ---------------------------------------------------------------------------
-# Public webhook router
-# ---------------------------------------------------------------------------
-
 _stripe_service_instance: StripeService | None = None
 
 
@@ -44,19 +40,17 @@ def get_stripe_service() -> StripeService:
     return _stripe_service_instance
 
 
-def _resolve_org_id(auth: AuthContext) -> str:
+def _resolve_org_id(auth: AuthContext | None) -> str:
+    if auth is None:
+        return ""
     oid = getattr(auth, "org_id", None) or getattr(auth, "tenant_id", None) or ""
-    return str(oid)
+    return str(oid).strip()
 
 
 def _resolve_customer_id(svc: StripeService, org_id: str) -> str | None:
     with svc._lock:  # noqa: SLF001
         return svc._org_customer_map.get(org_id)  # noqa: SLF001
 
-
-# ---------------------------------------------------------------------------
-# Package helpers
-# ---------------------------------------------------------------------------
 
 PACKAGE_PRICE_ENV_MAP: dict[str, str] = {
     "pkg5000": "BILLING_TIER_5K_PRICE_ID",
@@ -70,20 +64,54 @@ PACKAGE_UNIT_CREDITS: dict[str, int] = {
     "pkg60000": 60000,
 }
 
+_VALID_CHECKOUT_MODES: frozenset[str] = frozenset(m.value for m in StripeCheckoutMode)
+_VALID_PACKAGE_IDS: frozenset[str] = frozenset(PACKAGE_PRICE_ENV_MAP.keys())
+
+
+def _http_400(detail: str, *, code: str, extra: dict[str, Any] | None = None) -> HTTPException:
+    payload: dict[str, Any] = {"error": code, "detail": detail}
+    if extra:
+        payload.update(extra)
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=payload)
+
+
+def _http_404(detail: str, *, code: str, extra: dict[str, Any] | None = None) -> HTTPException:
+    payload: dict[str, Any] = {"error": code, "detail": detail}
+    if extra:
+        payload.update(extra)
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=payload)
+
+
+def _http_500(detail: str, *, code: str, extra: dict[str, Any] | None = None) -> HTTPException:
+    payload: dict[str, Any] = {"error": code, "detail": detail}
+    if extra:
+        payload.update(extra)
+    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=payload)
+
+
+def _is_valid_http_url(value: str) -> bool:
+    try:
+        parsed = urlparse(value)
+    except Exception:
+        return False
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
 
 def _configured_price_id_for_package(package_id: str) -> str:
     env_key = PACKAGE_PRICE_ENV_MAP.get(package_id)
     if not env_key:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"unsupported_package_id:{package_id}",
+        raise _http_400(
+            f"Unsupported package_id '{package_id}'.",
+            code="unsupported_package_id",
+            extra={"package_id": package_id, "valid_package_ids": sorted(_VALID_PACKAGE_IDS)},
         )
-    price_id = vault.get(env_key) or ""
-    price_id = price_id.strip()
+
+    price_id = (vault.get(env_key) or "").strip()
     if not price_id:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"billing_price_not_configured:{env_key}",
+        raise _http_500(
+            f"Stripe price is not configured for package_id '{package_id}'.",
+            code="billing_price_not_configured",
+            extra={"package_id": package_id, "env_key": env_key},
         )
     return price_id
 
@@ -91,38 +119,12 @@ def _configured_price_id_for_package(package_id: str) -> str:
 def _unit_credits_for_package(package_id: str) -> int:
     units = PACKAGE_UNIT_CREDITS.get(package_id)
     if units is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"unsupported_package_id:{package_id}",
+        raise _http_400(
+            f"Unsupported package_id '{package_id}'.",
+            code="unsupported_package_id",
+            extra={"package_id": package_id, "valid_package_ids": sorted(_VALID_PACKAGE_IDS)},
         )
     return units
-
-
-def _normalize_checkout_inputs(body: CheckoutSessionCreateRequest) -> tuple[str, int]:
-    package_id = (body.package_id or "").strip()
-    price_id = body.price_id.strip()
-
-    if package_id:
-        resolved_price_id = _configured_price_id_for_package(package_id)
-        resolved_unit_credits = body.unit_credits if body.unit_credits > 0 else _unit_credits_for_package(package_id)
-        return resolved_price_id, resolved_unit_credits
-
-    if price_id:
-        return price_id, body.unit_credits
-
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="price_id_or_package_id_required",
-    )
-
-
-# ---------------------------------------------------------------------------
-# Validation sets
-# ---------------------------------------------------------------------------
-
-_VALID_CHECKOUT_MODES: frozenset[str] = frozenset(m.value for m in StripeCheckoutMode)
-_VALID_METERED_ACTIONS: frozenset[str] = frozenset({"increment", "set"})
-_VALID_PACKAGE_IDS: frozenset[str] = frozenset(PACKAGE_PRICE_ENV_MAP.keys())
 
 
 class CheckoutSessionCreateRequest(BaseModel):
@@ -144,26 +146,29 @@ class CheckoutSessionCreateRequest(BaseModel):
         ge=0,
         description="IronClaw protection units to credit on completion",
     )
-    success_url: str = Field(
-        ...,
-        description="Redirect URL on successful payment",
-    )
-    cancel_url: str = Field(
-        ...,
-        description="Redirect URL on cancelled payment",
-    )
+    success_url: str = Field(..., description="Redirect URL on successful payment")
+    cancel_url: str = Field(..., description="Redirect URL on cancelled payment")
     customer_id: str | None = Field(
         default=None,
         description="Existing Stripe customer_id, if known",
     )
     metadata: dict[str, Any] = Field(default_factory=dict)
+    organizationid: str | None = Field(
+        default=None,
+        description="Optional frontend fallback org identifier when auth context is unavailable",
+    )
+    organization_id: str | None = Field(
+        default=None,
+        description="Optional frontend fallback org identifier when auth context is unavailable",
+    )
 
     @field_validator("mode")
     @classmethod
     def validate_mode(cls, v: str) -> str:
-        if v not in _VALID_CHECKOUT_MODES:
-            raise ValueError(f"invalid mode '{v}': must be payment | subscription | setup")
-        return v
+        normalized = v.strip()
+        if normalized not in _VALID_CHECKOUT_MODES:
+            raise ValueError("invalid mode: must be payment | subscription | setup")
+        return normalized
 
     @field_validator("package_id")
     @classmethod
@@ -182,6 +187,30 @@ class CheckoutSessionCreateRequest(BaseModel):
     def normalize_price_id(cls, v: str) -> str:
         return v.strip()
 
+    @field_validator("success_url", "cancel_url")
+    @classmethod
+    def validate_redirect_url(cls, v: str) -> str:
+        normalized = v.strip()
+        if not _is_valid_http_url(normalized):
+            raise ValueError("invalid redirect URL: must be absolute http(s) URL")
+        return normalized
+
+    @field_validator("customer_id")
+    @classmethod
+    def normalize_customer_id(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        normalized = v.strip()
+        return normalized or None
+
+    @field_validator("organizationid", "organization_id")
+    @classmethod
+    def normalize_org_fallback(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        normalized = v.strip()
+        return normalized or None
+
 
 class CheckoutSessionCompleteRequest(BaseModel):
     customer_id: str | None = Field(
@@ -194,6 +223,8 @@ class CustomerCreateRequest(BaseModel):
     email: str | None = Field(default=None)
     name: str | None = Field(default=None)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    organizationid: str | None = Field(default=None)
+    organization_id: str | None = Field(default=None)
 
 
 class AttachPaymentMethodRequest(BaseModel):
@@ -226,17 +257,40 @@ class UnitCreditRequest(BaseModel):
     reference_id: str | None = Field(default=None)
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+def _resolve_org_id_from_request(
+    auth: AuthContext | None,
+    request: Request | None = None,
+    body: Any | None = None,
+) -> str:
+    auth_org_id = _resolve_org_id(auth)
+    if auth_org_id:
+        return auth_org_id
+
+    body_org_id = None
+    if body is not None:
+        body_org_id = getattr(body, "organizationid", None) or getattr(body, "organization_id", None)
+    if isinstance(body_org_id, str) and body_org_id.strip():
+        return body_org_id.strip()
+
+    if request is not None:
+        query_org_id = request.query_params.get("organizationid") or request.query_params.get("organization_id")
+        if query_org_id and query_org_id.strip():
+            return query_org_id.strip()
+
+    return ""
 
 
-def _require_org_id(auth: AuthContext) -> str:
-    org_id = _resolve_org_id(auth)
+def _require_org_id(
+    auth: AuthContext | None,
+    request: Request | None = None,
+    body: Any | None = None,
+) -> str:
+    org_id = _resolve_org_id_from_request(auth=auth, request=request, body=body)
     if not org_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="org_id could not be resolved",
+        raise _http_400(
+            "Organization ID could not be resolved from auth context or request.",
+            code="org_id_unresolved",
+            extra={"accepted_fallbacks": ["organizationid", "organization_id"]},
         )
     return org_id
 
@@ -246,35 +300,33 @@ def _require_customer_id(svc: StripeService, org_id: str) -> str:
     if not customer_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="no_stripe_customer_for_org; call POST /billing/customers first",
+            detail="no_stripe_customer_for_org: No Stripe customer exists for this organization. Call POST /billing/customers first.",
         )
     return customer_id
 
 
-def _stripe_error_response(exc: StripeServiceError, detail: str, http_status: int) -> JSONResponse:
-    logger.error("stripe_router.error detail=%s error=%s", detail, exc)
-    return JSONResponse(
-        status_code=http_status,
-        content={"error": detail, "message": str(exc)},
-    )
-
-
 def _get_checkout_session_record_for_auth(
     session_id: str,
-    auth: AuthContext,
+    auth: AuthContext | None,
     svc: StripeService,
 ) -> dict[str, Any]:
     org_id = _resolve_org_id(auth)
     record = svc.get_checkout_session(session_id)
     if record is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="checkout_session_not_found",
+        raise _http_404(
+            "Checkout session not found.",
+            code="checkout_session_not_found",
+            extra={"session_id": session_id},
         )
     if org_id and record.get("org_id") != org_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="checkout_session_not_accessible",
+            detail={
+                "error": "checkout_session_not_accessible",
+                "detail": "Checkout session does not belong to the authenticated organization.",
+                "session_id": session_id,
+                "org_id": org_id,
+            },
         )
     return record
 
@@ -296,16 +348,33 @@ def _checkout_session_status_payload(session_id: str, record: dict[str, Any]) ->
     }
 
 
-# ---------------------------------------------------------------------------
-# Webhooks
-# ---------------------------------------------------------------------------
+def _normalize_checkout_inputs(body: CheckoutSessionCreateRequest) -> tuple[str, int]:
+    package_id = (body.package_id or "").strip()
+    price_id = body.price_id.strip()
+
+    if package_id:
+        resolved_price_id = _configured_price_id_for_package(package_id)
+        resolved_unit_credits = body.unit_credits if body.unit_credits > 0 else _unit_credits_for_package(package_id)
+        return resolved_price_id, resolved_unit_credits
+
+    if price_id:
+        if body.unit_credits <= 0:
+            raise _http_400(
+                "unit_credits must be greater than 0 when using a direct price_id.",
+                code="unit_credits_required_for_price_id",
+            )
+        return price_id, body.unit_credits
+
+    raise _http_400(
+        "Either package_id or price_id is required.",
+        code="price_id_or_package_id_required",
+    )
 
 
 @webhook_router.post(
     "/webhooks/stripe",
     status_code=status.HTTP_200_OK,
     summary="Receive and process Stripe webhook events",
-    description=("Inbound endpoint for Stripe webhook delivery. Verifies the stripe-signature header using STRIPE_WEBHOOK_SECRET. Handles checkout.session.completed (credits units), invoice.payment_succeeded, customer.subscription.deleted, payment_intent.succeeded, charge.succeeded."),
     tags=["billing"],
 )
 async def stripe_webhook(
@@ -317,9 +386,9 @@ async def stripe_webhook(
     verify_result = svc.verify_webhook_signature(payload=payload, signature_header=sig_header)
     if not verify_result.valid:
         logger.warning("stripe_webhook.signature_rejected error=%s", verify_result.error)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"webhook_signature_invalid: {verify_result.error}",
+        raise _http_400(
+            f"Stripe webhook signature invalid: {verify_result.error}",
+            code="webhook_signature_invalid",
         )
     try:
         result = svc.handle_webhook_event(verify_result.payload)
@@ -327,17 +396,12 @@ async def stripe_webhook(
         logger.warning("stripe_webhook.dispatch_error error=%s", exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"webhook_dispatch_error: {exc}",
+            detail={"error": "webhook_dispatch_error", "detail": str(exc)},
         ) from exc
     return JSONResponse(status_code=status.HTTP_200_OK, content=result)
 
 
-@webhook_router.post(
-    "/billing/webhooks/stripe",
-    status_code=status.HTTP_200_OK,
-    summary="Compatibility alias for Stripe webhook events",
-    tags=["billing"],
-)
+@webhook_router.post("/billing/webhooks/stripe", status_code=status.HTTP_200_OK, tags=["billing"])
 async def stripe_webhook_legacy_alias(
     request: Request,
     svc: StripeService = Depends(get_stripe_service),
@@ -345,12 +409,7 @@ async def stripe_webhook_legacy_alias(
     return await stripe_webhook(request=request, svc=svc)
 
 
-@webhook_router.post(
-    "/api/billing/webhooks/stripe",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for Stripe webhook events",
-    tags=["billing"],
-)
+@webhook_router.post("/api/billing/webhooks/stripe", status_code=status.HTTP_200_OK, tags=["billing"])
 async def stripe_webhook_api_alias(
     request: Request,
     svc: StripeService = Depends(get_stripe_service),
@@ -358,74 +417,44 @@ async def stripe_webhook_api_alias(
     return await stripe_webhook(request=request, svc=svc)
 
 
-# ---------------------------------------------------------------------------
-# Public catalogue / redirect helpers
-# ---------------------------------------------------------------------------
-
-
-@router.get(
-    "/catalogue",
-    status_code=status.HTTP_200_OK,
-    summary="Return IronClaw billing tier catalogue",
-    description=("Returns all available IronClaw protection unit packages with pricing. Starter: 5,000 units / $20. Team: 25,000 units / $90. Enterprise: 60,000 units / $180. Each unit covers up to 25,000 tokens with no scan ceiling. Public endpoint; no auth required."),
-)
+@router.get("/catalogue", status_code=status.HTTP_200_OK)
 async def get_billing_catalogue() -> JSONResponse:
     return JSONResponse(
         status_code=status.HTTP_200_OK,
         content={
             "packages": PACKAGE_CATALOGUE,
             "tokens_per_unit": TOKENS_PER_UNIT,
-            "notes": (f"Each protection unit covers up to {TOKENS_PER_UNIT} tokens. Scans are unlimited; units auto-deduct per chunk."),
+            "notes": f"Each protection unit covers up to {TOKENS_PER_UNIT} tokens. Scans are unlimited; units auto-deduct per chunk.",
         },
     )
 
 
-@router.get(
-    "/billing-catalogue",
-    status_code=status.HTTP_200_OK,
-    summary="Compatibility alias for billing catalogue",
-    tags=["billing"],
-)
+@router.get("/billing-catalogue", status_code=status.HTTP_200_OK, tags=["billing"])
 async def get_billing_catalogue_alias() -> JSONResponse:
     return await get_billing_catalogue()
 
 
-@api_router.get(
-    "/catalogue",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for billing catalogue",
-    tags=["billing"],
-)
+@api_router.get("/catalogue", status_code=status.HTTP_200_OK, tags=["billing"])
 async def get_billing_catalogue_api_alias() -> JSONResponse:
     return await get_billing_catalogue()
 
 
-@api_router.get(
-    "/billing-catalogue",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for billing catalogue",
-    tags=["billing"],
-)
+@api_router.get("/billing-catalogue", status_code=status.HTTP_200_OK, tags=["billing"])
 async def get_billing_catalogue_api_legacy_alias() -> JSONResponse:
     return await get_billing_catalogue()
 
 
-@router.get(
-    "/success",
-    status_code=status.HTTP_200_OK,
-    summary="Checkout success confirmation",
-    description=("Called by Stripe redirect after a successful checkout. Returns session confirmation. Frontend should use this to verify and display unit balance."),
-    tags=["billing", "checkout"],
-)
+@router.get("/success", status_code=status.HTTP_200_OK, tags=["billing", "checkout"])
 async def checkout_success(
     session_id: str = Query(..., description="Stripe checkout session ID"),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
     record = svc.get_checkout_session(session_id)
     if record is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="checkout_session_not_found",
+        raise _http_404(
+            "Checkout session not found.",
+            code="checkout_session_not_found",
+            extra={"session_id": session_id},
         )
     return JSONResponse(
         status_code=status.HTTP_200_OK,
@@ -439,12 +468,7 @@ async def checkout_success(
     )
 
 
-@api_router.get(
-    "/success",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for checkout success",
-    tags=["billing", "checkout"],
-)
+@api_router.get("/success", status_code=status.HTTP_200_OK, tags=["billing", "checkout"])
 async def checkout_success_api_alias(
     session_id: str = Query(..., description="Stripe checkout session ID"),
     svc: StripeService = Depends(get_stripe_service),
@@ -452,17 +476,7 @@ async def checkout_success_api_alias(
     return await checkout_success(session_id=session_id, svc=svc)
 
 
-# ---------------------------------------------------------------------------
-# Units
-# ---------------------------------------------------------------------------
-
-
-@router.post(
-    "/units/calculate",
-    status_code=status.HTTP_200_OK,
-    summary="Calculate units required for a token count",
-    description=("Returns how many IronClaw protection units are needed to cover a given token count. Uses ceiling division at 25,000 tokens per unit."),
-)
+@router.post("/units/calculate", status_code=status.HTTP_200_OK)
 async def calculate_units(
     token_count: int = Query(..., ge=1, description="Number of tokens to cover"),
 ) -> JSONResponse:
@@ -477,110 +491,73 @@ async def calculate_units(
     )
 
 
-@router.get(
-    "/units/calculate",
-    status_code=status.HTTP_200_OK,
-    summary="Compatibility alias for calculate units",
-    tags=["billing", "units"],
-)
+@router.get("/units/calculate", status_code=status.HTTP_200_OK, tags=["billing", "units"])
 async def calculate_units_get(
     token_count: int = Query(..., ge=1, description="Number of tokens to cover"),
 ) -> JSONResponse:
     return await calculate_units(token_count=token_count)
 
 
-@api_router.post(
-    "/units/calculate",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for calculate units",
-    tags=["billing", "units"],
-)
+@api_router.post("/units/calculate", status_code=status.HTTP_200_OK, tags=["billing", "units"])
 async def calculate_units_api(
     token_count: int = Query(..., ge=1, description="Number of tokens to cover"),
 ) -> JSONResponse:
     return await calculate_units(token_count=token_count)
 
 
-@api_router.get(
-    "/units/calculate",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for calculate units",
-    tags=["billing", "units"],
-)
+@api_router.get("/units/calculate", status_code=status.HTTP_200_OK, tags=["billing", "units"])
 async def calculate_units_get_api(
     token_count: int = Query(..., ge=1, description="Number of tokens to cover"),
 ) -> JSONResponse:
     return await calculate_units(token_count=token_count)
 
 
-@router.get(
-    "/units/balance",
-    status_code=status.HTTP_200_OK,
-    summary="Get the org's current protection unit balance",
-    description=("Returns current unit balance and full ledger history. Each unit covers up to 25,000 tokens with no scan ceiling."),
-    tags=["billing", "units"],
-)
+@router.get("/units/balance", status_code=status.HTTP_200_OK, tags=["billing", "units"])
 async def get_unit_balance(
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _require_org_id(auth)
+    org_id = _require_org_id(auth=auth, request=request)
     result = svc.get_unit_balance(org_id)
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
 
-@router.get(
-    "/unit-balance",
-    status_code=status.HTTP_200_OK,
-    summary="Compatibility alias for unit balance",
-    tags=["billing", "units"],
-)
+@router.get("/unit-balance", status_code=status.HTTP_200_OK, tags=["billing", "units"])
 async def get_unit_balance_alias(
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await get_unit_balance(auth=auth, svc=svc)
+    return await get_unit_balance(request=request, auth=auth, svc=svc)
 
 
-@api_router.get(
-    "/units/balance",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for unit balance",
-    tags=["billing", "units"],
-)
+@api_router.get("/units/balance", status_code=status.HTTP_200_OK, tags=["billing", "units"])
 async def get_unit_balance_api(
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await get_unit_balance(auth=auth, svc=svc)
+    return await get_unit_balance(request=request, auth=auth, svc=svc)
 
 
-@api_router.get(
-    "/unit-balance",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for unit balance",
-    tags=["billing", "units"],
-)
+@api_router.get("/unit-balance", status_code=status.HTTP_200_OK, tags=["billing", "units"])
 async def get_unit_balance_api_alias(
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await get_unit_balance(auth=auth, svc=svc)
+    return await get_unit_balance(request=request, auth=auth, svc=svc)
 
 
-@router.post(
-    "/units/debit",
-    status_code=status.HTTP_200_OK,
-    summary="Debit protection units for a token-consuming operation",
-    description=("Converts token_count to required units via ceiling division at 25,000 tokens/unit, then debits the org wallet. Raises 402 if balance is insufficient. Scans have no ceiling; units must simply be available."),
-    tags=["billing", "units"],
-)
+@router.post("/units/debit", status_code=status.HTTP_200_OK, tags=["billing", "units"])
 async def debit_units(
     body: UnitDebitRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _require_org_id(auth)
+    org_id = _require_org_id(auth=auth, request=request)
     amount = units_for_tokens(body.token_count)
     try:
         result = svc.debit_units(
@@ -594,6 +571,7 @@ async def debit_units(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail={
                 "error": "insufficient_units",
+                "detail": "Insufficient protection units.",
                 "have": exc.have,
                 "need": exc.need,
                 "org_id": exc.org_id,
@@ -602,66 +580,49 @@ async def debit_units(
     except StripeServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"debit_error: {exc}",
+            detail={"error": "debit_error", "detail": str(exc)},
         ) from exc
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
 
-@router.post(
-    "/debit-units",
-    status_code=status.HTTP_200_OK,
-    summary="Compatibility alias for debit units",
-    tags=["billing", "units"],
-)
+@router.post("/debit-units", status_code=status.HTTP_200_OK, tags=["billing", "units"])
 async def debit_units_alias(
     body: UnitDebitRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await debit_units(body=body, auth=auth, svc=svc)
+    return await debit_units(body=body, request=request, auth=auth, svc=svc)
 
 
-@api_router.post(
-    "/units/debit",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for debit units",
-    tags=["billing", "units"],
-)
+@api_router.post("/units/debit", status_code=status.HTTP_200_OK, tags=["billing", "units"])
 async def debit_units_api(
     body: UnitDebitRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await debit_units(body=body, auth=auth, svc=svc)
+    return await debit_units(body=body, request=request, auth=auth, svc=svc)
 
 
-@api_router.post(
-    "/debit-units",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for debit units",
-    tags=["billing", "units"],
-)
+@api_router.post("/debit-units", status_code=status.HTTP_200_OK, tags=["billing", "units"])
 async def debit_units_api_alias(
     body: UnitDebitRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await debit_units(body=body, auth=auth, svc=svc)
+    return await debit_units(body=body, request=request, auth=auth, svc=svc)
 
 
-@router.post(
-    "/units/credit",
-    status_code=status.HTTP_200_OK,
-    summary="Credit protection units to an org wallet",
-    description=("Admin/internal endpoint. Credits the specified number of units to the org. Use reason to describe the credit source."),
-    tags=["billing", "units"],
-)
+@router.post("/units/credit", status_code=status.HTTP_200_OK, tags=["billing", "units"])
 async def credit_units(
     body: UnitCreditRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _require_org_id(auth)
+    org_id = _require_org_id(auth=auth, request=request)
     try:
         reason_enum = StripeUnitEventReason(body.reason)
     except ValueError:
@@ -677,36 +638,28 @@ async def credit_units(
     except StripeServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"credit_error: {exc}",
+            detail={"error": "credit_error", "detail": str(exc)},
         ) from exc
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
 
-@api_router.post(
-    "/units/credit",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for credit units",
-    tags=["billing", "units"],
-)
+@api_router.post("/units/credit", status_code=status.HTTP_200_OK, tags=["billing", "units"])
 async def credit_units_api(
     body: UnitCreditRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await credit_units(body=body, auth=auth, svc=svc)
+    return await credit_units(body=body, request=request, auth=auth, svc=svc)
 
 
-@router.get(
-    "/units/ledger",
-    status_code=status.HTTP_200_OK,
-    summary="Get the full unit ledger for the authenticated org",
-    tags=["billing", "units"],
-)
+@router.get("/units/ledger", status_code=status.HTTP_200_OK, tags=["billing", "units"])
 async def get_unit_ledger(
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _require_org_id(auth)
+    org_id = _require_org_id(auth=auth, request=request)
     result = svc.get_unit_balance(org_id)
     return JSONResponse(
         status_code=status.HTTP_200_OK,
@@ -718,62 +671,41 @@ async def get_unit_ledger(
     )
 
 
-@router.get(
-    "/unit-ledger",
-    status_code=status.HTTP_200_OK,
-    summary="Compatibility alias for unit ledger",
-    tags=["billing", "units"],
-)
+@router.get("/unit-ledger", status_code=status.HTTP_200_OK, tags=["billing", "units"])
 async def get_unit_ledger_alias(
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await get_unit_ledger(auth=auth, svc=svc)
+    return await get_unit_ledger(request=request, auth=auth, svc=svc)
 
 
-@api_router.get(
-    "/units/ledger",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for unit ledger",
-    tags=["billing", "units"],
-)
+@api_router.get("/units/ledger", status_code=status.HTTP_200_OK, tags=["billing", "units"])
 async def get_unit_ledger_api(
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await get_unit_ledger(auth=auth, svc=svc)
+    return await get_unit_ledger(request=request, auth=auth, svc=svc)
 
 
-@api_router.get(
-    "/unit-ledger",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for unit ledger",
-    tags=["billing", "units"],
-)
+@api_router.get("/unit-ledger", status_code=status.HTTP_200_OK, tags=["billing", "units"])
 async def get_unit_ledger_api_alias(
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await get_unit_ledger(auth=auth, svc=svc)
+    return await get_unit_ledger(request=request, auth=auth, svc=svc)
 
 
-# ---------------------------------------------------------------------------
-# Customers / checkout
-# ---------------------------------------------------------------------------
-
-
-@router.post(
-    "/customers",
-    status_code=status.HTTP_200_OK,
-    summary="Get or create a Stripe customer for the authenticated org",
-    description=("Returns existing Stripe customer_id if already registered. Creates a new one if not. Idempotent per org."),
-)
+@router.post("/customers", status_code=status.HTTP_200_OK)
 async def get_or_create_customer(
     body: CustomerCreateRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _require_org_id(auth)
+    org_id = _require_org_id(auth=auth, request=request, body=body)
     try:
         customer_id = svc.get_or_create_stripe_customer(
             org_id=org_id,
@@ -784,7 +716,7 @@ async def get_or_create_customer(
     except StripeServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"stripe_customer_error: {exc}",
+            detail={"error": "stripe_customer_error", "detail": str(exc)},
         ) from exc
     return JSONResponse(
         status_code=status.HTTP_200_OK,
@@ -792,44 +724,42 @@ async def get_or_create_customer(
     )
 
 
-@api_router.post(
-    "/customers",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for customers",
-    tags=["billing"],
-)
+@api_router.post("/customers", status_code=status.HTTP_200_OK, tags=["billing"])
 async def get_or_create_customer_api(
     body: CustomerCreateRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await get_or_create_customer(body=body, auth=auth, svc=svc)
+    return await get_or_create_customer(body=body, request=request, auth=auth, svc=svc)
 
 
 @router.post(
     "/checkout/sessions",
     status_code=status.HTTP_201_CREATED,
-    summary="Create a Stripe Checkout Session",
-    description=(
-        "Creates a Stripe Checkout session for one-time payment or subscription. "
-        "Accepts either a direct Stripe price_id or an IronClaw package_id. "
-        "When package_id is supplied, the backend resolves the Stripe price from "
-        "BILLING_TIER_5K_PRICE_ID, BILLING_TIER_25K_PRICE_ID, BILLING_TIER_60K_PRICE_ID. "
-        "On checkout.session.completed, IronClaw credits unit_credits protection units to the org wallet."
-    ),
     tags=["billing", "checkout"],
 )
 async def create_checkout_session(
     body: CheckoutSessionCreateRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _require_org_id(auth)
+    org_id = _require_org_id(auth=auth, request=request, body=body)
     mode = StripeCheckoutMode(body.mode)
     resolved_price_id, resolved_unit_credits = _normalize_checkout_inputs(body)
+
     metadata = dict(body.metadata)
     if body.package_id:
         metadata.setdefault("package_id", body.package_id)
+    metadata.setdefault("org_id", org_id)
+
+    customer_id = body.customer_id
+    if not customer_id:
+        try:
+            customer_id = _resolve_customer_id(svc, org_id)
+        except Exception:
+            customer_id = None
 
     try:
         result = svc.create_checkout_session(
@@ -840,37 +770,41 @@ async def create_checkout_session(
             unit_credits=resolved_unit_credits,
             success_url=body.success_url,
             cancel_url=body.cancel_url,
-            customer_id=body.customer_id,
+            customer_id=customer_id,
             metadata=metadata,
         )
     except StripeServiceError as exc:
+        logger.exception(
+            "stripe_router.create_checkout_session_failed org_id=%s package_id=%s price_id=%s",
+            org_id,
+            body.package_id,
+            resolved_price_id,
+        )
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"stripe_checkout_error: {exc}",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "stripe_checkout_error",
+                "detail": str(exc),
+                "org_id": org_id,
+                "package_id": body.package_id,
+                "price_id": resolved_price_id,
+            },
         ) from exc
+
     return JSONResponse(status_code=status.HTTP_201_CREATED, content=result.to_dict())
 
 
-@api_router.post(
-    "/checkout/sessions",
-    status_code=status.HTTP_201_CREATED,
-    summary="API-prefixed compatibility alias for checkout sessions",
-    tags=["billing", "checkout"],
-)
+@api_router.post("/checkout/sessions", status_code=status.HTTP_201_CREATED, tags=["billing", "checkout"])
 async def create_checkout_session_api(
     body: CheckoutSessionCreateRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await create_checkout_session(body=body, auth=auth, svc=svc)
+    return await create_checkout_session(body=body, request=request, auth=auth, svc=svc)
 
 
-@router.get(
-    "/checkout/sessions/{session_id}",
-    status_code=status.HTTP_200_OK,
-    summary="Get a checkout session by ID",
-    tags=["billing", "checkout"],
-)
+@router.get("/checkout/sessions/{session_id}", status_code=status.HTTP_200_OK, tags=["billing", "checkout"])
 async def get_checkout_session(
     session_id: str,
     auth: AuthContext = Depends(get_auth_context),
@@ -880,12 +814,7 @@ async def get_checkout_session(
     return JSONResponse(status_code=status.HTTP_200_OK, content=record)
 
 
-@api_router.get(
-    "/checkout/sessions/{session_id}",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for checkout session lookup",
-    tags=["billing", "checkout"],
-)
+@api_router.get("/checkout/sessions/{session_id}", status_code=status.HTTP_200_OK, tags=["billing", "checkout"])
 async def get_checkout_session_api(
     session_id: str,
     auth: AuthContext = Depends(get_auth_context),
@@ -894,12 +823,7 @@ async def get_checkout_session_api(
     return await get_checkout_session(session_id=session_id, auth=auth, svc=svc)
 
 
-@router.get(
-    "/checkout/sessions/{session_id}/status",
-    status_code=status.HTTP_200_OK,
-    summary="Get checkout session status by ID",
-    tags=["billing", "checkout"],
-)
+@router.get("/checkout/sessions/{session_id}/status", status_code=status.HTTP_200_OK, tags=["billing", "checkout"])
 async def get_checkout_session_status(
     session_id: str,
     auth: AuthContext = Depends(get_auth_context),
@@ -912,12 +836,7 @@ async def get_checkout_session_status(
     )
 
 
-@api_router.get(
-    "/checkout/sessions/{session_id}/status",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for checkout session status",
-    tags=["billing", "checkout"],
-)
+@api_router.get("/checkout/sessions/{session_id}/status", status_code=status.HTTP_200_OK, tags=["billing", "checkout"])
 async def get_checkout_session_status_api(
     session_id: str,
     auth: AuthContext = Depends(get_auth_context),
@@ -926,12 +845,7 @@ async def get_checkout_session_status_api(
     return await get_checkout_session_status(session_id=session_id, auth=auth, svc=svc)
 
 
-@router.get(
-    "/checkout/status",
-    status_code=status.HTTP_200_OK,
-    summary="Compatibility alias for checkout session status",
-    tags=["billing", "checkout"],
-)
+@router.get("/checkout/status", status_code=status.HTTP_200_OK, tags=["billing", "checkout"])
 async def get_checkout_status_by_query(
     session_id: str = Query(..., description="Stripe checkout session ID"),
     auth: AuthContext = Depends(get_auth_context),
@@ -944,12 +858,7 @@ async def get_checkout_status_by_query(
     )
 
 
-@api_router.get(
-    "/checkout/status",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for checkout status",
-    tags=["billing", "checkout"],
-)
+@api_router.get("/checkout/status", status_code=status.HTTP_200_OK, tags=["billing", "checkout"])
 async def get_checkout_status_by_query_api(
     session_id: str = Query(..., description="Stripe checkout session ID"),
     auth: AuthContext = Depends(get_auth_context),
@@ -958,13 +867,7 @@ async def get_checkout_status_by_query_api(
     return await get_checkout_status_by_query(session_id=session_id, auth=auth, svc=svc)
 
 
-@router.post(
-    "/checkout/sessions/{session_id}/complete",
-    status_code=status.HTTP_200_OK,
-    summary="Manually complete a checkout session and credit units",
-    description=("Idempotent. Credits unit_credits to the org wallet. Intended for internal tooling and integration tests. Production fulfillment is driven by the Stripe webhook at POST /webhooks/stripe."),
-    tags=["billing", "checkout"],
-)
+@router.post("/checkout/sessions/{session_id}/complete", status_code=status.HTTP_200_OK, tags=["billing", "checkout"])
 async def complete_checkout_session(
     session_id: str,
     body: CheckoutSessionCompleteRequest,
@@ -977,24 +880,20 @@ async def complete_checkout_session(
             customer_id=body.customer_id,
         )
     except StripeSessionNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="checkout_session_not_found",
+        raise _http_404(
+            "Checkout session not found.",
+            code="checkout_session_not_found",
+            extra={"session_id": session_id},
         ) from exc
     except StripeServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"complete_error: {exc}",
+            detail={"error": "complete_error", "detail": str(exc)},
         ) from exc
     return JSONResponse(status_code=status.HTTP_200_OK, content=result)
 
 
-@api_router.post(
-    "/checkout/sessions/{session_id}/complete",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for checkout completion",
-    tags=["billing", "checkout"],
-)
+@api_router.post("/checkout/sessions/{session_id}/complete", status_code=status.HTTP_200_OK, tags=["billing", "checkout"])
 async def complete_checkout_session_api(
     session_id: str,
     body: CheckoutSessionCompleteRequest,
@@ -1004,12 +903,7 @@ async def complete_checkout_session_api(
     return await complete_checkout_session(session_id=session_id, body=body, auth=auth, svc=svc)
 
 
-@router.get(
-    "/subscriptions/{subscription_id}",
-    status_code=status.HTTP_200_OK,
-    summary="Get a subscription record by ID",
-    tags=["billing", "subscriptions"],
-)
+@router.get("/subscriptions/{subscription_id}", status_code=status.HTTP_200_OK, tags=["billing", "subscriptions"])
 async def get_subscription(
     subscription_id: str,
     auth: AuthContext = Depends(get_auth_context),
@@ -1018,24 +912,20 @@ async def get_subscription(
     try:
         result = svc.get_subscription(subscription_id)
     except StripeSubscriptionNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="subscription_not_found",
+        raise _http_404(
+            "Subscription not found.",
+            code="subscription_not_found",
+            extra={"subscription_id": subscription_id},
         ) from exc
     except StripeServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"subscription_fetch_error: {exc}",
+            detail={"error": "subscription_fetch_error", "detail": str(exc)},
         ) from exc
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
 
-@api_router.get(
-    "/subscriptions/{subscription_id}",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for subscription lookup",
-    tags=["billing", "subscriptions"],
-)
+@api_router.get("/subscriptions/{subscription_id}", status_code=status.HTTP_200_OK, tags=["billing", "subscriptions"])
 async def get_subscription_api(
     subscription_id: str,
     auth: AuthContext = Depends(get_auth_context),
@@ -1044,24 +934,14 @@ async def get_subscription_api(
     return await get_subscription(subscription_id=subscription_id, auth=auth, svc=svc)
 
 
-# ---------------------------------------------------------------------------
-# Metered usage
-# ---------------------------------------------------------------------------
-
-
-@router.post(
-    "/metered/sync",
-    status_code=status.HTTP_200_OK,
-    summary="Sync metered usage to Stripe for a subscription item",
-    description=("Reports usage quantity to Stripe for a metered-price subscription item (si_xxx). Uses subscription_item_id, not subscription ID. Idempotent when idempotency_key is supplied. Also debits org unit balance via StripeUnitEventReason.METERED_SYNC."),
-    tags=["billing", "metered"],
-)
+@router.post("/metered/sync", status_code=status.HTTP_200_OK, tags=["billing", "metered"])
 async def sync_metered_usage(
     body: MeteredUsageSyncRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _require_org_id(auth)
+    org_id = _require_org_id(auth=auth, request=request)
     try:
         result = svc.report_metered_usage(
             org_id=org_id,
@@ -1073,7 +953,7 @@ async def sync_metered_usage(
     except StripeServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"metered_sync_error: {exc}",
+            detail={"error": "metered_sync_error", "detail": str(exc)},
         ) from exc
 
     if body.quantity > 0:
@@ -1101,60 +981,44 @@ async def sync_metered_usage(
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
 
-@router.post(
-    "/metered-sync",
-    status_code=status.HTTP_200_OK,
-    summary="Compatibility alias for metered sync",
-    tags=["billing", "metered"],
-)
+@router.post("/metered-sync", status_code=status.HTTP_200_OK, tags=["billing", "metered"])
 async def sync_metered_usage_alias(
     body: MeteredUsageSyncRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await sync_metered_usage(body=body, auth=auth, svc=svc)
+    return await sync_metered_usage(body=body, request=request, auth=auth, svc=svc)
 
 
-@api_router.post(
-    "/metered/sync",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for metered sync",
-    tags=["billing", "metered"],
-)
+@api_router.post("/metered/sync", status_code=status.HTTP_200_OK, tags=["billing", "metered"])
 async def sync_metered_usage_api(
     body: MeteredUsageSyncRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await sync_metered_usage(body=body, auth=auth, svc=svc)
+    return await sync_metered_usage(body=body, request=request, auth=auth, svc=svc)
 
 
-@api_router.post(
-    "/metered-sync",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for metered sync",
-    tags=["billing", "metered"],
-)
+@api_router.post("/metered-sync", status_code=status.HTTP_200_OK, tags=["billing", "metered"])
 async def sync_metered_usage_api_alias(
     body: MeteredUsageSyncRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await sync_metered_usage(body=body, auth=auth, svc=svc)
+    return await sync_metered_usage(body=body, request=request, auth=auth, svc=svc)
 
 
-@router.get(
-    "/metered/log",
-    status_code=status.HTTP_200_OK,
-    summary="Get metered usage log for the org",
-    tags=["billing", "metered"],
-)
+@router.get("/metered/log", status_code=status.HTTP_200_OK, tags=["billing", "metered"])
 async def get_metered_usage_log(
+    request: Request,
     limit: int = Query(default=50, ge=1, le=200),
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _require_org_id(auth)
+    org_id = _require_org_id(auth=auth, request=request)
     entries = svc.get_metered_usage_log(org_id=org_id, limit=limit)
     return JSONResponse(
         status_code=status.HTTP_200_OK,
@@ -1162,37 +1026,24 @@ async def get_metered_usage_log(
     )
 
 
-@api_router.get(
-    "/metered/log",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for metered usage log",
-    tags=["billing", "metered"],
-)
+@api_router.get("/metered/log", status_code=status.HTTP_200_OK, tags=["billing", "metered"])
 async def get_metered_usage_log_api(
+    request: Request,
     limit: int = Query(default=50, ge=1, le=200),
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await get_metered_usage_log(limit=limit, auth=auth, svc=svc)
+    return await get_metered_usage_log(request=request, limit=limit, auth=auth, svc=svc)
 
 
-# ---------------------------------------------------------------------------
-# Payment methods
-# ---------------------------------------------------------------------------
-
-
-@router.post(
-    "/payment-methods/attach",
-    status_code=status.HTTP_200_OK,
-    summary="Attach a Stripe PaymentMethod to the org customer",
-    tags=["billing", "payment-methods"],
-)
+@router.post("/payment-methods/attach", status_code=status.HTTP_200_OK, tags=["billing", "payment-methods"])
 async def attach_payment_method(
     body: AttachPaymentMethodRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _require_org_id(auth)
+    org_id = _require_org_id(auth=auth, request=request)
     customer_id = _require_customer_id(svc, org_id)
     try:
         result = svc.attach_payment_method(
@@ -1203,59 +1054,42 @@ async def attach_payment_method(
     except StripeServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"attach_error: {exc}",
+            detail={"error": "attach_error", "detail": str(exc)},
         ) from exc
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
 
-@router.post(
-    "/payment-methods",
-    status_code=status.HTTP_200_OK,
-    summary="Compatibility alias for attach payment method",
-    tags=["billing", "payment-methods"],
-)
+@router.post("/payment-methods", status_code=status.HTTP_200_OK, tags=["billing", "payment-methods"])
 async def attach_payment_method_alias(
     body: AttachPaymentMethodRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await attach_payment_method(body=body, auth=auth, svc=svc)
+    return await attach_payment_method(body=body, request=request, auth=auth, svc=svc)
 
 
-@api_router.post(
-    "/payment-methods/attach",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for attach payment method",
-    tags=["billing", "payment-methods"],
-)
+@api_router.post("/payment-methods/attach", status_code=status.HTTP_200_OK, tags=["billing", "payment-methods"])
 async def attach_payment_method_api(
     body: AttachPaymentMethodRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await attach_payment_method(body=body, auth=auth, svc=svc)
+    return await attach_payment_method(body=body, request=request, auth=auth, svc=svc)
 
 
-@api_router.post(
-    "/payment-methods",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for attach payment method",
-    tags=["billing", "payment-methods"],
-)
+@api_router.post("/payment-methods", status_code=status.HTTP_200_OK, tags=["billing", "payment-methods"])
 async def attach_payment_method_api_alias(
     body: AttachPaymentMethodRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await attach_payment_method(body=body, auth=auth, svc=svc)
+    return await attach_payment_method(body=body, request=request, auth=auth, svc=svc)
 
 
-@router.post(
-    "/payment-methods/{payment_method_id}/detach",
-    status_code=status.HTTP_200_OK,
-    summary="Detach a PaymentMethod from its customer",
-    tags=["billing", "payment-methods"],
-)
+@router.post("/payment-methods/{payment_method_id}/detach", status_code=status.HTTP_200_OK, tags=["billing", "payment-methods"])
 async def detach_payment_method(
     payment_method_id: str,
     auth: AuthContext = Depends(get_auth_context),
@@ -1264,24 +1098,20 @@ async def detach_payment_method(
     try:
         result = svc.detach_payment_method(payment_method_id=payment_method_id)
     except StripePaymentMethodNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="payment_method_not_found",
+        raise _http_404(
+            "Payment method not found.",
+            code="payment_method_not_found",
+            extra={"payment_method_id": payment_method_id},
         ) from exc
     except StripeServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"detach_error: {exc}",
+            detail={"error": "detach_error", "detail": str(exc)},
         ) from exc
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
 
-@api_router.post(
-    "/payment-methods/{payment_method_id}/detach",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for detach payment method",
-    tags=["billing", "payment-methods"],
-)
+@api_router.post("/payment-methods/{payment_method_id}/detach", status_code=status.HTTP_200_OK, tags=["billing", "payment-methods"])
 async def detach_payment_method_api(
     payment_method_id: str,
     auth: AuthContext = Depends(get_auth_context),
@@ -1290,17 +1120,13 @@ async def detach_payment_method_api(
     return await detach_payment_method(payment_method_id=payment_method_id, auth=auth, svc=svc)
 
 
-@router.get(
-    "/payment-methods",
-    status_code=status.HTTP_200_OK,
-    summary="List payment methods for the org",
-    tags=["billing", "payment-methods"],
-)
+@router.get("/payment-methods", status_code=status.HTTP_200_OK, tags=["billing", "payment-methods"])
 async def list_payment_methods(
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _require_org_id(auth)
+    org_id = _require_org_id(auth=auth, request=request)
     customer_id = _resolve_customer_id(svc, org_id)
     if not customer_id:
         return JSONResponse(
@@ -1324,31 +1150,23 @@ async def list_payment_methods(
     )
 
 
-@api_router.get(
-    "/payment-methods",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for list payment methods",
-    tags=["billing", "payment-methods"],
-)
+@api_router.get("/payment-methods", status_code=status.HTTP_200_OK, tags=["billing", "payment-methods"])
 async def list_payment_methods_api(
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await list_payment_methods(auth=auth, svc=svc)
+    return await list_payment_methods(request=request, auth=auth, svc=svc)
 
 
-@router.post(
-    "/payment-methods/{payment_method_id}/set-default",
-    status_code=status.HTTP_200_OK,
-    summary="Set a payment method as the default for the org customer",
-    tags=["billing", "payment-methods"],
-)
+@router.post("/payment-methods/{payment_method_id}/set-default", status_code=status.HTTP_200_OK, tags=["billing", "payment-methods"])
 async def set_default_payment_method(
     payment_method_id: str,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _require_org_id(auth)
+    org_id = _require_org_id(auth=auth, request=request)
     customer_id = _require_customer_id(svc, org_id)
     try:
         result = svc.set_default_payment_method(
@@ -1356,83 +1174,68 @@ async def set_default_payment_method(
             payment_method_id=payment_method_id,
         )
     except StripePaymentMethodNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="payment_method_not_found",
+        raise _http_404(
+            "Payment method not found.",
+            code="payment_method_not_found",
+            extra={"payment_method_id": payment_method_id},
         ) from exc
     except StripeServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"set_default_error: {exc}",
+            detail={"error": "set_default_error", "detail": str(exc)},
         ) from exc
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
 
-@router.post(
-    "/payment-methods/default",
-    status_code=status.HTTP_200_OK,
-    summary="Compatibility alias for setting default payment method",
-    tags=["billing", "payment-methods"],
-)
+@router.post("/payment-methods/default", status_code=status.HTTP_200_OK, tags=["billing", "payment-methods"])
 async def set_default_payment_method_alias(
     body: SetDefaultPaymentMethodRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
     return await set_default_payment_method(
         payment_method_id=body.payment_method_id,
+        request=request,
         auth=auth,
         svc=svc,
     )
 
 
-@api_router.post(
-    "/payment-methods/{payment_method_id}/set-default",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for set default payment method",
-    tags=["billing", "payment-methods"],
-)
+@api_router.post("/payment-methods/{payment_method_id}/set-default", status_code=status.HTTP_200_OK, tags=["billing", "payment-methods"])
 async def set_default_payment_method_api(
     payment_method_id: str,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await set_default_payment_method(payment_method_id=payment_method_id, auth=auth, svc=svc)
+    return await set_default_payment_method(
+        payment_method_id=payment_method_id,
+        request=request,
+        auth=auth,
+        svc=svc,
+    )
 
 
-@api_router.post(
-    "/payment-methods/default",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for set default payment method",
-    tags=["billing", "payment-methods"],
-)
+@api_router.post("/payment-methods/default", status_code=status.HTTP_200_OK, tags=["billing", "payment-methods"])
 async def set_default_payment_method_api_alias(
     body: SetDefaultPaymentMethodRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await set_default_payment_method_alias(body=body, auth=auth, svc=svc)
+    return await set_default_payment_method_alias(body=body, request=request, auth=auth, svc=svc)
 
 
-# ---------------------------------------------------------------------------
-# Invoices
-# ---------------------------------------------------------------------------
-
-
-@router.get(
-    "/invoices",
-    status_code=status.HTTP_200_OK,
-    summary="List invoices for the org",
-    description=("Returns cached invoice list for the org. Pass force_refresh=true to bypass cache and re-fetch from Stripe."),
-    tags=["billing", "invoices"],
-)
+@router.get("/invoices", status_code=status.HTTP_200_OK, tags=["billing", "invoices"])
 async def list_invoices(
+    request: Request,
     limit: int = Query(default=20, ge=1, le=100),
     force_refresh: bool = Query(default=False),
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _require_org_id(auth)
+    org_id = _require_org_id(auth=auth, request=request)
     try:
         results = svc.get_invoices_for_org(
             org_id=org_id,
@@ -1442,7 +1245,7 @@ async def list_invoices(
     except StripeServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"invoice_fetch_error: {exc}",
+            detail={"error": "invoice_fetch_error", "detail": str(exc)},
         ) from exc
     return JSONResponse(
         status_code=status.HTTP_200_OK,
@@ -1454,19 +1257,16 @@ async def list_invoices(
     )
 
 
-@router.get(
-    "/invoice-history",
-    status_code=status.HTTP_200_OK,
-    summary="Compatibility alias for invoices",
-    tags=["billing", "invoices"],
-)
+@router.get("/invoice-history", status_code=status.HTTP_200_OK, tags=["billing", "invoices"])
 async def list_invoices_alias(
+    request: Request,
     limit: int = Query(default=20, ge=1, le=100),
     force_refresh: bool = Query(default=False),
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
     return await list_invoices(
+        request=request,
         limit=limit,
         force_refresh=force_refresh,
         auth=auth,
@@ -1474,47 +1274,35 @@ async def list_invoices_alias(
     )
 
 
-@api_router.get(
-    "/invoices",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for invoices",
-    tags=["billing", "invoices"],
-)
+@api_router.get("/invoices", status_code=status.HTTP_200_OK, tags=["billing", "invoices"])
 async def list_invoices_api(
+    request: Request,
     limit: int = Query(default=20, ge=1, le=100),
     force_refresh: bool = Query(default=False),
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await list_invoices(limit=limit, force_refresh=force_refresh, auth=auth, svc=svc)
+    return await list_invoices(request=request, limit=limit, force_refresh=force_refresh, auth=auth, svc=svc)
 
 
-@api_router.get(
-    "/invoice-history",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for invoice history",
-    tags=["billing", "invoices"],
-)
+@api_router.get("/invoice-history", status_code=status.HTTP_200_OK, tags=["billing", "invoices"])
 async def list_invoices_api_alias(
+    request: Request,
     limit: int = Query(default=20, ge=1, le=100),
     force_refresh: bool = Query(default=False),
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await list_invoices(limit=limit, force_refresh=force_refresh, auth=auth, svc=svc)
+    return await list_invoices(request=request, limit=limit, force_refresh=force_refresh, auth=auth, svc=svc)
 
 
-@router.delete(
-    "/invoices/cache",
-    status_code=status.HTTP_200_OK,
-    summary="Invalidate the invoice cache for the org",
-    tags=["billing", "invoices"],
-)
+@router.delete("/invoices/cache", status_code=status.HTTP_200_OK, tags=["billing", "invoices"])
 async def invalidate_invoice_cache(
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _require_org_id(auth)
+    org_id = _require_org_id(auth=auth, request=request)
     svc.invalidate_invoice_cache(org_id=org_id)
     return JSONResponse(
         status_code=status.HTTP_200_OK,
@@ -1522,17 +1310,13 @@ async def invalidate_invoice_cache(
     )
 
 
-@api_router.delete(
-    "/invoices/cache",
-    status_code=status.HTTP_200_OK,
-    summary="API-prefixed compatibility alias for invoice cache invalidation",
-    tags=["billing", "invoices"],
-)
+@api_router.delete("/invoices/cache", status_code=status.HTTP_200_OK, tags=["billing", "invoices"])
 async def invalidate_invoice_cache_api(
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await invalidate_invoice_cache(auth=auth, svc=svc)
+    return await invalidate_invoice_cache(request=request, auth=auth, svc=svc)
 
 
 router.include_router(api_router)

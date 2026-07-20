@@ -2,8 +2,10 @@
 import axios from "axios";
 import { supabase } from "@/lib/supabase";
 
-const BACKEND_URL =
+const RAW_BACKEND_URL =
   process.env.REACT_APP_API_BASE_URL || "http://127.0.0.1:8000";
+
+const BACKEND_URL = RAW_BACKEND_URL.replace(/\/+$/, "");
 
 export const API_BASE = `${BACKEND_URL}/api`;
 
@@ -12,9 +14,6 @@ const api = axios.create({
   timeout: 15000,
 });
 
-// ── Response: handle 401 globally ────────────────────────────────────────────
-// Authorization header is kept current by AuthContext.syncAxiosToken via
-// supabase.auth.onAuthStateChange — no request interceptor needed.
 api.interceptors.response.use(
   (res) => res,
   async (error) => {
@@ -26,79 +25,77 @@ api.interceptors.response.use(
   },
 );
 
-// ── Health ────────────────────────────────────────────────────────────────────
+const withOrgId = (orgId) =>
+  `organizationid=${encodeURIComponent(orgId)}`;
+
 export const health = {
   check: () => api.get("/"),
 };
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
-// signup/signin removed — handled by Supabase Auth directly in AuthContext.
-// me() retained for backend session/user validation.
 export const auth = {
   me: () => api.get("/auth/me"),
 };
 
-// ── Dashboard ─────────────────────────────────────────────────────────────────
 export const dashboard = {
   get: () => api.get("/dashboard/overview"),
 };
 
-// ── Events ────────────────────────────────────────────────────────────────────
 export const events = {
   simulate: () => api.post("/events/simulate"),
 };
 
-// ── Integrations ──────────────────────────────────────────────────────────────
 export const integrations = {
   getToken: () => api.get("/integrations/token"),
 };
 
-// ── Payments / Billing ────────────────────────────────────────────────────────
 export const payments = {
   createCheckout: (payload) => api.post("/billing/checkout/sessions", payload),
-  getStatus: (sessionId) => api.get(`/billing/checkout/sessions/${sessionId}`),
+  getStatus: (sessionId) =>
+    api.get(`/billing/checkout/sessions/${encodeURIComponent(sessionId)}`),
 };
 
-// ── Payment Methods ───────────────────────────────────────────────────────────
-// Drives the PaymentMethodPanel inside WalletCard.
-// All three calls scope to an organization via query param.
 export const paymentMethods = {
   list: (orgId) =>
-    api.get(
-      `/ui/billing/payment-methods?organizationid=${encodeURIComponent(orgId)}`,
-    ),
+    api.get(`/ui/billing/payment-methods?${withOrgId(orgId)}`),
 
   setDefault: (methodId, orgId) =>
     api.patch(
-      `/ui/billing/payment-methods/${encodeURIComponent(methodId)}/default?organizationid=${encodeURIComponent(orgId)}`,
+      `/ui/billing/payment-methods/${encodeURIComponent(methodId)}/default?${withOrgId(orgId)}`,
     ),
 
   delete: (methodId, orgId) =>
     api.delete(
-      `/ui/billing/payment-methods/${encodeURIComponent(methodId)}?organizationid=${encodeURIComponent(orgId)}`,
+      `/ui/billing/payment-methods/${encodeURIComponent(methodId)}?${withOrgId(orgId)}`,
+    ),
+
+  setDefaultFallback: (methodId, orgId) =>
+    api.post(
+      `/billing/payment-methods/${encodeURIComponent(methodId)}/set-default?${withOrgId(orgId)}`,
+    ),
+
+  detachFallback: (methodId, orgId) =>
+    api.post(
+      `/billing/payment-methods/${encodeURIComponent(methodId)}/detach?${withOrgId(orgId)}`,
     ),
 };
 
-// ── Prompts ───────────────────────────────────────────────────────────────────
 export const prompts = {
   inspect: (payload) => api.post("/inspect", payload),
 };
 
-// ── Audit ─────────────────────────────────────────────────────────────────────
 export const audit = {
   getLogs: (params) => api.get("/audit/logs", { params }),
 };
 
-// ── Policies ──────────────────────────────────────────────────────────────────
 export const policies = {
   list: () => api.get("/policies"),
-  get: (id) => api.get(`/policies/${id}`),
+  get: (id) => api.get(`/policies/${encodeURIComponent(id)}`),
   create: (payload) => api.post("/policies", payload),
-  update: (id, payload) => api.put(`/policies/${id}`, payload),
-  delete: (id) => api.delete(`/policies/${id}`),
+  update: (id, payload) =>
+    api.put(`/policies/${encodeURIComponent(id)}`, payload),
+  delete: (id) => api.delete(`/policies/${encodeURIComponent(id)}`),
 };
 
-// ── Tools ─────────────────────────────────────────────────────────────────────
 export const tools = {
   inspect: (payload) => api.post("/tools/inspect", payload),
 };
