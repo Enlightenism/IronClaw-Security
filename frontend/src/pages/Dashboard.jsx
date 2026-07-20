@@ -62,6 +62,29 @@ const getPackageUnits = (packageId) => {
   }
 };
 
+const getErrorMessage = (error) => {
+  const rawDetail = error?.response?.data?.detail;
+
+  if (typeof rawDetail === "string" && rawDetail.trim()) {
+    return rawDetail;
+  }
+
+  if (
+    rawDetail &&
+    typeof rawDetail === "object" &&
+    typeof rawDetail.detail === "string" &&
+    rawDetail.detail.trim()
+  ) {
+    return rawDetail.detail;
+  }
+
+  if (typeof error?.message === "string" && error.message.trim()) {
+    return error.message;
+  }
+
+  return "Could not start checkout.";
+};
+
 const AttackFeed = memo(function AttackFeed({ attacks }) {
   const [page, setPage] = useState(1);
 
@@ -264,10 +287,14 @@ const Dashboard = () => {
       }
 
       try {
-        const { data: status } = await api.get(`/payments/status/${sessionId}`);
+        const { data: status } = await api.get(
+          `/billing/checkout/sessions/${sessionId}`,
+        );
 
         if (status?.payment_status === "paid") {
-          const units = Number(status?.units ?? 0);
+          const units =
+            Number(status?.unit_credits ?? status?.units ?? 0) ||
+            getPackageUnits(purchasingId);
           toast.dismiss("pay");
           toast.success(
             `Payment confirmed — ${units.toLocaleString()} units added!`,
@@ -289,7 +316,7 @@ const Dashboard = () => {
         setTimeout(() => pollPayment(sessionId, attempts + 1), 2000);
       }
     },
-    [fetchDashboard],
+    [fetchDashboard, purchasingId],
   );
 
   useEffect(() => {
@@ -337,19 +364,19 @@ const Dashboard = () => {
         cancel_url: `${window.location.origin}/dashboard?checkout=cancel`,
       });
 
-      if (!res?.url) {
+      const redirectUrl = res?.checkout_url || res?.url;
+
+      if (!redirectUrl) {
         throw new Error("Missing checkout URL.");
       }
 
       if (typeof window.location.assign === "function") {
-        window.location.assign(res.url);
+        window.location.assign(redirectUrl);
       } else {
-        window.location.href = res.url;
+        window.location.href = redirectUrl;
       }
     } catch (e) {
-      toast.error(
-        e?.response?.data?.detail || e?.message || "Could not start checkout.",
-      );
+      toast.error(getErrorMessage(e));
       setPurchasingId(null);
     }
   }, []);

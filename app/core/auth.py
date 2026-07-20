@@ -5,6 +5,7 @@ import hmac
 import logging
 from typing import Any, cast
 
+import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import APIKeyHeader
 
@@ -19,15 +20,15 @@ from app.core.settings import get_settings
 
 _logger = logging.getLogger(__name__)
 
-
 API_KEY_HEADER_NAME = "X-API-Key"
 SESSION_ID_HEADER_NAME = "X-Session-Id"
 ORG_ID_HEADER_NAME = "X-Org-Id"
-
+AUTHORIZATION_HEADER_NAME = "Authorization"
 
 api_key_header = APIKeyHeader(name=API_KEY_HEADER_NAME, auto_error=False)
 session_id_header = APIKeyHeader(name=SESSION_ID_HEADER_NAME, auto_error=False)
 org_id_header = APIKeyHeader(name=ORG_ID_HEADER_NAME, auto_error=False)
+authorization_header = APIKeyHeader(name=AUTHORIZATION_HEADER_NAME, auto_error=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +45,15 @@ class AuthContext:
     auth_method: str | None = None
     key_type: str = "personal"
     metadata: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class BearerAuthContext:
+    token: str
+    principal_id: str
+    claims: dict[str, Any]
+    auth_source: str = "supabase_jwt"
+    auth_method: str = "bearer_jwt"
 
 
 def _get_settings(request: Request) -> Any | None:
@@ -111,6 +121,26 @@ def get_jwt_secret(request: Request) -> str | None:
 
 
 _get_jwt_secret = get_jwt_secret
+
+
+def get_supabase_jwt_secret(request: Request) -> str | None:
+    settings = _get_settings(request)
+    if settings is None:
+        return None
+
+    for attr_name in (
+        "supabase_jwt_secret",
+        "SUPABASE_JWT_SECRET",
+        "jwt_secret",
+    ):
+        value = _clean_optional_string(getattr(settings, attr_name, None))
+        if value and value not in {
+            "changeme-jwt-32-chars-minimum!!",
+            "changeme-32-chars-minimum!!!!!",
+        }:
+            return value
+
+    return None
 
 
 def _touch_record_if_possible(record: APIKeyRecord) -> APIKeyRecord:
@@ -300,14 +330,74 @@ def _coerce_key_type(record: APIKeyRecord | None) -> str:
     return value if value else "personal"
 
 
+def _extract_bearer_token(raw_authorization: str | None) -> str | None:
+    value = _clean_optional_string(raw_authorization)
+    if value is None:
+        return None
+    if not value.lower().startswith("bearer "):
+        return None
+    token = value[7:].strip()
+    return token or None
+
+
+def get_bearer_context(
+    request: Request,
+    raw_authorization: str | None = Depends(authorization_header),
+) -> BearerAuthContext | None:
+    token = _extract_bearer_token(raw_authorization)
+    if token is None:
+        return None
+
+    secret = get_supabase_jwt_secret(request)
+    if not secret:
+        _logger.warning("Missing SUPABASE_JWT_SECRET for Bearer auth")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="SUPABASE_JWT_SECRET is not configured",
+        )
+
+    try:
+        claims = cast(
+            dict[str, Any],
+            jwt.decode(
+                token,
+                secret,
+                algorithms=["HS256"],
+                options={"verify_aud": False},
+            ),
+        )
+    except jwt.PyJWTError as exc:
+        _logger.warning("Invalid Bearer token: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Bearer token",
+        ) from exc
+
+    principal_id = _clean_optional_string(claims.get("sub"))
+    if principal_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Bearer token missing sub claim",
+        )
+
+    return BearerAuthContext(
+        token=token,
+        principal_id=principal_id,
+        claims=claims,
+    )
+
+
 def get_api_key(
     request: Request,
     provided_api_key: str | None = Depends(api_key_header),
+    bearer_context: BearerAuthContext | None = Depends(get_bearer_context),
 ) -> str | None:
     normalized_api_key = _clean_optional_string(provided_api_key)
     auth_required = _is_auth_required(request)
 
     if normalized_api_key is None:
+        if bearer_context is not None:
+            return None
         if auth_required:
             _logger.warning("Missing API key")
             raise HTTPException(
@@ -349,6 +439,7 @@ def get_api_key(
 def get_auth_context(
     request: Request,
     api_key: str | None = Depends(get_api_key),
+    bearer_context: BearerAuthContext | None = Depends(get_bearer_context),
     session_id: str | None = Depends(session_id_header),
     provided_org_id: str | None = Depends(org_id_header),
 ) -> AuthContext:
@@ -387,6 +478,39 @@ def get_auth_context(
             auth_method=auth_method,
             key_type=resolved_key_type,
             metadata={"header": API_KEY_HEADER_NAME},
+        )
+
+    if bearer_context is not None:
+        metadata: dict[str, str] = {
+            "header": AUTHORIZATION_HEADER_NAME,
+        }
+
+        for claim_name in ("email", "role", "aal", "iss"):
+            claim_value = _clean_optional_string(bearer_context.claims.get(claim_name))
+            if claim_value is not None:
+                metadata[claim_name] = claim_value
+
+        resolved_org_id = _clean_optional_string(provided_org_id)
+
+        for claim_name in ("org_id", "organization_id", "tenant_id"):
+            claim_value = _clean_optional_string(bearer_context.claims.get(claim_name))
+            if claim_value is not None:
+                resolved_org_id = claim_value
+                break
+
+        return AuthContext(
+            api_key=None,
+            principal_type="user",
+            principal_id=bearer_context.principal_id,
+            session_id=normalized_session_id,
+            org_id=resolved_org_id,
+            permissions=(),
+            roles=(),
+            authenticated=True,
+            auth_source=bearer_context.auth_source,
+            auth_method=bearer_context.auth_method,
+            key_type="personal",
+            metadata=metadata,
         )
 
     if _is_auth_required(request):
