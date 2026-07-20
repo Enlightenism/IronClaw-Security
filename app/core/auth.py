@@ -5,9 +5,9 @@ import hmac
 import logging
 from typing import Any, cast
 
-import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import APIKeyHeader
+import jwt
 
 from app.core.apikeys import (
     APIKeyRecord,
