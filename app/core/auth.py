@@ -415,18 +415,20 @@ def get_api_key(
     if registry_record is not None:
         return normalized_api_key
 
-    if not auth_required:
+    if configured_api_key is None and not _has_registry_keys():
+        if auth_required:
+            _logger.warning(
+                "auth_not_configured: auth_required=True but no API keys are configured",
+            )
+            raise AppError(
+                "auth_not_configured",
+                "Authentication is required but no API keys are configured",
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         return normalized_api_key
 
-    if configured_api_key is None and not _has_registry_keys():
-        _logger.warning(
-            "auth_not_configured: auth_required=True but no API keys are configured",
-        )
-        raise AppError(
-            "auth_not_configured",
-            "Authentication is required but no API keys are configured",
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
+    if not auth_required:
+        return normalized_api_key
 
     _logger.warning("Invalid API key")
     raise AppError(
