@@ -396,7 +396,7 @@ def get_api_key(
     auth_required = _is_auth_required(request)
 
     if normalized_api_key is None:
-        if bearer_context is not None:
+        if isinstance(bearer_context, BearerAuthContext):
             return None
         if auth_required:
             _logger.warning("Missing API key")
@@ -482,7 +482,7 @@ def get_auth_context(
             metadata={"header": API_KEY_HEADER_NAME},
         )
 
-    if bearer_context is not None:
+    if isinstance(bearer_context, BearerAuthContext):
         metadata: dict[str, str] = {
             "header": AUTHORIZATION_HEADER_NAME,
         }

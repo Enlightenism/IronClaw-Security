@@ -180,7 +180,7 @@ class TestLooksLikeStaticKey:
 class TestRequireApiKeyEdgePath:
     """
     require_api_key calls registry.authenticate() first; if it returns a record
-    the edge path is never reached.  Patch get_api_key_registry to return a stub
+    the edge path is never reached. Patch get_api_key_registry to return a stub
     whose .authenticate() returns None so the local-registry path never intercepts
     the bearer token before the mocked edge path runs.
 
@@ -278,7 +278,9 @@ class TestRequireApiKeyEdgePath:
         assert "Invalid token" in exc_info.value.detail
 
     @pytest.mark.asyncio
-    async def test_require_api_key_static_prefix_key_ic_personal_rejected_401(self) -> None:
+    async def test_require_api_key_static_prefix_key_ic_personal_rejected_401(
+        self,
+    ) -> None:
         """ic_personal_ keys the registry doesn't recognise must 401, no edge call."""
         registry_stub = _make_registry_stub_returning_none()
         creds = _make_bearer_creds("ic_personal_unknown-key")
@@ -412,7 +414,6 @@ class TestRequireLocalApiKey:
             mock_request.app.state.settings = None
             result = get_api_key(request=mock_request, provided_api_key=raw_key)
 
-        # When auth is not required and a valid registry record is found, key is returned
         assert result == raw_key
 
     def test_get_api_key_returns_none_when_not_required(self) -> None:
@@ -438,12 +439,18 @@ class TestRequireLocalApiKey:
             mock_request = MagicMock(spec=Request)
             mock_request.app.state.settings = None
             with pytest.raises(HTTPException) as exc_info:
-                get_api_key(request=mock_request, provided_api_key=None)
+                get_api_key(
+                    request=mock_request,
+                    provided_api_key=None,
+                    bearer_context=None,
+                )
 
         assert exc_info.value.status_code == 401
         assert "missing" in exc_info.value.detail.lower() or "api key" in exc_info.value.detail.lower()
 
-    def test_get_api_key_raises_app_error_on_invalid_key_when_auth_required(self) -> None:
+    def test_get_api_key_raises_app_error_on_invalid_key_when_auth_required(
+        self,
+    ) -> None:
         with (
             patch("app.core.auth._is_auth_required", return_value=True),
             patch("app.core.auth._extract_configured_api_key", return_value="correct-key"),
@@ -560,7 +567,11 @@ class TestRequireAuthenticated:
 
     @pytest.mark.asyncio
     async def test_unauthenticated_context_raises(self) -> None:
-        ctx = _make_auth_context(authenticated=False, principal_type="anonymous", api_key=None)
+        ctx = _make_auth_context(
+            authenticated=False,
+            principal_type="anonymous",
+            api_key=None,
+        )
         with pytest.raises(AppError) as exc_info:
             await require_authenticated(context=ctx)
         assert exc_info.value.status_code in (401, 403)
@@ -611,13 +622,20 @@ class TestRequireAccessDependency:
             principal_type="platform",
             permissions=("scan:execute",),
         )
-        dep = require_access_dependency(action="scan:execute", permission="scan:execute")
+        dep = require_access_dependency(
+            action="scan:execute",
+            permission="scan:execute",
+        )
         result = await dep(context=ctx)
         assert result is ctx
 
     @pytest.mark.asyncio
     async def test_unauthenticated_raises(self) -> None:
-        ctx = _make_auth_context(authenticated=False, principal_type="anonymous", api_key=None)
+        ctx = _make_auth_context(
+            authenticated=False,
+            principal_type="anonymous",
+            api_key=None,
+        )
         dep = require_access_dependency(action="scan:execute")
         with pytest.raises(AppError) as exc_info:
             await dep(context=ctx)
@@ -634,7 +652,10 @@ class TestRequireAccessDependency:
     @pytest.mark.asyncio
     async def test_dependency_with_roles_platform_bypass(self) -> None:
         ctx = _make_auth_context(authenticated=True, principal_type="platform")
-        dep = require_access_dependency(action="admin:action", roles=("platform_admin",))
+        dep = require_access_dependency(
+            action="admin:action",
+            roles=("platform_admin",),
+        )
         result = await dep(context=ctx)
         assert result is ctx
 
@@ -730,7 +751,10 @@ class TestCompoundDependenciesChain:
         r2 = await dep(context=ctx)
         assert r2 is ctx
 
-        r3 = await require_same_org_dependency(x_org_id="org-chain-01", context=ctx)
+        r3 = await require_same_org_dependency(
+            x_org_id="org-chain-01",
+            context=ctx,
+        )
         assert r3 is ctx
 
     @pytest.mark.asyncio
