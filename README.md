@@ -420,7 +420,7 @@ ordering produces undefined verdict behavior.
 | `GROQ_ENABLED`         | `true`           | Enable Groq-powered analysis passes   |
 | `GROQ_API_KEY`         | _(empty)_        | **REQUIRED when `GROQ_ENABLED=true`** |
 | `GROQ_MODEL`           | `llama3-8b-8192` | Groq model identifier                 |
-| `GROQ_TIMEOUT_SECONDS` | `60.0`           | Per-request timeout in seconds        |
+| `GROQ_TIMEOUT_SECONDS` | `120.0`           | Per-request timeout in seconds        |
 
 ### OpenAI
 
