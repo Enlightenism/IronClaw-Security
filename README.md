@@ -486,7 +486,8 @@ of the core v1 shipping path.
 
 ## Notes
 
-- Keep the public story centered on the locked v1 mission.
+- Keep the public story centered on the locked v1 mission and what it can do for
+  all users and companies
 - Keep route documentation aligned with the actual mounted routers in
   `app/main.py`.
 - Do not document broad legacy surfaces as if they are part of the release path.
