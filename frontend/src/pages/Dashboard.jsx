@@ -362,6 +362,7 @@ const Dashboard = () => {
         package_id: packageId,
         success_url: `${window.location.origin}/dashboard?checkout=success`,
         cancel_url: `${window.location.origin}/dashboard?checkout=cancel`,
+              organization_id: data?.organization_id ?? "org-001",
       });
 
       const redirectUrl = res?.checkout_url || res?.url;
@@ -379,7 +380,7 @@ const Dashboard = () => {
       toast.error(getErrorMessage(e));
       setPurchasingId(null);
     }
-  }, []);
+    }, [data]);
 
   const handleSignOut = useCallback(() => {
     logout();
