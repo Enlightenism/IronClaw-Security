@@ -401,7 +401,7 @@ ordering produces undefined verdict behavior.
 
 | Key                         | Default   | Notes                                                                       |
 | --------------------------- | --------- | --------------------------------------------------------------------------- |
-| `AUTH_REQUIRED`             | `false`   | Set `true` in staging and production                                        |
+| `AUTH_REQUIRED`             | `true`    | Set `true` in staging and production                                        |
 | `API_KEY`                   | _(empty)_ | General-purpose key for standard callers                                    |
 | `ADMIN_API_KEY`             | _(empty)_ | Elevated key for admin operations                                           |
 | `PLATFORM_API_KEY`          | _(empty)_ | Key for trusted platform integrations                                       |
@@ -420,7 +420,7 @@ ordering produces undefined verdict behavior.
 | `GROQ_ENABLED`         | `true`           | Enable Groq-powered analysis passes   |
 | `GROQ_API_KEY`         | _(empty)_        | **REQUIRED when `GROQ_ENABLED=true`** |
 | `GROQ_MODEL`           | `llama3-8b-8192` | Groq model identifier                 |
-| `GROQ_TIMEOUT_SECONDS` | `120.0`           | Per-request timeout in seconds        |
+| `GROQ_TIMEOUT_SECONDS` | `120.0`          | Per-request timeout in seconds        |
 
 ### OpenAI
 
