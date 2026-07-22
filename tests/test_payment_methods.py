@@ -87,7 +87,7 @@ def test_get_payment_methods_full_response_has_stripe_key_when_configured(client
     monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
     monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Test Org")
     monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
-    monkeypatch.setenv("STRIPE_API_KEY", "sk_test_abc123")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_abc123")
 
     body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
     assert "stripe" in body
@@ -104,7 +104,7 @@ def test_get_payment_methods_stripe_sourced_from_get_stripe_status(client: TestC
     monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
     monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Test Org")
     monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
-    monkeypatch.setenv("STRIPE_API_KEY", "sk_live_xyz789")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_xyz789")
 
     body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
 
@@ -121,7 +121,7 @@ def test_get_payment_methods_stripe_unconfigured_when_no_key(client: TestClient,
     monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
     monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Test Org")
     monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
-    monkeypatch.delenv("STRIPE_API_KEY", raising=False)
+    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
 
     body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
     assert body["stripe"]["configured"] is False
@@ -135,7 +135,7 @@ def test_get_payment_methods_stripe_test_mode(client: TestClient, monkeypatch: p
     monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
     monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Test Org")
     monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
-    monkeypatch.setenv("STRIPE_API_KEY", "sk_test_abc123")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_abc123")
 
     body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
     assert body["stripe"]["configured"] is True
@@ -149,7 +149,7 @@ def test_get_payment_methods_stripe_live_mode(client: TestClient, monkeypatch: p
     monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
     monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Test Org")
     monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
-    monkeypatch.setenv("STRIPE_API_KEY", "sk_live_prodkey")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_prodkey")
 
     body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
     assert body["stripe"]["configured"] is True
@@ -168,7 +168,7 @@ def test_get_payment_methods_stripe_mode_scalar_consistent_with_stripe_block_tes
     monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
     monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Test Org")
     monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
-    monkeypatch.setenv("STRIPE_API_KEY", "sk_test_abc123")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_abc123")
 
     body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
     assert body["stripe_mode"] == body["stripe"]["mode"]
@@ -181,7 +181,7 @@ def test_get_payment_methods_stripe_mode_scalar_consistent_with_stripe_block_liv
     monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
     monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Test Org")
     monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
-    monkeypatch.setenv("STRIPE_API_KEY", "sk_live_prodkey")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_prodkey")
 
     body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
     assert body["stripe_mode"] == body["stripe"]["mode"]
@@ -194,7 +194,7 @@ def test_get_payment_methods_stripe_mode_scalar_is_none_when_unconfigured(client
     monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
     monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Test Org")
     monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
-    monkeypatch.delenv("STRIPE_API_KEY", raising=False)
+    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
 
     body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
     assert body["stripe_mode"] is None

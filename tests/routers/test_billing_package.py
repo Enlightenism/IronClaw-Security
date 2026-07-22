@@ -85,19 +85,19 @@ def client() -> TestClient:
 
 @pytest.fixture()
 def no_stripe_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    monkeypatch.delenv("STRIPE_API_KEY", raising=False)
+    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
     yield
 
 
 @pytest.fixture()
 def live_stripe_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    monkeypatch.setenv("STRIPE_API_KEY", "sk_live_test_ironclaw_fixture_key")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_test_ironclaw_fixture_key")
     yield
 
 
 @pytest.fixture()
 def test_stripe_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    monkeypatch.setenv("STRIPE_API_KEY", "sk_test_ironclaw_fixture_key")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_ironclaw_fixture_key")
     yield
 
 

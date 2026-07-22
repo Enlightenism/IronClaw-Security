@@ -607,28 +607,28 @@ class TestBrandDisplay_billing_pm:
 
 class TestStripeMode_billing_pm:
     def test_live_key_returns_live(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_API_KEY": "sk_live_abc123"}, clear=False):
+        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "sk_live_abc123"}, clear=False):
             assert _stripe_mode() == "live"
 
     def test_test_key_returns_test(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_API_KEY": "sk_test_abc123"}, clear=False):
+        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "sk_test_abc123"}, clear=False):
             assert _stripe_mode() == "test"
 
     def test_no_key_returns_none(self) -> None:
-        env = {k: v for k, v in os.environ.items() if k != "STRIPE_API_KEY"}
+        env = {k: v for k, v in os.environ.items() if k != "STRIPE_SECRET_KEY"}
         with patch.dict(os.environ, env, clear=True):
             assert _stripe_mode() is None
 
     def test_empty_key_returns_none(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_API_KEY": ""}, clear=False):
+        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": ""}, clear=False):
             assert _stripe_mode() is None
 
     def test_invalid_prefix_returns_none(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_API_KEY": "pk_live_notakey"}, clear=False):
+        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "pk_live_notakey"}, clear=False):
             assert _stripe_mode() is None
 
     def test_return_type_is_str_or_none(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_API_KEY": "sk_live_xyz"}, clear=False):
+        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "sk_live_xyz"}, clear=False):
             result = _stripe_mode()
             assert result is None or isinstance(result, str)
 
@@ -679,40 +679,40 @@ class TestStripeWebhookSecretNote_billing_pm:
 
 class TestStripeConnectionNote_billing_pm:
     def test_live_key_returns_live_note(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_API_KEY": "sk_live_abc123"}, clear=False):
+        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "sk_live_abc123"}, clear=False):
             note = _stripe_connection_note()
         assert "live" in note
         assert "connected" in note.lower()
 
     def test_test_key_returns_test_note(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_API_KEY": "sk_test_abc123"}, clear=False):
+        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "sk_test_abc123"}, clear=False):
             note = _stripe_connection_note()
         assert "test" in note
         assert "connected" in note.lower()
 
     def test_no_key_returns_unconfigured_note(self) -> None:
-        env = {k: v for k, v in os.environ.items() if k != "STRIPE_API_KEY"}
+        env = {k: v for k, v in os.environ.items() if k != "STRIPE_SECRET_KEY"}
         with patch.dict(os.environ, env, clear=True):
             note = _stripe_connection_note()
         assert "not configured" in note.lower() or "unavailable" in note.lower()
 
     def test_empty_key_returns_unconfigured_note(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_API_KEY": ""}, clear=False):
+        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": ""}, clear=False):
             note = _stripe_connection_note()
         assert "not configured" in note.lower() or "unavailable" in note.lower()
 
     def test_invalid_key_returns_unconfigured_note(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_API_KEY": "pk_live_notakey"}, clear=False):
+        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "pk_live_notakey"}, clear=False):
             note = _stripe_connection_note()
         assert "not configured" in note.lower() or "unavailable" in note.lower()
 
     def test_live_note_contains_mode_live(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_API_KEY": "sk_live_xyz"}, clear=False):
+        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "sk_live_xyz"}, clear=False):
             note = _stripe_connection_note()
         assert "mode: live" in note
 
     def test_test_note_contains_mode_test(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_API_KEY": "sk_test_xyz"}, clear=False):
+        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "sk_test_xyz"}, clear=False):
             note = _stripe_connection_note()
         assert "mode: test" in note
 

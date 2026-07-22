@@ -444,28 +444,28 @@ class TestPackageCatalogueEntryReload:
 
 class TestStripeMode:
     def test_returns_live_for_sk_live_key(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_API_KEY": "sk_live_abc123"}, clear=False):
+        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "sk_live_abc123"}, clear=False):
             assert _stripe_mode() == "live"
 
     def test_returns_test_for_sk_test_key(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_API_KEY": "sk_test_abc123"}, clear=False):
+        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "sk_test_abc123"}, clear=False):
             assert _stripe_mode() == "test"
 
     def test_returns_none_for_empty_key(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_API_KEY": ""}, clear=False):
+        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": ""}, clear=False):
             assert _stripe_mode() is None
 
     def test_returns_none_for_missing_key(self) -> None:
-        env = {k: v for k, v in os.environ.items() if k != "STRIPE_API_KEY"}
+        env = {k: v for k, v in os.environ.items() if k != "STRIPE_SECRET_KEY"}
         with patch.dict(os.environ, env, clear=True):
             assert _stripe_mode() is None
 
     def test_returns_none_for_invalid_prefix(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_API_KEY": "pk_live_abc123"}, clear=False):
+        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "pk_live_abc123"}, clear=False):
             assert _stripe_mode() is None
 
     def test_returns_none_for_rk_prefix(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_API_KEY": "rk_live_somekey"}, clear=False):
+        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "rk_live_somekey"}, clear=False):
             assert _stripe_mode() is None
 
 
@@ -476,28 +476,28 @@ class TestStripeMode:
 
 class TestStripeConnectionNote:
     def test_live_mode_note(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_API_KEY": "sk_live_abc"}, clear=False):
+        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "sk_live_abc"}, clear=False):
             note = _stripe_connection_note()
         assert "live" in note.lower()
         assert "real payment" in note.lower() or "enabled" in note.lower()
 
     def test_test_mode_note(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_API_KEY": "sk_test_abc"}, clear=False):
+        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "sk_test_abc"}, clear=False):
             note = _stripe_connection_note()
         assert "test" in note.lower()
 
     def test_unconfigured_note(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_API_KEY": ""}, clear=False):
+        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": ""}, clear=False):
             note = _stripe_connection_note()
         assert "not configured" in note.lower() or "unavailable" in note.lower()
 
     def test_live_note_does_not_mention_test_mode(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_API_KEY": "sk_live_abc"}, clear=False):
+        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "sk_live_abc"}, clear=False):
             note = _stripe_connection_note()
         assert "test mode" not in note.lower()
 
     def test_test_note_contains_switch_to_live_warning(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_API_KEY": "sk_test_abc"}, clear=False):
+        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "sk_test_abc"}, clear=False):
             note = _stripe_connection_note()
         assert "live" in note.lower() or "production" in note.lower()
 

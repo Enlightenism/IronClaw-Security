@@ -79,7 +79,7 @@ def _get_environment() -> str:
 
 
 def _stripe_mode() -> str | None:
-    key = os.environ.get("STRIPE_API_KEY", "").strip()
+    key = os.environ.get("STRIPE_SECRET_KEY", "").strip()
     if key.startswith("sk_live_"):
         return "live"
     if key.startswith("sk_test_"):

@@ -83,21 +83,21 @@ def test_billing_overview_stripe_note_is_non_empty_string(client: TestClient) ->
 
 
 def test_billing_overview_stripe_unconfigured_when_no_key_set(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("STRIPE_API_KEY", raising=False)
+    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
     body = client.get("/ui/billing/overview").json()
     assert body["stripe"]["configured"] is False
     assert body["stripe"]["mode"] == "unconfigured"
 
 
 def test_billing_overview_stripe_test_mode_when_test_key(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("STRIPE_API_KEY", "sk_test_abc123")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_abc123")
     body = client.get("/ui/billing/overview").json()
     assert body["stripe"]["configured"] is True
     assert body["stripe"]["mode"] == "test"
 
 
 def test_billing_overview_stripe_live_mode_when_live_key(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("STRIPE_API_KEY", "sk_live_abc123")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_abc123")
     body = client.get("/ui/billing/overview").json()
     assert body["stripe"]["configured"] is True
     assert body["stripe"]["mode"] == "live"

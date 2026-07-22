@@ -124,12 +124,12 @@ class StripeStatus(BaseModel):
 
 def _get_stripe_status() -> StripeStatus:
     """
-    Inspect STRIPE_API_KEY and return a structured StripeStatus.
+    Inspect STRIPE_SECRET_KEY and return a structured StripeStatus.
     - sk_live_* → live mode (production)
     - sk_test_* → test mode
     - anything else → unconfigured
     """
-    key = os.environ.get("STRIPE_API_KEY", "").strip()
+    key = os.environ.get("STRIPE_SECRET_KEY", "").strip()
     if key.startswith("sk_live_"):
         return StripeStatus(
             configured=True,
