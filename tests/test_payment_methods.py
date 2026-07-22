@@ -644,7 +644,7 @@ def test_get_payment_methods_notes_include_stripe_note(client: TestClient, monke
     monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
     monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Alpha Org")
     monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
-    monkeypatch.delenv("STRIPE_API_KEY", raising=False)
+    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
 
     body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
     combined_notes = " ".join(body["notes"]).lower()
