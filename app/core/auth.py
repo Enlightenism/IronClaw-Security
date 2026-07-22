@@ -20,12 +20,10 @@ from app.core.settings import get_settings
 
 _logger = logging.getLogger(__name__)
 
-
 API_KEY_HEADER_NAME = "X-API-Key"
 SESSION_ID_HEADER_NAME = "X-Session-Id"
 ORG_ID_HEADER_NAME = "X-Org-Id"
 AUTHORIZATION_HEADER_NAME = "Authorization"
-
 
 api_key_header = APIKeyHeader(name=API_KEY_HEADER_NAME, auto_error=False)
 session_id_header = APIKeyHeader(name=SESSION_ID_HEADER_NAME, auto_error=False)
@@ -90,6 +88,10 @@ def _coerce_optional_bool(value: object) -> bool | None:
     return None
 
 
+def _is_preflight_request(request: Request) -> bool:
+    return request.method.upper() == "OPTIONS" and bool(request.headers.get("origin")) and bool(request.headers.get("access-control-request-method"))
+
+
 def _extract_configured_api_key(request: Request) -> str | None:
     settings = _get_settings(request)
     if settings is None:
@@ -115,6 +117,9 @@ def get_secret_key(request: Request) -> str | None:
     settings = _get_settings(request)
     if settings is None:
         return None
+    effective_value = _clean_optional_string(getattr(settings, "effective_secret_key", None))
+    if effective_value is not None:
+        return effective_value
     value = _clean_optional_string(getattr(settings, "secret_key", None))
     if value and value != "changeme-32-chars-minimum!!!!!":
         return value
@@ -128,6 +133,9 @@ def get_jwt_secret(request: Request) -> str | None:
     settings = _get_settings(request)
     if settings is None:
         return None
+    effective_value = _clean_optional_string(getattr(settings, "effective_jwt_secret", None))
+    if effective_value is not None:
+        return effective_value
     value = _clean_optional_string(getattr(settings, "jwt_secret", None))
     if value and value != "changeme-jwt-32-chars-minimum!!":
         return value
@@ -145,16 +153,12 @@ def get_supabase_jwt_secret(request: Request) -> str | None:
     for attr_name in (
         "supabase_jwt_secret",
         "SUPABASE_JWT_SECRET",
-        "jwt_secret",
     ):
         value = _clean_optional_string(getattr(settings, attr_name, None))
-        if value and value not in {
-            "changeme-jwt-32-chars-minimum!!",
-            "changeme-32-chars-minimum!!!!!",
-        }:
+        if value:
             return value
 
-    return None
+    return get_jwt_secret(request)
 
 
 def _touch_record_if_possible(record: APIKeyRecord) -> APIKeyRecord:
@@ -254,6 +258,9 @@ def _has_registry_keys() -> bool:
 
 
 def _is_auth_required(request: Request) -> bool:
+    if _is_preflight_request(request):
+        return False
+
     settings = _get_settings(request)
     if settings is None:
         return _has_registry_keys()
@@ -358,6 +365,9 @@ def get_bearer_context(
     request: Request,
     raw_authorization: str | None = Depends(authorization_header),
 ) -> BearerAuthContext | None:
+    if _is_preflight_request(request):
+        return None
+
     token = _extract_bearer_token(raw_authorization)
     if token is None:
         return None
@@ -415,6 +425,9 @@ def get_api_key(
     provided_api_key: str | None = Depends(api_key_header),
     bearer_context: BearerAuthContext | None = Depends(get_bearer_context),
 ) -> str | None:
+    if _is_preflight_request(request):
+        return None
+
     normalized_api_key = _clean_optional_string(provided_api_key)
     auth_required = _is_auth_required(request)
 
@@ -467,6 +480,20 @@ def get_auth_context(
     session_id: str | None = Depends(session_id_header),
     provided_org_id: str | None = Depends(org_id_header),
 ) -> AuthContext:
+    if _is_preflight_request(request):
+        return AuthContext(
+            api_key=None,
+            principal_type="preflight",
+            principal_id=None,
+            session_id=None,
+            org_id=None,
+            authenticated=False,
+            auth_source="preflight",
+            auth_method=None,
+            key_type="personal",
+            metadata={"request_method": "OPTIONS"},
+        )
+
     normalized_session_id = _clean_optional_string(session_id)
     normalized_api_key = _clean_optional_string(api_key)
 
@@ -560,12 +587,16 @@ def require_api_key(
     request: Request,
     api_key: str | None = Depends(get_api_key),
 ) -> str | None:
+    if _is_preflight_request(request):
+        return None
     return api_key
 
 
 def require_auth_context(
     context: AuthContext = Depends(get_auth_context),
 ) -> AuthContext:
+    if context.principal_type == "preflight":
+        return context
     if not context.authenticated:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

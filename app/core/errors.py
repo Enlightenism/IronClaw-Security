@@ -85,6 +85,10 @@ def _request_id_from_request(request: Request) -> str | None:
     return None
 
 
+def _is_preflight_request(request: Request) -> bool:
+    return request.method.upper() == "OPTIONS" and bool(request.headers.get("origin")) and bool(request.headers.get("access-control-request-method"))
+
+
 def _sanitize_validation_errors(errors: list[Any]) -> list[dict[str, Any]]:
     sanitized: list[dict[str, Any]] = []
     for err in errors:
@@ -104,29 +108,42 @@ def _sanitize_validation_errors(errors: list[Any]) -> list[dict[str, Any]]:
 
 
 def _is_value_error(errors: list[Any]) -> bool:
-    """Return True if ALL errors are value_error type (model_validator failures)."""
     if not errors:
         return False
     return all(isinstance(e, dict) and e.get("type") == "value_error" for e in errors)
 
 
 def _is_field_level_value_error(errors: list[Any]) -> bool:
-    """Return True if any value_error originates from a named field (field_validator).
-
-    field_validator errors have loc with more than one element beyond 'body',
-    e.g. ("body", "action_type") — distinguishing them from model_validator
-    errors which land at ("body",) or shallower.
-    """
     for e in errors:
         if not isinstance(e, dict):
             continue
         if e.get("type") != "value_error":
             continue
         loc = e.get("loc", ())
-        # field_validator: loc has a field name as last element (len >= 2 or last is str field)
         if len(loc) >= 2:
             return True
     return False
+
+
+def _status_for_http_exception(exc: HTTPException) -> int:
+    try:
+        status_code = int(exc.status_code)
+    except Exception:
+        return status.HTTP_500_INTERNAL_SERVER_ERROR
+
+    if 100 <= status_code <= 599:
+        return status_code
+    return status.HTTP_500_INTERNAL_SERVER_ERROR
+
+
+def _message_from_http_exception_detail(detail: object) -> str:
+    if isinstance(detail, str):
+        return detail
+    if isinstance(detail, Mapping):
+        return str(detail.get("message") or detail.get("detail") or detail.get("error_description") or "Request failed")
+    if detail is None:
+        return "Request failed"
+    return str(detail)
 
 
 def build_error_response(
@@ -167,6 +184,7 @@ def _log_exception(
             "http_method": request.method,
             "request_id": _request_id_from_request(request),
             "details": dict(details or {}),
+            "is_preflight": _is_preflight_request(request),
         },
         exc_info=exc_info,
     )
@@ -221,30 +239,25 @@ async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     logger = get_logger("ironclaw.errors")
 
-    if isinstance(exc.detail, str):
-        message = exc.detail
-        details: dict[str, Any] = {}
-    elif isinstance(exc.detail, Mapping):
-        details = dict(exc.detail)
-        message = str(details.get("message") or "Request failed")
-    else:
-        message = "Request failed"
-        details = {}
+    status_code = _status_for_http_exception(exc)
+    message = _message_from_http_exception_detail(exc.detail)
+    log_details = dict(exc.detail) if isinstance(exc.detail, Mapping) else {}
 
     _log_exception(
         logger,
-        level=logging.WARNING,
+        level=logging.WARNING if status_code < 500 else logging.ERROR,
         event="http_exception",
         request=request,
-        status_code=exc.status_code,
+        status_code=status_code,
         message=message,
-        error="http_error",
-        details=details,
+        error="http_exception",
+        details=log_details,
     )
 
     return JSONResponse(
-        status_code=exc.status_code,
+        status_code=status_code,
         content={"detail": exc.detail},
+        headers=exc.headers,
     )
 
 
@@ -257,10 +270,11 @@ async def validation_exception_handler(
     sanitized_errors = _sanitize_validation_errors(raw_errors)
     details: dict[str, Any] = {"errors": sanitized_errors}
 
-    # model_validator raises value_error at model root → 400 Bad Request.
-    # field_validator raises value_error at field level (loc len >= 2) → 422.
-    # All other validation errors → 422.
-    if _is_value_error(raw_errors) and not _is_field_level_value_error(raw_errors):
+    if _is_preflight_request(request):
+        response_status = status.HTTP_400_BAD_REQUEST
+        error_code = "bad_request"
+        message = "CORS preflight validation failed"
+    elif _is_value_error(raw_errors) and not _is_field_level_value_error(raw_errors):
         response_status = status.HTTP_400_BAD_REQUEST
         error_code = "bad_request"
         message = "Request validation failed"

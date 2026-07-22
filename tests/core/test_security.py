@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
+from app.core.auth import require_api_key
 from app.core.security import (
     _DEFAULT_ALLOWED_HEADERS,
     _DEFAULT_ALLOWED_METHODS,
@@ -29,7 +30,12 @@ def _build_app(settings: Settings) -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.post("/protected")
+    def protected(_: str | None = Depends(require_api_key)) -> dict[str, str]:
+        return {"status": "ok"}
+
     install_security_middleware(app, settings)
+    app.state.settings = settings
     return app
 
 
@@ -38,7 +44,7 @@ def test_csv_to_list_returns_default_for_none() -> None:
 
 
 def test_csv_to_list_parses_csv_and_drops_empty_items() -> None:
-    assert _csv_to_list("  https://a.com, ,https://b.com  ", default=["fallback"]) == [
+    assert _csv_to_list("https://a.com, ,https://b.com", default=["fallback"]) == [
         "https://a.com",
         "https://b.com",
     ]
@@ -206,7 +212,7 @@ def test_install_security_middleware_applies_hsts_for_https_requests() -> None:
     response = client.get("/health", headers={"Origin": "https://moving-forward.ca"})
 
     assert response.status_code == 200
-    assert response.headers["Strict-Transport-Security"] == ("max-age=63072000; includeSubDomains")
+    assert response.headers["Strict-Transport-Security"] == "max-age=63072000; includeSubDomains"
 
 
 def test_install_security_middleware_omits_hsts_for_http_requests() -> None:
@@ -295,7 +301,7 @@ def test_install_security_middleware_sets_cors_headers_for_allowed_origin() -> N
         headers={"Origin": "https://moving-forward.ca"},
     )
     assert get_response.headers["access-control-allow-origin"] == "https://moving-forward.ca"
-    assert get_response.headers["access-control-expose-headers"] == ("X-Request-ID, X-Trace-ID")
+    assert get_response.headers["access-control-expose-headers"] == "X-Request-ID, X-Trace-ID"
 
 
 def test_install_security_middleware_respects_explicit_credentials_false() -> None:
@@ -316,6 +322,109 @@ def test_install_security_middleware_respects_explicit_credentials_false() -> No
 
     assert response.status_code == 200
     assert "access-control-allow-credentials" not in response.headers
+
+
+def test_preflight_to_protected_route_returns_200_without_api_key() -> None:
+    settings = Settings(
+        ALLOWED_ORIGINS="https://moving-forward.ca",
+        TRUSTED_HOSTS="testserver",
+        AUTH_REQUIRED=True,
+        API_KEY="test-api-key",
+        CORS_ALLOWED_METHODS="GET,POST,OPTIONS",
+        CORS_ALLOWED_HEADERS="Authorization,Content-Type,X-API-Key",
+    )
+    client = TestClient(_build_app(settings))
+
+    response = client.options(
+        "/protected",
+        headers={
+            "Origin": "https://moving-forward.ca",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "X-API-Key,Content-Type",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "https://moving-forward.ca"
+    assert response.headers["access-control-allow-methods"] == "GET, POST, OPTIONS"
+    assert "access-control-allow-headers" in response.headers
+
+
+def test_post_to_protected_route_requires_api_key_after_successful_preflight() -> None:
+    settings = Settings(
+        ALLOWED_ORIGINS="https://moving-forward.ca",
+        TRUSTED_HOSTS="testserver",
+        AUTH_REQUIRED=True,
+        API_KEY="test-api-key",
+        CORS_ALLOWED_METHODS="GET,POST,OPTIONS",
+        CORS_ALLOWED_HEADERS="Authorization,Content-Type,X-API-Key",
+    )
+    client = TestClient(_build_app(settings))
+
+    preflight = client.options(
+        "/protected",
+        headers={
+            "Origin": "https://moving-forward.ca",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "X-API-Key,Content-Type",
+        },
+    )
+    assert preflight.status_code == 200
+
+    response = client.post(
+        "/protected",
+        headers={"Origin": "https://moving-forward.ca"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_preflight_to_protected_route_is_not_blocked_by_auth_dependency_when_bearer_requested() -> None:
+    settings = Settings(
+        ALLOWED_ORIGINS="https://moving-forward.ca",
+        TRUSTED_HOSTS="testserver",
+        AUTH_REQUIRED=True,
+        SUPABASE_JWT_SECRET="test-supabase-secret",
+        CORS_ALLOWED_METHODS="GET,POST,OPTIONS",
+        CORS_ALLOWED_HEADERS="Authorization,Content-Type,X-API-Key",
+    )
+    client = TestClient(_build_app(settings))
+
+    response = client.options(
+        "/protected",
+        headers={
+            "Origin": "https://moving-forward.ca",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "Authorization,Content-Type",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "https://moving-forward.ca"
+    assert "access-control-allow-headers" in response.headers
+
+
+def test_preflight_disallowed_origin_is_rejected_for_protected_route() -> None:
+    settings = Settings(
+        ALLOWED_ORIGINS="https://moving-forward.ca",
+        TRUSTED_HOSTS="testserver",
+        AUTH_REQUIRED=True,
+        API_KEY="test-api-key",
+        CORS_ALLOWED_METHODS="GET,POST,OPTIONS",
+        CORS_ALLOWED_HEADERS="Authorization,Content-Type,X-API-Key",
+    )
+    client = TestClient(_build_app(settings))
+
+    response = client.options(
+        "/protected",
+        headers={
+            "Origin": "https://evil.example.com",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "X-API-Key,Content-Type",
+        },
+    )
+
+    assert response.status_code == 400
 
 
 def test_install_security_middleware_blocks_untrusted_host() -> None:

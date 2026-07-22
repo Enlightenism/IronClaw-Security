@@ -95,6 +95,14 @@ def _normalize_unique(values: Sequence[str]) -> list[str]:
     return normalized
 
 
+def _normalize_methods(values: Sequence[str]) -> list[str]:
+    return _normalize_unique([value.upper() for value in values])
+
+
+def _normalize_headers(values: Sequence[str]) -> list[str]:
+    return _normalize_unique(values)
+
+
 def get_allowed_origins(settings: Settings) -> list[str]:
     raw = getattr(settings, "effective_allowed_origins", None)
     origins = _coerce_list(raw, default=["http://localhost"])
@@ -104,19 +112,22 @@ def get_allowed_origins(settings: Settings) -> list[str]:
 def get_allowed_methods(settings: Settings) -> list[str]:
     raw = getattr(settings, "cors_allowed_methods", None)
     methods = _coerce_list(raw, default=_DEFAULT_ALLOWED_METHODS)
-    return _normalize_unique(methods)
+    return _normalize_methods(methods)
 
 
 def get_allowed_headers(settings: Settings) -> list[str]:
     raw = getattr(settings, "cors_allowed_headers", None)
     headers = _coerce_list(raw, default=_DEFAULT_ALLOWED_HEADERS)
-    return _normalize_unique(headers)
+    normalized = _normalize_headers(headers)
+    if "*" in normalized:
+        return ["*"]
+    return normalized
 
 
 def get_exposed_headers(settings: Settings) -> list[str]:
     raw = getattr(settings, "cors_expose_headers", None)
     headers = _coerce_list(raw, default=_DEFAULT_EXPOSE_HEADERS)
-    return _normalize_unique(headers)
+    return _normalize_headers(headers)
 
 
 def get_allowed_hosts(settings: Settings) -> list[str]:
@@ -138,6 +149,21 @@ def install_security_middleware(app: FastAPI, settings: Settings) -> None:
     headers = get_allowed_headers(settings)
     exposed_headers = get_exposed_headers(settings)
     hosts = get_allowed_hosts(settings)
+    allow_credentials = should_allow_credentials(settings, origins)
+
+    if allow_credentials:
+        methods = [method for method in methods if method != "*"] or list(_DEFAULT_ALLOWED_METHODS)
+        headers = [header for header in headers if header != "*"] or list(_DEFAULT_ALLOWED_HEADERS)
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=allow_credentials,
+        allow_methods=methods,
+        allow_headers=headers,
+        expose_headers=exposed_headers,
+        max_age=3600,
+    )
 
     app.add_middleware(
         TrustedHostMiddleware,
@@ -152,13 +178,4 @@ def install_security_middleware(app: FastAPI, settings: Settings) -> None:
         SecurityHeadersMiddleware,
         include_hsts=include_hsts,
         csp=normalized_csp,
-    )
-
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=should_allow_credentials(settings, origins),
-        allow_methods=methods,
-        allow_headers=headers,
-        expose_headers=exposed_headers,
     )
