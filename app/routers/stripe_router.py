@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
 from app.core.auth import AuthContext, get_auth_context
+from app.core.settings import get_settings
 from app.services.secrets_vault import vault
 from app.services.stripe_service import (
     PACKAGE_CATALOGUE,
@@ -127,6 +128,57 @@ def _unit_credits_for_package(package_id: str) -> int:
     return units
 
 
+def _coerce_optional_bool(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    return None
+
+
+def _is_auth_required() -> bool:
+    try:
+        settings = get_settings()
+    except Exception:
+        return True
+    explicit = _coerce_optional_bool(getattr(settings, "auth_required", None))
+    if explicit is not None:
+        return explicit
+    return True
+
+
+def _allow_anonymous_checkout() -> bool:
+    return not _is_auth_required()
+
+
+def _get_optional_auth_context(request: Request) -> AuthContext:
+    try:
+        context = get_auth_context(request)
+    except HTTPException as exc:
+        if _allow_anonymous_checkout() and exc.status_code == status.HTTP_401_UNAUTHORIZED:
+            return AuthContext(
+                api_key=None,
+                principal_type="anonymous",
+                principal_id=None,
+                session_id=None,
+                org_id=None,
+                authenticated=False,
+                auth_source="disabled",
+                auth_method=None,
+                key_type="personal",
+            )
+        raise
+    return context
+
+
+def get_checkout_auth_context(request: Request) -> AuthContext:
+    return _get_optional_auth_context(request)
+
+
 class CheckoutSessionCreateRequest(BaseModel):
     package_id: str | None = Field(
         default=None,
@@ -160,6 +212,10 @@ class CheckoutSessionCreateRequest(BaseModel):
     organization_id: str | None = Field(
         default=None,
         description="Optional frontend fallback org identifier when auth context is unavailable",
+    )
+    organizationId: str | None = Field(
+        default=None,
+        description="Optional frontend camelCase org identifier when auth context is unavailable",
     )
 
     @field_validator("mode")
@@ -203,7 +259,7 @@ class CheckoutSessionCreateRequest(BaseModel):
         normalized = v.strip()
         return normalized or None
 
-    @field_validator("organizationid", "organization_id")
+    @field_validator("organizationid", "organization_id", "organizationId")
     @classmethod
     def normalize_org_fallback(cls, v: str | None) -> str | None:
         if v is None:
@@ -225,6 +281,15 @@ class CustomerCreateRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     organizationid: str | None = Field(default=None)
     organization_id: str | None = Field(default=None)
+    organizationId: str | None = Field(default=None)
+
+    @field_validator("email", "name", "organizationid", "organization_id", "organizationId")
+    @classmethod
+    def normalize_optional_strings(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        normalized = v.strip()
+        return normalized or None
 
 
 class AttachPaymentMethodRequest(BaseModel):
@@ -268,12 +333,12 @@ def _resolve_org_id_from_request(
 
     body_org_id = None
     if body is not None:
-        body_org_id = getattr(body, "organizationid", None) or getattr(body, "organization_id", None)
+        body_org_id = getattr(body, "organizationid", None) or getattr(body, "organization_id", None) or getattr(body, "organizationId", None)
     if isinstance(body_org_id, str) and body_org_id.strip():
         return body_org_id.strip()
 
     if request is not None:
-        query_org_id = request.query_params.get("organizationid") or request.query_params.get("organization_id")
+        query_org_id = request.query_params.get("organizationid") or request.query_params.get("organization_id") or request.query_params.get("organizationId")
         if query_org_id and query_org_id.strip():
             return query_org_id.strip()
 
@@ -290,7 +355,7 @@ def _require_org_id(
         raise _http_400(
             "Organization ID could not be resolved from auth context or request.",
             code="org_id_unresolved",
-            extra={"accepted_fallbacks": ["organizationid", "organization_id"]},
+            extra={"accepted_fallbacks": ["organizationid", "organization_id", "organizationId"]},
         )
     return org_id
 
@@ -742,7 +807,7 @@ async def get_or_create_customer_api(
 async def create_checkout_session(
     body: CheckoutSessionCreateRequest,
     request: Request,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = Depends(get_checkout_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
     org_id = _require_org_id(auth=auth, request=request, body=body)
@@ -798,7 +863,7 @@ async def create_checkout_session(
 async def create_checkout_session_api(
     body: CheckoutSessionCreateRequest,
     request: Request,
-    auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = Depends(get_checkout_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
     return await create_checkout_session(body=body, request=request, auth=auth, svc=svc)

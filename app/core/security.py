@@ -12,7 +12,12 @@ from app.core.settings import Settings
 
 _DEFAULT_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; script-src 'self'; object-src 'none'"
 _DEFAULT_ALLOWED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
-_DEFAULT_ALLOWED_HEADERS = ["Authorization", "Content-Type", "X-API-Key", "X-Request-ID"]
+_DEFAULT_ALLOWED_HEADERS = [
+    "Authorization",
+    "Content-Type",
+    "X-API-Key",
+    "X-Request-ID",
+]
 _DEFAULT_EXPOSE_HEADERS = ["X-Request-ID"]
 
 
@@ -135,15 +140,6 @@ def install_security_middleware(app: FastAPI, settings: Settings) -> None:
     hosts = get_allowed_hosts(settings)
 
     app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=should_allow_credentials(settings, origins),
-        allow_methods=methods,
-        allow_headers=headers,
-        expose_headers=exposed_headers,
-    )
-
-    app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=hosts,
     )
@@ -156,4 +152,13 @@ def install_security_middleware(app: FastAPI, settings: Settings) -> None:
         SecurityHeadersMiddleware,
         include_hsts=include_hsts,
         csp=normalized_csp,
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=should_allow_credentials(settings, origins),
+        allow_methods=methods,
+        allow_headers=headers,
+        expose_headers=exposed_headers,
     )

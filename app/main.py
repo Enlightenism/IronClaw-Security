@@ -150,6 +150,29 @@ def _install_openapi_factory(app: FastAPI) -> None:
     app.openapi = custom_openapi
 
 
+def _coerce_optional_bool(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    return None
+
+
+def _is_auth_required() -> bool:
+    try:
+        settings = get_settings()
+    except Exception:
+        return True
+    explicit = _coerce_optional_bool(getattr(settings, "auth_required", None))
+    if explicit is not None:
+        return explicit
+    return True
+
+
 def _protected_dependencies() -> list[Any]:
     require_api_key = _optional_attr("app.core.auth", "require_api_key")
     if require_api_key is None:
@@ -188,7 +211,28 @@ def _public_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (_optional_router("app.api.router"), {}),
         (_optional_router("app.api.actionusage"), {}),
         (_optional_router("app.api.region_status"), {}),
+        (stripe_webhook_router, {}),
         (stripe_webhook_router, {"prefix": "/api"}),
+    ]
+
+
+def _stripe_router_configs() -> list[tuple[Any, dict[str, Any]]]:
+    stripe_router = _optional_router("app.routers.stripe_router")
+    if stripe_router is None:
+        return []
+
+    dependencies = _protected_dependencies()
+    auth_required = _is_auth_required()
+
+    if auth_required:
+        return [
+            (stripe_router, {"dependencies": dependencies}),
+            (stripe_router, {"prefix": "/api", "dependencies": dependencies}),
+        ]
+
+    return [
+        (stripe_router, {}),
+        (stripe_router, {"prefix": "/api"}),
     ]
 
 
@@ -196,7 +240,6 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
     dependencies = _protected_dependencies()
     agent_dependencies = _agent_protected_dependencies("agent_id")
     action_execute_router = _optional_router("app.api.action_execute")
-    stripe_router = _optional_router("app.routers.stripe_router")
     return [
         (_optional_router("app.api.requestcontext"), {"dependencies": dependencies}),
         (
@@ -301,14 +344,6 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (
             _optional_router("app.worker.remediation_worker"),
             {"dependencies": dependencies},
-        ),
-        (
-            stripe_router,
-            {"dependencies": dependencies},
-        ),
-        (
-            stripe_router,
-            {"prefix": "/api", "dependencies": dependencies},
         ),
     ]
 
@@ -443,6 +478,7 @@ def _install_all_routers(app: FastAPI) -> None:
 
     _include_router_group(app, _public_router_configs())
     _include_router_group(app, _protected_router_configs())
+    _include_router_group(app, _stripe_router_configs())
     _include_optional_protected_routers(app)
 
     include_ui_routers = _optional_attr("app.ui.router", "include_ui_routers")

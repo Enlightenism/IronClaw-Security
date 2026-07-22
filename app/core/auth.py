@@ -20,10 +20,12 @@ from app.core.settings import get_settings
 
 _logger = logging.getLogger(__name__)
 
+
 API_KEY_HEADER_NAME = "X-API-Key"
 SESSION_ID_HEADER_NAME = "X-Session-Id"
 ORG_ID_HEADER_NAME = "X-Org-Id"
 AUTHORIZATION_HEADER_NAME = "Authorization"
+
 
 api_key_header = APIKeyHeader(name=API_KEY_HEADER_NAME, auto_error=False)
 session_id_header = APIKeyHeader(name=SESSION_ID_HEADER_NAME, auto_error=False)
@@ -74,6 +76,18 @@ def _clean_optional_string(value: object) -> str | None:
         return None
     value = value.strip()
     return value or None
+
+
+def _coerce_optional_bool(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    return None
 
 
 def _extract_configured_api_key(request: Request) -> str | None:
@@ -244,9 +258,9 @@ def _is_auth_required(request: Request) -> bool:
     if settings is None:
         return _has_registry_keys()
 
-    explicit_flag = getattr(settings, "auth_required", None)
+    explicit_flag = _coerce_optional_bool(getattr(settings, "auth_required", None))
     if explicit_flag is not None:
-        return bool(explicit_flag)
+        return explicit_flag
 
     if _extract_configured_api_key(request) is not None:
         return True
@@ -350,6 +364,9 @@ def get_bearer_context(
 
     secret = get_supabase_jwt_secret(request)
     if not secret:
+        if not _is_auth_required(request):
+            _logger.info("Ignoring Bearer token because auth is disabled and no JWT secret is configured")
+            return None
         _logger.warning("Missing SUPABASE_JWT_SECRET for Bearer auth")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -367,6 +384,9 @@ def get_bearer_context(
             ),
         )
     except jwt.PyJWTError as exc:
+        if not _is_auth_required(request):
+            _logger.info("Ignoring invalid Bearer token because auth is disabled")
+            return None
         _logger.warning("Invalid Bearer token: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -375,6 +395,9 @@ def get_bearer_context(
 
     principal_id = _clean_optional_string(claims.get("sub"))
     if principal_id is None:
+        if not _is_auth_required(request):
+            _logger.info("Ignoring Bearer token without sub claim because auth is disabled")
+            return None
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Bearer token missing sub claim",
@@ -415,20 +438,19 @@ def get_api_key(
     if registry_record is not None:
         return normalized_api_key
 
-    if configured_api_key is None and not _has_registry_keys():
-        if auth_required:
-            _logger.warning(
-                "auth_not_configured: auth_required=True but no API keys are configured",
-            )
-            raise AppError(
-                "auth_not_configured",
-                "Authentication is required but no API keys are configured",
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
+    if not auth_required:
+        _logger.info("Allowing unrecognized API key passthrough because auth is disabled")
         return normalized_api_key
 
-    if not auth_required:
-        return normalized_api_key
+    if configured_api_key is None and not _has_registry_keys():
+        _logger.warning(
+            "auth_not_configured: auth_required=True but no API keys are configured",
+        )
+        raise AppError(
+            "auth_not_configured",
+            "Authentication is required but no API keys are configured",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
 
     _logger.warning("Invalid API key")
     raise AppError(
