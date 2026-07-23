@@ -14,7 +14,6 @@ from fastapi.routing import APIRoute
 from app.core.security import install_security_middleware
 from app.core.settings import get_settings
 
-
 ProtectedDependencyFactory = Callable[[], Any]
 
 _log = logging.getLogger(__name__)
@@ -100,11 +99,7 @@ def _include_router_once(
 
     app.include_router(router, **kwargs)
 
-    new_routes = [
-        route
-        for route in app.routes
-        if isinstance(route, APIRoute) and _route_signature(route) not in existing
-    ]
+    new_routes = [route for route in app.routes if isinstance(route, APIRoute) and _route_signature(route) not in existing]
 
     if not new_routes:
         _log.warning(
