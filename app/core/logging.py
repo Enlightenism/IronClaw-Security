@@ -9,11 +9,10 @@ import sys
 import time
 from typing import Any
 
-from fastapi import FastAPI, Request
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.datastructures import Headers, MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.core.request_id import REQUEST_ID_HEADER_NAME
+from app.core.requestid import REQUEST_ID_HEADER_NAME
 from app.core.settings import Settings
 
 request_id_context: contextvars.ContextVar[str] = contextvars.ContextVar(
@@ -112,70 +111,85 @@ def get_logger(name: str = "ironclaw") -> logging.Logger:
     return logging.getLogger(name)
 
 
-class RequestContextMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app: FastAPI, logger_name: str = "ironclaw.access") -> None:
-        super().__init__(app)
+class RequestContextMiddleware:
+    def __init__(self, app: ASGIApp, logger_name: str = "ironclaw.access") -> None:
+        self.app = app
         self.logger = get_logger(logger_name)
 
-    async def dispatch(self, request: Request, call_next) -> Response:
-        request_id = getattr(request.state, "request_id", None) or request.headers.get(
-            REQUEST_ID_HEADER_NAME,
-        )
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = Headers(scope=scope)
+        state = scope.setdefault("state", {})
+
+        request_id = state.get("request_id") or headers.get(REQUEST_ID_HEADER_NAME)
         if not request_id:
             request_id = "unknown-request-id"
 
         token = request_id_context.set(str(request_id))
-        start = time.perf_counter()
+        state["request_id"] = str(request_id)
 
-        request.state.request_id = request_id
-        client_ip = request.client.host if request.client else None
+        method = scope.get("method", "")
+        path = scope.get("path", "")
+        query_string_bytes = scope.get("query_string", b"")
+        query = query_string_bytes.decode("utf-8", errors="replace") if query_string_bytes else ""
+
+        client = scope.get("client")
+        client_ip = client[0] if client else None
+
+        start = time.perf_counter()
 
         self.logger.info(
             "request_started",
             extra={
                 "event": "request_started",
-                "http_method": request.method,
-                "path": request.url.path,
-                "query": str(request.url.query) if request.url.query else "",
+                "http_method": method,
+                "path": path,
+                "query": query,
                 "client_ip": client_ip,
             },
         )
 
+        async def send_with_request_context(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                duration_ms = round((time.perf_counter() - start) * 1000, 2)
+                response_headers = MutableHeaders(raw=message["headers"])
+                response_headers.setdefault(REQUEST_ID_HEADER_NAME, str(request_id))
+
+                self.logger.info(
+                    "request_completed",
+                    extra={
+                        "event": "request_completed",
+                        "http_method": method,
+                        "path": path,
+                        "client_ip": client_ip,
+                        "status_code": message["status"],
+                        "duration_ms": duration_ms,
+                    },
+                )
+
+            await send(message)
+
         try:
-            response = await call_next(request)
+            await self.app(scope, receive, send_with_request_context)
         except Exception as exc:
             duration_ms = round((time.perf_counter() - start) * 1000, 2)
             self.logger.exception(
                 "request_failed",
                 extra={
                     "event": "request_failed",
-                    "http_method": request.method,
-                    "path": request.url.path,
+                    "http_method": method,
+                    "path": path,
                     "client_ip": client_ip,
                     "duration_ms": duration_ms,
                     "error_type": exc.__class__.__name__,
                 },
             )
-            request_id_context.reset(token)
             raise
-
-        duration_ms = round((time.perf_counter() - start) * 1000, 2)
-        response.headers[REQUEST_ID_HEADER_NAME] = str(request_id)
-
-        self.logger.info(
-            "request_completed",
-            extra={
-                "event": "request_completed",
-                "http_method": request.method,
-                "path": request.url.path,
-                "client_ip": client_ip,
-                "status_code": response.status_code,
-                "duration_ms": duration_ms,
-            },
-        )
-
-        request_id_context.reset(token)
-        return response
+        finally:
+            request_id_context.reset(token)
 
 
 def bind_security_event(

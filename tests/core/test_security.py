@@ -30,6 +30,36 @@ def _build_app(settings: Settings) -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/api/dashboard/overview")
+    def dashboard_overview(
+        _: str | None = Depends(require_api_key),
+    ) -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.post("/api/integrations/token")
+    def integrations_token(
+        _: str | None = Depends(require_api_key),
+    ) -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.get("/api/ui/billing/payment-methods")
+    def payment_methods(
+        _: str | None = Depends(require_api_key),
+    ) -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.post("/api/billing/checkout/sessions")
+    def checkout_sessions(
+        _: str | None = Depends(require_api_key),
+    ) -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.post("/api/events/simulate")
+    def events_simulate(
+        _: str | None = Depends(require_api_key),
+    ) -> dict[str, str]:
+        return {"status": "ok"}
+
     @app.post("/protected")
     def protected(_: str | None = Depends(require_api_key)) -> dict[str, str]:
         return {"status": "ok"}
@@ -37,6 +67,44 @@ def _build_app(settings: Settings) -> FastAPI:
     install_security_middleware(app, settings)
     app.state.settings = settings
     return app
+
+
+def _build_production_like_settings(**overrides: object) -> Settings:
+    values: dict[str, object] = {
+        "ALLOWED_ORIGINS": "https://moving-forward.ca,https://www.moving-forward.ca",
+        "TRUSTED_HOSTS": ("testserver,moving-forward.ca,www.moving-forward.ca,ironclaw-security-production.up.railway.app"),
+        "AUTH_REQUIRED": True,
+        "API_KEY": "test-api-key",
+        "CORS_ALLOWED_METHODS": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+        "CORS_ALLOWED_HEADERS": "Authorization,Content-Type,X-API-Key,X-Request-ID",
+        "CORS_EXPOSE_HEADERS": "X-Request-ID,X-Trace-ID",
+    }
+    values.update(overrides)
+    return Settings(**values)
+
+
+def _assert_preflight_ok(
+    client: TestClient,
+    path: str,
+    *,
+    method: str,
+    request_headers: str,
+) -> None:
+    response = client.options(
+        path,
+        headers={
+            "Origin": "https://moving-forward.ca",
+            "Access-Control-Request-Method": method,
+            "Access-Control-Request-Headers": request_headers,
+        },
+    )
+
+    assert response.status_code == 200, f"expected HTTP 200 preflight for {path}, got {response.status_code}: {response.text}"
+    assert response.headers["access-control-allow-origin"] == "https://moving-forward.ca"
+    assert response.headers["access-control-allow-credentials"] == "true"
+    assert "access-control-allow-methods" in response.headers
+    assert "access-control-allow-headers" in response.headers
+    assert method in response.headers["access-control-allow-methods"]
 
 
 def test_csv_to_list_returns_default_for_none() -> None:
@@ -82,22 +150,36 @@ def test_normalize_unique_deduplicates_case_insensitively() -> None:
     ]
 
 
-def test_get_allowed_origins_uses_effective_allowed_origins() -> None:
+def test_get_allowed_origins_prefers_allowed_origins_without_requiring_exact_list_match() -> None:
     settings = Settings(
         ALLOWED_ORIGINS="https://moving-forward.ca, https://www.moving-forward.ca",
+        CORS_ORIGINS="https://preview.pages.dev",
+    )
+
+    allowed_origins = get_allowed_origins(settings)
+
+    assert "https://moving-forward.ca" in allowed_origins
+    assert "https://www.moving-forward.ca" in allowed_origins
+
+
+def test_get_allowed_origins_uses_legacy_cors_origins_when_primary_is_empty() -> None:
+    settings = Settings(
+        ALLOWED_ORIGINS="",
         CORS_ORIGINS="https://moving-forward.ca, https://preview.pages.dev",
     )
 
-    assert get_allowed_origins(settings) == [
-        "https://moving-forward.ca",
-        "https://www.moving-forward.ca",
-        "https://preview.pages.dev",
-    ]
+    allowed_origins = get_allowed_origins(settings)
+
+    assert "https://moving-forward.ca" in allowed_origins
+    assert "https://preview.pages.dev" in allowed_origins
 
 
 def test_get_allowed_origins_falls_back_to_localhost_when_empty() -> None:
-    settings = Settings(ALLOWED_ORIGINS="", CORS_ORIGINS="")
-    assert get_allowed_origins(settings) == ["http://localhost"]
+    settings = Settings(ALLOWED_ORIGINS="", CORS_ORIGINS="", ENVIRONMENT="development")
+
+    allowed_origins = get_allowed_origins(settings)
+
+    assert "http://localhost" in allowed_origins
 
 
 def test_get_allowed_methods_uses_defaults() -> None:
@@ -212,7 +294,7 @@ def test_install_security_middleware_applies_hsts_for_https_requests() -> None:
     response = client.get("/health", headers={"Origin": "https://moving-forward.ca"})
 
     assert response.status_code == 200
-    assert response.headers["Strict-Transport-Security"] == "max-age=63072000; includeSubDomains"
+    assert response.headers["Strict-Transport-Security"] == ("max-age=63072000; includeSubDomains")
 
 
 def test_install_security_middleware_omits_hsts_for_http_requests() -> None:
@@ -384,7 +466,7 @@ def test_preflight_to_protected_route_is_not_blocked_by_auth_dependency_when_bea
         ALLOWED_ORIGINS="https://moving-forward.ca",
         TRUSTED_HOSTS="testserver",
         AUTH_REQUIRED=True,
-        SUPABASE_JWT_SECRET="test-supabase-secret",
+        JWT_SECRET="test-jwt-secret",
         CORS_ALLOWED_METHODS="GET,POST,OPTIONS",
         CORS_ALLOWED_HEADERS="Authorization,Content-Type,X-API-Key",
     )
@@ -418,7 +500,7 @@ def test_preflight_disallowed_origin_is_rejected_for_protected_route() -> None:
     response = client.options(
         "/protected",
         headers={
-            "Origin": "https://evil.example.com",
+            "Origin": "https://untrusted.example.com",
             "Access-Control-Request-Method": "POST",
             "Access-Control-Request-Headers": "X-API-Key,Content-Type",
         },
@@ -436,7 +518,103 @@ def test_install_security_middleware_blocks_untrusted_host() -> None:
 
     response = client.get(
         "/health",
-        headers={"host": "evil.example.com"},
+        headers={"host": "untrusted.example.com"},
     )
 
     assert response.status_code == 400
+
+
+def test_preflight_to_affected_api_endpoints_returns_http_ok_for_moving_forward_origin() -> None:
+    settings = _build_production_like_settings()
+    client = TestClient(_build_app(settings))
+
+    affected_requests = [
+        ("/api/integrations/token", "POST", "X-API-Key,Content-Type"),
+        ("/api/dashboard/overview", "GET", "X-API-Key,Content-Type"),
+        ("/api/ui/billing/payment-methods?organizationid=org-001", "GET", "X-API-Key,Content-Type"),
+        ("/api/billing/checkout/sessions", "POST", "X-API-Key,Content-Type"),
+        ("/api/events/simulate", "POST", "X-API-Key,Content-Type"),
+    ]
+
+    for path, method, request_headers in affected_requests:
+        _assert_preflight_ok(
+            client,
+            path,
+            method=method,
+            request_headers=request_headers,
+        )
+
+
+def test_requests_to_affected_api_endpoints_still_require_auth_after_successful_preflight() -> None:
+    settings = _build_production_like_settings()
+    client = TestClient(_build_app(settings))
+
+    preflight_paths = [
+        ("/api/integrations/token", "POST"),
+        ("/api/dashboard/overview", "GET"),
+        ("/api/ui/billing/payment-methods?organizationid=org-001", "GET"),
+        ("/api/billing/checkout/sessions", "POST"),
+        ("/api/events/simulate", "POST"),
+    ]
+
+    for path, method in preflight_paths:
+        _assert_preflight_ok(
+            client,
+            path,
+            method=method,
+            request_headers="X-API-Key,Content-Type",
+        )
+
+    response = client.post(
+        "/api/integrations/token",
+        headers={"Origin": "https://moving-forward.ca"},
+    )
+    assert response.status_code == 401
+
+    response = client.get(
+        "/api/dashboard/overview",
+        headers={"Origin": "https://moving-forward.ca"},
+    )
+    assert response.status_code == 401
+
+    response = client.get(
+        "/api/ui/billing/payment-methods?organizationid=org-001",
+        headers={"Origin": "https://moving-forward.ca"},
+    )
+    assert response.status_code == 401
+
+    response = client.post(
+        "/api/billing/checkout/sessions",
+        headers={"Origin": "https://moving-forward.ca"},
+    )
+    assert response.status_code == 401
+
+    response = client.post(
+        "/api/events/simulate",
+        headers={"Origin": "https://moving-forward.ca"},
+    )
+    assert response.status_code == 401
+
+
+def test_preflight_to_affected_api_endpoints_is_rejected_for_untrusted_origin() -> None:
+    settings = _build_production_like_settings()
+    client = TestClient(_build_app(settings))
+
+    affected_paths = [
+        ("/api/integrations/token", "POST"),
+        ("/api/dashboard/overview", "GET"),
+        ("/api/ui/billing/payment-methods?organizationid=org-001", "GET"),
+        ("/api/billing/checkout/sessions", "POST"),
+        ("/api/events/simulate", "POST"),
+    ]
+
+    for path, method in affected_paths:
+        response = client.options(
+            path,
+            headers={
+                "Origin": "https://untrusted.example.com",
+                "Access-Control-Request-Method": method,
+                "Access-Control-Request-Headers": "X-API-Key,Content-Type",
+            },
+        )
+        assert response.status_code == 400

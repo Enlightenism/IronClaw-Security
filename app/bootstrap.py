@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 import logging
 from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 
 from app.core.settings import get_settings
 from app.persistencebootstrap import (
@@ -57,13 +58,7 @@ class DefaultActionDecisionService:
 
 
 def assert_schema_completeness() -> frozenset[str]:
-    """Assert all 19 DDL-registered tables are present before accepting traffic.
-
-    Raises RuntimeError if the registry count is wrong or any expected table
-    is missing. Returns the verified table set on success.
-
-    Safe to call at startup; must NOT be called at module import time.
-    """
+    """Assert all expected DDL-registered tables are present before accepting traffic."""
     registered = get_registered_tables()
     count = len(registered)
     if count != _EXPECTED_TABLE_COUNT:
@@ -121,7 +116,10 @@ def add_request_tracing_middleware(app: FastAPI) -> FastAPI:
         return app
 
     @app.middleware("http")
-    async def add_request_tracing(request: Request, call_next):
+    async def add_request_tracing(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
         request_id = request.headers.get("X-Request-ID") or str(uuid4())
         trace_id = request.headers.get("X-Trace-ID") or request_id
         started_at = perf_counter()
@@ -133,11 +131,9 @@ def add_request_tracing_middleware(app: FastAPI) -> FastAPI:
         response = await call_next(request)
 
         duration_ms = max(0, int((perf_counter() - started_at) * 1000))
-
         response.headers.setdefault("X-Request-ID", request_id)
         response.headers.setdefault("X-Trace-ID", trace_id)
         response.headers.setdefault("X-Response-Time-Ms", str(duration_ms))
-
         return response
 
     app.state._request_tracing_middleware_installed = True
@@ -149,11 +145,14 @@ def add_security_middleware(app: FastAPI) -> FastAPI:
         return app
 
     @app.middleware("http")
-    async def add_security_headers(request: Request, call_next):
+    async def add_security_headers(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
         response = await call_next(request)
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
         response.headers.setdefault("X-XSS-Protection", "1; mode=block")
         response.headers.setdefault(
             "Permissions-Policy",
@@ -178,13 +177,7 @@ def add_security_middleware(app: FastAPI) -> FastAPI:
 
 
 def _run_deferred_startup(app: FastAPI) -> bool:
-    """Execute startup-time checks that must not run at module import.
-
-    Returns True if schema completeness passed, False if it failed.
-    Registered as a startup event by bootstrap_app. Calls assert_schema_completeness
-    inside a guarded block so CI schema mismatches surface at server start, not at
-    import time (which would break openapi schema export and test collection).
-    """
+    """Execute startup-time checks that must not run at module import."""
     try:
         assert_schema_completeness()
         return True
@@ -197,19 +190,16 @@ def _run_deferred_startup(app: FastAPI) -> bool:
 
 
 def bootstrap_app(app: FastAPI) -> FastAPI:
-    """Entry point to configure global app state and middleware.
+    """Configure global app state and lightweight header-only middleware.
 
-    Registers a deferred startup event that runs assert_schema_completeness
-    only when the server actually starts (not at import time). Configures app
-    state and installs request tracing and security middleware. Call this once,
-    right after creating the FastAPI() instance.
+    This bootstrap must not install auth, host-validation, or request-blocking
+    middleware. CORS handling must be installed separately and earlier in the
+    effective request pipeline so browser OPTIONS preflight requests can return
+    HTTP OK before any protected API route logic is evaluated.
     """
     if getattr(app.state, "_bootstrap_installed", False):
         return app
 
-    # Deferred: schema completeness check runs at server startup, not import time.
-    # This prevents CI crashes when env vars are absent during schema export or
-    # test collection.
     if not getattr(app.state, "_bootstrap_startup_registered", False):
 
         @app.on_event("startup")

@@ -5,14 +5,16 @@ import math
 import threading
 import time
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.datastructures import Headers, MutableHeaders
+from starlette.requests import HTTPConnection
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.logging import get_logger
 
 
-@dataclass
+@dataclass(frozen=True)
 class RateLimit:
     capacity: int
     refill_rate: float
@@ -92,26 +94,37 @@ DEFAULT_RATE_LIMITS: dict[str, RateLimit] = {
 }
 
 
-class RateLimitMiddleware(BaseHTTPMiddleware):
+class RateLimitMiddleware:
     def __init__(
         self,
-        app,
+        app: ASGIApp,
         *,
         limiter: TokenBucketRateLimiter | None = None,
         route_limits: dict[str, RateLimit] | None = None,
     ) -> None:
-        super().__init__(app)
+        self.app = app
         self.limiter = limiter or TokenBucketRateLimiter()
         self.route_limits = route_limits or DEFAULT_RATE_LIMITS
         self.logger = get_logger("ironclaw.ratelimit")
 
-    async def dispatch(self, request: Request, call_next):
-        limit = self._match_limit(request.url.path)
-        if limit is None:
-            return await call_next(request)
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
-        client_id = self._build_client_key(request, limit.scope)
-        bucket = self.limiter.get_bucket(client_id, limit)
+        path = scope.get("path")
+        if not isinstance(path, str):
+            await self.app(scope, receive, send)
+            return
+
+        limit = self._match_limit(path)
+        if limit is None:
+            await self.app(scope, receive, send)
+            return
+
+        connection = HTTPConnection(scope)
+        client_key = self._build_client_key(connection, limit.scope)
+        bucket = self.limiter.get_bucket(client_key, limit)
 
         if not bucket.consume():
             retry_after = bucket.retry_after_seconds()
@@ -122,9 +135,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 "rate_limit_exceeded",
                 extra={
                     "event": "rate_limit_exceeded",
-                    "path": request.url.path,
-                    "http_method": request.method,
-                    "client_key": client_id,
+                    "path": path,
+                    "http_method": scope.get("method", "UNKNOWN"),
+                    "client_key": client_key,
                     "scope": limit.scope,
                     "limit": limit.capacity,
                     "remaining": remaining,
@@ -132,7 +145,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 },
             )
 
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 content={
                     "error": "rate_limit_exceeded",
@@ -144,29 +157,34 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 },
                 headers=headers,
             )
+            await response(scope, receive, send)
+            return
 
-        response = await call_next(request)
-        remaining = bucket.remaining()
-        reset_after = bucket.reset_seconds()
+        async def send_wrapper(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                remaining = bucket.remaining()
+                reset_after = bucket.reset_seconds()
+                response_headers = MutableHeaders(raw=message["headers"])
+                for header, value in self._build_headers(limit, remaining, reset_after).items():
+                    response_headers[header] = value
+            await send(message)
 
-        for header, value in self._build_headers(limit, remaining, reset_after).items():
-            response.headers[header] = value
-
-        return response
+        await self.app(scope, receive, send_wrapper)
 
     def _match_limit(self, path: str) -> RateLimit | None:
         return self.route_limits.get(path)
 
-    def _build_client_key(self, request: Request, scope: str) -> str:
-        request_id = request.headers.get("X-Client-ID")
-        session_id = request.headers.get("X-Session-ID")
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        real_ip = request.headers.get("X-Real-IP")
-        client_ip = request.client.host if request.client else "unknown"
+    def _build_client_key(self, connection: HTTPConnection, scope_name: str) -> str:
+        headers = Headers(scope=connection.scope)
+        request_id = headers.get("X-Client-ID")
+        session_id = headers.get("X-Session-ID")
+        forwarded_for = headers.get("X-Forwarded-For")
+        real_ip = headers.get("X-Real-IP")
+        client_ip = connection.client.host if connection.client else "unknown"
 
         identity = request_id or session_id or forwarded_for or real_ip or client_ip
-        identity = identity.split(",")[0].strip()
-        return f"{scope}:{identity}"
+        identity = identity.split(",")[0].strip() or "unknown"
+        return f"{scope_name}:{identity}"
 
     def _build_headers(
         self,
