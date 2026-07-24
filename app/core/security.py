@@ -99,6 +99,8 @@ def _clean_token(value: str) -> str:
 
 def _clean_origin_token(value: str) -> str:
     cleaned = _strip_wrappers(value)
+    if not cleaned:
+        return ""
     if cleaned == "*":
         return "*"
 
@@ -106,15 +108,31 @@ def _clean_origin_token(value: str) -> str:
     if parsed.scheme in {"http", "https"} and parsed.netloc:
         return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
 
-    return cleaned
+    return cleaned.rstrip("/")
 
 
 def _clean_host_token(value: str) -> str:
     cleaned = _strip_wrappers(value)
+    if not cleaned:
+        return ""
+    if cleaned == "*":
+        return "*"
+
     parsed = urlparse(cleaned)
     if parsed.scheme in {"http", "https"} and parsed.netloc:
-        return parsed.netloc.strip().lower()
-    return cleaned.strip().lower()
+        cleaned = parsed.netloc
+
+    cleaned = cleaned.strip().strip("/").lower()
+
+    if cleaned.startswith("*."):
+        return cleaned
+
+    if ":" in cleaned and not cleaned.startswith("["):
+        host, _, port = cleaned.partition(":")
+        if port.isdigit():
+            return host
+
+    return cleaned
 
 
 def _csv_to_list(value: str | None, *, default: Sequence[str]) -> list[str]:
@@ -190,49 +208,41 @@ def _is_valid_origin(value: str) -> bool:
 def _origin_to_host(origin: str) -> str:
     parsed = urlparse(origin)
     if parsed.scheme in {"http", "https"} and parsed.netloc:
-        return parsed.netloc.strip().lower()
+        return _clean_host_token(parsed.netloc)
     return ""
 
 
 def _append_local_origins(origins: Sequence[str], settings: Settings) -> list[str]:
-    environment = str(getattr(settings, "environment", "") or "").strip().lower()
+    environment = str(getattr(settings, "environment", getattr(settings, "ENVIRONMENT", "")) or "").strip().lower()
     if environment == "production":
         return list(origins)
     return _normalize_unique([*origins, *_DEFAULT_LOCAL_ORIGINS])
 
 
-def _is_local_origin(origin: str) -> bool:
-    return origin in _DEFAULT_LOCAL_ORIGINS
-
-
 def _is_local_host(host: str) -> bool:
     return host in {
         "localhost",
-        "localhost:3000",
-        "localhost:5173",
         "127.0.0.1",
-        "127.0.0.1:3000",
-        "127.0.0.1:5173",
+        "0.0.0.0",
         "testserver",
     }
 
 
 def get_allowed_origins(settings: Settings) -> list[str]:
-    primary = getattr(settings, "ALLOWED_ORIGINS", None)
-    if primary is None:
-        primary = getattr(settings, "allowed_origins", None)
-    if primary is None:
-        primary = getattr(settings, "effective_allowed_origins", None)
+    primary = getattr(settings, "allowed_origins", None)
+    if primary in (None, ""):
+        primary = getattr(settings, "ALLOWED_ORIGINS", None)
 
-    legacy = getattr(settings, "CORS_ORIGINS", None)
-    if legacy is None:
-        legacy = getattr(settings, "cors_origins", None)
+    legacy = getattr(settings, "cors_origins", None)
+    if legacy in (None, ""):
+        legacy = getattr(settings, "CORS_ORIGINS", None)
 
-    raw_primary = _coerce_list(primary, default=[])
-    raw_legacy = _coerce_list(legacy, default=[])
-
-    primary_origins = _normalize_unique([origin for origin in raw_primary if _is_valid_origin(origin)])
-    legacy_origins = _normalize_unique([origin for origin in raw_legacy if _is_valid_origin(origin)])
+    primary_origins = _normalize_unique(
+        [origin for origin in _coerce_list(primary, default=[]) if _is_valid_origin(origin)],
+    )
+    legacy_origins = _normalize_unique(
+        [origin for origin in _coerce_list(legacy, default=[]) if _is_valid_origin(origin)],
+    )
 
     selected = primary_origins if primary_origins else legacy_origins
     if not selected:

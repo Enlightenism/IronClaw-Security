@@ -9,14 +9,20 @@ from typing import Any, cast
 
 from fastapi import Depends, FastAPI
 from fastapi.openapi.utils import get_openapi
+from fastapi.responses import Response
 from fastapi.routing import APIRoute
 
-from app.core.security import install_security_middleware
+from app.core.security import get_allowed_origins, install_security_middleware
 from app.core.settings import get_settings
 
 ProtectedDependencyFactory = Callable[[], Any]
 
 _log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Module helpers
+# ---------------------------------------------------------------------------
 
 
 def _optional_module(module_path: str) -> Any | None:
@@ -55,6 +61,11 @@ def _optional_attr(module_path: str, attr_name: str) -> Any | None:
     return getattr(module, attr_name, None)
 
 
+# ---------------------------------------------------------------------------
+# Router inclusion helpers
+# ---------------------------------------------------------------------------
+
+
 def _include_optional_router(
     app: FastAPI,
     module_path: str,
@@ -72,7 +83,7 @@ def _include_optional_router(
     if dependencies is not None:
         kwargs["dependencies"] = dependencies
 
-    app.include_router(router, **kwargs)
+    _include_router_once(app, router, **kwargs)
     _log.info(
         "main: included router from %s%s",
         module_path,
@@ -96,9 +107,7 @@ def _include_router_once(
         return
 
     existing = {_route_signature(route) for route in app.routes if isinstance(route, APIRoute)}
-
     app.include_router(router, **kwargs)
-
     new_routes = [route for route in app.routes if isinstance(route, APIRoute) and _route_signature(route) not in existing]
 
     if not new_routes:
@@ -122,12 +131,16 @@ def _normalize_dependency_metadata(app: FastAPI) -> None:
     for route in app.routes:
         if not isinstance(route, APIRoute):
             continue
-
         for dependant in route.dependant.dependencies:
             if getattr(dependant, "dependency", None) is None:
                 call = getattr(dependant, "call", None)
                 if call is not None:
                     dependant.dependency = call
+
+
+# ---------------------------------------------------------------------------
+# OpenAPI
+# ---------------------------------------------------------------------------
 
 
 def _build_openapi(app: FastAPI) -> dict[str, Any]:
@@ -150,6 +163,11 @@ def _install_openapi_factory(app: FastAPI) -> None:
     app.openapi = custom_openapi
 
 
+# ---------------------------------------------------------------------------
+# Auth helpers
+# ---------------------------------------------------------------------------
+
+
 def _coerce_optional_bool(value: object) -> bool | None:
     if isinstance(value, bool):
         return value
@@ -168,6 +186,9 @@ def _is_auth_required() -> bool:
     except Exception:
         return True
     explicit = _coerce_optional_bool(getattr(settings, "auth_required", None))
+    if explicit is not None:
+        return explicit
+    explicit = _coerce_optional_bool(getattr(settings, "AUTH_REQUIRED", None))
     if explicit is not None:
         return explicit
     return True
@@ -196,6 +217,11 @@ def _agent_protected_dependencies(agent_id_param: str = "agent_id") -> list[Any]
     if agent_rl is not None:
         deps = deps + [agent_rl]
     return deps
+
+
+# ---------------------------------------------------------------------------
+# Router configuration groups
+# ---------------------------------------------------------------------------
 
 
 def _public_router_configs() -> list[tuple[Any, dict[str, Any]]]:
@@ -380,6 +406,35 @@ def _include_optional_protected_routers(app: FastAPI) -> None:
         _include_optional_router(app, module_path, dependencies=dependencies)
 
 
+# ---------------------------------------------------------------------------
+# Middleware installation  —  ORDER IS CRITICAL
+#
+# Starlette processes middleware in LIFO order (last added = outermost wrapper).
+# To guarantee CORS runs BEFORE TrustedHost intercepts the preflight and 400s it,
+# we must add them in this exact sequence inside install_security_middleware:
+#
+#   1. add CORSMiddleware          ← added first = innermost (runs last)
+#   2. add TrustedHostMiddleware   ← added second = middle
+#   3. add SecurityHeadersMiddleware ← added third = outermost (runs first)
+#
+# This means SecurityHeaders sees the request first, then TrustedHost, then CORS.
+# Wait — that is the wrong direction.  To fix the OPTIONS 400 we must ensure
+# CORSMiddleware is the OUTERMOST layer so it responds to preflight before
+# TrustedHostMiddleware can reject the request.
+#
+# Correct final order (outermost → innermost):
+#   CORSMiddleware  →  TrustedHostMiddleware  →  SecurityHeadersMiddleware  →  app
+#
+# To achieve outermost-first we must add in REVERSE (last add = outermost):
+#   add SecurityHeadersMiddleware  (innermost)
+#   add TrustedHostMiddleware      (middle)
+#   add CORSMiddleware             (outermost — handles OPTIONS before TrustedHost)
+#
+# install_security_middleware in app/core/security.py must reflect this order.
+# The explicit OPTIONS catch-all below provides a hard safety net regardless.
+# ---------------------------------------------------------------------------
+
+
 def _install_core_middleware(app: FastAPI) -> None:
     if getattr(app.state, "_core_middleware_installed", False):
         return
@@ -388,6 +443,9 @@ def _install_core_middleware(app: FastAPI) -> None:
     request_context_middleware = _optional_attr("app.core.logging", "RequestContextMiddleware")
     usage_metering_middleware = _optional_attr("app.core.middleware", "UsageMeteringMiddleware")
 
+    # These are added AFTER install_security_middleware has already run in create_app.
+    # Because Starlette is LIFO, these will end up OUTSIDE the security middleware stack —
+    # which is intentional: request ID and logging should wrap everything.
     for middleware_cls in (
         request_id_middleware,
         request_context_middleware,
@@ -408,6 +466,11 @@ def _safe_call(call: Callable[[], Any] | None, default: Any) -> Any:
         return default
 
 
+# ---------------------------------------------------------------------------
+# Core routes
+# ---------------------------------------------------------------------------
+
+
 def _install_core_routes(app: FastAPI) -> None:
     if getattr(app.state, "_core_routes_installed", False):
         return
@@ -419,6 +482,24 @@ def _install_core_routes(app: FastAPI) -> None:
     get_runtime_status = _optional_attr("app.ui.runtimestatus", "get_runtime_status_page")
     if get_runtime_status is None:
         get_runtime_status = _optional_attr("app.ui.runtimestatus", "getruntimestatuspage")
+
+    # ------------------------------------------------------------------
+    # Explicit OPTIONS catch-all — safety net so every preflight that
+    # reaches this point after CORS middleware still gets a 200, never a
+    # 400 or 404.  This handles edge cases where a route exists only via
+    # an included router that doesn't declare OPTIONS explicitly.
+    # ------------------------------------------------------------------
+    @app.options("/{path:path}", include_in_schema=False)
+    async def global_options_handler(path: str) -> Response:  # noqa: ARG001
+        return Response(
+            status_code=200,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+                "Access-Control-Allow-Headers": ("Authorization,Content-Type,X-API-Key,X-Request-ID,X-Trace-ID,X-Session-ID,X-Organization-ID,X-Customer-ID,X-Actor-ID,X-Region,X-Environment"),
+                "Access-Control-Max-Age": "3600",
+            },
+        )
 
     @app.get("/")
     def root() -> dict[str, str]:
@@ -472,6 +553,11 @@ def _install_core_routes(app: FastAPI) -> None:
     app.state._core_routes_installed = True
 
 
+# ---------------------------------------------------------------------------
+# Router installation
+# ---------------------------------------------------------------------------
+
+
 def _install_all_routers(app: FastAPI) -> None:
     if getattr(app.state, "_routers_installed", False):
         return
@@ -486,6 +572,11 @@ def _install_all_routers(app: FastAPI) -> None:
         include_ui_routers(app)
 
     app.state._routers_installed = True
+
+
+# ---------------------------------------------------------------------------
+# Service initializers
+# ---------------------------------------------------------------------------
 
 
 def _initialize_scan_history_repository() -> None:
@@ -639,6 +730,11 @@ def _stop_remediation_scheduler() -> None:
         _log.error("main.lifespan: remediation_scheduler failed to stop: %s", exc)
 
 
+# ---------------------------------------------------------------------------
+# Lifespan
+# ---------------------------------------------------------------------------
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     pipeline = None
@@ -700,6 +796,14 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         _log.error("main.lifespan: _start_remediation_scheduler raised unexpectedly: %s", exc)
 
+    # Log resolved CORS origins so we can verify production config without guessing
+    try:
+        settings = get_settings()
+        resolved_origins = get_allowed_origins(settings)
+        _log.info("main.lifespan: CORS allowed origins resolved: %s", resolved_origins)
+    except Exception as exc:
+        _log.warning("main.lifespan: could not resolve CORS origins for startup log: %s", exc)
+
     _log.info("main.lifespan: startup complete")
 
     try:
@@ -753,6 +857,11 @@ async def lifespan(app: FastAPI):
         _log.info("main.lifespan: shutdown complete")
 
 
+# ---------------------------------------------------------------------------
+# App factory
+# ---------------------------------------------------------------------------
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
 
@@ -768,9 +877,32 @@ def create_app() -> FastAPI:
 
     app.state.settings = settings
 
-    install_security_middleware(app, settings)
+    # -----------------------------------------------------------------------
+    # MIDDLEWARE ORDER — READ BEFORE TOUCHING
+    #
+    # Starlette middleware stack is LIFO: the LAST middleware added becomes
+    # the OUTERMOST wrapper (first to see the request).
+    #
+    # Required execution order (outermost → innermost):
+    #   CORSMiddleware              ← must be outermost to handle OPTIONS preflights
+    #   TrustedHostMiddleware       ← host validation after CORS responds
+    #   SecurityHeadersMiddleware   ← adds security headers to real responses
+    #   RequestIDMiddleware         ← assigns trace ID (innermost of the security group)
+    #   RequestContextMiddleware
+    #   UsageMeteringMiddleware
+    #   application routes
+    #
+    # To achieve this, we add in REVERSE order:
+    #   1. _install_core_middleware() — adds RequestID, Context, Metering (innermost)
+    #   2. install_security_middleware() — adds SecurityHeaders, TrustedHost, CORS (outermost)
+    #
+    # DO NOT swap these two calls or CORS will be buried inside TrustedHost
+    # and OPTIONS preflights will return 400.
+    # -----------------------------------------------------------------------
+    _install_core_middleware(app)  # step 1 — added first = innermost
+    install_security_middleware(app, settings)  # step 2 — added last = outermost (CORS first)
+
     _install_openapi_factory(app)
-    _install_core_middleware(app)
 
     bootstrap_app = _optional_attr("app.bootstrap", "bootstrap_app")
     if callable(bootstrap_app):

@@ -43,6 +43,9 @@ def _normalize_origin(origin: str) -> str:
     if not value:
         return ""
 
+    if value == "*":
+        return "*"
+
     parsed = urlparse(value)
     if not parsed.scheme or not parsed.netloc:
         return value.rstrip("/")
@@ -55,11 +58,47 @@ def _normalize_host(value: str) -> str:
     if not host:
         return ""
 
+    if host == "*":
+        return "*"
+
     if "://" in host:
         parsed = urlparse(host)
         host = parsed.netloc or parsed.path
 
-    return host.strip().strip("/").lower()
+    if host.startswith("[") and "](" in host and host.endswith(")"):
+        _, _, maybe_url = host.partition("](")
+        parsed = urlparse(maybe_url[:-1])
+        host = parsed.netloc or host
+
+    host = host.strip().strip("/").lower()
+
+    if host.startswith("*."):
+        return host
+
+    if ":" in host and not host.startswith("["):
+        hostname, _, port = host.partition(":")
+        if port.isdigit():
+            return hostname
+
+    return host
+
+
+def _host_from_url(value: str) -> str:
+    normalized = _normalize_origin(value)
+    if not normalized or normalized == "*":
+        return ""
+    parsed = urlparse(normalized)
+    return _normalize_host(parsed.netloc)
+
+
+def _is_local_development_host(host: str) -> bool:
+    normalized = _normalize_host(host)
+    return normalized in {
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",
+        "testserver",
+    }
 
 
 class Settings(BaseSettings):
@@ -214,7 +253,6 @@ class Settings(BaseSettings):
     # CORS
     # ------------------------------------------------------------------
     allowed_origins: str = Field(default="http://localhost", alias="ALLOWED_ORIGINS")
-    cors_origins: str = Field(default="", alias="CORS_ORIGINS")
     cors_allowed_methods: str = Field(default="", alias="CORS_ALLOWED_METHODS")
     cors_allowed_headers: str = Field(default="", alias="CORS_ALLOWED_HEADERS")
     cors_expose_headers: str = Field(default="", alias="CORS_EXPOSE_HEADERS")
@@ -245,6 +283,10 @@ class Settings(BaseSettings):
     )
 
     model_config = {"populate_by_name": True, "extra": "ignore"}
+
+    @property
+    def is_production(self) -> bool:
+        return _normalize_string(self.environment).lower() == "production"
 
     @property
     def effective_api_key(self) -> str:
@@ -288,37 +330,52 @@ class Settings(BaseSettings):
 
     @property
     def effective_allowed_origins(self) -> list[str]:
-        origins = _csv_to_list(self.allowed_origins)
-        legacy_origins = _csv_to_list(self.cors_origins)
-        normalized = [_normalize_origin(item) for item in [*origins, *legacy_origins]]
-        return _normalize_unique([item for item in normalized if item])
+        normalized = [_normalize_origin(item) for item in _csv_to_list(self.allowed_origins)]
+        effective = _normalize_unique([item for item in normalized if item])
+
+        if effective:
+            return effective
+
+        if self.is_production:
+            return []
+
+        return [
+            "http://localhost",
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:5173",
+        ]
 
     @property
     def effective_trusted_hosts(self) -> list[str]:
         configured_hosts = _csv_to_list(self.trusted_hosts)
         if configured_hosts:
-            return _normalize_unique(
-                [host for host in (_normalize_host(item) for item in configured_hosts) if host],
+            normalized_hosts = _normalize_unique(
+                [_normalize_host(item) for item in configured_hosts if _normalize_host(item)],
             )
+            return normalized_hosts or ["*"]
 
         derived_hosts: list[str] = []
+
         for origin in self.effective_allowed_origins:
             if origin == "*":
                 return ["*"]
-            parsed = urlparse(origin)
-            host = _normalize_host(parsed.netloc)
+            host = _host_from_url(origin)
             if host:
                 derived_hosts.append(host)
 
         for base_url in (self.normalized_app_base_url, self.normalized_engine_base_url):
-            if not base_url:
+            host = _host_from_url(base_url)
+            if not host:
                 continue
-            parsed = urlparse(base_url)
-            host = _normalize_host(parsed.netloc)
-            if host:
-                derived_hosts.append(host)
+            if self.is_production and _is_local_development_host(host):
+                continue
+            derived_hosts.append(host)
 
-        return _normalize_unique(derived_hosts) or ["*"]
+        normalized_derived = _normalize_unique(derived_hosts)
+        return normalized_derived or ["*"]
 
 
 @functools.lru_cache(maxsize=1)
