@@ -67,6 +67,13 @@ PACKAGE_UNIT_CREDITS: dict[str, int] = {
 
 _VALID_CHECKOUT_MODES: frozenset[str] = frozenset(m.value for m in StripeCheckoutMode)
 _VALID_PACKAGE_IDS: frozenset[str] = frozenset(PACKAGE_PRICE_ENV_MAP.keys())
+_ALLOWED_REDIRECT_HOSTS: frozenset[str] = frozenset(
+    {
+        "moving-forward.ca",
+        "www.moving-forward.ca",
+        "ironclaw-security-production.up.railway.app",
+    },
+)
 
 
 def _http_400(detail: str, *, code: str, extra: dict[str, Any] | None = None) -> HTTPException:
@@ -98,6 +105,21 @@ def _is_valid_http_url(value: str) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
+def _normalized_hostname(value: str) -> str:
+    try:
+        parsed = urlparse(value)
+    except Exception:
+        return ""
+    return (parsed.netloc or "").strip().lower()
+
+
+def _is_allowed_redirect_url(value: str) -> bool:
+    if not _is_valid_http_url(value):
+        return False
+    host = _normalized_hostname(value)
+    return host in _ALLOWED_REDIRECT_HOSTS
+
+
 def _configured_price_id_for_package(package_id: str) -> str:
     env_key = PACKAGE_PRICE_ENV_MAP.get(package_id)
     if not env_key:
@@ -106,7 +128,6 @@ def _configured_price_id_for_package(package_id: str) -> str:
             code="unsupported_package_id",
             extra={"package_id": package_id, "valid_package_ids": sorted(_VALID_PACKAGE_IDS)},
         )
-
     price_id = (vault.get(env_key) or "").strip()
     if not price_id:
         raise _http_500(
@@ -249,6 +270,8 @@ class CheckoutSessionCreateRequest(BaseModel):
         normalized = v.strip()
         if not _is_valid_http_url(normalized):
             raise ValueError("invalid redirect URL: must be absolute http(s) URL")
+        if not _is_allowed_redirect_url(normalized):
+            raise ValueError("invalid redirect URL host")
         return normalized
 
     @field_validator("customer_id")
@@ -455,6 +478,7 @@ async def stripe_webhook(
             f"Stripe webhook signature invalid: {verify_result.error}",
             code="webhook_signature_invalid",
         )
+
     try:
         result = svc.handle_webhook_event(verify_result.payload)
     except StripeServiceError as exc:
@@ -463,6 +487,7 @@ async def stripe_webhook(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"error": "webhook_dispatch_error", "detail": str(exc)},
         ) from exc
+
     return JSONResponse(status_code=status.HTTP_200_OK, content=result)
 
 
@@ -692,7 +717,6 @@ async def credit_units(
         reason_enum = StripeUnitEventReason(body.reason)
     except ValueError:
         reason_enum = StripeUnitEventReason.MANUAL_CREDIT
-
     try:
         result = svc.credit_units(
             org_id=org_id,
@@ -813,7 +837,6 @@ async def create_checkout_session(
     org_id = _require_org_id(auth=auth, request=request, body=body)
     mode = StripeCheckoutMode(body.mode)
     resolved_price_id, resolved_unit_credits = _normalize_checkout_inputs(body)
-
     metadata = dict(body.metadata)
     if body.package_id:
         metadata.setdefault("package_id", body.package_id)
@@ -1202,7 +1225,6 @@ async def list_payment_methods(
                 "payment_methods": [],
             },
         )
-
     results = svc.list_payment_methods(customer_id=customer_id)
     return JSONResponse(
         status_code=status.HTTP_200_OK,
@@ -1358,7 +1380,13 @@ async def list_invoices_api_alias(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await list_invoices(request=request, limit=limit, force_refresh=force_refresh, auth=auth, svc=svc)
+    return await list_invoices(
+        request=request,
+        limit=limit,
+        force_refresh=force_refresh,
+        auth=auth,
+        svc=svc,
+    )
 
 
 @router.delete("/invoices/cache", status_code=status.HTTP_200_OK, tags=["billing", "invoices"])

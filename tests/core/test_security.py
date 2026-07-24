@@ -72,7 +72,7 @@ def _build_app(settings: Settings) -> FastAPI:
 def _build_production_like_settings(**overrides: object) -> Settings:
     values: dict[str, object] = {
         "ALLOWED_ORIGINS": "https://moving-forward.ca,https://www.moving-forward.ca",
-        "TRUSTED_HOSTS": ("testserver,moving-forward.ca,www.moving-forward.ca,ironclaw-security-production.up.railway.app"),
+        "TRUSTED_HOSTS": "testserver,moving-forward.ca,[www.moving-forward.ca](https://www.moving-forward.ca),ironclaw-security-production.up.railway.app",
         "AUTH_REQUIRED": True,
         "API_KEY": "test-api-key",
         "CORS_ALLOWED_METHODS": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
@@ -160,6 +160,7 @@ def test_get_allowed_origins_prefers_allowed_origins_without_requiring_exact_lis
 
     assert "https://moving-forward.ca" in allowed_origins
     assert "https://www.moving-forward.ca" in allowed_origins
+    assert "https://preview.pages.dev" not in allowed_origins
 
 
 def test_get_allowed_origins_uses_legacy_cors_origins_when_primary_is_empty() -> None:
@@ -180,6 +181,18 @@ def test_get_allowed_origins_falls_back_to_localhost_when_empty() -> None:
     allowed_origins = get_allowed_origins(settings)
 
     assert "http://localhost" in allowed_origins
+
+
+def test_get_allowed_origins_does_not_append_localhost_in_production() -> None:
+    settings = Settings(
+        ALLOWED_ORIGINS="https://moving-forward.ca",
+        CORS_ORIGINS="",
+        ENVIRONMENT="production",
+    )
+
+    allowed_origins = get_allowed_origins(settings)
+
+    assert allowed_origins == ["https://moving-forward.ca"]
 
 
 def test_get_allowed_methods_uses_defaults() -> None:
@@ -220,7 +233,7 @@ def test_get_exposed_headers_uses_configured_values() -> None:
 
 def test_get_allowed_hosts_uses_effective_trusted_hosts() -> None:
     settings = Settings(
-        TRUSTED_HOSTS="moving-forward.ca,www.moving-forward.ca,moving-forward.ca",
+        TRUSTED_HOSTS="moving-forward.ca,[www.moving-forward.ca](https://www.moving-forward.ca),moving-forward.ca",
     )
     assert get_allowed_hosts(settings) == [
         "moving-forward.ca",
@@ -276,11 +289,36 @@ def test_install_security_middleware_applies_security_headers() -> None:
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert response.headers["X-Frame-Options"] == "DENY"
     assert response.headers["Referrer-Policy"] == "no-referrer"
-    assert response.headers["Permissions-Policy"] == ("accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()")
+    assert response.headers["Permissions-Policy"] == "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
     assert response.headers["Content-Security-Policy"] == _DEFAULT_CSP
     assert response.headers["Cross-Origin-Opener-Policy"] == "same-origin"
     assert response.headers["Cross-Origin-Resource-Policy"] == "same-origin"
     assert response.headers["Cross-Origin-Embedder-Policy"] == "require-corp"
+
+
+def test_install_security_middleware_omits_cross_origin_isolation_headers_on_options_preflight() -> None:
+    settings = Settings(
+        ALLOWED_ORIGINS="https://moving-forward.ca",
+        TRUSTED_HOSTS="testserver",
+        CORS_ALLOWED_METHODS="GET,POST,OPTIONS",
+        CORS_ALLOWED_HEADERS="Authorization,Content-Type,X-API-Key",
+    )
+    client = TestClient(_build_app(settings))
+
+    response = client.options(
+        "/protected",
+        headers={
+            "Origin": "https://moving-forward.ca",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "X-API-Key,Content-Type",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "Content-Security-Policy" not in response.headers
+    assert "Cross-Origin-Opener-Policy" not in response.headers
+    assert "Cross-Origin-Resource-Policy" not in response.headers
+    assert "Cross-Origin-Embedder-Policy" not in response.headers
 
 
 def test_install_security_middleware_applies_hsts_for_https_requests() -> None:
@@ -294,7 +332,7 @@ def test_install_security_middleware_applies_hsts_for_https_requests() -> None:
     response = client.get("/health", headers={"Origin": "https://moving-forward.ca"})
 
     assert response.status_code == 200
-    assert response.headers["Strict-Transport-Security"] == ("max-age=63072000; includeSubDomains")
+    assert response.headers["Strict-Transport-Security"] == "max-age=63072000; includeSubDomains"
 
 
 def test_install_security_middleware_omits_hsts_for_http_requests() -> None:
@@ -336,7 +374,7 @@ def test_install_security_middleware_uses_custom_csp_when_configured() -> None:
     response = client.get("/health", headers={"Origin": "https://moving-forward.ca"})
 
     assert response.status_code == 200
-    assert response.headers["Content-Security-Policy"] == ("default-src 'self'; connect-src 'self' https://moving-forward.ca")
+    assert response.headers["Content-Security-Policy"] == "default-src 'self'; connect-src 'self' https://moving-forward.ca"
 
 
 def test_install_security_middleware_uses_default_csp_for_blank_custom_value() -> None:
@@ -376,7 +414,7 @@ def test_install_security_middleware_sets_cors_headers_for_allowed_origin() -> N
     assert response.headers["access-control-allow-origin"] == "https://moving-forward.ca"
     assert response.headers["access-control-allow-credentials"] == "true"
     assert response.headers["access-control-allow-methods"] == "GET, POST, OPTIONS"
-    assert response.headers["access-control-allow-headers"] == ("Accept, Accept-Language, Authorization, Content-Language, Content-Type, X-API-Key")
+    assert response.headers["access-control-allow-headers"] == "Accept, Accept-Language, Authorization, Content-Language, Content-Type, X-API-Key"
 
     get_response = client.get(
         "/health",
@@ -543,6 +581,34 @@ def test_preflight_to_affected_api_endpoints_returns_http_ok_for_moving_forward_
             method=method,
             request_headers=request_headers,
         )
+
+
+def test_preflight_to_affected_api_endpoints_does_not_include_isolation_headers() -> None:
+    settings = _build_production_like_settings()
+    client = TestClient(_build_app(settings))
+
+    affected_requests = [
+        ("/api/integrations/token", "POST"),
+        ("/api/dashboard/overview", "GET"),
+        ("/api/ui/billing/payment-methods?organizationid=org-001", "GET"),
+        ("/api/billing/checkout/sessions", "POST"),
+        ("/api/events/simulate", "POST"),
+    ]
+
+    for path, method in affected_requests:
+        response = client.options(
+            path,
+            headers={
+                "Origin": "https://moving-forward.ca",
+                "Access-Control-Request-Method": method,
+                "Access-Control-Request-Headers": "X-API-Key,Content-Type",
+            },
+        )
+        assert response.status_code == 200
+        assert "Content-Security-Policy" not in response.headers
+        assert "Cross-Origin-Opener-Policy" not in response.headers
+        assert "Cross-Origin-Resource-Policy" not in response.headers
+        assert "Cross-Origin-Embedder-Policy" not in response.headers
 
 
 def test_requests_to_affected_api_endpoints_still_require_auth_after_successful_preflight() -> None:

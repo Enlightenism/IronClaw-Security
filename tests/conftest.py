@@ -26,15 +26,36 @@ from ironclaw_sdk.models import ScanResponse as SDKScanResponse
 # Test environment baseline
 # ---------------------------------------------------------------------------
 
-os.environ["IRONCLAW_PERSISTENCE_MODE"] = "memory"
-os.environ["ENVIRONMENT"] = "test"
-os.environ["IRONCLAW_API_KEY"] = "test-api-key"
-os.environ["AUTH_REQUIRED"] = "true"
-os.environ["IRONCLAW_RATE_LIMIT_ENABLED"] = "false"
-os.environ["SUPABASE_URL"] = ""
-os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
-os.environ["SUPABASE_KEY"] = ""
-os.environ["SUPABASE_ANON_KEY"] = ""
+_TEST_ENV_DEFAULTS: dict[str, str] = {
+    "IRONCLAW_PERSISTENCE_MODE": "memory",
+    "ENVIRONMENT": "test",
+    "IRONCLAW_API_KEY": "test-api-key",
+    "API_KEY": "test-api-key",
+    "AUTH_REQUIRED": "true",
+    "IRONCLAW_RATE_LIMIT_ENABLED": "false",
+    "ALLOWED_ORIGINS": "http://testserver",
+    "CORS_ORIGINS": "http://testserver",
+    "TRUSTED_HOSTS": "testserver,localhost,127.0.0.1",
+    "SUPABASE_URL": "",
+    "SUPABASE_SERVICE_ROLE_KEY": "",
+    "SUPABASE_KEY": "",
+    "SUPABASE_ANON_KEY": "",
+}
+
+_TEST_SECRET_DEFAULTS: dict[str, str] = {
+    "IRONCLAW_SECRET_KEY": "test-secret-key-32-chars-minimum!!",
+    "JWT_SECRET": "test-jwt-secret-key-32-chars-min!",
+}
+
+
+def _seed_test_environment() -> None:
+    for key, value in _TEST_ENV_DEFAULTS.items():
+        os.environ[key] = os.environ.get(key) or value
+    for key, value in _TEST_SECRET_DEFAULTS.items():
+        os.environ[key] = os.environ.get(key) or value
+
+
+_seed_test_environment()
 
 # ---------------------------------------------------------------------------
 # Shared auth context used by all override fixtures
@@ -58,6 +79,10 @@ def _override_require_auth_context() -> AuthContext:
     return _TEST_AUTH_CONTEXT
 
 
+def _clear_auth_override() -> None:
+    _app.dependency_overrides.pop(require_auth_context, None)
+
+
 # ---------------------------------------------------------------------------
 # Autouse fixtures
 # ---------------------------------------------------------------------------
@@ -65,11 +90,6 @@ def _override_require_auth_context() -> AuthContext:
 
 @pytest.fixture(scope="function", autouse=True)
 def _reset_supabase_singleton() -> Generator[None, None, None]:
-    """Clear the Supabase client singleton before and after every test.
-
-    Prevents cached _client state from one test (e.g. env-var patching)
-    bleeding into subsequent tests.
-    """
     reset_supabase_client()
     yield
     reset_supabase_client()
@@ -82,6 +102,7 @@ def _refresh_app_settings() -> Generator[None, None, None]:
     _app.state.settings = settings
     yield
     get_settings.cache_clear()
+    _app.state.settings = get_settings()
 
 
 @pytest.fixture(scope="function", autouse=True)
@@ -95,7 +116,7 @@ def _reset_unit_wallet_registry() -> Generator[None, None, None]:
 @pytest.fixture(scope="function", autouse=True)
 def _reset_install_key_registry() -> Generator[None, None, None]:
     fresh = InstallKeyRegistry()
-    fresh._loaded = True  # prevent Supabase load in test context
+    fresh._loaded = True
     _install_keys_module._install_key_registry = fresh
     yield
     fresh2 = InstallKeyRegistry()
@@ -110,7 +131,15 @@ def _reset_billing_registry() -> Generator[None, None, None]:
     _reset_billing_registry_for_testing()
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture(scope="function", autouse=True)
+def _reset_dependency_overrides() -> Generator[None, None, None]:
+    original = dict(_app.dependency_overrides)
+    yield
+    _app.dependency_overrides.clear()
+    _app.dependency_overrides.update(original)
+
+
+@pytest.fixture(scope="function", autouse=True)
 def reset_audit_state() -> Generator[None, None, None]:
     reset_audit_log()
     yield
@@ -128,7 +157,7 @@ def test_client(_refresh_app_settings: None) -> Generator[TestClient, None, None
     with TestClient(_app, raise_server_exceptions=True) as client:
         client.headers.update({"X-API-Key": os.environ["IRONCLAW_API_KEY"]})
         yield client
-    _app.dependency_overrides.pop(require_auth_context, None)
+    _clear_auth_override()
 
 
 # ---------------------------------------------------------------------------
@@ -139,36 +168,36 @@ def test_client(_refresh_app_settings: None) -> Generator[TestClient, None, None
 @pytest.fixture(scope="function")
 def sdk_client(_refresh_app_settings: None) -> Generator[IronclawClient, None, None]:
     _app.dependency_overrides[require_auth_context] = _override_require_auth_context
-    tc = TestClient(_app, raise_server_exceptions=False)
-    client = IronclawClient(
-        api_key=os.environ["IRONCLAW_API_KEY"],
-        base_url="http://testserver",
-        connect_timeout=5.0,
-        read_timeout=10.0,
-    )
-
-    def _patched_scan(request: SDKScanRequest) -> SDKScanResponse:
-        resp = tc.post(
-            "/scan/",
-            content=request.model_dump_json(),
-            headers={
-                "X-API-Key": os.environ["IRONCLAW_API_KEY"],
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
+    with TestClient(_app, raise_server_exceptions=False) as tc:
+        client = IronclawClient(
+            api_key=os.environ["IRONCLAW_API_KEY"],
+            base_url="http://testserver",
+            connect_timeout=5.0,
+            read_timeout=10.0,
         )
-        if resp.status_code in (401, 403):
-            raise IronclawAuthError(status_code=resp.status_code, message=resp.text)
-        if resp.status_code >= 400:
-            raise IronclawAPIError(status_code=resp.status_code, body=resp.text)
-        try:
-            return SDKScanResponse.model_validate(resp.json())
-        except Exception as exc:
-            raise IronclawAPIError(status_code=resp.status_code, body=resp.text) from exc
 
-    client.scan = _patched_scan
-    yield client
-    _app.dependency_overrides.pop(require_auth_context, None)
+        def _patched_scan(request: SDKScanRequest) -> SDKScanResponse:
+            resp = tc.post(
+                "/scan/",
+                content=request.model_dump_json(),
+                headers={
+                    "X-API-Key": os.environ["IRONCLAW_API_KEY"],
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+            )
+            if resp.status_code in (401, 403):
+                raise IronclawAuthError(status_code=resp.status_code, message=resp.text)
+            if resp.status_code >= 400:
+                raise IronclawAPIError(status_code=resp.status_code, body=resp.text)
+            try:
+                return SDKScanResponse.model_validate(resp.json())
+            except Exception as exc:
+                raise IronclawAPIError(status_code=resp.status_code, body=resp.text) from exc
+
+        client.scan = _patched_scan
+        yield client
+    _clear_auth_override()
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +236,5 @@ def mock_hunt_client() -> MagicMock:
     ):
         getattr(query_builder, method).return_value = query_builder
     query_builder.execute.return_value = mock_response
-
     mock_client.table.return_value = query_builder
-
     return mock_client
