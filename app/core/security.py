@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from urllib.parse import urlparse
 
 from fastapi import FastAPI
@@ -11,7 +11,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.settings import Settings
 
-_DEFAULT_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; script-src 'self'; object-src 'none'"
+_DEFAULT_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'; script-src 'self'; object-src 'none'; manifest-src 'self'"
 _DEFAULT_ALLOWED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 _DEFAULT_ALLOWED_HEADERS = [
     "Authorization",
@@ -28,6 +28,7 @@ _DEFAULT_LOCAL_ORIGINS = [
     "http://127.0.0.1:3000",
     "http://127.0.0.1:5173",
 ]
+_SECURITY_MIDDLEWARE_INSTALLED_FLAG = "_ironclaw_security_middleware_installed"
 
 
 class SecurityHeadersMiddleware:
@@ -53,6 +54,7 @@ class SecurityHeadersMiddleware:
         async def send_with_security_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(raw=message["headers"])
+
                 headers.setdefault("X-Content-Type-Options", "nosniff")
                 headers.setdefault("X-Frame-Options", "DENY")
                 headers.setdefault("Referrer-Policy", "no-referrer")
@@ -108,7 +110,7 @@ def _clean_origin_token(value: str) -> str:
     if parsed.scheme in {"http", "https"} and parsed.netloc:
         return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
 
-    return cleaned.rstrip("/")
+    return ""
 
 
 def _clean_host_token(value: str) -> str:
@@ -143,11 +145,24 @@ def _csv_to_list(value: str | None, *, default: Sequence[str]) -> list[str]:
     return normalized or list(default)
 
 
+def _coerce_csv_list(
+    value: str | None,
+    *,
+    default: Sequence[str],
+    cleaner: Callable[[str], str],
+) -> list[str]:
+    if value is None:
+        return list(default)
+    parsed = [cleaner(item) for item in value.split(",")]
+    normalized = [item for item in parsed if item]
+    return normalized or list(default)
+
+
 def _coerce_list(value: object, *, default: Sequence[str]) -> list[str]:
     if value is None:
         return list(default)
     if isinstance(value, str):
-        return _csv_to_list(value, default=default)
+        return _coerce_csv_list(value, default=default, cleaner=_clean_token)
     if isinstance(value, Iterable):
         parsed: list[str] = []
         for item in value:
@@ -158,13 +173,26 @@ def _coerce_list(value: object, *, default: Sequence[str]) -> list[str]:
     return list(default)
 
 
+def _coerce_origin_list(value: object, *, default: Sequence[str]) -> list[str]:
+    if value is None:
+        return list(default)
+    if isinstance(value, str):
+        return _coerce_csv_list(value, default=default, cleaner=_clean_origin_token)
+    if isinstance(value, Iterable):
+        parsed: list[str] = []
+        for item in value:
+            text = _clean_origin_token(str(item))
+            if text:
+                parsed.append(text)
+        return parsed or list(default)
+    return list(default)
+
+
 def _coerce_host_list(value: object, *, default: Sequence[str]) -> list[str]:
     if value is None:
         return list(default)
     if isinstance(value, str):
-        parsed = [_clean_host_token(item) for item in value.split(",")]
-        normalized = [item for item in parsed if item]
-        return normalized or list(default)
+        return _coerce_csv_list(value, default=default, cleaner=_clean_host_token)
     if isinstance(value, Iterable):
         parsed: list[str] = []
         for item in value:
@@ -228,20 +256,33 @@ def _is_local_host(host: str) -> bool:
     }
 
 
+def _parse_bool(value: object, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 def get_allowed_origins(settings: Settings) -> list[str]:
     primary = getattr(settings, "allowed_origins", None)
-    if primary in (None, ""):
+    if primary is None:
         primary = getattr(settings, "ALLOWED_ORIGINS", None)
 
     legacy = getattr(settings, "cors_origins", None)
-    if legacy in (None, ""):
+    if legacy is None:
         legacy = getattr(settings, "CORS_ORIGINS", None)
 
     primary_origins = _normalize_unique(
-        [origin for origin in _coerce_list(primary, default=[]) if _is_valid_origin(origin)],
+        [origin for origin in _coerce_origin_list(primary, default=[]) if _is_valid_origin(origin)],
     )
     legacy_origins = _normalize_unique(
-        [origin for origin in _coerce_list(legacy, default=[]) if _is_valid_origin(origin)],
+        [origin for origin in _coerce_origin_list(legacy, default=[]) if _is_valid_origin(origin)],
     )
 
     selected = primary_origins if primary_origins else legacy_origins
@@ -256,7 +297,8 @@ def get_allowed_methods(settings: Settings) -> list[str]:
     if raw is None:
         raw = getattr(settings, "CORS_ALLOWED_METHODS", None)
     methods = _coerce_list(raw, default=_DEFAULT_ALLOWED_METHODS)
-    return _normalize_methods(methods)
+    normalized = _normalize_methods(methods)
+    return normalized or list(_DEFAULT_ALLOWED_METHODS)
 
 
 def get_allowed_headers(settings: Settings) -> list[str]:
@@ -267,7 +309,7 @@ def get_allowed_headers(settings: Settings) -> list[str]:
     normalized = _normalize_headers(headers)
     if "*" in normalized:
         return ["*"]
-    return normalized
+    return normalized or list(_DEFAULT_ALLOWED_HEADERS)
 
 
 def get_exposed_headers(settings: Settings) -> list[str]:
@@ -275,7 +317,8 @@ def get_exposed_headers(settings: Settings) -> list[str]:
     if raw is None:
         raw = getattr(settings, "CORS_EXPOSE_HEADERS", None)
     headers = _coerce_list(raw, default=_DEFAULT_EXPOSE_HEADERS)
-    return _normalize_headers(headers)
+    normalized = _normalize_headers(headers)
+    return normalized or list(_DEFAULT_EXPOSE_HEADERS)
 
 
 def get_allowed_hosts(settings: Settings) -> list[str]:
@@ -302,6 +345,8 @@ def get_allowed_hosts(settings: Settings) -> list[str]:
         "app_base_url",
         "ENGINE_BASE_URL",
         "engine_base_url",
+        "IRONCLAW_BASE_URL",
+        "ironclaw_base_url",
     ):
         value = getattr(settings, attr, None)
         if isinstance(value, str) and value.strip():
@@ -316,12 +361,15 @@ def should_allow_credentials(settings: Settings, origins: Sequence[str]) -> bool
     raw = getattr(settings, "cors_allow_credentials", None)
     if raw is None:
         raw = getattr(settings, "CORS_ALLOW_CREDENTIALS", None)
-    if isinstance(raw, bool):
-        return raw
+    if raw is not None:
+        return _parse_bool(raw, default="*" not in origins)
     return "*" not in origins
 
 
 def install_security_middleware(app: FastAPI, settings: Settings) -> None:
+    if getattr(app.state, _SECURITY_MIDDLEWARE_INSTALLED_FLAG, False):
+        return
+
     origins = get_allowed_origins(settings)
     methods = get_allowed_methods(settings)
     headers = get_allowed_headers(settings)
@@ -333,22 +381,11 @@ def install_security_middleware(app: FastAPI, settings: Settings) -> None:
         methods = [method for method in methods if method != "*"] or list(_DEFAULT_ALLOWED_METHODS)
         headers = [header for header in headers if header != "*"] or list(_DEFAULT_ALLOWED_HEADERS)
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=allow_credentials,
-        allow_methods=methods,
-        allow_headers=headers,
-        expose_headers=exposed_headers,
-        max_age=3600,
+    include_hsts = _parse_bool(
+        getattr(settings, "enable_hsts", getattr(settings, "ENABLE_HSTS", True)),
+        default=True,
     )
 
-    app.add_middleware(
-        TrustedHostMiddleware,
-        allowed_hosts=hosts,
-    )
-
-    include_hsts = bool(getattr(settings, "enable_hsts", getattr(settings, "ENABLE_HSTS", True)))
     csp = getattr(settings, "content_security_policy", None)
     if csp is None:
         csp = getattr(settings, "CONTENT_SECURITY_POLICY", None)
@@ -359,3 +396,20 @@ def install_security_middleware(app: FastAPI, settings: Settings) -> None:
         include_hsts=include_hsts,
         csp=normalized_csp,
     )
+
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=hosts,
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=allow_credentials,
+        allow_methods=methods,
+        allow_headers=headers,
+        expose_headers=exposed_headers,
+        max_age=3600,
+    )
+
+    setattr(app.state, _SECURITY_MIDDLEWARE_INSTALLED_FLAG, True)
