@@ -229,9 +229,18 @@ def _origin_to_host(origin: str) -> str:
     return ""
 
 
+def _environment_name(settings: Settings) -> str:
+    return (
+        str(
+            getattr(settings, "environment", getattr(settings, "ENVIRONMENT", "")) or "",
+        )
+        .strip()
+        .lower()
+    )
+
+
 def _append_local_origins(origins: Sequence[str], settings: Settings) -> list[str]:
-    environment = str(getattr(settings, "environment", getattr(settings, "ENVIRONMENT", "")) or "").strip().lower()
-    if environment == "production":
+    if _environment_name(settings) == "production":
         return list(origins)
     return _normalize_unique([*origins, *_DEFAULT_LOCAL_ORIGINS])
 
@@ -269,6 +278,17 @@ def _first_non_empty(*values: object) -> object:
 
 
 def get_allowed_origins(settings: Settings) -> list[str]:
+    effective = getattr(settings, "effective_allowed_origins", None)
+    if isinstance(effective, list):
+        normalized_effective = _normalize_unique(
+            [item for item in (_clean_origin_token(str(value)) for value in effective) if item],
+        )
+        if normalized_effective:
+            return normalized_effective
+        if _environment_name(settings) == "production":
+            return []
+        return list(_DEFAULT_LOCAL_ORIGINS)
+
     primary_raw = _first_non_empty(
         getattr(settings, "allowed_origins", None),
         getattr(settings, "ALLOWED_ORIGINS", None),
@@ -281,8 +301,13 @@ def get_allowed_origins(settings: Settings) -> list[str]:
     primary_origins = _normalize_unique(_coerce_origin_list(primary_raw, default=[]))
     legacy_origins = _normalize_unique(_coerce_origin_list(legacy_raw, default=[]))
 
-    selected = primary_origins or legacy_origins or ["http://localhost"]
-    return _append_local_origins(selected, settings) or ["http://localhost"]
+    selected = primary_origins or legacy_origins
+    if selected:
+        return _append_local_origins(selected, settings)
+
+    if _environment_name(settings) == "production":
+        return []
+    return list(_DEFAULT_LOCAL_ORIGINS)
 
 
 def get_allowed_methods(settings: Settings) -> list[str]:
