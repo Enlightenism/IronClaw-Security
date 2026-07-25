@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import functools
+import os
 from urllib.parse import urlparse
 
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SECRET_KEY_SENTINEL = "changeme-32-chars-minimum!!!!!"
 JWT_SECRET_SENTINEL = "changeme-jwt-32-chars-minimum!!"
@@ -42,6 +43,9 @@ def _normalize_origin(origin: str) -> str:
     value = _normalize_string(origin)
     if not value:
         return ""
+
+    if value.startswith("[") and "](" in value and value.endswith(")"):
+        value = value[value.index("](") + 2 : -1].strip()
 
     if value == "*":
         return "*"
@@ -101,7 +105,19 @@ def _is_local_development_host(host: str) -> bool:
     }
 
 
+def _optional_env_file() -> str | None:
+    value = _normalize_string(os.getenv("IRONCLAW_ENV_FILE"))
+    return value or None
+
+
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        populate_by_name=True,
+        extra="ignore",
+        env_file=_optional_env_file(),
+        env_file_encoding="utf-8",
+    )
+
     # ------------------------------------------------------------------
     # Core identity
     # ------------------------------------------------------------------
@@ -250,9 +266,12 @@ class Settings(BaseSettings):
     quarantine_dir: str | None = Field(default=None, alias="QUARANTINE_DIR")
 
     # ------------------------------------------------------------------
-    # CORS
+    # CORS — primary env var: ALLOWED_ORIGINS
+    # Legacy fallback env var: CORS_ORIGINS.
+    # Keep both fields so env injection and compatibility logic remain intact.
     # ------------------------------------------------------------------
     allowed_origins: str = Field(default="http://localhost", alias="ALLOWED_ORIGINS")
+    cors_origins: str = Field(default="", alias="CORS_ORIGINS")
     cors_allowed_methods: str = Field(default="", alias="CORS_ALLOWED_METHODS")
     cors_allowed_headers: str = Field(default="", alias="CORS_ALLOWED_HEADERS")
     cors_expose_headers: str = Field(default="", alias="CORS_EXPOSE_HEADERS")
@@ -282,8 +301,9 @@ class Settings(BaseSettings):
         alias="ENGINE_BASE_URL",
     )
 
-    model_config = {"populate_by_name": True, "extra": "ignore"}
-
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
     @property
     def is_production(self) -> bool:
         return _normalize_string(self.environment).lower() == "production"
@@ -330,11 +350,17 @@ class Settings(BaseSettings):
 
     @property
     def effective_allowed_origins(self) -> list[str]:
-        normalized = [_normalize_origin(item) for item in _csv_to_list(self.allowed_origins)]
-        effective = _normalize_unique([item for item in normalized if item])
+        primary = _normalize_unique(
+            [_normalize_origin(item) for item in _csv_to_list(self.allowed_origins) if item.strip()],
+        )
+        if primary:
+            return primary
 
-        if effective:
-            return effective
+        legacy = _normalize_unique(
+            [_normalize_origin(item) for item in _csv_to_list(self.cors_origins) if item.strip()],
+        )
+        if legacy:
+            return legacy
 
         if self.is_production:
             return []
@@ -353,7 +379,7 @@ class Settings(BaseSettings):
         configured_hosts = _csv_to_list(self.trusted_hosts)
         if configured_hosts:
             normalized_hosts = _normalize_unique(
-                [_normalize_host(item) for item in configured_hosts if _normalize_host(item)],
+                [normalized for item in configured_hosts if (normalized := _normalize_host(item))],
             )
             return normalized_hosts or ["*"]
 

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator, Iterator
 import os
 from typing import Any
+
+from fastapi.testclient import TestClient
+import pytest
 
 # Patch env BEFORE any app import so get_settings() cache warms with test-safe values.
 _TEST_ENV_DEFAULTS: dict[str, str] = {
@@ -18,6 +21,10 @@ _TEST_ENV_DEFAULTS: dict[str, str] = {
     "SUPABASE_SERVICE_ROLE_KEY": "",
     "SUPABASE_KEY": "",
     "SUPABASE_ANON_KEY": "",
+    "IRONCLAW_SUPABASE_URL": "",
+    "IRONCLAW_SUPABASE_KEY": "",
+    "NEXT_PUBLIC_SUPABASE_URL": "",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "",
 }
 
 _SECRET_DEFAULTS: dict[str, str] = {
@@ -25,12 +32,14 @@ _SECRET_DEFAULTS: dict[str, str] = {
     "JWT_SECRET": "test-jwt-secret-key-32-chars-min!",
 }
 
+_SANITIZED_ENV_KEYS: frozenset[str] = frozenset(set(_TEST_ENV_DEFAULTS) | set(_SECRET_DEFAULTS))
+
 
 def _seed_test_environment() -> None:
     for key, value in _TEST_ENV_DEFAULTS.items():
-        os.environ[key] = os.environ.get(key) or value
+        os.environ[key] = value
     for key, value in _SECRET_DEFAULTS.items():
-        os.environ[key] = os.environ.get(key) or value
+        os.environ[key] = value
 
 
 _seed_test_environment()
@@ -39,9 +48,6 @@ from app.core.settings import get_settings  # noqa: E402
 
 get_settings.cache_clear()
 _settings = get_settings()
-
-from fastapi.testclient import TestClient  # noqa: E402
-import pytest  # noqa: E402
 
 from app.main import app  # noqa: E402
 
@@ -52,9 +58,69 @@ def _patch_app_state(application: Any) -> None:
     application.state.settings = _settings
 
 
+def _refresh_settings() -> Any:
+    global _settings
+    get_settings.cache_clear()
+    _settings = get_settings()
+    _patch_app_state(app)
+    return _settings
+
+
+def _restore_environment(snapshot: dict[str, str | None]) -> None:
+    for key, prior in snapshot.items():
+        if prior is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = prior
+
+
 def _build_client() -> TestClient:
     _patch_app_state(app)
     return TestClient(app, raise_server_exceptions=False)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def sanitize_test_environment_session() -> Iterator[None]:
+    original = {key: os.environ.get(key) for key in _SANITIZED_ENV_KEYS}
+    try:
+        _seed_test_environment()
+        _refresh_settings()
+        yield
+    finally:
+        _restore_environment(original)
+        _refresh_settings()
+
+
+@pytest.fixture(scope="function", autouse=True)
+def sanitize_test_environment(request: pytest.FixtureRequest) -> Iterator[None]:
+    if request.node.get_closest_marker("allow_real_env") is not None:
+        _refresh_settings()
+        yield
+        _refresh_settings()
+        return
+
+    original = {key: os.environ.get(key) for key in _SANITIZED_ENV_KEYS}
+    try:
+        _seed_test_environment()
+        _refresh_settings()
+        yield
+    finally:
+        _restore_environment(original)
+        _refresh_settings()
+
+
+@pytest.fixture(scope="function")
+def env_override(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[..., None]]:
+    def _apply(**values: str | None) -> None:
+        for key, value in values.items():
+            if value is None:
+                monkeypatch.delenv(key, raising=False)
+            else:
+                monkeypatch.setenv(key, value)
+        _refresh_settings()
+
+    yield _apply
+    _refresh_settings()
 
 
 @pytest.fixture(scope="session")

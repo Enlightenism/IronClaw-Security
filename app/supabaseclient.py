@@ -10,12 +10,11 @@ import requests
 
 SUPABASE_TIMEOUT_SECONDS = 15.0
 
-
 # ---------------------------------------------------------------------------
 # Billing tier constants — single source of truth for unit pricing
-# 5,000 units  → $20 USD
-# 25,000 units → $90 USD
-# 60,000 units → $180 USD
+# 5,000 units -> $20 USD
+# 25,000 units -> $90 USD
+# 60,000 units -> $180 USD
 # Each protection unit covers up to 25,000 tokens.
 # ---------------------------------------------------------------------------
 TOKENS_PER_UNIT: int = 25_000
@@ -31,37 +30,28 @@ BILLING_TIER_60K_PRICE_USD: int = 180
 
 # ---------------------------------------------------------------------------
 # Known IronClaw table registry — single source of truth for table names
-# used across the system.  Add new tables here; never hardcode strings
+# used across the system. Add new tables here; never hardcode strings
 # in caller modules.
 # ---------------------------------------------------------------------------
 IRONCLAW_TABLES: frozenset[str] = frozenset(
     {
-        # Core scan pipeline
         "scan_history",
         "scan_patterns",
-        # Policy engine
         "policy_rules",
         "policy_sets",
         "policy_set_memberships",
-        # Agents
         "agents",
         "agent_trust_profiles",
         "trust_events",
-        # Telemetry & observability
         "telemetry_events",
         "audit_events",
-        # Threat intelligence
         "iocs",
         "threat_detections",
-        # Quarantine & review
         "quarantine_items",
         "review_queue",
-        # Rate limiting
         "rate_limit_state",
-        # Tool execution & sandbox
         "tool_call_log",
         "sandbox_execution_log",
-        # Webhooks
         "webhook_subscriptions",
         "webhook_deliveries",
     }
@@ -117,34 +107,111 @@ def _clean_env(value: str | None) -> str | None:
     return cleaned or None
 
 
-def get_supabase_config() -> SupabaseConfig:
-    url = _clean_env(
-        os.getenv("SUPABASE_URL") or os.getenv("IRONCLAW_SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL"),
+def _read_setting(settings: Any | None, *names: str) -> str | None:
+    if settings is None:
+        return None
+    for name in names:
+        if not hasattr(settings, name):
+            continue
+        value = getattr(settings, name)
+        if value is None:
+            continue
+        if isinstance(value, str):
+            cleaned = _clean_env(value)
+        else:
+            cleaned = _clean_env(str(value))
+        if cleaned:
+            return cleaned
+    return None
+
+
+def _read_env(*names: str) -> str | None:
+    for name in names:
+        cleaned = _clean_env(os.getenv(name))
+        if cleaned:
+            return cleaned
+    return None
+
+
+def _resolve_supabase_url(settings: Any | None = None) -> str | None:
+    return (
+        _read_setting(
+            settings,
+            "supabase_url",
+            "SUPABASE_URL",
+        )
+        or _read_setting(
+            settings,
+            "ironclaw_supabase_url",
+            "IRONCLAW_SUPABASE_URL",
+        )
+        or _read_setting(
+            settings,
+            "next_public_supabase_url",
+            "NEXT_PUBLIC_SUPABASE_URL",
+        )
+        or _read_env(
+            "SUPABASE_URL",
+            "IRONCLAW_SUPABASE_URL",
+            "NEXT_PUBLIC_SUPABASE_URL",
+        )
     )
-    key = _clean_env(
-        os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY") or os.getenv("IRONCLAW_SUPABASE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+
+
+def _resolve_supabase_key(settings: Any | None = None) -> str | None:
+    return (
+        _read_setting(
+            settings,
+            "supabase_service_role_key",
+            "SUPABASE_SERVICE_ROLE_KEY",
+        )
+        or _read_setting(
+            settings,
+            "supabase_key",
+            "SUPABASE_KEY",
+        )
+        or _read_setting(
+            settings,
+            "ironclaw_supabase_key",
+            "IRONCLAW_SUPABASE_KEY",
+        )
+        or _read_setting(
+            settings,
+            "supabase_anon_key",
+            "SUPABASE_ANON_KEY",
+        )
+        or _read_setting(
+            settings,
+            "next_public_supabase_anon_key",
+            "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        )
+        or _read_env(
+            "SUPABASE_SERVICE_ROLE_KEY",
+            "SUPABASE_KEY",
+            "IRONCLAW_SUPABASE_KEY",
+            "SUPABASE_ANON_KEY",
+            "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        )
     )
+
+
+def get_supabase_config(settings: Any | None = None) -> SupabaseConfig:
+    url = _resolve_supabase_url(settings)
+    key = _resolve_supabase_key(settings)
 
     if not url:
         raise SupabaseConfigurationError("missing SUPABASE_URL")
     if not key:
         raise SupabaseConfigurationError("missing supabase api key")
     if not url.startswith(("http://", "https://")):
-        raise SupabaseConfigurationError(
-            "SUPABASE_URL must start with http:// or https://",
-        )
+        raise SupabaseConfigurationError("SUPABASE_URL must start with http:// or https://")
 
     return SupabaseConfig(url=url.rstrip("/"), key=key)
 
 
-def is_supabase_configured() -> bool:
-    """Return True only when both SUPABASE_URL and a key are non-empty."""
-    url = _clean_env(
-        os.getenv("SUPABASE_URL") or os.getenv("IRONCLAW_SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL"),
-    )
-    key = _clean_env(
-        os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY") or os.getenv("IRONCLAW_SUPABASE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
-    )
+def is_supabase_configured(settings: Any | None = None) -> bool:
+    url = _resolve_supabase_url(settings)
+    key = _resolve_supabase_key(settings)
     return bool(url and key and url.startswith(("http://", "https://")))
 
 
@@ -413,8 +480,10 @@ class SupabaseClient:
         *,
         timeout: float = SUPABASE_TIMEOUT_SECONDS,
         session: requests.Session | None = None,
+        settings: Any | None = None,
     ) -> None:
         self._config: SupabaseConfig | None = config
+        self._settings = settings
         self.timeout = float(timeout)
         if self.timeout <= 0:
             raise ValueError("timeout must be greater than zero")
@@ -423,12 +492,12 @@ class SupabaseClient:
     @property
     def config(self) -> SupabaseConfig:
         if self._config is None:
-            self._config = get_supabase_config()
+            self._config = get_supabase_config(self._settings)
         return self._config
 
     @property
     def is_configured(self) -> bool:
-        return is_supabase_configured()
+        return is_supabase_configured(self._settings)
 
     @property
     def headers(self) -> dict[str, str]:
@@ -678,17 +747,11 @@ class SupabaseClient:
             },
         )
 
-    # -----------------------------------------------------------------------
-    # Domain-specific fetch helpers — typed convenience wrappers over select()
-    # that expose IronClaw tables through a stable interface.
-    # -----------------------------------------------------------------------
-
     def fetch_scan_patterns(
         self,
         *,
         enabled_only: bool = True,
     ) -> list[dict[str, Any]]:
-        """Return rows from scan_patterns, optionally filtered to enabled=true."""
         filters: dict[str, Any] = {}
         if enabled_only:
             filters["enabled"] = "eq.true"
@@ -699,14 +762,12 @@ class SupabaseClient:
         *,
         enabled_only: bool = True,
     ) -> list[dict[str, Any]]:
-        """Return rows from policy_rules, optionally filtered to enabled=true."""
         filters: dict[str, Any] = {}
         if enabled_only:
             filters["enabled"] = "eq.true"
         return self.select("policy_rules", filters=filters or None)
 
     def fetch_policy_set(self, set_key: str) -> dict[str, Any] | None:
-        """Return the policy_sets row matching set_key, or None if absent."""
         if not set_key or not set_key.strip():
             raise ValueError("set_key is required")
 
@@ -718,7 +779,6 @@ class SupabaseClient:
         return rows[0] if rows else None
 
     def fetch_policy_set_memberships(self, policy_set_id: str) -> list[dict[str, Any]]:
-        """Return all policy_set_memberships rows for the given policy_set_id."""
         if not policy_set_id or not policy_set_id.strip():
             raise ValueError("policy_set_id is required")
 
@@ -732,7 +792,6 @@ class SupabaseClient:
         *,
         active_only: bool = True,
     ) -> list[dict[str, Any]]:
-        """Return rows from webhook_subscriptions, optionally filtered to active=true."""
         filters: dict[str, Any] = {}
         if active_only:
             filters["active"] = "eq.true"
@@ -744,10 +803,6 @@ class SupabaseClient:
         subscription_id: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        """Return rows from webhook_deliveries.
-
-        Optionally scoped to a single subscription_id and bounded by limit.
-        """
         filters: dict[str, Any] = {}
         if subscription_id:
             filters["subscription_id"] = f"eq.{subscription_id}"
@@ -760,13 +815,6 @@ class SupabaseClient:
         )
 
 
-# ---------------------------------------------------------------------------
-# Process-level singleton with lazy initialization and thread-safe guard.
-# Importing this module never creates a SupabaseClient or reads env vars.
-# Call get_supabase_client() to obtain the shared instance at runtime.
-# Call reset_supabase_client() in tests to clear the singleton between cases.
-# ---------------------------------------------------------------------------
-
 _client: SupabaseClient | None = None
 _client_lock: threading.Lock = threading.Lock()
 
@@ -775,28 +823,21 @@ def get_supabase_client(
     *,
     timeout: float = SUPABASE_TIMEOUT_SECONDS,
     session: requests.Session | None = None,
+    settings: Any | None = None,
 ) -> SupabaseClient:
-    """Return the process-level SupabaseClient singleton.
-
-    The instance is created on the first call; subsequent calls return the
-    cached instance.  Passing a custom ``timeout`` or ``session`` only takes
-    effect when the singleton does not yet exist (i.e. on the very first call
-    or after ``reset_supabase_client()``).
-    """
     global _client
     if _client is None:
         with _client_lock:
             if _client is None:
-                _client = SupabaseClient(timeout=timeout, session=session)
+                _client = SupabaseClient(
+                    timeout=timeout,
+                    session=session,
+                    settings=settings,
+                )
     return _client
 
 
 def reset_supabase_client() -> None:
-    """Destroy the process-level singleton.
-
-    Intended for use in tests only — allows each test to start with a fresh
-    client without env-var bleed-through.
-    """
     global _client
     with _client_lock:
         _client = None

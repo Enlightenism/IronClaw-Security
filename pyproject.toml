@@ -149,7 +149,8 @@ markers = [
   "asyncio: mark test as asyncio-based",
   "integration: mark test as a live integration test requiring a running server",
   "sdk: mark test as an SDK round-trip test using the IronclawClient and ASGI transport shim",
-  "cli: mark test as a CLI-layer test"
+  "cli: mark test as a CLI-layer test",
+  "allow_real_env: opt out of sanitized test env for tests that intentionally require real environment values"
 ]
 
 [tool.ruff]

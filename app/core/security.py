@@ -137,14 +137,6 @@ def _clean_host_token(value: str) -> str:
     return cleaned
 
 
-def _csv_to_list(value: str | None, *, default: Sequence[str]) -> list[str]:
-    if value is None:
-        return list(default)
-    parsed = [_clean_origin_token(item) for item in value.split(",")]
-    normalized = [item for item in parsed if item]
-    return normalized or list(default)
-
-
 def _coerce_csv_list(
     value: str | None,
     *,
@@ -156,6 +148,10 @@ def _coerce_csv_list(
     parsed = [cleaner(item) for item in value.split(",")]
     normalized = [item for item in parsed if item]
     return normalized or list(default)
+
+
+def _csv_to_list(value: str | None, *, default: Sequence[str]) -> list[str]:
+    return _coerce_csv_list(value, default=default, cleaner=_clean_origin_token)
 
 
 def _coerce_list(value: object, *, default: Sequence[str]) -> list[str]:
@@ -226,13 +222,6 @@ def _normalize_headers(values: Sequence[str]) -> list[str]:
     return _normalize_unique(values)
 
 
-def _is_valid_origin(value: str) -> bool:
-    if value == "*":
-        return True
-    parsed = urlparse(value)
-    return bool(parsed.scheme in {"http", "https"} and parsed.netloc)
-
-
 def _origin_to_host(origin: str) -> str:
     parsed = urlparse(origin)
     if parsed.scheme in {"http", "https"} and parsed.netloc:
@@ -248,12 +237,7 @@ def _append_local_origins(origins: Sequence[str], settings: Settings) -> list[st
 
 
 def _is_local_host(host: str) -> bool:
-    return host in {
-        "localhost",
-        "127.0.0.1",
-        "0.0.0.0",
-        "testserver",
-    }
+    return host in {"localhost", "127.0.0.1", "0.0.0.0", "testserver"}
 
 
 def _parse_bool(value: object, *, default: bool) -> bool:
@@ -269,26 +253,35 @@ def _parse_bool(value: object, *, default: bool) -> bool:
     return default
 
 
+def _is_effectively_empty(value: object) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return _strip_wrappers(value) == ""
+    return False
+
+
+def _first_non_empty(*values: object) -> object:
+    for value in values:
+        if not _is_effectively_empty(value):
+            return value
+    return None
+
+
 def get_allowed_origins(settings: Settings) -> list[str]:
-    primary = getattr(settings, "allowed_origins", None)
-    if primary is None:
-        primary = getattr(settings, "ALLOWED_ORIGINS", None)
-
-    legacy = getattr(settings, "cors_origins", None)
-    if legacy is None:
-        legacy = getattr(settings, "CORS_ORIGINS", None)
-
-    primary_origins = _normalize_unique(
-        [origin for origin in _coerce_origin_list(primary, default=[]) if _is_valid_origin(origin)],
+    primary_raw = _first_non_empty(
+        getattr(settings, "allowed_origins", None),
+        getattr(settings, "ALLOWED_ORIGINS", None),
     )
-    legacy_origins = _normalize_unique(
-        [origin for origin in _coerce_origin_list(legacy, default=[]) if _is_valid_origin(origin)],
+    legacy_raw = _first_non_empty(
+        getattr(settings, "cors_origins", None),
+        getattr(settings, "CORS_ORIGINS", None),
     )
 
-    selected = primary_origins if primary_origins else legacy_origins
-    if not selected:
-        selected = ["http://localhost"]
+    primary_origins = _normalize_unique(_coerce_origin_list(primary_raw, default=[]))
+    legacy_origins = _normalize_unique(_coerce_origin_list(legacy_raw, default=[]))
 
+    selected = primary_origins or legacy_origins or ["http://localhost"]
     return _append_local_origins(selected, settings) or ["http://localhost"]
 
 
@@ -322,11 +315,11 @@ def get_exposed_headers(settings: Settings) -> list[str]:
 
 
 def get_allowed_hosts(settings: Settings) -> list[str]:
-    raw = getattr(settings, "TRUSTED_HOSTS", None)
-    if raw is None:
-        raw = getattr(settings, "trusted_hosts", None)
-    if raw is None:
-        raw = getattr(settings, "effective_trusted_hosts", None)
+    raw = _first_non_empty(
+        getattr(settings, "TRUSTED_HOSTS", None),
+        getattr(settings, "trusted_hosts", None),
+        getattr(settings, "effective_trusted_hosts", None),
+    )
 
     hosts = _coerce_host_list(raw, default=[])
     normalized_hosts = _normalize_unique(hosts)
@@ -386,9 +379,10 @@ def install_security_middleware(app: FastAPI, settings: Settings) -> None:
         default=True,
     )
 
-    csp = getattr(settings, "content_security_policy", None)
-    if csp is None:
-        csp = getattr(settings, "CONTENT_SECURITY_POLICY", None)
+    csp = _first_non_empty(
+        getattr(settings, "content_security_policy", None),
+        getattr(settings, "CONTENT_SECURITY_POLICY", None),
+    )
     normalized_csp = csp.strip() if isinstance(csp, str) and csp.strip() else None
 
     app.add_middleware(
@@ -396,12 +390,10 @@ def install_security_middleware(app: FastAPI, settings: Settings) -> None:
         include_hsts=include_hsts,
         csp=normalized_csp,
     )
-
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=hosts,
     )
-
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,

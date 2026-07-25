@@ -10,31 +10,49 @@ from app.core.supabase import (
 )
 from app.supabaseclient import SUPABASE_TIMEOUT_SECONDS
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 _VALID_URL = "https://test.supabase.co"
 _VALID_KEY = "service-role-key-abc123"
 
+_ALL_SUPABASE_ENV_VARS: tuple[str, ...] = (
+    "SUPABASE_URL",
+    "IRONCLAW_SUPABASE_URL",
+    "NEXT_PUBLIC_SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "SUPABASE_KEY",
+    "IRONCLAW_SUPABASE_KEY",
+    "SUPABASE_ANON_KEY",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+)
+
 
 def _clear_settings_cache() -> None:
-    """Bust the lru_cache on get_settings so monkeypatched env is picked up."""
     from app.core.settings import get_settings
 
     get_settings.cache_clear()
 
 
-# ---------------------------------------------------------------------------
-# _clean_env — private helper tests via module reference
-# ---------------------------------------------------------------------------
+def _clear_supabase_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in _ALL_SUPABASE_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    _clear_settings_cache()
+
+
+def _set_service_config(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    url: str | None = _VALID_URL,
+    key: str | None = _VALID_KEY,
+) -> None:
+    _clear_supabase_env(monkeypatch)
+    if url is not None:
+        monkeypatch.setenv("SUPABASE_URL", url)
+    if key is not None:
+        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", key)
+    _clear_settings_cache()
 
 
 class TestCleanEnv:
-    """Tests for app.core.supabase._clean_env — accessed via module reference."""
-
     def setup_method(self) -> None:
-        # _clean_env is private; grab it directly from the module.
         from app.core import supabase as _mod
 
         self._fn = _mod._clean_env  # type: ignore[attr-defined]
@@ -71,14 +89,7 @@ class TestCleanEnv:
         assert self._fn("plainvalue") == "plainvalue"
 
 
-# ---------------------------------------------------------------------------
-# get_supabase_service_client — configuration-error paths
-# ---------------------------------------------------------------------------
-
-
 class TestGetSupabaseServiceClientErrors:
-    """get_supabase_service_client raises SupabaseConfigurationError on bad config."""
-
     def setup_method(self) -> None:
         _clear_settings_cache()
 
@@ -86,9 +97,7 @@ class TestGetSupabaseServiceClientErrors:
         _clear_settings_cache()
 
     def test_raises_when_supabase_url_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("SUPABASE_URL", raising=False)
-        monkeypatch.delenv("IRONCLAW_SUPABASE_URL", raising=False)
-        monkeypatch.delenv("NEXT_PUBLIC_SUPABASE_URL", raising=False)
+        _clear_supabase_env(monkeypatch)
         monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
         _clear_settings_cache()
 
@@ -96,54 +105,55 @@ class TestGetSupabaseServiceClientErrors:
             get_supabase_service_client()
 
     def test_raises_when_service_role_key_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _clear_supabase_env(monkeypatch)
         monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
-        monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
         _clear_settings_cache()
 
-        with pytest.raises(SupabaseConfigurationError, match="SUPABASE_SERVICE_ROLE_KEY"):
+        with pytest.raises(SupabaseConfigurationError, match="SUPABASE_SERVICE_ROLE_KEY|supabase api key"):
             get_supabase_service_client()
 
     def test_raises_when_url_has_invalid_scheme(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SUPABASE_URL", "ftp://invalid.supabase.co")
-        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
-        _clear_settings_cache()
+        _set_service_config(
+            monkeypatch,
+            url="ftp://invalid.supabase.co",
+            key=_VALID_KEY,
+        )
 
         with pytest.raises(SupabaseConfigurationError, match="http"):
             get_supabase_service_client()
 
     def test_raises_when_url_is_blank_string(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SUPABASE_URL", "   ")
-        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
-        _clear_settings_cache()
+        _set_service_config(
+            monkeypatch,
+            url="   ",
+            key=_VALID_KEY,
+        )
 
         with pytest.raises(SupabaseConfigurationError, match="missing SUPABASE_URL"):
             get_supabase_service_client()
 
     def test_raises_when_key_is_blank_string(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
-        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "   ")
-        _clear_settings_cache()
+        _set_service_config(
+            monkeypatch,
+            url=_VALID_URL,
+            key="   ",
+        )
 
-        with pytest.raises(SupabaseConfigurationError, match="SUPABASE_SERVICE_ROLE_KEY"):
+        with pytest.raises(SupabaseConfigurationError, match="SUPABASE_SERVICE_ROLE_KEY|supabase api key"):
             get_supabase_service_client()
 
     def test_raises_when_url_is_quoted_blank(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SUPABASE_URL", '""')
-        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
-        _clear_settings_cache()
+        _set_service_config(
+            monkeypatch,
+            url='""',
+            key=_VALID_KEY,
+        )
 
         with pytest.raises(SupabaseConfigurationError, match="missing SUPABASE_URL"):
             get_supabase_service_client()
 
 
-# ---------------------------------------------------------------------------
-# get_supabase_service_client — happy paths
-# ---------------------------------------------------------------------------
-
-
 class TestGetSupabaseServiceClientSuccess:
-    """get_supabase_service_client returns a correctly-configured SupabaseClient."""
-
     def setup_method(self) -> None:
         _clear_settings_cache()
 
@@ -151,86 +161,73 @@ class TestGetSupabaseServiceClientSuccess:
         _clear_settings_cache()
 
     def test_returns_supabase_client_instance(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
-        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
-        _clear_settings_cache()
+        _set_service_config(monkeypatch)
 
         client = get_supabase_service_client()
         assert isinstance(client, SupabaseClient)
 
     def test_client_config_url_is_stripped(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SUPABASE_URL", _VALID_URL + "/")
-        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
-        _clear_settings_cache()
+        _set_service_config(monkeypatch, url=_VALID_URL + "/")
 
         client = get_supabase_service_client()
         assert not client.config.url.endswith("/")
 
     def test_client_config_url_matches_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
-        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
-        _clear_settings_cache()
+        _set_service_config(monkeypatch, url=_VALID_URL)
 
         client = get_supabase_service_client()
         assert client.config.url == _VALID_URL
 
     def test_client_config_key_matches_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
-        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
-        _clear_settings_cache()
+        _set_service_config(monkeypatch, url=_VALID_URL, key=_VALID_KEY)
 
         client = get_supabase_service_client()
         assert client.config.key == _VALID_KEY
 
     def test_default_timeout_applied(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
-        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
-        _clear_settings_cache()
+        _set_service_config(monkeypatch)
 
         client = get_supabase_service_client()
         assert client.timeout == SUPABASE_TIMEOUT_SECONDS
 
     def test_custom_timeout_applied(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
-        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
-        _clear_settings_cache()
+        _set_service_config(monkeypatch)
 
         client = get_supabase_service_client(timeout=42.0)
         assert client.timeout == 42.0
 
     def test_http_url_scheme_accepted(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SUPABASE_URL", "http://localhost:54321")
-        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
-        _clear_settings_cache()
+        _set_service_config(
+            monkeypatch,
+            url="http://localhost:54321",
+            key=_VALID_KEY,
+        )
 
         client = get_supabase_service_client()
         assert client.config.url.startswith("http://")
 
     def test_key_with_surrounding_whitespace_is_cleaned(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
-        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", f"  {_VALID_KEY}  ")
-        _clear_settings_cache()
+        _set_service_config(
+            monkeypatch,
+            url=_VALID_URL,
+            key=f"  {_VALID_KEY}  ",
+        )
 
         client = get_supabase_service_client()
         assert client.config.key == _VALID_KEY
 
     def test_url_with_surrounding_whitespace_is_cleaned(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SUPABASE_URL", f"  {_VALID_URL}  ")
-        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
-        _clear_settings_cache()
+        _set_service_config(
+            monkeypatch,
+            url=f"  {_VALID_URL}  ",
+            key=_VALID_KEY,
+        )
 
         client = get_supabase_service_client()
         assert client.config.url == _VALID_URL
 
 
-# ---------------------------------------------------------------------------
-# Settings-resolved URL takes priority over raw env fallback
-# ---------------------------------------------------------------------------
-
-
 class TestSettingsUrlPriority:
-    """settings.supabase_url is preferred over raw IRONCLAW_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_URL."""
-
     def setup_method(self) -> None:
         _clear_settings_cache()
 
@@ -241,6 +238,7 @@ class TestSettingsUrlPriority:
         settings_url = "https://settings-resolved.supabase.co"
         fallback_url = "https://should-not-be-used.supabase.co"
 
+        _clear_supabase_env(monkeypatch)
         monkeypatch.setenv("SUPABASE_URL", settings_url)
         monkeypatch.setenv("IRONCLAW_SUPABASE_URL", fallback_url)
         monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
@@ -252,7 +250,7 @@ class TestSettingsUrlPriority:
     def test_ironclaw_env_used_when_supabase_url_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
         fallback_url = "https://ironclaw-fallback.supabase.co"
 
-        monkeypatch.delenv("SUPABASE_URL", raising=False)
+        _clear_supabase_env(monkeypatch)
         monkeypatch.setenv("IRONCLAW_SUPABASE_URL", fallback_url)
         monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
         _clear_settings_cache()
@@ -263,8 +261,7 @@ class TestSettingsUrlPriority:
     def test_next_public_url_used_as_last_env_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
         next_url = "https://next-public.supabase.co"
 
-        monkeypatch.delenv("SUPABASE_URL", raising=False)
-        monkeypatch.delenv("IRONCLAW_SUPABASE_URL", raising=False)
+        _clear_supabase_env(monkeypatch)
         monkeypatch.setenv("NEXT_PUBLIC_SUPABASE_URL", next_url)
         monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
         _clear_settings_cache()
@@ -272,18 +269,71 @@ class TestSettingsUrlPriority:
         client = get_supabase_service_client()
         assert client.config.url == next_url
 
+    def test_service_role_key_preferred_over_legacy_keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _clear_supabase_env(monkeypatch)
+        monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
+        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
+        monkeypatch.setenv("SUPABASE_KEY", "legacy-key-should-not-win")
+        monkeypatch.setenv("IRONCLAW_SUPABASE_KEY", "ironclaw-key-should-not-win")
+        monkeypatch.setenv("SUPABASE_ANON_KEY", "anon-key-should-not-win")
+        monkeypatch.setenv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "public-anon-should-not-win")
+        _clear_settings_cache()
 
-# ---------------------------------------------------------------------------
-# __all__ completeness — every exported symbol must be importable
-# ---------------------------------------------------------------------------
+        client = get_supabase_service_client()
+        assert client.config.key == _VALID_KEY
+
+    def test_legacy_service_key_used_when_service_role_key_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        legacy_key = "legacy-supabase-key"
+
+        _clear_supabase_env(monkeypatch)
+        monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
+        monkeypatch.setenv("SUPABASE_KEY", legacy_key)
+        _clear_settings_cache()
+
+        client = get_supabase_service_client()
+        assert client.config.key == legacy_key
+
+    def test_ironclaw_key_used_when_primary_keys_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        ironclaw_key = "ironclaw-fallback-key"
+
+        _clear_supabase_env(monkeypatch)
+        monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
+        monkeypatch.setenv("IRONCLAW_SUPABASE_KEY", ironclaw_key)
+        _clear_settings_cache()
+
+        client = get_supabase_service_client()
+        assert client.config.key == ironclaw_key
+
+    def test_anon_key_used_when_server_keys_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        anon_key = "anon-fallback-key"
+
+        _clear_supabase_env(monkeypatch)
+        monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
+        monkeypatch.setenv("SUPABASE_ANON_KEY", anon_key)
+        _clear_settings_cache()
+
+        client = get_supabase_service_client()
+        assert client.config.key == anon_key
+
+    def test_next_public_anon_key_used_as_last_key_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        public_anon_key = "next-public-anon-key"
+
+        _clear_supabase_env(monkeypatch)
+        monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
+        monkeypatch.setenv("NEXT_PUBLIC_SUPABASE_ANON_KEY", public_anon_key)
+        _clear_settings_cache()
+
+        client = get_supabase_service_client()
+        assert client.config.key == public_anon_key
 
 
 class TestDunderAll:
-    """Every name in app.core.supabase.__all__ must be importable from that module."""
-
     def test_all_symbols_importable(self) -> None:
         for name in supabase_core.__all__:
-            assert hasattr(supabase_core, name), f"app.core.supabase.__all__ declares {name!r} but the symbol is not present on the module"
+            assert hasattr(
+                supabase_core,
+                name,
+            ), f"app.core.supabase.__all__ declares {name!r} but the symbol is not present on the module"
 
     def test_all_contains_get_supabase_service_client(self) -> None:
         assert "get_supabase_service_client" in supabase_core.__all__
@@ -307,14 +357,7 @@ class TestDunderAll:
         assert "get_supabase_config" in supabase_core.__all__
 
 
-# ---------------------------------------------------------------------------
-# SupabaseConfig contract — verify config properties used downstream
-# ---------------------------------------------------------------------------
-
-
 class TestSupabaseConfigContract:
-    """SupabaseConfig returned inside the client exposes the expected URL properties."""
-
     def setup_method(self) -> None:
         _clear_settings_cache()
 
@@ -322,9 +365,7 @@ class TestSupabaseConfigContract:
         _clear_settings_cache()
 
     def _make_client(self, monkeypatch: pytest.MonkeyPatch) -> SupabaseClient:
-        monkeypatch.setenv("SUPABASE_URL", _VALID_URL)
-        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", _VALID_KEY)
-        _clear_settings_cache()
+        _set_service_config(monkeypatch)
         return get_supabase_service_client()
 
     def test_rest_url_has_correct_suffix(self, monkeypatch: pytest.MonkeyPatch) -> None:

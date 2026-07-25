@@ -16,7 +16,6 @@ from app.core.settings import get_settings
 
 ProtectedDependencyFactory = Callable[[], Any]
 
-
 _log = logging.getLogger(__name__)
 
 
@@ -56,31 +55,6 @@ def _optional_attr(module_path: str, attr_name: str) -> Any | None:
     return getattr(module, attr_name, None)
 
 
-def _include_optional_router(
-    app: FastAPI,
-    module_path: str,
-    *,
-    prefix: str | None = None,
-    dependencies: list[Any] | None = None,
-) -> None:
-    router = _optional_router(module_path)
-    if router is None:
-        return
-
-    kwargs: dict[str, Any] = {}
-    if prefix is not None:
-        kwargs["prefix"] = prefix
-    if dependencies is not None:
-        kwargs["dependencies"] = dependencies
-
-    _include_router_once(app, router, **kwargs)
-    _log.info(
-        "main: included router from %s%s",
-        module_path,
-        f" with prefix {prefix}" if prefix is not None else "",
-    )
-
-
 def _route_signature(route: APIRoute) -> tuple[str, tuple[str, ...]]:
     return (
         route.path,
@@ -117,6 +91,31 @@ def _include_router_group(
         if router is None:
             continue
         _include_router_once(app, router, **kwargs)
+
+
+def _include_optional_router(
+    app: FastAPI,
+    module_path: str,
+    *,
+    prefix: str | None = None,
+    dependencies: list[Any] | None = None,
+) -> None:
+    router = _optional_router(module_path)
+    if router is None:
+        return
+
+    kwargs: dict[str, Any] = {}
+    if prefix is not None:
+        kwargs["prefix"] = prefix
+    if dependencies is not None:
+        kwargs["dependencies"] = dependencies
+
+    _include_router_once(app, router, **kwargs)
+    _log.info(
+        "main: included router from %s%s",
+        module_path,
+        f" with prefix {prefix}" if prefix is not None else "",
+    )
 
 
 def _normalize_dependency_metadata(app: FastAPI) -> None:
@@ -168,12 +167,15 @@ def _is_auth_required() -> bool:
         settings = get_settings()
     except Exception:
         return True
+
     explicit = _coerce_optional_bool(getattr(settings, "auth_required", None))
     if explicit is not None:
         return explicit
+
     explicit = _coerce_optional_bool(getattr(settings, "AUTH_REQUIRED", None))
     if explicit is not None:
         return explicit
+
     return True
 
 
@@ -225,14 +227,11 @@ def _stripe_router_configs() -> list[tuple[Any, dict[str, Any]]]:
     if stripe_router is None:
         return []
 
-    dependencies = _protected_dependencies()
     auth_required = _is_auth_required()
-
-    if auth_required:
-        return [
-            (stripe_router, {"dependencies": dependencies}),
-            (stripe_router, {"prefix": "/api", "dependencies": dependencies}),
-        ]
+    _log.info(
+        "main: including stripe router with route-level auth control; AUTH_REQUIRED=%s",
+        auth_required,
+    )
 
     return [
         (stripe_router, {}),
@@ -246,58 +245,19 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
     action_execute_router = _optional_router("app.api.action_execute")
     return [
         (_optional_router("app.api.requestcontext"), {"dependencies": dependencies}),
-        (
-            _optional_router("app.api.history"),
-            {"prefix": "/history", "dependencies": dependencies},
-        ),
-        (
-            _optional_router("app.api.action_guard"),
-            {"prefix": "/guard", "dependencies": agent_dependencies},
-        ),
-        (
-            _optional_router("app.api.guard"),
-            {"dependencies": agent_dependencies},
-        ),
-        (
-            _optional_router("app.api.guard_action"),
-            {"dependencies": agent_dependencies},
-        ),
-        (
-            action_execute_router,
-            {"prefix": "/guard", "dependencies": agent_dependencies},
-        ),
-        (
-            action_execute_router,
-            {"prefix": "/execute", "dependencies": agent_dependencies},
-        ),
-        (
-            _optional_router("app.api.execute"),
-            {"dependencies": agent_dependencies},
-        ),
-        (
-            _optional_router("app.api.review_queue"),
-            {"prefix": "/guard", "dependencies": dependencies},
-        ),
-        (
-            _optional_router("app.api.audit_log"),
-            {"prefix": "/guard", "dependencies": dependencies},
-        ),
-        (
-            _optional_router("app.api.auditlog"),
-            {"dependencies": dependencies},
-        ),
-        (
-            _optional_router("app.api.audit"),
-            {"prefix": "/api", "dependencies": dependencies},
-        ),
-        (
-            _optional_router("app.api.behavioral_baseline"),
-            {"dependencies": dependencies},
-        ),
-        (
-            _optional_router("app.api.policy"),
-            {"prefix": "/policy", "dependencies": dependencies},
-        ),
+        (_optional_router("app.api.history"), {"prefix": "/history", "dependencies": dependencies}),
+        (_optional_router("app.api.action_guard"), {"prefix": "/guard", "dependencies": agent_dependencies}),
+        (_optional_router("app.api.guard"), {"dependencies": agent_dependencies}),
+        (_optional_router("app.api.guard_action"), {"dependencies": agent_dependencies}),
+        (action_execute_router, {"prefix": "/guard", "dependencies": agent_dependencies}),
+        (action_execute_router, {"prefix": "/execute", "dependencies": agent_dependencies}),
+        (_optional_router("app.api.execute"), {"dependencies": agent_dependencies}),
+        (_optional_router("app.api.review_queue"), {"prefix": "/guard", "dependencies": dependencies}),
+        (_optional_router("app.api.audit_log"), {"prefix": "/guard", "dependencies": dependencies}),
+        (_optional_router("app.api.auditlog"), {"dependencies": dependencies}),
+        (_optional_router("app.api.audit"), {"prefix": "/api", "dependencies": dependencies}),
+        (_optional_router("app.api.behavioral_baseline"), {"dependencies": dependencies}),
+        (_optional_router("app.api.policy"), {"prefix": "/policy", "dependencies": dependencies}),
         (_optional_router("app.api.actionpolicy"), {"dependencies": dependencies}),
         (_optional_router("app.api.actiondecision"), {"dependencies": dependencies}),
         (_optional_router("app.api.actionguard"), {"dependencies": agent_dependencies}),
@@ -329,26 +289,11 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (_optional_router("app.api.claude_guard_router"), {"dependencies": dependencies}),
         (_optional_router("app.api.claude_stream_guard"), {"dependencies": dependencies}),
         (_optional_router("app.api.claude_router_proxy"), {"dependencies": dependencies}),
-        (
-            _optional_router("app.routers.threat_detection"),
-            {"dependencies": dependencies},
-        ),
-        (
-            _optional_router("app.api.threat_detection"),
-            {"dependencies": dependencies},
-        ),
-        (
-            _optional_router("app.api.threat_hunt"),
-            {"dependencies": dependencies},
-        ),
-        (
-            _optional_router("app.api.ioc_management"),
-            {"dependencies": dependencies},
-        ),
-        (
-            _optional_router("app.worker.remediation_worker"),
-            {"dependencies": dependencies},
-        ),
+        (_optional_router("app.routers.threat_detection"), {"dependencies": dependencies}),
+        (_optional_router("app.api.threat_detection"), {"dependencies": dependencies}),
+        (_optional_router("app.api.threat_hunt"), {"dependencies": dependencies}),
+        (_optional_router("app.api.ioc_management"), {"dependencies": dependencies}),
+        (_optional_router("app.worker.remediation_worker"), {"dependencies": dependencies}),
     ]
 
 
@@ -708,8 +653,9 @@ async def lifespan(app: FastAPI):
         settings = get_settings()
         resolved_origins = get_allowed_origins(settings)
         _log.info("main.lifespan: CORS allowed origins resolved: %s", resolved_origins)
+        _log.info("main.lifespan: AUTH_REQUIRED resolved: %s", _is_auth_required())
     except Exception as exc:
-        _log.warning("main.lifespan: could not resolve CORS origins for startup log: %s", exc)
+        _log.warning("main.lifespan: could not resolve startup security settings for log: %s", exc)
 
     _log.info("main.lifespan: startup complete")
 
@@ -779,9 +725,6 @@ def create_app() -> FastAPI:
 
     app.state.settings = settings
 
-    # Keep this order. It is the payment/CORS fix.
-    # Starlette is LIFO for middleware registration, so installing core middleware
-    # first and security middleware second allows security.py to place CORS outermost.
     _install_core_middleware(app)
     install_security_middleware(app, settings)
 
