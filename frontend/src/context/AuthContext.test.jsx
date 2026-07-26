@@ -467,8 +467,16 @@ describe("AuthContext", () => {
       return null;
     };
 
-    expect(() => render(<OutsideConsumer />)).toThrow(
-      "useAuth must be used within AuthProvider",
-    );
+    const consoleErrorSpy = jest
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    try {
+      expect(() => render(<OutsideConsumer />)).toThrow(
+        "useAuth must be used within AuthProvider",
+      );
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
   });
 });

@@ -169,10 +169,10 @@ describe("auth.me", () => {
 });
 
 describe("dashboard.get", () => {
-  it("calls api.get('/dashboard')", () => {
+  it("calls api.get('/dashboard/overview')", () => {
     mockGet.mockResolvedValueOnce({ data: {} });
     dashboard.get();
-    expect(mockGet).toHaveBeenCalledWith("/dashboard");
+    expect(mockGet).toHaveBeenCalledWith("/dashboard/overview");
   });
 });
 
@@ -205,7 +205,9 @@ describe("payments.getStatus", () => {
   it("calls api.get with the correct URL including sessionId", () => {
     mockGet.mockResolvedValueOnce({ data: {} });
     payments.getStatus("cs_test_abc123");
-    expect(mockGet).toHaveBeenCalledWith("/billing/checkout/sessions/cs_test_abc123");
+    expect(mockGet).toHaveBeenCalledWith(
+      "/billing/checkout/sessions/cs_test_abc123",
+    );
   });
 });
 

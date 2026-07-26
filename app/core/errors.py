@@ -89,6 +89,23 @@ def _is_preflight_request(request: Request) -> bool:
     return request.method.upper() == "OPTIONS" and bool(request.headers.get("origin")) and bool(request.headers.get("access-control-request-method"))
 
 
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if isinstance(value, Mapping):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, Exception):
+        return str(value)
+    if hasattr(value, "__iter__") and not isinstance(value, (str, bytes, bytearray)):
+        try:
+            return [_json_safe(v) for v in value]
+        except TypeError:
+            pass
+    return value
+
+
 def _sanitize_validation_errors(errors: list[Any]) -> list[dict[str, Any]]:
     sanitized: list[dict[str, Any]] = []
     for err in errors:
@@ -98,11 +115,9 @@ def _sanitize_validation_errors(errors: list[Any]) -> list[dict[str, Any]]:
         clean: dict[str, Any] = {}
         for k, v in err.items():
             if k == "ctx" and isinstance(v, dict):
-                clean[k] = {ck: str(cv) if isinstance(cv, Exception) else cv for ck, cv in v.items()}
-            elif isinstance(v, Exception):
-                clean[k] = str(v)
+                clean[k] = {ck: _json_safe(cv) for ck, cv in v.items()}
             else:
-                clean[k] = v
+                clean[k] = _json_safe(v)
         sanitized.append(clean)
     return sanitized
 
@@ -157,7 +172,7 @@ def build_error_response(
         error=error,
         message=message,
         request_id=request_id or get_request_id() or None,
-        details=dict(details or {}),
+        details=_json_safe(dict(details or {})),
     )
 
 
@@ -183,7 +198,7 @@ def _log_exception(
             "path": request.url.path,
             "http_method": request.method,
             "request_id": _request_id_from_request(request),
-            "details": dict(details or {}),
+            "details": _json_safe(dict(details or {})),
             "is_preflight": _is_preflight_request(request),
         },
         exc_info=exc_info,
@@ -211,7 +226,7 @@ async def insufficient_units_handler(request: Request, exc: InsufficientUnitsErr
     )
     return JSONResponse(
         status_code=status.HTTP_402_PAYMENT_REQUIRED,
-        content={"detail": detail},
+        content={"detail": _json_safe(detail)},
     )
 
 
@@ -233,7 +248,7 @@ async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
         request_id=_request_id_from_request(request),
         details=exc.details,
     )
-    return JSONResponse(status_code=exc.status_code, content=payload.model_dump())
+    return JSONResponse(status_code=exc.status_code, content=payload.model_dump(mode="json"))
 
 
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
@@ -256,7 +271,7 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 
     return JSONResponse(
         status_code=status_code,
-        content={"detail": exc.detail},
+        content={"detail": _json_safe(exc.detail)},
         headers=exc.headers,
     )
 
@@ -299,7 +314,7 @@ async def validation_exception_handler(
         request_id=_request_id_from_request(request),
         details=details,
     )
-    return JSONResponse(status_code=response_status, content=payload.model_dump())
+    return JSONResponse(status_code=response_status, content=payload.model_dump(mode="json"))
 
 
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -325,7 +340,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     )
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content=payload.model_dump(),
+        content=payload.model_dump(mode="json"),
     )
 
 

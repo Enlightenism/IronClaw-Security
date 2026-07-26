@@ -9,7 +9,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
 
-from app.core.auth import AuthContext, get_auth_context, require_api_key
+from app.core.auth import AuthContext, get_auth_context, require_auth_context
 from app.core.billing import resolve_billing_owner
 from app.core.install_keys import (
     InstallKeyAlreadyExistsError,
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/billing",
     tags=["billing"],
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(require_auth_context)],
 )
 
 
@@ -93,11 +93,6 @@ def _derive_package_catalog() -> dict[str, dict[str, Any]]:
 PACKAGE_CATALOG: dict[str, dict[str, Any]] = _derive_package_catalog()
 
 
-# ---------------------------------------------------------------------------
-# Response / request schemas
-# ---------------------------------------------------------------------------
-
-
 class BillingPackageView(BaseModel):
     package_id: str
     name: str
@@ -132,9 +127,10 @@ class BillingPackagePurchaseRequest(BaseModel):
     @field_validator("buyer_email")
     @classmethod
     def validate_email(cls, v: str) -> str:
-        if _ORG_KEY_RE.match(v):
-            return v
-        normalized = v.strip().lower()
+        value = v.strip()
+        if _ORG_KEY_RE.match(value):
+            return value
+        normalized = value.lower()
         if not _EMAIL_RE.match(normalized):
             raise ValueError("Invalid email address")
         return normalized
@@ -255,10 +251,6 @@ class InsufficientUnitsErrorResponse(BaseModel):
     timestamp: str
 
 
-# ---------------------------------------------------------------------------
-# In-process purchase log (size-bounded)
-# ---------------------------------------------------------------------------
-
 _PURCHASES: list[BillingPackagePurchaseView] = []
 
 
@@ -266,11 +258,6 @@ def _append_purchase(purchase: BillingPackagePurchaseView) -> None:
     _PURCHASES.append(purchase)
     if len(_PURCHASES) > _PURCHASES_MAX_SIZE:
         del _PURCHASES[: len(_PURCHASES) - _PURCHASES_MAX_SIZE]
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
 
 
 def _utc_now_iso() -> str:
@@ -297,6 +284,16 @@ def _package_to_view(pkg_id: str, pkg: dict[str, Any]) -> BillingPackageView:
 
 
 def _wallet_to_view(wallet: Any) -> WalletBalanceView:
+    updated_at = getattr(wallet, "updated_at", None)
+    if hasattr(updated_at, "isoformat"):
+        updated_at_value = updated_at.isoformat().replace("+00:00", "Z")
+    else:
+        updated_at_value = _utc_now_iso()
+
+    metadata = getattr(wallet, "metadata", {}) or {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+
     return WalletBalanceView(
         wallet_id=str(wallet.wallet_id),
         owner_key=str(wallet.owner_key),
@@ -304,8 +301,8 @@ def _wallet_to_view(wallet: Any) -> WalletBalanceView:
         total_purchased_units=int(wallet.total_purchased_units),
         total_consumed_units=int(wallet.total_consumed_units),
         total_refunded_units=int(wallet.total_refunded_units),
-        updated_at=_utc_now_iso(),
-        metadata=dict(wallet.metadata) if wallet.metadata else {},
+        updated_at=updated_at_value,
+        metadata=metadata,
     )
 
 
@@ -329,7 +326,7 @@ def _assert_owner_access(owner_key: str, auth_ctx: AuthContext) -> None:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
                     "reason": "org_key_mismatch",
-                    "detail": (f"Org key does not match wallet owner: expected {expected_owner}, got {owner_key}"),
+                    "detail": f"Org key does not match wallet owner: expected {expected_owner}, got {owner_key}",
                 },
             )
     else:
@@ -410,11 +407,6 @@ def _provision_install_keys(
     return openclaw_key, claude_key
 
 
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
-
-
 @router.get(
     "/packages",
     response_model=BillingPackagesResponse,
@@ -423,10 +415,10 @@ def _provision_install_keys(
 def get_packages() -> BillingPackagesResponse:
     packages = [_package_to_view(pid, pkg) for pid, pkg in PACKAGE_CATALOG.items()]
     unit_policy = UnitPolicyView(
-        unit_definition=(f"One protection unit covers {TOKEN_CHUNK_SIZE:,} tokens of inspected AI interaction across all active guardrails."),
+        unit_definition=f"One protection unit covers {TOKEN_CHUNK_SIZE:,} tokens of inspected AI interaction across all active guardrails.",
         token_chunk_size=TOKEN_CHUNK_SIZE,
         delivery_model="prepaid",
-        buyer_positioning=("Units are consumed as AI actions pass through IronClaw guardrails. Unused units roll over until your balance is exhausted."),
+        buyer_positioning="Units are consumed as AI actions pass through IronClaw guardrails. Unused units roll over until your balance is exhausted.",
         protection_layers=[
             ProtectionValueView(
                 title="Prompt Injection Guard",
@@ -537,7 +529,7 @@ def list_purchases(
         "service": "IronClaw-Security",
         "timestamp": _utc_now_iso(),
         "count": len(records),
-        "purchases": [p.model_dump() for p in records],
+        "purchases": [p.model_dump(mode="json") for p in records],
     }
 
 

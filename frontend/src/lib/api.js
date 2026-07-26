@@ -9,9 +9,88 @@ const BACKEND_URL = RAW_BACKEND_URL.replace(/\/+$/, "");
 
 export const API_BASE = `${BACKEND_URL}/api`;
 
+const AUTH_TOKEN_STORAGE_KEY = "ironclaw.auth.token";
+const AUTH_ORG_ID_STORAGE_KEY = "ironclaw.auth.orgId";
+
 const api = axios.create({
   baseURL: API_BASE,
   timeout: 15000,
+});
+
+const getStoredToken = () => {
+  try {
+    return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+};
+
+const getStoredOrgId = () => {
+  try {
+    return localStorage.getItem(AUTH_ORG_ID_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+};
+
+const getOrgIdFromSession = (session) => {
+  const user = session?.user;
+  if (!user) return "";
+
+  const userMeta = user.user_metadata ?? {};
+  const appMeta = user.app_metadata ?? {};
+
+  return (
+    userMeta.org_id ||
+    userMeta.organization_id ||
+    userMeta.orgId ||
+    appMeta.org_id ||
+    appMeta.organization_id ||
+    appMeta.orgId ||
+    user.id ||
+    ""
+  );
+};
+
+api.interceptors.request.use(async (config) => {
+  let accessToken = "";
+  let orgId = "";
+
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    accessToken = session?.access_token || "";
+    orgId = getOrgIdFromSession(session);
+  } catch {
+    accessToken = "";
+    orgId = "";
+  }
+
+  if (!accessToken) {
+    accessToken = getStoredToken();
+  }
+
+  if (!orgId) {
+    orgId = getStoredOrgId();
+  }
+
+  config.headers = config.headers ?? {};
+
+  if (accessToken) {
+    config.headers.Authorization = `Bearer ${accessToken}`;
+  } else {
+    delete config.headers.Authorization;
+  }
+
+  if (orgId) {
+    config.headers["X-Org-Id"] = orgId;
+  } else {
+    delete config.headers["X-Org-Id"];
+  }
+
+  return config;
 });
 
 api.interceptors.response.use(

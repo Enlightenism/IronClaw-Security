@@ -6,11 +6,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.core.auth import require_api_key
 from app.core.billing import BillingRegistry, BillingSubscription, get_billing_registry
 from app.core.install_keys import InstallKeyNotFoundError, InstallKeyRegistry, get_install_key_registry
 from app.core.settings import Settings, get_settings
 from app.core.unit_wallet import UnitWalletRegistry, get_unit_wallet_registry
+from app.dependencies.customer_auth import require_customer_read, require_customer_write
 from app.services.audit_store import get_audit_store
 from app.services.incident_store import get_incident_store
 from app.services.quarantine_store import get_quarantine_store
@@ -18,7 +18,6 @@ from app.services.quarantine_store import get_quarantine_store
 router = APIRouter(
     prefix="/dashboard",
     tags=["dashboard"],
-    dependencies=[Depends(require_api_key)],
 )
 
 
@@ -150,14 +149,6 @@ def _build_install_key_views(
     registry: InstallKeyRegistry,
     owner_key: str,
 ) -> list[DashboardInstallKeyView]:
-    """
-    Return all install key records for owner_key with correct slot status.
-    Status precedence: revoked > locked > active.
-    A key is:
-      - revoked  : revoked_at is set OR status field == "revoked"
-      - locked   : active is False AND revoked_at is None (not yet activated)
-      - active   : active is True AND revoked_at is None
-    """
     try:
         records = registry.get_keys_for_owner(owner_key)
     except Exception:
@@ -243,7 +234,11 @@ def _build_billing_kpi(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/overview", response_model=DashboardResponse)
+@router.get(
+    "/overview",
+    response_model=DashboardResponse,
+    dependencies=[Depends(require_customer_read)],
+)
 def get_dashboard_overview(
     owner_key: str | None = Query(default=None),
     settings: Settings = Depends(get_settings),
@@ -281,17 +276,11 @@ def get_dashboard_overview(
         if (event.verdict or "").lower() in {"block", "quarantine"}:
             bucket["blocked_events_24h"] = int(bucket["blocked_events_24h"]) + 1
 
-    # ---------------------------------------------------------------------------
-    # Owner-scoped wallet, billing, and install key resolution
-    # owner_key query param → live per-owner data
-    # no owner_key → fall back to demo sentinel for backward compat
-    # ---------------------------------------------------------------------------
     _DEMO_OWNER = "demo@ironclaw.local"
     resolved_owner = owner_key.strip() if owner_key and owner_key.strip() else _DEMO_OWNER
 
     wallet_kpi = _build_wallet_kpi(wallet_registry, resolved_owner)
 
-    # If no wallet under the resolved key and we fell back to demo, try get_or_create
     if wallet_kpi is None and resolved_owner == _DEMO_OWNER:
         try:
             wallet = wallet_registry.get_or_create_wallet(_DEMO_OWNER)
@@ -307,9 +296,6 @@ def get_dashboard_overview(
     billing_kpi = _build_billing_kpi(billing_registry, resolved_owner)
     install_keys = _build_install_key_views(install_key_registry, resolved_owner)
 
-    # ---------------------------------------------------------------------------
-    # Backward-compat metadata.wallet block (legacy consumers)
-    # ---------------------------------------------------------------------------
     wallet_meta: dict[str, Any] = {}
     if wallet_kpi is not None:
         wallet_meta = {
@@ -419,7 +405,11 @@ def get_dashboard_overview(
     )
 
 
-@router.get("/units", response_model=DashboardUnitsResponse)
+@router.get(
+    "/units",
+    response_model=DashboardUnitsResponse,
+    dependencies=[Depends(require_customer_read)],
+)
 def get_dashboard_units(
     owner_key: str = Query(...),
     registry: InstallKeyRegistry = Depends(get_install_key_registry),
@@ -445,7 +435,11 @@ def get_dashboard_units(
     )
 
 
-@router.post("/units/record", response_model=RecordKeyUsageResponse)
+@router.post(
+    "/units/record",
+    response_model=RecordKeyUsageResponse,
+    dependencies=[Depends(require_customer_write)],
+)
 def record_key_usage(
     body: RecordKeyUsageRequest,
     registry: InstallKeyRegistry = Depends(get_install_key_registry),

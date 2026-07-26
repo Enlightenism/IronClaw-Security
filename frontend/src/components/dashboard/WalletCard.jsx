@@ -15,14 +15,6 @@ import { useCountUp } from "@/hooks/useCountUp";
 import api, { paymentMethods } from "@/lib/api";
 import { toast } from "sonner";
 
-const STRIPE_PK = process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY ?? "";
-
-const STRIPE_MODE = STRIPE_PK.startsWith("pk_live_")
-  ? "live"
-  : STRIPE_PK.startsWith("pk_test_")
-    ? "test"
-    : "unconfigured";
-
 const TOKENS_PER_UNIT = 25_000;
 
 const TIERS = [
@@ -59,6 +51,14 @@ const TIERS = [
 const DEFAULT_ADD_CARD_PACKAGE_ID = "pkg5000";
 const VALID_PACKAGE_IDS = new Set(TIERS.map((t) => t.id));
 const paymentMethodCache = new Map();
+
+const getStripePublishableKey = () => process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY ?? "";
+
+const getStripeMode = (publishableKey = "") => {
+  if (publishableKey.startsWith("pk_live_")) return "live";
+  if (publishableKey.startsWith("pk_test_")) return "test";
+  return "unconfigured";
+};
 
 const getFirstString = (...values) => {
   for (const value of values) {
@@ -199,8 +199,8 @@ const EnterpriseBadge = () => (
   </div>
 );
 
-const StripeModeTag = () => {
-  if (STRIPE_MODE === "unconfigured") {
+const StripeModeTag = ({ stripeMode }) => {
+  if (stripeMode === "unconfigured") {
     return (
       <span
         className="ml-2 rounded-full border border-[#F59E0B]/40 bg-[#F59E0B]/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-[#F59E0B]"
@@ -211,7 +211,7 @@ const StripeModeTag = () => {
     );
   }
 
-  const isLive = STRIPE_MODE === "live";
+  const isLive = stripeMode === "live";
   return (
     <span
       className={`ml-2 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest ${
@@ -219,15 +219,15 @@ const StripeModeTag = () => {
           ? "border border-[#22C55E]/40 bg-[#22C55E]/10 text-[#22C55E]"
           : "border border-[#38BDF8]/40 bg-[#38BDF8]/10 text-[#38BDF8]"
       }`}
-      title={`Stripe ${STRIPE_MODE} mode`}
+      title={`Stripe ${stripeMode} mode`}
     >
-      Stripe {STRIPE_MODE}
+      Stripe {stripeMode}
     </span>
   );
 };
 
-const StripeKeyWarning = () => {
-  if (STRIPE_MODE !== "unconfigured") return null;
+const StripeKeyWarning = ({ stripeMode }) => {
+  if (stripeMode !== "unconfigured") return null;
 
   return (
     <div className="mb-4 flex items-start gap-2 rounded-lg border border-[#F59E0B]/30 bg-[#F59E0B]/10 px-3 py-2 text-xs text-[#FDE68A]">
@@ -496,6 +496,8 @@ const WalletCard = ({
   organizationId = "org-001",
 }) => {
   const animated = useCountUp(balance, 1500, [balance]);
+  const stripePublishableKey = getStripePublishableKey();
+  const stripeMode = getStripeMode(stripePublishableKey);
 
   const handleTierPurchase = useCallback(
     (tierId) => {
@@ -528,7 +530,7 @@ const WalletCard = ({
         </span>
       </div>
 
-      <StripeKeyWarning />
+      <StripeKeyWarning stripeMode={stripeMode} />
 
       <div className="mb-1 text-xs uppercase tracking-widest text-[#BFC1C2]">
         Available balance
@@ -562,7 +564,7 @@ const WalletCard = ({
               disabled={!!purchasingId}
               data-testid={`purchase-${t.id}`}
               title={
-                STRIPE_MODE === "unconfigured"
+                stripeMode === "unconfigured"
                   ? "Stripe publishable key is missing from the frontend build, but purchase will still be attempted through the configured checkout flow."
                   : undefined
               }
@@ -596,7 +598,7 @@ const WalletCard = ({
       >
         <div className="mb-3 flex items-center gap-2 text-xs uppercase tracking-widest text-[#BFC1C2]">
           <CreditCard size={14} /> Payment method
-          <StripeModeTag />
+          <StripeModeTag stripeMode={stripeMode} />
         </div>
 
         {hasPaid && lastPayment && (

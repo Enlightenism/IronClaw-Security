@@ -305,6 +305,18 @@ def get_allowed_origins(settings: Settings) -> list[str]:
     if selected:
         return _append_local_origins(selected, settings)
 
+    app_base_raw = _first_non_empty(
+        getattr(settings, "APP_BASE_URL", None),
+        getattr(settings, "app_base_url", None),
+        getattr(settings, "ENGINE_BASE_URL", None),
+        getattr(settings, "engine_base_url", None),
+        getattr(settings, "IRONCLAW_BASE_URL", None),
+        getattr(settings, "ironclaw_base_url", None),
+    )
+    derived_origin = _clean_origin_token(str(app_base_raw)) if app_base_raw is not None else ""
+    if derived_origin:
+        return _append_local_origins([derived_origin], settings)
+
     if _environment_name(settings) == "production":
         return []
     return list(_DEFAULT_LOCAL_ORIGINS)

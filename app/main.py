@@ -16,6 +16,7 @@ from app.core.settings import get_settings
 
 ProtectedDependencyFactory = Callable[[], Any]
 
+
 _log = logging.getLogger(__name__)
 
 
@@ -263,7 +264,6 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (_optional_router("app.api.actionguard"), {"dependencies": agent_dependencies}),
         (_optional_router("app.api.actionexecute"), {"dependencies": agent_dependencies}),
         (_optional_router("app.api.release_policy_routes"), {"dependencies": dependencies}),
-        (_optional_router("app.api.integrations"), {"dependencies": dependencies}),
         (_optional_router("app.api.customer_keys"), {"dependencies": dependencies}),
         (_optional_router("app.api.usage_reports"), {"dependencies": dependencies}),
         (_optional_router("app.api.auth"), {"dependencies": dependencies}),
@@ -301,13 +301,11 @@ def _include_optional_protected_routers(app: FastAPI) -> None:
     dependencies = _protected_dependencies()
 
     legacy_modules = [
-        "app.api.routes.billing",
         "app.api.routes.quarantine",
         "app.api.routes.llamafirewall",
         "app.api.routes.reviewqueue",
         "app.api.routes.unitledger",
         "app.api.routes.unitwallet",
-        "app.api.routes.dashboard",
         "app.api.routes.organizations",
     ]
     for module_path in legacy_modules:
@@ -327,6 +325,10 @@ def _include_optional_protected_routers(app: FastAPI) -> None:
     ]
     for module_path in integration_modules:
         _include_optional_router(app, module_path, dependencies=dependencies)
+
+    _include_optional_router(app, "app.api.routes.billing")
+    _include_optional_router(app, "app.api.routes.dashboard")
+    _include_optional_router(app, "app.api.integrations")
 
 
 def _install_core_middleware(app: FastAPI) -> None:

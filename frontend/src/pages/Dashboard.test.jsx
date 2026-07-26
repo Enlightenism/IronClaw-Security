@@ -119,12 +119,6 @@ const DEFAULT_TOKENS = {
   openclaw_command: "openclaw --token xyz",
 };
 
-const DEFAULT_PRICE_IDS = {
-  REACT_APP_STRIPE_PRICE_ID_PKG_5000: "price_test_5000",
-  REACT_APP_STRIPE_PRICE_ID_PKG_25000: "price_test_25000",
-  REACT_APP_STRIPE_PRICE_ID_PKG_60000: "price_test_60000",
-};
-
 function makeAttack(index) {
   return {
     id: `attack-${index}`,
@@ -137,7 +131,7 @@ function makeAttack(index) {
 
 function setupDefaultApis() {
   mockApiGet.mockImplementation((url) => {
-    if (url === "/dashboard") {
+    if (url === "/dashboard/overview") {
       return Promise.resolve({ data: DEFAULT_DASH });
     }
     if (url === "/integrations/token") {
@@ -152,18 +146,6 @@ function setupDefaultApis() {
     }
     return Promise.resolve({ data: {} });
   });
-}
-
-function setPriceIdEnv(overrides = {}) {
-  process.env.REACT_APP_STRIPE_PRICE_ID_PKG_5000 =
-    overrides.REACT_APP_STRIPE_PRICE_ID_PKG_5000 ??
-    DEFAULT_PRICE_IDS.REACT_APP_STRIPE_PRICE_ID_PKG_5000;
-  process.env.REACT_APP_STRIPE_PRICE_ID_PKG_25000 =
-    overrides.REACT_APP_STRIPE_PRICE_ID_PKG_25000 ??
-    DEFAULT_PRICE_IDS.REACT_APP_STRIPE_PRICE_ID_PKG_25000;
-  process.env.REACT_APP_STRIPE_PRICE_ID_PKG_60000 =
-    overrides.REACT_APP_STRIPE_PRICE_ID_PKG_60000 ??
-    DEFAULT_PRICE_IDS.REACT_APP_STRIPE_PRICE_ID_PKG_60000;
 }
 
 function resetWindowLocation() {
@@ -189,7 +171,6 @@ beforeEach(() => {
     loading: false,
     logout: mockLogout,
   };
-  setPriceIdEnv();
   setupDefaultApis();
   resetWindowLocation();
   jest.useFakeTimers();
@@ -271,7 +252,7 @@ describe("loading spinner", () => {
 describe("WalletCard organizationId prop", () => {
   it("passes organizationId from dashboard API response to WalletCard", async () => {
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard") {
+      if (url === "/dashboard/overview") {
         return Promise.resolve({
           data: { ...DEFAULT_DASH, organization_id: "org-abc" },
         });
@@ -297,7 +278,7 @@ describe("WalletCard organizationId prop", () => {
     const { organization_id: _unused, ...dashWithoutOrg } = DEFAULT_DASH;
 
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard") {
+      if (url === "/dashboard/overview") {
         return Promise.resolve({ data: dashWithoutOrg });
       }
       if (url === "/integrations/token") {
@@ -319,7 +300,7 @@ describe("WalletCard organizationId prop", () => {
 
   it("passes organizationId='org-001' fallback when organization_id is null", async () => {
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard") {
+      if (url === "/dashboard/overview") {
         return Promise.resolve({
           data: { ...DEFAULT_DASH, organization_id: null },
         });
@@ -348,16 +329,16 @@ describe("WalletCard organizationId prop", () => {
 
 describe("session_id payment polling", () => {
   it("fires toast.loading and navigates replace on session_id in URL", async () => {
-    mockLocation.search = "?session_id=cs_test_abc";
+    mockLocation.search = "?session_id=cs_test_abc&package_id=pkg_5000";
 
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard") {
+      if (url === "/dashboard/overview") {
         return Promise.resolve({ data: DEFAULT_DASH });
       }
       if (url === "/integrations/token") {
         return Promise.resolve({ data: DEFAULT_TOKENS });
       }
-      if (url === "/payments/status/cs_test_abc") {
+      if (url === "/billing/checkout/sessions/cs_test_abc") {
         return Promise.resolve({
           data: { payment_status: "paid", units: 5000 },
         });
@@ -377,16 +358,16 @@ describe("session_id payment polling", () => {
   });
 
   it("fires toast.success with unit count when payment_status is paid", async () => {
-    mockLocation.search = "?session_id=cs_test_abc";
+    mockLocation.search = "?session_id=cs_test_abc&package_id=pkg_5000";
 
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard") {
+      if (url === "/dashboard/overview") {
         return Promise.resolve({ data: DEFAULT_DASH });
       }
       if (url === "/integrations/token") {
         return Promise.resolve({ data: DEFAULT_TOKENS });
       }
-      if (url === "/payments/status/cs_test_abc") {
+      if (url === "/billing/checkout/sessions/cs_test_abc") {
         return Promise.resolve({
           data: { payment_status: "paid", units: 5000 },
         });
@@ -406,15 +387,15 @@ describe("session_id payment polling", () => {
   });
 
   it("dismisses the pay toast before showing success", async () => {
-    mockLocation.search = "?session_id=cs_test_abc";
+    mockLocation.search = "?session_id=cs_test_abc&package_id=pkg_5000";
 
     mockApiGet.mockImplementation((url) => {
-      if (url === "/payments/status/cs_test_abc") {
+      if (url === "/billing/checkout/sessions/cs_test_abc") {
         return Promise.resolve({
           data: { payment_status: "paid", units: 5000 },
         });
       }
-      if (url === "/dashboard") {
+      if (url === "/dashboard/overview") {
         return Promise.resolve({ data: DEFAULT_DASH });
       }
       if (url === "/integrations/token") {
@@ -506,9 +487,12 @@ describe("handlePurchase — valid package", () => {
     });
 
     expect(mockApiPost).toHaveBeenCalledWith("/billing/checkout/sessions", {
-      price_id: "price_test_5000",
-      success_url: "http://localhost/dashboard?checkout=success",
-      cancel_url: "http://localhost/dashboard?checkout=cancel",
+      package_id: "pkg_5000",
+      success_url:
+        "http://localhost/dashboard?checkout=success&package_id=pkg_5000",
+      cancel_url:
+        "http://localhost/dashboard?checkout=cancel&package_id=pkg_5000",
+      organization_id: "org-abc",
     });
   });
 
@@ -543,7 +527,7 @@ describe("handlePurchase — valid package", () => {
     });
   });
 
-  it("shows a checkout error when the response returns checkout_url instead of url", async () => {
+  it("redirects with window.location.assign when checkout response returns checkout_url", async () => {
     const checkoutUrl = "https://checkout.stripe.com/pay/cs_test_checkout_url";
 
     mockApiPost.mockImplementation((url) => {
@@ -569,11 +553,9 @@ describe("handlePurchase — valid package", () => {
     });
 
     await waitFor(() => {
-      expect(window.location.assign).not.toHaveBeenCalled();
-      expect(window.location.href).toBe("");
-      expect(mockToastError).toHaveBeenCalledWith(
-        expect.stringContaining("Missing checkout URL"),
-      );
+      expect(window.location.assign).toHaveBeenCalledWith(checkoutUrl);
+      expect(window.location.href).toBe(checkoutUrl);
+      expect(mockToastError).not.toHaveBeenCalled();
     });
   });
 
@@ -610,7 +592,7 @@ describe("handlePurchase — valid package", () => {
   });
 
   it("accepts all three valid package IDs without toast.error", async () => {
-    const validIds = ["pkg_5000", "pkg_25000", "pkg_60000"];
+    const validIds = ["pkg5000", "pkg25000", "pkg60000"];
 
     for (const pkgId of validIds) {
       cleanup();
@@ -623,7 +605,6 @@ describe("handlePurchase — valid package", () => {
         loading: false,
         logout: mockLogout,
       };
-      setPriceIdEnv();
       setupDefaultApis();
       resetWindowLocation();
 
@@ -716,31 +697,6 @@ describe("handlePurchase — valid package", () => {
       );
     });
   });
-
-  it("calls toast.error when a valid package has no configured price ID", async () => {
-    process.env.REACT_APP_STRIPE_PRICE_ID_PKG_5000 = "";
-
-    await act(async () => {
-      render(<Dashboard />);
-    });
-
-    await waitFor(() => {
-      expect(capturedWalletProps).not.toBeNull();
-    });
-
-    await act(async () => {
-      await capturedWalletProps.onPurchase("pkg_5000");
-    });
-
-    expect(
-      mockApiPost.mock.calls.some(
-        ([url]) => url === "/billing/checkout/sessions",
-      ),
-    ).toBe(false);
-    expect(mockToastError).toHaveBeenCalledWith(
-      expect.stringContaining("Package price not configured"),
-    );
-  });
 });
 
 // =============================================================================
@@ -820,7 +776,7 @@ describe("dashboard structure", () => {
 
   it("passes balance from wallet_units to WalletCard", async () => {
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard") {
+      if (url === "/dashboard/overview") {
         return Promise.resolve({
           data: { ...DEFAULT_DASH, wallet_units: 9999 },
         });
@@ -861,7 +817,7 @@ describe("dashboard structure", () => {
     ];
 
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard") {
+      if (url === "/dashboard/overview") {
         return Promise.resolve({
           data: {
             ...DEFAULT_DASH,
@@ -920,7 +876,7 @@ describe("attack feed pagination", () => {
     );
 
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard") {
+      if (url === "/dashboard/overview") {
         return Promise.resolve({
           data: { ...DEFAULT_DASH, attacks },
         });
@@ -957,7 +913,7 @@ describe("attack feed pagination", () => {
     );
 
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard") {
+      if (url === "/dashboard/overview") {
         return Promise.resolve({
           data: { ...DEFAULT_DASH, attacks },
         });
@@ -1000,7 +956,7 @@ describe("attack feed pagination", () => {
     );
 
     mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard") {
+      if (url === "/dashboard/overview") {
         return Promise.resolve({
           data: { ...DEFAULT_DASH, attacks },
         });
@@ -1094,14 +1050,14 @@ describe("refresh behavior", () => {
     });
 
     const dashboardCallsBefore = mockApiGet.mock.calls.filter(
-      ([url]) => url === "/dashboard",
+      ([url]) => url === "/dashboard/overview",
     ).length;
 
     await user.click(screen.getByTestId("refresh-btn"));
 
     await waitFor(() => {
       const dashboardCallsAfter = mockApiGet.mock.calls.filter(
-        ([url]) => url === "/dashboard",
+        ([url]) => url === "/dashboard/overview",
       ).length;
       expect(dashboardCallsAfter).toBeGreaterThan(dashboardCallsBefore);
     });
@@ -1127,7 +1083,7 @@ describe("refresh behavior", () => {
     });
 
     const dashboardCallsBefore = mockApiGet.mock.calls.filter(
-      ([url]) => url === "/dashboard",
+      ([url]) => url === "/dashboard/overview",
     ).length;
 
     await act(async () => {
@@ -1136,7 +1092,7 @@ describe("refresh behavior", () => {
 
     await waitFor(() => {
       const dashboardCallsAfter = mockApiGet.mock.calls.filter(
-        ([url]) => url === "/dashboard",
+        ([url]) => url === "/dashboard/overview",
       ).length;
       expect(dashboardCallsAfter).toBeGreaterThan(dashboardCallsBefore);
     });

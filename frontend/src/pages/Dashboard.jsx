@@ -27,7 +27,7 @@ import { useAuth } from "@/context/AuthContext";
 import api from "@/lib/api";
 
 const ATTACKS_PAGE_SIZE = 25;
-const VALID_PACKAGES = ["pkg5000", "pkg25000", "pkg60000"];
+const VALID_PACKAGES = ["pkg_5000", "pkg_25000", "pkg_60000"];
 
 const MemoWalletCard = memo(WalletCard);
 const MemoSecurityAnalysis = memo(SecurityAnalysis);
@@ -37,13 +37,13 @@ const normalizePackageId = (packageId) => {
   switch (packageId) {
     case "pkg_5000":
     case "pkg5000":
-      return "pkg5000";
+      return "pkg_5000";
     case "pkg_25000":
     case "pkg25000":
-      return "pkg25000";
+      return "pkg_25000";
     case "pkg_60000":
     case "pkg60000":
-      return "pkg60000";
+      return "pkg_60000";
     default:
       return "";
   }
@@ -51,11 +51,11 @@ const normalizePackageId = (packageId) => {
 
 const getPackageUnits = (packageId) => {
   switch (normalizePackageId(packageId)) {
-    case "pkg5000":
+    case "pkg_5000":
       return 5000;
-    case "pkg25000":
+    case "pkg_25000":
       return 25000;
-    case "pkg60000":
+    case "pkg_60000":
       return 60000;
     default:
       return 0;
@@ -64,6 +64,8 @@ const getPackageUnits = (packageId) => {
 
 const getErrorMessage = (error) => {
   const rawDetail = error?.response?.data?.detail;
+  const rawMessage = error?.response?.data?.message;
+  const topError = error?.response?.data?.error;
 
   if (typeof rawDetail === "string" && rawDetail.trim()) {
     return rawDetail;
@@ -76,6 +78,23 @@ const getErrorMessage = (error) => {
     rawDetail.detail.trim()
   ) {
     return rawDetail.detail;
+  }
+
+  if (
+    rawDetail &&
+    typeof rawDetail === "object" &&
+    typeof rawDetail.error === "string" &&
+    rawDetail.error.trim()
+  ) {
+    return rawDetail.error;
+  }
+
+  if (typeof rawMessage === "string" && rawMessage.trim()) {
+    return rawMessage;
+  }
+
+  if (typeof topError === "string" && topError.trim()) {
+    return topError;
   }
 
   if (typeof error?.message === "string" && error.message.trim()) {
@@ -271,7 +290,7 @@ const Dashboard = () => {
   }, [fetchDashboard, user]);
 
   const pollPayment = useCallback(
-    async (sessionId, attempts = 0) => {
+    async (sessionId, packageId, attempts = 0) => {
       const maxAttempts = 6;
 
       if (!sessionId) {
@@ -288,13 +307,13 @@ const Dashboard = () => {
 
       try {
         const { data: status } = await api.get(
-          `/billing/checkout/sessions/${sessionId}`,
+          `/billing/checkout/sessions/${encodeURIComponent(sessionId)}`,
         );
 
         if (status?.payment_status === "paid") {
           const units =
             Number(status?.unit_credits ?? status?.units ?? 0) ||
-            getPackageUnits(purchasingId);
+            getPackageUnits(packageId);
           toast.dismiss("pay");
           toast.success(
             `Payment confirmed — ${units.toLocaleString()} units added!`,
@@ -311,18 +330,19 @@ const Dashboard = () => {
           return;
         }
 
-        setTimeout(() => pollPayment(sessionId, attempts + 1), 2000);
+        setTimeout(() => pollPayment(sessionId, packageId, attempts + 1), 2000);
       } catch {
-        setTimeout(() => pollPayment(sessionId, attempts + 1), 2000);
+        setTimeout(() => pollPayment(sessionId, packageId, attempts + 1), 2000);
       }
     },
-    [fetchDashboard, purchasingId],
+    [fetchDashboard],
   );
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const sessionId = params.get("session_id");
     const checkoutState = params.get("checkout");
+    const packageId = normalizePackageId(params.get("package_id") || "");
 
     if (checkoutState === "cancel") {
       toast.error("Checkout canceled.");
@@ -342,45 +362,57 @@ const Dashboard = () => {
     if (sessionId && !polledRef.current) {
       polledRef.current = true;
       toast.loading("Verifying your payment...", { id: "pay" });
-      pollPayment(sessionId);
+      pollPayment(sessionId, packageId);
       navigate("/dashboard", { replace: true });
     }
   }, [fetchDashboard, location.search, navigate, pollPayment]);
 
-  const handlePurchase = useCallback(async (rawPackageId) => {
-    const packageId = normalizePackageId(rawPackageId);
+  const handlePurchase = useCallback(
+    async (rawPackageId) => {
+      const packageId = normalizePackageId(rawPackageId);
 
-    if (!VALID_PACKAGES.includes(packageId)) {
-      toast.error("Invalid package selected.");
-      return;
-    }
-
-    setPurchasingId(packageId);
-
-    try {
-      const { data: res } = await api.post("/billing/checkout/sessions", {
-        package_id: packageId,
-        success_url: `${window.location.origin}/dashboard?checkout=success`,
-        cancel_url: `${window.location.origin}/dashboard?checkout=cancel`,
-              organization_id: data?.organization_id ?? "org-001",
-      });
-
-      const redirectUrl = res?.checkout_url || res?.url;
-
-      if (!redirectUrl) {
-        throw new Error("Missing checkout URL.");
+      if (!VALID_PACKAGES.includes(packageId)) {
+        toast.error("Invalid package selected.");
+        return;
       }
 
-      if (typeof window.location.assign === "function") {
-        window.location.assign(redirectUrl);
-      } else {
-        window.location.href = redirectUrl;
+      setPurchasingId(packageId);
+
+      try {
+        const organizationId = data?.organization_id ?? "org-001";
+        const successUrl = new URL(`${window.location.origin}/dashboard`);
+        successUrl.searchParams.set("checkout", "success");
+        successUrl.searchParams.set("package_id", packageId);
+
+        const cancelUrl = new URL(`${window.location.origin}/dashboard`);
+        cancelUrl.searchParams.set("checkout", "cancel");
+        cancelUrl.searchParams.set("package_id", packageId);
+
+        const { data: res } = await api.post("/billing/checkout/sessions", {
+          package_id: packageId,
+          success_url: successUrl.toString(),
+          cancel_url: cancelUrl.toString(),
+          organization_id: organizationId,
+        });
+
+        const redirectUrl = res?.checkout_url || res?.url;
+
+        if (!redirectUrl) {
+          throw new Error("Missing checkout URL.");
+        }
+
+        if (typeof window.location.assign === "function") {
+          window.location.assign(redirectUrl);
+        } else {
+          window.location.href = redirectUrl;
+        }
+      } catch (e) {
+        toast.error(getErrorMessage(e));
+        setPurchasingId(null);
       }
-    } catch (e) {
-      toast.error(getErrorMessage(e));
-      setPurchasingId(null);
-    }
-    }, [data]);
+    },
+    [data],
+  );
 
   const handleSignOut = useCallback(() => {
     logout();
