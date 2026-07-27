@@ -1146,10 +1146,17 @@ class StripeService:
           Team:      25,000 units / $90 USD  — each unit ≤ 25,000 tokens · unlimited scans
           Enterprise: 60,000 units / $180 USD — each unit ≤ 25,000 tokens · unlimited scans
         """
+        # Existing validation kept intact, plus guarded checks for critical inputs.
         if quantity < 1:
             raise StripeServiceError("quantity must be >= 1")
         if unit_credits < 0:
             raise StripeServiceError("unit_credits must be >= 0")
+        if not price_id or not price_id.strip():
+            raise StripeServiceError("price_id is required")
+        if not success_url or not success_url.strip():
+            raise StripeServiceError("success_url is required")
+        if not cancel_url or not cancel_url.strip():
+            raise StripeServiceError("cancel_url is required")
 
         now = _utcnow_iso()
         session_meta: dict[str, Any] = {
@@ -1167,12 +1174,31 @@ class StripeService:
             "line_items[0][price]": price_id,
             "line_items[0][quantity]": str(quantity),
         }
+
+        # New: explicitly request card collection for payment mode.
+        if mode == StripeCheckoutMode.PAYMENT:
+            params["payment_method_types[0]"] = "card"
+
         if customer_id:
             params["customer"] = customer_id
+
         for k, v in session_meta.items():
             params[f"metadata[{k}]"] = str(v)
 
-        resp = self._get_client().post("/checkout/sessions", params)
+        try:
+            resp = self._get_client().post("/checkout/sessions", params)
+        except StripeAPIError as exc:
+            # New: log full Stripe error context before re-raising for the router to catch.
+            logger.exception(
+                "stripe.checkout_session_create_failed org=%s mode=%s price_id=%s http_status=%s stripe_code=%s raw=%s",
+                org_id,
+                mode.value,
+                price_id,
+                exc.http_status,
+                exc.stripe_code,
+                exc.raw,
+            )
+            raise
 
         session_id: str = resp["id"]
         checkout_url: str = resp.get("url", "")
