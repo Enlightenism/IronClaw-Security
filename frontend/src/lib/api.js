@@ -52,6 +52,18 @@ const getOrgIdFromSession = (session) => {
   );
 };
 
+const shouldBypassUnauthorizedRedirect = async () => {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    return Boolean(session?.access_token);
+  } catch {
+    return false;
+  }
+};
+
 api.interceptors.request.use(async (config) => {
   let accessToken = "";
   let orgId = "";
@@ -97,15 +109,19 @@ api.interceptors.response.use(
   (res) => res,
   async (error) => {
     if (error?.response?.status === 401) {
-      await supabase.auth.signOut();
-      window.location.href = "/";
+      const hasActiveSession = await shouldBypassUnauthorizedRedirect();
+
+      if (!hasActiveSession) {
+        await supabase.auth.signOut();
+        window.location.href = "/";
+      }
     }
+
     return Promise.reject(error);
   },
 );
 
-const withOrgId = (orgId) =>
-  `organizationid=${encodeURIComponent(orgId)}`;
+const withOrgId = (orgId) => `organizationid=${encodeURIComponent(orgId)}`;
 
 export const health = {
   check: () => api.get("/"),
@@ -134,8 +150,7 @@ export const payments = {
 };
 
 export const paymentMethods = {
-  list: (orgId) =>
-    api.get(`/ui/billing/payment-methods?${withOrgId(orgId)}`),
+  list: (orgId) => api.get(`/ui/billing/payment-methods?${withOrgId(orgId)}`),
 
   setDefault: (methodId, orgId) =>
     api.patch(

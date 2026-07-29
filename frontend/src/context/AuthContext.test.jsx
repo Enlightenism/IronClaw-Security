@@ -1,5 +1,11 @@
 import React from "react";
-import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
+import {
+  render,
+  screen,
+  waitFor,
+  act,
+  fireEvent,
+} from "@testing-library/react";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
 import api from "@/lib/api";
@@ -183,7 +189,9 @@ describe("AuthContext", () => {
 
     expect(screen.getByTestId("user")).toHaveTextContent("user@example.com");
     expect(screen.getByTestId("session")).toHaveTextContent("token-123");
-    expect(api.defaults.headers.common["Authorization"]).toBe("Bearer token-123");
+    expect(api.defaults.headers.common["Authorization"]).toBe(
+      "Bearer token-123",
+    );
     expect(window.localStorage.setItem).toHaveBeenCalledWith(
       "ironclaw.auth.token",
       "token-123",
@@ -223,7 +231,9 @@ describe("AuthContext", () => {
 
     expect(screen.getByTestId("user")).toHaveTextContent("changed@example.com");
     expect(screen.getByTestId("session")).toHaveTextContent("token-456");
-    expect(api.defaults.headers.common["Authorization"]).toBe("Bearer token-456");
+    expect(api.defaults.headers.common["Authorization"]).toBe(
+      "Bearer token-456",
+    );
     expect(window.localStorage.setItem).toHaveBeenCalledWith(
       "ironclaw.auth.token",
       "token-456",

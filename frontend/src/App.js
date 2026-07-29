@@ -13,11 +13,12 @@ const Privacy = lazy(() => import("@/pages/Privacy"));
 const Terms = lazy(() => import("@/pages/Terms"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 
-// Blocks unauthenticated access. Shows nothing while session is resolving.
 const PrivateRoute = ({ children }) => {
-  const { user, loading } = useAuth();
+  const { user, session, loading } = useAuth();
+
   if (loading) return null;
-  return user ? children : <Navigate to="/" replace />;
+
+  return user || session ? children : <Navigate to="/" replace />;
 };
 
 const RouteFallback = () => null;

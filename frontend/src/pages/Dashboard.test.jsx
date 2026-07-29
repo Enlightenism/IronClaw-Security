@@ -34,6 +34,7 @@ jest.mock("react-router-dom", () => ({
 const mockLogout = jest.fn();
 let mockAuthState = {
   user: { email: "test@ironclaw.io" },
+  session: null,
   loading: false,
   logout: mockLogout,
 };
@@ -168,9 +169,11 @@ beforeEach(() => {
   mockLocation.search = "";
   mockAuthState = {
     user: { email: "test@ironclaw.io" },
+    session: null,
     loading: false,
     logout: mockLogout,
   };
+  mockLogout.mockResolvedValue(undefined);
   setupDefaultApis();
   resetWindowLocation();
   jest.useFakeTimers();
@@ -185,8 +188,13 @@ afterEach(() => {
 // =============================================================================
 
 describe("auth redirect", () => {
-  it("calls navigate('/') when user is null and loading is false", async () => {
-    mockAuthState = { user: null, loading: false, logout: mockLogout };
+  it("calls navigate('/') when user and session are null and loading is false", async () => {
+    mockAuthState = {
+      user: null,
+      session: null,
+      loading: false,
+      logout: mockLogout,
+    };
 
     await act(async () => {
       render(<Dashboard />);
@@ -205,6 +213,24 @@ describe("auth redirect", () => {
     );
     expect(redirectCalls).toHaveLength(0);
   });
+
+  it("does NOT call navigate('/') when session is present during rehydration", async () => {
+    mockAuthState = {
+      user: null,
+      session: { access_token: "token-123" },
+      loading: false,
+      logout: mockLogout,
+    };
+
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    const redirectCalls = mockNavigate.mock.calls.filter(
+      (c) => c[0] === "/" && c.length === 1,
+    );
+    expect(redirectCalls).toHaveLength(0);
+  });
 });
 
 // =============================================================================
@@ -213,7 +239,12 @@ describe("auth redirect", () => {
 
 describe("loading spinner", () => {
   it("renders Loader2 spinner when auth loading is true", async () => {
-    mockAuthState = { user: null, loading: true, logout: mockLogout };
+    mockAuthState = {
+      user: null,
+      session: null,
+      loading: true,
+      logout: mockLogout,
+    };
 
     await act(async () => {
       render(<Dashboard />);
@@ -602,9 +633,11 @@ describe("handlePurchase — valid package", () => {
       mockLocation.search = "";
       mockAuthState = {
         user: { email: "test@ironclaw.io" },
+        session: null,
         loading: false,
         logout: mockLogout,
       };
+      mockLogout.mockResolvedValue(undefined);
       setupDefaultApis();
       resetWindowLocation();
 
@@ -720,8 +753,15 @@ describe("sign out", () => {
     expect(mockLogout).toHaveBeenCalledTimes(1);
   });
 
-  it("calls navigate('/') when Sign Out is clicked", async () => {
+  it("awaits logout() before calling navigate('/')", async () => {
     const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    let resolveLogout;
+    mockLogout.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveLogout = resolve;
+        }),
+    );
 
     await act(async () => {
       render(<Dashboard />);
@@ -733,7 +773,16 @@ describe("sign out", () => {
 
     await user.click(screen.getByTestId("signout-btn"));
 
-    expect(mockNavigate).toHaveBeenCalledWith("/");
+    expect(mockLogout).toHaveBeenCalledTimes(1);
+    expect(mockNavigate).not.toHaveBeenCalledWith("/");
+
+    await act(async () => {
+      resolveLogout();
+    });
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/");
+    });
   });
 });
 

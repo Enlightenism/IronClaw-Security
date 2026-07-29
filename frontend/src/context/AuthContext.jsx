@@ -103,12 +103,17 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const authenticate = useCallback(async (email, password) => {
+    setLoading(true);
+
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
 
-    if (error) throw error;
+    if (error) {
+      setLoading(false);
+      throw error;
+    }
 
     const nextSession = data?.session ?? null;
     const nextUser = data?.user ?? nextSession?.user ?? null;
@@ -122,12 +127,17 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const register = useCallback(async (email, password) => {
+    setLoading(true);
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
     });
 
-    if (error) throw error;
+    if (error) {
+      setLoading(false);
+      throw error;
+    }
 
     const nextSession = data?.session ?? null;
     const nextUser = data?.user ?? nextSession?.user ?? null;

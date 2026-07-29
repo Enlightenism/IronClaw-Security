@@ -22,7 +22,7 @@ async def require_customer_auth(
         required_roles=("customer_admin", "customer_user"),
         metadata={"dependency": "require_customer_auth"},
     )
-    if context.principal_type != "customer":
+    if context.principal_type not in {"customer"}:
         require_access(
             context,
             action="customer_principal_required",

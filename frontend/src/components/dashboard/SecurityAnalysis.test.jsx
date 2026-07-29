@@ -118,7 +118,9 @@ describe("SecurityAnalysis", () => {
     expect(screen.getByText("840")).toBeInTheDocument();
     expect(screen.getByTestId("usage-chart")).toBeInTheDocument();
     expect(screen.getByTestId("attack-log")).toBeInTheDocument();
-    expect(screen.queryByTestId("usage-chart-skeleton")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("usage-chart-skeleton"),
+    ).not.toBeInTheDocument();
     expect(screen.queryByTestId("attack-log-skeleton")).not.toBeInTheDocument();
   });
 
@@ -147,12 +149,16 @@ describe("SecurityAnalysis", () => {
       />,
     );
 
-    expect(screen.queryByTestId("usage-chart-skeleton")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("usage-chart-skeleton"),
+    ).not.toBeInTheDocument();
     expect(screen.queryByTestId("attack-log-skeleton")).not.toBeInTheDocument();
     expect(screen.getByText("333")).toBeInTheDocument();
     expect(screen.getByText("999")).toBeInTheDocument();
     expect(screen.getByText("Prompt Injection")).toBeInTheDocument();
-    expect(screen.queryByText("No threats recorded yet.")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("No threats recorded yet."),
+    ).not.toBeInTheDocument();
   });
 
   it("updates the cache when newer incoming data arrives", () => {
@@ -212,7 +218,9 @@ describe("SecurityAnalysis", () => {
       "data-points",
       String(DAILY_USAGE.length),
     );
-    expect(screen.getAllByTestId("chart-cell")).toHaveLength(DAILY_USAGE.length);
+    expect(screen.getAllByTestId("chart-cell")).toHaveLength(
+      DAILY_USAGE.length,
+    );
   });
 
   it("renders attack rows with threat, risk score, and verdict", () => {
@@ -271,11 +279,15 @@ describe("SecurityAnalysis", () => {
       />,
     );
 
-    expect(screen.queryByTestId("skeleton-units-used-today")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("skeleton-units-used-today"),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByTestId("skeleton-units-used-this-week"),
     ).not.toBeInTheDocument();
-    expect(screen.queryByTestId("usage-chart-skeleton")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("usage-chart-skeleton"),
+    ).not.toBeInTheDocument();
     expect(screen.queryByTestId("attack-log-skeleton")).not.toBeInTheDocument();
     expect(screen.getByTestId("usage-chart")).toBeInTheDocument();
     expect(screen.getByTestId("attack-log")).toBeInTheDocument();

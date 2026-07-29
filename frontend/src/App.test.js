@@ -51,7 +51,10 @@ jest.mock("@/pages/NotFound", () => ({
   default: () => <div>Not Found Page</div>,
 }));
 
-const renderAppAtRoute = (route, authState = { user: null, loading: false }) => {
+const renderAppAtRoute = (
+  route,
+  authState = { user: null, session: null, loading: false },
+) => {
   window.history.pushState({}, "", route);
   mockUseAuth.mockReturnValue(authState);
   return render(<App />);
@@ -61,7 +64,7 @@ describe("App", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     window.history.pushState({}, "", "/");
-    mockUseAuth.mockReturnValue({ user: null, loading: false });
+    mockUseAuth.mockReturnValue({ user: null, session: null, loading: false });
   });
 
   it("renders the landing page on /", async () => {
@@ -75,6 +78,17 @@ describe("App", () => {
   it("renders the dashboard page for an authenticated user", async () => {
     renderAppAtRoute("/dashboard", {
       user: { id: "user-1" },
+      session: null,
+      loading: false,
+    });
+
+    expect(await screen.findByText("Dashboard Page")).toBeInTheDocument();
+  });
+
+  it("renders the dashboard page when session exists during auth rehydration", async () => {
+    renderAppAtRoute("/dashboard", {
+      user: null,
+      session: { access_token: "token-123" },
       loading: false,
     });
 
@@ -84,6 +98,7 @@ describe("App", () => {
   it("redirects unauthenticated users from /dashboard to /", async () => {
     renderAppAtRoute("/dashboard", {
       user: null,
+      session: null,
       loading: false,
     });
 
@@ -94,6 +109,7 @@ describe("App", () => {
   it("renders nothing for private routes while auth is loading", async () => {
     const { container } = renderAppAtRoute("/dashboard", {
       user: null,
+      session: null,
       loading: true,
     });
 
@@ -108,15 +124,19 @@ describe("App", () => {
   it("renders the prompt inspector page for an authenticated user", async () => {
     renderAppAtRoute("/inspector", {
       user: { id: "user-1" },
+      session: null,
       loading: false,
     });
 
-    expect(await screen.findByText("Prompt Inspector Page")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Prompt Inspector Page"),
+    ).toBeInTheDocument();
   });
 
   it("renders the policy manager page for an authenticated user", async () => {
     renderAppAtRoute("/policies", {
       user: { id: "user-1" },
+      session: null,
       loading: false,
     });
 

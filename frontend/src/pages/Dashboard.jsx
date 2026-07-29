@@ -1,12 +1,4 @@
-/* global process */
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   ChevronLeft,
@@ -181,7 +173,9 @@ const AttackFeed = memo(function AttackFeed({ attacks }) {
                       </div>
                     </div>
                     <div className="text-right text-xs text-[#BFC1C2]">
-                      <div>{attack?.severity || attack?.status || "observed"}</div>
+                      <div>
+                        {attack?.severity || attack?.status || "observed"}
+                      </div>
                       <div className="mt-1">
                         {attack?.timestamp || attack?.created_at || ""}
                       </div>
@@ -231,7 +225,7 @@ const AttackFeed = memo(function AttackFeed({ attacks }) {
 });
 
 const Dashboard = () => {
-  const { user, loading, logout } = useAuth();
+  const { user, session, loading, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [data, setData] = useState(null);
@@ -240,6 +234,8 @@ const Dashboard = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [purchasingId, setPurchasingId] = useState(null);
   const polledRef = useRef(false);
+
+  const isAuthenticated = Boolean(user || session);
 
   const fetchDashboard = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoadingData(true);
@@ -260,19 +256,22 @@ const Dashboard = () => {
   }, []);
 
   useEffect(() => {
-    if (!loading && !user) navigate("/");
-  }, [loading, navigate, user]);
+    if (!loading && !isAuthenticated) navigate("/");
+  }, [isAuthenticated, loading, navigate]);
 
   useEffect(() => {
-    if (user) fetchDashboard();
-  }, [fetchDashboard, user]);
+    if (isAuthenticated) fetchDashboard();
+  }, [fetchDashboard, isAuthenticated]);
 
   useEffect(() => {
-    if (!user) return undefined;
+    if (!isAuthenticated) return undefined;
 
-    const refresh = setInterval(() => {
-      fetchDashboard({ silent: true });
-    }, 5 * 60 * 1000);
+    const refresh = setInterval(
+      () => {
+        fetchDashboard({ silent: true });
+      },
+      5 * 60 * 1000,
+    );
 
     const live = setInterval(async () => {
       try {
@@ -287,7 +286,7 @@ const Dashboard = () => {
       clearInterval(refresh);
       clearInterval(live);
     };
-  }, [fetchDashboard, user]);
+  }, [fetchDashboard, isAuthenticated]);
 
   const pollPayment = useCallback(
     async (sessionId, packageId, attempts = 0) => {
@@ -414,8 +413,8 @@ const Dashboard = () => {
     [data],
   );
 
-  const handleSignOut = useCallback(() => {
-    logout();
+  const handleSignOut = useCallback(async () => {
+    await logout();
     navigate("/");
   }, [logout, navigate]);
 
@@ -540,7 +539,8 @@ const Dashboard = () => {
               Enforcement Control Room
             </h1>
             <p className="mt-1 text-sm text-[#BFC1C2]">
-              Live verdicts, unit draw, and blocked attacks across your installs.
+              Live verdicts, unit draw, and blocked attacks across your
+              installs.
             </p>
           </div>
           <button

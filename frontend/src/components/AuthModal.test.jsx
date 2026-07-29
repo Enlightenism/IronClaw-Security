@@ -3,11 +3,6 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import AuthModal from "@/components/AuthModal";
 
-// ---------------------------------------------------------------------------
-// Mocks
-// ---------------------------------------------------------------------------
-
-// Mock useDebounce to return the value immediately — no delay, no validation lag
 jest.mock("@/hooks/useDebounce", () => ({
   useDebounce: (value) => value,
 }));
@@ -44,7 +39,8 @@ jest.mock("framer-motion", () => {
     motion: new Proxy(
       {},
       {
-        get: (_, tag) =>
+        get:
+          (_, tag) =>
           ({ children, ...props }) => {
             const filteredProps = { ...props };
             delete filteredProps.initial;
@@ -62,16 +58,13 @@ jest.mock("framer-motion", () => {
   };
 });
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 const renderModal = (props = {}) => {
   const defaults = {
     open: true,
     onClose: jest.fn(),
     initialMode: "signin",
   };
+
   return render(
     <MemoryRouter
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
@@ -95,10 +88,6 @@ const submitForm = () =>
   fireEvent.submit(screen.getByTestId("auth-submit-btn").closest("form"));
 
 const submitBtn = () => screen.getByTestId("auth-submit-btn");
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -161,13 +150,60 @@ describe("AuthModal", () => {
     });
   });
 
-  describe("sign in submission", () => {
-    it("calls authenticate with email and password on signin submit", async () => {
-      mockAuthenticate.mockResolvedValueOnce({});
+  describe("email validation", () => {
+    it("shows validation error when email is missing", async () => {
       renderModal({ initialMode: "signin" });
-      fillEmail("operator@ironclaw.io");
       fillPassword("SecurePass123!");
       submitForm();
+
+      await waitFor(() => {
+        expect(screen.getByTestId("auth-email-status")).toHaveTextContent(
+          "Email is required.",
+        );
+      });
+
+      expect(mockAuthenticate).not.toHaveBeenCalled();
+    });
+
+    it("shows validation error when email format is invalid", async () => {
+      renderModal({ initialMode: "signin" });
+      fillEmail("not-an-email");
+      fillPassword("SecurePass123!");
+      submitForm();
+
+      await waitFor(() => {
+        expect(screen.getByTestId("auth-email-status")).toHaveTextContent(
+          "Enter a valid email address.",
+        );
+      });
+
+      expect(mockAuthenticate).not.toHaveBeenCalled();
+    });
+
+    it("shows success status when email is valid", async () => {
+      renderModal({ initialMode: "signin" });
+      fillEmail("operator@ironclaw.io");
+
+      await waitFor(() => {
+        expect(screen.getByTestId("auth-email-status")).toHaveTextContent(
+          "Email looks good.",
+        );
+      });
+    });
+  });
+
+  describe("sign in submission", () => {
+    it("calls authenticate with trimmed email and password on signin submit", async () => {
+      mockAuthenticate.mockResolvedValueOnce({
+        user: { id: "user-1", email: "operator@ironclaw.io" },
+        session: { access_token: "token-123" },
+      });
+
+      renderModal({ initialMode: "signin" });
+      fillEmail("  operator@ironclaw.io  ");
+      fillPassword("SecurePass123!");
+      submitForm();
+
       await waitFor(() => {
         expect(mockAuthenticate).toHaveBeenCalledWith(
           "operator@ironclaw.io",
@@ -177,15 +213,40 @@ describe("AuthModal", () => {
     });
 
     it("shows success toast and navigates to dashboard on successful signin", async () => {
-      mockAuthenticate.mockResolvedValueOnce({});
+      mockAuthenticate.mockResolvedValueOnce({
+        user: { id: "user-1", email: "operator@ironclaw.io" },
+        session: { access_token: "token-123" },
+      });
+
       renderModal({ initialMode: "signin" });
       fillEmail("operator@ironclaw.io");
       fillPassword("pass123");
       submitForm();
+
       await waitFor(() => {
-        expect(mockToastSuccess).toHaveBeenCalledWith("Welcome back, operator.");
+        expect(mockToastSuccess).toHaveBeenCalledWith(
+          "Welcome back, operator.",
+        );
         expect(mockNavigate).toHaveBeenCalledWith("/dashboard");
       });
+    });
+
+    it("shows error toast when signin returns no active session", async () => {
+      mockAuthenticate.mockResolvedValueOnce({});
+
+      renderModal({ initialMode: "signin" });
+      fillEmail("operator@ironclaw.io");
+      fillPassword("pass123");
+      submitForm();
+
+      await waitFor(() => {
+        expect(mockToastError).toHaveBeenCalledWith(
+          "Authentication succeeded without an active session.",
+        );
+      });
+
+      expect(mockNavigate).not.toHaveBeenCalled();
+      expect(mockToastSuccess).not.toHaveBeenCalled();
     });
 
     it("shows error toast when signin fails", async () => {
@@ -194,6 +255,7 @@ describe("AuthModal", () => {
       fillEmail("bad@bad.com");
       fillPassword("wrong");
       submitForm();
+
       await waitFor(() => {
         expect(mockToastError).toHaveBeenCalledWith("Invalid credentials");
       });
@@ -201,12 +263,17 @@ describe("AuthModal", () => {
   });
 
   describe("sign up submission", () => {
-    it("calls register with email and password on signup submit", async () => {
-      mockRegister.mockResolvedValueOnce({});
+    it("calls register with trimmed email and password on signup submit", async () => {
+      mockRegister.mockResolvedValueOnce({
+        user: { id: "user-2", email: "new@ironclaw.io" },
+        session: { access_token: "token-456" },
+      });
+
       renderModal({ initialMode: "signup" });
-      fillEmail("new@ironclaw.io");
+      fillEmail("  new@ironclaw.io  ");
       fillPassword("NewPass123!");
       submitForm();
+
       await waitFor(() => {
         expect(mockRegister).toHaveBeenCalledWith(
           "new@ironclaw.io",
@@ -216,11 +283,16 @@ describe("AuthModal", () => {
     });
 
     it("shows success toast and navigates to dashboard on successful signup", async () => {
-      mockRegister.mockResolvedValueOnce({});
+      mockRegister.mockResolvedValueOnce({
+        user: { id: "user-2", email: "new@ironclaw.io" },
+        session: { access_token: "token-456" },
+      });
+
       renderModal({ initialMode: "signup" });
       fillEmail("new@ironclaw.io");
       fillPassword("NewPass123!");
       submitForm();
+
       await waitFor(() => {
         expect(mockToastSuccess).toHaveBeenCalledWith(
           "Account created. Defenses online.",
@@ -229,12 +301,31 @@ describe("AuthModal", () => {
       });
     });
 
+    it("shows error toast when signup returns no active session", async () => {
+      mockRegister.mockResolvedValueOnce({});
+
+      renderModal({ initialMode: "signup" });
+      fillEmail("new@ironclaw.io");
+      fillPassword("NewPass123!");
+      submitForm();
+
+      await waitFor(() => {
+        expect(mockToastError).toHaveBeenCalledWith(
+          "Authentication succeeded without an active session.",
+        );
+      });
+
+      expect(mockNavigate).not.toHaveBeenCalled();
+      expect(mockToastSuccess).not.toHaveBeenCalled();
+    });
+
     it("shows error toast when signup fails", async () => {
       mockRegister.mockRejectedValueOnce(new Error("Email already in use"));
       renderModal({ initialMode: "signup" });
       fillEmail("dup@ironclaw.io");
       fillPassword("pass123");
       submitForm();
+
       await waitFor(() => {
         expect(mockToastError).toHaveBeenCalledWith("Email already in use");
       });
@@ -246,10 +337,12 @@ describe("AuthModal", () => {
       mockAuthenticate.mockImplementation(
         () => new Promise((resolve) => setTimeout(resolve, 500)),
       );
+
       renderModal({ initialMode: "signin" });
       fillEmail("operator@ironclaw.io");
       fillPassword("pass123");
       submitForm();
+
       await waitFor(() => {
         expect(submitBtn()).toBeDisabled();
       });
@@ -259,14 +352,37 @@ describe("AuthModal", () => {
   describe("onClose", () => {
     it("calls onClose after successful signin", async () => {
       const onClose = jest.fn();
-      mockAuthenticate.mockResolvedValueOnce({});
+      mockAuthenticate.mockResolvedValueOnce({
+        user: { id: "user-1", email: "operator@ironclaw.io" },
+        session: { access_token: "token-123" },
+      });
+
       renderModal({ onClose, initialMode: "signin" });
       fillEmail("operator@ironclaw.io");
       fillPassword("pass123");
       submitForm();
+
       await waitFor(() => {
         expect(onClose).toHaveBeenCalled();
       });
+    });
+
+    it("does not call onClose when signin returns no active session", async () => {
+      const onClose = jest.fn();
+      mockAuthenticate.mockResolvedValueOnce({});
+
+      renderModal({ onClose, initialMode: "signin" });
+      fillEmail("operator@ironclaw.io");
+      fillPassword("pass123");
+      submitForm();
+
+      await waitFor(() => {
+        expect(mockToastError).toHaveBeenCalledWith(
+          "Authentication succeeded without an active session.",
+        );
+      });
+
+      expect(onClose).not.toHaveBeenCalled();
     });
   });
 
@@ -277,6 +393,7 @@ describe("AuthModal", () => {
       fillEmail("operator@ironclaw.io");
       fillPassword("pass123");
       submitForm();
+
       await waitFor(() => {
         expect(mockToastError).toHaveBeenCalledWith(
           "Something went wrong. Try again.",

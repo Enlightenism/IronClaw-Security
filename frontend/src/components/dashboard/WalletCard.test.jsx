@@ -154,7 +154,9 @@ describe("WalletCard — no Stripe key", () => {
       organizationId: "",
     });
     expect(
-      screen.getByText(/Stripe publishable key is not present in the frontend build/i),
+      screen.getByText(
+        /Stripe publishable key is not present in the frontend build/i,
+      ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/REACT_APP_STRIPE_PUBLISHABLE_KEY/i),
@@ -175,7 +177,9 @@ describe("WalletCard — no Stripe key", () => {
       organizationId: "",
     });
     expect(
-      screen.getByText(/Stripe publishable key is not present in the frontend build/i),
+      screen.getByText(
+        /Stripe publishable key is not present in the frontend build/i,
+      ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/REACT_APP_STRIPE_PUBLISHABLE_KEY/i),
@@ -275,7 +279,9 @@ describe("tier purchase buttons", () => {
     await expect(
       user.click(screen.getByTestId("purchase-pkg5000")),
     ).resolves.toBeUndefined();
-    expect(mockToastError).toHaveBeenCalledWith("Purchase action is unavailable.");
+    expect(mockToastError).toHaveBeenCalledWith(
+      "Purchase action is unavailable.",
+    );
   });
 });
 
@@ -334,7 +340,9 @@ describe("Payment method panel — current behavior", () => {
         screen.getByText(/No payment method on file yet/i),
       ).toBeInTheDocument();
       expect(
-        screen.getByText(/Complete a purchase to securely save one with Stripe/i),
+        screen.getByText(
+          /Complete a purchase to securely save one with Stripe/i,
+        ),
       ).toBeInTheDocument();
     });
   });
@@ -372,7 +380,9 @@ describe("Payment method panel — current behavior", () => {
     expect(
       await screen.findByTestId("payment-method-row-pm_default"),
     ).toBeInTheDocument();
-    expect(screen.getByTestId("payment-method-row-pm_other")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("payment-method-row-pm_other"),
+    ).toBeInTheDocument();
   });
 
   it("renders set-default and delete controls for returned methods", async () => {
@@ -419,10 +429,15 @@ describe("Payment method interactions", () => {
     await user.click(button);
 
     await waitFor(() => {
-      expect(mockPaymentMethodsSetDefault).toHaveBeenCalledWith("pm_other", orgId);
+      expect(mockPaymentMethodsSetDefault).toHaveBeenCalledWith(
+        "pm_other",
+        orgId,
+      );
     });
 
-    expect(mockToastSuccess).toHaveBeenCalledWith("Default payment method updated.");
+    expect(mockToastSuccess).toHaveBeenCalledWith(
+      "Default payment method updated.",
+    );
   });
 
   it("falls back to api.post when setDefault fails", async () => {
@@ -445,7 +460,9 @@ describe("Payment method interactions", () => {
       );
     });
 
-    expect(mockToastSuccess).toHaveBeenCalledWith("Default payment method updated.");
+    expect(mockToastSuccess).toHaveBeenCalledWith(
+      "Default payment method updated.",
+    );
   });
 
   it("shows toast error when setDefault and fallback both fail", async () => {
@@ -464,7 +481,9 @@ describe("Payment method interactions", () => {
     await user.click(button);
 
     await waitFor(() => {
-      expect(mockToastError).toHaveBeenCalledWith("Fallback set-default failed.");
+      expect(mockToastError).toHaveBeenCalledWith(
+        "Fallback set-default failed.",
+      );
     });
   });
 
@@ -497,7 +516,9 @@ describe("Payment method interactions", () => {
   it("falls back to api.post when delete fails", async () => {
     const user = userEvent.setup();
     const orgId = uniqueOrgId();
-    mockPaymentMethodsDelete.mockRejectedValue(new Error("primary delete failed"));
+    mockPaymentMethodsDelete.mockRejectedValue(
+      new Error("primary delete failed"),
+    );
     mockApiPost.mockResolvedValue({ data: { status: "ok" } });
     mockPaymentMethodsList
       .mockResolvedValueOnce(TWO_METHODS_RESPONSE)

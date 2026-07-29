@@ -95,13 +95,27 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
     setLoading(true);
 
     try {
+      const authResult =
+        mode === "signup"
+          ? await register(trimmedEmail, password)
+          : await authenticate(trimmedEmail, password);
+
+      const nextSession = authResult?.session ?? null;
+      const nextUser = authResult?.user ?? nextSession?.user ?? null;
+      const hasAuthenticatedSession = Boolean(
+        nextSession?.access_token || nextUser?.id,
+      );
+
+      if (!hasAuthenticatedSession) {
+        throw new Error("Authentication succeeded without an active session.");
+      }
+
       if (mode === "signup") {
-        await register(trimmedEmail, password);
         toast.success("Account created. Defenses online.");
       } else {
-        await authenticate(trimmedEmail, password);
         toast.success("Welcome back, operator.");
       }
+
       onClose();
       navigate("/dashboard");
     } catch (err) {
@@ -184,7 +198,9 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
                 placeholder="you@company.com"
                 data-testid="auth-email-input"
                 aria-invalid={emailError ? "true" : "false"}
-                aria-describedby={emailError || emailStatus ? "auth-email-status" : undefined}
+                aria-describedby={
+                  emailError || emailStatus ? "auth-email-status" : undefined
+                }
                 className={`w-full rounded-lg border bg-white/5 py-3 pl-11 pr-4 text-sm text-white placeholder-white/40 outline-none transition focus:ring-2 ${
                   emailError
                     ? "border-red-400/60 focus:border-red-400/60 focus:ring-red-400/20"
@@ -217,7 +233,9 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
                 type="password"
                 required
                 minLength={6}
-                autoComplete={mode === "signup" ? "new-password" : "current-password"}
+                autoComplete={
+                  mode === "signup" ? "new-password" : "current-password"
+                }
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Password (min 6 chars)"
@@ -238,8 +256,8 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
                   ? "Creating account..."
                   : "Signing in..."
                 : mode === "signup"
-                ? "Create account"
-                : "Sign in"}
+                  ? "Create account"
+                  : "Sign in"}
             </button>
 
             {loading && (

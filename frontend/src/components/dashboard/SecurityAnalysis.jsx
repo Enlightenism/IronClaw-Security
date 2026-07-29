@@ -185,7 +185,10 @@ const SecurityAnalysis = ({
   }, [unitsToday, unitsWeek, dailyUsage, attacks, hasIncomingData]);
 
   const displayData = useMemo(
-    () => (hasIncomingData ? { unitsToday, unitsWeek, dailyUsage, attacks } : cachedData),
+    () =>
+      hasIncomingData
+        ? { unitsToday, unitsWeek, dailyUsage, attacks }
+        : cachedData,
     [hasIncomingData, unitsToday, unitsWeek, dailyUsage, attacks, cachedData],
   );
 
@@ -195,7 +198,9 @@ const SecurityAnalysis = ({
         <Cell
           key={`${entry.label ?? idx}-${idx}`}
           fill="#38BDF8"
-          fillOpacity={0.45 + (idx / (displayData.dailyUsage.length || 1)) * 0.5}
+          fillOpacity={
+            0.45 + (idx / (displayData.dailyUsage.length || 1)) * 0.5
+          }
         />
       )),
     [displayData.dailyUsage],
@@ -337,9 +342,7 @@ const SecurityAnalysis = ({
               </tr>
             </thead>
             <tbody>
-              <AnimatePresence initial={false}>
-                {attackRows}
-              </AnimatePresence>
+              <AnimatePresence initial={false}>{attackRows}</AnimatePresence>
               {displayData.attacks.length === 0 && (
                 <tr>
                   <td

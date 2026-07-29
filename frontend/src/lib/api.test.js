@@ -20,6 +20,11 @@ jest.mock("axios", () => {
 jest.mock("@/lib/supabase", () => ({
   supabase: {
     auth: {
+      getSession: jest.fn(() =>
+        Promise.resolve({
+          data: { session: null },
+        }),
+      ),
       signOut: jest.fn(() => Promise.resolve({ error: null })),
     },
   },
@@ -49,12 +54,20 @@ const mockPost = mockAxiosInstance.post;
 const mockPatch = mockAxiosInstance.patch;
 const mockDelete = mockAxiosInstance.delete;
 const mockPut = mockAxiosInstance.put;
+const mockRequestInterceptorUse = mockAxiosInstance.interceptors.request.use;
 const mockResponseInterceptorUse = mockAxiosInstance.interceptors.response.use;
+const mockGetSession = supabase.auth.getSession;
 const mockSignOut = supabase.auth.signOut;
 
 const axiosCreateCallCount = axios.create.mock.calls.length;
 const axiosCreateConfig = axios.create.mock.calls[0]?.[0];
-const responseInterceptorCallCount = mockResponseInterceptorUse.mock.calls.length;
+const requestInterceptorCallCount = mockRequestInterceptorUse.mock.calls.length;
+const responseInterceptorCallCount =
+  mockResponseInterceptorUse.mock.calls.length;
+const [, capturedRequestHandler] = [
+  null,
+  mockRequestInterceptorUse.mock.calls[0]?.[0],
+];
 const [capturedOnFulfilled, capturedOnRejected] =
   mockResponseInterceptorUse.mock.calls[0] || [];
 
@@ -64,7 +77,11 @@ beforeEach(() => {
   mockPatch.mockClear();
   mockDelete.mockClear();
   mockPut.mockClear();
+  mockGetSession.mockClear();
   mockSignOut.mockClear();
+  mockGetSession.mockResolvedValue({
+    data: { session: null },
+  });
 });
 
 describe("axios.create", () => {
@@ -93,6 +110,87 @@ describe("API_BASE", () => {
   });
 });
 
+describe("request interceptor", () => {
+  const originalLocalStorage = global.localStorage;
+
+  beforeEach(() => {
+    Object.defineProperty(global, "localStorage", {
+      value: {
+        getItem: jest.fn(() => null),
+      },
+      configurable: true,
+      writable: true,
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(global, "localStorage", {
+      value: originalLocalStorage,
+      configurable: true,
+      writable: true,
+    });
+  });
+
+  it("registers exactly one request interceptor", () => {
+    expect(requestInterceptorCallCount).toBe(1);
+  });
+
+  it("adds Authorization and X-Org-Id headers from the active Supabase session", async () => {
+    mockGetSession.mockResolvedValueOnce({
+      data: {
+        session: {
+          access_token: "token-123",
+          user: {
+            id: "user-1",
+            user_metadata: { org_id: "org-123" },
+            app_metadata: {},
+          },
+        },
+      },
+    });
+
+    const config = { headers: {} };
+    const result = await capturedRequestHandler(config);
+
+    expect(result.headers.Authorization).toBe("Bearer token-123");
+    expect(result.headers["X-Org-Id"]).toBe("org-123");
+  });
+
+  it("falls back to localStorage token and org id when session is unavailable", async () => {
+    global.localStorage.getItem = jest.fn((key) => {
+      if (key === "ironclaw.auth.token") return "stored-token";
+      if (key === "ironclaw.auth.orgId") return "stored-org";
+      return null;
+    });
+
+    mockGetSession.mockResolvedValueOnce({
+      data: { session: null },
+    });
+
+    const config = { headers: {} };
+    const result = await capturedRequestHandler(config);
+
+    expect(result.headers.Authorization).toBe("Bearer stored-token");
+    expect(result.headers["X-Org-Id"]).toBe("stored-org");
+  });
+
+  it("removes auth headers when neither session nor storage values exist", async () => {
+    global.localStorage.getItem = jest.fn(() => null);
+
+    const config = {
+      headers: {
+        Authorization: "Bearer old-token",
+        "X-Org-Id": "old-org",
+      },
+    };
+
+    const result = await capturedRequestHandler(config);
+
+    expect(result.headers.Authorization).toBeUndefined();
+    expect(result.headers["X-Org-Id"]).toBeUndefined();
+  });
+});
+
 describe("401 response interceptor", () => {
   const originalHref = window.location.href;
 
@@ -110,16 +208,60 @@ describe("401 response interceptor", () => {
     expect(result).toBe(fakeRes);
   });
 
-  it("calls supabase.auth.signOut() on a 401 error", async () => {
+  it("calls supabase.auth.getSession() on a 401 error", async () => {
+    const error401 = { response: { status: 401 } };
+    await capturedOnRejected(error401).catch(() => {});
+    expect(mockGetSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls supabase.auth.signOut() on a 401 error only when no active session exists", async () => {
+    mockGetSession.mockResolvedValueOnce({
+      data: { session: null },
+    });
+
     const error401 = { response: { status: 401 } };
     await capturedOnRejected(error401).catch(() => {});
     expect(mockSignOut).toHaveBeenCalledTimes(1);
   });
 
-  it("redirects to / on a 401 error", async () => {
+  it("redirects to / on a 401 error only when no active session exists", async () => {
+    mockGetSession.mockResolvedValueOnce({
+      data: { session: null },
+    });
+
     const error401 = { response: { status: 401 } };
     await capturedOnRejected(error401).catch(() => {});
     expect(window.location.pathname).toBe("/");
+  });
+
+  it("does NOT call supabase.auth.signOut() on a 401 error when an active session still exists", async () => {
+    mockGetSession.mockResolvedValueOnce({
+      data: {
+        session: {
+          access_token: "token-123",
+          user: { id: "user-1", user_metadata: {}, app_metadata: {} },
+        },
+      },
+    });
+
+    const error401 = { response: { status: 401 } };
+    await capturedOnRejected(error401).catch(() => {});
+    expect(mockSignOut).not.toHaveBeenCalled();
+  });
+
+  it("does NOT redirect on a 401 error when an active session still exists", async () => {
+    mockGetSession.mockResolvedValueOnce({
+      data: {
+        session: {
+          access_token: "token-123",
+          user: { id: "user-1", user_metadata: {}, app_metadata: {} },
+        },
+      },
+    });
+
+    const error401 = { response: { status: 401 } };
+    await capturedOnRejected(error401).catch(() => {});
+    expect(window.location.href).toBe(originalHref);
   });
 
   it("rejects the promise so callers receive the error after 401 handling", async () => {
@@ -197,7 +339,10 @@ describe("payments.createCheckout", () => {
     mockPost.mockResolvedValueOnce({ data: {} });
     const payload = { plan: "starter", quantity: 1 };
     payments.createCheckout(payload);
-    expect(mockPost).toHaveBeenCalledWith("/billing/checkout/sessions", payload);
+    expect(mockPost).toHaveBeenCalledWith(
+      "/billing/checkout/sessions",
+      payload,
+    );
   });
 });
 

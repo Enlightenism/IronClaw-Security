@@ -376,6 +376,159 @@ def _extract_bearer_token(raw_authorization: str | None) -> str | None:
     return token or None
 
 
+def _clean_claim_strings(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        cleaned = _clean_optional_string(value)
+        return (cleaned,) if cleaned else ()
+    if isinstance(value, (list, tuple, set)):
+        return tuple(item for item in (_clean_optional_string(candidate) for candidate in value) if item is not None)
+    return ()
+
+
+def _extract_claim_values(claims: dict[str, Any], *claim_names: str) -> tuple[str, ...]:
+    values: list[str] = []
+    seen: set[str] = set()
+
+    for claim_name in claim_names:
+        for candidate in _clean_claim_strings(claims.get(claim_name)):
+            normalized = candidate.strip()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                values.append(normalized)
+
+    return tuple(values)
+
+
+def _resolve_bearer_org_id(
+    request: Request,
+    claims: dict[str, Any],
+    provided_org_id: str | None,
+) -> str | None:
+    for claim_name in (
+        "org_id",
+        "organization_id",
+        "tenant_id",
+        "orgId",
+    ):
+        claim_value = _clean_optional_string(claims.get(claim_name))
+        if claim_value is not None:
+            return claim_value
+
+    user_metadata = claims.get("user_metadata")
+    if isinstance(user_metadata, dict):
+        for claim_name in ("org_id", "organization_id", "tenant_id", "orgId"):
+            claim_value = _clean_optional_string(user_metadata.get(claim_name))
+            if claim_value is not None:
+                return claim_value
+
+    app_metadata = claims.get("app_metadata")
+    if isinstance(app_metadata, dict):
+        for claim_name in ("org_id", "organization_id", "tenant_id", "orgId"):
+            claim_value = _clean_optional_string(app_metadata.get(claim_name))
+            if claim_value is not None:
+                return claim_value
+
+    return _coerce_org_id(request, provided_org_id, None)
+
+
+def _resolve_bearer_roles(claims: dict[str, Any]) -> tuple[str, ...]:
+    roles = _extract_claim_values(
+        claims,
+        "roles",
+        "role",
+        "permissions_role",
+    )
+
+    if roles:
+        return roles
+
+    app_metadata = claims.get("app_metadata")
+    if isinstance(app_metadata, dict):
+        roles = _extract_claim_values(
+            app_metadata,
+            "roles",
+            "role",
+            "permissions_role",
+        )
+        if roles:
+            return roles
+
+    user_metadata = claims.get("user_metadata")
+    if isinstance(user_metadata, dict):
+        roles = _extract_claim_values(
+            user_metadata,
+            "roles",
+            "role",
+            "permissions_role",
+        )
+        if roles:
+            return roles
+
+    return ("customer_user",)
+
+
+def _resolve_bearer_permissions(claims: dict[str, Any]) -> tuple[str, ...]:
+    permissions = _extract_claim_values(
+        claims,
+        "permissions",
+        "scopes",
+        "scope",
+        "allowed_actions",
+    )
+
+    if permissions:
+        return permissions
+
+    app_metadata = claims.get("app_metadata")
+    if isinstance(app_metadata, dict):
+        permissions = _extract_claim_values(
+            app_metadata,
+            "permissions",
+            "scopes",
+            "scope",
+            "allowed_actions",
+        )
+        if permissions:
+            return permissions
+
+    user_metadata = claims.get("user_metadata")
+    if isinstance(user_metadata, dict):
+        permissions = _extract_claim_values(
+            user_metadata,
+            "permissions",
+            "scopes",
+            "scope",
+            "allowed_actions",
+        )
+        if permissions:
+            return permissions
+
+    return ("customer:read",)
+
+
+def _resolve_bearer_principal_type(claims: dict[str, Any]) -> str:
+    for claim_name in ("principal_type", "principalType"):
+        claim_value = _clean_optional_string(claims.get(claim_name))
+        if claim_value is not None:
+            return claim_value
+
+    app_metadata = claims.get("app_metadata")
+    if isinstance(app_metadata, dict):
+        for claim_name in ("principal_type", "principalType"):
+            claim_value = _clean_optional_string(app_metadata.get(claim_name))
+            if claim_value is not None:
+                return claim_value
+
+    user_metadata = claims.get("user_metadata")
+    if isinstance(user_metadata, dict):
+        for claim_name in ("principal_type", "principalType"):
+            claim_value = _clean_optional_string(user_metadata.get(claim_name))
+            if claim_value is not None:
+                return claim_value
+
+    return "customer"
+
+
 def get_bearer_context(
     request: Request,
     raw_authorization: str | None = Depends(authorization_header),
@@ -545,22 +698,23 @@ def get_auth_context(
             if claim_value is not None:
                 metadata[claim_name] = claim_value
 
-        resolved_org_id = _clean_optional_string(provided_org_id)
-
-        for claim_name in ("org_id", "organization_id", "tenant_id"):
-            claim_value = _clean_optional_string(bearer_context.claims.get(claim_name))
-            if claim_value is not None:
-                resolved_org_id = claim_value
-                break
+        resolved_org_id = _resolve_bearer_org_id(
+            request,
+            bearer_context.claims,
+            provided_org_id,
+        )
+        resolved_roles = _resolve_bearer_roles(bearer_context.claims)
+        resolved_permissions = _resolve_bearer_permissions(bearer_context.claims)
+        resolved_principal_type = _resolve_bearer_principal_type(bearer_context.claims)
 
         return AuthContext(
             api_key=None,
-            principal_type="user",
+            principal_type=resolved_principal_type,
             principal_id=bearer_context.principal_id,
             session_id=normalized_session_id,
             org_id=resolved_org_id,
-            permissions=(),
-            roles=(),
+            permissions=resolved_permissions,
+            roles=resolved_roles,
             authenticated=True,
             auth_source=bearer_context.auth_source,
             auth_method=bearer_context.auth_method,

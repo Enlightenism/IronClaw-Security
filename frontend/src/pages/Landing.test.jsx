@@ -1,4 +1,10 @@
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from "@testing-library/react";
 import Landing from "@/pages/Landing";
 import { useAuth } from "@/context/AuthContext";
 import { MemoryRouter } from "react-router-dom";

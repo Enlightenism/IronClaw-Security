@@ -52,7 +52,8 @@ const DEFAULT_ADD_CARD_PACKAGE_ID = "pkg5000";
 const VALID_PACKAGE_IDS = new Set(TIERS.map((t) => t.id));
 const paymentMethodCache = new Map();
 
-const getStripePublishableKey = () => process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY ?? "";
+const getStripePublishableKey = () =>
+  process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY ?? "";
 
 const getStripeMode = (publishableKey = "") => {
   if (publishableKey.startsWith("pk_live_")) return "live";
@@ -103,15 +104,9 @@ const normalizePaymentMethod = (method, fallbackDefaultId = "") => {
     method?.card?.brand,
   );
 
-  const expDisplay = getFirstString(
-    method?.exp_display,
-    method?.expdisplay,
-  );
+  const expDisplay = getFirstString(method?.exp_display, method?.expdisplay);
 
-  const last4 = getFirstString(
-    method?.last4,
-    method?.card?.last4,
-  );
+  const last4 = getFirstString(method?.last4, method?.card?.last4);
 
   const status = getFirstString(method?.status);
   const inferredDefault =
@@ -158,9 +153,7 @@ const normalizePaymentMethodsResponse = (data) => {
     .filter((method) => method.methodid);
 
   const resolvedDefaultId =
-    defaultId ||
-    methods.find((method) => method.isDefault)?.methodid ||
-    "";
+    defaultId || methods.find((method) => method.isDefault)?.methodid || "";
 
   return {
     methods: methods.map((method) => ({
@@ -233,8 +226,11 @@ const StripeKeyWarning = ({ stripeMode }) => {
     <div className="mb-4 flex items-start gap-2 rounded-lg border border-[#F59E0B]/30 bg-[#F59E0B]/10 px-3 py-2 text-xs text-[#FDE68A]">
       <AlertTriangle size={13} className="mt-0.5 shrink-0 text-[#F59E0B]" />
       <span>
-        Stripe publishable key is not present in the frontend build. Billing actions may fail until
-        <strong className="ml-1 text-white">REACT_APP_STRIPE_PUBLISHABLE_KEY</strong>
+        Stripe publishable key is not present in the frontend build. Billing
+        actions may fail until
+        <strong className="ml-1 text-white">
+          REACT_APP_STRIPE_PUBLISHABLE_KEY
+        </strong>
         is set in the deployed frontend environment.
       </span>
     </div>
@@ -243,13 +239,18 @@ const StripeKeyWarning = ({ stripeMode }) => {
 
 const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
   const cachedEntry = useMemo(
-    () => (organizationId ? paymentMethodCache.get(organizationId) ?? null : null),
+    () =>
+      organizationId ? (paymentMethodCache.get(organizationId) ?? null) : null,
     [organizationId],
   );
 
   const [methods, setMethods] = useState(() => cachedEntry?.methods ?? []);
-  const [defaultId, setDefaultId] = useState(() => cachedEntry?.defaultId ?? null);
-  const [loadingMethods, setLoadingMethods] = useState(() => !cachedEntry && !!organizationId);
+  const [defaultId, setDefaultId] = useState(
+    () => cachedEntry?.defaultId ?? null,
+  );
+  const [loadingMethods, setLoadingMethods] = useState(
+    () => !cachedEntry && !!organizationId,
+  );
   const [actionId, setActionId] = useState(null);
   const hasFetchedRef = useRef(!!cachedEntry);
 
@@ -377,7 +378,8 @@ const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
     return (
       <div className="flex items-center gap-2 text-xs text-[#737373]">
         <Zap size={14} className="text-[#FFD700]" />
-        No payment method on file yet. Complete a purchase to securely save one with Stripe.
+        No payment method on file yet. Complete a purchase to securely save one
+        with Stripe.
       </div>
     );
   }
@@ -428,7 +430,9 @@ const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
                       ? `Expires ${String(m.expmonth).padStart(2, "0")}/${String(m.expyear).slice(-2)}`
                       : "Expiration unavailable"}
                   {m.status && m.status !== "active" && (
-                    <span className="ml-2 capitalize text-[#EF4444]">{m.status}</span>
+                    <span className="ml-2 capitalize text-[#EF4444]">
+                      {m.status}
+                    </span>
                   )}
                 </div>
               </div>
@@ -605,7 +609,8 @@ const WalletCard = ({
           <div className="mb-3 flex items-center gap-2 rounded-lg border border-[#22C55E]/20 bg-[#22C55E]/5 px-3 py-2 text-xs">
             <ShieldCheck size={13} className="text-[#22C55E]" />
             <span className="text-[#22C55E]">
-              Last purchase: <span className="font-semibold">{lastPayment.label}</span> · $
+              Last purchase:{" "}
+              <span className="font-semibold">{lastPayment.label}</span> · $
               {Number(lastPayment.amount).toFixed(2)}
             </span>
           </div>
