@@ -92,6 +92,21 @@ def _is_preflight_request(request: Request) -> bool:
     return request.method.upper() == "OPTIONS" and bool(request.headers.get("origin")) and bool(request.headers.get("access-control-request-method"))
 
 
+def _preflight_auth_context() -> AuthContext:
+    return AuthContext(
+        api_key=None,
+        principal_type="preflight",
+        principal_id=None,
+        session_id=None,
+        org_id=None,
+        authenticated=False,
+        auth_source="preflight",
+        auth_method=None,
+        key_type="personal",
+        metadata={"request_method": "OPTIONS"},
+    )
+
+
 def _extract_configured_api_key(request: Request) -> str | None:
     settings = _get_settings(request)
     if settings is None:
@@ -481,18 +496,7 @@ def get_auth_context(
     provided_org_id: str | None = Depends(org_id_header),
 ) -> AuthContext:
     if _is_preflight_request(request):
-        return AuthContext(
-            api_key=None,
-            principal_type="preflight",
-            principal_id=None,
-            session_id=None,
-            org_id=None,
-            authenticated=False,
-            auth_source="preflight",
-            auth_method=None,
-            key_type="personal",
-            metadata={"request_method": "OPTIONS"},
-        )
+        return _preflight_auth_context()
 
     normalized_session_id = _clean_optional_string(session_id)
     normalized_api_key = _clean_optional_string(api_key)

@@ -11,6 +11,18 @@ from app.core.auth import API_KEY_HEADER_NAME
 from app.core.usage_metering import get_usage_metering_registry
 
 
+def _is_cors_preflight_request(scope: Scope) -> bool:
+    if scope.get("type") != "http":
+        return False
+
+    method = str(scope.get("method", "")).upper()
+    if method != "OPTIONS":
+        return False
+
+    headers = Headers(scope=scope)
+    return bool(headers.get("origin")) and bool(headers.get("access-control-request-method"))
+
+
 def _resolve_api_key_record(raw_api_key: str) -> Any:
     registry = get_api_key_registry()
 
@@ -82,8 +94,7 @@ class UsageMeteringMiddleware:
             await self.app(scope, receive, send)
             return
 
-        method = str(scope.get("method", "")).upper()
-        if method == "OPTIONS":
+        if _is_cors_preflight_request(scope):
             await self.app(scope, receive, send)
             return
 
@@ -121,6 +132,7 @@ class UsageMeteringMiddleware:
                         request_id = state.get("request_id")
                         path = str(scope.get("path", "") or "")
                         route_path = _resolve_route_path(scope)
+                        method = str(scope.get("method", "")).upper()
 
                         try:
                             get_usage_metering_registry().record_event(

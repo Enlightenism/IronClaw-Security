@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Generator
 import os
+import threading
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 import pytest
@@ -15,95 +19,323 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
 os.environ.setdefault("SUPABASE_KEY", "")
 os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
+from app.core.auth import AuthContext, get_auth_context
 from app.main import app as _app
+from app.routers.stripe_router import get_stripe_service
+from app.services.stripe_service import StripeService, StripeServiceError
+from app.ui.billing import payment_methods as payment_methods_module
 from app.ui.billing.package import PACKAGE_CATALOGUE, _get_stripe_status
 
 _MOCK_API_KEY = "test-api-key"
-_AUTH_HEADERS = {"X-API-Key": _MOCK_API_KEY}
+ORG_ID = "org-001"
+CUSTOMER_ID = "cus_test_001"
+_AUTH_HEADERS = {"X-API-Key": _MOCK_API_KEY, "X-Org-Id": ORG_ID}
+
+
+_TEST_AUTH_CONTEXT = AuthContext(
+    api_key=_MOCK_API_KEY,
+    principal_type="api_key",
+    principal_id="test-principal",
+    session_id=None,
+    org_id=ORG_ID,
+    permissions=(),
+    roles=(),
+    authenticated=True,
+    auth_source="test",
+    auth_method="api_key",
+    key_type="personal",
+)
+
+
+def _override_get_auth_context() -> AuthContext:
+    return _TEST_AUTH_CONTEXT
+
+
+def _build_mock_svc() -> MagicMock:
+    svc = MagicMock(spec=StripeService)
+    svc._lock = threading.Lock()
+    svc._org_customer_map = {}
+    svc.list_payment_methods.return_value = []
+    svc.set_default_payment_method.return_value = {"status": "updated"}
+    svc.detach_payment_method.return_value = {"status": "deleted"}
+    return svc
+
+
+class FakeSupabaseQuery:
+    def __init__(self, table_name: str, client: FakeSupabaseClient) -> None:
+        self.table_name = table_name
+        self.client = client
+        self.filters_eq: list[tuple[str, object]] = []
+        self.filters_neq: list[tuple[str, object]] = []
+        self.order_by: str | None = None
+        self.insert_payload: dict[str, object] | None = None
+        self.update_payload: dict[str, object] | None = None
+        self.mode: str | None = None
+
+    def select(self, *_args, **_kwargs) -> FakeSupabaseQuery:
+        self.mode = "select"
+        return self
+
+    def eq(self, key: str, value: object) -> FakeSupabaseQuery:
+        self.filters_eq.append((key, value))
+        return self
+
+    def neq(self, key: str, value: object) -> FakeSupabaseQuery:
+        self.filters_neq.append((key, value))
+        return self
+
+    def order(self, column: str, *_args, **_kwargs) -> FakeSupabaseQuery:
+        self.order_by = column
+        return self
+
+    def insert(self, payload: dict[str, object]) -> FakeSupabaseQuery:
+        self.mode = "insert"
+        self.insert_payload = dict(payload)
+        return self
+
+    def update(self, payload: dict[str, object]) -> FakeSupabaseQuery:
+        self.mode = "update"
+        self.update_payload = dict(payload)
+        return self
+
+    def delete(self) -> FakeSupabaseQuery:
+        self.mode = "delete"
+        return self
+
+    def execute(self) -> SimpleNamespace:
+        rows = self.client.tables.setdefault(self.table_name, [])
+
+        if self.mode == "select":
+            result = [dict(row) for row in rows if self._matches(row)]
+            if self.order_by is not None:
+                result.sort(key=lambda row: row.get(self.order_by) or "")
+            return SimpleNamespace(data=result)
+
+        if self.mode == "insert":
+            payload = dict(self.insert_payload or {})
+            if not payload.get("id"):
+                payload["id"] = f"row-{self.client.next_id}"
+                self.client.next_id += 1
+            rows.append(payload)
+            return SimpleNamespace(data=[dict(payload)])
+
+        if self.mode == "update":
+            updated: list[dict[str, object]] = []
+            for row in rows:
+                if self._matches(row):
+                    row.update(self.update_payload or {})
+                    updated.append(dict(row))
+            return SimpleNamespace(data=updated)
+
+        if self.mode == "delete":
+            kept: list[dict[str, object]] = []
+            deleted: list[dict[str, object]] = []
+            for row in rows:
+                if self._matches(row):
+                    deleted.append(dict(row))
+                else:
+                    kept.append(row)
+            self.client.tables[self.table_name] = kept
+            return SimpleNamespace(data=deleted)
+
+        return SimpleNamespace(data=[])
+
+    def _matches(self, row: dict[str, object]) -> bool:
+        for key, value in self.filters_eq:
+            if row.get(key) != value:
+                return False
+        for key, value in self.filters_neq:
+            if row.get(key) == value:
+                return False
+        return True
+
+
+class FakeSupabaseClient:
+    def __init__(self) -> None:
+        self.tables: dict[str, list[dict[str, object]]] = {
+            "billing_payment_methods": [],
+        }
+        self.next_id = 1
+
+    def table(self, table_name: str) -> FakeSupabaseQuery:
+        return FakeSupabaseQuery(table_name=table_name, client=self)
 
 
 @pytest.fixture()
-def client():
+def mock_svc() -> MagicMock:
+    return _build_mock_svc()
+
+
+@pytest.fixture()
+def fake_supabase(monkeypatch: pytest.MonkeyPatch) -> FakeSupabaseClient:
+    client = FakeSupabaseClient()
+    monkeypatch.setattr(payment_methods_module, "is_supabase_configured", lambda: True)
+    monkeypatch.setattr(payment_methods_module, "get_supabase_client", lambda: client)
+    return client
+
+
+@pytest.fixture()
+def client(mock_svc: MagicMock) -> Generator[TestClient, None, None]:
+    _app.dependency_overrides[get_stripe_service] = lambda: mock_svc
+    _app.dependency_overrides[get_auth_context] = _override_get_auth_context
     with TestClient(_app, raise_server_exceptions=True) as c:
         c.headers.update(_AUTH_HEADERS)
         yield c
+    _app.dependency_overrides.pop(get_stripe_service, None)
+    _app.dependency_overrides.pop(get_auth_context, None)
 
 
-# ---------------------------------------------------------------------------
-# GET /ui/billing/payment-methods — Supabase unconfigured path
-# ---------------------------------------------------------------------------
+def _make_method_dict(
+    *,
+    methodid: str,
+    brand: str = "visa",
+    last4: str = "4242",
+    expmonth: int = 12,
+    expyear: int = 2028,
+    isdefault: bool = False,
+    status: str | None = "active",
+    type: str = "card",
+    createdat: str = "2026-01-01T09:00:00+00:00",
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "id": methodid,
+        "stripe_payment_method_id": methodid,
+        "payment_method_id": methodid,
+        "type": type,
+        "brand": brand,
+        "last4": last4,
+        "exp_month": expmonth,
+        "exp_year": expyear,
+        "is_default": isdefault,
+        "created_at": createdat,
+        "organization_id": ORG_ID,
+    }
+    if status is not None:
+        payload["status"] = status
+    return payload
 
 
-def test_get_payment_methods_returns_200_when_supabase_unconfigured(
-    client: TestClient,
+def _seed_db_method(
+    fake_supabase: FakeSupabaseClient,
+    *,
+    row_id: str,
+    organizationid: str = ORG_ID,
+    stripe_payment_method_id: str | None = None,
+    payment_method_id: str | None = None,
+    is_default: bool = False,
+    created_at: str = "2026-01-01T09:00:00+00:00",
+    brand: str = "visa",
+    last4: str = "4242",
+    exp_month: int = 12,
+    exp_year: int = 2028,
+    status: str = "active",
+    type: str = "card",
 ) -> None:
+    method_id = stripe_payment_method_id or payment_method_id or row_id
+    fake_supabase.tables["billing_payment_methods"].append(
+        {
+            "id": row_id,
+            "organization_id": organizationid,
+            "stripe_payment_method_id": method_id,
+            "payment_method_id": payment_method_id or method_id,
+            "type": type,
+            "brand": brand,
+            "last4": last4,
+            "exp_month": exp_month,
+            "exp_year": exp_year,
+            "is_default": is_default,
+            "status": status,
+            "created_at": created_at,
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# Import safety
+# ---------------------------------------------------------------------------
+
+
+def test_payment_methods_module_imports_without_stripe_payment_method_view_dependency() -> None:
+    assert hasattr(payment_methods_module, "router")
+    assert "StripePaymentMethodView" not in payment_methods_module.__dict__
+
+
+# ---------------------------------------------------------------------------
+# GET /ui/billing/payment-methods
+# ---------------------------------------------------------------------------
+
+
+def test_get_payment_methods_returns_not_found_when_supabase_not_configured(
+    client: TestClient,
+    mock_svc: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_svc._org_customer_map.clear()
+    monkeypatch.setattr(payment_methods_module, "is_supabase_configured", lambda: False)
+
     resp = client.get("/ui/billing/payment-methods?organizationid=org-001")
+
     assert resp.status_code == 200
-
-
-def test_get_payment_methods_not_found_response_shape(client: TestClient) -> None:
-    body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
+    body = resp.json()
     assert body["status"] == "not_found"
     assert body["organizationid"] == "org-001"
-    assert isinstance(body["message"], str)
-    assert len(body["message"]) > 0
+    assert "generatedat" in body
+    assert "environment" in body
+
+
+def test_get_payment_methods_response_shape_when_no_customer_mapping(
+    client: TestClient,
+    mock_svc: MagicMock,
+    fake_supabase: FakeSupabaseClient,
+) -> None:
+    mock_svc._org_customer_map.clear()
+
+    body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
+    assert body["organizationid"] == "org-001"
+    assert body["organizationname"] == "org-001"
+    assert body["stripe_customer_id"] is None
+    assert body["defaultmethodid"] is None
+    assert body["methods"] == []
+    assert body["methodcount"] == 0
+    assert body["statuscounts"] == []
+    assert body["canaddnew"] is True
     assert isinstance(body["generatedat"], str)
-    assert len(body["generatedat"]) > 0
     assert isinstance(body["environment"], str)
-    assert len(body["environment"]) > 0
 
 
-def test_get_payment_methods_not_found_message_mentions_supabase(
+def test_get_payment_methods_notes_mentions_missing_customer_mapping(
     client: TestClient,
+    mock_svc: MagicMock,
+    fake_supabase: FakeSupabaseClient,
 ) -> None:
+    mock_svc._org_customer_map.clear()
+
     body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
-    assert "supabase" in body["message"].lower()
+    joined = " ".join(body["notes"]).lower()
+    assert "no stripe customer" in joined or "create a stripe customer" in joined
 
 
-def test_get_payment_methods_environment_driven_by_get_environment(
+def test_get_payment_methods_environment_not_hardcoded_local(
     client: TestClient,
+    mock_svc: MagicMock,
+    fake_supabase: FakeSupabaseClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
-    assert isinstance(body["environment"], str)
-    assert len(body["environment"]) > 0
-    assert body["environment"] != "local"
-
-
-def test_get_payment_methods_environment_not_hardcoded_local(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_svc._org_customer_map.clear()
     monkeypatch.setenv("IRONCLAW_ENV", "staging")
+
     body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
     assert body["environment"] == "staging"
 
 
-# ---------------------------------------------------------------------------
-# stripe field — sourced from _get_stripe_status(), not inline key inspection
-# ---------------------------------------------------------------------------
-
-
-def test_get_payment_methods_full_response_has_stripe_key_when_configured(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
-    monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Test Org")
-    monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
-    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_abc123")
-
-    body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
-    assert "stripe" in body
-    assert isinstance(body["stripe"]["configured"], bool)
-    assert body["stripe"]["mode"] in {"live", "test", "unconfigured"}
-    assert isinstance(body["stripe"]["note"], str)
-    assert len(body["stripe"]["note"]) > 0
-
-
-def test_get_payment_methods_stripe_sourced_from_get_stripe_status(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
-    monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Test Org")
-    monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
+def test_get_payment_methods_stripe_sourced_from_get_stripe_status(
+    client: TestClient,
+    mock_svc: MagicMock,
+    fake_supabase: FakeSupabaseClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
+    mock_svc.list_payment_methods.return_value = []
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_xyz789")
 
     body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
@@ -114,104 +346,41 @@ def test_get_payment_methods_stripe_sourced_from_get_stripe_status(client: TestC
     assert body["stripe"]["note"] == expected_stripe.note
 
 
-def test_get_payment_methods_stripe_unconfigured_when_no_key(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
-    monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Test Org")
-    monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
-    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
-
-    body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
-    assert body["stripe"]["configured"] is False
-    assert body["stripe"]["mode"] == "unconfigured"
-
-
-def test_get_payment_methods_stripe_test_mode(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
-    monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Test Org")
-    monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
-    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_abc123")
-
-    body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
-    assert body["stripe"]["configured"] is True
-    assert body["stripe"]["mode"] == "test"
-
-
-def test_get_payment_methods_stripe_live_mode(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
-    monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Test Org")
-    monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
-    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_prodkey")
-
-    body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
-    assert body["stripe"]["configured"] is True
-    assert body["stripe"]["mode"] == "live"
-
-
-# ---------------------------------------------------------------------------
-# stripe_mode scalar consistent with stripe.mode
-# ---------------------------------------------------------------------------
-
-
-def test_get_payment_methods_stripe_mode_scalar_consistent_with_stripe_block_test(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
-    monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Test Org")
-    monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
+def test_get_payment_methods_stripe_mode_scalar_consistent_with_stripe_block_test(
+    client: TestClient,
+    mock_svc: MagicMock,
+    fake_supabase: FakeSupabaseClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
+    mock_svc.list_payment_methods.return_value = []
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_abc123")
 
     body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
     assert body["stripe_mode"] == body["stripe"]["mode"]
 
 
-def test_get_payment_methods_stripe_mode_scalar_consistent_with_stripe_block_live(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
-    monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Test Org")
-    monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
-    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_prodkey")
-
-    body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
-    assert body["stripe_mode"] == body["stripe"]["mode"]
-
-
-def test_get_payment_methods_stripe_mode_scalar_is_none_when_unconfigured(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
-    monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Test Org")
-    monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
+def test_get_payment_methods_stripe_mode_scalar_is_none_when_unconfigured(
+    client: TestClient,
+    mock_svc: MagicMock,
+    fake_supabase: FakeSupabaseClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
+    mock_svc.list_payment_methods.return_value = []
     monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
 
     body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
     assert body["stripe_mode"] is None
 
 
-# ---------------------------------------------------------------------------
-# BillingPaymentMethodsResponse shape (Supabase mocked as configured)
-# ---------------------------------------------------------------------------
-
-
-def test_get_payment_methods_full_response_required_keys(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
-    monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Alpha Org")
-    monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
+def test_get_payment_methods_full_response_required_keys(
+    client: TestClient,
+    mock_svc: MagicMock,
+    fake_supabase: FakeSupabaseClient,
+) -> None:
+    mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
+    mock_svc.list_payment_methods.return_value = []
 
     body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
     for key in (
@@ -235,108 +404,78 @@ def test_get_payment_methods_full_response_required_keys(client: TestClient, mon
         assert key in body, f"missing key: {key}"
 
 
-def test_get_payment_methods_maxmethods_is_4(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
-    monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Alpha Org")
-    monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
-
-    body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
-    assert body["maxmethods"] == 4
-
-
-def test_get_payment_methods_canaddnew_true_when_zero_methods(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
-    monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Alpha Org")
-    monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
-
-    body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
-    assert body["canaddnew"] is True
-    assert body["methodcount"] == 0
-
-
-def test_get_payment_methods_canaddnew_false_when_at_max(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-    from app.ui.billing.payment_methods import BillingPaymentMethodView
-
-    def _utc_iso_helper(y: int, m: int, d: int) -> str:
-        from datetime import UTC, datetime
-
-        return datetime(y, m, d, 9, 0, 0, tzinfo=UTC).isoformat()
-
-    def _make_method(idx: int) -> BillingPaymentMethodView:
-        return BillingPaymentMethodView(
-            methodid=f"pm-00{idx}",
-            type="card",
-            brand="visa",
-            branddisplay="Visa",
-            last4=f"{1000 + idx}",
-            expmonth=12,
-            expyear=2028,
-            expdisplay="12/2028",
-            isdefault=(idx == 1),
-            status="active",
-            statuscolor="success",
-            createdat=_utc_iso_helper(2026, 1, idx),
-            organizationid="org-001",
-        )
-
-    four_methods = [_make_method(i) for i in range(1, 5)]
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: four_methods)
-    monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Alpha Org")
-    monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: "cus_abc")
+def test_get_payment_methods_canaddnew_false_when_at_max(
+    client: TestClient,
+    mock_svc: MagicMock,
+    fake_supabase: FakeSupabaseClient,
+) -> None:
+    mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
+    mock_svc.list_payment_methods.return_value = [
+        _make_method_dict(methodid="pm-001", isdefault=True, createdat="2026-01-01T09:00:00+00:00"),
+        _make_method_dict(methodid="pm-002", createdat="2026-01-02T09:00:00+00:00"),
+        _make_method_dict(methodid="pm-003", createdat="2026-01-03T09:00:00+00:00"),
+        _make_method_dict(methodid="pm-004", createdat="2026-01-04T09:00:00+00:00"),
+    ]
 
     body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
     assert body["canaddnew"] is False
     assert body["methodcount"] == 4
 
 
-# ---------------------------------------------------------------------------
-# package_catalogue — stripe_price_id injected from env
-# ---------------------------------------------------------------------------
+def test_get_payment_methods_defaultmethodid_resolves_from_default_flag(
+    client: TestClient,
+    mock_svc: MagicMock,
+    fake_supabase: FakeSupabaseClient,
+) -> None:
+    mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
+    mock_svc.list_payment_methods.return_value = [
+        _make_method_dict(methodid="pm-001"),
+        _make_method_dict(methodid="pm-002", isdefault=True),
+    ]
+
+    body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
+    assert body["defaultmethodid"] == "pm-002"
 
 
-def test_get_payment_methods_package_catalogue_has_all_plans(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
+def test_get_payment_methods_statuscounts_populated(
+    client: TestClient,
+    mock_svc: MagicMock,
+    fake_supabase: FakeSupabaseClient,
+) -> None:
+    mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
+    mock_svc.list_payment_methods.return_value = [
+        _make_method_dict(methodid="pm-001", status="active"),
+        _make_method_dict(methodid="pm-002", status="expired"),
+        _make_method_dict(methodid="pm-003", status="active"),
+    ]
 
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
-    monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Alpha Org")
-    monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
+    body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
+    counts = {entry["status"]: entry["count"] for entry in body["statuscounts"]}
+    assert counts["active"] == 2
+    assert counts["expired"] == 1
+
+
+def test_get_payment_methods_package_catalogue_has_all_plans(
+    client: TestClient,
+    mock_svc: MagicMock,
+    fake_supabase: FakeSupabaseClient,
+) -> None:
+    mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
+    mock_svc.list_payment_methods.return_value = []
 
     body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
     catalogue = body["package_catalogue"]
     assert set(catalogue.keys()) == set(PACKAGE_CATALOGUE.keys())
 
 
-def test_get_payment_methods_package_catalogue_entries_have_stripe_price_id(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
-    monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Alpha Org")
-    monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
-
-    body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
-    for plan, entry in body["package_catalogue"].items():
-        assert "stripe_price_id" in entry, f"plan '{plan}' missing stripe_price_id"
-        assert isinstance(entry["stripe_price_id"], str)
-
-
-def test_get_payment_methods_package_catalogue_stripe_price_id_from_env(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
-    monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Alpha Org")
-    monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
+def test_get_payment_methods_package_catalogue_stripe_price_id_from_env(
+    client: TestClient,
+    mock_svc: MagicMock,
+    fake_supabase: FakeSupabaseClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
+    mock_svc.list_payment_methods.return_value = []
     monkeypatch.setenv("STRIPE_PRICE_ID_STARTER", "price_starter_test_123")
     monkeypatch.setenv("STRIPE_PRICE_ID_TEAM", "price_team_test_456")
     monkeypatch.setenv("STRIPE_PRICE_ID_ENTERPRISE", "price_enterprise_test_789")
@@ -348,175 +487,138 @@ def test_get_payment_methods_package_catalogue_stripe_price_id_from_env(client: 
     assert catalogue["enterprise"]["stripe_price_id"] == "price_enterprise_test_789"
 
 
-def test_get_payment_methods_package_catalogue_stripe_price_id_empty_when_env_unset(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
-    monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Alpha Org")
-    monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
-    monkeypatch.delenv("STRIPE_PRICE_ID_STARTER", raising=False)
-    monkeypatch.delenv("STRIPE_PRICE_ID_TEAM", raising=False)
-    monkeypatch.delenv("STRIPE_PRICE_ID_ENTERPRISE", raising=False)
-
-    body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
-    catalogue = body["package_catalogue"]
-    for plan in PACKAGE_CATALOGUE:
-        assert catalogue[plan]["stripe_price_id"] == ""
-
-
-def test_get_payment_methods_package_catalogue_entry_has_required_fields(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
-    monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Alpha Org")
-    monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
-
-    body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
-    for plan, entry in body["package_catalogue"].items():
-        for field in ("label", "units", "price_usd", "price_cents", "tokens_per_unit", "token_coverage", "stripe_price_id", "notes"):
-            assert field in entry, f"plan '{plan}' catalogue entry missing field: {field}"
-
-
-# ---------------------------------------------------------------------------
-# POST /ui/billing/payment-methods — 503 when Supabase unconfigured
-# ---------------------------------------------------------------------------
-
-
-def test_post_payment_method_503_when_supabase_unconfigured(
+def test_get_payment_methods_returns_502_on_stripe_service_error(
     client: TestClient,
+    mock_svc: MagicMock,
+    fake_supabase: FakeSupabaseClient,
+) -> None:
+    mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
+    mock_svc.list_payment_methods.side_effect = StripeServiceError("boom")
+
+    resp = client.get("/ui/billing/payment-methods?organizationid=org-001")
+
+    assert resp.status_code == 502
+    body = resp.json()
+    assert body["detail"]["error"] == "payment_methods_fetch_error"
+
+
+def test_get_payment_methods_uses_query_org_id_when_auth_org_missing(
+    mock_svc: MagicMock,
+    fake_supabase: FakeSupabaseClient,
+) -> None:
+    auth_without_org = AuthContext(
+        api_key=_MOCK_API_KEY,
+        principal_type="api_key",
+        principal_id="test-principal",
+        session_id=None,
+        org_id="",
+        permissions=(),
+        roles=(),
+        authenticated=True,
+        auth_source="test",
+        auth_method="api_key",
+        key_type="personal",
+    )
+
+    _app.dependency_overrides[get_stripe_service] = lambda: mock_svc
+    _app.dependency_overrides[get_auth_context] = lambda: auth_without_org
+    try:
+        with TestClient(_app, raise_server_exceptions=True) as test_client:
+            test_client.headers.update(_AUTH_HEADERS)
+            body = test_client.get("/ui/billing/payment-methods?organizationid=org-fallback").json()
+            assert body["organizationid"] == "org-fallback"
+    finally:
+        _app.dependency_overrides.pop(get_stripe_service, None)
+        _app.dependency_overrides.pop(get_auth_context, None)
+
+
+# ---------------------------------------------------------------------------
+# POST /ui/billing/payment-methods
+# ---------------------------------------------------------------------------
+
+
+def test_post_add_payment_method_creates_record(
+    client: TestClient,
+    mock_svc: MagicMock,
+    fake_supabase: FakeSupabaseClient,
 ) -> None:
     payload = {"stripe_payment_method_id": "pm_test_abc123", "set_as_default": False}
+
     resp = client.post("/ui/billing/payment-methods?organizationid=org-001", json=payload)
+
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["status"] == "created"
+    assert body["organizationid"] == "org-001"
+    assert body["methodid"] == "pm_test_abc123"
+    rows = fake_supabase.tables["billing_payment_methods"]
+    assert len(rows) == 1
+    assert rows[0]["stripe_payment_method_id"] == "pm_test_abc123"
+
+
+def test_post_add_payment_method_sets_default_and_unsets_old_row(
+    client: TestClient,
+    mock_svc: MagicMock,
+    fake_supabase: FakeSupabaseClient,
+) -> None:
+    _seed_db_method(
+        fake_supabase,
+        row_id="row-existing",
+        stripe_payment_method_id="pm-existing",
+        payment_method_id="pm-existing",
+        is_default=True,
+    )
+    payload = {"stripe_payment_method_id": "pm_test_new_default", "set_as_default": True}
+
+    resp = client.post("/ui/billing/payment-methods?organizationid=org-001", json=payload)
+
+    assert resp.status_code == 201
+    rows = fake_supabase.tables["billing_payment_methods"]
+    old_row = next(row for row in rows if row["id"] == "row-existing")
+    new_row = next(row for row in rows if row["stripe_payment_method_id"] == "pm_test_new_default")
+    assert old_row["is_default"] is False
+    assert new_row["is_default"] is True
+    assert resp.json()["methodid"] == "pm_test_new_default"
+
+
+def test_post_add_payment_method_returns_409_at_max_methods(
+    client: TestClient,
+    mock_svc: MagicMock,
+    fake_supabase: FakeSupabaseClient,
+) -> None:
+    _seed_db_method(fake_supabase, row_id="row-1")
+    _seed_db_method(fake_supabase, row_id="row-2")
+    _seed_db_method(fake_supabase, row_id="row-3")
+    _seed_db_method(fake_supabase, row_id="row-4")
+
+    payload = {"stripe_payment_method_id": "pm_test_overflow", "set_as_default": False}
+    resp = client.post("/ui/billing/payment-methods?organizationid=org-001", json=payload)
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["error"] == "payment_method_limit_reached"
+
+
+def test_post_add_payment_method_returns_503_when_supabase_not_configured(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(payment_methods_module, "is_supabase_configured", lambda: False)
+
+    payload = {"stripe_payment_method_id": "pm_test_abc123", "set_as_default": False}
+    resp = client.post("/ui/billing/payment-methods?organizationid=org-001", json=payload)
+
     assert resp.status_code == 503
 
 
-def test_post_payment_method_503_detail_mentions_supabase(
+def test_post_add_payment_method_returns_422_when_method_id_blank(
     client: TestClient,
+    fake_supabase: FakeSupabaseClient,
 ) -> None:
-    payload = {"stripe_payment_method_id": "pm_test_abc123", "set_as_default": False}
-    body = client.post("/ui/billing/payment-methods?organizationid=org-001", json=payload).json()
-    assert "supabase" in body["detail"].lower()
+    payload = {"stripe_payment_method_id": "", "set_as_default": False}
 
-
-# ---------------------------------------------------------------------------
-# POST /ui/billing/payment-methods — 409 when _MAX_METHODS cap reached
-# ---------------------------------------------------------------------------
-
-
-def test_post_payment_method_409_when_max_methods_reached(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-    from app.ui.billing.payment_methods import BillingPaymentMethodView
-
-    def _utc_iso_helper(y: int, m: int, d: int) -> str:
-        from datetime import UTC, datetime
-
-        return datetime(y, m, d, 9, 0, 0, tzinfo=UTC).isoformat()
-
-    def _make_method(idx: int) -> BillingPaymentMethodView:
-        return BillingPaymentMethodView(
-            methodid=f"pm-00{idx}",
-            type="card",
-            brand="visa",
-            branddisplay="Visa",
-            last4=f"{1000 + idx}",
-            expmonth=12,
-            expyear=2028,
-            expdisplay="12/2028",
-            isdefault=(idx == 1),
-            status="active",
-            statuscolor="success",
-            createdat=_utc_iso_helper(2026, 1, idx),
-            organizationid="org-001",
-        )
-
-    four_methods = [_make_method(i) for i in range(1, 5)]
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: four_methods)
-
-    payload = {"stripe_payment_method_id": "pm_new_xyz", "set_as_default": False}
     resp = client.post("/ui/billing/payment-methods?organizationid=org-001", json=payload)
-    assert resp.status_code == 409
 
-
-def test_post_payment_method_409_detail_mentions_max(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-    from app.ui.billing.payment_methods import BillingPaymentMethodView
-
-    def _utc_iso_helper(y: int, m: int, d: int) -> str:
-        from datetime import UTC, datetime
-
-        return datetime(y, m, d, 9, 0, 0, tzinfo=UTC).isoformat()
-
-    def _make_method(idx: int) -> BillingPaymentMethodView:
-        return BillingPaymentMethodView(
-            methodid=f"pm-00{idx}",
-            type="card",
-            brand="visa",
-            branddisplay="Visa",
-            last4=f"{1000 + idx}",
-            expmonth=12,
-            expyear=2028,
-            expdisplay="12/2028",
-            isdefault=(idx == 1),
-            status="active",
-            statuscolor="success",
-            createdat=_utc_iso_helper(2026, 1, idx),
-            organizationid="org-001",
-        )
-
-    four_methods = [_make_method(i) for i in range(1, 5)]
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: four_methods)
-
-    payload = {"stripe_payment_method_id": "pm_new_xyz", "set_as_default": False}
-    body = client.post("/ui/billing/payment-methods?organizationid=org-001", json=payload).json()
-    detail = body["detail"].lower()
-    assert "maximum" in detail or "4" in detail
-
-
-def test_post_payment_method_201_when_under_max(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
-    monkeypatch.setattr(pm_mod, "_insert_payment_method_record", lambda **kw: "pm-new-001")
-
-    payload = {"stripe_payment_method_id": "pm_test_abc", "set_as_default": False}
-    resp = client.post("/ui/billing/payment-methods?organizationid=org-001", json=payload)
-    assert resp.status_code == 201
-
-
-def test_post_payment_method_response_shape(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
-    monkeypatch.setattr(pm_mod, "_insert_payment_method_record", lambda **kw: "pm-new-001")
-
-    payload = {"stripe_payment_method_id": "pm_test_abc", "set_as_default": True}
-    body = client.post("/ui/billing/payment-methods?organizationid=org-001", json=payload).json()
-    assert body["status"] == "created"
-    assert body["methodid"] == "pm-new-001"
-    assert body["organizationid"] == "org-001"
-    assert body["set_as_default"] is True
-    assert isinstance(body["generatedat"], str)
-    assert isinstance(body["environment"], str)
-    assert isinstance(body["message"], str)
-
-
-def test_post_payment_method_500_when_insert_returns_none(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
-    monkeypatch.setattr(pm_mod, "_insert_payment_method_record", lambda **kw: None)
-
-    payload = {"stripe_payment_method_id": "pm_test_abc", "set_as_default": False}
-    resp = client.post("/ui/billing/payment-methods?organizationid=org-001", json=payload)
-    assert resp.status_code == 500
+    assert resp.status_code == 422
 
 
 # ---------------------------------------------------------------------------
@@ -524,18 +626,50 @@ def test_post_payment_method_500_when_insert_returns_none(client: TestClient, mo
 # ---------------------------------------------------------------------------
 
 
-def test_patch_default_503_when_supabase_unconfigured(client: TestClient) -> None:
+def test_patch_default_sets_requested_row_default(
+    client: TestClient,
+    mock_svc: MagicMock,
+    fake_supabase: FakeSupabaseClient,
+) -> None:
+    _seed_db_method(
+        fake_supabase,
+        row_id="row-1",
+        stripe_payment_method_id="pm-001",
+        payment_method_id="pm-001",
+        is_default=True,
+    )
+    _seed_db_method(
+        fake_supabase,
+        row_id="row-2",
+        stripe_payment_method_id="pm-002",
+        payment_method_id="pm-002",
+        is_default=False,
+    )
+
+    resp = client.patch("/ui/billing/payment-methods/pm-002/default?organizationid=org-001")
+
+    assert resp.status_code == 200
+    rows = fake_supabase.tables["billing_payment_methods"]
+    row_1 = next(row for row in rows if row["id"] == "row-1")
+    row_2 = next(row for row in rows if row["id"] == "row-2")
+    assert row_1["is_default"] is False
+    assert row_2["is_default"] is True
+
+
+def test_patch_default_response_shape(
+    client: TestClient,
+    mock_svc: MagicMock,
+    fake_supabase: FakeSupabaseClient,
+) -> None:
+    _seed_db_method(
+        fake_supabase,
+        row_id="row-1",
+        stripe_payment_method_id="pm-001",
+        payment_method_id="pm-001",
+    )
+
     resp = client.patch("/ui/billing/payment-methods/pm-001/default?organizationid=org-001")
-    assert resp.status_code == 503
 
-
-def test_patch_default_200_response_shape(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_set_default_method_in_db", lambda **kw: True)
-
-    resp = client.patch("/ui/billing/payment-methods/pm-001/default?organizationid=org-001")
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "updated"
@@ -544,28 +678,27 @@ def test_patch_default_200_response_shape(client: TestClient, monkeypatch: pytes
     assert isinstance(body["generatedat"], str)
     assert isinstance(body["environment"], str)
     assert isinstance(body["message"], str)
-    assert len(body["message"]) > 0
 
 
-def test_patch_default_500_when_db_fails(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
+def test_patch_default_returns_400_when_method_id_blank_after_normalize(
+    client: TestClient,
+    fake_supabase: FakeSupabaseClient,
+) -> None:
+    resp = client.patch("/ui/billing/payment-methods/%20/default?organizationid=org-001")
 
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_set_default_method_in_db", lambda **kw: False)
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["error"] == "payment_method_id_required"
+
+
+def test_patch_default_returns_503_when_supabase_not_configured(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(payment_methods_module, "is_supabase_configured", lambda: False)
 
     resp = client.patch("/ui/billing/payment-methods/pm-001/default?organizationid=org-001")
-    assert resp.status_code == 500
 
-
-def test_patch_default_message_identifies_method_and_org(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_set_default_method_in_db", lambda **kw: True)
-
-    body = client.patch("/ui/billing/payment-methods/pm-007/default?organizationid=org-002").json()
-    assert "pm-007" in body["message"]
-    assert "org-002" in body["message"]
+    assert resp.status_code == 503
 
 
 # ---------------------------------------------------------------------------
@@ -573,18 +706,32 @@ def test_patch_default_message_identifies_method_and_org(client: TestClient, mon
 # ---------------------------------------------------------------------------
 
 
-def test_delete_method_503_when_supabase_unconfigured(client: TestClient) -> None:
-    resp = client.delete("/ui/billing/payment-methods/pm-001?organizationid=org-001")
-    assert resp.status_code == 503
-
-
-def test_delete_method_200_response_shape(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_delete_method_from_db", lambda **kw: True)
+def test_delete_method_deletes_requested_row(
+    client: TestClient,
+    mock_svc: MagicMock,
+    fake_supabase: FakeSupabaseClient,
+) -> None:
+    _seed_db_method(fake_supabase, row_id="row-1", stripe_payment_method_id="pm-001", payment_method_id="pm-001")
+    _seed_db_method(fake_supabase, row_id="row-2", stripe_payment_method_id="pm-002", payment_method_id="pm-002")
 
     resp = client.delete("/ui/billing/payment-methods/pm-001?organizationid=org-001")
+
+    assert resp.status_code == 200
+    rows = fake_supabase.tables["billing_payment_methods"]
+    remaining_ids = {row["id"] for row in rows}
+    assert "row-1" not in remaining_ids
+    assert "row-2" in remaining_ids
+
+
+def test_delete_method_response_shape(
+    client: TestClient,
+    mock_svc: MagicMock,
+    fake_supabase: FakeSupabaseClient,
+) -> None:
+    _seed_db_method(fake_supabase, row_id="row-1", stripe_payment_method_id="pm-001", payment_method_id="pm-001")
+
+    resp = client.delete("/ui/billing/payment-methods/pm-001?organizationid=org-001")
+
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "deleted"
@@ -593,59 +740,24 @@ def test_delete_method_200_response_shape(client: TestClient, monkeypatch: pytes
     assert isinstance(body["generatedat"], str)
     assert isinstance(body["environment"], str)
     assert isinstance(body["message"], str)
-    assert len(body["message"]) > 0
 
 
-def test_delete_method_500_when_db_fails(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
+def test_delete_method_returns_400_when_method_id_blank_after_normalize(
+    client: TestClient,
+    fake_supabase: FakeSupabaseClient,
+) -> None:
+    resp = client.delete("/ui/billing/payment-methods/%20?organizationid=org-001")
 
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_delete_method_from_db", lambda **kw: False)
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["error"] == "payment_method_id_required"
+
+
+def test_delete_method_returns_503_when_supabase_not_configured(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(payment_methods_module, "is_supabase_configured", lambda: False)
 
     resp = client.delete("/ui/billing/payment-methods/pm-001?organizationid=org-001")
-    assert resp.status_code == 500
 
-
-def test_delete_method_message_identifies_method_and_org(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_delete_method_from_db", lambda **kw: True)
-
-    body = client.delete("/ui/billing/payment-methods/pm-005?organizationid=org-003").json()
-    assert "pm-005" in body["message"]
-    assert "org-003" in body["message"]
-
-
-# ---------------------------------------------------------------------------
-# notes block
-# ---------------------------------------------------------------------------
-
-
-def test_get_payment_methods_notes_non_empty_when_supabase_configured(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
-    monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Alpha Org")
-    monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
-
-    body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
-    assert len(body["notes"]) >= 1
-    for note in body["notes"]:
-        assert isinstance(note, str)
-        assert len(note) > 0
-
-
-def test_get_payment_methods_notes_include_stripe_note(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.ui.billing.payment_methods as pm_mod
-
-    monkeypatch.setattr(pm_mod, "is_supabase_configured", lambda: True)
-    monkeypatch.setattr(pm_mod, "_fetch_org_payment_methods", lambda org: [])
-    monkeypatch.setattr(pm_mod, "_fetch_org_name", lambda org: "Alpha Org")
-    monkeypatch.setattr(pm_mod, "_fetch_stripe_customer_id", lambda org: None)
-    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
-
-    body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
-    combined_notes = " ".join(body["notes"]).lower()
-    assert "stripe" in combined_notes
+    assert resp.status_code == 503

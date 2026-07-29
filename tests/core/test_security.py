@@ -150,7 +150,7 @@ def test_normalize_unique_deduplicates_case_insensitively() -> None:
     ]
 
 
-def test_get_allowed_origins_prefers_allowed_origins_without_requiring_exact_list_match() -> None:
+def test_get_allowed_origins_prefers_primary_allowed_origins_over_legacy_when_primary_present() -> None:
     settings = Settings(
         ALLOWED_ORIGINS="https://moving-forward.ca, https://www.moving-forward.ca",
         CORS_ORIGINS="https://preview.pages.dev",
@@ -173,6 +173,21 @@ def test_get_allowed_origins_uses_legacy_cors_origins_when_primary_is_empty() ->
 
     assert "https://moving-forward.ca" in allowed_origins
     assert "https://preview.pages.dev" in allowed_origins
+
+
+def test_get_allowed_origins_ignores_base_urls_when_not_supported_by_settings_contract() -> None:
+    settings = Settings(
+        ALLOWED_ORIGINS="",
+        CORS_ORIGINS="",
+        APP_BASE_URL="https://api.moving-forward.ca",
+        ENGINE_BASE_URL="https://engine.moving-forward.ca",
+    )
+
+    allowed_origins = get_allowed_origins(settings)
+
+    assert "https://api.moving-forward.ca" not in allowed_origins
+    assert "https://engine.moving-forward.ca" not in allowed_origins
+    assert "http://localhost" in allowed_origins
 
 
 def test_get_allowed_origins_falls_back_to_localhost_when_empty() -> None:
@@ -205,12 +220,17 @@ def test_get_allowed_methods_uses_configured_values() -> None:
     assert get_allowed_methods(settings) == ["GET", "POST", "OPTIONS"]
 
 
+def test_get_allowed_methods_appends_options_when_missing() -> None:
+    settings = Settings(CORS_ALLOWED_METHODS="GET,POST")
+    assert get_allowed_methods(settings) == ["GET", "POST", "OPTIONS"]
+
+
 def test_get_allowed_headers_uses_defaults() -> None:
     settings = Settings()
     assert get_allowed_headers(settings) == _DEFAULT_ALLOWED_HEADERS
 
 
-def test_get_allowed_headers_uses_configured_values() -> None:
+def test_get_allowed_headers_uses_configured_values_and_keeps_required_defaults() -> None:
     settings = Settings(
         CORS_ALLOWED_HEADERS="Authorization, Content-Type, X-API-Key, authorization",
     )
@@ -218,6 +238,19 @@ def test_get_allowed_headers_uses_configured_values() -> None:
         "Authorization",
         "Content-Type",
         "X-API-Key",
+        "X-Request-ID",
+    ]
+
+
+def test_get_allowed_headers_preserves_explicit_request_id_header() -> None:
+    settings = Settings(
+        CORS_ALLOWED_HEADERS="Authorization, Content-Type, X-API-Key, X-Request-ID",
+    )
+    assert get_allowed_headers(settings) == [
+        "Authorization",
+        "Content-Type",
+        "X-API-Key",
+        "X-Request-ID",
     ]
 
 
@@ -256,9 +289,9 @@ def test_get_allowed_hosts_derives_from_allowed_origins_and_base_urls() -> None:
     ]
 
 
-def test_should_allow_credentials_returns_explicit_setting_true() -> None:
+def test_should_allow_credentials_rejects_explicit_true_for_wildcard_origin() -> None:
     settings = Settings(CORS_ALLOW_CREDENTIALS=True)
-    assert should_allow_credentials(settings, ["*"]) is True
+    assert should_allow_credentials(settings, ["*"]) is False
 
 
 def test_should_allow_credentials_returns_explicit_setting_false() -> None:
@@ -414,7 +447,7 @@ def test_install_security_middleware_sets_cors_headers_for_allowed_origin() -> N
     assert response.headers["access-control-allow-origin"] == "https://moving-forward.ca"
     assert response.headers["access-control-allow-credentials"] == "true"
     assert response.headers["access-control-allow-methods"] == "GET, POST, OPTIONS"
-    assert response.headers["access-control-allow-headers"] == "Accept, Accept-Language, Authorization, Content-Language, Content-Type, X-API-Key"
+    assert response.headers["access-control-allow-headers"] == "Accept, Accept-Language, Authorization, Content-Language, Content-Type, X-API-Key, X-Request-ID"
 
     get_response = client.get(
         "/health",
@@ -442,6 +475,25 @@ def test_install_security_middleware_respects_explicit_credentials_false() -> No
 
     assert response.status_code == 200
     assert "access-control-allow-credentials" not in response.headers
+
+
+def test_install_security_middleware_rejects_browser_invalid_wildcard_credentials_config() -> None:
+    settings = Settings(
+        ALLOWED_ORIGINS="*",
+        TRUSTED_HOSTS="testserver",
+        CORS_ALLOW_CREDENTIALS=True,
+    )
+    client = TestClient(_build_app(settings))
+
+    response = client.options(
+        "/health",
+        headers={
+            "Origin": "https://moving-forward.ca",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert response.status_code == 400 or "access-control-allow-credentials" not in response.headers
 
 
 def test_preflight_to_protected_route_returns_200_without_api_key() -> None:
@@ -581,6 +633,24 @@ def test_preflight_to_affected_api_endpoints_returns_http_ok_for_moving_forward_
             method=method,
             request_headers=request_headers,
         )
+
+
+def test_preflight_to_checkout_payment_route_allows_request_id_header() -> None:
+    settings = _build_production_like_settings()
+    client = TestClient(_build_app(settings))
+
+    response = client.options(
+        "/api/billing/checkout/sessions",
+        headers={
+            "Origin": "https://moving-forward.ca",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "Authorization,Content-Type,X-API-Key,X-Request-ID",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "https://moving-forward.ca"
+    assert "X-Request-ID" in response.headers["access-control-allow-headers"]
 
 
 def test_preflight_to_affected_api_endpoints_does_not_include_isolation_headers() -> None:

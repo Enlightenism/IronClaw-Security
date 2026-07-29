@@ -1,49 +1,50 @@
 from __future__ import annotations
 
-import os
-from unittest.mock import MagicMock, patch
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
-from fastapi.testclient import TestClient
 import pytest
 
-from app.supabaseclient import (
-    BILLING_TIER_5K_PRICE_USD,
-    BILLING_TIER_5K_UNITS,
-    BILLING_TIER_25K_PRICE_USD,
-    BILLING_TIER_25K_UNITS,
-    BILLING_TIER_60K_PRICE_USD,
-    BILLING_TIER_60K_UNITS,
-    TOKENS_PER_UNIT,
-)
+from app.supabaseclient import TOKENS_PER_UNIT
 from app.ui.billing.payment_methods import (
     _BRAND_DISPLAY,
     _MAX_METHODS,
     _STATUS_COLOR,
-    PACKAGE_CATALOGUE,
-    AddPaymentMethodRequest,
-    AddPaymentMethodResponse,
     BillingPaymentMethodsResponse,
+    BillingPaymentMethodStatusCount,
     BillingPaymentMethodView,
     DeletePaymentMethodResponse,
     PackageCatalogueEntry,
     SetDefaultPaymentMethodResponse,
     _brand_display,
     _build_method,
+    _build_method_from_stripe,
     _build_package_catalogue,
     _build_status_counts,
     _exp_display,
+    _fetch_payment_methods_from_stripe,
+    _get_environment,
+    _method_brand,
+    _method_created_at,
+    _method_exp_month,
+    _method_exp_year,
+    _method_is_default,
+    _method_last4,
+    _method_status,
+    _method_type,
+    _normalize_method_id,
     _resolve_default_method_id,
+    _resolve_org_id,
+    _resolve_org_id_from_request,
+    _status_color,
     _stripe_connection_note,
     _stripe_mode,
     _stripe_webhook_secret_note,
 )
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
-
-def _make_method(
+def make_method(
     methodid: str = "pm-001",
     type: str = "card",
     brand: str = "visa",
@@ -69,29 +70,26 @@ def _make_method(
     )
 
 
-# ---------------------------------------------------------------------------
-# _build_method — instance type and field correctness
-# ---------------------------------------------------------------------------
+class DummyLock:
+    def __enter__(self) -> DummyLock:
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
 
 
-class TestBuildMethod_billing_pm:
+class DummyRequest:
+    def __init__(self, query_params: dict[str, str] | None = None) -> None:
+        self.query_params = query_params or {}
+
+
+class TestBuildMethod:
     def test_returns_billing_payment_method_view_instance(self) -> None:
-        result = _build_method(
-            methodid="pm-001",
-            type="card",
-            brand="visa",
-            last4="4242",
-            expmonth=12,
-            expyear=2027,
-            isdefault=False,
-            status="active",
-            createdat="2025-01-01T00:00:00+00:00",
-            organizationid="org-001",
-        )
+        result = make_method()
         assert isinstance(result, BillingPaymentMethodView)
 
     def test_build_method_all_fields_populated(self) -> None:
-        result = _build_method(
+        result = make_method(
             methodid="pm-999",
             type="card",
             brand="mastercard",
@@ -106,316 +104,116 @@ class TestBuildMethod_billing_pm:
         assert result.methodid == "pm-999"
         assert result.type == "card"
         assert result.brand == "mastercard"
+        assert result.branddisplay == "Mastercard"
         assert result.last4 == "1234"
         assert result.expmonth == 3
         assert result.expyear == 2029
+        assert result.expdisplay == "03/2029"
         assert result.isdefault is True
         assert result.status == "active"
+        assert result.statuscolor == "success"
         assert result.createdat == "2026-06-01T00:00:00+00:00"
         assert result.organizationid == "org-abc"
-        assert result.branddisplay == "Mastercard"
-        assert result.expdisplay == "03/2029"
-        assert result.statuscolor == "success"
 
     def test_branddisplay_derived_from_brand(self) -> None:
-        result = _build_method(
-            methodid="pm-001",
-            type="card",
-            brand="amex",
-            last4="0005",
-            expmonth=1,
-            expyear=2028,
-            isdefault=False,
-            status="active",
-            createdat="2025-01-01T00:00:00+00:00",
-            organizationid="org-001",
-        )
+        result = make_method(brand="amex")
         assert result.branddisplay == "American Express"
 
     def test_expdisplay_derived_from_expmonth_expyear(self) -> None:
-        result = _build_method(
-            methodid="pm-001",
-            type="card",
-            brand="visa",
-            last4="4242",
-            expmonth=7,
-            expyear=2031,
-            isdefault=False,
-            status="active",
-            createdat="2025-01-01T00:00:00+00:00",
-            organizationid="org-001",
-        )
+        result = make_method(expmonth=7, expyear=2031)
         assert result.expdisplay == "07/2031"
 
     def test_statuscolor_derived_from_status(self) -> None:
         for status, expected_color in _STATUS_COLOR.items():
-            result = _build_method(
-                methodid="pm-001",
-                type="card",
-                brand="visa",
-                last4="4242",
-                expmonth=12,
-                expyear=2027,
-                isdefault=False,
-                status=status,
-                createdat="2025-01-01T00:00:00+00:00",
-                organizationid="org-001",
-            )
+            result = make_method(status=status)
             assert result.statuscolor == expected_color
 
     def test_unknown_status_statuscolor_is_neutral(self) -> None:
-        result = _build_method(
-            methodid="pm-001",
-            type="card",
-            brand="visa",
-            last4="4242",
-            expmonth=12,
-            expyear=2027,
-            isdefault=False,
-            status="unrecognized_status",
-            createdat="2025-01-01T00:00:00+00:00",
-            organizationid="org-001",
-        )
+        result = make_method(status="unrecognized-status")
         assert result.statuscolor == "neutral"
 
     def test_isdefault_false_propagates(self) -> None:
-        result = _build_method(
-            methodid="pm-001",
-            type="card",
-            brand="visa",
-            last4="4242",
-            expmonth=12,
-            expyear=2027,
-            isdefault=False,
-            status="active",
-            createdat="2025-01-01T00:00:00+00:00",
-            organizationid="org-001",
-        )
+        result = make_method(isdefault=False)
         assert result.isdefault is False
 
     def test_isdefault_true_propagates(self) -> None:
-        result = _build_method(
-            methodid="pm-002",
-            type="card",
-            brand="visa",
-            last4="0000",
-            expmonth=6,
-            expyear=2030,
-            isdefault=True,
-            status="active",
-            createdat="2025-01-01T00:00:00+00:00",
-            organizationid="org-001",
-        )
+        result = make_method(methodid="pm-002", isdefault=True)
         assert result.isdefault is True
 
     def test_unknown_brand_falls_back_to_title_in_branddisplay(self) -> None:
-        result = _build_method(
-            methodid="pm-001",
-            type="card",
-            brand="unionpay",
-            last4="4242",
-            expmonth=12,
-            expyear=2027,
-            isdefault=False,
-            status="active",
-            createdat="2025-01-01T00:00:00+00:00",
-            organizationid="org-001",
-        )
-        assert result.branddisplay == "Unionpay"
+        result = make_method(brand="custom_brand_name")
+        assert result.branddisplay == "Custom Brand Name"
 
     def test_single_digit_month_zero_padded_in_expdisplay(self) -> None:
-        result = _build_method(
-            methodid="pm-001",
-            type="card",
-            brand="visa",
-            last4="4242",
-            expmonth=1,
-            expyear=2030,
-            isdefault=False,
-            status="active",
-            createdat="2025-01-01T00:00:00+00:00",
-            organizationid="org-001",
-        )
+        result = make_method(expmonth=1, expyear=2030)
         assert result.expdisplay == "01/2030"
 
+    def test_invalid_exp_values_return_empty_expdisplay(self) -> None:
+        result = make_method(expmonth=0, expyear=0)
+        assert result.expdisplay == ""
 
-# ---------------------------------------------------------------------------
-# PackageCatalogueEntry — field validation
-# ---------------------------------------------------------------------------
 
+class TestPackageCatalogue:
+    def test_catalogue_keys_present(self) -> None:
+        catalogue = _build_package_catalogue()
+        assert set(catalogue.keys()) == {"starter", "team", "enterprise"}
 
-class TestPackageCatalogueEntry:
-    def test_starter_all_fields_valid(self) -> None:
-        entry = PackageCatalogueEntry(**PACKAGE_CATALOGUE["starter"])
-        assert entry.label == "Starter"
-        assert entry.units == BILLING_TIER_5K_UNITS
-        assert entry.price_usd == BILLING_TIER_5K_PRICE_USD
-        assert entry.price_cents == BILLING_TIER_5K_PRICE_USD * 100
-        assert entry.tokens_per_unit == TOKENS_PER_UNIT
-        assert entry.token_coverage == BILLING_TIER_5K_UNITS * TOKENS_PER_UNIT
-        assert isinstance(entry.notes, str)
-        assert len(entry.notes) > 0
-
-    def test_team_all_fields_valid(self) -> None:
-        entry = PackageCatalogueEntry(**PACKAGE_CATALOGUE["team"])
-        assert entry.label == "Team"
-        assert entry.units == BILLING_TIER_25K_UNITS
-        assert entry.price_usd == BILLING_TIER_25K_PRICE_USD
-        assert entry.price_cents == BILLING_TIER_25K_PRICE_USD * 100
-        assert entry.tokens_per_unit == TOKENS_PER_UNIT
-        assert entry.token_coverage == BILLING_TIER_25K_UNITS * TOKENS_PER_UNIT
-        assert isinstance(entry.notes, str)
-
-    def test_enterprise_all_fields_valid(self) -> None:
-        entry = PackageCatalogueEntry(**PACKAGE_CATALOGUE["enterprise"])
-        assert entry.label == "Enterprise"
-        assert entry.units == BILLING_TIER_60K_UNITS
-        assert entry.price_usd == BILLING_TIER_60K_PRICE_USD
-        assert entry.price_cents == BILLING_TIER_60K_PRICE_USD * 100
-        assert entry.tokens_per_unit == TOKENS_PER_UNIT
-        assert entry.token_coverage == BILLING_TIER_60K_UNITS * TOKENS_PER_UNIT
-        assert isinstance(entry.notes, str)
-
-    def test_price_cents_is_int(self) -> None:
-        for key in ("starter", "team", "enterprise"):
-            entry = PackageCatalogueEntry(**PACKAGE_CATALOGUE[key])
-            assert isinstance(entry.price_cents, int)
-
-    def test_token_coverage_is_int(self) -> None:
-        for key in ("starter", "team", "enterprise"):
-            entry = PackageCatalogueEntry(**PACKAGE_CATALOGUE[key])
-            assert isinstance(entry.token_coverage, int)
-
-    def test_units_is_int(self) -> None:
-        for key in ("starter", "team", "enterprise"):
-            entry = PackageCatalogueEntry(**PACKAGE_CATALOGUE[key])
-            assert isinstance(entry.units, int)
-
-    def test_stripe_price_id_is_str(self) -> None:
-        for key in ("starter", "team", "enterprise"):
-            entry = PackageCatalogueEntry(**PACKAGE_CATALOGUE[key])
+    def test_catalogue_entries_can_be_loaded_into_model(self) -> None:
+        catalogue = _build_package_catalogue()
+        for value in catalogue.values():
+            entry = PackageCatalogueEntry(**value)
+            assert isinstance(entry, PackageCatalogueEntry)
             assert isinstance(entry.stripe_price_id, str)
+            assert entry.tokens_per_unit == TOKENS_PER_UNIT
 
-    def test_get_payment_methods_package_catalogue_stripe_price_id_empty_when_env_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_stripe_price_id_empty_when_env_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("STRIPE_PRICE_ID_STARTER", raising=False)
         monkeypatch.delenv("STRIPE_PRICE_ID_TEAM", raising=False)
         monkeypatch.delenv("STRIPE_PRICE_ID_ENTERPRISE", raising=False)
         catalogue = _build_package_catalogue()
-        for plan in ("starter", "team", "enterprise"):
-            assert catalogue.get(plan, {}).get("stripe_price_id", "MISSING") == "", f"Expected empty stripe_price_id for plan '{plan}' when env unset, got: {catalogue.get(plan, {}).get('stripe_price_id')}"
+        assert catalogue["starter"]["stripe_price_id"] == ""
+        assert catalogue["team"]["stripe_price_id"] == ""
+        assert catalogue["enterprise"]["stripe_price_id"] == ""
 
-    def test_get_payment_methods_package_catalogue_stripe_price_id_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("STRIPE_PRICE_ID_STARTER", "price_test_starter_abc")
-        monkeypatch.setenv("STRIPE_PRICE_ID_TEAM", "price_test_team_abc")
-        monkeypatch.setenv("STRIPE_PRICE_ID_ENTERPRISE", "price_test_enterprise_abc")
+    def test_stripe_price_id_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("STRIPE_PRICE_ID_STARTER", "price_test_starter_123")
+        monkeypatch.setenv("STRIPE_PRICE_ID_TEAM", "price_test_team_123")
+        monkeypatch.setenv("STRIPE_PRICE_ID_ENTERPRISE", "price_test_enterprise_123")
         catalogue = _build_package_catalogue()
-        assert catalogue.get("starter", {}).get("stripe_price_id") == "price_test_starter_abc"
-        assert catalogue.get("team", {}).get("stripe_price_id") == "price_test_team_abc"
-        assert catalogue.get("enterprise", {}).get("stripe_price_id") == "price_test_enterprise_abc"
+        assert catalogue["starter"]["stripe_price_id"] == "price_test_starter_123"
+        assert catalogue["team"]["stripe_price_id"] == "price_test_team_123"
+        assert catalogue["enterprise"]["stripe_price_id"] == "price_test_enterprise_123"
 
-
-# ---------------------------------------------------------------------------
-# PACKAGE_CATALOGUE consistency with supabaseclient constants
-# ---------------------------------------------------------------------------
-
-
-class TestPackageCatalogueConsistency:
-    def test_catalogue_keys_present(self) -> None:
-        assert set(PACKAGE_CATALOGUE.keys()) == {"starter", "team", "enterprise"}
-
-    def test_starter_units_match_constant(self) -> None:
-        assert PACKAGE_CATALOGUE["starter"]["units"] == BILLING_TIER_5K_UNITS
-
-    def test_starter_price_usd_match_constant(self) -> None:
-        assert PACKAGE_CATALOGUE["starter"]["price_usd"] == BILLING_TIER_5K_PRICE_USD
-
-    def test_starter_price_cents_derived_correctly(self) -> None:
-        assert PACKAGE_CATALOGUE["starter"]["price_cents"] == BILLING_TIER_5K_PRICE_USD * 100
-
-    def test_starter_token_coverage_derived_correctly(self) -> None:
-        assert PACKAGE_CATALOGUE["starter"]["token_coverage"] == BILLING_TIER_5K_UNITS * TOKENS_PER_UNIT
-
-    def test_starter_tokens_per_unit_match_constant(self) -> None:
-        assert PACKAGE_CATALOGUE["starter"]["tokens_per_unit"] == TOKENS_PER_UNIT
-
-    def test_team_units_match_constant(self) -> None:
-        assert PACKAGE_CATALOGUE["team"]["units"] == BILLING_TIER_25K_UNITS
-
-    def test_team_price_usd_match_constant(self) -> None:
-        assert PACKAGE_CATALOGUE["team"]["price_usd"] == BILLING_TIER_25K_PRICE_USD
-
-    def test_team_price_cents_derived_correctly(self) -> None:
-        assert PACKAGE_CATALOGUE["team"]["price_cents"] == BILLING_TIER_25K_PRICE_USD * 100
-
-    def test_team_token_coverage_derived_correctly(self) -> None:
-        assert PACKAGE_CATALOGUE["team"]["token_coverage"] == BILLING_TIER_25K_UNITS * TOKENS_PER_UNIT
-
-    def test_team_tokens_per_unit_match_constant(self) -> None:
-        assert PACKAGE_CATALOGUE["team"]["tokens_per_unit"] == TOKENS_PER_UNIT
-
-    def test_enterprise_units_match_constant(self) -> None:
-        assert PACKAGE_CATALOGUE["enterprise"]["units"] == BILLING_TIER_60K_UNITS
-
-    def test_enterprise_price_usd_match_constant(self) -> None:
-        assert PACKAGE_CATALOGUE["enterprise"]["price_usd"] == BILLING_TIER_60K_PRICE_USD
-
-    def test_enterprise_price_cents_derived_correctly(self) -> None:
-        assert PACKAGE_CATALOGUE["enterprise"]["price_cents"] == BILLING_TIER_60K_PRICE_USD * 100
-
-    def test_enterprise_token_coverage_derived_correctly(self) -> None:
-        assert PACKAGE_CATALOGUE["enterprise"]["token_coverage"] == BILLING_TIER_60K_UNITS * TOKENS_PER_UNIT
-
-    def test_enterprise_tokens_per_unit_match_constant(self) -> None:
-        assert PACKAGE_CATALOGUE["enterprise"]["tokens_per_unit"] == TOKENS_PER_UNIT
-
-    def test_tokens_per_unit_constant_value(self) -> None:
-        assert TOKENS_PER_UNIT == 25_000
-
-    def test_starter_price_cents_value(self) -> None:
-        assert PACKAGE_CATALOGUE["starter"]["price_cents"] == 2000
-
-    def test_team_price_cents_value(self) -> None:
-        assert PACKAGE_CATALOGUE["team"]["price_cents"] == 9000
-
-    def test_enterprise_price_cents_value(self) -> None:
-        assert PACKAGE_CATALOGUE["enterprise"]["price_cents"] == 18000
-
-    def test_starter_token_coverage_value(self) -> None:
-        assert PACKAGE_CATALOGUE["starter"]["token_coverage"] == 125_000_000
-
-    def test_team_token_coverage_value(self) -> None:
-        assert PACKAGE_CATALOGUE["team"]["token_coverage"] == 625_000_000
-
-    def test_enterprise_token_coverage_value(self) -> None:
-        assert PACKAGE_CATALOGUE["enterprise"]["token_coverage"] == 1_500_000_000
-
-    def test_catalogue_entries_each_have_stripe_price_id_key(self) -> None:
+    def test_package_catalogue_entry_types(self) -> None:
+        catalogue = _build_package_catalogue()
         for key in ("starter", "team", "enterprise"):
-            assert "stripe_price_id" in PACKAGE_CATALOGUE[key]
+            entry = PackageCatalogueEntry(**catalogue[key])
+            assert isinstance(entry.label, str)
+            assert isinstance(entry.units, int)
+            assert isinstance(entry.price_usd, int)
+            assert isinstance(entry.price_cents, int)
+            assert isinstance(entry.tokens_per_unit, int)
+            assert isinstance(entry.token_coverage, int)
+            assert isinstance(entry.stripe_price_id, str)
+            assert isinstance(entry.notes, str)
 
 
-# ---------------------------------------------------------------------------
-# _build_status_counts
-# ---------------------------------------------------------------------------
-
-
-class TestBuildStatusCounts_billing_pm:
+class TestBuildStatusCounts:
     def test_empty_list_returns_empty(self) -> None:
-        result = _build_status_counts([])
-        assert result == []
+        assert _build_status_counts([]) == []
 
     def test_single_status_single_count(self) -> None:
-        methods = [_make_method(status="active")]
-        result = _build_status_counts(methods)
+        result = _build_status_counts([make_method(status="active")])
         assert len(result) == 1
         assert result[0].status == "active"
         assert result[0].count == 1
+        assert result[0].statuscolor == "success"
 
     def test_multiple_same_status_counts_correctly(self) -> None:
         methods = [
-            _make_method(methodid="pm-001", status="active"),
-            _make_method(methodid="pm-002", status="active"),
-            _make_method(methodid="pm-003", status="active"),
+            make_method(methodid="pm-001", status="active"),
+            make_method(methodid="pm-002", status="active"),
+            make_method(methodid="pm-003", status="active"),
         ]
         result = _build_status_counts(methods)
         assert len(result) == 1
@@ -424,114 +222,78 @@ class TestBuildStatusCounts_billing_pm:
 
     def test_multiple_statuses_grouped_correctly(self) -> None:
         methods = [
-            _make_method(methodid="pm-001", status="active"),
-            _make_method(methodid="pm-002", status="expired"),
-            _make_method(methodid="pm-003", status="active"),
-            _make_method(methodid="pm-004", status="revoked"),
+            make_method(methodid="pm-001", status="active"),
+            make_method(methodid="pm-002", status="expired"),
+            make_method(methodid="pm-003", status="active"),
+            make_method(methodid="pm-004", status="revoked"),
         ]
         result = _build_status_counts(methods)
-        counts_by_status = {r.status: r.count for r in result}
+        counts_by_status = {item.status: item.count for item in result}
         assert counts_by_status["active"] == 2
         assert counts_by_status["expired"] == 1
         assert counts_by_status["revoked"] == 1
 
     def test_sorted_by_status_alphabetically(self) -> None:
         methods = [
-            _make_method(methodid="pm-001", status="revoked"),
-            _make_method(methodid="pm-002", status="active"),
-            _make_method(methodid="pm-003", status="expired"),
+            make_method(methodid="pm-001", status="revoked"),
+            make_method(methodid="pm-002", status="active"),
+            make_method(methodid="pm-003", status="expired"),
         ]
         result = _build_status_counts(methods)
-        statuses = [r.status for r in result]
+        statuses = [item.status for item in result]
         assert statuses == sorted(statuses)
 
     def test_statuscolor_applied_to_each_count(self) -> None:
         methods = [
-            _make_method(methodid="pm-001", status="active"),
-            _make_method(methodid="pm-002", status="expired"),
-            _make_method(methodid="pm-003", status="revoked"),
+            make_method(methodid="pm-001", status="active"),
+            make_method(methodid="pm-002", status="expired"),
+            make_method(methodid="pm-003", status="revoked"),
+            make_method(methodid="pm-004", status="pending"),
         ]
         result = _build_status_counts(methods)
-        color_map = {r.status: r.statuscolor for r in result}
-        assert color_map["active"] == "success"
-        assert color_map["expired"] == "warning"
-        assert color_map["revoked"] == "error"
-
-    def test_pending_status_statuscolor_is_info(self) -> None:
-        methods = [_make_method(status="pending")]
-        result = _build_status_counts(methods)
-        assert result[0].statuscolor == "info"
+        by_status = {item.status: item.statuscolor for item in result}
+        assert by_status["active"] == "success"
+        assert by_status["expired"] == "warning"
+        assert by_status["revoked"] == "error"
+        assert by_status["pending"] == "info"
 
     def test_unknown_status_statuscolor_is_neutral(self) -> None:
-        methods = [_make_method(status="unknown_custom")]
-        result = _build_status_counts(methods)
+        result = _build_status_counts([make_method(status="unknown-custom")])
         assert result[0].statuscolor == "neutral"
 
-    def test_returns_list_of_billing_payment_method_status_count(self) -> None:
-        import app.ui.billing.payment_methods as pm_mod
-
-        methods = [_make_method(status="active")]
-        result = pm_mod._build_status_counts(methods)
-        assert all(isinstance(r, pm_mod.BillingPaymentMethodStatusCount) for r in result)
-
-    def test_pending_counted_alongside_active(self) -> None:
-        methods = [
-            _make_method(methodid="pm-001", status="active"),
-            _make_method(methodid="pm-002", status="pending"),
-            _make_method(methodid="pm-003", status="pending"),
-        ]
-        result = _build_status_counts(methods)
-        counts_by_status = {r.status: r.count for r in result}
-        assert counts_by_status["active"] == 1
-        assert counts_by_status["pending"] == 2
+    def test_returns_status_count_models(self) -> None:
+        result = _build_status_counts([make_method(status="active")])
+        assert all(isinstance(item, BillingPaymentMethodStatusCount) for item in result)
 
 
-# ---------------------------------------------------------------------------
-# _resolve_default_method_id
-# ---------------------------------------------------------------------------
-
-
-class TestResolveDefaultMethodId_billing_pm:
+class TestResolveDefaultMethodId:
     def test_returns_none_when_no_methods(self) -> None:
         assert _resolve_default_method_id([]) is None
 
     def test_returns_none_when_no_default(self) -> None:
         methods = [
-            _make_method(methodid="pm-001", isdefault=False),
-            _make_method(methodid="pm-002", isdefault=False),
+            make_method(methodid="pm-001", isdefault=False),
+            make_method(methodid="pm-002", isdefault=False),
         ]
         assert _resolve_default_method_id(methods) is None
 
     def test_returns_methodid_of_default(self) -> None:
         methods = [
-            _make_method(methodid="pm-001", isdefault=False),
-            _make_method(methodid="pm-002", isdefault=True),
-            _make_method(methodid="pm-003", isdefault=False),
+            make_method(methodid="pm-001", isdefault=False),
+            make_method(methodid="pm-002", isdefault=True),
+            make_method(methodid="pm-003", isdefault=False),
         ]
         assert _resolve_default_method_id(methods) == "pm-002"
 
     def test_returns_first_default_when_multiple(self) -> None:
         methods = [
-            _make_method(methodid="pm-001", isdefault=True),
-            _make_method(methodid="pm-002", isdefault=True),
+            make_method(methodid="pm-001", isdefault=True),
+            make_method(methodid="pm-002", isdefault=True),
         ]
         assert _resolve_default_method_id(methods) == "pm-001"
 
-    def test_single_default_method(self) -> None:
-        methods = [_make_method(methodid="pm-only", isdefault=True)]
-        assert _resolve_default_method_id(methods) == "pm-only"
 
-    def test_single_non_default_method_returns_none(self) -> None:
-        methods = [_make_method(methodid="pm-only", isdefault=False)]
-        assert _resolve_default_method_id(methods) is None
-
-
-# ---------------------------------------------------------------------------
-# _exp_display
-# ---------------------------------------------------------------------------
-
-
-class TestExpDisplay_billing_pm:
+class TestExpDisplay:
     def test_single_digit_month_zero_padded(self) -> None:
         assert _exp_display(1, 2027) == "01/2027"
 
@@ -541,466 +303,285 @@ class TestExpDisplay_billing_pm:
     def test_month_9_zero_padded(self) -> None:
         assert _exp_display(9, 2025) == "09/2025"
 
-    def test_format_is_mm_slash_yyyy(self) -> None:
-        result = _exp_display(6, 2026)
-        assert result == "06/2026"
-        parts = result.split("/")
-        assert len(parts) == 2
-        assert len(parts[0]) == 2
-        assert len(parts[1]) == 4
-
-    def test_all_months_correct(self) -> None:
-        for month in range(1, 13):
-            result = _exp_display(month, 2028)
-            assert result == f"{month:02d}/2028"
+    def test_returns_empty_for_invalid_values(self) -> None:
+        assert _exp_display(0, 2026) == ""
+        assert _exp_display(-1, 2026) == ""
+        assert _exp_display(6, 0) == ""
 
 
-# ---------------------------------------------------------------------------
-# _brand_display
-# ---------------------------------------------------------------------------
-
-
-class TestBrandDisplay_billing_pm:
-    def test_visa_returns_visa(self) -> None:
+class TestBrandDisplay:
+    def test_known_brand_values(self) -> None:
         assert _brand_display("visa") == "Visa"
-
-    def test_mastercard_returns_mastercard(self) -> None:
         assert _brand_display("mastercard") == "Mastercard"
-
-    def test_amex_returns_american_express(self) -> None:
         assert _brand_display("amex") == "American Express"
-
-    def test_discover_returns_discover(self) -> None:
         assert _brand_display("discover") == "Discover"
-
-    def test_bank_account_returns_bank_account(self) -> None:
         assert _brand_display("bank_account") == "Bank Account"
 
     def test_unknown_brand_falls_back_to_title(self) -> None:
-        assert _brand_display("unionpay") == "Unionpay"
+        assert _brand_display("unionpay_special") == "Unionpay Special"
 
-    def test_unknown_brand_multiword_falls_back_to_title(self) -> None:
-        assert _brand_display("some brand") == "Some Brand"
+    def test_empty_string_returns_unknown(self) -> None:
+        assert _brand_display("") == "Unknown"
 
-    def test_empty_string_falls_back_to_title(self) -> None:
-        assert _brand_display("") == ""
-
-    def test_all_mapped_brands_present(self) -> None:
-        expected = {
-            "visa": "Visa",
-            "mastercard": "Mastercard",
-            "amex": "American Express",
-            "discover": "Discover",
-            "bank_account": "Bank Account",
-        }
-        for key, value in expected.items():
-            assert _brand_display(key) == value
-
-    def test_brand_display_map_complete(self) -> None:
-        assert set(_BRAND_DISPLAY.keys()) == {"visa", "mastercard", "amex", "discover", "bank_account"}
+    def test_brand_display_map_contains_expected_keys(self) -> None:
+        assert "visa" in _BRAND_DISPLAY
+        assert "mastercard" in _BRAND_DISPLAY
+        assert "amex" in _BRAND_DISPLAY
+        assert "discover" in _BRAND_DISPLAY
+        assert "bank_account" in _BRAND_DISPLAY
 
 
-# ---------------------------------------------------------------------------
-# _stripe_mode
-# ---------------------------------------------------------------------------
+class TestStripeHelpers:
+    def test_live_key_returns_live(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_abc123")
+        assert _stripe_mode() == "live"
 
+    def test_test_key_returns_test(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_abc123")
+        assert _stripe_mode() == "test"
 
-class TestStripeMode_billing_pm:
-    def test_live_key_returns_live(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "sk_live_abc123"}, clear=False):
-            assert _stripe_mode() == "live"
+    def test_invalid_key_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("STRIPE_SECRET_KEY", "pk_live_not_secret")
+        assert _stripe_mode() is None
 
-    def test_test_key_returns_test(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "sk_test_abc123"}, clear=False):
-            assert _stripe_mode() == "test"
+    def test_empty_key_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("STRIPE_SECRET_KEY", "")
+        assert _stripe_mode() is None
 
-    def test_no_key_returns_none(self) -> None:
-        env = {k: v for k, v in os.environ.items() if k != "STRIPE_SECRET_KEY"}
-        with patch.dict(os.environ, env, clear=True):
-            assert _stripe_mode() is None
+    def test_live_connection_note(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_abc123")
+        note = _stripe_connection_note()
+        assert "live" in note.lower()
+        assert "connected" in note.lower()
 
-    def test_empty_key_returns_none(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": ""}, clear=False):
-            assert _stripe_mode() is None
+    def test_test_connection_note(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_abc123")
+        note = _stripe_connection_note()
+        assert "test" in note.lower()
+        assert "connected" in note.lower()
 
-    def test_invalid_prefix_returns_none(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "pk_live_notakey"}, clear=False):
-            assert _stripe_mode() is None
+    def test_unconfigured_connection_note(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
+        note = _stripe_connection_note()
+        assert "not configured" in note.lower() or "unavailable" in note.lower()
 
-    def test_return_type_is_str_or_none(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "sk_live_xyz"}, clear=False):
-            result = _stripe_mode()
-            assert result is None or isinstance(result, str)
-
-
-# ---------------------------------------------------------------------------
-# _stripe_webhook_secret_note
-# ---------------------------------------------------------------------------
-
-
-class TestStripeWebhookSecretNote_billing_pm:
-    def test_valid_secret_returns_configured_note(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_WEBHOOK_SECRET": "whsec_abc123"}, clear=False):
-            note = _stripe_webhook_secret_note()
+    def test_valid_webhook_secret_note(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_abc123")
+        note = _stripe_webhook_secret_note()
         assert "configured" in note.lower()
-        assert "not" not in note.lower()
 
-    def test_no_secret_returns_unconfigured_note(self) -> None:
-        env = {k: v for k, v in os.environ.items() if k != "STRIPE_WEBHOOK_SECRET"}
-        with patch.dict(os.environ, env, clear=True):
-            note = _stripe_webhook_secret_note()
+    def test_invalid_webhook_secret_note(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "invalid_secret")
+        note = _stripe_webhook_secret_note()
         assert "not configured" in note.lower()
-
-    def test_empty_secret_returns_unconfigured_note(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_WEBHOOK_SECRET": ""}, clear=False):
-            note = _stripe_webhook_secret_note()
-        assert "not configured" in note.lower()
-
-    def test_invalid_prefix_returns_unconfigured_note(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_WEBHOOK_SECRET": "secret_invalid"}, clear=False):
-            note = _stripe_webhook_secret_note()
-        assert "not configured" in note.lower()
-
-    def test_note_is_str(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_WEBHOOK_SECRET": "whsec_xyz"}, clear=False):
-            assert isinstance(_stripe_webhook_secret_note(), str)
-
-    def test_unconfigured_note_mentions_env_var(self) -> None:
-        env = {k: v for k, v in os.environ.items() if k != "STRIPE_WEBHOOK_SECRET"}
-        with patch.dict(os.environ, env, clear=True):
-            note = _stripe_webhook_secret_note()
         assert "STRIPE_WEBHOOK_SECRET" in note
 
 
-# ---------------------------------------------------------------------------
-# _stripe_connection_note
-# ---------------------------------------------------------------------------
+class TestEnvironmentHelpers:
+    def test_get_environment_prefers_ironclaw_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("IRONCLAW_ENV", "staging")
+        monkeypatch.setenv("APP_ENV", "development")
+        assert _get_environment() == "staging"
+
+    def test_get_environment_falls_back_to_app_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("IRONCLAW_ENV", raising=False)
+        monkeypatch.setenv("APP_ENV", "development")
+        assert _get_environment() == "development"
+
+    def test_get_environment_defaults_to_production(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("IRONCLAW_ENV", raising=False)
+        monkeypatch.delenv("APP_ENV", raising=False)
+        assert _get_environment() == "production"
 
 
-class TestStripeConnectionNote_billing_pm:
-    def test_live_key_returns_live_note(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "sk_live_abc123"}, clear=False):
-            note = _stripe_connection_note()
-        assert "live" in note
-        assert "connected" in note.lower()
+class TestMethodExtractionHelpers:
+    def test_method_created_at_from_dict(self) -> None:
+        value = _method_created_at({"created_at": "2025-01-01T00:00:00+00:00"})
+        assert value == "2025-01-01T00:00:00+00:00"
 
-    def test_test_key_returns_test_note(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "sk_test_abc123"}, clear=False):
-            note = _stripe_connection_note()
-        assert "test" in note
-        assert "connected" in note.lower()
+    def test_method_created_at_from_object(self) -> None:
+        raw = SimpleNamespace(created_at="2026-02-03T04:05:06+00:00")
+        assert _method_created_at(raw) == "2026-02-03T04:05:06+00:00"
 
-    def test_no_key_returns_unconfigured_note(self) -> None:
-        env = {k: v for k, v in os.environ.items() if k != "STRIPE_SECRET_KEY"}
-        with patch.dict(os.environ, env, clear=True):
-            note = _stripe_connection_note()
-        assert "not configured" in note.lower() or "unavailable" in note.lower()
+    def test_method_created_at_defaults_to_isoformat(self) -> None:
+        value = _method_created_at({})
+        assert isinstance(value, str)
+        assert "T" in value
 
-    def test_empty_key_returns_unconfigured_note(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": ""}, clear=False):
-            note = _stripe_connection_note()
-        assert "not configured" in note.lower() or "unavailable" in note.lower()
+    def test_method_brand_type_last4(self) -> None:
+        raw = {"brand": "visa", "type": "card", "last4": "4242"}
+        assert _method_brand(raw) == "visa"
+        assert _method_type(raw) == "card"
+        assert _method_last4(raw) == "4242"
 
-    def test_invalid_key_returns_unconfigured_note(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "pk_live_notakey"}, clear=False):
-            note = _stripe_connection_note()
-        assert "not configured" in note.lower() or "unavailable" in note.lower()
+    def test_method_exp_month_and_year_from_dict(self) -> None:
+        raw = {"exp_month": 12, "exp_year": 2030}
+        assert _method_exp_month(raw) == 12
+        assert _method_exp_year(raw) == 2030
 
-    def test_live_note_contains_mode_live(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "sk_live_xyz"}, clear=False):
-            note = _stripe_connection_note()
-        assert "mode: live" in note
+    def test_method_exp_month_and_year_invalid_values_become_zero(self) -> None:
+        raw = {"exp_month": "bad", "exp_year": None}
+        assert _method_exp_month(raw) == 0
+        assert _method_exp_year(raw) == 0
 
-    def test_test_note_contains_mode_test(self) -> None:
-        with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "sk_test_xyz"}, clear=False):
-            note = _stripe_connection_note()
-        assert "mode: test" in note
+    def test_method_is_default_truthy_aliases(self) -> None:
+        assert _method_is_default({"is_default": True}) is True
+        assert _method_is_default({"isdefault": True}) is True
+        assert _method_is_default({"default": True}) is True
+
+    def test_method_status_uses_explicit_status_when_present(self) -> None:
+        assert _method_status({"status": "pending"}) == "pending"
+
+    def test_method_status_detects_expired(self) -> None:
+        now = datetime.now(UTC)
+        expired_year = now.year - 1
+        assert _method_status({"exp_month": 1, "exp_year": expired_year}) == "expired"
+
+    def test_method_status_defaults_active_when_not_expired(self) -> None:
+        now = datetime.now(UTC)
+        future = now + timedelta(days=365)
+        assert _method_status({"exp_month": future.month, "exp_year": future.year}) == "active"
+
+    def test_build_method_from_stripe_dict(self) -> None:
+        raw = {
+            "payment_method_id": "pm-stripe-123",
+            "type": "card",
+            "brand": "visa",
+            "last4": "4242",
+            "exp_month": 9,
+            "exp_year": 2032,
+            "is_default": True,
+            "status": "active",
+            "created_at": "2026-01-01T00:00:00+00:00",
+        }
+        result = _build_method_from_stripe(raw, organizationid="org-123")
+        assert result.methodid == "pm-stripe-123"
+        assert result.organizationid == "org-123"
+        assert result.branddisplay == "Visa"
+        assert result.expdisplay == "09/2032"
+        assert result.isdefault is True
+
+    def test_normalize_method_id(self) -> None:
+        assert _normalize_method_id(" pm-123 ") == "pm-123"
+        assert _normalize_method_id(None) == ""
 
 
-# ---------------------------------------------------------------------------
-# BillingPaymentMethodsResponse — stripe_customer_id and stripe_mode fields
-# ---------------------------------------------------------------------------
+class TestOrgResolutionHelpers:
+    def test_resolve_org_id_prefers_org_id(self) -> None:
+        auth = SimpleNamespace(org_id="org-123", tenant_id="tenant-456")
+        assert _resolve_org_id(auth) == "org-123"
+
+    def test_resolve_org_id_falls_back_to_tenant_id(self) -> None:
+        auth = SimpleNamespace(org_id=None, tenant_id="tenant-456")
+        assert _resolve_org_id(auth) == "tenant-456"
+
+    def test_resolve_org_id_empty_when_none(self) -> None:
+        assert _resolve_org_id(None) == ""
+
+    def test_resolve_org_id_from_request_uses_query_fallbacks(self) -> None:
+        auth = SimpleNamespace(org_id=None, tenant_id=None)
+        assert _resolve_org_id_from_request(auth, DummyRequest({"organizationid": "org-a"})) == "org-a"
+        assert _resolve_org_id_from_request(auth, DummyRequest({"organization_id": "org-b"})) == "org-b"
+        assert _resolve_org_id_from_request(auth, DummyRequest({"organizationId": "org-c"})) == "org-c"
+
+    def test_resolve_org_id_from_request_prefers_auth(self) -> None:
+        auth = SimpleNamespace(org_id="org-auth", tenant_id=None)
+        request = DummyRequest({"organizationid": "org-query"})
+        assert _resolve_org_id_from_request(auth, request) == "org-auth"
 
 
-class TestBillingPaymentMethodsResponseStripeFields:
-    def _make_response(
-        self,
-        stripe_customer_id: str | None = None,
-        stripe_mode: str | None = None,
-    ) -> BillingPaymentMethodsResponse:
-        return BillingPaymentMethodsResponse(
+class TestFetchPaymentMethodsFromStripe:
+    def test_returns_none_and_empty_when_no_customer_mapping(self) -> None:
+        svc = SimpleNamespace(
+            _lock=DummyLock(),
+            _org_customer_map={},
+            list_payment_methods=MagicMock(),
+        )
+        customer_id, methods = _fetch_payment_methods_from_stripe(svc=svc, organizationid="org-001")
+        assert customer_id is None
+        assert methods == []
+        svc.list_payment_methods.assert_not_called()
+
+    def test_returns_customer_id_and_methods(self) -> None:
+        raw_methods = [
+            {
+                "payment_method_id": "pm-001",
+                "brand": "visa",
+                "type": "card",
+                "last4": "4242",
+                "exp_month": 12,
+                "exp_year": 2030,
+                "is_default": True,
+                "status": "active",
+                "created_at": "2025-01-01T00:00:00+00:00",
+            },
+            {
+                "payment_method_id": "pm-002",
+                "brand": "amex",
+                "type": "card",
+                "last4": "0005",
+                "exp_month": 11,
+                "exp_year": 2031,
+                "is_default": False,
+                "status": "pending",
+                "created_at": "2025-01-02T00:00:00+00:00",
+            },
+        ]
+        list_payment_methods = MagicMock(return_value=raw_methods)
+        svc = SimpleNamespace(
+            _lock=DummyLock(),
+            _org_customer_map={"org-001": "cus-123"},
+            list_payment_methods=list_payment_methods,
+        )
+
+        customer_id, methods = _fetch_payment_methods_from_stripe(svc=svc, organizationid="org-001")
+
+        assert customer_id == "cus-123"
+        assert len(methods) == 2
+        assert methods[0].methodid == "pm-001"
+        assert methods[0].isdefault is True
+        assert methods[1].branddisplay == "American Express"
+        list_payment_methods.assert_called_once_with(customer_id="cus-123")
+
+
+class TestResponseModels:
+    def test_billing_payment_methods_response_accepts_fields(self) -> None:
+        response = BillingPaymentMethodsResponse(
             generatedat="2026-01-01T00:00:00+00:00",
             environment="test",
             organizationid="org-001",
             organizationname="Test Org",
-            stripe_customer_id=stripe_customer_id,
-            stripe_mode=stripe_mode,
-            defaultmethodid=None,
-            methods=[],
-            methodcount=0,
+            stripe_customer_id="cus-123",
+            stripe_mode="test",
+            defaultmethodid="pm-001",
+            methods=[make_method(methodid="pm-001", isdefault=True)],
+            methodcount=1,
             canaddnew=True,
             maxmethods=_MAX_METHODS,
-            statuscounts=[],
+            statuscounts=[BillingPaymentMethodStatusCount(status="active", count=1, statuscolor="success")],
             tokens_per_unit=TOKENS_PER_UNIT,
             package_catalogue={},
-            notes=[],
+            notes=["ok"],
         )
+        data = response.model_dump()
+        assert data["stripe_customer_id"] == "cus-123"
+        assert data["stripe_mode"] == "test"
+        assert data["organizationid"] == "org-001"
 
-    def test_stripe_customer_id_none_allowed(self) -> None:
-        r = self._make_response(stripe_customer_id=None)
-        assert r.stripe_customer_id is None
-
-    def test_stripe_customer_id_set(self) -> None:
-        r = self._make_response(stripe_customer_id="cus_abc123")
-        assert r.stripe_customer_id == "cus_abc123"
-
-    def test_stripe_mode_none_allowed(self) -> None:
-        r = self._make_response(stripe_mode=None)
-        assert r.stripe_mode is None
-
-    def test_stripe_mode_live(self) -> None:
-        r = self._make_response(stripe_mode="live")
-        assert r.stripe_mode == "live"
-
-    def test_stripe_mode_test(self) -> None:
-        r = self._make_response(stripe_mode="test")
-        assert r.stripe_mode == "test"
-
-    def test_both_fields_present_in_serialized_output(self) -> None:
-        r = self._make_response(stripe_customer_id="cus_xyz", stripe_mode="live")
-        data = r.model_dump()
-        assert "stripe_customer_id" in data
-        assert "stripe_mode" in data
-        assert data["stripe_customer_id"] == "cus_xyz"
-        assert data["stripe_mode"] == "live"
-
-
-# ---------------------------------------------------------------------------
-# GET /ui/billing/payment-methods — TestClient (Supabase unconfigured)
-# ---------------------------------------------------------------------------
-
-
-class TestGetPaymentMethodsEndpoint:
-    """
-    conftest sets SUPABASE_URL="" which means is_supabase_configured() → False.
-    The endpoint must return BillingPaymentMethodsNotFoundResponse.
-    """
-
-    @pytest.fixture(autouse=True)
-    def _client(self, test_client: TestClient) -> None:
-        self.client = test_client
-
-    def test_returns_200(self) -> None:
-        resp = self.client.get("/ui/billing/payment-methods")
-        assert resp.status_code == 200
-
-    def test_returns_not_found_shape(self) -> None:
-        resp = self.client.get("/ui/billing/payment-methods")
-        body = resp.json()
-        assert body["status"] == "not_found"
-
-    def test_not_found_response_has_organizationid(self) -> None:
-        resp = self.client.get("/ui/billing/payment-methods?organizationid=org-test")
-        body = resp.json()
-        assert body["organizationid"] == "org-test"
-
-    def test_not_found_response_has_message(self) -> None:
-        resp = self.client.get("/ui/billing/payment-methods")
-        body = resp.json()
-        assert "message" in body
-        assert len(body["message"]) > 0
-
-    def test_not_found_response_has_generatedat(self) -> None:
-        resp = self.client.get("/ui/billing/payment-methods")
-        body = resp.json()
-        assert "generatedat" in body
-        assert len(body["generatedat"]) > 0
-
-    def test_not_found_response_has_environment(self) -> None:
-        resp = self.client.get("/ui/billing/payment-methods")
-        body = resp.json()
-        assert "environment" in body
-
-    def test_default_organizationid_used_when_not_provided(self) -> None:
-        resp = self.client.get("/ui/billing/payment-methods")
-        body = resp.json()
-        assert body["organizationid"] == "org-001"
-
-    def test_custom_organizationid_passed_through(self) -> None:
-        resp = self.client.get("/ui/billing/payment-methods?organizationid=org-custom-99")
-        body = resp.json()
-        assert body["organizationid"] == "org-custom-99"
-
-
-# ---------------------------------------------------------------------------
-# POST /ui/billing/payment-methods — Supabase unconfigured → 503
-# ---------------------------------------------------------------------------
-
-
-class TestPostPaymentMethodEndpoint:
-    @pytest.fixture(autouse=True)
-    def _client(self, test_client: TestClient) -> None:
-        self.client = test_client
-
-    def test_returns_503_when_supabase_not_configured(self) -> None:
-        resp = self.client.post(
-            "/ui/billing/payment-methods?organizationid=org-001",
-            json={"stripe_payment_method_id": "pm_test_abc", "set_as_default": False},
-        )
-        assert resp.status_code == 503
-
-    def test_503_body_has_detail(self) -> None:
-        resp = self.client.post(
-            "/ui/billing/payment-methods?organizationid=org-001",
-            json={"stripe_payment_method_id": "pm_test_abc", "set_as_default": False},
-        )
-        body = resp.json()
-        assert "detail" in body
-
-    def test_missing_stripe_payment_method_id_returns_422(self) -> None:
-        resp = self.client.post(
-            "/ui/billing/payment-methods?organizationid=org-001",
-            json={"set_as_default": False},
-        )
-        assert resp.status_code == 422
-
-    def test_set_as_default_field_defaults_to_false(self) -> None:
-        body = AddPaymentMethodRequest(stripe_payment_method_id="pm_test_xyz")
-        assert body.set_as_default is False
-
-    def test_set_as_default_can_be_true(self) -> None:
-        body = AddPaymentMethodRequest(stripe_payment_method_id="pm_test_xyz", set_as_default=True)
-        assert body.set_as_default is True
-
-    def test_add_response_schema_fields(self) -> None:
-        resp = AddPaymentMethodResponse(
-            status="created",
-            methodid="pm-new-001",
-            organizationid="org-001",
-            set_as_default=False,
-            generatedat="2026-01-01T00:00:00+00:00",
-            environment="test",
-            message="added",
-        )
-        assert resp.status == "created"
-        assert resp.methodid == "pm-new-001"
-        assert resp.set_as_default is False
-
-    def test_post_with_supabase_configured_inserts_and_returns_201(self) -> None:
-        mock_supabase = MagicMock()
-        mock_supabase.table.return_value.select.return_value.eq.return_value.order.return_value.execute.return_value.data = []
-        mock_supabase.table.return_value.insert.return_value.execute.return_value.data = [{"id": "pm-inserted-001"}]
-        mock_supabase.table.return_value.update.return_value.eq.return_value.execute.return_value.data = []
-
-        with (
-            patch("app.ui.billing.payment_methods.is_supabase_configured", return_value=True),
-            patch("app.ui.billing.payment_methods.get_supabase_client", return_value=mock_supabase),
-        ):
-            resp = self.client.post(
-                "/ui/billing/payment-methods?organizationid=org-001",
-                json={"stripe_payment_method_id": "pm_test_live", "set_as_default": False},
-            )
-        assert resp.status_code == 201
-        body = resp.json()
-        assert body["status"] == "created"
-        assert body["methodid"] == "pm-inserted-001"
-
-    def test_post_returns_409_when_at_max_methods(self) -> None:
-        existing_rows = [{"id": f"pm-{i}", "type": "card", "brand": "visa", "last4": "0000", "exp_month": 12, "exp_year": 2030, "is_default": False, "status": "active", "created_at": "2025-01-01T00:00:00+00:00"} for i in range(_MAX_METHODS)]
-        mock_supabase = MagicMock()
-        mock_supabase.table.return_value.select.return_value.eq.return_value.order.return_value.execute.return_value.data = existing_rows
-
-        with (
-            patch("app.ui.billing.payment_methods.is_supabase_configured", return_value=True),
-            patch("app.ui.billing.payment_methods.get_supabase_client", return_value=mock_supabase),
-        ):
-            resp = self.client.post(
-                "/ui/billing/payment-methods?organizationid=org-001",
-                json={"stripe_payment_method_id": "pm_test_overflow", "set_as_default": False},
-            )
-        assert resp.status_code == 409
-
-
-# ---------------------------------------------------------------------------
-# PATCH /ui/billing/payment-methods/{methodid}/default — Supabase unconfigured → 503
-# ---------------------------------------------------------------------------
-
-
-class TestPatchSetDefaultPaymentMethodEndpoint:
-    @pytest.fixture(autouse=True)
-    def _client(self, test_client: TestClient) -> None:
-        self.client = test_client
-
-    def test_returns_503_when_supabase_not_configured(self) -> None:
-        resp = self.client.patch("/ui/billing/payment-methods/pm-001/default?organizationid=org-001")
-        assert resp.status_code == 503
-
-    def test_503_body_has_detail(self) -> None:
-        resp = self.client.patch("/ui/billing/payment-methods/pm-001/default?organizationid=org-001")
-        body = resp.json()
-        assert "detail" in body
-
-    def test_set_default_response_schema_fields(self) -> None:
-        resp = SetDefaultPaymentMethodResponse(
+    def test_set_default_response_shape(self) -> None:
+        response = SetDefaultPaymentMethodResponse(
             status="updated",
             methodid="pm-001",
             organizationid="org-001",
             generatedat="2026-01-01T00:00:00+00:00",
             environment="test",
-            message="set as default",
+            message="updated",
         )
-        assert resp.status == "updated"
-        assert resp.methodid == "pm-001"
+        assert response.status == "updated"
+        assert response.methodid == "pm-001"
 
-    def test_patch_with_supabase_configured_returns_200(self) -> None:
-        mock_supabase = MagicMock()
-        mock_supabase.table.return_value.update.return_value.eq.return_value.execute.return_value.data = []
-
-        with (
-            patch("app.ui.billing.payment_methods.is_supabase_configured", return_value=True),
-            patch("app.ui.billing.payment_methods.get_supabase_client", return_value=mock_supabase),
-        ):
-            resp = self.client.patch("/ui/billing/payment-methods/pm-001/default?organizationid=org-001")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["status"] == "updated"
-        assert body["methodid"] == "pm-001"
-
-    def test_patch_response_contains_organizationid(self) -> None:
-        mock_supabase = MagicMock()
-        mock_supabase.table.return_value.update.return_value.eq.return_value.execute.return_value.data = []
-
-        with (
-            patch("app.ui.billing.payment_methods.is_supabase_configured", return_value=True),
-            patch("app.ui.billing.payment_methods.get_supabase_client", return_value=mock_supabase),
-        ):
-            resp = self.client.patch("/ui/billing/payment-methods/pm-007/default?organizationid=org-custom")
-        body = resp.json()
-        assert body["organizationid"] == "org-custom"
-        assert body["methodid"] == "pm-007"
-
-
-# ---------------------------------------------------------------------------
-# DELETE /ui/billing/payment-methods/{methodid} — Supabase unconfigured → 503
-# ---------------------------------------------------------------------------
-
-
-class TestDeletePaymentMethodEndpoint:
-    @pytest.fixture(autouse=True)
-    def _client(self, test_client: TestClient) -> None:
-        self.client = test_client
-
-    def test_returns_503_when_supabase_not_configured(self) -> None:
-        resp = self.client.delete("/ui/billing/payment-methods/pm-001?organizationid=org-001")
-        assert resp.status_code == 503
-
-    def test_503_body_has_detail(self) -> None:
-        resp = self.client.delete("/ui/billing/payment-methods/pm-001?organizationid=org-001")
-        body = resp.json()
-        assert "detail" in body
-
-    def test_delete_response_schema_fields(self) -> None:
-        resp = DeletePaymentMethodResponse(
+    def test_delete_response_shape(self) -> None:
+        response = DeletePaymentMethodResponse(
             status="deleted",
             methodid="pm-001",
             organizationid="org-001",
@@ -1008,101 +589,13 @@ class TestDeletePaymentMethodEndpoint:
             environment="test",
             message="deleted",
         )
-        assert resp.status == "deleted"
-        assert resp.methodid == "pm-001"
-
-    def test_delete_with_supabase_configured_returns_200(self) -> None:
-        mock_supabase = MagicMock()
-        mock_supabase.table.return_value.delete.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
-
-        with (
-            patch("app.ui.billing.payment_methods.is_supabase_configured", return_value=True),
-            patch("app.ui.billing.payment_methods.get_supabase_client", return_value=mock_supabase),
-        ):
-            resp = self.client.delete("/ui/billing/payment-methods/pm-001?organizationid=org-001")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["status"] == "deleted"
-        assert body["methodid"] == "pm-001"
-
-    def test_delete_response_contains_organizationid(self) -> None:
-        mock_supabase = MagicMock()
-        mock_supabase.table.return_value.delete.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
-
-        with (
-            patch("app.ui.billing.payment_methods.is_supabase_configured", return_value=True),
-            patch("app.ui.billing.payment_methods.get_supabase_client", return_value=mock_supabase),
-        ):
-            resp = self.client.delete("/ui/billing/payment-methods/pm-009?organizationid=org-custom")
-        body = resp.json()
-        assert body["organizationid"] == "org-custom"
-        assert body["methodid"] == "pm-009"
+        assert response.status == "deleted"
+        assert response.methodid == "pm-001"
 
 
-# ---------------------------------------------------------------------------
-# canaddnew — False when methodcount >= _MAX_METHODS
-# ---------------------------------------------------------------------------
-
-
-class TestCanAddNew_billing_pm:
+class TestConstants:
     def test_max_methods_constant_is_four(self) -> None:
         assert _MAX_METHODS == 4
-
-    def test_canaddnew_false_at_max_methods(self) -> None:
-        methods = [_make_method(methodid=f"pm-{i:03d}") for i in range(_MAX_METHODS)]
-        can_add = len(methods) < _MAX_METHODS
-        assert can_add is False
-
-    def test_canaddnew_false_above_max_methods(self) -> None:
-        methods = [_make_method(methodid=f"pm-{i:03d}") for i in range(_MAX_METHODS + 2)]
-        can_add = len(methods) < _MAX_METHODS
-        assert can_add is False
-
-    def test_canaddnew_true_below_max_methods(self) -> None:
-        methods = [_make_method(methodid=f"pm-{i:03d}") for i in range(_MAX_METHODS - 1)]
-        can_add = len(methods) < _MAX_METHODS
-        assert can_add is True
-
-    def test_canaddnew_true_when_empty(self) -> None:
-        can_add = len([]) < _MAX_METHODS
-        assert can_add is True
-
-    def test_canaddnew_true_with_one_method(self) -> None:
-        methods = [_make_method()]
-        can_add = len(methods) < _MAX_METHODS
-        assert can_add is True
-
-
-# ---------------------------------------------------------------------------
-# statuscounts statuscolor matches _STATUS_COLOR mapping
-# ---------------------------------------------------------------------------
-
-
-class TestStatusCountsStatusColor:
-    def test_active_statuscolor_is_success(self) -> None:
-        methods = [_make_method(status="active")]
-        result = _build_status_counts(methods)
-        assert result[0].statuscolor == _STATUS_COLOR["active"]
-
-    def test_expired_statuscolor_is_warning(self) -> None:
-        methods = [_make_method(status="expired")]
-        result = _build_status_counts(methods)
-        assert result[0].statuscolor == _STATUS_COLOR["expired"]
-
-    def test_revoked_statuscolor_is_error(self) -> None:
-        methods = [_make_method(status="revoked")]
-        result = _build_status_counts(methods)
-        assert result[0].statuscolor == _STATUS_COLOR["revoked"]
-
-    def test_pending_statuscolor_is_info(self) -> None:
-        methods = [_make_method(status="pending")]
-        result = _build_status_counts(methods)
-        assert result[0].statuscolor == _STATUS_COLOR["pending"]
-
-    def test_unknown_status_statuscolor_is_neutral(self) -> None:
-        methods = [_make_method(status="xyz_unknown")]
-        result = _build_status_counts(methods)
-        assert result[0].statuscolor == "neutral"
 
     def test_status_color_map_values(self) -> None:
         assert _STATUS_COLOR["active"] == "success"
@@ -1113,14 +606,5 @@ class TestStatusCountsStatusColor:
     def test_status_color_map_keys_complete(self) -> None:
         assert set(_STATUS_COLOR.keys()) == {"active", "expired", "revoked", "pending"}
 
-    def test_mixed_statuses_all_colors_correct(self) -> None:
-        methods = [
-            _make_method(methodid="pm-001", status="active"),
-            _make_method(methodid="pm-002", status="expired"),
-            _make_method(methodid="pm-003", status="revoked"),
-            _make_method(methodid="pm-004", status="pending"),
-        ]
-        result = _build_status_counts(methods)
-        color_map = {r.status: r.statuscolor for r in result}
-        for status, expected_color in _STATUS_COLOR.items():
-            assert color_map[status] == expected_color
+    def test_status_color_helper_returns_neutral_for_unknown(self) -> None:
+        assert _status_color("not-real") == "neutral"

@@ -49,8 +49,8 @@ def _resolve_org_id(auth: AuthContext | None) -> str:
 
 
 def _resolve_customer_id(svc: StripeService, org_id: str) -> str | None:
-    with svc._lock:  # noqa: SLF001
-        return svc._org_customer_map.get(org_id)  # noqa: SLF001
+    with svc.lock:  # noqa: SLF001
+        return svc.org_customer_map.get(org_id)  # noqa: SLF001
 
 
 PACKAGE_PRICE_ENV_MAP: dict[str, str] = {
@@ -65,14 +65,15 @@ PACKAGE_UNIT_CREDITS: dict[str, int] = {
     "pkg60000": 60000,
 }
 
-_VALID_CHECKOUT_MODES: frozenset[str] = frozenset(m.value for m in StripeCheckoutMode)
-_VALID_PACKAGE_IDS: frozenset[str] = frozenset(PACKAGE_PRICE_ENV_MAP.keys())
-_ALLOWED_REDIRECT_HOSTS: frozenset[str] = frozenset(
+VALID_CHECKOUT_MODES: frozenset[str] = frozenset(m.value for m in StripeCheckoutMode)
+VALID_PACKAGE_IDS: frozenset[str] = frozenset(PACKAGE_PRICE_ENV_MAP.keys())
+
+ALLOWED_REDIRECT_HOSTS: frozenset[str] = frozenset(
     {
         "moving-forward.ca",
         "www.moving-forward.ca",
         "ironclaw-security-production.up.railway.app",
-    },
+    }
 )
 
 
@@ -105,7 +106,7 @@ def _is_valid_http_url(value: str) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
-def _normalized_hostname(value: str) -> str:
+def _normalized_host_name(value: str) -> str:
     try:
         parsed = urlparse(value)
     except Exception:
@@ -116,8 +117,8 @@ def _normalized_hostname(value: str) -> str:
 def _is_allowed_redirect_url(value: str) -> bool:
     if not _is_valid_http_url(value):
         return False
-    host = _normalized_hostname(value)
-    return host in _ALLOWED_REDIRECT_HOSTS
+    host = _normalized_host_name(value)
+    return host in ALLOWED_REDIRECT_HOSTS
 
 
 def _configured_price_id_for_package(package_id: str) -> str:
@@ -126,8 +127,9 @@ def _configured_price_id_for_package(package_id: str) -> str:
         raise _http_400(
             f"Unsupported package_id '{package_id}'.",
             code="unsupported_package_id",
-            extra={"package_id": package_id, "valid_package_ids": sorted(_VALID_PACKAGE_IDS)},
+            extra={"package_id": package_id, "valid_package_ids": sorted(VALID_PACKAGE_IDS)},
         )
+
     price_id = (vault.get(env_key) or "").strip()
     if not price_id:
         raise _http_500(
@@ -144,7 +146,7 @@ def _unit_credits_for_package(package_id: str) -> int:
         raise _http_400(
             f"Unsupported package_id '{package_id}'.",
             code="unsupported_package_id",
-            extra={"package_id": package_id, "valid_package_ids": sorted(_VALID_PACKAGE_IDS)},
+            extra={"package_id": package_id, "valid_package_ids": sorted(VALID_PACKAGE_IDS)},
         )
     return units
 
@@ -166,6 +168,7 @@ def _is_auth_required() -> bool:
         settings = get_settings()
     except Exception:
         return True
+
     explicit = _coerce_optional_bool(getattr(settings, "auth_required", None))
     if explicit is not None:
         return explicit
@@ -176,173 +179,207 @@ def _allow_anonymous_checkout() -> bool:
     return not _is_auth_required()
 
 
-def _get_optional_auth_context(request: Request) -> AuthContext:
-    try:
-        context = get_auth_context(request)
-    except HTTPException as exc:
-        if _allow_anonymous_checkout() and exc.status_code == status.HTTP_401_UNAUTHORIZED:
-            return AuthContext(
-                api_key=None,
-                principal_type="anonymous",
-                principal_id=None,
-                session_id=None,
-                org_id=None,
-                authenticated=False,
-                auth_source="disabled",
-                auth_method=None,
-                key_type="personal",
-            )
-        raise
-    return context
+def _anonymous_auth_context() -> AuthContext:
+    return AuthContext(
+        api_key=None,
+        principal_type="anonymous",
+        principal_id=None,
+        session_id=None,
+        org_id=None,
+        authenticated=False,
+        auth_source="disabled",
+        auth_method=None,
+        key_type="personal",
+    )
 
 
-def get_checkout_auth_context(request: Request) -> AuthContext:
-    return _get_optional_auth_context(request)
+def get_optional_auth_context(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> AuthContext:
+    if getattr(auth, "principal_type", None) == "preflight":
+        return auth
+    return auth
+
+
+def get_checkout_auth_context(
+    request: Request,
+    auth: AuthContext = Depends(get_optional_auth_context),
+) -> AuthContext:
+    if getattr(auth, "principal_type", None) == "preflight":
+        return auth
+
+    if getattr(auth, "authenticated", False):
+        return auth
+
+    if _allow_anonymous_checkout():
+        return _anonymous_auth_context()
+
+    return auth
 
 
 class CheckoutSessionCreateRequest(BaseModel):
     package_id: str | None = Field(
         default=None,
-        description="IronClaw package identifier: pkg5000 | pkg25000 | pkg60000",
+        alias="packageId",
+        description="IronClaw package identifier: pkg5000, pkg25000, pkg60000",
     )
     price_id: str = Field(
         default="",
+        alias="priceId",
         description="Stripe Price ID for the line item; optional when package_id is supplied",
     )
     mode: str = Field(
         default="payment",
-        description="Stripe checkout mode: payment | subscription | setup",
+        description="Stripe checkout mode: payment, subscription, setup",
     )
     quantity: int = Field(default=1, ge=1)
     unit_credits: int = Field(
         default=0,
+        alias="unitCredits",
         ge=0,
         description="IronClaw protection units to credit on completion",
     )
-    success_url: str = Field(..., description="Redirect URL on successful payment")
-    cancel_url: str = Field(..., description="Redirect URL on cancelled payment")
-    customer_id: str | None = Field(
-        default=None,
-        description="Existing Stripe customer_id, if known",
-    )
+    success_url: str = Field(..., alias="successUrl", description="Redirect URL on successful payment")
+    cancel_url: str = Field(..., alias="cancelUrl", description="Redirect URL on cancelled payment")
+    customer_id: str | None = Field(default=None, alias="customerId", description="Existing Stripe customer ID")
     metadata: dict[str, Any] = Field(default_factory=dict)
-    organizationid: str | None = Field(
-        default=None,
-        description="Optional frontend fallback org identifier when auth context is unavailable",
-    )
-    organization_id: str | None = Field(
-        default=None,
-        description="Optional frontend fallback org identifier when auth context is unavailable",
-    )
-    organizationId: str | None = Field(
-        default=None,
-        description="Optional frontend camelCase org identifier when auth context is unavailable",
-    )
+    organization_id: str | None = Field(default=None, alias="organizationId")
+    organizationid: str | None = Field(default=None)
+    org_id: str | None = Field(default=None, alias="orgId")
 
     @field_validator("mode")
     @classmethod
-    def validate_mode(cls, v: str) -> str:
-        normalized = v.strip()
-        if normalized not in _VALID_CHECKOUT_MODES:
-            raise ValueError("invalid mode: must be payment | subscription | setup")
+    def validate_mode(cls, value: str) -> str:
+        normalized = value.strip()
+        if normalized not in VALID_CHECKOUT_MODES:
+            raise ValueError("invalid mode, must be one of: payment, subscription, setup")
         return normalized
 
     @field_validator("package_id")
     @classmethod
-    def validate_package_id(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        normalized = v.strip()
+    def validate_package_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        normalized = value.strip()
         if not normalized:
             return None
-        if normalized not in _VALID_PACKAGE_IDS:
-            raise ValueError("invalid package_id: must be pkg5000 | pkg25000 | pkg60000")
+        if normalized not in VALID_PACKAGE_IDS:
+            raise ValueError("invalid package_id, must be one of: pkg5000, pkg25000, pkg60000")
         return normalized
 
     @field_validator("price_id")
     @classmethod
-    def normalize_price_id(cls, v: str) -> str:
-        return v.strip()
+    def normalize_price_id(cls, value: str) -> str:
+        return value.strip()
 
     @field_validator("success_url", "cancel_url")
     @classmethod
-    def validate_redirect_url(cls, v: str) -> str:
-        normalized = v.strip()
+    def validate_redirect_url(cls, value: str) -> str:
+        normalized = value.strip()
         if not _is_valid_http_url(normalized):
-            raise ValueError("invalid redirect URL: must be absolute http(s) URL")
+            raise ValueError("invalid redirect URL, must be absolute http(s) URL")
         if not _is_allowed_redirect_url(normalized):
             raise ValueError("invalid redirect URL host")
         return normalized
 
-    @field_validator("customer_id")
+    @field_validator("customer_id", "organization_id", "organizationid", "org_id")
     @classmethod
-    def normalize_customer_id(cls, v: str | None) -> str | None:
-        if v is None:
+    def normalize_optional_strings(cls, value: str | None) -> str | None:
+        if value is None:
             return None
-        normalized = v.strip()
-        return normalized or None
-
-    @field_validator("organizationid", "organization_id", "organizationId")
-    @classmethod
-    def normalize_org_fallback(cls, v: str | None) -> str | None:
-        if v is None:
-            return None
-        normalized = v.strip()
+        normalized = value.strip()
         return normalized or None
 
 
 class CheckoutSessionCompleteRequest(BaseModel):
-    customer_id: str | None = Field(
-        default=None,
-        description="Stripe customer_id returned by Stripe webhook / redirect",
-    )
+    customer_id: str | None = Field(default=None, alias="customerId", description="Stripe customer ID returned by Stripe")
+
+    @field_validator("customer_id")
+    @classmethod
+    def normalize_customer_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
 
 
 class CustomerCreateRequest(BaseModel):
     email: str | None = Field(default=None)
     name: str | None = Field(default=None)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    organization_id: str | None = Field(default=None, alias="organizationId")
     organizationid: str | None = Field(default=None)
-    organization_id: str | None = Field(default=None)
-    organizationId: str | None = Field(default=None)
+    org_id: str | None = Field(default=None, alias="orgId")
 
-    @field_validator("email", "name", "organizationid", "organization_id", "organizationId")
+    @field_validator("email", "name", "organization_id", "organizationid", "org_id")
     @classmethod
-    def normalize_optional_strings(cls, v: str | None) -> str | None:
-        if v is None:
+    def normalize_optional_strings(cls, value: str | None) -> str | None:
+        if value is None:
             return None
-        normalized = v.strip()
+        normalized = value.strip()
         return normalized or None
 
 
 class AttachPaymentMethodRequest(BaseModel):
-    payment_method_id: str = Field(..., description="Stripe PaymentMethod ID to attach")
-    set_as_default: bool = Field(default=False)
+    payment_method_id: str = Field(..., alias="paymentMethodId", description="Stripe PaymentMethod ID to attach")
+    set_as_default: bool = Field(default=False, alias="setAsDefault")
+
+    @field_validator("payment_method_id")
+    @classmethod
+    def normalize_payment_method_id(cls, value: str) -> str:
+        return value.strip()
 
 
 class SetDefaultPaymentMethodRequest(BaseModel):
-    payment_method_id: str = Field(..., description="Stripe PaymentMethod ID to set as default")
+    payment_method_id: str = Field(..., alias="paymentMethodId", description="Stripe PaymentMethod ID to set as default")
+
+    @field_validator("payment_method_id")
+    @classmethod
+    def normalize_payment_method_id(cls, value: str) -> str:
+        return value.strip()
 
 
 class MeteredUsageSyncRequest(BaseModel):
-    subscription_item_id: str = Field(
-        ...,
-        description="Stripe subscription item ID with a metered price (si_xxx). This is the subscription item, not the subscription ID.",
-    )
-    quantity: int = Field(..., ge=0, description="Usage quantity to report")
-    action: Literal["increment", "set"] = Field(default="increment", description="increment | set")
-    idempotency_key: str | None = Field(default=None, description="Optional idempotency key for deduplication")
+    subscription_item_id: str = Field(..., alias="subscriptionItemId")
+    quantity: int = Field(..., ge=0)
+    action: Literal["increment", "set"] = Field(default="increment")
+    idempotency_key: str | None = Field(default=None, alias="idempotencyKey")
+
+    @field_validator("subscription_item_id", "idempotency_key")
+    @classmethod
+    def normalize_optional_strings(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
 
 
 class UnitDebitRequest(BaseModel):
-    token_count: int = Field(..., ge=1, description="Number of tokens to debit units for")
-    reference_id: str | None = Field(default=None)
+    token_count: int = Field(..., alias="tokenCount", ge=1)
+    reference_id: str | None = Field(default=None, alias="referenceId")
+
+    @field_validator("reference_id")
+    @classmethod
+    def normalize_reference_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
 
 
 class UnitCreditRequest(BaseModel):
-    units: int = Field(..., ge=1, description="Number of units to credit to the org wallet")
+    units: int = Field(..., ge=1)
     reason: str = Field(default="manual.credit")
-    reference_id: str | None = Field(default=None)
+    reference_id: str | None = Field(default=None, alias="referenceId")
+
+    @field_validator("reason", "reference_id")
+    @classmethod
+    def normalize_optional_strings(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
 
 
 def _resolve_org_id_from_request(
@@ -354,14 +391,13 @@ def _resolve_org_id_from_request(
     if auth_org_id:
         return auth_org_id
 
-    body_org_id = None
     if body is not None:
-        body_org_id = getattr(body, "organizationid", None) or getattr(body, "organization_id", None) or getattr(body, "organizationId", None)
-    if isinstance(body_org_id, str) and body_org_id.strip():
-        return body_org_id.strip()
+        body_org_id = getattr(body, "organization_id", None) or getattr(body, "organizationid", None) or getattr(body, "org_id", None)
+        if isinstance(body_org_id, str) and body_org_id.strip():
+            return body_org_id.strip()
 
     if request is not None:
-        query_org_id = request.query_params.get("organizationid") or request.query_params.get("organization_id") or request.query_params.get("organizationId")
+        query_org_id = request.query_params.get("organizationId") or request.query_params.get("organizationid") or request.query_params.get("orgId")
         if query_org_id and query_org_id.strip():
             return query_org_id.strip()
 
@@ -378,7 +414,7 @@ def _require_org_id(
         raise _http_400(
             "Organization ID could not be resolved from auth context or request.",
             code="org_id_unresolved",
-            extra={"accepted_fallbacks": ["organizationid", "organization_id", "organizationId"]},
+            extra={"accepted_fallbacks": ["organizationId", "organizationid", "orgId"]},
         )
     return org_id
 
@@ -406,6 +442,7 @@ def _get_checkout_session_record_for_auth(
             code="checkout_session_not_found",
             extra={"session_id": session_id},
         )
+
     if org_id and record.get("org_id") != org_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -437,7 +474,7 @@ def _checkout_session_status_payload(session_id: str, record: dict[str, Any]) ->
 
 
 def _normalize_checkout_inputs(body: CheckoutSessionCreateRequest) -> tuple[str, int]:
-    package_id = (body.package_id or "").strip()
+    package_id = body.package_id or ""
     price_id = body.price_id.strip()
 
     if package_id:
@@ -448,23 +485,18 @@ def _normalize_checkout_inputs(body: CheckoutSessionCreateRequest) -> tuple[str,
     if price_id:
         if body.unit_credits <= 0:
             raise _http_400(
-                "unit_credits must be greater than 0 when using a direct price_id.",
+                "unitCredits must be greater than 0 when using a direct priceId.",
                 code="unit_credits_required_for_price_id",
             )
         return price_id, body.unit_credits
 
     raise _http_400(
-        "Either package_id or price_id is required.",
+        "Either packageId or priceId is required.",
         code="price_id_or_package_id_required",
     )
 
 
-@webhook_router.post(
-    "/webhooks/stripe",
-    status_code=status.HTTP_200_OK,
-    summary="Receive and process Stripe webhook events",
-    tags=["billing"],
-)
+@webhook_router.post("/webhooks/stripe", status_code=status.HTTP_200_OK, summary="Receive and process Stripe webhook events", tags=["billing"])
 async def stripe_webhook(
     request: Request,
     svc: StripeService = Depends(get_stripe_service),
@@ -473,7 +505,7 @@ async def stripe_webhook(
     sig_header = request.headers.get("stripe-signature")
     verify_result = svc.verify_webhook_signature(payload=payload, signature_header=sig_header)
     if not verify_result.valid:
-        logger.warning("stripe_webhook.signature_rejected error=%s", verify_result.error)
+        logger.warning("stripe.webhook.signature_rejected error=%s", verify_result.error)
         raise _http_400(
             f"Stripe webhook signature invalid: {verify_result.error}",
             code="webhook_signature_invalid",
@@ -482,7 +514,7 @@ async def stripe_webhook(
     try:
         result = svc.handle_webhook_event(verify_result.payload)
     except StripeServiceError as exc:
-        logger.warning("stripe_webhook.dispatch_error error=%s", exc)
+        logger.warning("stripe.webhook.dispatch_error error=%s", exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"error": "webhook_dispatch_error", "detail": str(exc)},
@@ -546,6 +578,7 @@ async def checkout_success(
             code="checkout_session_not_found",
             extra={"session_id": session_id},
         )
+
     return JSONResponse(
         status_code=status.HTTP_200_OK,
         content={
@@ -568,7 +601,7 @@ async def checkout_success_api_alias(
 
 @router.post("/units/calculate", status_code=status.HTTP_200_OK)
 async def calculate_units(
-    token_count: int = Query(..., ge=1, description="Number of tokens to cover"),
+    token_count: int = Query(..., alias="tokenCount", ge=1, description="Number of tokens to cover"),
 ) -> JSONResponse:
     units = units_for_tokens(token_count)
     return JSONResponse(
@@ -583,21 +616,21 @@ async def calculate_units(
 
 @router.get("/units/calculate", status_code=status.HTTP_200_OK, tags=["billing", "units"])
 async def calculate_units_get(
-    token_count: int = Query(..., ge=1, description="Number of tokens to cover"),
+    token_count: int = Query(..., alias="tokenCount", ge=1, description="Number of tokens to cover"),
 ) -> JSONResponse:
     return await calculate_units(token_count=token_count)
 
 
 @api_router.post("/units/calculate", status_code=status.HTTP_200_OK, tags=["billing", "units"])
 async def calculate_units_api(
-    token_count: int = Query(..., ge=1, description="Number of tokens to cover"),
+    token_count: int = Query(..., alias="tokenCount", ge=1, description="Number of tokens to cover"),
 ) -> JSONResponse:
     return await calculate_units(token_count=token_count)
 
 
 @api_router.get("/units/calculate", status_code=status.HTTP_200_OK, tags=["billing", "units"])
 async def calculate_units_get_api(
-    token_count: int = Query(..., ge=1, description="Number of tokens to cover"),
+    token_count: int = Query(..., alias="tokenCount", ge=1, description="Number of tokens to cover"),
 ) -> JSONResponse:
     return await calculate_units(token_count=token_count)
 
@@ -647,7 +680,7 @@ async def debit_units(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _require_org_id(auth=auth, request=request)
+    org_id = _require_org_id(auth=auth, request=request, body=body)
     amount = units_for_tokens(body.token_count)
     try:
         result = svc.debit_units(
@@ -672,6 +705,7 @@ async def debit_units(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"error": "debit_error", "detail": str(exc)},
         ) from exc
+
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
 
@@ -712,11 +746,12 @@ async def credit_units(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _require_org_id(auth=auth, request=request)
+    org_id = _require_org_id(auth=auth, request=request, body=body)
     try:
         reason_enum = StripeUnitEventReason(body.reason)
     except ValueError:
         reason_enum = StripeUnitEventReason.MANUAL_CREDIT
+
     try:
         result = svc.credit_units(
             org_id=org_id,
@@ -729,6 +764,7 @@ async def credit_units(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"error": "credit_error", "detail": str(exc)},
         ) from exc
+
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
 
@@ -752,11 +788,7 @@ async def get_unit_ledger(
     result = svc.get_unit_balance(org_id)
     return JSONResponse(
         status_code=status.HTTP_200_OK,
-        content={
-            "org_id": org_id,
-            "balance": result.balance,
-            "ledger": result.ledger_entries,
-        },
+        content={"org_id": org_id, "balance": result.balance, "ledger": result.ledger_entries},
     )
 
 
@@ -807,10 +839,8 @@ async def get_or_create_customer(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"error": "stripe_customer_error", "detail": str(exc)},
         ) from exc
-    return JSONResponse(
-        status_code=status.HTTP_200_OK,
-        content={"org_id": org_id, "customer_id": customer_id},
-    )
+
+    return JSONResponse(status_code=status.HTTP_200_OK, content={"org_id": org_id, "customer_id": customer_id})
 
 
 @api_router.post("/customers", status_code=status.HTTP_200_OK, tags=["billing"])
@@ -823,11 +853,7 @@ async def get_or_create_customer_api(
     return await get_or_create_customer(body=body, request=request, auth=auth, svc=svc)
 
 
-@router.post(
-    "/checkout/sessions",
-    status_code=status.HTTP_201_CREATED,
-    tags=["billing", "checkout"],
-)
+@router.post("/checkout/sessions", status_code=status.HTTP_201_CREATED, tags=["billing", "checkout"])
 async def create_checkout_session(
     body: CheckoutSessionCreateRequest,
     request: Request,
@@ -837,6 +863,7 @@ async def create_checkout_session(
     org_id = _require_org_id(auth=auth, request=request, body=body)
     mode = StripeCheckoutMode(body.mode)
     resolved_price_id, resolved_unit_credits = _normalize_checkout_inputs(body)
+
     metadata = dict(body.metadata)
     if body.package_id:
         metadata.setdefault("package_id", body.package_id)
@@ -935,7 +962,7 @@ async def get_checkout_session_status_api(
 
 @router.get("/checkout/status", status_code=status.HTTP_200_OK, tags=["billing", "checkout"])
 async def get_checkout_status_by_query(
-    session_id: str = Query(..., description="Stripe checkout session ID"),
+    session_id: str = Query(..., alias="sessionId", description="Stripe checkout session ID"),
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
@@ -948,7 +975,7 @@ async def get_checkout_status_by_query(
 
 @api_router.get("/checkout/status", status_code=status.HTTP_200_OK, tags=["billing", "checkout"])
 async def get_checkout_status_by_query_api(
-    session_id: str = Query(..., description="Stripe checkout session ID"),
+    session_id: str = Query(..., alias="sessionId", description="Stripe checkout session ID"),
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
@@ -963,10 +990,7 @@ async def complete_checkout_session(
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
     try:
-        result = svc.complete_checkout_session(
-            session_id=session_id,
-            customer_id=body.customer_id,
-        )
+        result = svc.complete_checkout_session(session_id=session_id, customer_id=body.customer_id)
     except StripeSessionNotFoundError as exc:
         raise _http_404(
             "Checkout session not found.",
@@ -978,6 +1002,7 @@ async def complete_checkout_session(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"error": "complete_error", "detail": str(exc)},
         ) from exc
+
     return JSONResponse(status_code=status.HTTP_200_OK, content=result)
 
 
@@ -1010,6 +1035,7 @@ async def get_subscription(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"error": "subscription_fetch_error", "detail": str(exc)},
         ) from exc
+
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
 
@@ -1029,7 +1055,7 @@ async def sync_metered_usage(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _require_org_id(auth=auth, request=request)
+    org_id = _require_org_id(auth=auth, request=request, body=body)
     try:
         result = svc.report_metered_usage(
             org_id=org_id,
@@ -1055,16 +1081,12 @@ async def sync_metered_usage(
             )
         except StripeInsufficientUnitsError:
             logger.warning(
-                "stripe_router.metered_sync insufficient_units org=%s quantity=%d usage reported to Stripe but debit skipped",
+                "stripe_router.metered_sync_insufficient_units org_id=%s quantity=%d usage reported to Stripe but debit skipped",
                 org_id,
                 body.quantity,
             )
         except StripeServiceError as exc:
-            logger.error(
-                "stripe_router.metered_sync debit_error org=%s error=%s",
-                org_id,
-                exc,
-            )
+            logger.error("stripe_router.metered_sync_debit_error org_id=%s error=%s", org_id, exc)
 
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
@@ -1131,7 +1153,7 @@ async def attach_payment_method(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _require_org_id(auth=auth, request=request)
+    org_id = _require_org_id(auth=auth, request=request, body=body)
     customer_id = _require_customer_id(svc, org_id)
     try:
         result = svc.attach_payment_method(
@@ -1144,6 +1166,7 @@ async def attach_payment_method(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"error": "attach_error", "detail": str(exc)},
         ) from exc
+
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
 
@@ -1196,6 +1219,7 @@ async def detach_payment_method(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"error": "detach_error", "detail": str(exc)},
         ) from exc
+
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
 
@@ -1219,12 +1243,9 @@ async def list_payment_methods(
     if not customer_id:
         return JSONResponse(
             status_code=status.HTTP_200_OK,
-            content={
-                "org_id": org_id,
-                "customer_id": None,
-                "payment_methods": [],
-            },
+            content={"org_id": org_id, "customer_id": None, "payment_methods": []},
         )
+
     results = svc.list_payment_methods(customer_id=customer_id)
     return JSONResponse(
         status_code=status.HTTP_200_OK,
@@ -1256,10 +1277,7 @@ async def set_default_payment_method(
     org_id = _require_org_id(auth=auth, request=request)
     customer_id = _require_customer_id(svc, org_id)
     try:
-        result = svc.set_default_payment_method(
-            customer_id=customer_id,
-            payment_method_id=payment_method_id,
-        )
+        result = svc.set_default_payment_method(customer_id=customer_id, payment_method_id=payment_method_id)
     except StripePaymentMethodNotFoundError as exc:
         raise _http_404(
             "Payment method not found.",
@@ -1271,6 +1289,7 @@ async def set_default_payment_method(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"error": "set_default_error", "detail": str(exc)},
         ) from exc
+
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
 
@@ -1318,29 +1337,22 @@ async def set_default_payment_method_api_alias(
 async def list_invoices(
     request: Request,
     limit: int = Query(default=20, ge=1, le=100),
-    force_refresh: bool = Query(default=False),
+    force_refresh: bool = Query(default=False, alias="forceRefresh"),
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
     org_id = _require_org_id(auth=auth, request=request)
     try:
-        results = svc.get_invoices_for_org(
-            org_id=org_id,
-            limit=limit,
-            force_refresh=force_refresh,
-        )
+        results = svc.get_invoices_for_org(org_id=org_id, limit=limit, force_refresh=force_refresh)
     except StripeServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"error": "invoice_fetch_error", "detail": str(exc)},
         ) from exc
+
     return JSONResponse(
         status_code=status.HTTP_200_OK,
-        content={
-            "org_id": org_id,
-            "count": len(results),
-            "invoices": [r.to_dict() for r in results],
-        },
+        content={"org_id": org_id, "count": len(results), "invoices": [r.to_dict() for r in results]},
     )
 
 
@@ -1348,24 +1360,18 @@ async def list_invoices(
 async def list_invoices_alias(
     request: Request,
     limit: int = Query(default=20, ge=1, le=100),
-    force_refresh: bool = Query(default=False),
+    force_refresh: bool = Query(default=False, alias="forceRefresh"),
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await list_invoices(
-        request=request,
-        limit=limit,
-        force_refresh=force_refresh,
-        auth=auth,
-        svc=svc,
-    )
+    return await list_invoices(request=request, limit=limit, force_refresh=force_refresh, auth=auth, svc=svc)
 
 
 @api_router.get("/invoices", status_code=status.HTTP_200_OK, tags=["billing", "invoices"])
 async def list_invoices_api(
     request: Request,
     limit: int = Query(default=20, ge=1, le=100),
-    force_refresh: bool = Query(default=False),
+    force_refresh: bool = Query(default=False, alias="forceRefresh"),
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
@@ -1376,17 +1382,11 @@ async def list_invoices_api(
 async def list_invoices_api_alias(
     request: Request,
     limit: int = Query(default=20, ge=1, le=100),
-    force_refresh: bool = Query(default=False),
+    force_refresh: bool = Query(default=False, alias="forceRefresh"),
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await list_invoices(
-        request=request,
-        limit=limit,
-        force_refresh=force_refresh,
-        auth=auth,
-        svc=svc,
-    )
+    return await list_invoices(request=request, limit=limit, force_refresh=force_refresh, auth=auth, svc=svc)
 
 
 @router.delete("/invoices/cache", status_code=status.HTTP_200_OK, tags=["billing", "invoices"])
@@ -1397,10 +1397,7 @@ async def invalidate_invoice_cache(
 ) -> JSONResponse:
     org_id = _require_org_id(auth=auth, request=request)
     svc.invalidate_invoice_cache(org_id=org_id)
-    return JSONResponse(
-        status_code=status.HTTP_200_OK,
-        content={"invalidated": True, "org_id": org_id},
-    )
+    return JSONResponse(status_code=status.HTTP_200_OK, content={"invalidated": True, "org_id": org_id})
 
 
 @api_router.delete("/invoices/cache", status_code=status.HTTP_200_OK, tags=["billing", "invoices"])

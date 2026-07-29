@@ -30,22 +30,12 @@ _BOOTSTRAP_PATCH = "app.bootstrap.get_registered_tables"
 _STORE_PATCH = "app.bootstrap.get_persistence_store"
 
 
-# ===========================================================================
-# Helpers
-# ===========================================================================
-
-
 def _fresh_app() -> FastAPI:
     return FastAPI()
 
 
 def _real_table_set() -> frozenset[str]:
     return get_registered_tables()
-
-
-# ===========================================================================
-# assert_schema_completeness
-# ===========================================================================
 
 
 class TestAssertSchemaCompleteness:
@@ -101,16 +91,6 @@ class TestAssertSchemaCompleteness:
         assert "1" in str(exc_info.value)
 
 
-# ===========================================================================
-# _run_deferred_startup  (replaces TestBootstrapAppSchemaGate)
-#
-# bootstrap_app() no longer calls assert_schema_completeness() synchronously.
-# The schema gate now lives in _run_deferred_startup(), which is registered as
-# a startup event handler. It must log a critical error on failure — NOT raise —
-# so a schema mismatch never kills the import path or test collection.
-# ===========================================================================
-
-
 class TestRunDeferredStartup:
     def test_succeeds_silently_on_valid_schema(self, caplog):
         app = _fresh_app()
@@ -153,11 +133,6 @@ class TestRunDeferredStartup:
         assert any(r.levelno == logging.INFO for r in caplog.records)
 
 
-# ===========================================================================
-# bootstrap_app — startup event registration
-# ===========================================================================
-
-
 class TestBootstrapAppStartupEvent:
     def test_startup_event_is_registered(self):
         app = _fresh_app()
@@ -192,11 +167,6 @@ class TestBootstrapAppStartupEvent:
         assert any("schema" in r.message.lower() for r in caplog.records)
 
 
-# ===========================================================================
-# bootstrap_app — idempotency
-# ===========================================================================
-
-
 class TestBootstrapAppIdempotency:
     def test_bootstrap_installs_flag(self):
         app = _fresh_app()
@@ -221,10 +191,30 @@ class TestBootstrapAppIdempotency:
         bootstrap_app(app)
         assert len(app.user_middleware) == middleware_count
 
+    @pytest.mark.anyio
+    async def test_bootstrap_options_response_keeps_trace_and_security_headers(self):
+        app = _fresh_app()
+        bootstrap_app(app)
 
-# ===========================================================================
-# configure_app_state
-# ===========================================================================
+        @app.options("/ping")
+        async def ping_options():
+            return {"ok": True}
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.options(
+                "/ping",
+                headers={
+                    "Origin": "https://moving-forward.ca",
+                    "Access-Control-Request-Method": "POST",
+                },
+            )
+
+        assert response.status_code == 200
+        assert "x-request-id" in response.headers
+        assert "x-trace-id" in response.headers
+        assert "x-response-time-ms" in response.headers
+        assert response.headers.get("x-frame-options") == "DENY"
+        assert response.headers.get("x-content-type-options") == "nosniff"
 
 
 class TestConfigureAppState:
@@ -288,11 +278,6 @@ class TestConfigureAppState:
         app = _fresh_app()
         result = configure_app_state(app)
         assert result is app
-
-
-# ===========================================================================
-# add_request_tracing_middleware
-# ===========================================================================
 
 
 class TestAddRequestTracingMiddleware:
@@ -365,10 +350,28 @@ class TestAddRequestTracingMiddleware:
             response = await client.get("/ping", headers={"X-Request-ID": "test-req-123"})
         assert response.headers["x-request-id"] == "test-req-123"
 
+    @pytest.mark.anyio
+    async def test_options_response_also_gets_tracing_headers(self):
+        app = _fresh_app()
+        add_request_tracing_middleware(app)
 
-# ===========================================================================
-# add_security_middleware
-# ===========================================================================
+        @app.options("/ping")
+        async def ping_options():
+            return {"ok": True}
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.options(
+                "/ping",
+                headers={
+                    "Origin": "https://moving-forward.ca",
+                    "Access-Control-Request-Method": "GET",
+                },
+            )
+
+        assert response.status_code == 200
+        assert "x-request-id" in response.headers
+        assert "x-trace-id" in response.headers
+        assert "x-response-time-ms" in response.headers
 
 
 class TestAddSecurityMiddleware:
@@ -467,10 +470,31 @@ class TestAddSecurityMiddleware:
             response = await client.get("/ping")
         assert "permissions-policy" in response.headers
 
+    @pytest.mark.anyio
+    async def test_options_response_keeps_security_headers(self):
+        app = _fresh_app()
+        add_security_middleware(app)
 
-# ===========================================================================
-# InMemoryHistoryService
-# ===========================================================================
+        @app.options("/ping")
+        async def ping_options():
+            return {"ok": True}
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.options(
+                "/ping",
+                headers={
+                    "Origin": "https://moving-forward.ca",
+                    "Access-Control-Request-Method": "POST",
+                },
+            )
+
+        assert response.status_code == 200
+        assert response.headers.get("x-frame-options") == "DENY"
+        assert response.headers.get("x-content-type-options") == "nosniff"
+        assert response.headers.get("referrer-policy") == "no-referrer"
+        assert response.headers.get("cache-control") == "no-store"
+        assert "content-security-policy" in response.headers
+        assert "permissions-policy" in response.headers
 
 
 class TestInMemoryHistoryService:

@@ -50,6 +50,7 @@ class SecurityHeadersMiddleware:
 
         method = str(scope.get("method", "")).upper()
         scheme = str(scope.get("scheme", "")).lower()
+        is_preflight = method == "OPTIONS" and any(str(key).decode("latin-1").lower() == "origin" for key, _ in scope.get("headers", [])) and any(str(key).decode("latin-1").lower() == "access-control-request-method" for key, _ in scope.get("headers", []))
 
         async def send_with_security_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
@@ -63,7 +64,7 @@ class SecurityHeadersMiddleware:
                     "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
                 )
 
-                if method != "OPTIONS":
+                if not is_preflight:
                     headers.setdefault("Content-Security-Policy", self.csp)
                     headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
                     headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
@@ -277,6 +278,27 @@ def _first_non_empty(*values: object) -> object:
     return None
 
 
+def _derived_base_origins(settings: Settings) -> list[str]:
+    derived: list[str] = []
+
+    for attr in (
+        "APP_BASE_URL",
+        "app_base_url",
+        "ENGINE_BASE_URL",
+        "engine_base_url",
+        "IRONCLAW_BASE_URL",
+        "ironclaw_base_url",
+    ):
+        value = getattr(settings, attr, None)
+        if value is None:
+            continue
+        origin = _clean_origin_token(str(value))
+        if origin:
+            derived.append(origin)
+
+    return _normalize_unique(derived)
+
+
 def get_allowed_origins(settings: Settings) -> list[str]:
     effective = getattr(settings, "effective_allowed_origins", None)
     if isinstance(effective, list):
@@ -284,7 +306,7 @@ def get_allowed_origins(settings: Settings) -> list[str]:
             [item for item in (_clean_origin_token(str(value)) for value in effective) if item],
         )
         if normalized_effective:
-            return normalized_effective
+            return _append_local_origins(normalized_effective, settings)
         if _environment_name(settings) == "production":
             return []
         return list(_DEFAULT_LOCAL_ORIGINS)
@@ -300,22 +322,14 @@ def get_allowed_origins(settings: Settings) -> list[str]:
 
     primary_origins = _normalize_unique(_coerce_origin_list(primary_raw, default=[]))
     legacy_origins = _normalize_unique(_coerce_origin_list(legacy_raw, default=[]))
+    configured_origins = _normalize_unique([*primary_origins, *legacy_origins])
 
-    selected = primary_origins or legacy_origins
-    if selected:
-        return _append_local_origins(selected, settings)
+    if configured_origins:
+        return _append_local_origins(configured_origins, settings)
 
-    app_base_raw = _first_non_empty(
-        getattr(settings, "APP_BASE_URL", None),
-        getattr(settings, "app_base_url", None),
-        getattr(settings, "ENGINE_BASE_URL", None),
-        getattr(settings, "engine_base_url", None),
-        getattr(settings, "IRONCLAW_BASE_URL", None),
-        getattr(settings, "ironclaw_base_url", None),
-    )
-    derived_origin = _clean_origin_token(str(app_base_raw)) if app_base_raw is not None else ""
-    if derived_origin:
-        return _append_local_origins([derived_origin], settings)
+    derived_origins = _derived_base_origins(settings)
+    if derived_origins:
+        return _append_local_origins(derived_origins, settings)
 
     if _environment_name(settings) == "production":
         return []
@@ -328,7 +342,11 @@ def get_allowed_methods(settings: Settings) -> list[str]:
         raw = getattr(settings, "CORS_ALLOWED_METHODS", None)
     methods = _coerce_list(raw, default=_DEFAULT_ALLOWED_METHODS)
     normalized = _normalize_methods(methods)
-    return normalized or list(_DEFAULT_ALLOWED_METHODS)
+    if "*" in normalized:
+        return ["*"]
+    if "OPTIONS" not in normalized:
+        normalized.append("OPTIONS")
+    return _normalize_methods(normalized) or list(_DEFAULT_ALLOWED_METHODS)
 
 
 def get_allowed_headers(settings: Settings) -> list[str]:
@@ -339,7 +357,9 @@ def get_allowed_headers(settings: Settings) -> list[str]:
     normalized = _normalize_headers(headers)
     if "*" in normalized:
         return ["*"]
-    return normalized or list(_DEFAULT_ALLOWED_HEADERS)
+
+    required_headers = _normalize_headers(_DEFAULT_ALLOWED_HEADERS)
+    return _normalize_headers([*normalized, *required_headers]) or list(_DEFAULT_ALLOWED_HEADERS)
 
 
 def get_exposed_headers(settings: Settings) -> list[str]:
@@ -392,7 +412,10 @@ def should_allow_credentials(settings: Settings, origins: Sequence[str]) -> bool
     if raw is None:
         raw = getattr(settings, "CORS_ALLOW_CREDENTIALS", None)
     if raw is not None:
-        return _parse_bool(raw, default="*" not in origins)
+        explicit = _parse_bool(raw, default="*" not in origins)
+        if explicit and "*" in origins:
+            return False
+        return explicit
     return "*" not in origins
 
 
@@ -408,6 +431,7 @@ def install_security_middleware(app: FastAPI, settings: Settings) -> None:
     allow_credentials = should_allow_credentials(settings, origins)
 
     if allow_credentials:
+        origins = [origin for origin in origins if origin != "*"]
         methods = [method for method in methods if method != "*"] or list(_DEFAULT_ALLOWED_METHODS)
         headers = [header for header in headers if header != "*"] or list(_DEFAULT_ALLOWED_HEADERS)
 

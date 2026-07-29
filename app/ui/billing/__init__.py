@@ -73,8 +73,6 @@ from app.ui.billing.package import (
 )
 from app.ui.billing.payment_methods import (
     PACKAGE_CATALOGUE,
-    AddPaymentMethodRequest,
-    AddPaymentMethodResponse,
     BillingPaymentMethodsNotFoundResponse,
     BillingPaymentMethodsResponse,
     BillingPaymentMethodStatusCount,
@@ -154,8 +152,6 @@ __all__ = [
     "BillingPaymentMethodStatusCount",
     "BillingPaymentMethodsResponse",
     "BillingPaymentMethodsNotFoundResponse",
-    "AddPaymentMethodRequest",
-    "AddPaymentMethodResponse",
     "SetDefaultPaymentMethodResponse",
     "DeletePaymentMethodResponse",
     "get_payment_methods",

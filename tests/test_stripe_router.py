@@ -2,16 +2,18 @@ from __future__ import annotations
 
 from collections.abc import Generator
 import threading
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 import pytest
 
-from app.core.auth import AuthContext, require_auth_context
+from app.core.auth import AuthContext, get_auth_context
 from app.main import app
 from app.routers.stripe_router import get_stripe_service
 from app.services.stripe_service import (
     MeteredSyncResponse,
+    StripeCheckoutMode,
     StripeInsufficientUnitsError,
     StripeService,
     StripeUnitEventReason,
@@ -19,24 +21,19 @@ from app.services.stripe_service import (
     units_for_tokens,
 )
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 ORG_ID = "test-org-router-001"
 CUSTOMER_ID = "cus_test_router_001"
 SUB_ITEM_ID = "si_test_item_001"
 PM_ID = "pm_test_001"
+SESSION_ID = "cs_test_001"
+SUBSCRIPTION_ID = "sub_test_001"
 
-# Must match conftest.py IRONCLAW_API_KEY env value exactly
 _API_KEY = "test-api-key"
-
-# Stripe router is mounted in app.main.py under the /api prefix.
 _BILLING_BASE = "/api/billing"
 
-# ---------------------------------------------------------------------------
-# Auth override — mirrors conftest.py exactly
-# ---------------------------------------------------------------------------
+_ALLOWED_SUCCESS_URL = "https://moving-forward.ca/billing/success"
+_ALLOWED_CANCEL_URL = "https://moving-forward.ca/billing/cancel"
+
 
 _TEST_AUTH_CONTEXT = AuthContext(
     api_key=_API_KEY,
@@ -49,16 +46,12 @@ _TEST_AUTH_CONTEXT = AuthContext(
     authenticated=True,
     auth_source="test",
     auth_method="api_key",
+    key_type="personal",
 )
 
 
-def _override_require_auth_context() -> AuthContext:
+def _override_get_auth_context() -> AuthContext:
     return _TEST_AUTH_CONTEXT
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _auth_headers() -> dict[str, str]:
@@ -94,16 +87,20 @@ def _make_metered_response(
     )
 
 
+def _obj_with_to_dict(**data: object) -> SimpleNamespace:
+    obj = SimpleNamespace(**data)
+    obj.to_dict = lambda: data.copy()
+    return obj
+
+
 def _build_mock_svc() -> MagicMock:
     svc = MagicMock(spec=StripeService)
-    svc._lock = threading.Lock()
+    lock = threading.Lock()
+    svc.lock = lock
+    svc._lock = lock
     svc._org_customer_map = {}
+    svc.org_customer_map = svc._org_customer_map
     return svc
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -114,15 +111,10 @@ def mock_svc() -> MagicMock:
 @pytest.fixture()
 def client(mock_svc: MagicMock) -> Generator[TestClient, None, None]:
     app.dependency_overrides[get_stripe_service] = lambda: mock_svc
-    app.dependency_overrides[require_auth_context] = _override_require_auth_context
+    app.dependency_overrides[get_auth_context] = _override_get_auth_context
     yield TestClient(app, raise_server_exceptions=False)
     app.dependency_overrides.pop(get_stripe_service, None)
-    app.dependency_overrides.pop(require_auth_context, None)
-
-
-# ---------------------------------------------------------------------------
-# POST /api/billing/metered/sync
-# ---------------------------------------------------------------------------
+    app.dependency_overrides.pop(get_auth_context, None)
 
 
 class TestMeteredSync:
@@ -133,7 +125,7 @@ class TestMeteredSync:
         mock_svc.debit_units.return_value = _make_balance_response()
 
         payload = {
-            "subscription_item_id": SUB_ITEM_ID,
+            "subscriptionItemId": SUB_ITEM_ID,
             "quantity": 5,
             "action": "increment",
         }
@@ -154,21 +146,22 @@ class TestMeteredSync:
         mock_svc.report_metered_usage.return_value = metered_resp
         mock_svc.debit_units.return_value = _make_balance_response()
 
-        payload = {"subscription_item_id": SUB_ITEM_ID, "quantity": 7}
+        payload = {"subscriptionItemId": SUB_ITEM_ID, "quantity": 7}
         resp = client.post(_billing_path("/metered/sync"), json=payload, headers=_auth_headers())
 
         assert resp.status_code == 200
         call_kwargs = mock_svc.debit_units.call_args
         assert call_kwargs is not None
-        assert "amount" in call_kwargs.kwargs, "debit_units must be called with amount= keyword argument, not units="
+        assert "amount" in call_kwargs.kwargs
         assert call_kwargs.kwargs["amount"] == 7
         assert call_kwargs.kwargs["reason"] == StripeUnitEventReason.METERED_SYNC
+        assert call_kwargs.kwargs["reference_id"] == metered_resp.idempotency_key
 
     def test_metered_sync_zero_quantity_skips_debit(self, client: TestClient, mock_svc: MagicMock) -> None:
         mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
         mock_svc.report_metered_usage.return_value = _make_metered_response(quantity=0)
 
-        payload = {"subscription_item_id": SUB_ITEM_ID, "quantity": 0}
+        payload = {"subscriptionItemId": SUB_ITEM_ID, "quantity": 0}
         resp = client.post(_billing_path("/metered/sync"), json=payload, headers=_auth_headers())
 
         assert resp.status_code == 200
@@ -179,7 +172,7 @@ class TestMeteredSync:
         mock_svc.report_metered_usage.return_value = _make_metered_response(quantity=99)
         mock_svc.debit_units.side_effect = StripeInsufficientUnitsError(org_id=ORG_ID, have=0, need=99)
 
-        payload = {"subscription_item_id": SUB_ITEM_ID, "quantity": 99}
+        payload = {"subscriptionItemId": SUB_ITEM_ID, "quantity": 99}
         resp = client.post(_billing_path("/metered/sync"), json=payload, headers=_auth_headers())
 
         assert resp.status_code == 200
@@ -190,9 +183,9 @@ class TestMeteredSync:
         mock_svc.debit_units.return_value = _make_balance_response()
 
         payload = {
-            "subscription_item_id": SUB_ITEM_ID,
+            "subscriptionItemId": SUB_ITEM_ID,
             "quantity": 3,
-            "idempotency_key": "custom-key-abc",
+            "idempotencyKey": "custom-key-abc",
         }
         resp = client.post(_billing_path("/metered/sync"), json=payload, headers=_auth_headers())
 
@@ -206,24 +199,19 @@ class TestMeteredSync:
         )
 
 
-# ---------------------------------------------------------------------------
-# _resolve_customer_id returning None → 404 paths
-# ---------------------------------------------------------------------------
-
-
 class TestResolveCustomerIdNone:
     def test_attach_payment_method_no_customer_returns_404(self, client: TestClient, mock_svc: MagicMock) -> None:
         mock_svc._org_customer_map.clear()
 
         resp = client.post(
             _billing_path("/payment-methods/attach"),
-            json={"payment_method_id": PM_ID, "set_as_default": False},
+            json={"paymentMethodId": PM_ID, "setAsDefault": False},
             headers=_auth_headers(),
         )
 
         assert resp.status_code == 404
-        body = resp.json()
-        assert "no_stripe_customer_for_org" in body.get("detail", "")
+        detail = resp.json().get("detail", "")
+        assert "no_stripe_customer_for_org" in str(detail)
 
     def test_set_default_payment_method_no_customer_returns_404(self, client: TestClient, mock_svc: MagicMock) -> None:
         mock_svc._org_customer_map.clear()
@@ -234,8 +222,8 @@ class TestResolveCustomerIdNone:
         )
 
         assert resp.status_code == 404
-        body = resp.json()
-        assert "no_stripe_customer_for_org" in body.get("detail", "")
+        detail = resp.json().get("detail", "")
+        assert "no_stripe_customer_for_org" in str(detail)
 
     def test_list_payment_methods_no_customer_returns_empty_list(self, client: TestClient, mock_svc: MagicMock) -> None:
         mock_svc._org_customer_map.clear()
@@ -248,37 +236,30 @@ class TestResolveCustomerIdNone:
         assert body["customer_id"] is None
 
 
-# ---------------------------------------------------------------------------
-# POST /api/billing/units/debit
-# ---------------------------------------------------------------------------
-
-
 class TestDebitUnits:
     def test_debit_units_calls_svc_with_amount_keyword(self, client: TestClient, mock_svc: MagicMock) -> None:
-        mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
         mock_svc.debit_units.return_value = _make_balance_response(balance=490)
 
         token_count = 25_000
         resp = client.post(
             _billing_path("/units/debit"),
-            json={"token_count": token_count},
+            json={"tokenCount": token_count},
             headers=_auth_headers(),
         )
 
         assert resp.status_code == 200
         call_kwargs = mock_svc.debit_units.call_args
         assert call_kwargs is not None
-        assert "amount" in call_kwargs.kwargs, "debit_units must be called with amount= keyword, not units="
+        assert "amount" in call_kwargs.kwargs
         expected_amount = units_for_tokens(token_count)
         assert call_kwargs.kwargs["amount"] == expected_amount
 
     def test_debit_units_insufficient_units_returns_402(self, client: TestClient, mock_svc: MagicMock) -> None:
-        mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
         mock_svc.debit_units.side_effect = StripeInsufficientUnitsError(org_id=ORG_ID, have=0, need=5)
 
         resp = client.post(
             _billing_path("/units/debit"),
-            json={"token_count": 125_000},
+            json={"tokenCount": 125_000},
             headers=_auth_headers(),
         )
 
@@ -291,12 +272,11 @@ class TestDebitUnits:
         assert detail.get("org_id") == ORG_ID
 
     def test_debit_units_reason_is_metered_sync(self, client: TestClient, mock_svc: MagicMock) -> None:
-        mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
         mock_svc.debit_units.return_value = _make_balance_response(balance=499)
 
         resp = client.post(
             _billing_path("/units/debit"),
-            json={"token_count": 1},
+            json={"tokenCount": 1},
             headers=_auth_headers(),
         )
 
@@ -305,12 +285,11 @@ class TestDebitUnits:
         assert call_kwargs.kwargs["reason"] == StripeUnitEventReason.METERED_SYNC
 
     def test_debit_units_with_reference_id(self, client: TestClient, mock_svc: MagicMock) -> None:
-        mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
         mock_svc.debit_units.return_value = _make_balance_response(balance=498)
 
         resp = client.post(
             _billing_path("/units/debit"),
-            json={"token_count": 50_000, "reference_id": "scan-ref-abc"},
+            json={"tokenCount": 50_000, "referenceId": "scan-ref-abc"},
             headers=_auth_headers(),
         )
 
@@ -318,7 +297,7 @@ class TestDebitUnits:
         call_kwargs = mock_svc.debit_units.call_args
         assert call_kwargs.kwargs.get("reference_id") == "scan-ref-abc"
 
-    def test_debit_units_missing_org_id_returns_error(self, client: TestClient, mock_svc: MagicMock) -> None:
+    def test_debit_units_missing_org_id_returns_error(self, client: TestClient) -> None:
         no_org_context = AuthContext(
             api_key=_API_KEY,
             principal_type="api_key",
@@ -330,44 +309,41 @@ class TestDebitUnits:
             authenticated=True,
             auth_source="test",
             auth_method="api_key",
+            key_type="personal",
         )
-        app.dependency_overrides[require_auth_context] = lambda: no_org_context
+        app.dependency_overrides[get_auth_context] = lambda: no_org_context
         try:
             resp = client.post(
                 _billing_path("/units/debit"),
-                json={"token_count": 1},
+                json={"tokenCount": 1},
                 headers={"X-API-Key": _API_KEY},
             )
-            assert resp.status_code in (400, 401, 422)
+            assert resp.status_code == 400
+            detail = resp.json()["detail"]
+            assert detail["error"] == "org_id_unresolved"
         finally:
-            app.dependency_overrides[require_auth_context] = _override_require_auth_context
-
-
-# ---------------------------------------------------------------------------
-# patch.object coverage: _lock and _org_customer_map
-# ---------------------------------------------------------------------------
+            app.dependency_overrides[get_auth_context] = _override_get_auth_context
 
 
 class TestPatchObjectLockAndMap:
-    """
-    StripeService.__new__ skips __init__ so _lock/_org_customer_map do not
-    exist on the bare instance. We set them directly before patch.object.
-    """
-
     def _bare_svc_with_attrs(self) -> StripeService:
         svc = StripeService.__new__(StripeService)
-        svc._lock = threading.Lock()
+        lock = threading.Lock()
+        svc.lock = lock
+        svc._lock = lock
         svc._org_customer_map = {}
+        svc.org_customer_map = svc._org_customer_map
         return svc
 
     def test_resolve_customer_id_via_patch_object_returns_customer(self) -> None:
         svc = self._bare_svc_with_attrs()
         real_map = {ORG_ID: CUSTOMER_ID}
 
-        with patch.object(svc, "_org_customer_map", real_map):
-            from app.routers.stripe_router import _resolve_customer_id
+        from app.routers.stripe_router import _resolve_customer_id
 
-            result = _resolve_customer_id(svc, ORG_ID)
+        svc.org_customer_map = real_map
+        svc._org_customer_map = real_map
+        result = _resolve_customer_id(svc, ORG_ID)
 
         assert result == CUSTOMER_ID
 
@@ -375,33 +351,34 @@ class TestPatchObjectLockAndMap:
         svc = self._bare_svc_with_attrs()
         real_map: dict[str, str] = {}
 
-        with patch.object(svc, "_org_customer_map", real_map):
-            from app.routers.stripe_router import _resolve_customer_id
+        from app.routers.stripe_router import _resolve_customer_id
 
-            result = _resolve_customer_id(svc, ORG_ID)
+        svc.org_customer_map = real_map
+        svc._org_customer_map = real_map
+        result = _resolve_customer_id(svc, ORG_ID)
 
         assert result is None
 
     def test_attach_route_404_controlled_via_patch_object(self) -> None:
         svc = _build_mock_svc()
         app.dependency_overrides[get_stripe_service] = lambda: svc
-        app.dependency_overrides[require_auth_context] = _override_require_auth_context
+        app.dependency_overrides[get_auth_context] = _override_get_auth_context
         try:
             c = TestClient(app, raise_server_exceptions=False)
             resp = c.post(
                 _billing_path("/payment-methods/attach"),
-                json={"payment_method_id": PM_ID},
+                json={"paymentMethodId": PM_ID},
                 headers=_auth_headers(),
             )
             assert resp.status_code == 404
         finally:
             app.dependency_overrides.pop(get_stripe_service, None)
-            app.dependency_overrides.pop(require_auth_context, None)
+            app.dependency_overrides.pop(get_auth_context, None)
 
     def test_set_default_route_404_controlled_via_patch_object(self) -> None:
         svc = _build_mock_svc()
         app.dependency_overrides[get_stripe_service] = lambda: svc
-        app.dependency_overrides[require_auth_context] = _override_require_auth_context
+        app.dependency_overrides[get_auth_context] = _override_get_auth_context
         try:
             c = TestClient(app, raise_server_exceptions=False)
             resp = c.post(
@@ -411,12 +388,12 @@ class TestPatchObjectLockAndMap:
             assert resp.status_code == 404
         finally:
             app.dependency_overrides.pop(get_stripe_service, None)
-            app.dependency_overrides.pop(require_auth_context, None)
+            app.dependency_overrides.pop(get_auth_context, None)
 
     def test_list_payment_methods_empty_via_patch_object(self) -> None:
         svc = _build_mock_svc()
         app.dependency_overrides[get_stripe_service] = lambda: svc
-        app.dependency_overrides[require_auth_context] = _override_require_auth_context
+        app.dependency_overrides[get_auth_context] = _override_get_auth_context
         try:
             c = TestClient(app, raise_server_exceptions=False)
             resp = c.get(_billing_path("/payment-methods"), headers=_auth_headers())
@@ -424,12 +401,7 @@ class TestPatchObjectLockAndMap:
             assert resp.json()["payment_methods"] == []
         finally:
             app.dependency_overrides.pop(get_stripe_service, None)
-            app.dependency_overrides.pop(require_auth_context, None)
-
-
-# ---------------------------------------------------------------------------
-# Additional coverage: catalogue, balance, ledger
-# ---------------------------------------------------------------------------
+            app.dependency_overrides.pop(get_auth_context, None)
 
 
 class TestAncillaryRoutes:
@@ -460,8 +432,197 @@ class TestAncillaryRoutes:
         assert len(body["ledger"]) == 1
 
     def test_calculate_units_endpoint(self, client: TestClient) -> None:
-        resp = client.post(_billing_path("/units/calculate?token_count=50000"), headers=_auth_headers())
+        resp = client.post(_billing_path("/units/calculate?tokenCount=50000"), headers=_auth_headers())
         assert resp.status_code == 200
         body = resp.json()
         assert body["units_required"] == 2
         assert body["token_count"] == 50_000
+
+
+class TestCheckoutSessionRoutes:
+    def test_create_checkout_session_with_package_id_calls_service_with_resolved_values(self, client: TestClient, mock_svc: MagicMock) -> None:
+        mock_svc.create_checkout_session.return_value = _obj_with_to_dict(
+            session_id=SESSION_ID,
+            checkout_url="https://checkout.stripe.com/c/pay/test",
+            org_id=ORG_ID,
+            mode=StripeCheckoutMode.PAYMENT.value,
+            price_id="price_pkg5000",
+            quantity=1,
+            unit_credits=5000,
+            expires_at=None,
+            metadata={"source": "test", "package_id": "pkg5000", "org_id": ORG_ID},
+            created_at="2026-06-28T00:00:00Z",
+            schema_version="1.0",
+        )
+
+        with MagicMock(), pytest.MonkeyPatch.context() as mp:
+            mp.setattr("app.routers.stripe_router.vault.get", lambda key, default=None: "price_pkg5000")
+            resp = client.post(
+                _billing_path("/checkout/sessions"),
+                json={
+                    "packageId": "pkg5000",
+                    "quantity": 1,
+                    "successUrl": _ALLOWED_SUCCESS_URL,
+                    "cancelUrl": _ALLOWED_CANCEL_URL,
+                    "metadata": {"source": "test"},
+                },
+                headers=_auth_headers(),
+            )
+
+        assert resp.status_code == 201
+        mock_svc.create_checkout_session.assert_called_once_with(
+            org_id=ORG_ID,
+            price_id="price_pkg5000",
+            mode=StripeCheckoutMode.PAYMENT,
+            quantity=1,
+            unit_credits=5000,
+            success_url=_ALLOWED_SUCCESS_URL,
+            cancel_url=_ALLOWED_CANCEL_URL,
+            customer_id=None,
+            metadata={"source": "test", "package_id": "pkg5000", "org_id": ORG_ID},
+        )
+
+    def test_create_checkout_session_with_direct_price_id_requires_unit_credits(self, client: TestClient) -> None:
+        resp = client.post(
+            _billing_path("/checkout/sessions"),
+            json={
+                "priceId": "price_direct_123",
+                "quantity": 1,
+                "successUrl": _ALLOWED_SUCCESS_URL,
+                "cancelUrl": _ALLOWED_CANCEL_URL,
+            },
+            headers=_auth_headers(),
+        )
+
+        assert resp.status_code == 400
+        detail = resp.json()["detail"]
+        assert detail["error"] == "unit_credits_required_for_price_id"
+
+    def test_create_checkout_session_with_direct_price_id_calls_service(self, client: TestClient, mock_svc: MagicMock) -> None:
+        checkout_result = _obj_with_to_dict(
+            session_id=SESSION_ID,
+            checkout_url="https://checkout.stripe.com/c/pay/direct",
+            org_id=ORG_ID,
+            mode=StripeCheckoutMode.PAYMENT.value,
+            price_id="price_direct_123",
+            quantity=2,
+            unit_credits=42,
+            expires_at=None,
+            metadata={"flow": "direct", "org_id": ORG_ID},
+            created_at="2026-06-28T00:00:00Z",
+            schema_version="1.0",
+        )
+        mock_svc.create_checkout_session.return_value = checkout_result
+
+        resp = client.post(
+            _billing_path("/checkout/sessions"),
+            json={
+                "priceId": "price_direct_123",
+                "unitCredits": 42,
+                "quantity": 2,
+                "successUrl": _ALLOWED_SUCCESS_URL,
+                "cancelUrl": _ALLOWED_CANCEL_URL,
+                "metadata": {"flow": "direct"},
+            },
+            headers=_auth_headers(),
+        )
+
+        assert resp.status_code == 201
+        mock_svc.create_checkout_session.assert_called_once_with(
+            org_id=ORG_ID,
+            price_id="price_direct_123",
+            mode=StripeCheckoutMode.PAYMENT,
+            quantity=2,
+            unit_credits=42,
+            success_url=_ALLOWED_SUCCESS_URL,
+            cancel_url=_ALLOWED_CANCEL_URL,
+            customer_id=None,
+            metadata={"flow": "direct", "org_id": ORG_ID},
+        )
+
+
+class TestAdditionalRoutes:
+    def test_get_subscription(self, client: TestClient, mock_svc: MagicMock) -> None:
+        mock_svc.get_subscription.return_value = _obj_with_to_dict(
+            subscription_id=SUBSCRIPTION_ID,
+            status="active",
+            customer_id=CUSTOMER_ID,
+        )
+
+        resp = client.get(_billing_path(f"/subscriptions/{SUBSCRIPTION_ID}"), headers=_auth_headers())
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["subscription_id"] == SUBSCRIPTION_ID
+        assert body["status"] == "active"
+
+    def test_attach_payment_method_success(self, client: TestClient, mock_svc: MagicMock) -> None:
+        mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
+        mock_svc.attach_payment_method.return_value = _obj_with_to_dict(
+            payment_method_id=PM_ID,
+            customer_id=CUSTOMER_ID,
+            type="card",
+            brand="visa",
+            last4="4242",
+            exp_month=12,
+            exp_year=2030,
+            is_default=False,
+            created_at="2026-06-28T00:00:00Z",
+            schema_version="1.0",
+        )
+
+        resp = client.post(
+            _billing_path("/payment-methods/attach"),
+            json={"paymentMethodId": PM_ID, "setAsDefault": False},
+            headers=_auth_headers(),
+        )
+
+        assert resp.status_code == 200
+        mock_svc.attach_payment_method.assert_called_once_with(
+            customer_id=CUSTOMER_ID,
+            payment_method_id=PM_ID,
+            set_as_default=False,
+        )
+
+    def test_set_default_payment_method_success(self, client: TestClient, mock_svc: MagicMock) -> None:
+        mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
+        mock_svc.set_default_payment_method.return_value = _obj_with_to_dict(
+            payment_method_id=PM_ID,
+            customer_id=CUSTOMER_ID,
+            type="card",
+            brand="visa",
+            last4="4242",
+            exp_month=12,
+            exp_year=2030,
+            is_default=True,
+            created_at="2026-06-28T00:00:00Z",
+            schema_version="1.0",
+        )
+
+        resp = client.post(
+            _billing_path(f"/payment-methods/{PM_ID}/set-default"),
+            headers=_auth_headers(),
+        )
+
+        assert resp.status_code == 200
+        mock_svc.set_default_payment_method.assert_called_once_with(
+            customer_id=CUSTOMER_ID,
+            payment_method_id=PM_ID,
+        )
+
+    def test_credit_units_success(self, client: TestClient, mock_svc: MagicMock) -> None:
+        mock_svc.credit_units.return_value = _make_balance_response(balance=750)
+
+        resp = client.post(
+            _billing_path("/units/credit"),
+            json={"units": 250, "reason": "manual.credit", "referenceId": "credit-ref-001"},
+            headers=_auth_headers(),
+        )
+
+        assert resp.status_code == 200
+        mock_svc.credit_units.assert_called_once()
+        call_kwargs = mock_svc.credit_units.call_args.kwargs
+        assert call_kwargs["org_id"] == ORG_ID
+        assert call_kwargs["amount"] == 250
+        assert call_kwargs["reason"] == StripeUnitEventReason.MANUAL_CREDIT
+        assert call_kwargs["reference_id"] == "credit-ref-001"

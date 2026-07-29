@@ -17,11 +17,26 @@ def _normalize_string(value: str | None) -> str:
     return value.strip()
 
 
+def _strip_wrappers(value: str) -> str:
+    cleaned = _normalize_string(value).strip("\"'").strip()
+
+    if cleaned.startswith("[") and "](" in cleaned and cleaned.endswith(")"):
+        cleaned = cleaned[cleaned.index("](") + 2 : -1].strip()
+
+    if cleaned.startswith("[") and cleaned.endswith("]"):
+        cleaned = cleaned[1:-1].strip()
+
+    if cleaned.startswith("(") and cleaned.endswith(")"):
+        cleaned = cleaned[1:-1].strip()
+
+    return cleaned.strip().strip("\"'").strip()
+
+
 def _csv_to_list(value: str | None) -> list[str]:
     normalized = _normalize_string(value)
     if not normalized:
         return []
-    return [item.strip() for item in normalized.split(",") if item.strip()]
+    return [_strip_wrappers(item) for item in normalized.split(",") if _strip_wrappers(item)]
 
 
 def _normalize_unique(values: list[str]) -> list[str]:
@@ -40,12 +55,9 @@ def _normalize_unique(values: list[str]) -> list[str]:
 
 
 def _normalize_origin(origin: str) -> str:
-    value = _normalize_string(origin)
+    value = _strip_wrappers(origin)
     if not value:
         return ""
-
-    if value.startswith("[") and "](" in value and value.endswith(")"):
-        value = value[value.index("](") + 2 : -1].strip()
 
     if value == "*":
         return "*"
@@ -58,7 +70,7 @@ def _normalize_origin(origin: str) -> str:
 
 
 def _normalize_host(value: str) -> str:
-    host = _normalize_string(value)
+    host = _strip_wrappers(value)
     if not host:
         return ""
 
@@ -68,11 +80,6 @@ def _normalize_host(value: str) -> str:
     if "://" in host:
         parsed = urlparse(host)
         host = parsed.netloc or parsed.path
-
-    if host.startswith("[") and "](" in host and host.endswith(")"):
-        _, _, maybe_url = host.partition("](")
-        parsed = urlparse(maybe_url[:-1])
-        host = parsed.netloc or host
 
     host = host.strip().strip("/").lower()
 

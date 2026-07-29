@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from app.core.auth import API_KEY_HEADER_NAME
 from app.core.middleware import (
     UsageMeteringMiddleware,
+    _is_cors_preflight_request,
     _resolve_api_key_record,
     _resolve_route_path,
     _resolve_units_from_path,
@@ -41,6 +42,66 @@ def _build_app() -> FastAPI:
         return JSONResponse({"status": "accepted"}, status_code=202)
 
     return app
+
+
+def test_is_cors_preflight_request_returns_true_for_browser_preflight() -> None:
+    scope = {
+        "type": "http",
+        "method": "OPTIONS",
+        "headers": [
+            (b"origin", b"https://moving-forward.ca"),
+            (b"access-control-request-method", b"GET"),
+        ],
+    }
+
+    assert _is_cors_preflight_request(scope) is True
+
+
+def test_is_cors_preflight_request_returns_false_for_plain_options() -> None:
+    scope = {
+        "type": "http",
+        "method": "OPTIONS",
+        "headers": [],
+    }
+
+    assert _is_cors_preflight_request(scope) is False
+
+
+def test_is_cors_preflight_request_returns_false_without_origin() -> None:
+    scope = {
+        "type": "http",
+        "method": "OPTIONS",
+        "headers": [
+            (b"access-control-request-method", b"GET"),
+        ],
+    }
+
+    assert _is_cors_preflight_request(scope) is False
+
+
+def test_is_cors_preflight_request_returns_false_without_access_control_request_method() -> None:
+    scope = {
+        "type": "http",
+        "method": "OPTIONS",
+        "headers": [
+            (b"origin", b"https://moving-forward.ca"),
+        ],
+    }
+
+    assert _is_cors_preflight_request(scope) is False
+
+
+def test_is_cors_preflight_request_returns_false_for_non_http_scope() -> None:
+    scope = {
+        "type": "lifespan",
+        "method": "OPTIONS",
+        "headers": [
+            (b"origin", b"https://moving-forward.ca"),
+            (b"access-control-request-method", b"GET"),
+        ],
+    }
+
+    assert _is_cors_preflight_request(scope) is False
 
 
 def test_resolve_route_path_prefers_route_path() -> None:
@@ -161,7 +222,7 @@ def test_usage_metering_middleware_passes_through_non_http_scope() -> None:
     ]
 
 
-def test_usage_metering_middleware_skips_options_requests(monkeypatch) -> None:
+def test_usage_metering_middleware_skips_true_browser_preflight_requests(monkeypatch) -> None:
     events: list[dict[str, object]] = []
 
     class MeteringRegistry:
@@ -186,7 +247,65 @@ def test_usage_metering_middleware_skips_options_requests(monkeypatch) -> None:
     )
 
     assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
     assert events == []
+
+
+def test_usage_metering_middleware_does_not_skip_plain_options_without_preflight_headers(monkeypatch) -> None:
+    events: list[dict[str, object]] = []
+
+    class MeteringRegistry:
+        def record_event(self, **kwargs) -> None:
+            events.append(kwargs)
+
+    class ApiKeyRegistry:
+        def resolve_api_key(self, raw_api_key: str):
+            assert raw_api_key == "secret-key"
+            return SimpleNamespace(key_id="key_123", active=True)
+
+    monkeypatch.setattr("app.core.middleware.get_usage_metering_registry", lambda: MeteringRegistry())
+    monkeypatch.setattr("app.core.middleware.get_api_key_registry", lambda: ApiKeyRegistry())
+
+    client = TestClient(_build_app())
+    response = client.options(
+        "/health",
+        headers={API_KEY_HEADER_NAME: "secret-key"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert len(events) == 1
+    assert events[0]["method"] == "OPTIONS"
+    assert events[0]["status_code"] == 200
+
+
+def test_usage_metering_middleware_does_not_skip_options_with_origin_only(monkeypatch) -> None:
+    events: list[dict[str, object]] = []
+
+    class MeteringRegistry:
+        def record_event(self, **kwargs) -> None:
+            events.append(kwargs)
+
+    class ApiKeyRegistry:
+        def resolve_api_key(self, raw_api_key: str):
+            return SimpleNamespace(key_id="key_123", active=True)
+
+    monkeypatch.setattr("app.core.middleware.get_usage_metering_registry", lambda: MeteringRegistry())
+    monkeypatch.setattr("app.core.middleware.get_api_key_registry", lambda: ApiKeyRegistry())
+
+    client = TestClient(_build_app())
+    response = client.options(
+        "/health",
+        headers={
+            "Origin": "https://moving-forward.ca",
+            API_KEY_HEADER_NAME: "secret-key",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert len(events) == 1
+    assert events[0]["method"] == "OPTIONS"
 
 
 def test_usage_metering_middleware_skips_when_api_key_header_missing(monkeypatch) -> None:
