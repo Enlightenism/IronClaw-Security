@@ -73,9 +73,6 @@ class SecurityHeadersMiddleware:
 
                 if not is_preflight:
                     headers.setdefault("Content-Security-Policy", self.csp)
-                    headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
-                    headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
-                    headers.setdefault("Cross-Origin-Embedder-Policy", "require-corp")
 
                 if self.include_hsts and scheme == "https":
                     headers.setdefault(

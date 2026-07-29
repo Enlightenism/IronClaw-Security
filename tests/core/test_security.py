@@ -329,9 +329,9 @@ def test_install_security_middleware_applies_security_headers() -> None:
     assert response.headers["Referrer-Policy"] == "no-referrer"
     assert response.headers["Permissions-Policy"] == "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
     assert response.headers["Content-Security-Policy"] == _DEFAULT_CSP
-    assert response.headers["Cross-Origin-Opener-Policy"] == "same-origin"
-    assert response.headers["Cross-Origin-Resource-Policy"] == "same-origin"
-    assert response.headers["Cross-Origin-Embedder-Policy"] == "require-corp"
+    assert "Cross-Origin-Opener-Policy" not in response.headers
+    assert "Cross-Origin-Resource-Policy" not in response.headers
+    assert "Cross-Origin-Embedder-Policy" not in response.headers
 
 
 def test_install_security_middleware_omits_cross_origin_isolation_headers_on_options_preflight() -> None:
