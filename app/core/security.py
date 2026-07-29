@@ -55,7 +55,6 @@ class SecurityHeadersMiddleware:
 
         method = str(scope.get("method", "")).upper()
         scheme = str(scope.get("scheme", "")).lower()
-
         header_names = {key.decode("latin-1").lower() for key, _ in scope.get("headers", []) if isinstance(key, (bytes, bytearray))}
         is_preflight = method == "OPTIONS" and "origin" in header_names and "access-control-request-method" in header_names
 
@@ -335,7 +334,7 @@ def get_allowed_origins(settings: Settings) -> list[str]:
 
     primary_origins = _normalize_unique(_coerce_origin_list(primary_raw, default=[]))
     legacy_origins = _normalize_unique(_coerce_origin_list(legacy_raw, default=[]))
-    configured_origins = _normalize_unique([*primary_origins, *legacy_origins])
+    configured_origins = primary_origins or legacy_origins
     configured_origins = _append_required_production_origins(configured_origins, settings)
 
     if configured_origins:
