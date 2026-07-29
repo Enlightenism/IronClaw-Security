@@ -207,7 +207,10 @@ def test_get_allowed_origins_does_not_append_localhost_in_production() -> None:
 
     allowed_origins = get_allowed_origins(settings)
 
-    assert allowed_origins == ["https://moving-forward.ca"]
+    assert allowed_origins == [
+        "https://moving-forward.ca",
+        "https://www.moving-forward.ca",
+    ]
 
 
 def test_get_allowed_methods_uses_defaults() -> None:
@@ -238,6 +241,7 @@ def test_get_allowed_headers_uses_configured_values_and_keeps_required_defaults(
         "Authorization",
         "Content-Type",
         "X-API-Key",
+        "X-Org-Id",
         "X-Request-ID",
     ]
 
@@ -251,6 +255,7 @@ def test_get_allowed_headers_preserves_explicit_request_id_header() -> None:
         "Content-Type",
         "X-API-Key",
         "X-Request-ID",
+        "X-Org-Id",
     ]
 
 
@@ -447,7 +452,7 @@ def test_install_security_middleware_sets_cors_headers_for_allowed_origin() -> N
     assert response.headers["access-control-allow-origin"] == "https://moving-forward.ca"
     assert response.headers["access-control-allow-credentials"] == "true"
     assert response.headers["access-control-allow-methods"] == "GET, POST, OPTIONS"
-    assert response.headers["access-control-allow-headers"] == "Accept, Accept-Language, Authorization, Content-Language, Content-Type, X-API-Key, X-Request-ID"
+    assert response.headers["access-control-allow-headers"] == "Accept, Accept-Language, Authorization, Content-Language, Content-Type, X-API-Key, X-Org-Id, X-Request-ID"
 
     get_response = client.get(
         "/health",

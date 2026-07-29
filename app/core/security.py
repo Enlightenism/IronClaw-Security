@@ -17,6 +17,7 @@ _DEFAULT_ALLOWED_HEADERS = [
     "Authorization",
     "Content-Type",
     "X-API-Key",
+    "X-Org-Id",
     "X-Request-ID",
 ]
 _DEFAULT_EXPOSE_HEADERS = ["X-Request-ID"]
@@ -29,6 +30,10 @@ _DEFAULT_LOCAL_ORIGINS = [
     "http://127.0.0.1:5173",
 ]
 _SECURITY_MIDDLEWARE_INSTALLED_FLAG = "_ironclaw_security_middleware_installed"
+_PRODUCTION_REQUIRED_ORIGINS = [
+    "https://moving-forward.ca",
+    "https://www.moving-forward.ca",
+]
 
 
 class SecurityHeadersMiddleware:
@@ -50,7 +55,9 @@ class SecurityHeadersMiddleware:
 
         method = str(scope.get("method", "")).upper()
         scheme = str(scope.get("scheme", "")).lower()
-        is_preflight = method == "OPTIONS" and any(str(key).decode("latin-1").lower() == "origin" for key, _ in scope.get("headers", [])) and any(str(key).decode("latin-1").lower() == "access-control-request-method" for key, _ in scope.get("headers", []))
+
+        header_names = {key.decode("latin-1").lower() for key, _ in scope.get("headers", []) if isinstance(key, (bytes, bytearray))}
+        is_preflight = method == "OPTIONS" and "origin" in header_names and "access-control-request-method" in header_names
 
         async def send_with_security_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
@@ -241,9 +248,17 @@ def _environment_name(settings: Settings) -> str:
 
 
 def _append_local_origins(origins: Sequence[str], settings: Settings) -> list[str]:
+    base = _normalize_unique(origins)
     if _environment_name(settings) == "production":
-        return list(origins)
-    return _normalize_unique([*origins, *_DEFAULT_LOCAL_ORIGINS])
+        return base
+    return _normalize_unique([*base, *_DEFAULT_LOCAL_ORIGINS])
+
+
+def _append_required_production_origins(origins: Sequence[str], settings: Settings) -> list[str]:
+    normalized = _normalize_unique(origins)
+    if _environment_name(settings) != "production":
+        return normalized
+    return _normalize_unique([*normalized, *_PRODUCTION_REQUIRED_ORIGINS])
 
 
 def _is_local_host(host: str) -> bool:
@@ -305,10 +320,11 @@ def get_allowed_origins(settings: Settings) -> list[str]:
         normalized_effective = _normalize_unique(
             [item for item in (_clean_origin_token(str(value)) for value in effective) if item],
         )
+        normalized_effective = _append_required_production_origins(normalized_effective, settings)
         if normalized_effective:
             return _append_local_origins(normalized_effective, settings)
         if _environment_name(settings) == "production":
-            return []
+            return list(_PRODUCTION_REQUIRED_ORIGINS)
         return list(_DEFAULT_LOCAL_ORIGINS)
 
     primary_raw = _first_non_empty(
@@ -323,16 +339,17 @@ def get_allowed_origins(settings: Settings) -> list[str]:
     primary_origins = _normalize_unique(_coerce_origin_list(primary_raw, default=[]))
     legacy_origins = _normalize_unique(_coerce_origin_list(legacy_raw, default=[]))
     configured_origins = _normalize_unique([*primary_origins, *legacy_origins])
+    configured_origins = _append_required_production_origins(configured_origins, settings)
 
     if configured_origins:
         return _append_local_origins(configured_origins, settings)
 
-    derived_origins = _derived_base_origins(settings)
+    derived_origins = _append_required_production_origins(_derived_base_origins(settings), settings)
     if derived_origins:
         return _append_local_origins(derived_origins, settings)
 
     if _environment_name(settings) == "production":
-        return []
+        return list(_PRODUCTION_REQUIRED_ORIGINS)
     return list(_DEFAULT_LOCAL_ORIGINS)
 
 
@@ -380,14 +397,16 @@ def get_allowed_hosts(settings: Settings) -> list[str]:
 
     hosts = _coerce_host_list(raw, default=[])
     normalized_hosts = _normalize_unique(hosts)
-    if normalized_hosts and normalized_hosts != ["*"]:
+    if normalized_hosts:
+        if "*" in normalized_hosts:
+            return ["*"]
         return normalized_hosts
 
     derived_hosts: list[str] = []
 
     for origin in get_allowed_origins(settings):
         host = _origin_to_host(origin)
-        if host and not _is_local_host(host):
+        if host:
             derived_hosts.append(host)
 
     for attr in (
@@ -401,10 +420,14 @@ def get_allowed_hosts(settings: Settings) -> list[str]:
         value = getattr(settings, attr, None)
         if isinstance(value, str) and value.strip():
             host = _origin_to_host(value.strip())
-            if host and not _is_local_host(host):
+            if host:
                 derived_hosts.append(host)
 
-    return _normalize_unique(derived_hosts) or ["*"]
+    normalized_derived_hosts = _normalize_unique(derived_hosts)
+    if normalized_derived_hosts:
+        return normalized_derived_hosts
+
+    return ["*"]
 
 
 def should_allow_credentials(settings: Settings, origins: Sequence[str]) -> bool:
@@ -447,15 +470,6 @@ def install_security_middleware(app: FastAPI, settings: Settings) -> None:
     normalized_csp = csp.strip() if isinstance(csp, str) and csp.strip() else None
 
     app.add_middleware(
-        SecurityHeadersMiddleware,
-        include_hsts=include_hsts,
-        csp=normalized_csp,
-    )
-    app.add_middleware(
-        TrustedHostMiddleware,
-        allowed_hosts=hosts,
-    )
-    app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
         allow_credentials=allow_credentials,
@@ -463,6 +477,15 @@ def install_security_middleware(app: FastAPI, settings: Settings) -> None:
         allow_headers=headers,
         expose_headers=exposed_headers,
         max_age=3600,
+    )
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=hosts,
+    )
+    app.add_middleware(
+        SecurityHeadersMiddleware,
+        include_hsts=include_hsts,
+        csp=normalized_csp,
     )
 
     setattr(app.state, _SECURITY_MIDDLEWARE_INSTALLED_FLAG, True)
