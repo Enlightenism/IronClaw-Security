@@ -137,9 +137,7 @@ def execute_tool_with_guard(tool_name: str, args: Dict[str, Any]) -> Any:
     if not verdict.get("should_execute", False):
         # Blocked or queued for review – DO NOT execute the tool.
         # Surface a safe message back into Claude Code instead.
-        raise RuntimeError(
-            f"Guard blocked tool '{tool_name}': {verdict.get('reason', 'no reason provided')}"
-        )
+        raise RuntimeError(f"Guard blocked tool '{tool_name}': {verdict.get('reason', 'no reason provided')}")
 
     # Safe to execute – run the actual tool now.
     return perform_tool_call(tool_name, args)
@@ -189,17 +187,11 @@ def guard_and_render_response(
 
     if bundle_verdict in {"block", "quarantine"}:
         # Replace unsafe content with a safe explanation.
-        return (
-            "⚠️ Response blocked by IronClaw security guard.\n\n"
-            f"Reason: {reason or 'high-risk content detected.'}"
-        )
+        return f"⚠️ Response blocked by IronClaw security guard.\n\nReason: {reason or 'high-risk content detected.'}"
 
     if bundle_verdict == "warn":
         # Optionally annotate the response with a warning banner.
-        return (
-            "⚠️ IronClaw detected potentially risky content. Review carefully.\n\n"
-            + model_output
-        )
+        return "⚠️ IronClaw detected potentially risky content. Review carefully.\n\n" + model_output
 
     # bundle_verdict == "allow"
     return model_output
@@ -247,27 +239,17 @@ def guard_and_maybe_block(model_output: str, bundle: dict) -> str:
     if GUARD_MODE == "assist":
         if bundle_verdict in {"block", "quarantine", "warn"}:
             log_guard_verdict(bundle_verdict, reason)
-            return (
-                "⚠️ IronClaw flagged this response as potentially unsafe.\n\n"
-                f"Reason: {reason or 'review recommended.'}\n\n"
-                + model_output
-            )
+            return f"⚠️ IronClaw flagged this response as potentially unsafe.\n\nReason: {reason or 'review recommended.'}\n\n" + model_output
         return model_output
 
     # GUARD_MODE == "enforce"
     if bundle_verdict in {"block", "quarantine"}:
         log_guard_verdict(bundle_verdict, reason)
-        return (
-            "⚠️ Response blocked by IronClaw security guard.\n\n"
-            f"Reason: {reason or 'high-risk content detected.'}"
-        )
+        return f"⚠️ Response blocked by IronClaw security guard.\n\nReason: {reason or 'high-risk content detected.'}"
 
     if bundle_verdict == "warn":
         log_guard_verdict(bundle_verdict, reason)
-        return (
-            "⚠️ IronClaw warns this response may be unsafe.\n\n"
-            + model_output
-        )
+        return "⚠️ IronClaw warns this response may be unsafe.\n\n" + model_output
 
     return model_output
 ```

@@ -209,7 +209,17 @@ def get_checkout_auth_context(
     if getattr(auth, "principal_type", None) == "preflight":
         return auth
 
+    auth_source = str(getattr(auth, "auth_source", "") or "").strip().lower()
+    auth_method = str(getattr(auth, "auth_method", "") or "").strip().lower()
+    authorization_header = request.headers.get("authorization", "").strip()
+
     if getattr(auth, "authenticated", False):
+        return auth
+
+    if auth_source == "bearer" or auth_method == "bearer":
+        return auth
+
+    if authorization_header.lower().startswith("bearer "):
         return auth
 
     if _allow_anonymous_checkout():

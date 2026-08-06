@@ -11,6 +11,12 @@ SECRET_KEY_SENTINEL = "changeme-32-chars-minimum!!!!!"
 JWT_SECRET_SENTINEL = "changeme-jwt-32-chars-minimum!!"
 
 
+def _get_vault():
+    from app.services.secrets_vault import vault
+
+    return vault
+
+
 def _normalize_string(value: str | None) -> str:
     if not isinstance(value, str):
         return ""
@@ -117,6 +123,13 @@ def _optional_env_file() -> str | None:
     return value or None
 
 
+def _sanitize_secret(value: str | None, *sentinels: str) -> str:
+    normalized = _normalize_string(value)
+    if not normalized or normalized in sentinels:
+        return ""
+    return normalized
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         populate_by_name=True,
@@ -168,7 +181,7 @@ class Settings(BaseSettings):
         alias="IRONCLAW_SECRET_KEY",
     )
     jwt_secret: str = Field(default=JWT_SECRET_SENTINEL, alias="JWT_SECRET")
-    jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
+    jwt_algorithm: str = Field(default="", alias="JWT_ALGORITHM")
     access_token_expire_minutes: int = Field(
         default=30,
         alias="ACCESS_TOKEN_EXPIRE_MINUTES",
@@ -335,17 +348,76 @@ class Settings(BaseSettings):
 
     @property
     def effective_secret_key(self) -> str:
-        value = _normalize_string(self.secret_key)
-        if not value or value == SECRET_KEY_SENTINEL:
-            return ""
-        return value
+        vault = _get_vault()
+        vault_secret = _sanitize_secret(
+            vault.secret_key(),
+            SECRET_KEY_SENTINEL,
+            JWT_SECRET_SENTINEL,
+        )
+        if vault_secret:
+            return vault_secret
+        return _sanitize_secret(
+            self.secret_key,
+            SECRET_KEY_SENTINEL,
+            JWT_SECRET_SENTINEL,
+        )
 
     @property
     def effective_jwt_secret(self) -> str:
-        value = _normalize_string(self.jwt_secret)
-        if not value or value == JWT_SECRET_SENTINEL:
-            return ""
-        return value
+        vault = _get_vault()
+        vault_jwt_secret = _sanitize_secret(
+            vault.jwt_secret(),
+            JWT_SECRET_SENTINEL,
+            SECRET_KEY_SENTINEL,
+        )
+        if vault_jwt_secret:
+            return vault_jwt_secret
+        return _sanitize_secret(
+            self.jwt_secret,
+            JWT_SECRET_SENTINEL,
+            SECRET_KEY_SENTINEL,
+        )
+
+    @property
+    def effective_supabase_jwt_secret(self) -> str:
+        vault = _get_vault()
+        return _sanitize_secret(
+            vault.supabase_jwt_secret(),
+            JWT_SECRET_SENTINEL,
+            SECRET_KEY_SENTINEL,
+        )
+
+    @property
+    def effective_jwt_algorithm(self) -> str:
+        return _normalize_string(self.jwt_algorithm).upper()
+
+    @property
+    def effective_supabase_url(self) -> str:
+        return _normalize_string(self.supabase_url)
+
+    @property
+    def effective_supabase_anon_key(self) -> str:
+        return _normalize_string(self.supabase_anon_key)
+
+    @property
+    def effective_supabase_service_role_key(self) -> str:
+        return _normalize_string(self.supabase_service_role_key)
+
+    @property
+    def bearer_auth_configured(self) -> bool:
+        return bool(self.effective_supabase_url and (self.effective_supabase_anon_key or self.effective_supabase_service_role_key or self.effective_supabase_jwt_secret or self.effective_jwt_secret))
+
+    @property
+    def api_key_auth_configured(self) -> bool:
+        return bool(self.effective_api_key)
+
+    @property
+    def auth_configured(self) -> bool:
+        return self.api_key_auth_configured or self.bearer_auth_configured
+
+    @property
+    def effective_auth_required(self) -> bool:
+        return bool(self.auth_required and self.auth_configured)
 
     @property
     def normalized_app_base_url(self) -> str:
@@ -399,7 +471,10 @@ class Settings(BaseSettings):
             if host:
                 derived_hosts.append(host)
 
-        for base_url in (self.normalized_app_base_url, self.normalized_engine_base_url):
+        for base_url in (
+            self.normalized_app_base_url,
+            self.normalized_engine_base_url,
+        ):
             host = _host_from_url(base_url)
             if not host:
                 continue

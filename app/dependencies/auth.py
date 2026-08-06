@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-
-from fastapi import Depends, Header
+from fastapi import Depends
 
 from app.core.access_control import require_access
 from app.core.auth import (
@@ -29,28 +27,6 @@ __all__ = [
     "require_permission_dependency",
     "require_same_org_dependency",
 ]
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers (local only — not re-exported)
-# ---------------------------------------------------------------------------
-
-
-def _clean(value: object) -> str:
-    if not isinstance(value, str):
-        return ""
-    return value.strip()
-
-
-def _clean_lower(value: object) -> str:
-    return _clean(value).lower()
-
-
-def _normalize_metadata(value: object) -> dict[str, str]:
-    if not isinstance(value, Mapping):
-        return {}
-    return {str(key): str(item) for key, item in value.items()}
-
 
 # ---------------------------------------------------------------------------
 # Compound dependencies that wrap the canonical get_auth_context
@@ -113,13 +89,11 @@ def require_access_dependency(
 
 
 async def require_same_org_dependency(
-    x_org_id: str | None = Header(default=None),
     context: AuthContext = Depends(get_auth_context),
 ) -> AuthContext:
-    target_org_id = _clean(x_org_id) or context.org_id
     require_same_org(
         context,
-        target_org_id=target_org_id,
+        target_org_id=context.org_id,
         metadata={"dependency": "require_same_org_dependency"},
     )
     return context

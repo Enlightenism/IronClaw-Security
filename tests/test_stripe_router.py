@@ -10,7 +10,7 @@ import pytest
 
 from app.core.auth import AuthContext, get_auth_context
 from app.main import app
-from app.routers.stripe_router import get_stripe_service
+from app.routers.stripe_router import get_checkout_auth_context, get_stripe_service
 from app.services.stripe_service import (
     MeteredSyncResponse,
     StripeCheckoutMode,
@@ -33,7 +33,6 @@ _BILLING_BASE = "/api/billing"
 
 _ALLOWED_SUCCESS_URL = "https://moving-forward.ca/billing/success"
 _ALLOWED_CANCEL_URL = "https://moving-forward.ca/billing/cancel"
-
 
 _TEST_AUTH_CONTEXT = AuthContext(
     api_key=_API_KEY,
@@ -439,6 +438,99 @@ class TestAncillaryRoutes:
         assert body["token_count"] == 50_000
 
 
+class TestCheckoutAuthContext:
+    def test_checkout_auth_context_returns_authenticated_bearer_context(self) -> None:
+        request = MagicMock()
+        request.headers = {"authorization": "Bearer valid-token"}
+        auth = AuthContext(
+            api_key=None,
+            principal_type="user",
+            principal_id="user-123",
+            session_id=None,
+            org_id=ORG_ID,
+            permissions=(),
+            roles=(),
+            authenticated=True,
+            auth_source="bearer",
+            auth_method="bearer",
+            key_type="personal",
+        )
+
+        result = get_checkout_auth_context(request=request, auth=auth)
+
+        assert result is auth
+
+    def test_checkout_auth_context_preserves_bearer_context_when_header_present_but_not_authenticated(self) -> None:
+        request = MagicMock()
+        request.headers = {"authorization": "Bearer candidate-token"}
+        auth = AuthContext(
+            api_key=None,
+            principal_type="user",
+            principal_id=None,
+            session_id=None,
+            org_id=None,
+            permissions=(),
+            roles=(),
+            authenticated=False,
+            auth_source="bearer",
+            auth_method="bearer",
+            key_type="personal",
+        )
+
+        result = get_checkout_auth_context(request=request, auth=auth)
+
+        assert result is auth
+
+    def test_checkout_auth_context_returns_anonymous_context_when_auth_not_required(self) -> None:
+        request = MagicMock()
+        request.headers = {}
+
+        auth = AuthContext(
+            api_key=None,
+            principal_type="anonymous",
+            principal_id=None,
+            session_id=None,
+            org_id=None,
+            permissions=(),
+            roles=(),
+            authenticated=False,
+            auth_source="disabled",
+            auth_method=None,
+            key_type="personal",
+        )
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("app.routers.stripe_router._allow_anonymous_checkout", lambda: True)
+            result = get_checkout_auth_context(request=request, auth=auth)
+
+        assert result.principal_type == "anonymous"
+        assert result.authenticated is False
+        assert result.auth_source == "disabled"
+
+    def test_checkout_auth_context_returns_original_context_when_auth_required_and_not_authenticated(self) -> None:
+        request = MagicMock()
+        request.headers = {}
+        auth = AuthContext(
+            api_key=None,
+            principal_type="anonymous",
+            principal_id=None,
+            session_id=None,
+            org_id=None,
+            permissions=(),
+            roles=(),
+            authenticated=False,
+            auth_source="disabled",
+            auth_method=None,
+            key_type="personal",
+        )
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("app.routers.stripe_router._allow_anonymous_checkout", lambda: False)
+            result = get_checkout_auth_context(request=request, auth=auth)
+
+        assert result is auth
+
+
 class TestCheckoutSessionRoutes:
     def test_create_checkout_session_with_package_id_calls_service_with_resolved_values(self, client: TestClient, mock_svc: MagicMock) -> None:
         mock_svc.create_checkout_session.return_value = _obj_with_to_dict(
@@ -455,7 +547,7 @@ class TestCheckoutSessionRoutes:
             schema_version="1.0",
         )
 
-        with MagicMock(), pytest.MonkeyPatch.context() as mp:
+        with pytest.MonkeyPatch.context() as mp:
             mp.setattr("app.routers.stripe_router.vault.get", lambda key, default=None: "price_pkg5000")
             resp = client.post(
                 _billing_path("/checkout/sessions"),
@@ -539,6 +631,38 @@ class TestCheckoutSessionRoutes:
             customer_id=None,
             metadata={"flow": "direct", "org_id": ORG_ID},
         )
+
+    def test_create_checkout_session_uses_existing_customer_id_from_service_map(self, client: TestClient, mock_svc: MagicMock) -> None:
+        mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
+        mock_svc.create_checkout_session.return_value = _obj_with_to_dict(
+            session_id=SESSION_ID,
+            checkout_url="https://checkout.stripe.com/c/pay/customer",
+            org_id=ORG_ID,
+            mode=StripeCheckoutMode.PAYMENT.value,
+            price_id="price_direct_123",
+            quantity=1,
+            unit_credits=10,
+            expires_at=None,
+            metadata={"org_id": ORG_ID},
+            created_at="2026-06-28T00:00:00Z",
+            schema_version="1.0",
+        )
+
+        resp = client.post(
+            _billing_path("/checkout/sessions"),
+            json={
+                "priceId": "price_direct_123",
+                "unitCredits": 10,
+                "quantity": 1,
+                "successUrl": _ALLOWED_SUCCESS_URL,
+                "cancelUrl": _ALLOWED_CANCEL_URL,
+            },
+            headers=_auth_headers(),
+        )
+
+        assert resp.status_code == 201
+        mock_svc.create_checkout_session.assert_called_once()
+        assert mock_svc.create_checkout_session.call_args.kwargs["customer_id"] == CUSTOMER_ID
 
 
 class TestAdditionalRoutes:

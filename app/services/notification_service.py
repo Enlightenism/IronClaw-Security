@@ -8,9 +8,11 @@ from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
+
 # ---------------------------------------------------------------------------
 # Types
 # ---------------------------------------------------------------------------
+
 
 NotificationChannel = Literal["email", "slack", "pagerduty"]
 NotificationSeverity = Literal["info", "warning", "critical"]
@@ -251,13 +253,17 @@ class SuppressionRule:
 # ---------------------------------------------------------------------------
 
 
+def _event_str(payload: NotificationPayload) -> str:
+    return payload.event.value if isinstance(payload.event, NotificationEvent) else str(payload.event)
+
+
 def _deliver_email(
     config: EmailConfig,
     payload: NotificationPayload,
     *,
     dry_run: bool = False,
 ) -> DeliveryResult:
-    event_str = payload.event.value if isinstance(payload.event, NotificationEvent) else payload.event
+    event_str = _event_str(payload)
     recipients = list(config.recipients)
     detail = f"[DRY-RUN] Email to={recipients} subject='{payload.title}' event={event_str}" if dry_run else f"Email queued to={recipients} subject='{payload.title}' event={event_str}"
     status: NotificationStatus = "simulated" if dry_run else "sent"
@@ -278,7 +284,7 @@ def _deliver_slack(
     *,
     dry_run: bool = False,
 ) -> DeliveryResult:
-    event_str = payload.event.value if isinstance(payload.event, NotificationEvent) else payload.event
+    event_str = _event_str(payload)
     mention = ""
     if payload.severity == "critical" and config.mention_on_critical:
         mention = f" {config.mention_on_critical}"
@@ -302,7 +308,7 @@ def _deliver_pagerduty(
     *,
     dry_run: bool = False,
 ) -> DeliveryResult:
-    event_str = payload.event.value if isinstance(payload.event, NotificationEvent) else payload.event
+    event_str = _event_str(payload)
     dedup_key = f"{config.dedup_key_prefix}-{payload.source_id}"
     detail = f"[DRY-RUN] PagerDuty trigger dedup_key={dedup_key} severity={payload.severity} event={event_str}" if dry_run else f"PagerDuty triggered dedup_key={dedup_key} severity={payload.severity} event={event_str}"
     status: NotificationStatus = "simulated" if dry_run else "sent"
@@ -344,6 +350,110 @@ class NotificationEngine:
                 return True, rule.reason
         return False, ""
 
+    def _channel_configured(self, channel: NotificationChannel) -> bool:
+        if channel == "email":
+            return self.email_config is not None
+        if channel == "slack":
+            return self.slack_config is not None
+        if channel == "pagerduty":
+            return self.pagerduty_config is not None
+        return False
+
+    def _missing_config_error(self, channel: NotificationChannel) -> str:
+        if channel == "email":
+            return "EmailConfig not registered on NotificationEngine."
+        if channel == "slack":
+            return "SlackConfig not registered on NotificationEngine."
+        if channel == "pagerduty":
+            return "PagerDutyConfig not registered on NotificationEngine."
+        return f"Unsupported channel: {channel!r}"
+
+    def _failed_result(
+        self,
+        *,
+        channel: NotificationChannel,
+        payload: NotificationPayload,
+        detail: str,
+        error: str,
+    ) -> DeliveryResult:
+        return DeliveryResult(
+            channel=channel,
+            status="failed",
+            payload_event=_event_str(payload),
+            payload_severity=payload.severity,
+            source_id=payload.source_id,
+            detail=detail,
+            error=error,
+        )
+
+    def _safe_log_delivery_failure(
+        self,
+        *,
+        channel: NotificationChannel,
+        payload: NotificationPayload,
+        exc: Exception | str,
+    ) -> None:
+        try:
+            logger.error(
+                "notification_service | %s | failed | source_id=%s error=%s",
+                channel,
+                payload.source_id,
+                exc,
+            )
+        except Exception:
+            pass
+
+    def _safe_log_missing_channel_config(
+        self,
+        *,
+        channel: NotificationChannel,
+        payload: NotificationPayload,
+        error: str,
+    ) -> None:
+        try:
+            logger.warning(
+                "notification_service | %s | unavailable | source_id=%s error=%s",
+                channel,
+                payload.source_id,
+                error,
+            )
+        except Exception:
+            pass
+
+    def _safe_log_notification_side_effect_error(
+        self,
+        *,
+        method_name: str,
+        source_id: str,
+        exc: Exception | str,
+    ) -> None:
+        try:
+            logger.warning(
+                "notification_service.%s side-effect failure source_id=%s error=%s",
+                method_name,
+                source_id,
+                exc,
+            )
+        except Exception:
+            pass
+
+    def _safe_dispatch(
+        self,
+        payload: NotificationPayload,
+        channels: list[NotificationChannel],
+        *,
+        method_name: str,
+    ) -> DispatchResult:
+        try:
+            return self.dispatch(payload, channels)
+        except Exception as exc:  # noqa: BLE001
+            self._safe_log_notification_side_effect_error(
+                method_name=method_name,
+                source_id=payload.source_id,
+                exc=exc,
+            )
+            return DispatchResult(payload=payload, results=[])
+
     def _run_channel(
         self,
         channel: NotificationChannel,
@@ -351,7 +461,6 @@ class NotificationEngine:
     ) -> DeliveryResult:
         suppressed, reason = self._is_suppressed(payload, channel)
         if suppressed:
-            event_str = payload.event.value if isinstance(payload.event, NotificationEvent) else payload.event
             logger.debug(
                 "notification_service | %s | suppressed | source_id=%s reason=%s",
                 channel,
@@ -361,40 +470,35 @@ class NotificationEngine:
             return DeliveryResult(
                 channel=channel,
                 status="suppressed",
-                payload_event=event_str,
+                payload_event=_event_str(payload),
                 payload_severity=payload.severity,
                 source_id=payload.source_id,
                 detail=f"Suppressed: {reason}",
             )
 
+        if not self._channel_configured(channel):
+            error = self._missing_config_error(channel)
+            self._safe_log_missing_channel_config(channel=channel, payload=payload, error=error)
+            return self._failed_result(
+                channel=channel,
+                payload=payload,
+                detail="Delivery skipped due to missing channel configuration.",
+                error=error,
+            )
+
         try:
             if channel == "email":
-                if self.email_config is None:
-                    raise ValueError("EmailConfig not registered on NotificationEngine.")
-                return _deliver_email(self.email_config, payload, dry_run=self.dry_run)
+                return _deliver_email(self.email_config, payload, dry_run=self.dry_run)  # type: ignore[arg-type]
             if channel == "slack":
-                if self.slack_config is None:
-                    raise ValueError("SlackConfig not registered on NotificationEngine.")
-                return _deliver_slack(self.slack_config, payload, dry_run=self.dry_run)
+                return _deliver_slack(self.slack_config, payload, dry_run=self.dry_run)  # type: ignore[arg-type]
             if channel == "pagerduty":
-                if self.pagerduty_config is None:
-                    raise ValueError("PagerDutyConfig not registered on NotificationEngine.")
-                return _deliver_pagerduty(self.pagerduty_config, payload, dry_run=self.dry_run)
+                return _deliver_pagerduty(self.pagerduty_config, payload, dry_run=self.dry_run)  # type: ignore[arg-type]
             raise ValueError(f"Unsupported channel: {channel!r}")
         except Exception as exc:  # noqa: BLE001
-            event_str = payload.event.value if isinstance(payload.event, NotificationEvent) else payload.event
-            logger.error(
-                "notification_service | %s | failed | source_id=%s error=%s",
-                channel,
-                payload.source_id,
-                exc,
-            )
-            return DeliveryResult(
+            self._safe_log_delivery_failure(channel=channel, payload=payload, exc=exc)
+            return self._failed_result(
                 channel=channel,
-                status="failed",
-                payload_event=event_str,
-                payload_severity=payload.severity,
-                source_id=payload.source_id,
+                payload=payload,
                 detail="Delivery failed — see error field.",
                 error=str(exc),
             )
@@ -405,7 +509,7 @@ class NotificationEngine:
         channels: list[NotificationChannel],
     ) -> DispatchResult:
         results: list[DeliveryResult] = []
-        for channel in channels:
+        for channel in list(channels):
             result = self._run_channel(channel, payload)
             results.append(result)
             self._delivery_log.append(result)
@@ -421,17 +525,19 @@ class NotificationEngine:
     # Threat-detection integration methods
     # Called by threat_detection router via notification_engine DI.
     # These translate domain results into notification payloads and dispatch.
+    # Notification failures must remain side effects only and must never
+    # interfere with detection/feed/hunt result assembly.
     # -----------------------------------------------------------------------
 
     def notify_detection(self, result: Any, *, org_id: str | None = None) -> None:
         """Notify on a completed threat detection result."""
+        event_id = getattr(result, "event_id", "unknown")
         try:
             verdict = getattr(result, "verdict", None)
             verdict_val = verdict.value if hasattr(verdict, "value") else str(verdict)
             severity_raw = getattr(result, "severity", None)
             severity_val = severity_raw.value if hasattr(severity_raw, "value") else str(severity_raw or "warning")
             score = getattr(result, "score", 0.0)
-            event_id = getattr(result, "event_id", "unknown")
 
             if verdict_val == "block":
                 event = NotificationEvent.THREAT_BLOCKED
@@ -449,7 +555,7 @@ class NotificationEngine:
             payload = build_notification_payload(
                 event=event,
                 title=f"IronClaw Threat Detection: {verdict_val.upper()} [{severity_val}]",
-                body=(f"Event ID: {event_id} | Score: {score:.3f} | Verdict: {verdict_val} | Severity: {severity_val}"),
+                body=f"Event ID: {event_id} | Score: {score:.3f} | Verdict: {verdict_val} | Severity: {severity_val}",
                 source_id=event_id,
                 source_type="threat_detection",
                 severity=notif_severity,
@@ -461,17 +567,18 @@ class NotificationEngine:
                 },
             )
             channels = default_channels_for_severity(notif_severity)
-            self.dispatch(payload, channels)
+            _ = self._safe_dispatch(payload, channels, method_name="notify_detection")
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "notification_service.notify_detection error: %s",
-                exc,
+            self._safe_log_notification_side_effect_error(
+                method_name="notify_detection",
+                source_id=str(event_id),
+                exc=exc,
             )
 
     def notify_feed_refresh(self, feed_result: Any, *, org_id: str | None = None) -> None:
         """Notify on a completed threat feed refresh."""
+        request_id = getattr(feed_result, "request_id", "unknown")
         try:
-            request_id = getattr(feed_result, "request_id", "unknown")
             total_inserted = getattr(feed_result, "total_iocs_inserted", 0)
             total_updated = getattr(feed_result, "total_iocs_updated", 0)
             total_errors = getattr(feed_result, "total_errors", 0)
@@ -482,7 +589,7 @@ class NotificationEngine:
             payload = build_notification_payload(
                 event=event,
                 title=f"IronClaw Feed Refresh: {request_id}",
-                body=(f"Inserted: {total_inserted} | Updated: {total_updated} | Errors: {total_errors}"),
+                body=f"Inserted: {total_inserted} | Updated: {total_updated} | Errors: {total_errors}",
                 source_id=request_id,
                 source_type="feed_refresh",
                 severity=notif_severity,
@@ -494,17 +601,18 @@ class NotificationEngine:
                 },
             )
             channels = default_channels_for_severity(notif_severity)
-            self.dispatch(payload, channels)
+            _ = self._safe_dispatch(payload, channels, method_name="notify_feed_refresh")
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "notification_service.notify_feed_refresh error: %s",
-                exc,
+            self._safe_log_notification_side_effect_error(
+                method_name="notify_feed_refresh",
+                source_id=str(request_id),
+                exc=exc,
             )
 
     def notify_hunt(self, result: Any, *, org_id: str | None = None) -> None:
         """Notify on a completed threat hunt."""
+        hunt_id = getattr(result, "hunt_id", "unknown")
         try:
-            hunt_id = getattr(result, "hunt_id", "unknown")
             total_matches = getattr(result, "total_matches", 0)
             status_raw = getattr(result, "status", None)
             status_val = status_raw.value if hasattr(status_raw, "value") else str(status_raw or "completed")
@@ -516,7 +624,7 @@ class NotificationEngine:
             payload = build_notification_payload(
                 event=event,
                 title=f"IronClaw Hunt Completed: {hunt_id}",
-                body=(f"Hunt ID: {hunt_id} | Matches: {total_matches} | Status: {status_val} | Duration: {duration_ms}ms"),
+                body=f"Hunt ID: {hunt_id} | Matches: {total_matches} | Status: {status_val} | Duration: {duration_ms}ms",
                 source_id=hunt_id,
                 source_type="threat_hunt",
                 severity=notif_severity,
@@ -529,11 +637,12 @@ class NotificationEngine:
                 },
             )
             channels = default_channels_for_severity(notif_severity)
-            self.dispatch(payload, channels)
+            _ = self._safe_dispatch(payload, channels, method_name="notify_hunt")
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "notification_service.notify_hunt error: %s",
-                exc,
+            self._safe_log_notification_side_effect_error(
+                method_name="notify_hunt",
+                source_id=str(hunt_id),
+                exc=exc,
             )
 
 
@@ -627,7 +736,7 @@ def build_notification_payload(
         agent_id=agent_id,
         session_id=session_id,
         trace_id=trace_id,
-        metadata=metadata or {},
+        metadata=dict(metadata or {}),
     )
 
 
@@ -642,7 +751,7 @@ def dispatch_notification(
     *,
     channels: list[NotificationChannel] | None = None,
 ) -> DispatchResult:
-    resolved_channels = channels or default_channels_for_severity(payload.severity)
+    resolved_channels = list(channels) if channels is not None else default_channels_for_severity(payload.severity)
     return engine.dispatch(payload, resolved_channels)
 
 

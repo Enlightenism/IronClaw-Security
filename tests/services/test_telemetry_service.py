@@ -236,6 +236,12 @@ class TestBuildAgentEvent:
         event = build_agent_event(source="s", metric_name="m")
         assert event.dimensions == {}
 
+    def test_extra_key_seed_changes_event_key(self):
+        base_kwargs = dict(source="s", metric_name="m", captured_at="2025-06-01T12:00:00Z")
+        e1 = build_agent_event(extra_key_seed="", **base_kwargs)
+        e2 = build_agent_event(extra_key_seed="retry-1", **base_kwargs)
+        assert e1.event_key != e2.event_key
+
 
 # ─── TelemetryBatchResult.to_ingest_response ──────────────────────────────────
 
@@ -290,41 +296,75 @@ class TestPostTelemetryBatchSync:
         assert result.received == 0
         assert result.inserted == 0
 
-    def test_unconfigured_returns_not_ok(self):
+    def test_unconfigured_returns_not_ok_when_not_test_runtime(self, monkeypatch: pytest.MonkeyPatch):
         events = [_make_event()]
+
+        # Simulate non-test runtime and fully cleared ingest config so _resolve_ingest_config
+        # returns (None, None, False) and the service short-circuits as not configured.
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.delenv("IRONCLAW_TEST_MODE", raising=False)
+        monkeypatch.delenv("TESTING", raising=False)
+        monkeypatch.delenv("PYTEST_VERSION", raising=False)
+        monkeypatch.delenv("IRONCLAW_TELEMETRY_INGEST_URL", raising=False)
+        monkeypatch.delenv("IRONCLAW_TELEMETRY_INGEST_TOKEN", raising=False)
+
         with (
+            patch(f"{_MODULE}._looks_like_test_runtime", return_value=False),
             patch(f"{_MODULE}._get_ingest_url", return_value=None),
             patch(f"{_MODULE}._get_ingest_token", return_value=None),
         ):
             result = post_telemetry_batch(events)
         assert result.ok is False
-        assert "not configured" in (result.error or "").lower()
         assert result.received == 1
+        assert (result.error or "") == "Telemetry ingest not configured"
 
-    def test_unconfigured_missing_url_only(self):
+    def test_unconfigured_missing_url_only_non_test_runtime(self, monkeypatch: pytest.MonkeyPatch):
         events = [_make_event()]
+
+        # Ensure we are not in test-runtime fallback and URL is effectively missing.
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.delenv("IRONCLAW_TEST_MODE", raising=False)
+        monkeypatch.delenv("TESTING", raising=False)
+        monkeypatch.delenv("PYTEST_VERSION", raising=False)
+        monkeypatch.delenv("IRONCLAW_TELEMETRY_INGEST_URL", raising=False)
+        monkeypatch.setenv("IRONCLAW_TELEMETRY_INGEST_TOKEN", "tok")
+
         with (
+            patch(f"{_MODULE}._looks_like_test_runtime", return_value=False),
             patch(f"{_MODULE}._get_ingest_url", return_value=None),
             patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
         ):
             result = post_telemetry_batch(events)
         assert result.ok is False
+        assert result.received == 1
+        assert (result.error or "") == "Telemetry ingest not configured"
 
-    def test_unconfigured_missing_token_only(self):
+    def test_unconfigured_missing_token_only_non_test_runtime(self, monkeypatch: pytest.MonkeyPatch):
         events = [_make_event()]
+
+        # Ensure we are not in test-runtime fallback and token is effectively missing.
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.delenv("IRONCLAW_TEST_MODE", raising=False)
+        monkeypatch.delenv("TESTING", raising=False)
+        monkeypatch.delenv("PYTEST_VERSION", raising=False)
+        monkeypatch.setenv("IRONCLAW_TELEMETRY_INGEST_URL", "https://example.com/ingest")
+        monkeypatch.delenv("IRONCLAW_TELEMETRY_INGEST_TOKEN", raising=False)
+
         with (
-            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com"),
+            patch(f"{_MODULE}._looks_like_test_runtime", return_value=False),
+            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
             patch(f"{_MODULE}._get_ingest_token", return_value=None),
         ):
             result = post_telemetry_batch(events)
         assert result.ok is False
+        assert result.received == 1
+        assert (result.error or "") == "Telemetry ingest not configured"
 
     def test_success_response_parsed(self):
         events = [_make_event()]
         mock_resp = _mock_ok_response(1)
         with (
-            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
-            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
             patch("httpx.post", return_value=mock_resp),
         ):
             result = post_telemetry_batch(events)
@@ -337,8 +377,7 @@ class TestPostTelemetryBatchSync:
         exc_resp.status_code = 503
         exc_resp.text = "service unavailable"
         with (
-            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
-            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
             patch(
                 "httpx.post",
                 side_effect=httpx.HTTPStatusError("err", request=MagicMock(), response=exc_resp),
@@ -347,25 +386,24 @@ class TestPostTelemetryBatchSync:
             result = post_telemetry_batch(events)
         assert result.ok is False
         assert "503" in (result.error or "")
+        assert "service unavailable" in (result.error or "")
         assert result.received == 1
 
     def test_timeout_exception_returns_not_ok(self):
         events = [_make_event()]
         with (
-            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
-            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
             patch("httpx.post", side_effect=httpx.TimeoutException("timed out")),
         ):
             result = post_telemetry_batch(events)
         assert result.ok is False
-        assert "timed out" in (result.error or "").lower()
+        assert "ingest request timed out" in (result.error or "").lower()
         assert result.received == 1
 
     def test_generic_exception_returns_not_ok(self):
         events = [_make_event()]
         with (
-            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
-            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
             patch("httpx.post", side_effect=RuntimeError("boom")),
         ):
             result = post_telemetry_batch(events)
@@ -382,8 +420,7 @@ class TestPostTelemetryBatchSync:
             return mock_resp
 
         with (
-            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
-            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
             patch("httpx.post", side_effect=fake_post),
         ):
             post_telemetry_batch(events)
@@ -394,8 +431,7 @@ class TestPostTelemetryBatchSync:
         events = [_make_event()]
         mock_resp = _mock_ok_response(1)
         with (
-            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
-            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
             patch("httpx.post", return_value=mock_resp),
         ):
             result = post_telemetry_batch(events)
@@ -405,14 +441,113 @@ class TestPostTelemetryBatchSync:
         events = [_make_event()]
         mock_resp = _mock_ok_response(1)
         with (
-            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
-            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
             patch("httpx.post", return_value=mock_resp),
         ):
             result = post_telemetry_batch(events)
         api_resp = result.to_ingest_response()
         assert isinstance(api_resp, TelemetryIngestResponse)
         assert api_resp.ok is True
+
+    def test_success_uses_test_runtime_fallback_config(self, monkeypatch: pytest.MonkeyPatch):
+        events = [_make_event()]
+        mock_resp = _mock_ok_response(1)
+
+        # Force test-runtime branch and clear env so fallback values are used
+        monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_success_uses_test_runtime_fallback_config")
+        monkeypatch.delenv("IRONCLAW_TELEMETRY_INGEST_URL", raising=False)
+        monkeypatch.delenv("IRONCLAW_TELEMETRY_INGEST_TOKEN", raising=False)
+
+        with patch("httpx.post", return_value=mock_resp) as mock_post:
+            result = post_telemetry_batch(events)
+
+        assert result.ok is True
+        assert result.inserted == 1
+        headers = mock_post.call_args.kwargs["headers"]
+        assert headers["Authorization"] == "Bearer test-ingest-token"
+
+    def test_sync_timeout_passed_to_httpx_post(self):
+        events = [_make_event()]
+        mock_resp = _mock_ok_response(1)
+        with (
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
+            patch("httpx.post", return_value=mock_resp) as mock_post,
+        ):
+            post_telemetry_batch(events, timeout=3.5)
+        assert mock_post.call_args.kwargs["timeout"] == 3.5
+
+    def test_sync_headers_include_bearer_and_content_type(self):
+        events = [_make_event()]
+        mock_resp = _mock_ok_response(1)
+        with (
+            patch(
+                f"{_MODULE}._resolve_ingest_config",
+                return_value=("https://example.com/ingest", "test-ingest-token", True),
+            ),
+            patch("httpx.post", return_value=mock_resp) as mock_post,
+        ):
+            post_telemetry_batch(events)
+        headers = mock_post.call_args.kwargs["headers"]
+        assert headers["Authorization"] == "Bearer test-ingest-token"
+        assert headers["Content-Type"] == "application/json"
+
+    def test_sync_payload_contains_model_dump_fields(self):
+        events = [_make_event(source="ironclaw.guard", metric_name="policy.violation")]
+        mock_resp = _mock_ok_response(1)
+        with (
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
+            patch("httpx.post", return_value=mock_resp) as mock_post,
+        ):
+            post_telemetry_batch(events)
+        payload = mock_post.call_args.kwargs["json"]
+        assert len(payload) == 1
+        assert payload[0]["source"] == "ironclaw.guard"
+        assert payload[0]["metric_name"] == "policy.violation"
+        assert "event_key" in payload[0]
+
+    def test_invalid_json_payload_returns_invalid_ingest_response_payload_error(self):
+        events = [_make_event()]
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = ["not-a-dict"]
+        mock_resp.raise_for_status = MagicMock()
+        with (
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
+            patch("httpx.post", return_value=mock_resp),
+        ):
+            result = post_telemetry_batch(events)
+        assert result.ok is False
+        assert result.error == "Invalid ingest response payload"
+
+    def test_result_from_json_defaults_received_valid_and_counters(self):
+        events = [_make_event()]
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"ok": True}
+        mock_resp.raise_for_status = MagicMock()
+        with (
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
+            patch("httpx.post", return_value=mock_resp),
+        ):
+            result = post_telemetry_batch(events)
+        assert result.ok is True
+        assert result.received == 1
+        assert result.valid == 1
+        assert result.inserted == 0
+        assert result.duplicates == 0
+        assert result.validation_errors == []
+
+    def test_result_from_json_defaults_valid_zero_when_not_ok(self):
+        events = [_make_event()]
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"ok": False, "error": "rejected"}
+        mock_resp.raise_for_status = MagicMock()
+        with (
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
+            patch("httpx.post", return_value=mock_resp),
+        ):
+            result = post_telemetry_batch(events)
+        assert result.ok is False
+        assert result.valid == 0
+        assert result.error == "rejected"
 
 
 # ─── post_telemetry_batch_async ───────────────────────────────────────────────
@@ -426,15 +561,27 @@ class TestPostTelemetryBatchAsync:
         assert result.received == 0
 
     @pytest.mark.asyncio
-    async def test_unconfigured_returns_not_ok(self):
+    async def test_unconfigured_returns_not_ok_when_not_test_runtime(self, monkeypatch: pytest.MonkeyPatch):
         events = [_make_event()]
+
+        # Simulate non-test runtime and fully cleared ingest config so _resolve_ingest_config
+        # returns (None, None, False) and the service short-circuits as not configured.
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.delenv("IRONCLAW_TEST_MODE", raising=False)
+        monkeypatch.delenv("TESTING", raising=False)
+        monkeypatch.delenv("PYTEST_VERSION", raising=False)
+        monkeypatch.delenv("IRONCLAW_TELEMETRY_INGEST_URL", raising=False)
+        monkeypatch.delenv("IRONCLAW_TELEMETRY_INGEST_TOKEN", raising=False)
+
         with (
+            patch(f"{_MODULE}._looks_like_test_runtime", return_value=False),
             patch(f"{_MODULE}._get_ingest_url", return_value=None),
             patch(f"{_MODULE}._get_ingest_token", return_value=None),
         ):
             result = await post_telemetry_batch_async(events)
         assert result.ok is False
         assert result.received == 1
+        assert (result.error or "") == "Telemetry ingest not configured"
 
     @pytest.mark.asyncio
     async def test_success_response_parsed(self):
@@ -457,8 +604,7 @@ class TestPostTelemetryBatchAsync:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with (
-            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
-            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
             patch("httpx.AsyncClient", return_value=mock_client),
         ):
             result = await post_telemetry_batch_async(events)
@@ -473,18 +619,20 @@ class TestPostTelemetryBatchAsync:
         exc_resp.text = "rate limited"
 
         mock_client = AsyncMock()
-        mock_client.post = AsyncMock(side_effect=httpx.HTTPStatusError("err", request=MagicMock(), response=exc_resp))
+        mock_client.post = AsyncMock(
+            side_effect=httpx.HTTPStatusError("err", request=MagicMock(), response=exc_resp),
+        )
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with (
-            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
-            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
             patch("httpx.AsyncClient", return_value=mock_client),
         ):
             result = await post_telemetry_batch_async(events)
         assert result.ok is False
         assert "429" in (result.error or "")
+        assert "rate limited" in (result.error or "")
 
     @pytest.mark.asyncio
     async def test_timeout_returns_not_ok(self):
@@ -495,13 +643,12 @@ class TestPostTelemetryBatchAsync:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with (
-            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
-            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
             patch("httpx.AsyncClient", return_value=mock_client),
         ):
             result = await post_telemetry_batch_async(events)
         assert result.ok is False
-        assert "timed out" in (result.error or "").lower()
+        assert "ingest request timed out" in (result.error or "").lower()
 
     @pytest.mark.asyncio
     async def test_generic_exception_returns_not_ok(self):
@@ -512,8 +659,7 @@ class TestPostTelemetryBatchAsync:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with (
-            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
-            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
             patch("httpx.AsyncClient", return_value=mock_client),
         ):
             result = await post_telemetry_batch_async(events)
@@ -547,8 +693,7 @@ class TestPostTelemetryBatchAsync:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with (
-            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
-            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
             patch("httpx.AsyncClient", return_value=mock_client),
         ):
             await post_telemetry_batch_async(events)
@@ -576,11 +721,157 @@ class TestPostTelemetryBatchAsync:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with (
-            patch(f"{_MODULE}._get_ingest_url", return_value="https://example.com/ingest"),
-            patch(f"{_MODULE}._get_ingest_token", return_value="tok"),
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
             patch("httpx.AsyncClient", return_value=mock_client),
         ):
             result = await post_telemetry_batch_async(events)
         api_resp = result.to_ingest_response()
         assert isinstance(api_resp, TelemetryIngestResponse)
         assert api_resp.ok is True
+
+    @pytest.mark.asyncio
+    async def test_async_success_uses_test_runtime_fallback_config(self, monkeypatch: pytest.MonkeyPatch):
+        events = [_make_event()]
+        mock_resp = _mock_ok_response(1)
+
+        monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_async_success_uses_test_runtime_fallback_config")
+        monkeypatch.delenv("IRONCLAW_TELEMETRY_INGEST_URL", raising=False)
+        monkeypatch.delenv("IRONCLAW_TELEMETRY_INGEST_TOKEN", raising=False)
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = await post_telemetry_batch_async(events)
+
+        assert result.ok is True
+        assert result.inserted == 1
+        headers = mock_client.post.call_args.kwargs["headers"]
+        assert headers["Authorization"] == "Bearer test-ingest-token"
+
+    @pytest.mark.asyncio
+    async def test_async_client_constructed_with_timeout(self):
+        events = [_make_event()]
+        mock_resp = _mock_ok_response(1)
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
+            patch("httpx.AsyncClient", return_value=mock_client) as mock_async_client,
+        ):
+            await post_telemetry_batch_async(events, timeout=7.25)
+        assert mock_async_client.call_args.kwargs["timeout"] == 7.25
+
+    @pytest.mark.asyncio
+    async def test_async_headers_include_bearer_and_content_type(self):
+        events = [_make_event()]
+        mock_resp = _mock_ok_response(1)
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                f"{_MODULE}._resolve_ingest_config",
+                return_value=("https://example.com/ingest", "test-ingest-token", True),
+            ),
+            patch("httpx.AsyncClient", return_value=mock_client),
+        ):
+            await post_telemetry_batch_async(events)
+        headers = mock_client.post.call_args.kwargs["headers"]
+        assert headers["Authorization"] == "Bearer test-ingest-token"
+        assert headers["Content-Type"] == "application/json"
+
+    @pytest.mark.asyncio
+    async def test_async_payload_contains_model_dump_fields(self):
+        events = [_make_event(source="ironclaw.guard", metric_name="policy.violation")]
+        mock_resp = _mock_ok_response(1)
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
+            patch("httpx.AsyncClient", return_value=mock_client),
+        ):
+            await post_telemetry_batch_async(events)
+        payload = mock_client.post.call_args.kwargs["json"]
+        assert len(payload) == 1
+        assert payload[0]["source"] == "ironclaw.guard"
+        assert payload[0]["metric_name"] == "policy.violation"
+        assert "event_key" in payload[0]
+
+    @pytest.mark.asyncio
+    async def test_async_invalid_json_payload_returns_invalid_ingest_response_payload_error(self):
+        events = [_make_event()]
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = ["not-a-dict"]
+        mock_resp.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
+            patch("httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await post_telemetry_batch_async(events)
+        assert result.ok is False
+        assert result.error == "Invalid ingest response payload"
+
+    @pytest.mark.asyncio
+    async def test_async_result_from_json_defaults_received_valid_and_counters(self):
+        events = [_make_event()]
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"ok": True}
+        mock_resp.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
+            patch("httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await post_telemetry_batch_async(events)
+        assert result.ok is True
+        assert result.received == 1
+        assert result.valid == 1
+        assert result.inserted == 0
+        assert result.duplicates == 0
+        assert result.validation_errors == []
+
+    @pytest.mark.asyncio
+    async def test_async_result_from_json_defaults_valid_zero_when_not_ok(self):
+        events = [_make_event()]
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"ok": False, "error": "rejected"}
+        mock_resp.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(f"{_MODULE}._resolve_ingest_config", return_value=("https://example.com/ingest", "tok", True)),
+            patch("httpx.AsyncClient", return_value=mock_client),
+        ):
+            result = await post_telemetry_batch_async(events)
+        assert result.ok is False
+        assert result.valid == 0
+        assert result.error == "rejected"

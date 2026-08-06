@@ -17,8 +17,8 @@ from app.core.settings import (
 def _fresh(monkeypatch, **env_overrides) -> Settings:
     """Clear lru_cache, apply env overrides, return a new Settings instance."""
     get_settings.cache_clear()
-    for k, v in env_overrides.items():
-        monkeypatch.setenv(k, str(v))
+    for key, value in env_overrides.items():
+        monkeypatch.setenv(key, str(value))
     return get_settings()
 
 
@@ -229,6 +229,7 @@ class TestJWTDefaults:
     def test_secret_key_default(self, monkeypatch):
         get_settings.cache_clear()
         monkeypatch.delenv("IRONCLAW_SECRET_KEY", raising=False)
+        monkeypatch.delenv("SECRET_KEY", raising=False)
         s = get_settings()
         assert s.secret_key == SECRET_KEY_SENTINEL
         assert isinstance(s.secret_key, str)
@@ -236,6 +237,7 @@ class TestJWTDefaults:
     def test_jwt_secret_default(self, monkeypatch):
         get_settings.cache_clear()
         monkeypatch.delenv("JWT_SECRET", raising=False)
+        monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
         s = get_settings()
         assert s.jwt_secret == JWT_SECRET_SENTINEL
         assert isinstance(s.jwt_secret, str)
@@ -244,7 +246,7 @@ class TestJWTDefaults:
         get_settings.cache_clear()
         monkeypatch.delenv("JWT_ALGORITHM", raising=False)
         s = get_settings()
-        assert s.jwt_algorithm == "HS256"
+        assert s.jwt_algorithm == ""
         assert isinstance(s.jwt_algorithm, str)
 
     def test_access_token_expire_minutes_default(self, monkeypatch):
@@ -263,25 +265,87 @@ class TestJWTDefaults:
         assert s.access_token_expire_minutes == 60
         assert isinstance(s.access_token_expire_minutes, int)
 
-    def test_effective_secret_key_returns_empty_for_sentinel(self):
+    def test_effective_secret_key_returns_empty_for_sentinel(self, monkeypatch):
+        monkeypatch.delenv("IRONCLAW_SECRET_KEY", raising=False)
+        monkeypatch.delenv("SECRET_KEY", raising=False)
         s = Settings(IRONCLAW_SECRET_KEY=SECRET_KEY_SENTINEL)
         assert s.effective_secret_key == ""
 
-    def test_effective_secret_key_returns_trimmed_value(self):
+    def test_effective_secret_key_returns_trimmed_value_from_settings(self, monkeypatch):
+        monkeypatch.delenv("IRONCLAW_SECRET_KEY", raising=False)
+        monkeypatch.delenv("SECRET_KEY", raising=False)
         s = Settings(IRONCLAW_SECRET_KEY="  real-secret-key  ")
         assert s.effective_secret_key == "real-secret-key"
 
-    def test_effective_jwt_secret_returns_empty_for_sentinel(self):
+    def test_effective_secret_key_prefers_vault_env(self, monkeypatch):
+        monkeypatch.setenv("IRONCLAW_SECRET_KEY", "vault-secret")
+        s = Settings(IRONCLAW_SECRET_KEY="settings-secret")
+        assert s.effective_secret_key == "vault-secret"
+
+    def test_effective_secret_key_uses_legacy_secret_key_fallback(self, monkeypatch):
+        monkeypatch.delenv("IRONCLAW_SECRET_KEY", raising=False)
+        monkeypatch.setenv("SECRET_KEY", "legacy-secret")
+        s = Settings()
+        assert s.effective_secret_key == "legacy-secret"
+
+    def test_effective_jwt_secret_returns_empty_for_sentinel(self, monkeypatch):
+        monkeypatch.delenv("JWT_SECRET", raising=False)
+        monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
+        monkeypatch.delenv("IRONCLAW_SECRET_KEY", raising=False)
+        monkeypatch.delenv("SECRET_KEY", raising=False)
         s = Settings(JWT_SECRET=JWT_SECRET_SENTINEL)
         assert s.effective_jwt_secret == ""
 
-    def test_effective_jwt_secret_returns_trimmed_value(self):
+    def test_effective_jwt_secret_returns_trimmed_value_from_settings(self, monkeypatch):
+        monkeypatch.delenv("JWT_SECRET", raising=False)
+        monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
+        monkeypatch.delenv("IRONCLAW_SECRET_KEY", raising=False)
+        monkeypatch.delenv("SECRET_KEY", raising=False)
         s = Settings(JWT_SECRET="  real-jwt-secret  ")
         assert s.effective_jwt_secret == "real-jwt-secret"
 
+    def test_effective_jwt_secret_prefers_vault_jwt_secret(self, monkeypatch):
+        monkeypatch.setenv("JWT_SECRET", "vault-jwt-secret")
+        monkeypatch.setenv("SUPABASE_JWT_SECRET", "vault-supabase-jwt-secret")
+        s = Settings(JWT_SECRET="settings-jwt-secret")
+        assert s.effective_jwt_secret == "vault-jwt-secret"
+
+    def test_effective_jwt_secret_uses_supabase_jwt_secret_fallback(self, monkeypatch):
+        monkeypatch.delenv("JWT_SECRET", raising=False)
+        monkeypatch.setenv("SUPABASE_JWT_SECRET", "vault-supabase-jwt-secret")
+        s = Settings()
+        assert s.effective_jwt_secret == "vault-supabase-jwt-secret"
+
+    def test_effective_supabase_jwt_secret_returns_empty_when_unset(self, monkeypatch):
+        monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
+        monkeypatch.delenv("JWT_SECRET", raising=False)
+        s = Settings()
+        assert s.effective_supabase_jwt_secret == ""
+
+    def test_effective_supabase_jwt_secret_prefers_supabase_env(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_JWT_SECRET", "supabase-secret")
+        monkeypatch.setenv("JWT_SECRET", "jwt-secret")
+        s = Settings()
+        assert s.effective_supabase_jwt_secret == "supabase-secret"
+
+    def test_effective_supabase_jwt_secret_falls_back_to_jwt_secret(self, monkeypatch):
+        monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
+        monkeypatch.setenv("JWT_SECRET", "jwt-secret")
+        s = Settings()
+        assert s.effective_supabase_jwt_secret == "jwt-secret"
+
+    def test_effective_jwt_algorithm_returns_empty_when_unset(self, monkeypatch):
+        monkeypatch.delenv("JWT_ALGORITHM", raising=False)
+        s = get_settings()
+        assert s.effective_jwt_algorithm == ""
+
+    def test_effective_jwt_algorithm_normalizes_case_and_whitespace(self, monkeypatch):
+        s = _fresh(monkeypatch, JWT_ALGORITHM="  rs256  ")
+        assert s.effective_jwt_algorithm == "RS256"
+
 
 # ---------------------------------------------------------------------------
-# IronClaw Auth Edge Function — primary focus area
+# IronClaw Auth Edge Function
 # ---------------------------------------------------------------------------
 
 
@@ -315,7 +379,10 @@ class TestIronClawAuthEdgeFnSettings:
         assert s.ironclaw_auth_edge_fn_timeout_seconds == 30.0
         assert isinstance(s.ironclaw_auth_edge_fn_timeout_seconds, float)
 
-    def test_ironclaw_auth_edge_fn_timeout_seconds_integer_string_coerces_to_float(self, monkeypatch):
+    def test_ironclaw_auth_edge_fn_timeout_seconds_integer_string_coerces_to_float(
+        self,
+        monkeypatch,
+    ):
         s = _fresh(monkeypatch, IRONCLAW_AUTH_EDGE_FN_TIMEOUT_SECONDS="5")
         assert s.ironclaw_auth_edge_fn_timeout_seconds == 5.0
         assert isinstance(s.ironclaw_auth_edge_fn_timeout_seconds, float)
@@ -385,6 +452,18 @@ class TestSupabaseDefaults:
     def test_persistence_mode_override(self, monkeypatch):
         s = _fresh(monkeypatch, IRONCLAW_PERSISTENCE_MODE="supabase")
         assert s.persistence_mode == "supabase"
+
+    def test_effective_supabase_url_returns_trimmed_value(self):
+        s = Settings(SUPABASE_URL="  https://xyz.supabase.co  ")
+        assert s.effective_supabase_url == "https://xyz.supabase.co"
+
+    def test_effective_supabase_anon_key_returns_trimmed_value(self):
+        s = Settings(SUPABASE_ANON_KEY="  anon-key  ")
+        assert s.effective_supabase_anon_key == "anon-key"
+
+    def test_effective_supabase_service_role_key_returns_trimmed_value(self):
+        s = Settings(SUPABASE_SERVICE_ROLE_KEY="  service-role-key  ")
+        assert s.effective_supabase_service_role_key == "service-role-key"
 
 
 # ---------------------------------------------------------------------------
@@ -567,7 +646,7 @@ class TestInputSizeLimitsDefaults:
 
 
 # ---------------------------------------------------------------------------
-# Filesystem path defaults — str | None fields
+# Filesystem path defaults
 # ---------------------------------------------------------------------------
 
 
@@ -638,12 +717,15 @@ class TestCORSDefaults:
         assert isinstance(s.allowed_origins, str)
 
     def test_allowed_origins_override(self, monkeypatch):
-        s = _fresh(monkeypatch, ALLOWED_ORIGINS="https://app.ironclaw.io,https://admin.ironclaw.io")
+        s = _fresh(
+            monkeypatch,
+            ALLOWED_ORIGINS="https://app.ironclaw.io,https://admin.ironclaw.io",
+        )
         assert s.allowed_origins == "https://app.ironclaw.io,https://admin.ironclaw.io"
 
 
 # ---------------------------------------------------------------------------
-# Optional integrations — str | None fields
+# Optional integrations
 # ---------------------------------------------------------------------------
 
 
@@ -726,6 +808,131 @@ class TestEffectiveKeyResolution:
         )
         assert s.effective_api_key == ""
         assert s.effective_platform_api_key == ""
+
+
+# ---------------------------------------------------------------------------
+# Effective auth configuration
+# ---------------------------------------------------------------------------
+
+
+class TestEffectiveAuthConfiguration:
+    def test_api_key_auth_configured_false_when_no_api_key(self, monkeypatch):
+        monkeypatch.delenv("IRONCLAW_API_KEY", raising=False)
+        monkeypatch.delenv("INTERNAL_PLATFORM_API_KEY", raising=False)
+        monkeypatch.delenv("PLATFORM_API_KEY", raising=False)
+        monkeypatch.delenv("ADMIN_API_KEY", raising=False)
+        monkeypatch.delenv("API_KEY", raising=False)
+        s = Settings()
+        assert s.api_key_auth_configured is False
+
+    def test_api_key_auth_configured_true_when_api_key_present(self):
+        s = Settings(IRONCLAW_API_KEY="ironclaw-key")
+        assert s.api_key_auth_configured is True
+
+    def test_bearer_auth_configured_false_without_supabase_url(self, monkeypatch):
+        monkeypatch.setenv("JWT_SECRET", "jwt-secret")
+        monkeypatch.delenv("SUPABASE_URL", raising=False)
+        s = Settings()
+        assert s.bearer_auth_configured is False
+
+    def test_bearer_auth_configured_false_without_auth_inputs(self, monkeypatch):
+        monkeypatch.delenv("SUPABASE_URL", raising=False)
+        monkeypatch.delenv("SUPABASE_ANON_KEY", raising=False)
+        monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+        monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
+        monkeypatch.delenv("JWT_SECRET", raising=False)
+        monkeypatch.delenv("IRONCLAW_SECRET_KEY", raising=False)
+        monkeypatch.delenv("SECRET_KEY", raising=False)
+        s = Settings(SUPABASE_URL="https://xyz.supabase.co", JWT_SECRET=JWT_SECRET_SENTINEL)
+        assert s.bearer_auth_configured is False
+
+    def test_bearer_auth_configured_true_with_supabase_url_and_anon_key(self):
+        s = Settings(
+            SUPABASE_URL="https://xyz.supabase.co",
+            SUPABASE_ANON_KEY="anon-key",
+        )
+        assert s.bearer_auth_configured is True
+
+    def test_bearer_auth_configured_true_with_supabase_url_and_service_role_key(self):
+        s = Settings(
+            SUPABASE_URL="https://xyz.supabase.co",
+            SUPABASE_SERVICE_ROLE_KEY="service-role-key",
+        )
+        assert s.bearer_auth_configured is True
+
+    def test_bearer_auth_configured_true_with_supabase_url_and_supabase_jwt_secret(
+        self,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("SUPABASE_JWT_SECRET", "supabase-jwt-secret")
+        monkeypatch.delenv("JWT_SECRET", raising=False)
+        s = Settings(SUPABASE_URL="https://xyz.supabase.co")
+        assert s.bearer_auth_configured is True
+
+    def test_bearer_auth_configured_true_with_supabase_url_and_jwt_secret(self, monkeypatch):
+        monkeypatch.setenv("JWT_SECRET", "jwt-secret")
+        monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
+        s = Settings(SUPABASE_URL="https://xyz.supabase.co")
+        assert s.bearer_auth_configured is True
+
+    def test_auth_configured_true_when_any_auth_mode_configured(self):
+        s = Settings(IRONCLAW_API_KEY="ironclaw-key")
+        assert s.auth_configured is True
+
+    def test_auth_configured_false_when_no_auth_mode_configured(self, monkeypatch):
+        monkeypatch.delenv("IRONCLAW_API_KEY", raising=False)
+        monkeypatch.delenv("INTERNAL_PLATFORM_API_KEY", raising=False)
+        monkeypatch.delenv("PLATFORM_API_KEY", raising=False)
+        monkeypatch.delenv("ADMIN_API_KEY", raising=False)
+        monkeypatch.delenv("API_KEY", raising=False)
+        monkeypatch.delenv("SUPABASE_URL", raising=False)
+        monkeypatch.delenv("SUPABASE_ANON_KEY", raising=False)
+        monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+        monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
+        monkeypatch.delenv("JWT_SECRET", raising=False)
+        monkeypatch.delenv("IRONCLAW_SECRET_KEY", raising=False)
+        monkeypatch.delenv("SECRET_KEY", raising=False)
+        s = Settings(
+            JWT_SECRET=JWT_SECRET_SENTINEL,
+            IRONCLAW_SECRET_KEY=SECRET_KEY_SENTINEL,
+        )
+        assert s.auth_configured is False
+
+    def test_effective_auth_required_false_when_auth_disabled(self):
+        s = Settings(AUTH_REQUIRED=False, IRONCLAW_API_KEY="ironclaw-key")
+        assert s.effective_auth_required is False
+
+    def test_effective_auth_required_false_when_required_but_unconfigured(self, monkeypatch):
+        monkeypatch.delenv("IRONCLAW_API_KEY", raising=False)
+        monkeypatch.delenv("INTERNAL_PLATFORM_API_KEY", raising=False)
+        monkeypatch.delenv("PLATFORM_API_KEY", raising=False)
+        monkeypatch.delenv("ADMIN_API_KEY", raising=False)
+        monkeypatch.delenv("API_KEY", raising=False)
+        monkeypatch.delenv("SUPABASE_URL", raising=False)
+        monkeypatch.delenv("SUPABASE_ANON_KEY", raising=False)
+        monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+        monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
+        monkeypatch.delenv("JWT_SECRET", raising=False)
+        monkeypatch.delenv("IRONCLAW_SECRET_KEY", raising=False)
+        monkeypatch.delenv("SECRET_KEY", raising=False)
+        s = Settings(
+            AUTH_REQUIRED=True,
+            JWT_SECRET=JWT_SECRET_SENTINEL,
+            IRONCLAW_SECRET_KEY=SECRET_KEY_SENTINEL,
+        )
+        assert s.effective_auth_required is False
+
+    def test_effective_auth_required_true_when_required_and_api_key_configured(self):
+        s = Settings(AUTH_REQUIRED=True, IRONCLAW_API_KEY="ironclaw-key")
+        assert s.effective_auth_required is True
+
+    def test_effective_auth_required_true_when_required_and_bearer_configured(self):
+        s = Settings(
+            AUTH_REQUIRED=True,
+            SUPABASE_URL="https://xyz.supabase.co",
+            SUPABASE_ANON_KEY="anon-key",
+        )
+        assert s.effective_auth_required is True
 
 
 # ---------------------------------------------------------------------------

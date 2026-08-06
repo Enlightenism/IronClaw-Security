@@ -17,9 +17,11 @@ from app.persistencebootstrap import PersistenceStore
 
 logger = logging.getLogger(__name__)
 
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+
 
 _WEBHOOK_DELIVERY_TABLE = "webhook_delivery_log"
 _WEBHOOK_SUBSCRIPTIONS_TABLE = "webhook_subscriptions"
@@ -34,6 +36,7 @@ _EVENT_HEADER = "X-IronClaw-Event"
 _TIMESTAMP_HEADER = "X-IronClaw-Timestamp"
 
 _EDGE_FUNCTION_NAME = "ironclaw-webhook-dispatch"
+
 
 # ---------------------------------------------------------------------------
 # Data models
@@ -55,15 +58,15 @@ class WebhookSubscription:
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> WebhookSubscription:
         return cls(
-            id=row["id"],
-            tenant_id=row["tenant_id"],
-            target_url=row["target_url"],
-            events=row.get("events") or [],
-            secret_hash=row["secret_hash"],
-            active=row.get("active", True),
-            max_attempts=row.get("max_attempts", _MAX_ATTEMPTS),
-            metadata=row.get("metadata") or {},
-            created_at=row.get("created_at", datetime.now(UTC).isoformat()),
+            id=str(row["id"]),
+            tenant_id=str(row["tenant_id"]),
+            target_url=str(row["target_url"]),
+            events=list(row.get("events") or []),
+            secret_hash=str(row["secret_hash"]),
+            active=bool(row.get("active", True)),
+            max_attempts=int(row.get("max_attempts") or _MAX_ATTEMPTS),
+            metadata=dict(row.get("metadata") or {}),
+            created_at=str(row.get("created_at") or datetime.now(UTC).isoformat()),
         )
 
 
@@ -137,8 +140,6 @@ class WebhookDispatchResult:
 
 @dataclass(frozen=True)
 class EdgeDispatchResult:
-    """Result of a POST to the ironclaw-webhook-dispatch Edge Function."""
-
     event_type: str
     tenant_id: str
     http_status: int | None
@@ -188,11 +189,6 @@ def verify_webhook_signature(
 
 
 def _get_persistence_store() -> PersistenceStore:
-    """
-    Returns the active persistence store via the IronClaw bootstrap layer.
-    All table access in this module must go through this store — never call
-    get_supabase_service_client() directly.
-    """
     try:
         from app.persistencebootstrap import get_persistence_store  # type: ignore[import]
 
@@ -218,54 +214,186 @@ def _edge_function_url(function_name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Canonical HTTP hooks
+# ---------------------------------------------------------------------------
+
+
+def _post_json_with_httpx(
+    *,
+    url: str,
+    body_bytes: bytes,
+    headers: dict[str, str],
+    timeout: float,
+) -> tuple[int | None, str | None, str | None]:
+    try:
+        with httpx.Client(timeout=timeout) as http:
+            response = http.post(url, content=body_bytes, headers=headers)
+
+        response_text = response.text[:4096] if response.text else None
+        if response.is_success:
+            return response.status_code, response_text, None
+        return response.status_code, response_text, f"Non-2xx response: HTTP {response.status_code}"
+    except httpx.TimeoutException as exc:
+        return None, None, f"Timeout after {timeout}s: {exc}"
+    except Exception as exc:  # noqa: BLE001
+        return None, None, f"HTTP error: {exc}"
+
+
+def _dispatch_http_post_impl(
+    subscription: WebhookSubscription,
+    delivery_id: str,
+    event_type: str,
+    payload: dict[str, Any],
+    *,
+    attempt: int,
+    timeout: float = _DELIVERY_TIMEOUT_SECONDS,
+) -> tuple[int | None, str | None, str | None]:
+    body_bytes = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    signature = _compute_signature(subscription.secret_hash, body_bytes, timestamp)
+
+    headers = {
+        "Content-Type": "application/json",
+        _SIGNATURE_HEADER: signature,
+        _DELIVERY_ID_HEADER: delivery_id,
+        _EVENT_HEADER: event_type,
+        _TIMESTAMP_HEADER: timestamp,
+        "User-Agent": "IronClaw-Security/1.0",
+    }
+
+    http_status, response_body, error_detail = _post_json_with_httpx(
+        url=subscription.target_url,
+        body_bytes=body_bytes,
+        headers=headers,
+        timeout=timeout,
+    )
+
+    if error_detail is None and http_status is not None:
+        logger.info(
+            "webhook_service | dispatch | delivery_id=%s subscription_id=%s attempt=%d http=%d",
+            delivery_id,
+            subscription.id,
+            attempt,
+            http_status,
+        )
+    elif http_status is not None:
+        logger.warning(
+            "webhook_service | dispatch | delivery_id=%s subscription_id=%s attempt=%d http=%d detail=%s",
+            delivery_id,
+            subscription.id,
+            attempt,
+            http_status,
+            error_detail,
+        )
+    elif error_detail and error_detail.startswith("Timeout after"):
+        logger.warning(
+            "webhook_service | dispatch | delivery_id=%s subscription_id=%s attempt=%d timeout",
+            delivery_id,
+            subscription.id,
+            attempt,
+        )
+    else:
+        logger.error(
+            "webhook_service | dispatch | delivery_id=%s subscription_id=%s attempt=%d error=%s",
+            delivery_id,
+            subscription.id,
+            attempt,
+            error_detail,
+        )
+
+    return http_status, response_body, error_detail
+
+
+def _dispatch_http_post(
+    subscription: WebhookSubscription,
+    delivery_id: str,
+    event_type: str,
+    payload: dict[str, Any],
+    *,
+    attempt: int,
+    timeout: float = _DELIVERY_TIMEOUT_SECONDS,
+) -> tuple[int | None, str | None, str | None]:
+    return _dispatch_http_post_impl(
+        subscription,
+        delivery_id,
+        event_type,
+        payload,
+        attempt=attempt,
+        timeout=timeout,
+    )
+
+
+def dispatch_http_post(
+    subscription: WebhookSubscription,
+    delivery_id: str,
+    event_type: str,
+    payload: dict[str, Any],
+    *,
+    attempt: int,
+    timeout: float = _DELIVERY_TIMEOUT_SECONDS,
+) -> tuple[int | None, str | None, str | None]:
+    return _dispatch_http_post(
+        subscription,
+        delivery_id,
+        event_type,
+        payload,
+        attempt=attempt,
+        timeout=timeout,
+    )
+
+
+dispatchhttppost = dispatch_http_post
+
+
+# ---------------------------------------------------------------------------
 # Edge Function caller
 # ---------------------------------------------------------------------------
 
 
-def dispatch_verdict_to_edge(
+def _dispatch_verdict_to_edge_impl(
     event_type: str,
     payload: dict[str, Any],
     tenant_id: str,
     *,
     timeout: float = _EDGE_DISPATCH_TIMEOUT_SECONDS,
 ) -> EdgeDispatchResult:
-    """
-    POST {event_type, payload, tenant_id} to the ironclaw-webhook-dispatch
-    Supabase Edge Function using the service-role Bearer token.
-
-    Failures are logged and returned as a failed EdgeDispatchResult — they
-    never raise so the verdict path is never blocked.
-    """
     service_role_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    dispatched_at = datetime.now(UTC).isoformat()
+
     if not service_role_key:
-        logger.error("webhook_service | dispatch_verdict_to_edge | SUPABASE_SERVICE_ROLE_KEY not set")
+        logger.error(
+            "webhook_service | dispatch_verdict_to_edge | SUPABASE_SERVICE_ROLE_KEY not set",
+        )
         return EdgeDispatchResult(
             event_type=event_type,
             tenant_id=tenant_id,
             http_status=None,
             succeeded=False,
             error_detail="SUPABASE_SERVICE_ROLE_KEY not configured",
-            dispatched_at=datetime.now(UTC).isoformat(),
+            dispatched_at=dispatched_at,
         )
 
     try:
         url = _edge_function_url(_EDGE_FUNCTION_NAME)
     except ValueError as exc:
-        logger.error("webhook_service | dispatch_verdict_to_edge | url build error | %s", exc)
+        logger.error(
+            "webhook_service | dispatch_verdict_to_edge | url build error | %s",
+            exc,
+        )
         return EdgeDispatchResult(
             event_type=event_type,
             tenant_id=tenant_id,
             http_status=None,
             succeeded=False,
             error_detail=str(exc),
-            dispatched_at=datetime.now(UTC).isoformat(),
+            dispatched_at=dispatched_at,
         )
 
     body: dict[str, Any] = {
         "event_type": event_type,
         "payload": payload,
         "tenant_id": tenant_id,
-        "dispatched_at": datetime.now(UTC).isoformat(),
+        "dispatched_at": dispatched_at,
     }
     body_bytes = json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
@@ -275,77 +403,79 @@ def dispatch_verdict_to_edge(
         "User-Agent": "IronClaw-Security/1.0",
     }
 
-    dispatched_at = datetime.now(UTC).isoformat()
+    http_status, response_body, error_detail = _post_json_with_httpx(
+        url=url,
+        body_bytes=body_bytes,
+        headers=headers,
+        timeout=timeout,
+    )
 
-    try:
-        with httpx.Client(timeout=timeout) as http:
-            response = http.post(url, content=body_bytes, headers=headers)
-
-        if response.is_success:
-            logger.info(
-                "webhook_service | dispatch_verdict_to_edge | event_type=%s tenant_id=%s http=%d",
-                event_type,
-                tenant_id,
-                response.status_code,
-            )
-            return EdgeDispatchResult(
-                event_type=event_type,
-                tenant_id=tenant_id,
-                http_status=response.status_code,
-                succeeded=True,
-                error_detail=None,
-                dispatched_at=dispatched_at,
-            )
-
-        error_detail = f"Non-2xx from edge function: HTTP {response.status_code} — {response.text[:512]}"
-        logger.warning(
-            "webhook_service | dispatch_verdict_to_edge | event_type=%s tenant_id=%s http=%d detail=%s",
+    if error_detail is None and http_status is not None:
+        logger.info(
+            "webhook_service | dispatch_verdict_to_edge | event_type=%s tenant_id=%s http=%d",
             event_type,
             tenant_id,
-            response.status_code,
-            error_detail,
+            http_status,
         )
         return EdgeDispatchResult(
             event_type=event_type,
             tenant_id=tenant_id,
-            http_status=response.status_code,
-            succeeded=False,
-            error_detail=error_detail,
+            http_status=http_status,
+            succeeded=True,
+            error_detail=None,
             dispatched_at=dispatched_at,
         )
 
-    except httpx.TimeoutException as exc:
-        detail = f"Timeout after {timeout}s contacting edge function: {exc}"
+    normalized_error = error_detail
+    if http_status is not None and response_body is not None:
+        normalized_error = f"Non-2xx from edge function: HTTP {http_status} — {response_body[:512]}"
+        logger.warning(
+            "webhook_service | dispatch_verdict_to_edge | event_type=%s tenant_id=%s http=%d detail=%s",
+            event_type,
+            tenant_id,
+            http_status,
+            normalized_error,
+        )
+    elif normalized_error and normalized_error.startswith("Timeout after"):
         logger.warning(
             "webhook_service | dispatch_verdict_to_edge | event_type=%s tenant_id=%s timeout",
             event_type,
             tenant_id,
         )
-        return EdgeDispatchResult(
-            event_type=event_type,
-            tenant_id=tenant_id,
-            http_status=None,
-            succeeded=False,
-            error_detail=detail,
-            dispatched_at=dispatched_at,
-        )
-
-    except Exception as exc:  # noqa: BLE001
-        detail = f"HTTP error contacting edge function: {exc}"
+    else:
         logger.error(
             "webhook_service | dispatch_verdict_to_edge | event_type=%s tenant_id=%s error=%s",
             event_type,
             tenant_id,
-            exc,
+            normalized_error,
         )
-        return EdgeDispatchResult(
-            event_type=event_type,
-            tenant_id=tenant_id,
-            http_status=None,
-            succeeded=False,
-            error_detail=detail,
-            dispatched_at=dispatched_at,
-        )
+
+    return EdgeDispatchResult(
+        event_type=event_type,
+        tenant_id=tenant_id,
+        http_status=http_status,
+        succeeded=False,
+        error_detail=normalized_error,
+        dispatched_at=dispatched_at,
+    )
+
+
+def dispatch_verdict_to_edge(
+    event_type: str,
+    payload: dict[str, Any],
+    tenant_id: str,
+    *,
+    timeout: float = _EDGE_DISPATCH_TIMEOUT_SECONDS,
+) -> EdgeDispatchResult:
+    return _dispatch_verdict_to_edge_impl(
+        event_type=event_type,
+        payload=payload,
+        tenant_id=tenant_id,
+        timeout=timeout,
+    )
+
+
+dispatchverdicttoedge = dispatch_verdict_to_edge
 
 
 # ---------------------------------------------------------------------------
@@ -365,9 +495,8 @@ def _query_subscriptions_for_event(
             _WEBHOOK_SUBSCRIPTIONS_TABLE,
             filters={"tenant_id": tenant_id, "active": True},
         )
-        # Filter for event membership in application layer (adapter-agnostic)
-        matching = [r for r in rows if event_type in (r.get("events") or [])]
-        return [WebhookSubscription.from_row(r) for r in matching]
+        matching = [row for row in rows if event_type in (row.get("events") or [])]
+        return [WebhookSubscription.from_row(row) for row in matching]
     except Exception as exc:  # noqa: BLE001
         logger.error(
             "webhook_service | query_subscriptions | tenant_id=%s event_type=%s error=%s",
@@ -387,19 +516,10 @@ def _write_delivery_log(
     record: WebhookDeliveryRecord,
     *,
     store: PersistenceStore | None = None,
-    upsert: bool = False,
 ) -> None:
     ps = store or _get_persistence_store()
     try:
-        row = record.to_dict()
-        if upsert:
-            ps.update(
-                _WEBHOOK_DELIVERY_TABLE,
-                row,
-                filters={"id": record.id},
-            )
-        else:
-            ps.insert(_WEBHOOK_DELIVERY_TABLE, row)
+        ps.insert(_WEBHOOK_DELIVERY_TABLE, record.to_dict())
     except Exception as exc:  # noqa: BLE001
         logger.error(
             "webhook_service | write_delivery_log | delivery_id=%s error=%s",
@@ -441,83 +561,6 @@ def _update_delivery_log_attempt(
             delivery_id,
             exc,
         )
-
-
-# ---------------------------------------------------------------------------
-# HTTP dispatch (synchronous, single attempt)
-# ---------------------------------------------------------------------------
-
-
-def _dispatch_http_post(
-    subscription: WebhookSubscription,
-    delivery_id: str,
-    event_type: str,
-    payload: dict[str, Any],
-    *,
-    attempt: int,
-    timeout: float = _DELIVERY_TIMEOUT_SECONDS,
-) -> tuple[int | None, str | None, str | None]:
-    body_bytes = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    signature = _compute_signature(subscription.secret_hash, body_bytes, timestamp)
-
-    headers = {
-        "Content-Type": "application/json",
-        _SIGNATURE_HEADER: signature,
-        _DELIVERY_ID_HEADER: delivery_id,
-        _EVENT_HEADER: event_type,
-        _TIMESTAMP_HEADER: timestamp,
-        "User-Agent": "IronClaw-Security/1.0",
-    }
-
-    try:
-        with httpx.Client(timeout=timeout) as http:
-            response = http.post(
-                subscription.target_url,
-                content=body_bytes,
-                headers=headers,
-            )
-        resp_text = response.text[:4096] if response.text else None
-        if response.is_success:
-            logger.info(
-                "webhook_service | dispatch | delivery_id=%s subscription_id=%s attempt=%d http=%d",
-                delivery_id,
-                subscription.id,
-                attempt,
-                response.status_code,
-            )
-            return response.status_code, resp_text, None
-        error_detail = f"Non-2xx response: HTTP {response.status_code}"
-        logger.warning(
-            "webhook_service | dispatch | delivery_id=%s subscription_id=%s attempt=%d http=%d detail=%s",
-            delivery_id,
-            subscription.id,
-            attempt,
-            response.status_code,
-            error_detail,
-        )
-        return response.status_code, resp_text, error_detail
-
-    except httpx.TimeoutException as exc:
-        detail = f"Timeout after {timeout}s: {exc}"
-        logger.warning(
-            "webhook_service | dispatch | delivery_id=%s subscription_id=%s attempt=%d timeout",
-            delivery_id,
-            subscription.id,
-            attempt,
-        )
-        return None, None, detail
-
-    except Exception as exc:  # noqa: BLE001
-        detail = f"HTTP error: {exc}"
-        logger.error(
-            "webhook_service | dispatch | delivery_id=%s subscription_id=%s attempt=%d error=%s",
-            delivery_id,
-            subscription.id,
-            attempt,
-            exc,
-        )
-        return None, None, detail
 
 
 # ---------------------------------------------------------------------------
@@ -587,7 +630,7 @@ def deliver_webhook(
         )
         _write_delivery_log(initial_record, store=store)
 
-    http_status, response_body, error_detail = _dispatch_http_post(
+    http_status, response_body, error_detail = dispatch_http_post(
         subscription,
         delivery_id,
         event_type,
@@ -595,7 +638,7 @@ def deliver_webhook(
         attempt=attempt_number,
     )
 
-    success = error_detail is None and http_status is not None and (200 <= http_status < 300)
+    success = error_detail is None and http_status is not None and 200 <= http_status < 300
 
     if success:
         final_status = WebhookDeliveryStatus.SUCCESS
@@ -657,14 +700,6 @@ def dispatch_event(
     store: PersistenceStore | None = None,
     fire_edge_function: bool = True,
 ) -> list[WebhookDispatchResult]:
-    """
-    Fan-out webhook delivery to all active subscriptions for this tenant/event,
-    then POST to the ironclaw-webhook-dispatch Edge Function so that server-side
-    downstream consumers (alerting, SIEM, realtime channels) are notified.
-
-    `fire_edge_function=False` disables the edge call for tests or environments
-    where the Edge Function is not deployed.
-    """
     subscriptions = _query_subscriptions_for_event(tenant_id, event_type, store=store)
 
     if not subscriptions:
@@ -675,11 +710,32 @@ def dispatch_event(
         )
 
     results: list[WebhookDispatchResult] = []
-    for sub in subscriptions:
-        result = deliver_webhook(sub, event_type, payload, store=store)
-        results.append(result)
+    for subscription in subscriptions:
+        try:
+            results.append(deliver_webhook(subscription, event_type, payload, store=store))
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "webhook_service | dispatch_event | subscription_delivery_error | subscription_id=%s tenant_id=%s event_type=%s error=%s",
+                subscription.id,
+                tenant_id,
+                event_type,
+                exc,
+            )
+            results.append(
+                WebhookDispatchResult(
+                    delivery_id=str(uuid.uuid4()),
+                    subscription_id=subscription.id,
+                    tenant_id=subscription.tenant_id,
+                    event_type=event_type,
+                    status=WebhookDeliveryStatus.FAILED,
+                    http_status=None,
+                    attempts=0,
+                    error_detail=str(exc),
+                    delivered_at=None,
+                )
+            )
 
-    succeeded = sum(1 for r in results if r.succeeded)
+    succeeded = sum(1 for result in results if result.succeeded)
     failed = len(results) - succeeded
     logger.info(
         "webhook_service | dispatch_event | tenant_id=%s event_type=%s subscriptions=%d succeeded=%d failed=%d",
@@ -744,7 +800,7 @@ def retry_failed_delivery(
                 error_detail=error_msg,
                 delivered_at=None,
             )
-        sub = WebhookSubscription.from_row(rows[0])
+        subscription = WebhookSubscription.from_row(rows[0])
     except Exception as exc:  # noqa: BLE001
         logger.error(
             "webhook_service | retry_failed_delivery | subscription fetch error | delivery_id=%s error=%s",
@@ -769,7 +825,7 @@ def retry_failed_delivery(
         payload = {"raw": payload_json}
 
     return deliver_webhook(
-        sub,
+        subscription,
         event_type,
         payload.get("data", payload),
         existing_delivery_id=delivery_id,
@@ -835,10 +891,6 @@ def list_retryable_deliveries(
     limit: int = 50,
     store: PersistenceStore | None = None,
 ) -> list[dict[str, Any]]:
-    """
-    Returns delivery log rows with status='failed' and next_attempt_at <= now.
-    Consumed by the webhooks router retry worker only.
-    """
     ps = store or _get_persistence_store()
     try:
         rows = ps.select(
@@ -847,7 +899,27 @@ def list_retryable_deliveries(
             limit=limit,
         )
         now_iso = datetime.now(UTC).isoformat()
-        return [r for r in rows if r.get("next_attempt_at") and r["next_attempt_at"] <= now_iso]
+        return [row for row in rows if row.get("next_attempt_at") and row["next_attempt_at"] <= now_iso]
     except Exception as exc:  # noqa: BLE001
         logger.error("webhook_service | list_retryable_deliveries | error=%s", exc)
         return []
+
+
+__all__ = [
+    "WebhookSubscription",
+    "WebhookDeliveryRecord",
+    "WebhookDispatchResult",
+    "EdgeDispatchResult",
+    "verify_webhook_signature",
+    "deliver_webhook",
+    "dispatch_event",
+    "retry_failed_delivery",
+    "get_delivery_log",
+    "list_delivery_logs_for_tenant",
+    "list_retryable_deliveries",
+    "_dispatch_http_post",
+    "dispatch_http_post",
+    "dispatchhttppost",
+    "dispatch_verdict_to_edge",
+    "dispatchverdicttoedge",
+]

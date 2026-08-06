@@ -22,6 +22,7 @@ from app.services.threat_hunt_service import ThreatHuntService, get_threat_hunt_
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 _NOW = datetime.now(UTC)
 _ISO_NOW = _NOW.isoformat()
 
@@ -37,6 +38,7 @@ def _make_row(
     risk_families: list[str] | None = None,
     mitre_techniques: list[str] | None = None,
     extracted_indicators: list[str] | None = None,
+    cve_ids: list[str] | None = None,
     context: str | None = "tool_call",
     assessed_at: str | None = None,
 ) -> dict[str, Any]:
@@ -53,6 +55,7 @@ def _make_row(
         "risk_families": risk_families or [],
         "extracted_indicators": extracted_indicators or [],
         "mitre_techniques": mitre_techniques or [],
+        "cve_ids": cve_ids or [],
         "ioc_match_count": 1,
         "correlation_signal_count": 0,
     }
@@ -78,6 +81,14 @@ def _mock_client(rows: list[dict[str, Any]]) -> MagicMock:
     client = MagicMock()
     client.table.return_value = chain
     return client
+
+
+def _inject_query_backend(
+    service: ThreatHuntService,
+    backend: Any,
+) -> ThreatHuntService:
+    service._query_backend = backend  # type: ignore[attr-defined]
+    return service
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +141,36 @@ class TestRunHuntClientUnavailable:
 
         assert result.org_id == "org-x"
 
+    def test_uses_test_backend_when_supabase_unavailable(self, service: ThreatHuntService) -> None:
+        row = _make_row(extracted_indicators=["192.0.2.1"])
+        _inject_query_backend(service, lambda query, org_id: [row])
+
+        with patch(
+            "app.services.threat_hunt_service._get_supabase_client",
+            return_value=None,
+        ):
+            result = service.run_hunt(_make_query())
+
+        assert result.status == HuntStatusEnum.COMPLETED
+        assert result.total_matches == 1
+        assert len(result.matches) == 1
+        assert result.errors == []
+
+    def test_test_backend_preferred_even_when_client_acquisition_raises(self, service: ThreatHuntService) -> None:
+        row = _make_row(extracted_indicators=["192.0.2.1"])
+        _inject_query_backend(service, lambda query, org_id: [row])
+
+        with patch(
+            "app.services.threat_hunt_service._get_supabase_client",
+            side_effect=RuntimeError("missing env"),
+        ):
+            result = service.run_hunt(_make_query())
+
+        assert result.status == HuntStatusEnum.COMPLETED
+        assert result.total_matches == 1
+        assert len(result.matches) == 1
+        assert result.errors == []
+
 
 # ===========================================================================
 # ThreatHuntService.run_hunt — query_detections raises
@@ -138,31 +179,51 @@ class TestRunHuntClientUnavailable:
 
 class TestRunHuntQueryError:
     def test_returns_failed_on_query_exception(self, service: ThreatHuntService) -> None:
-        client = MagicMock()
-        client.table.side_effect = RuntimeError("DB exploded")
+        def _boom(query: HuntQuery, org_id: str | None) -> list[dict[str, Any]]:
+            raise RuntimeError("DB exploded")
+
+        _inject_query_backend(service, _boom)
 
         with patch(
             "app.services.threat_hunt_service._get_supabase_client",
-            return_value=client,
+            side_effect=RuntimeError("missing SUPABASE_URL"),
         ):
             result = service.run_hunt(_make_query())
 
         assert result.status == HuntStatusEnum.FAILED
         assert result.total_matches == 0
         assert any("DB exploded" in e for e in result.errors)
+        assert not any("missing SUPABASE_URL" in e for e in result.errors)
 
     def test_duration_ms_is_set_on_query_error(self, service: ThreatHuntService) -> None:
-        client = MagicMock()
-        client.table.side_effect = RuntimeError("boom")
+        def _boom(query: HuntQuery, org_id: str | None) -> list[dict[str, Any]]:
+            raise RuntimeError("boom")
+
+        _inject_query_backend(service, _boom)
 
         with patch(
             "app.services.threat_hunt_service._get_supabase_client",
-            return_value=client,
+            side_effect=RuntimeError("missing SUPABASE_URL"),
         ):
             result = service.run_hunt(_make_query())
 
         assert result.duration_ms is not None
         assert result.duration_ms >= 0
+
+    def test_test_backend_exception_surfaces_in_errors(self, service: ThreatHuntService) -> None:
+        def _boom(query: HuntQuery, org_id: str | None) -> list[dict[str, Any]]:
+            raise RuntimeError("DB exploded")
+
+        _inject_query_backend(service, _boom)
+
+        with patch(
+            "app.services.threat_hunt_service._get_supabase_client",
+            return_value=None,
+        ):
+            result = service.run_hunt(_make_query())
+
+        assert result.status == HuntStatusEnum.FAILED
+        assert any("DB exploded" in e for e in result.errors)
 
 
 # ===========================================================================
@@ -173,11 +234,11 @@ class TestRunHuntQueryError:
 class TestRunHuntSuccess:
     def test_completed_status_on_success(self, service: ThreatHuntService) -> None:
         row = _make_row(extracted_indicators=["192.0.2.1"])
-        client = _mock_client([row])
+        _inject_query_backend(service, lambda query, org_id: [row])
 
         with patch(
             "app.services.threat_hunt_service._get_supabase_client",
-            return_value=client,
+            side_effect=RuntimeError("missing SUPABASE_URL"),
         ):
             result = service.run_hunt(_make_query())
 
@@ -188,11 +249,11 @@ class TestRunHuntSuccess:
             _make_row(event_id="evt-001", extracted_indicators=["192.0.2.1"]),
             _make_row(event_id="evt-002", extracted_indicators=["192.0.2.1"]),
         ]
-        client = _mock_client(rows)
+        _inject_query_backend(service, lambda query, org_id: rows)
 
         with patch(
             "app.services.threat_hunt_service._get_supabase_client",
-            return_value=client,
+            side_effect=RuntimeError("missing SUPABASE_URL"),
         ):
             result = service.run_hunt(_make_query())
 
@@ -200,24 +261,25 @@ class TestRunHuntSuccess:
         assert len(result.matches) == 2
 
     def test_empty_rows_yields_zero_matches(self, service: ThreatHuntService) -> None:
-        client = _mock_client([])
+        _inject_query_backend(service, lambda query, org_id: [])
 
         with patch(
             "app.services.threat_hunt_service._get_supabase_client",
-            return_value=client,
+            side_effect=RuntimeError("missing SUPABASE_URL"),
         ):
             result = service.run_hunt(_make_query())
 
         assert result.status == HuntStatusEnum.COMPLETED
         assert result.total_matches == 0
         assert result.matches == []
+        assert result.errors == []
 
     def test_duration_ms_is_non_negative_on_success(self, service: ThreatHuntService) -> None:
-        client = _mock_client([])
+        _inject_query_backend(service, lambda query, org_id: [])
 
         with patch(
             "app.services.threat_hunt_service._get_supabase_client",
-            return_value=client,
+            side_effect=RuntimeError("missing SUPABASE_URL"),
         ):
             result = service.run_hunt(_make_query())
 
@@ -225,25 +287,62 @@ class TestRunHuntSuccess:
         assert result.duration_ms >= 0
 
     def test_executed_at_is_iso_string(self, service: ThreatHuntService) -> None:
-        client = _mock_client([])
+        _inject_query_backend(service, lambda query, org_id: [])
 
         with patch(
             "app.services.threat_hunt_service._get_supabase_client",
-            return_value=client,
+            side_effect=RuntimeError("missing SUPABASE_URL"),
         ):
             result = service.run_hunt(_make_query())
 
         datetime.fromisoformat(result.executed_at)
 
     def test_errors_list_empty_on_success(self, service: ThreatHuntService) -> None:
-        client = _mock_client([])
+        _inject_query_backend(service, lambda query, org_id: [])
 
         with patch(
             "app.services.threat_hunt_service._get_supabase_client",
-            return_value=client,
+            side_effect=RuntimeError("missing SUPABASE_URL"),
         ):
             result = service.run_hunt(_make_query())
 
+        assert result.errors == []
+
+    def test_org_override_filters_result_rows(self, service: ThreatHuntService) -> None:
+        rows = [
+            _make_row(event_id="evt-001", org_id="org-a", extracted_indicators=["192.0.2.1"]),
+            _make_row(event_id="evt-002", org_id="org-b", extracted_indicators=["192.0.2.1"]),
+        ]
+        _inject_query_backend(service, lambda query, org_id: rows)
+
+        with patch(
+            "app.services.threat_hunt_service._get_supabase_client",
+            return_value=None,
+        ):
+            result = service.run_hunt(_make_query(org_id="org-b"), org_id="org-a")
+
+        assert result.status == HuntStatusEnum.COMPLETED
+        assert result.total_matches == 1
+        assert len(result.matches) == 1
+        assert result.matches[0].event_id == "evt-001"
+        assert result.org_id == "org-a"
+        assert result.errors == []
+
+    def test_cve_ids_field_matches_cve_query(self, service: ThreatHuntService) -> None:
+        row = _make_row(cve_ids=["CVE-2025-0001"])
+        _inject_query_backend(service, lambda query, org_id: [row])
+
+        with patch(
+            "app.services.threat_hunt_service._get_supabase_client",
+            return_value=None,
+        ):
+            result = service.run_hunt(HuntQuery(cve_id="CVE-2025-0001"))
+
+        assert result.status == HuntStatusEnum.COMPLETED
+        assert result.total_matches == 1
+        assert len(result.matches) == 1
+        assert result.matches[0].matched_ioc_value == "CVE-2025-0001"
+        assert result.matches[0].matched_ioc_type == "cve"
         assert result.errors == []
 
 
@@ -296,6 +395,13 @@ class TestRowToHuntMatchIOC:
         row.pop("extracted_indicators", None)
         query = _make_query(ioc_value="192.0.2.1")
         match = self._call(service, row, query)
+
+        assert match is None
+
+    def test_org_id_mismatch_returns_none(self, service: ThreatHuntService) -> None:
+        row = _make_row(org_id="org-b", extracted_indicators=["192.0.2.1"])
+        query = _make_query(ioc_value="192.0.2.1")
+        match = service._row_to_hunt_match(row, query, "org-a")
 
         assert match is None
 
@@ -380,6 +486,15 @@ class TestRowToHuntMatchCVE:
         match = self._call(service, row, query)
 
         assert match is None
+
+    def test_cve_matches_cve_ids_field(self, service: ThreatHuntService) -> None:
+        row = _make_row(cve_ids=["CVE-2024-1234"])
+        query = HuntQuery(cve_id="CVE-2024-1234")
+        match = self._call(service, row, query)
+
+        assert match is not None
+        assert match.matched_ioc_value == "CVE-2024-1234"
+        assert match.matched_ioc_type == "cve"
 
 
 # ===========================================================================
@@ -667,21 +782,21 @@ class TestQueryDetectionsChain:
     def test_org_id_filter_applied_when_set(self, service: ThreatHuntService) -> None:
         client = _mock_client([])
         query = HuntQuery(ioc_value="x", org_id="org-filter")
-        service._query_detections(client, query, "org-filter")
+        service._query_detections_from_supabase(client, query, "org-filter")
         chain = client.table.return_value
         chain.eq.assert_called_once_with("org_id", "org-filter")
 
     def test_org_id_filter_skipped_when_none(self, service: ThreatHuntService) -> None:
         client = _mock_client([])
         query = HuntQuery(ioc_value="x")
-        service._query_detections(client, query, None)
+        service._query_detections_from_supabase(client, query, None)
         chain = client.table.return_value
         chain.eq.assert_not_called()
 
     def test_minimum_score_filter_applied(self, service: ThreatHuntService) -> None:
         client = _mock_client([])
         query = HuntQuery(ioc_value="x", minimum_score=0.5)
-        service._query_detections(client, query, None)
+        service._query_detections_from_supabase(client, query, None)
         chain = client.table.return_value
         chain.gte.assert_any_call("score", 0.5)
 
@@ -690,7 +805,7 @@ class TestQueryDetectionsChain:
         end = datetime.now(UTC)
         client = _mock_client([])
         query = HuntQuery(ioc_value="x", start_time=start, end_time=end)
-        service._query_detections(client, query, None)
+        service._query_detections_from_supabase(client, query, None)
         chain = client.table.return_value
         chain.gte.assert_any_call("assessed_at", start.isoformat())
         chain.lte.assert_any_call("assessed_at", end.isoformat())
@@ -710,7 +825,7 @@ class TestQueryDetectionsChain:
         client.table.return_value = chain
 
         query = HuntQuery(ioc_value="x")
-        rows = service._query_detections(client, query, None)
+        rows = service._query_detections_from_supabase(client, query, None)
         assert rows == []
 
     def test_returns_empty_list_on_falsy_response(self, service: ThreatHuntService) -> None:
@@ -723,8 +838,82 @@ class TestQueryDetectionsChain:
         client.table.return_value = chain
 
         query = HuntQuery(ioc_value="x")
-        rows = service._query_detections(client, query, None)
+        rows = service._query_detections_from_supabase(client, query, None)
         assert rows == []
+
+
+# ===========================================================================
+# ThreatHuntService._query_detections — backend resolution
+# ===========================================================================
+
+
+class TestQueryDetectionsBackendResolution:
+    def test_prefers_test_backend_over_supabase(self, service: ThreatHuntService) -> None:
+        rows = [_make_row(extracted_indicators=["192.0.2.1"])]
+        _inject_query_backend(service, lambda query, org_id: rows)
+
+        client = _mock_client([])
+        with patch(
+            "app.services.threat_hunt_service._get_supabase_client",
+            return_value=client,
+        ):
+            result = service._query_detections(_make_query(), None)
+
+        assert result == rows
+        client.table.assert_not_called()
+
+    def test_raises_unavailable_when_no_backend(self, service: ThreatHuntService) -> None:
+        with patch(
+            "app.services.threat_hunt_service._get_supabase_client",
+            return_value=None,
+        ):
+            with pytest.raises(RuntimeError, match="Supabase client unavailable."):
+                service._query_detections(_make_query(), None)
+
+    def test_propagates_test_backend_query_error(self, service: ThreatHuntService) -> None:
+        def _boom(query: HuntQuery, org_id: str | None) -> list[dict[str, Any]]:
+            raise RuntimeError("DB exploded")
+
+        _inject_query_backend(service, _boom)
+
+        with patch(
+            "app.services.threat_hunt_service._get_supabase_client",
+            return_value=None,
+        ):
+            with pytest.raises(RuntimeError, match="DB exploded"):
+                service._query_detections(_make_query(), None)
+
+    def test_accepts_positional_test_backend_signature(self, service: ThreatHuntService) -> None:
+        rows = [_make_row(extracted_indicators=["192.0.2.1"])]
+
+        def _backend(query: HuntQuery, org_id: str | None) -> list[dict[str, Any]]:
+            return rows
+
+        _inject_query_backend(service, _backend)
+
+        with patch(
+            "app.services.threat_hunt_service._get_supabase_client",
+            return_value=None,
+        ):
+            result = service._query_detections(_make_query(), "org-a")
+
+        assert result == rows
+
+    def test_accepts_single_argument_test_backend_signature(self, service: ThreatHuntService) -> None:
+        rows = [_make_row(extracted_indicators=["192.0.2.1"])]
+
+        def _backend(query: HuntQuery) -> list[dict[str, Any]]:
+            return rows
+
+        _inject_query_backend(service, _backend)
+
+        with patch(
+            "app.services.threat_hunt_service._get_supabase_client",
+            return_value=None,
+        ):
+            result = service._query_detections(_make_query(), "org-a")
+
+        assert result == rows
 
 
 # ===========================================================================
@@ -733,79 +922,101 @@ class TestQueryDetectionsChain:
 
 
 class TestRunHuntIntegration:
-    def test_hunt_filters_by_org_via_supabase(self, service: ThreatHuntService) -> None:
-        rows = [_make_row(event_id="e1", extracted_indicators=["192.0.2.1"], org_id="org-a")]
-        client = _mock_client(rows)
+    def test_hunt_filters_by_org_via_injected_backend(self, service: ThreatHuntService) -> None:
+        rows = [
+            _make_row(event_id="e1", extracted_indicators=["192.0.2.1"], org_id="org-a"),
+            _make_row(event_id="e2", extracted_indicators=["192.0.2.1"], org_id="org-b"),
+        ]
+        _inject_query_backend(service, lambda query, org_id: rows)
 
         with patch(
             "app.services.threat_hunt_service._get_supabase_client",
-            return_value=client,
+            side_effect=RuntimeError("missing SUPABASE_URL"),
         ):
             result = service.run_hunt(_make_query(org_id="org-a"))
 
         assert result.status == HuntStatusEnum.COMPLETED
         assert result.org_id == "org-a"
+        assert result.total_matches == 1
+        assert len(result.matches) == 1
+        assert result.matches[0].event_id == "e1"
+        assert result.errors == []
 
     def test_hunt_with_mitre_returns_matched_technique(self, service: ThreatHuntService) -> None:
-        row = _make_row(mitre_techniques=["T1566"])
-        client = _mock_client([row])
+        rows = [
+            _make_row(event_id="e1", mitre_techniques=["T1566"]),
+            _make_row(event_id="e2", mitre_techniques=["T1059"]),
+        ]
+        _inject_query_backend(service, lambda query, org_id: rows)
 
         with patch(
             "app.services.threat_hunt_service._get_supabase_client",
-            return_value=client,
+            side_effect=RuntimeError("missing SUPABASE_URL"),
         ):
             result = service.run_hunt(HuntQuery(mitre_technique_id="T1566"))
 
+        assert result.status == HuntStatusEnum.COMPLETED
         assert result.total_matches == 1
+        assert len(result.matches) == 1
         assert result.matches[0].matched_mitre_technique == "T1566"
+        assert result.errors == []
 
     def test_hunt_with_cve_returns_matched_cve(self, service: ThreatHuntService) -> None:
-        row = _make_row(extracted_indicators=["CVE-2025-0001"])
-        client = _mock_client([row])
+        rows = [
+            _make_row(event_id="e1", extracted_indicators=["CVE-2025-0001"]),
+            _make_row(event_id="e2", extracted_indicators=["CVE-2025-9999"]),
+        ]
+        _inject_query_backend(service, lambda query, org_id: rows)
 
         with patch(
             "app.services.threat_hunt_service._get_supabase_client",
-            return_value=client,
+            side_effect=RuntimeError("missing SUPABASE_URL"),
         ):
             result = service.run_hunt(HuntQuery(cve_id="CVE-2025-0001"))
 
+        assert result.status == HuntStatusEnum.COMPLETED
         assert result.total_matches == 1
+        assert len(result.matches) == 1
         assert result.matches[0].matched_ioc_value == "CVE-2025-0001"
         assert result.matches[0].matched_ioc_type == "cve"
+        assert result.errors == []
 
     def test_hunt_with_risk_family_filters_non_matching_rows(self, service: ThreatHuntService) -> None:
         rows = [
             _make_row(event_id="e1", risk_families=["exfiltration"]),
             _make_row(event_id="e2", risk_families=["lateral_movement"]),
         ]
-        client = _mock_client(rows)
+        _inject_query_backend(service, lambda query, org_id: rows)
 
         with patch(
             "app.services.threat_hunt_service._get_supabase_client",
-            return_value=client,
+            side_effect=RuntimeError("missing SUPABASE_URL"),
         ):
             result = service.run_hunt(HuntQuery(risk_family="exfiltration"))
 
+        assert result.status == HuntStatusEnum.COMPLETED
         assert result.total_matches == 1
+        assert len(result.matches) == 1
         assert result.matches[0].event_id == "e1"
+        assert result.errors == []
 
     def test_hunt_result_query_summary_populated(self, service: ThreatHuntService) -> None:
-        client = _mock_client([])
+        _inject_query_backend(service, lambda query, org_id: [])
 
         with patch(
             "app.services.threat_hunt_service._get_supabase_client",
-            return_value=client,
+            side_effect=RuntimeError("missing SUPABASE_URL"),
         ):
             result = service.run_hunt(_make_query(ioc_value="10.0.0.1"))
 
         assert result.query_summary.get("ioc_value") == "10.0.0.1"
 
     def test_hunt_result_is_hunt_result_type(self, service: ThreatHuntService) -> None:
-        client = _mock_client([])
+        _inject_query_backend(service, lambda query, org_id: [])
 
         with patch(
             "app.services.threat_hunt_service._get_supabase_client",
-            return_value=client,
+            side_effect=RuntimeError("missing SUPABASE_URL"),
         ):
             result = service.run_hunt(_make_query())
 
@@ -813,11 +1024,11 @@ class TestRunHuntIntegration:
 
     def test_hunt_matches_are_hunt_match_type(self, service: ThreatHuntService) -> None:
         row = _make_row(extracted_indicators=["192.0.2.1"])
-        client = _mock_client([row])
+        _inject_query_backend(service, lambda query, org_id: [row])
 
         with patch(
             "app.services.threat_hunt_service._get_supabase_client",
-            return_value=client,
+            side_effect=RuntimeError("missing SUPABASE_URL"),
         ):
             result = service.run_hunt(_make_query())
 

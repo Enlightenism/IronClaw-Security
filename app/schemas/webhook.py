@@ -5,12 +5,16 @@ from typing import Any
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator
 
 from app.models.webhook import (
+    WEBHOOK_ERROR_MESSAGE_MAX_LENGTH,
+    WEBHOOK_MAX_RETRIES_MAX,
+    WEBHOOK_SCHEMA_VERSION,
     WebhookDeliveryStatus,
     WebhookEventType,
     WebhookSigningAlgorithm,
     WebhookStatus,
-    _validate_event_list,
-    _validate_https_url,
+    _normalize_event_list,
+    _normalize_event_value,
+    _require_https_url,
 )
 
 # ---------------------------------------------------------------------------
@@ -24,6 +28,7 @@ class _WebhookSchemaBase(BaseModel):
         from_attributes=True,
         use_enum_values=True,
         populate_by_name=True,
+        str_strip_whitespace=True,
     )
 
 
@@ -35,13 +40,45 @@ class _WebhookReadBase(BaseModel):
         from_attributes=True,
         use_enum_values=True,
         populate_by_name=True,
+        str_strip_whitespace=True,
     )
+
+
+# ---------------------------------------------------------------------------
+# Shared validators
+# ---------------------------------------------------------------------------
+
+
+def _validate_public_event_list(
+    value: list[str] | list[WebhookEventType] | None,
+) -> list[str] | None:
+    normalized = _normalize_event_list(value, allow_all_wildcard=False)
+    if normalized is None:
+        return None
+    return [event.value for event in normalized]
+
+
+def _validate_read_event_list(
+    value: list[str] | list[WebhookEventType] | None,
+) -> list[str] | None:
+    normalized = _normalize_event_list(value, allow_all_wildcard=True)
+    if normalized is None:
+        return None
+    return [event.value for event in normalized]
+
+
+def _validate_public_event_value(value: Any) -> str:
+    event = _normalize_event_value(value)
+    if event is WebhookEventType.ALL:
+        raise ValueError("The '*' wildcard is not accepted here.")
+    return event.value
 
 
 # ---------------------------------------------------------------------------
 # WebhookEventType re-export
 # Consumers importing from app.schemas.webhook get the canonical enum.
 # ---------------------------------------------------------------------------
+
 
 __all__ = [
     "WebhookEventType",
@@ -66,7 +103,6 @@ __all__ = [
     "WebhookEventPayloadSchema",
 ]
 
-
 # ---------------------------------------------------------------------------
 # Subscription — Create
 # ---------------------------------------------------------------------------
@@ -74,14 +110,10 @@ __all__ = [
 
 class WebhookSubscriptionCreateSchema(_WebhookSchemaBase):
     """
-    POST /webhooks/subscriptions request body.
+    Compatibility request body for older subscription-oriented routes.
 
-    - target_url: must be HTTPS.
-    - events: must be valid WebhookEventType values; '*' wildcard is rejected.
-    - max_attempts: delivery retry ceiling (1–10).
-    - metadata: arbitrary caller key/value store.
-
-    The signing secret is server-generated on creation and returned once.
+    This schema remains intentionally shaped like the legacy subscription API
+    while delegating validation rules to the canonical webhook model helpers.
     """
 
     target_url: AnyHttpUrl = Field(
@@ -96,7 +128,7 @@ class WebhookSubscriptionCreateSchema(_WebhookSchemaBase):
     max_attempts: int = Field(
         default=5,
         ge=1,
-        le=10,
+        le=WEBHOOK_MAX_RETRIES_MAX,
         description="Maximum delivery attempts before the subscription is marked EXHAUSTED.",
     )
     metadata: dict[str, Any] = Field(
@@ -106,13 +138,15 @@ class WebhookSubscriptionCreateSchema(_WebhookSchemaBase):
 
     @field_validator("target_url", mode="before")
     @classmethod
-    def _require_https(cls, v: Any) -> Any:
-        return _validate_https_url(v)
+    def _require_https(cls, value: Any) -> Any:
+        return _require_https_url(value)
 
-    @field_validator("events")
+    @field_validator("events", mode="before")
     @classmethod
-    def _validate_events(cls, v: list[str]) -> list[str]:
-        return _validate_event_list(v) or v
+    def _validate_events(cls, value: Any) -> list[str]:
+        normalized = _validate_public_event_list(value)
+        assert normalized is not None
+        return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +156,7 @@ class WebhookSubscriptionCreateSchema(_WebhookSchemaBase):
 
 class WebhookSubscriptionUpdateSchema(_WebhookSchemaBase):
     """
-    PATCH /webhooks/subscriptions/{subscription_id} request body.
+    Compatibility PATCH request body for older subscription-oriented routes.
 
     All fields are optional — only supplied fields are applied.
     secret_hash is never accepted from the caller.
@@ -137,16 +171,20 @@ class WebhookSubscriptionUpdateSchema(_WebhookSchemaBase):
         min_length=1,
         description="Replace the full subscribed event list.",
     )
-    max_attempts: int | None = Field(default=None, ge=1, le=10)
+    max_attempts: int | None = Field(
+        default=None,
+        ge=1,
+        le=WEBHOOK_MAX_RETRIES_MAX,
+    )
     metadata: dict[str, Any] | None = Field(
         default=None,
         description="Replace the metadata map.",
     )
 
-    @field_validator("events")
+    @field_validator("events", mode="before")
     @classmethod
-    def _validate_events(cls, v: list[str] | None) -> list[str] | None:
-        return _validate_event_list(v)
+    def _validate_events(cls, value: Any) -> list[str] | None:
+        return _validate_public_event_list(value)
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +194,8 @@ class WebhookSubscriptionUpdateSchema(_WebhookSchemaBase):
 
 class WebhookSubscriptionResponseSchema(_WebhookReadBase):
     """
-    Read response for a single webhook subscription record.
+    Compatibility read response for a single webhook subscription record.
+
     secret_hash is permanently excluded — only secret_hint is surfaced.
     """
 
@@ -173,6 +212,14 @@ class WebhookSubscriptionResponseSchema(_WebhookReadBase):
         description="First 8 chars of the signing secret prefix — secret is never re-exposed.",
     )
 
+    @field_validator("events", mode="before")
+    @classmethod
+    def _validate_events(cls, value: Any) -> list[str]:
+        normalized = _validate_read_event_list(value)
+        if normalized is None:
+            return []
+        return normalized
+
 
 # ---------------------------------------------------------------------------
 # Subscription — Create Response (one-time signing secret exposure)
@@ -182,6 +229,7 @@ class WebhookSubscriptionResponseSchema(_WebhookReadBase):
 class WebhookSubscriptionCreateResponseSchema(_WebhookReadBase):
     """
     Response for POST /webhooks/subscriptions.
+
     signing_secret is returned exactly once at creation — store it securely.
     It will not appear on any subsequent read.
     """
@@ -200,8 +248,16 @@ class WebhookSubscriptionCreateResponseSchema(_WebhookReadBase):
     )
     signing_secret: str = Field(
         ...,
-        description=("Full HMAC-SHA256 signing secret. Returned once at creation only — store it securely and do not log it."),
+        description=("Full signing secret. Returned once at creation only — store it securely and do not log it."),
     )
+
+    @field_validator("events", mode="before")
+    @classmethod
+    def _validate_events(cls, value: Any) -> list[str]:
+        normalized = _validate_read_event_list(value)
+        if normalized is None:
+            return []
+        return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -223,8 +279,9 @@ class WebhookSubscriptionListResponseSchema(_WebhookReadBase):
 
 class WebhookDeliveryLogSchema(_WebhookReadBase):
     """
-    Read model for a single row from the webhook_delivery_log table.
-    Aligns with GET /webhooks/deliveries column projection.
+    Compatibility read model for a single row from the webhook delivery log table.
+
+    Aligns legacy field names with canonical event and status validation.
     """
 
     id: str
@@ -237,10 +294,18 @@ class WebhookDeliveryLogSchema(_WebhookReadBase):
         default=None,
         description="HTTP response status code from the last delivery attempt.",
     )
-    error_detail: str | None = Field(default=None, max_length=1024)
+    error_detail: str | None = Field(
+        default=None,
+        max_length=WEBHOOK_ERROR_MESSAGE_MAX_LENGTH,
+    )
     delivered_at: str | None = None
     next_attempt_at: str | None = None
     created_at: str
+
+    @field_validator("event_type", mode="before")
+    @classmethod
+    def _validate_event_type(cls, value: Any) -> str:
+        return _normalize_event_value(value).value
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +328,7 @@ class WebhookDeliveryLogListResponseSchema(_WebhookReadBase):
 class WebhookTestRequestSchema(_WebhookSchemaBase):
     """
     POST /webhooks/subscriptions/{subscription_id}/test request body.
+
     Triggers a synthetic delivery to verify endpoint connectivity.
     """
 
@@ -270,6 +336,11 @@ class WebhookTestRequestSchema(_WebhookSchemaBase):
         default=WebhookEventType.WEBHOOK_TEST,
         description="IronClaw event type to simulate in the test delivery.",
     )
+
+    @field_validator("event_type", mode="before")
+    @classmethod
+    def _validate_event_type(cls, value: Any) -> str:
+        return _validate_public_event_value(value)
 
 
 class WebhookTestResponseSchema(_WebhookReadBase):
@@ -279,9 +350,17 @@ class WebhookTestResponseSchema(_WebhookReadBase):
     event_type: str
     delivery_status: WebhookDeliveryStatus
     http_status: int | None = None
-    duration_ms: int | None = None
-    error_message: str | None = None
+    duration_ms: int | None = Field(default=None, ge=0)
+    error_message: str | None = Field(
+        default=None,
+        max_length=WEBHOOK_ERROR_MESSAGE_MAX_LENGTH,
+    )
     tested_at: str
+
+    @field_validator("event_type", mode="before")
+    @classmethod
+    def _validate_event_type(cls, value: Any) -> str:
+        return _validate_public_event_value(value)
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +371,7 @@ class WebhookTestResponseSchema(_WebhookReadBase):
 class WebhookRetryResponseSchema(_WebhookReadBase):
     """
     Response for POST /webhooks/deliveries/{delivery_id}/retry.
+
     Confirms that a failed delivery has been re-queued.
     """
 
@@ -300,6 +380,11 @@ class WebhookRetryResponseSchema(_WebhookReadBase):
     event_type: str
     previous_status: WebhookDeliveryStatus
     queued_at: str
+
+    @field_validator("event_type", mode="before")
+    @classmethod
+    def _validate_event_type(cls, value: Any) -> str:
+        return _normalize_event_value(value).value
 
 
 # ---------------------------------------------------------------------------
@@ -310,10 +395,11 @@ class WebhookRetryResponseSchema(_WebhookReadBase):
 class WebhookEventPayloadSchema(_WebhookSchemaBase):
     """
     Schema-layer mirror of the outbound delivery envelope.
+
     Used for OpenAPI documentation and validation in test/dispatch endpoints.
 
-    Receivers must verify X-IronClaw-Signature-256 against
-    HMAC-SHA256(signing_secret, raw_request_body) before trusting any field.
+    Receivers must verify the configured webhook signature header against the
+    raw request body before trusting any field.
     """
 
     model_config = ConfigDict(
@@ -321,6 +407,7 @@ class WebhookEventPayloadSchema(_WebhookSchemaBase):
         from_attributes=True,
         use_enum_values=True,
         populate_by_name=True,
+        str_strip_whitespace=True,
     )
 
     ironclaw_delivery_id: str = Field(
@@ -331,7 +418,7 @@ class WebhookEventPayloadSchema(_WebhookSchemaBase):
     event_type: str
     tenant_id: str | None = None
     schema_version: str = Field(
-        default="1.0",
+        default=WEBHOOK_SCHEMA_VERSION,
         description="Payload schema version for forward compatibility.",
     )
     data: dict[str, Any] = Field(
@@ -339,3 +426,8 @@ class WebhookEventPayloadSchema(_WebhookSchemaBase):
         description="Event-specific payload body.",
     )
     sent_at: str
+
+    @field_validator("event_type", mode="before")
+    @classmethod
+    def _validate_event_type(cls, value: Any) -> str:
+        return _normalize_event_value(value).value

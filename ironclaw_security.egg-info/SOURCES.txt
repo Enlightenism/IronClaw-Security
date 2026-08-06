@@ -541,7 +541,6 @@ tests/test_auth.py
 tests/test_auth_integration.py
 tests/test_auth_registry.py
 tests/test_backup_restore.py
-tests/test_billing.py
 tests/test_billing_core.py
 tests/test_billing_org_keys.py
 tests/test_billing_org_wallet.py
@@ -559,11 +558,13 @@ tests/test_claude_stream_guard.py
 tests/test_cli_install.py
 tests/test_cli_verify.py
 tests/test_compatibility_matrix.py
+tests/test_config.py
 tests/test_customer_key_detail.py
 tests/test_dashboard.py
 tests/test_data_retention.py
 tests/test_dependencies_auth.py
 tests/test_dependencies_auth_integration.py
+tests/test_dependencies_customer_auth.py
 tests/test_detonation_service.py
 tests/test_docs_and_openapi.py
 tests/test_end_to_end_claude_code_integration.py
@@ -579,7 +580,6 @@ tests/test_guard_execute_boundaries.py
 tests/test_guard_facade.py
 tests/test_guard_routes.py
 tests/test_hardening_service.py
-tests/test_heuristics.py
 tests/test_history.py
 tests/test_history_api.py
 tests/test_incidents_api.py
@@ -714,8 +714,8 @@ tests/test_unit_wallet.py
 tests/test_unit_wallet_org_keys.py
 tests/test_usage_reports.py
 tests/test_usage_reports_ui.py
+tests/test_webhook_models.py
 tests/test_webhook_service.py
-tests/test_webhooks.py
 tests/testaccesscontrol.py
 tests/testactionhistorytest.py
 tests/testactionusage.py

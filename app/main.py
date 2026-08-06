@@ -16,7 +16,6 @@ from app.core.settings import get_settings
 
 ProtectedDependencyFactory = Callable[[], Any]
 
-
 _log = logging.getLogger(__name__)
 
 
@@ -169,6 +168,10 @@ def _is_auth_required() -> bool:
     except Exception:
         return True
 
+    effective = _coerce_optional_bool(getattr(settings, "effective_auth_required", None))
+    if effective is not None:
+        return effective
+
     explicit = _coerce_optional_bool(getattr(settings, "auth_required", None))
     if explicit is not None:
         return explicit
@@ -230,7 +233,7 @@ def _stripe_router_configs() -> list[tuple[Any, dict[str, Any]]]:
 
     auth_required = _is_auth_required()
     _log.info(
-        "main: including stripe router with route-level auth control; AUTH_REQUIRED=%s",
+        "main: including stripe router with route-level auth control; effective_auth_required=%s",
         auth_required,
     )
 
@@ -244,6 +247,7 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
     dependencies = _protected_dependencies()
     agent_dependencies = _agent_protected_dependencies("agent_id")
     action_execute_router = _optional_router("app.api.action_execute")
+    event_simulation_router = _optional_router("app.api.event_simulation")
     return [
         (_optional_router("app.api.requestcontext"), {"dependencies": dependencies}),
         (_optional_router("app.api.history"), {"prefix": "/history", "dependencies": dependencies}),
@@ -293,6 +297,8 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (_optional_router("app.api.threat_detection"), {"dependencies": dependencies}),
         (_optional_router("app.api.threat_hunt"), {"dependencies": dependencies}),
         (_optional_router("app.api.ioc_management"), {"dependencies": dependencies}),
+        (event_simulation_router, {"prefix": "/events", "dependencies": dependencies}),
+        (event_simulation_router, {"prefix": "/api/events", "dependencies": dependencies}),
         (_optional_router("app.worker.remediation_worker"), {"dependencies": dependencies}),
     ]
 
@@ -655,7 +661,7 @@ async def lifespan(app: FastAPI):
         settings = get_settings()
         resolved_origins = get_allowed_origins(settings)
         _log.info("main.lifespan: CORS allowed origins resolved: %s", resolved_origins)
-        _log.info("main.lifespan: AUTH_REQUIRED resolved: %s", _is_auth_required())
+        _log.info("main.lifespan: effective_auth_required resolved: %s", _is_auth_required())
     except Exception as exc:
         _log.warning("main.lifespan: could not resolve startup security settings for log: %s", exc)
 

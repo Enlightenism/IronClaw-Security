@@ -1,14 +1,3 @@
-"""
-tests/services/test_secrets_vault.py
-
-Hermetic pytest suite for app.services.secrets_vault._SecretsVault.
-Covers every accessor: default value (env var absent) and override path
-(monkeypatch.setenv), including return-type assertions and both new
-accessors (ironclaw_auth_edge_fn_path, ironclaw_auth_edge_fn_timeout_seconds).
-
-No mocking of os — monkeypatch.setenv / monkeypatch.delenv throughout.
-"""
-
 from __future__ import annotations
 
 import sys
@@ -38,7 +27,11 @@ _ALL_VAULT_KEYS = (
     "PLATFORM_API_KEY",
     "INTERNAL_PLATFORM_API_KEY",
     "IRONCLAW_API_KEY",
+    "IRONCLAW_SECRET_KEY",
     "SECRET_KEY",
+    "APP_SECRET_KEY",
+    "JWT_SECRET",
+    "SUPABASE_JWT_SECRET",
     "JWT_ALGORITHM",
     "ACCESS_TOKEN_EXPIRE_MINUTES",
     "IRONCLAW_AUTH_EDGE_FN_PATH",
@@ -47,6 +40,9 @@ _ALL_VAULT_KEYS = (
     "SUPABASE_KEY",
     "SUPABASE_ANON_KEY",
     "SUPABASE_SERVICE_ROLE_KEY",
+    "STRIPE_SECRET_KEY",
+    "STRIPE_PUBLISHABLE_KEY",
+    "STRIPE_WEBHOOK_SECRET",
     "GROQ_ENABLED",
     "GROQ_API_KEY",
     "GROQ_MODEL",
@@ -269,6 +265,17 @@ class TestAuthentication:
         v = _reload_vault()
         assert v.api_key() == "secret-key-xyz"
 
+    def test_api_key_falls_back_to_ironclaw_api_key(self, monkeypatch):
+        monkeypatch.setenv("IRONCLAW_API_KEY", "ic-secret")
+        v = _reload_vault()
+        assert v.api_key() == "ic-secret"
+
+    def test_api_key_prefers_api_key_over_ironclaw_api_key(self, monkeypatch):
+        monkeypatch.setenv("API_KEY", "primary-key")
+        monkeypatch.setenv("IRONCLAW_API_KEY", "secondary-key")
+        v = _reload_vault()
+        assert v.api_key() == "primary-key"
+
     def test_admin_api_key_default_empty(self, fresh_vault):
         assert fresh_vault.admin_api_key() == ""
 
@@ -312,10 +319,81 @@ class TestAuthJWT:
         assert fresh_vault.secret_key() == ""
         assert isinstance(fresh_vault.secret_key(), str)
 
-    def test_secret_key_override(self, monkeypatch):
-        monkeypatch.setenv("SECRET_KEY", "my-jwt-secret")
+    def test_secret_key_uses_legacy_secret_key(self, monkeypatch):
+        monkeypatch.setenv("SECRET_KEY", "legacy-secret")
         v = _reload_vault()
-        assert v.secret_key() == "my-jwt-secret"
+        assert v.secret_key() == "legacy-secret"
+
+    def test_secret_key_falls_back_to_ironclaw_secret_key(self, monkeypatch):
+        monkeypatch.setenv("IRONCLAW_SECRET_KEY", "ironclaw-secret")
+        v = _reload_vault()
+        assert v.secret_key() == "ironclaw-secret"
+
+    def test_secret_key_falls_back_to_app_secret_key(self, monkeypatch):
+        monkeypatch.setenv("APP_SECRET_KEY", "app-secret")
+        v = _reload_vault()
+        assert v.secret_key() == "app-secret"
+
+    def test_secret_key_prefers_legacy_over_ironclaw_and_app(self, monkeypatch):
+        monkeypatch.setenv("SECRET_KEY", "legacy-secret")
+        monkeypatch.setenv("IRONCLAW_SECRET_KEY", "ironclaw-secret")
+        monkeypatch.setenv("APP_SECRET_KEY", "app-secret")
+        v = _reload_vault()
+        assert v.secret_key() == "legacy-secret"
+
+    def test_secret_key_prefers_ironclaw_over_app_when_legacy_missing(self, monkeypatch):
+        monkeypatch.setenv("IRONCLAW_SECRET_KEY", "ironclaw-secret")
+        monkeypatch.setenv("APP_SECRET_KEY", "app-secret")
+        v = _reload_vault()
+        assert v.secret_key() == "ironclaw-secret"
+
+    def test_jwt_secret_default_empty(self, fresh_vault):
+        assert fresh_vault.jwt_secret() == ""
+        assert isinstance(fresh_vault.jwt_secret(), str)
+
+    def test_jwt_secret_prefers_jwt_secret(self, monkeypatch):
+        monkeypatch.setenv("JWT_SECRET", "jwt-secret")
+        monkeypatch.setenv("SUPABASE_JWT_SECRET", "supabase-secret")
+        monkeypatch.setenv("SECRET_KEY", "legacy-secret")
+        monkeypatch.setenv("IRONCLAW_SECRET_KEY", "ironclaw-secret")
+        monkeypatch.setenv("APP_SECRET_KEY", "app-secret")
+        v = _reload_vault()
+        assert v.jwt_secret() == "jwt-secret"
+
+    def test_jwt_secret_falls_back_to_supabase_jwt_secret(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_JWT_SECRET", "supabase-secret")
+        v = _reload_vault()
+        assert v.jwt_secret() == "supabase-secret"
+
+    def test_jwt_secret_falls_back_to_legacy_secret_key(self, monkeypatch):
+        monkeypatch.setenv("SECRET_KEY", "legacy-secret")
+        v = _reload_vault()
+        assert v.jwt_secret() == "legacy-secret"
+
+    def test_jwt_secret_falls_back_to_ironclaw_secret_key(self, monkeypatch):
+        monkeypatch.setenv("IRONCLAW_SECRET_KEY", "ironclaw-secret")
+        v = _reload_vault()
+        assert v.jwt_secret() == "ironclaw-secret"
+
+    def test_jwt_secret_falls_back_to_app_secret_key(self, monkeypatch):
+        monkeypatch.setenv("APP_SECRET_KEY", "app-secret")
+        v = _reload_vault()
+        assert v.jwt_secret() == "app-secret"
+
+    def test_supabase_jwt_secret_default_empty(self, fresh_vault):
+        assert fresh_vault.supabase_jwt_secret() == ""
+        assert isinstance(fresh_vault.supabase_jwt_secret(), str)
+
+    def test_supabase_jwt_secret_prefers_supabase_jwt_secret(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_JWT_SECRET", "supabase-secret")
+        monkeypatch.setenv("JWT_SECRET", "jwt-secret")
+        v = _reload_vault()
+        assert v.supabase_jwt_secret() == "supabase-secret"
+
+    def test_supabase_jwt_secret_falls_back_to_jwt_secret(self, monkeypatch):
+        monkeypatch.setenv("JWT_SECRET", "jwt-secret")
+        v = _reload_vault()
+        assert v.supabase_jwt_secret() == "jwt-secret"
 
     def test_jwt_algorithm_default(self, fresh_vault):
         assert fresh_vault.jwt_algorithm() == "HS256"
@@ -337,13 +415,11 @@ class TestAuthJWT:
 
 
 # ===========================================================================
-# IronClaw Auth Edge Function  ← NEW ACCESSORS (primary coverage target)
+# IronClaw Auth Edge Function
 # ===========================================================================
 
 
 class TestIronClawAuthEdgeFn:
-    # --- ironclaw_auth_edge_fn_path ---
-
     def test_edge_fn_path_default_is_empty_string(self, fresh_vault):
         result = fresh_vault.ironclaw_auth_edge_fn_path()
         assert result == ""
@@ -366,9 +442,7 @@ class TestIronClawAuthEdgeFn:
             "https://edge.supabase.co/functions/v1/ironclaw-auth",
         )
         v = _reload_vault()
-        assert v.ironclaw_auth_edge_fn_path() == ("https://edge.supabase.co/functions/v1/ironclaw-auth")
-
-    # --- ironclaw_auth_edge_fn_timeout_seconds ---
+        assert v.ironclaw_auth_edge_fn_path() == "https://edge.supabase.co/functions/v1/ironclaw-auth"
 
     def test_edge_fn_timeout_default_is_10_float(self, fresh_vault):
         result = fresh_vault.ironclaw_auth_edge_fn_timeout_seconds()
@@ -429,11 +503,33 @@ class TestSupabase:
         v = _reload_vault()
         assert v.supabase_key() == "supabase-key-abc"
 
+    def test_supabase_key_falls_back_to_anon_key(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_ANON_KEY", "anon-key")
+        v = _reload_vault()
+        assert v.supabase_key() == "anon-key"
+
+    def test_supabase_key_prefers_supabase_key_over_anon_key(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_KEY", "supabase-key-abc")
+        monkeypatch.setenv("SUPABASE_ANON_KEY", "anon-key")
+        v = _reload_vault()
+        assert v.supabase_key() == "supabase-key-abc"
+
     def test_supabase_anon_key_default_empty(self, fresh_vault):
         assert fresh_vault.supabase_anon_key() == ""
 
     def test_supabase_anon_key_override(self, monkeypatch):
         monkeypatch.setenv("SUPABASE_ANON_KEY", "anon-key")
+        v = _reload_vault()
+        assert v.supabase_anon_key() == "anon-key"
+
+    def test_supabase_anon_key_falls_back_to_supabase_key(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_KEY", "supabase-key-abc")
+        v = _reload_vault()
+        assert v.supabase_anon_key() == "supabase-key-abc"
+
+    def test_supabase_anon_key_prefers_anon_key_over_supabase_key(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_ANON_KEY", "anon-key")
+        monkeypatch.setenv("SUPABASE_KEY", "supabase-key-abc")
         v = _reload_vault()
         assert v.supabase_anon_key() == "anon-key"
 
@@ -447,6 +543,40 @@ class TestSupabase:
         result = v.supabase_service_role_key()
         assert result == "service-role-key"
         assert isinstance(result, str)
+
+
+# ===========================================================================
+# Stripe
+# ===========================================================================
+
+
+class TestStripe:
+    def test_stripe_secret_key_default_empty(self, fresh_vault):
+        assert fresh_vault.stripe_secret_key() == ""
+        assert isinstance(fresh_vault.stripe_secret_key(), str)
+
+    def test_stripe_secret_key_override(self, monkeypatch):
+        monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_123")
+        v = _reload_vault()
+        assert v.stripe_secret_key() == "sk_test_123"
+
+    def test_stripe_publishable_key_default_empty(self, fresh_vault):
+        assert fresh_vault.stripe_publishable_key() == ""
+        assert isinstance(fresh_vault.stripe_publishable_key(), str)
+
+    def test_stripe_publishable_key_override(self, monkeypatch):
+        monkeypatch.setenv("STRIPE_PUBLISHABLE_KEY", "pk_test_123")
+        v = _reload_vault()
+        assert v.stripe_publishable_key() == "pk_test_123"
+
+    def test_stripe_webhook_secret_default_empty(self, fresh_vault):
+        assert fresh_vault.stripe_webhook_secret() == ""
+        assert isinstance(fresh_vault.stripe_webhook_secret(), str)
+
+    def test_stripe_webhook_secret_override(self, monkeypatch):
+        monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_123")
+        v = _reload_vault()
+        assert v.stripe_webhook_secret() == "whsec_123"
 
 
 # ===========================================================================
@@ -624,32 +754,83 @@ class TestFilesystemPaths:
         v = _reload_vault()
         assert v.data_dir() == "/var/ironclaw/data"
 
+    def test_data_dir_override_via_ironclaw_base_dir(self, monkeypatch):
+        monkeypatch.setenv("IRONCLAW_BASE_DIR", "/var/ironclaw/base")
+        v = _reload_vault()
+        assert v.data_dir() == "/var/ironclaw/base"
+
     def test_data_dir_override_via_data_dir(self, monkeypatch):
         monkeypatch.setenv("DATA_DIR", "/custom/data")
         v = _reload_vault()
         assert v.data_dir() == "/custom/data"
 
+    def test_data_dir_prefers_ironclaw_data_dir_over_base_dir_and_data_dir(self, monkeypatch):
+        monkeypatch.setenv("IRONCLAW_DATA_DIR", "/var/ironclaw/data")
+        monkeypatch.setenv("IRONCLAW_BASE_DIR", "/var/ironclaw/base")
+        monkeypatch.setenv("DATA_DIR", "/custom/data")
+        v = _reload_vault()
+        assert v.data_dir() == "/var/ironclaw/data"
+
+    def test_data_dir_prefers_ironclaw_base_dir_over_data_dir_when_data_dir_missing(self, monkeypatch):
+        monkeypatch.setenv("IRONCLAW_BASE_DIR", "/var/ironclaw/base")
+        monkeypatch.setenv("DATA_DIR", "/custom/data")
+        v = _reload_vault()
+        assert v.data_dir() == "/var/ironclaw/base"
+
     def test_reports_dir_default_none(self, fresh_vault):
         assert fresh_vault.reports_dir() is None
 
-    def test_reports_dir_override(self, monkeypatch):
+    def test_reports_dir_override_via_reports_dir(self, monkeypatch):
         monkeypatch.setenv("REPORTS_DIR", "/var/reports")
+        v = _reload_vault()
+        assert v.reports_dir() == "/var/reports"
+
+    def test_reports_dir_override_via_ironclaw_reports_dir(self, monkeypatch):
+        monkeypatch.setenv("IRONCLAW_REPORTS_DIR", "/var/ironclaw/reports")
+        v = _reload_vault()
+        assert v.reports_dir() == "/var/ironclaw/reports"
+
+    def test_reports_dir_prefers_reports_dir_over_ironclaw_reports_dir(self, monkeypatch):
+        monkeypatch.setenv("REPORTS_DIR", "/var/reports")
+        monkeypatch.setenv("IRONCLAW_REPORTS_DIR", "/var/ironclaw/reports")
         v = _reload_vault()
         assert v.reports_dir() == "/var/reports"
 
     def test_uploads_dir_default_none(self, fresh_vault):
         assert fresh_vault.uploads_dir() is None
 
-    def test_uploads_dir_override(self, monkeypatch):
+    def test_uploads_dir_override_via_uploads_dir(self, monkeypatch):
         monkeypatch.setenv("UPLOADS_DIR", "/var/uploads")
+        v = _reload_vault()
+        assert v.uploads_dir() == "/var/uploads"
+
+    def test_uploads_dir_override_via_ironclaw_uploads_dir(self, monkeypatch):
+        monkeypatch.setenv("IRONCLAW_UPLOADS_DIR", "/var/ironclaw/uploads")
+        v = _reload_vault()
+        assert v.uploads_dir() == "/var/ironclaw/uploads"
+
+    def test_uploads_dir_prefers_uploads_dir_over_ironclaw_uploads_dir(self, monkeypatch):
+        monkeypatch.setenv("UPLOADS_DIR", "/var/uploads")
+        monkeypatch.setenv("IRONCLAW_UPLOADS_DIR", "/var/ironclaw/uploads")
         v = _reload_vault()
         assert v.uploads_dir() == "/var/uploads"
 
     def test_quarantine_dir_default_none(self, fresh_vault):
         assert fresh_vault.quarantine_dir() is None
 
-    def test_quarantine_dir_override(self, monkeypatch):
+    def test_quarantine_dir_override_via_quarantine_dir(self, monkeypatch):
         monkeypatch.setenv("QUARANTINE_DIR", "/var/quarantine")
+        v = _reload_vault()
+        assert v.quarantine_dir() == "/var/quarantine"
+
+    def test_quarantine_dir_override_via_ironclaw_quarantine_dir(self, monkeypatch):
+        monkeypatch.setenv("IRONCLAW_QUARANTINE_DIR", "/var/ironclaw/quarantine")
+        v = _reload_vault()
+        assert v.quarantine_dir() == "/var/ironclaw/quarantine"
+
+    def test_quarantine_dir_prefers_quarantine_dir_over_ironclaw_quarantine_dir(self, monkeypatch):
+        monkeypatch.setenv("QUARANTINE_DIR", "/var/quarantine")
+        monkeypatch.setenv("IRONCLAW_QUARANTINE_DIR", "/var/ironclaw/quarantine")
         v = _reload_vault()
         assert v.quarantine_dir() == "/var/quarantine"
 
@@ -709,7 +890,7 @@ class TestGenericGet:
 
 
 # ===========================================================================
-# Return-type contract assertions (all accessors, one sweep)
+# Return-type contract assertions
 # ===========================================================================
 
 
@@ -732,11 +913,16 @@ class TestReturnTypeContracts:
             fresh_vault.internal_platform_api_key,
             fresh_vault.ironclaw_api_key,
             fresh_vault.secret_key,
+            fresh_vault.jwt_secret,
+            fresh_vault.supabase_jwt_secret,
             fresh_vault.jwt_algorithm,
             fresh_vault.ironclaw_auth_edge_fn_path,
             fresh_vault.supabase_url,
             fresh_vault.supabase_key,
             fresh_vault.supabase_anon_key,
+            fresh_vault.stripe_secret_key,
+            fresh_vault.stripe_publishable_key,
+            fresh_vault.stripe_webhook_secret,
             fresh_vault.groq_api_key,
             fresh_vault.groq_model,
             fresh_vault.openai_api_key,

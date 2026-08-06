@@ -10,6 +10,14 @@ class _SecretsVault:
     Thread-safe; values are read once at call time — no instance state.
     """
 
+    @staticmethod
+    def _first_non_empty(*keys: str) -> str:
+        for key in keys:
+            value = os.getenv(key)
+            if value is not None and value != "":
+                return value
+        return ""
+
     # ------------------------------------------------------------------
     # Core identity
     # ------------------------------------------------------------------
@@ -83,7 +91,7 @@ class _SecretsVault:
 
     @staticmethod
     def api_key() -> str:
-        return os.getenv("API_KEY", "")
+        return _SecretsVault._first_non_empty("API_KEY", "IRONCLAW_API_KEY")
 
     @staticmethod
     def admin_api_key() -> str:
@@ -106,7 +114,25 @@ class _SecretsVault:
     # ------------------------------------------------------------------
     @staticmethod
     def secret_key() -> str:
-        return os.getenv("SECRET_KEY", "")
+        return _SecretsVault._first_non_empty(
+            "SECRET_KEY",
+            "IRONCLAW_SECRET_KEY",
+            "APP_SECRET_KEY",
+        )
+
+    @staticmethod
+    def jwt_secret() -> str:
+        return _SecretsVault._first_non_empty(
+            "JWT_SECRET",
+            "SUPABASE_JWT_SECRET",
+            "SECRET_KEY",
+            "IRONCLAW_SECRET_KEY",
+            "APP_SECRET_KEY",
+        )
+
+    @staticmethod
+    def supabase_jwt_secret() -> str:
+        return _SecretsVault._first_non_empty("SUPABASE_JWT_SECRET", "JWT_SECRET")
 
     @staticmethod
     def jwt_algorithm() -> str:
@@ -122,7 +148,8 @@ class _SecretsVault:
     @staticmethod
     def ironclaw_auth_edge_fn_path() -> str:
         """URL path or full URL to the IronClaw auth edge function endpoint.
-        Defaults to empty string — callers must guard against empty value."""
+        Defaults to empty string — callers must guard against empty value.
+        """
         return os.getenv("IRONCLAW_AUTH_EDGE_FN_PATH", "")
 
     @staticmethod
@@ -139,11 +166,11 @@ class _SecretsVault:
 
     @staticmethod
     def supabase_key() -> str:
-        return os.getenv("SUPABASE_KEY", "")
+        return _SecretsVault._first_non_empty("SUPABASE_KEY", "SUPABASE_ANON_KEY")
 
     @staticmethod
     def supabase_anon_key() -> str:
-        return os.getenv("SUPABASE_ANON_KEY", "")
+        return _SecretsVault._first_non_empty("SUPABASE_ANON_KEY", "SUPABASE_KEY")
 
     @staticmethod
     def supabase_service_role_key() -> str | None:
@@ -156,21 +183,24 @@ class _SecretsVault:
     def stripe_secret_key() -> str:
         """Stripe secret key (sk_test_... or sk_live_...).
         Env var: STRIPE_SECRET_KEY — must match .env exactly.
-        Used by stripe_service.py for all Stripe API calls."""
+        Used by stripe_service.py for all Stripe API calls.
+        """
         return os.getenv("STRIPE_SECRET_KEY", "")
 
     @staticmethod
     def stripe_publishable_key() -> str:
         """Stripe publishable key (pk_test_... or pk_live_...).
         Env var: STRIPE_PUBLISHABLE_KEY — must match .env exactly.
-        Returned to frontend for Stripe.js initialisation."""
+        Returned to frontend for Stripe.js initialisation.
+        """
         return os.getenv("STRIPE_PUBLISHABLE_KEY", "")
 
     @staticmethod
     def stripe_webhook_secret() -> str:
         """Stripe webhook signing secret (whsec_...).
         Env var: STRIPE_WEBHOOK_SECRET — must match .env exactly.
-        Used by stripe_service.py for HMAC webhook signature verification."""
+        Used by stripe_service.py for HMAC webhook signature verification.
+        """
         return os.getenv("STRIPE_WEBHOOK_SECRET", "")
 
     # ------------------------------------------------------------------

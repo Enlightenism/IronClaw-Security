@@ -38,10 +38,7 @@ pip install -e .
 ```python
 from ironclaw_sdk import IronclawClient
 
-guard = IronclawClient(
-    base_url="http://localhost:8000",
-    api_key="your-ironclaw-api-key"
-)
+guard = IronclawClient(base_url="http://localhost:8000", api_key="your-ironclaw-api-key")
 ```
 
 ---
@@ -53,13 +50,7 @@ Wrap your MCP tool dispatcher with IronClaw inspection:
 ```python
 def guarded_tool_call(tool_name: str, tool_args: dict, agent_id: str) -> dict:
     # Inspect before dispatch
-    pre_result = guard.scan(
-        content=f"{tool_name}({tool_args})",
-        context="tool_call",
-        agent_id=agent_id,
-        tool_name=tool_name,
-        tool_args=tool_args
-    )
+    pre_result = guard.scan(content=f"{tool_name}({tool_args})", context="tool_call", agent_id=agent_id, tool_name=tool_name, tool_args=tool_args)
 
     if pre_result.verdict == "block":
         raise PermissionError(f"Tool call blocked: {pre_result.reason}")
@@ -72,12 +63,7 @@ def guarded_tool_call(tool_name: str, tool_args: dict, agent_id: str) -> dict:
     tool_output = mcp_dispatch(tool_name, tool_args)
 
     # Inspect output
-    post_result = guard.scan(
-        content=str(tool_output),
-        context="agent_output",
-        agent_id=agent_id,
-        tool_name=tool_name
-    )
+    post_result = guard.scan(content=str(tool_output), context="agent_output", agent_id=agent_id, tool_name=tool_name)
 
     if post_result.verdict in ("block", "quarantine"):
         raise PermissionError(f"Tool output blocked: {post_result.reason}")
@@ -97,6 +83,7 @@ bundle = guard.get_guard_bundle()
 
 ALLOWED_TOOLS = {rule["tool_name"] for rule in bundle.rules if rule.get("type") == "tool_allowlist"}
 
+
 def is_tool_allowed(tool_name: str) -> bool:
     return tool_name in ALLOWED_TOOLS
 ```
@@ -113,24 +100,13 @@ planned_calls = [
     {"tool_name": "send_email", "args": {"to": "user@example.com", "body": "..."}},
 ]
 
-scan_items = [
-    {
-        "content": f"{c['tool_name']}({c['args']})",
-        "context": "tool_call",
-        "tool_name": c["tool_name"],
-        "tool_args": c["args"],
-        "agent_id": "mcp-agent"
-    }
-    for c in planned_calls
-]
+scan_items = [{"content": f"{c['tool_name']}({c['args']})", "context": "tool_call", "tool_name": c["tool_name"], "tool_args": c["args"], "agent_id": "mcp-agent"} for c in planned_calls]
 
 results = guard.scan_batch(scan_items)
 
 for i, result in enumerate(results):
     if result.verdict in ("block", "quarantine"):
-        raise PermissionError(
-            f"Planned tool call [{planned_calls[i]['tool_name']}] blocked: {result.reason}"
-        )
+        raise PermissionError(f"Planned tool call [{planned_calls[i]['tool_name']}] blocked: {result.reason}")
 
 # All cleared — dispatch in order
 for call in planned_calls:

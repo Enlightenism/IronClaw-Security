@@ -8,11 +8,12 @@ import hmac
 import json
 import logging
 from threading import Lock
-import time
-from typing import Any
-import urllib.error
-import urllib.request
+from time import sleep as _sleep
+from typing import Any, Protocol
 from uuid import uuid4
+
+import httpx
+from pydantic import SecretStr
 
 from app.models.webhook import (
     WebhookCreateRequest,
@@ -38,18 +39,19 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-
 _MAX_DEAD_LETTER_SIZE = 500
 _RETRY_BACKOFF_BASE_SECONDS = 2.0
 _DEFAULT_MAX_RETRIES = 3
 _DEFAULT_TIMEOUT_SECONDS = 10
 _HIGH_FAILURE_THRESHOLD = 5
+_AUTO_DISABLE_FAILURE_THRESHOLD = 10
+_MAX_DELIVERY_LOG_PER_WEBHOOK = 200
 _SIGNATURE_HEADER_256 = "X-IronClaw-Signature-256"
 _SIGNATURE_HEADER_512 = "X-IronClaw-Signature-512"
 _DELIVERY_ID_HEADER = "X-IronClaw-Delivery"
 _EVENT_TYPE_HEADER = "X-IronClaw-Event"
 _WEBHOOK_AGENT_HEADER = "User-Agent"
-_WEBHOOK_AGENT_VALUE = "IronClaw-Webhook/1.0"
+_WEBHOOK_AGENT_VALUE = "IronClaw-Webhook/2.0"
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +64,7 @@ class _WebhookRecord:
     webhook_id: str
     name: str
     target_url: str
-    secret: str
+    secret: SecretStr
     event_types: list[str]
     org_id: str | None
     signing_algorithm: str
@@ -118,23 +120,124 @@ class _WebhookRecord:
 class DeadLetterEntry:
     delivery_id: str
     webhook_id: str
+    org_id: str | None
     event_type: str
     payload_json: str
     payload_hash: str
     error_message: str
     attempt_count: int
     queued_at: str
+    last_attempt_id: str
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "delivery_id": self.delivery_id,
             "webhook_id": self.webhook_id,
+            "org_id": self.org_id,
             "event_type": self.event_type,
             "payload_hash": self.payload_hash,
             "error_message": self.error_message,
             "attempt_count": self.attempt_count,
             "queued_at": self.queued_at,
+            "last_attempt_id": self.last_attempt_id,
         }
+
+
+# ---------------------------------------------------------------------------
+# Persistence abstraction
+# ---------------------------------------------------------------------------
+
+
+class WebhookDispatcherRepository(Protocol):
+    def save_webhook(self, record: _WebhookRecord) -> None: ...
+    def get_webhook(self, webhook_id: str) -> _WebhookRecord | None: ...
+    def delete_webhook(self, webhook_id: str) -> bool: ...
+    def list_webhooks(self) -> list[_WebhookRecord]: ...
+    def append_delivery_attempt(self, webhook_id: str, attempt: WebhookDeliveryAttempt) -> None: ...
+    def get_delivery_log(self, webhook_id: str) -> list[WebhookDeliveryAttempt]: ...
+    def append_dead_letter(self, entry: DeadLetterEntry) -> None: ...
+    def list_dead_letter(self) -> list[DeadLetterEntry]: ...
+    def remove_dead_letter(self, delivery_id: str, *, org_id: str | None) -> bool: ...
+    def clear_dead_letter(self, *, org_id: str | None = None) -> int: ...
+    def reset(self) -> None: ...
+
+
+class InMemoryWebhookDispatcherRepository:
+    def __init__(self, *, max_dead_letter: int = _MAX_DEAD_LETTER_SIZE) -> None:
+        self._lock = Lock()
+        self._webhooks: dict[str, _WebhookRecord] = {}
+        self._delivery_log: dict[str, list[WebhookDeliveryAttempt]] = {}
+        self._dead_letter: deque[DeadLetterEntry] = deque(maxlen=max_dead_letter)
+
+    def save_webhook(self, record: _WebhookRecord) -> None:
+        with self._lock:
+            self._webhooks[record.webhook_id] = record
+            self._delivery_log.setdefault(record.webhook_id, [])
+
+    def get_webhook(self, webhook_id: str) -> _WebhookRecord | None:
+        with self._lock:
+            return self._webhooks.get(webhook_id)
+
+    def delete_webhook(self, webhook_id: str) -> bool:
+        with self._lock:
+            if webhook_id not in self._webhooks:
+                return False
+            del self._webhooks[webhook_id]
+            self._delivery_log.pop(webhook_id, None)
+            retained = deque(
+                (entry for entry in self._dead_letter if entry.webhook_id != webhook_id),
+                maxlen=self._dead_letter.maxlen,
+            )
+            self._dead_letter = retained
+            return True
+
+    def list_webhooks(self) -> list[_WebhookRecord]:
+        with self._lock:
+            return list(self._webhooks.values())
+
+    def append_delivery_attempt(self, webhook_id: str, attempt: WebhookDeliveryAttempt) -> None:
+        with self._lock:
+            history = self._delivery_log.setdefault(webhook_id, [])
+            history.append(attempt)
+            if len(history) > _MAX_DELIVERY_LOG_PER_WEBHOOK:
+                del history[:-_MAX_DELIVERY_LOG_PER_WEBHOOK]
+
+    def get_delivery_log(self, webhook_id: str) -> list[WebhookDeliveryAttempt]:
+        with self._lock:
+            return list(self._delivery_log.get(webhook_id, []))
+
+    def append_dead_letter(self, entry: DeadLetterEntry) -> None:
+        with self._lock:
+            self._dead_letter.append(entry)
+
+    def list_dead_letter(self) -> list[DeadLetterEntry]:
+        with self._lock:
+            return list(self._dead_letter)
+
+    def remove_dead_letter(self, delivery_id: str, *, org_id: str | None) -> bool:
+        with self._lock:
+            for idx, item in enumerate(self._dead_letter):
+                if item.delivery_id == delivery_id and item.org_id == org_id:
+                    del self._dead_letter[idx]  # type: ignore[attr-defined]
+                    return True
+        return False
+
+    def clear_dead_letter(self, *, org_id: str | None = None) -> int:
+        with self._lock:
+            if org_id is None:
+                count = len(self._dead_letter)
+                self._dead_letter.clear()
+                return count
+            retained = [entry for entry in self._dead_letter if entry.org_id != org_id]
+            removed = len(self._dead_letter) - len(retained)
+            self._dead_letter = deque(retained, maxlen=self._dead_letter.maxlen)
+            return removed
+
+    def reset(self) -> None:
+        with self._lock:
+            self._webhooks.clear()
+            self._delivery_log.clear()
+            self._dead_letter.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -142,8 +245,9 @@ class DeadLetterEntry:
 # ---------------------------------------------------------------------------
 
 
-def _sign_payload(payload_bytes: bytes, secret: str, algorithm: str) -> str:
-    key = secret.encode("utf-8")
+def _sign_payload(payload_bytes: bytes, secret: SecretStr | str, algorithm: str) -> str:
+    secret_value = secret.get_secret_value() if isinstance(secret, SecretStr) else secret
+    key = secret_value.encode("utf-8")
     if algorithm == WebhookSigningAlgorithm.HMAC_SHA512:
         digest = hmac.new(key, payload_bytes, hashlib.sha512).hexdigest()
         return f"sha512={digest}"
@@ -159,6 +263,10 @@ def _utcnow_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
+def _coerce_secret(secret: SecretStr | str) -> SecretStr:
+    return secret if isinstance(secret, SecretStr) else SecretStr(secret)
+
+
 # ---------------------------------------------------------------------------
 # WebhookDispatcher
 # ---------------------------------------------------------------------------
@@ -168,24 +276,35 @@ class WebhookDispatcher:
     """
     Delivery engine for IronClaw webhooks.
 
-
     Responsibilities:
     - Register / update / delete webhook registrations.
+    - Persist registrations, delivery attempts, and dead-letter state through a repository abstraction.
     - Sign payloads with HMAC-SHA256 or HMAC-SHA512.
     - Deliver events with configurable retry + exponential back-off.
-    - Track per-webhook delivery attempts (in-memory, capped).
+    - Track per-webhook delivery attempts.
     - Route failed deliveries exceeding max_retries to the dead-letter queue.
-    - Mark webhooks as FAILING after _HIGH_FAILURE_THRESHOLD consecutive failures.
-    - Provide dead-letter queue inspection and replay.
+    - Mark webhooks as FAILING after repeated failures and auto-disable after sustained failure.
+    - Provide org-scoped dead-letter queue inspection and replay.
     - Filter subscriptions by event_type and org_id scope.
     """
 
-    def __init__(self, *, max_dead_letter: int = _MAX_DEAD_LETTER_SIZE) -> None:
+    def __init__(
+        self,
+        *,
+        repository: WebhookDispatcherRepository | None = None,
+        http_client: httpx.Client | None = None,
+        max_dead_letter: int = _MAX_DEAD_LETTER_SIZE,
+        failure_threshold: int = _HIGH_FAILURE_THRESHOLD,
+        auto_disable_failure_threshold: int = _AUTO_DISABLE_FAILURE_THRESHOLD,
+        sleep_fn: Any | None = None,
+    ) -> None:
         self._lock = Lock()
-        self._webhooks: dict[str, _WebhookRecord] = {}
-        # delivery_id → list[WebhookDeliveryAttempt], capped per webhook
-        self._delivery_log: dict[str, list[WebhookDeliveryAttempt]] = {}
-        self._dead_letter: deque[DeadLetterEntry] = deque(maxlen=max_dead_letter)
+        self._repository = repository or InMemoryWebhookDispatcherRepository(max_dead_letter=max_dead_letter)
+        self._http_client = http_client or httpx.Client(follow_redirects=False)
+        self._owns_http_client = http_client is None
+        self._failure_threshold = max(1, failure_threshold)
+        self._auto_disable_failure_threshold = max(self._failure_threshold, auto_disable_failure_threshold)
+        self._sleep = sleep_fn or _sleep
 
     # ------------------------------------------------------------------
     # Registration
@@ -198,7 +317,7 @@ class WebhookDispatcher:
             webhook_id=webhook_id,
             name=request.name,
             target_url=str(request.target_url),
-            secret=request.secret,
+            secret=_coerce_secret(request.secret),
             event_types=[str(e) for e in request.event_types],
             org_id=request.org_id,
             signing_algorithm=str(request.signing_algorithm),
@@ -212,21 +331,19 @@ class WebhookDispatcher:
             created_at=now,
             updated_at=now,
         )
-        with self._lock:
-            self._webhooks[webhook_id] = record
-            self._delivery_log[webhook_id] = []
+        self._repository.save_webhook(record)
         logger.info("webhook.registered id=%s name=%s", webhook_id, request.name)
         return record.to_response()
 
     def update(self, webhook_id: str, request: WebhookUpdateRequest) -> WebhookResponse | None:
         with self._lock:
-            record = self._webhooks.get(webhook_id)
+            record = self._repository.get_webhook(webhook_id)
             if record is None:
                 return None
 
             new_name = request.name if request.name is not None else record.name
             new_url = str(request.target_url) if request.target_url is not None else record.target_url
-            new_secret = request.secret if request.secret is not None else record.secret
+            new_secret = _coerce_secret(request.secret) if request.secret is not None else record.secret
             new_events = [str(e) for e in request.event_types] if request.event_types is not None else record.event_types
             new_org = request.org_id if request.org_id is not None else record.org_id
             new_algo = str(request.signing_algorithm) if request.signing_algorithm is not None else record.signing_algorithm
@@ -260,28 +377,23 @@ class WebhookDispatcher:
                 created_at=record.created_at,
                 updated_at=_utcnow_iso(),
             )
-            self._webhooks[webhook_id] = updated
+            self._repository.save_webhook(updated)
 
         logger.info("webhook.updated id=%s", webhook_id)
         return updated.to_response()
 
     def delete(self, webhook_id: str) -> bool:
-        with self._lock:
-            if webhook_id not in self._webhooks:
-                return False
-            del self._webhooks[webhook_id]
-            self._delivery_log.pop(webhook_id, None)
-        logger.info("webhook.deleted id=%s", webhook_id)
-        return True
+        deleted = self._repository.delete_webhook(webhook_id)
+        if deleted:
+            logger.info("webhook.deleted id=%s", webhook_id)
+        return deleted
 
     def get(self, webhook_id: str) -> WebhookResponse | None:
-        with self._lock:
-            record = self._webhooks.get(webhook_id)
+        record = self._repository.get_webhook(webhook_id)
         return record.to_response() if record else None
 
     def list_webhooks(self, filter_req: WebhookFilterRequest | None = None) -> list[WebhookSummaryResponse]:
-        with self._lock:
-            records = list(self._webhooks.values())
+        records = self._repository.list_webhooks()
 
         if filter_req is not None:
             if filter_req.org_id is not None:
@@ -302,14 +414,14 @@ class WebhookDispatcher:
 
     def rotate_secret(self, webhook_id: str, new_secret: str) -> WebhookRotateSecretResponse | None:
         with self._lock:
-            record = self._webhooks.get(webhook_id)
+            record = self._repository.get_webhook(webhook_id)
             if record is None:
                 return None
             updated = _WebhookRecord(
                 webhook_id=record.webhook_id,
                 name=record.name,
                 target_url=record.target_url,
-                secret=new_secret,
+                secret=SecretStr(new_secret),
                 event_types=record.event_types,
                 org_id=record.org_id,
                 signing_algorithm=record.signing_algorithm,
@@ -323,7 +435,7 @@ class WebhookDispatcher:
                 created_at=record.created_at,
                 updated_at=_utcnow_iso(),
             )
-            self._webhooks[webhook_id] = updated
+            self._repository.save_webhook(updated)
 
         logger.info("webhook.secret_rotated id=%s", webhook_id)
         return WebhookRotateSecretResponse(
@@ -337,7 +449,7 @@ class WebhookDispatcher:
 
     def set_active(self, webhook_id: str, *, active: bool) -> WebhookStatusUpdateResponse | None:
         with self._lock:
-            record = self._webhooks.get(webhook_id)
+            record = self._repository.get_webhook(webhook_id)
             if record is None:
                 return None
             new_status = WebhookStatus.ACTIVE if active else WebhookStatus.DISABLED
@@ -359,7 +471,7 @@ class WebhookDispatcher:
                 created_at=record.created_at,
                 updated_at=_utcnow_iso(),
             )
-            self._webhooks[webhook_id] = updated
+            self._repository.save_webhook(updated)
 
         return WebhookStatusUpdateResponse(
             webhook_id=webhook_id,
@@ -378,16 +490,12 @@ class WebhookDispatcher:
         *,
         org_id: str | None = None,
     ) -> list[WebhookDeliveryAttempt]:
-        """
-        Dispatch an event to all matching, active webhook subscriptions.
-        Returns the list of final delivery attempt records.
-        """
-        with self._lock:
-            candidates = [r for r in self._webhooks.values() if r.active and r.status != WebhookStatus.DISABLED and self._matches_event(r, event_type, org_id)]
+        records = self._repository.list_webhooks()
+        candidates = [r for r in records if r.active and r.status != WebhookStatus.DISABLED and self._matches_event(r, event_type, org_id)]
 
         results: list[WebhookDeliveryAttempt] = []
         for record in candidates:
-            attempt = self._deliver_with_retry(record, event_type, data, org_id=org_id)
+            attempt = self._deliver_with_retry(record, event_type, data, org_id=org_id, is_test=False)
             results.append(attempt)
 
         return results
@@ -418,7 +526,11 @@ class WebhookDispatcher:
             org_id=org_id,
             data=data,
         )
-        payload_bytes = json.dumps(envelope.model_dump(), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        payload_bytes = json.dumps(
+            envelope.model_dump(),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
         payload_hash = _hash_payload(payload_bytes)
         return payload_bytes, payload_hash
 
@@ -429,22 +541,31 @@ class WebhookDispatcher:
         data: dict[str, Any],
         *,
         org_id: str | None,
+        is_test: bool,
+        delivery_id: str | None = None,
+        payload_bytes_override: bytes | None = None,
+        payload_hash_override: str | None = None,
     ) -> WebhookDeliveryAttempt:
-        delivery_id = f"dlv-{uuid4().hex[:20]}"
-        payload_bytes, payload_hash = self._build_payload(record, event_type, data, delivery_id, org_id)
+        effective_delivery_id = delivery_id or f"dlv-{uuid4().hex[:20]}"
+        if payload_bytes_override is None:
+            payload_bytes, payload_hash = self._build_payload(record, event_type, data, effective_delivery_id, org_id)
+        else:
+            payload_bytes = payload_bytes_override
+            payload_hash = payload_hash_override or _hash_payload(payload_bytes)
+
         signature = _sign_payload(payload_bytes, record.secret, record.signing_algorithm)
 
         last_attempt: WebhookDeliveryAttempt | None = None
-        max_attempts = record.max_retries + 1
+        max_attempts = max(1, record.max_retries + 1)
 
         for attempt_num in range(1, max_attempts + 1):
             if attempt_num > 1:
                 backoff = _RETRY_BACKOFF_BASE_SECONDS * (2 ** (attempt_num - 2))
-                time.sleep(min(backoff, 30.0))
+                self._sleep(min(backoff, 30.0))
 
             last_attempt = self._send_once(
                 record=record,
-                delivery_id=delivery_id,
+                delivery_id=effective_delivery_id,
                 payload_bytes=payload_bytes,
                 payload_hash=payload_hash,
                 signature=signature,
@@ -452,12 +573,12 @@ class WebhookDispatcher:
                 attempt_number=attempt_num,
                 max_attempts=max_attempts,
             )
+            self._repository.append_delivery_attempt(record.webhook_id, last_attempt)
 
             if last_attempt.status == WebhookDeliveryStatus.SUCCESS:
-                self._record_success(record.webhook_id, last_attempt)
+                self._record_success(record.webhook_id, last_attempt, is_test=is_test)
                 return last_attempt
 
-        # All attempts exhausted
         assert last_attempt is not None
         final = WebhookDeliveryAttempt(
             attempt_id=last_attempt.attempt_id,
@@ -472,7 +593,15 @@ class WebhookDispatcher:
             error_message=last_attempt.error_message,
             attempted_at=last_attempt.attempted_at,
         )
-        self._record_failure(record.webhook_id, final, payload_bytes, event_type)
+        self._record_failure(
+            record.webhook_id,
+            final,
+            payload_bytes,
+            event_type,
+            delivery_id=effective_delivery_id,
+            org_id=record.org_id,
+            is_test=is_test,
+        )
         return final
 
     def _send_once(
@@ -489,7 +618,7 @@ class WebhookDispatcher:
     ) -> WebhookDeliveryAttempt:
         attempt_id = f"att-{uuid4().hex[:16]}"
         attempted_at = _utcnow_iso()
-        start_ns = time.monotonic_ns()
+        start_ns = datetime.now(UTC).timestamp()
 
         sig_header = _SIGNATURE_HEADER_512 if record.signing_algorithm == WebhookSigningAlgorithm.HMAC_SHA512 else _SIGNATURE_HEADER_256
 
@@ -507,38 +636,30 @@ class WebhookDispatcher:
         status = WebhookDeliveryStatus.FAILED
 
         try:
-            req = urllib.request.Request(
+            response = self._http_client.post(
                 record.target_url,
-                data=payload_bytes,
+                content=payload_bytes,
                 headers=headers,
-                method="POST",
+                timeout=record.timeout_seconds,
             )
-            with urllib.request.urlopen(req, timeout=record.timeout_seconds) as resp:
-                http_status = resp.status
-                raw_body = resp.read(512)
-                response_snippet = raw_body.decode("utf-8", errors="replace")
-
-            if http_status is not None and 200 <= http_status < 300:
+            http_status = response.status_code
+            response_snippet = response.text[:512]
+            if 200 <= response.status_code < 300:
                 status = WebhookDeliveryStatus.SUCCESS
             else:
-                error_message = f"Non-2xx HTTP status: {http_status}"
+                error_message = f"Non-2xx HTTP status: {response.status_code}"
                 status = WebhookDeliveryStatus.RETRYING if attempt_number < max_attempts else WebhookDeliveryStatus.FAILED
-
-        except urllib.error.HTTPError as exc:
-            http_status = exc.code
-            error_message = f"HTTPError {exc.code}: {exc.reason}"
-            status = WebhookDeliveryStatus.RETRYING if attempt_number < max_attempts else WebhookDeliveryStatus.FAILED
-        except urllib.error.URLError as exc:
-            error_message = f"URLError: {exc.reason}"
-            status = WebhookDeliveryStatus.RETRYING if attempt_number < max_attempts else WebhookDeliveryStatus.FAILED
-        except TimeoutError:
+        except httpx.TimeoutException:
             error_message = f"Delivery timed out after {record.timeout_seconds}s"
+            status = WebhookDeliveryStatus.RETRYING if attempt_number < max_attempts else WebhookDeliveryStatus.FAILED
+        except httpx.RequestError as exc:
+            error_message = f"RequestError: {exc}"
             status = WebhookDeliveryStatus.RETRYING if attempt_number < max_attempts else WebhookDeliveryStatus.FAILED
         except Exception as exc:  # noqa: BLE001
             error_message = f"Unexpected error: {exc}"
             status = WebhookDeliveryStatus.RETRYING if attempt_number < max_attempts else WebhookDeliveryStatus.FAILED
 
-        elapsed_ms = (time.monotonic_ns() - start_ns) // 1_000_000
+        elapsed_ms = int((datetime.now(UTC).timestamp() - start_ns) * 1000)
 
         return WebhookDeliveryAttempt(
             attempt_id=attempt_id,
@@ -549,7 +670,7 @@ class WebhookDispatcher:
             http_status_code=http_status,
             response_body_snippet=response_snippet,
             attempt_number=attempt_number,
-            duration_ms=int(elapsed_ms),
+            duration_ms=elapsed_ms,
             error_message=error_message,
             attempted_at=attempted_at,
         )
@@ -558,9 +679,15 @@ class WebhookDispatcher:
     # Post-delivery bookkeeping
     # ------------------------------------------------------------------
 
-    def _record_success(self, webhook_id: str, attempt: WebhookDeliveryAttempt) -> None:
+    def _record_success(
+        self,
+        webhook_id: str,
+        attempt: WebhookDeliveryAttempt,
+        *,
+        is_test: bool,
+    ) -> None:
         with self._lock:
-            record = self._webhooks.get(webhook_id)
+            record = self._repository.get_webhook(webhook_id)
             if record is None:
                 return
             updated = _WebhookRecord(
@@ -581,14 +708,14 @@ class WebhookDispatcher:
                 created_at=record.created_at,
                 updated_at=_utcnow_iso(),
             )
-            self._webhooks[webhook_id] = updated
-            self._delivery_log[webhook_id] = (self._delivery_log.get(webhook_id, []) + [attempt])[-200:]
+            self._repository.save_webhook(updated)
 
         logger.debug(
-            "webhook.delivered id=%s attempt=%d status=%d",
+            "webhook.delivered id=%s attempt=%d status=%d test=%s",
             webhook_id,
             attempt.attempt_number,
             attempt.http_status_code or 0,
+            is_test,
         )
 
     def _record_failure(
@@ -597,14 +724,25 @@ class WebhookDispatcher:
         attempt: WebhookDeliveryAttempt,
         payload_bytes: bytes,
         event_type: str,
+        *,
+        delivery_id: str,
+        org_id: str | None,
+        is_test: bool,
     ) -> None:
         with self._lock:
-            record = self._webhooks.get(webhook_id)
+            record = self._repository.get_webhook(webhook_id)
             if record is None:
                 return
 
             new_failures = record.failure_count + 1
-            new_status = WebhookStatus.FAILING if new_failures >= _HIGH_FAILURE_THRESHOLD else record.status
+            new_status = record.status
+            new_active = record.active
+
+            if new_failures >= self._auto_disable_failure_threshold:
+                new_status = WebhookStatus.DISABLED
+                new_active = False
+            elif new_failures >= self._failure_threshold:
+                new_status = WebhookStatus.FAILING
 
             updated = _WebhookRecord(
                 webhook_id=record.webhook_id,
@@ -615,7 +753,7 @@ class WebhookDispatcher:
                 org_id=record.org_id,
                 signing_algorithm=record.signing_algorithm,
                 status=new_status,
-                active=record.active,
+                active=new_active,
                 max_retries=record.max_retries,
                 timeout_seconds=record.timeout_seconds,
                 failure_count=new_failures,
@@ -624,27 +762,28 @@ class WebhookDispatcher:
                 created_at=record.created_at,
                 updated_at=_utcnow_iso(),
             )
-            self._webhooks[webhook_id] = updated
-            self._delivery_log[webhook_id] = (self._delivery_log.get(webhook_id, []) + [attempt])[-200:]
-
-            self._dead_letter.append(
+            self._repository.save_webhook(updated)
+            self._repository.append_dead_letter(
                 DeadLetterEntry(
-                    delivery_id=attempt.attempt_id,
+                    delivery_id=delivery_id,
                     webhook_id=webhook_id,
+                    org_id=org_id,
                     event_type=event_type,
                     payload_json=payload_bytes.decode("utf-8", errors="replace"),
                     payload_hash=attempt.payload_hash,
                     error_message=attempt.error_message or "unknown",
                     attempt_count=attempt.attempt_number,
                     queued_at=_utcnow_iso(),
+                    last_attempt_id=attempt.attempt_id,
                 )
             )
 
         logger.warning(
-            "webhook.failed id=%s failures=%d error=%s",
+            "webhook.failed id=%s failures=%d error=%s test=%s",
             webhook_id,
             new_failures,
             attempt.error_message,
+            is_test,
         )
 
     # ------------------------------------------------------------------
@@ -652,62 +791,83 @@ class WebhookDispatcher:
     # ------------------------------------------------------------------
 
     def get_delivery_log(self, webhook_id: str, *, limit: int = 50) -> list[WebhookDeliveryAttempt]:
-        with self._lock:
-            log = list(self._delivery_log.get(webhook_id, []))
+        log = self._repository.get_delivery_log(webhook_id)
         return log[-limit:]
 
     # ------------------------------------------------------------------
     # Dead-letter queue
     # ------------------------------------------------------------------
 
-    def list_dead_letter(self, *, limit: int = 100) -> list[dict[str, Any]]:
-        with self._lock:
-            items = list(self._dead_letter)
-        return [e.to_dict() for e in items[-limit:]]
+    def list_dead_letter(
+        self,
+        *,
+        org_id: str,
+        limit: int = 100,
+        allow_global: bool = False,
+    ) -> list[dict[str, Any]]:
+        if not org_id and not allow_global:
+            return []
 
-    def replay_dead_letter(self, delivery_id: str) -> WebhookDeliveryAttempt | None:
-        """
-        Re-attempt delivery of a single dead-letter entry by delivery_id.
-        Removes the entry from the dead-letter queue on successful replay.
-        """
-        with self._lock:
-            entry: DeadLetterEntry | None = None
-            for item in self._dead_letter:
-                if item.delivery_id == delivery_id:
-                    entry = item
-                    break
+        items = self._repository.list_dead_letter()
+        if allow_global:
+            scoped = items
+        else:
+            scoped = [entry for entry in items if entry.org_id == org_id]
+        return [entry.to_dict() for entry in scoped[-limit:]]
+
+    def replay_dead_letter(
+        self,
+        delivery_id: str,
+        *,
+        org_id: str,
+        allow_global: bool = False,
+    ) -> WebhookDeliveryAttempt | None:
+        entry: DeadLetterEntry | None = None
+        for item in self._repository.list_dead_letter():
+            if item.delivery_id != delivery_id:
+                continue
+            if allow_global or item.org_id == org_id:
+                entry = item
+                break
 
         if entry is None:
             return None
 
-        with self._lock:
-            record = self._webhooks.get(entry.webhook_id)
+        record = self._repository.get_webhook(entry.webhook_id)
         if record is None:
+            return None
+        if not allow_global and record.org_id != org_id:
             return None
 
         try:
-            data: dict[str, Any] = json.loads(entry.payload_json).get("data", {})
-        except (json.JSONDecodeError, AttributeError):
+            payload_bytes = entry.payload_json.encode("utf-8")
+            payload_obj = json.loads(entry.payload_json)
+            data = payload_obj.get("data", {}) if isinstance(payload_obj, dict) else {}
+        except (UnicodeEncodeError, json.JSONDecodeError, AttributeError):
+            payload_bytes = entry.payload_json.encode("utf-8", errors="replace")
             data = {}
 
-        result = self._deliver_with_retry(record, entry.event_type, data, org_id=record.org_id)
+        result = self._deliver_with_retry(
+            record,
+            entry.event_type,
+            data,
+            org_id=record.org_id,
+            is_test=False,
+            delivery_id=entry.delivery_id,
+            payload_bytes_override=payload_bytes,
+            payload_hash_override=entry.payload_hash,
+        )
 
         if result.status == WebhookDeliveryStatus.SUCCESS:
-            with self._lock:
-                for i, item in enumerate(self._dead_letter):
-                    if item.delivery_id == delivery_id:
-                        del self._dead_letter[i]  # type: ignore[attr-defined]
-                        break
-            logger.info("webhook.dead_letter_replayed id=%s", delivery_id)
+            self._repository.remove_dead_letter(entry.delivery_id, org_id=entry.org_id)
+            logger.info("webhook.dead_letter_replayed delivery_id=%s org_id=%s", delivery_id, entry.org_id)
 
         return result
 
-    def purge_dead_letter(self) -> int:
-        with self._lock:
-            count = len(self._dead_letter)
-            self._dead_letter.clear()
-        logger.info("webhook.dead_letter_purged count=%d", count)
-        return count
+    def purge_dead_letter(self, *, org_id: str, allow_global: bool = False) -> int:
+        removed = self._repository.clear_dead_letter(org_id=None if allow_global else org_id)
+        logger.info("webhook.dead_letter_purged count=%d org_id=%s global=%s", removed, org_id, allow_global)
+        return removed
 
     # ------------------------------------------------------------------
     # Test delivery
@@ -718,8 +878,7 @@ class WebhookDispatcher:
         webhook_id: str,
         event_type: str = WebhookEventType.GUARD_ALLOW,
     ) -> WebhookTestResponse:
-        with self._lock:
-            record = self._webhooks.get(webhook_id)
+        record = self._repository.get_webhook(webhook_id)
 
         if record is None:
             return WebhookTestResponse(
@@ -733,19 +892,13 @@ class WebhookDispatcher:
             "test": True,
             "message": "IronClaw webhook connectivity test",
         }
-        delivery_id = f"test-{uuid4().hex[:20]}"
-        payload_bytes, payload_hash = self._build_payload(record, event_type, test_data, delivery_id, record.org_id)
-        signature = _sign_payload(payload_bytes, record.secret, record.signing_algorithm)
-
-        attempt = self._send_once(
-            record=record,
-            delivery_id=delivery_id,
-            payload_bytes=payload_bytes,
-            payload_hash=payload_hash,
-            signature=signature,
-            event_type=event_type,
-            attempt_number=1,
-            max_attempts=1,
+        attempt = self._deliver_with_retry(
+            record,
+            event_type,
+            test_data,
+            org_id=record.org_id,
+            is_test=True,
+            delivery_id=f"test-{uuid4().hex[:20]}",
         )
 
         return WebhookTestResponse(
@@ -762,10 +915,11 @@ class WebhookDispatcher:
     # ------------------------------------------------------------------
 
     def reset(self) -> None:
-        with self._lock:
-            self._webhooks.clear()
-            self._delivery_log.clear()
-            self._dead_letter.clear()
+        self._repository.reset()
+
+    def close(self) -> None:
+        if self._owns_http_client:
+            self._http_client.close()
 
 
 # ---------------------------------------------------------------------------

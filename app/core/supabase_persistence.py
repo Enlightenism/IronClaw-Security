@@ -5,7 +5,7 @@ import logging
 from typing import Any
 
 from app.core.logging import get_logger
-from app.core.supabase import get_supabase_service_client
+from app.core.supabase import SupabaseConfigurationError, get_supabase_service_client
 from app.supabaseclient import SupabaseAPIError, SupabaseClientError
 
 _logger: logging.Logger = get_logger("ironclaw.persistence")
@@ -83,7 +83,7 @@ def upsert_scan(record: dict[str, Any]) -> dict[str, Any]:
         if isinstance(data, dict):
             return data
         return record
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -98,7 +98,7 @@ def get_scan_by_id(scan_id: str) -> dict[str, Any] | None:
         if isinstance(data, list):
             return data[0] if data else None
         return None
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -125,7 +125,7 @@ def list_scans(
         if isinstance(data, dict):
             return [data]
         return []
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -150,7 +150,7 @@ def upsert_audit_event(record: dict[str, Any]) -> dict[str, Any]:
         if isinstance(data, dict):
             return data
         return record
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -172,7 +172,7 @@ def upsert_telemetry(record: dict[str, Any]) -> dict[str, Any]:
         if isinstance(data, dict):
             return data
         return record
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -194,7 +194,7 @@ def upsert_quarantine_item(record: dict[str, Any]) -> dict[str, Any]:
         if isinstance(data, dict):
             return data
         return record
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -226,7 +226,7 @@ def get_review_queue(
         if isinstance(data, dict):
             return [data]
         return []
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -248,7 +248,7 @@ def upsert_ioc(record: dict[str, Any]) -> dict[str, Any]:
         if isinstance(data, dict):
             return data
         return record
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -270,7 +270,7 @@ def upsert_threat_detection(record: dict[str, Any]) -> dict[str, Any]:
         if isinstance(data, dict):
             return data
         return record
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -307,7 +307,7 @@ def get_policy_set(set_key: str) -> dict[str, Any] | None:
                 rules = raw_rules if isinstance(raw_rules, list) else [raw_rules]
 
         return {"policy_set": set_data, "rules": rules}
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -336,7 +336,7 @@ def get_scan_patterns(
         if isinstance(data, dict):
             return [data]
         return []
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -358,7 +358,7 @@ def get_rate_limit_state(key: str) -> dict[str, Any] | None:
         if isinstance(data, list):
             return data[0] if data else None
         return None
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -377,7 +377,7 @@ def upsert_rate_limit_state(record: dict[str, Any]) -> dict[str, Any]:
         if isinstance(data, dict):
             return data
         return record
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -388,7 +388,7 @@ def delete_rate_limit_state(key: str) -> None:
     try:
         client = get_supabase_service_client()
         client.table(_T_RATE_LIMIT_STATE).delete().eq("key", key.strip()).execute()
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -413,7 +413,7 @@ def log_tool_call(record: dict[str, Any]) -> dict[str, Any]:
         if isinstance(data, dict):
             return data
         return record
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -438,7 +438,7 @@ def log_sandbox_execution(record: dict[str, Any]) -> dict[str, Any]:
         if isinstance(data, dict):
             return data
         return record
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -460,7 +460,7 @@ def get_agent_trust_profile(agent_id: str) -> dict[str, Any] | None:
         if isinstance(data, list):
             return data[0] if data else None
         return None
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -479,7 +479,7 @@ def upsert_agent_trust_profile(record: dict[str, Any]) -> dict[str, Any]:
         if isinstance(data, dict):
             return data
         return record
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -508,7 +508,7 @@ def insert_trust_event(record: dict[str, Any]) -> dict[str, Any]:
         if isinstance(data, dict):
             return data
         return record
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -530,7 +530,7 @@ def list_trust_events(
         if isinstance(data, dict):
             return [data]
         return []
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -556,7 +556,7 @@ def create_webhook_subscription(record: dict[str, Any]) -> dict[str, Any]:
         if isinstance(data, dict):
             return data
         return record
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -583,7 +583,7 @@ def list_webhook_subscriptions(
         if isinstance(data, dict):
             return [data]
         return []
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -602,7 +602,7 @@ def get_webhook_subscription(subscription_id: str, tenant_id: str) -> dict[str, 
         if isinstance(data, list):
             return data[0] if data else None
         return None
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -622,7 +622,7 @@ def update_webhook_subscription(subscription_id: str, tenant_id: str, updates: d
         if isinstance(data, dict) and data:
             return data
         return None
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -635,7 +635,7 @@ def delete_webhook_subscription(subscription_id: str, tenant_id: str) -> None:
     try:
         client = get_supabase_service_client()
         client.table(_T_WEBHOOK_SUBSCRIPTIONS).delete().eq("id", subscription_id).eq("tenant_id", tenant_id).execute()
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -673,7 +673,7 @@ def get_webhook_delivery_log(
         if isinstance(data, dict):
             return [data]
         return []
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -690,7 +690,7 @@ def get_webhook_delivery_record(delivery_id: str) -> dict[str, Any] | None:
         if isinstance(data, list):
             return data[0] if data else None
         return None
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -720,7 +720,7 @@ def list_webhook_deliveries(
         if isinstance(data, dict):
             return [data]
         return []
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -742,7 +742,7 @@ def list_retryable_webhook_deliveries(
         if isinstance(data, dict):
             return [data]
         return []
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -761,7 +761,7 @@ def get_webhook_delivery(delivery_id: str, tenant_id: str) -> dict[str, Any] | N
         if isinstance(data, list):
             return data[0] if data else None
         return None
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -782,7 +782,7 @@ def upsert_webhook_delivery(record: dict[str, Any]) -> dict[str, Any]:
         if isinstance(data, dict):
             return data
         return record
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -799,7 +799,7 @@ def update_webhook_delivery(delivery_id: str, updates: dict[str, Any]) -> dict[s
         if isinstance(data, dict) and data:
             return data
         return None
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -827,7 +827,7 @@ def upsert_install_key(record: dict[str, Any]) -> dict[str, Any]:
         if isinstance(data, dict):
             return data
         return record
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -845,7 +845,7 @@ def get_install_key(install_key_id: str) -> dict[str, Any] | None:
         if isinstance(data, list):
             return data[0] if data else None
         return None
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -873,7 +873,7 @@ def list_install_keys_for_owner(
         if isinstance(data, dict):
             return [data]
         return []
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -902,7 +902,7 @@ def increment_install_key_units(install_key_id: str, delta: int = 1) -> dict[str
         return upsert_install_key(updated)
     except PersistenceError:
         raise
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -925,7 +925,7 @@ def get_payment_transaction_by_session(session_id: str) -> dict[str, Any] | None
         if isinstance(data, list):
             return data[0] if data else None
         return None
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -943,7 +943,7 @@ def mark_payment_transaction_paid(transaction_id: str) -> None:
             "updated_at": _now_utc(),
         }
         client.table(_T_PAYMENT_TRANSACTIONS).update(updates).eq("id", transaction_id.strip()).execute()
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -966,7 +966,7 @@ def increment_user_wallet_units(user_id: str, delta: int) -> None:
             row = row[0] if row else None
         current: int = int(row.get("wallet_units", 0)) if isinstance(row, dict) else 0
         client.table(_T_USERS).update({"wallet_units": current + delta, "updated_at": _now_utc()}).eq("id", user_id.strip()).execute()
-    except (SupabaseAPIError, SupabaseClientError) as exc:
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
 
@@ -992,7 +992,6 @@ def fulfill_checkout_session(session_id: str, session_metadata: dict[str, Any]) 
     if txn is None:
         raise ValueError(f"[{operation}] no payment_transaction found for stripe_session_id={session_id!r}")
 
-    # Idempotency guard — already credited, nothing to do
     if txn.get("credited"):
         _logger.info(
             "fulfill_checkout_session.already_credited session_id=%s txn_id=%s",
@@ -1005,7 +1004,6 @@ def fulfill_checkout_session(session_id: str, session_metadata: dict[str, Any]) 
     if not transaction_id:
         raise PersistenceError(operation, f"payment_transaction row missing id for session_id={session_id!r}")
 
-    # Resolve units — prefer transaction row, fall back to session metadata
     units: int = 0
     raw_units = txn.get("units") or session_metadata.get("units")
     if raw_units is not None:
@@ -1065,13 +1063,11 @@ __all__ = [
     "upsert_agent_trust_profile",
     "insert_trust_event",
     "list_trust_events",
-    # Webhook Subscriptions
     "create_webhook_subscription",
     "list_webhook_subscriptions",
     "get_webhook_subscription",
     "update_webhook_subscription",
     "delete_webhook_subscription",
-    # Webhook Deliveries
     "get_webhook_delivery_log",
     "get_webhook_delivery_record",
     "list_webhook_deliveries",
@@ -1079,12 +1075,10 @@ __all__ = [
     "list_retryable_webhook_deliveries",
     "upsert_webhook_delivery",
     "update_webhook_delivery",
-    # Install Keys
     "upsert_install_key",
     "get_install_key",
     "list_install_keys_for_owner",
     "increment_install_key_units",
-    # Billing
     "get_payment_transaction_by_session",
     "mark_payment_transaction_paid",
     "increment_user_wallet_units",

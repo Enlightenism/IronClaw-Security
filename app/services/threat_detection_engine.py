@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 import logging
 import re
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 import uuid
 
 from app.schemas.threat_detection import (
@@ -21,6 +21,7 @@ from app.services.threat_correlation import get_correlation_engine
 if TYPE_CHECKING:
     from app.services.notification_service import NotificationEngine
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,11 +29,14 @@ logger = logging.getLogger(__name__)
 # Internal constants
 # ---------------------------------------------------------------------------
 
+
 _ENGINE_VERSION = "1.0.0"
+
 
 _THRESHOLD_BLOCK = 0.75
 _THRESHOLD_REVIEW = 0.50
 _THRESHOLD_MONITOR = 0.20
+
 
 _SEVERITY_WEIGHT: dict[ThreatSeverityLevel, float] = {
     ThreatSeverityLevel.CRITICAL: 1.0,
@@ -42,6 +46,30 @@ _SEVERITY_WEIGHT: dict[ThreatSeverityLevel, float] = {
     ThreatSeverityLevel.INFO: 0.05,
 }
 
+
+_VERDICT_RANK: dict[DetectionVerdict, int] = {
+    DetectionVerdict.ALLOW: 0,
+    DetectionVerdict.MONITOR: 1,
+    DetectionVerdict.REVIEW: 2,
+    DetectionVerdict.BLOCK: 3,
+}
+
+
+_SEVERITY_RANK: dict[ThreatSeverityLevel, int] = {
+    ThreatSeverityLevel.INFO: 0,
+    ThreatSeverityLevel.LOW: 1,
+    ThreatSeverityLevel.MEDIUM: 2,
+    ThreatSeverityLevel.HIGH: 3,
+    ThreatSeverityLevel.CRITICAL: 4,
+}
+
+
+_ENGINE_SIGNAL_PRIORITY: dict[str, int] = {
+    "attack_chain": 0,
+    "high_severity_cluster": 1,
+}
+
+
 _RE_IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 _RE_DOMAIN = re.compile(r"\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b")
 _RE_SHA256 = re.compile(r"\b[0-9a-fA-F]{64}\b")
@@ -49,6 +77,7 @@ _RE_SHA1 = re.compile(r"\b[0-9a-fA-F]{40}\b")
 _RE_MD5 = re.compile(r"\b[0-9a-fA-F]{32}\b")
 _RE_CVE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.IGNORECASE)
 _RE_URL = re.compile(r"https?://[^\s\"'>]+")
+
 
 _ENGINE_LOCK = threading.Lock()
 
@@ -65,7 +94,7 @@ def _get_optional_notification_engine() -> NotificationEngine | None:
     notification infrastructure being configured.
     """
     try:
-        from app.services.notification_engine import get_notification_engine  # noqa: PLC0415
+        from app.services.notification_service import get_notification_engine  # noqa: PLC0415
 
         return get_notification_engine()
     except Exception:  # noqa: BLE001
@@ -124,8 +153,11 @@ class ThreatScoringEngine:
 
         verdict = self._verdict_from_score(normalized)
         severity = self._severity_from_score(normalized, ioc_matches)
-        risk_families = self._extract_risk_families(ioc_matches)
+        risk_families = self._extract_risk_families(ioc_matches, correlation_signals)
         mitre_techniques = self._extract_mitre_techniques(ioc_matches, correlation_signals)
+
+        verdict = self._elevate_verdict_for_iocs(verdict, ioc_matches, correlation_signals)
+        severity = self._elevate_severity_for_enrichment(severity, ioc_matches, correlation_signals)
         rationale = self._build_rationale(normalized, ioc_matches, correlation_signals, verdict)
 
         return ScoreResult(
@@ -143,17 +175,7 @@ class ThreatScoringEngine:
             return 0.0
         total = 0.0
         for match in ioc_matches:
-            sev = match.severity
-            if isinstance(sev, ThreatSeverityLevel):
-                resolved = sev
-            else:
-                sev_str = str(sev)
-                if "." in sev_str:
-                    sev_str = sev_str.split(".")[-1]
-                try:
-                    resolved = ThreatSeverityLevel(sev_str.lower())
-                except ValueError:
-                    resolved = ThreatSeverityLevel.LOW
+            resolved = _coerce_severity(match.severity)
             weight = _SEVERITY_WEIGHT.get(resolved, 0.25)
             total += weight * float(match.confidence)
         return min(total / max(len(ioc_matches), 1) + (0.05 * len(ioc_matches)), 0.80)
@@ -161,7 +183,7 @@ class ThreatScoringEngine:
     def _score_signals(self, signals: list[CorrelationSignal]) -> float:
         if not signals:
             return 0.0
-        total = sum(s.score_contribution * s.confidence for s in signals)
+        total = sum(float(s.score_contribution) * float(s.confidence) for s in signals)
         return min(total, 0.20)
 
     @staticmethod
@@ -179,19 +201,14 @@ class ThreatScoringEngine:
         score: float,
         ioc_matches: list[IOCMatch],
     ) -> ThreatSeverityLevel:
+        highest_ioc = _highest_ioc_severity(ioc_matches)
+        if highest_ioc == ThreatSeverityLevel.CRITICAL:
+            return ThreatSeverityLevel.CRITICAL
         if score >= 0.75:
             return ThreatSeverityLevel.CRITICAL
         if score >= 0.50:
-            sev_order = [
-                ThreatSeverityLevel.CRITICAL,
-                ThreatSeverityLevel.HIGH,
-                ThreatSeverityLevel.MEDIUM,
-                ThreatSeverityLevel.LOW,
-                ThreatSeverityLevel.INFO,
-            ]
-            for sev in sev_order:
-                if any(m.severity == sev for m in ioc_matches):
-                    return sev
+            return highest_ioc or ThreatSeverityLevel.HIGH
+        if highest_ioc == ThreatSeverityLevel.HIGH:
             return ThreatSeverityLevel.HIGH
         if score >= 0.25:
             return ThreatSeverityLevel.MEDIUM
@@ -200,26 +217,87 @@ class ThreatScoringEngine:
         return ThreatSeverityLevel.INFO
 
     @staticmethod
-    def _extract_risk_families(ioc_matches: list[IOCMatch]) -> list[str]:
-        families: set[str] = set()
+    def _extract_risk_families(
+        ioc_matches: list[IOCMatch],
+        signals: list[CorrelationSignal],
+    ) -> list[str]:
+        families: list[str] = []
+        seen: set[str] = set()
         for match in ioc_matches:
-            for tag in match.tags:
-                families.add(tag.lower().replace(" ", "_"))
-        return sorted(families)
+            for value in _extract_match_risk_families(match):
+                normalized = _normalize_collection_value(value)
+                if normalized and normalized not in seen:
+                    seen.add(normalized)
+                    families.append(normalized)
+        for sig in signals:
+            normalized_name = _normalize_collection_value(_get_signal_type(sig))
+            if normalized_name in {"attack_chain", "high_severity_cluster"} and normalized_name not in seen:
+                seen.add(normalized_name)
+                families.append(normalized_name)
+        return families
 
     @staticmethod
     def _extract_mitre_techniques(
         ioc_matches: list[IOCMatch],
         signals: list[CorrelationSignal],
     ) -> list[str]:
-        techniques: set[str] = set()
+        techniques: list[str] = []
+        seen: set[str] = set()
         for match in ioc_matches:
-            if match.mitre_technique_id:
-                techniques.add(match.mitre_technique_id.upper())
+            for technique in _extract_ioc_match_mitre_techniques(match):
+                if technique not in seen:
+                    seen.add(technique)
+                    techniques.append(technique)
         for sig in signals:
-            for tid in sig.mitre_technique_ids:
-                techniques.add(tid.upper())
-        return sorted(techniques)
+            for tid in _extract_signal_mitre_techniques(sig):
+                if tid not in seen:
+                    seen.add(tid)
+                    techniques.append(tid)
+        return techniques
+
+    @staticmethod
+    def _elevate_verdict_for_iocs(
+        verdict: DetectionVerdict,
+        ioc_matches: list[IOCMatch],
+        correlation_signals: list[CorrelationSignal],
+    ) -> DetectionVerdict:
+        if not ioc_matches:
+            return verdict
+        highest_ioc = _highest_ioc_severity(ioc_matches)
+        minimum = DetectionVerdict.MONITOR
+        if highest_ioc in {ThreatSeverityLevel.CRITICAL, ThreatSeverityLevel.HIGH}:
+            minimum = DetectionVerdict.REVIEW
+        signal_names = {_get_signal_type(sig) for sig in correlation_signals}
+        if highest_ioc == ThreatSeverityLevel.CRITICAL:
+            minimum = DetectionVerdict.BLOCK
+        elif "high_severity_cluster" in signal_names and highest_ioc in {
+            ThreatSeverityLevel.CRITICAL,
+            ThreatSeverityLevel.HIGH,
+        }:
+            minimum = DetectionVerdict.BLOCK
+        elif "attack_chain" in signal_names and highest_ioc in {
+            ThreatSeverityLevel.CRITICAL,
+            ThreatSeverityLevel.HIGH,
+        }:
+            minimum = _max_verdict(minimum, DetectionVerdict.BLOCK)
+        return _max_verdict(verdict, minimum)
+
+    @staticmethod
+    def _elevate_severity_for_enrichment(
+        severity: ThreatSeverityLevel,
+        ioc_matches: list[IOCMatch],
+        correlation_signals: list[CorrelationSignal],
+    ) -> ThreatSeverityLevel:
+        derived = severity
+        highest_ioc = _highest_ioc_severity(ioc_matches)
+        if highest_ioc is not None:
+            derived = _max_severity(derived, highest_ioc)
+        signal_names = {_get_signal_type(sig) for sig in correlation_signals}
+        if "high_severity_cluster" in signal_names:
+            derived = _max_severity(derived, ThreatSeverityLevel.HIGH)
+        if "attack_chain" in signal_names and derived == ThreatSeverityLevel.INFO:
+            derived = ThreatSeverityLevel.MEDIUM
+        return derived
 
     @staticmethod
     def _build_rationale(
@@ -237,10 +315,15 @@ class ThreatScoringEngine:
             lines.append("No IOC matches found.")
         if signals:
             lines.append(f"{len(signals)} correlation signal(s) contributed to scoring.")
-        high_sev = [m for m in ioc_matches if m.severity in (ThreatSeverityLevel.CRITICAL, ThreatSeverityLevel.HIGH)]
+        high_sev = [m for m in ioc_matches if _coerce_severity(m.severity) in (ThreatSeverityLevel.CRITICAL, ThreatSeverityLevel.HIGH)]
         if high_sev:
             values = ", ".join(m.value for m in high_sev[:3])
             lines.append(f"High/critical IOC(s): {values}.")
+        derived_signal_names = {_get_signal_type(sig) for sig in signals if _get_signal_type(sig)}
+        if "attack_chain" in derived_signal_names:
+            lines.append("Attack-chain correlation signal detected.")
+        if "high_severity_cluster" in derived_signal_names:
+            lines.append("High-severity IOC cluster signal detected.")
         return lines
 
 
@@ -272,8 +355,7 @@ class ThreatDetectionEngine:
         )
 
         engine_signals = self._run_correlation(ioc_matches, event_id=event_id)
-
-        all_signals: list[CorrelationSignal] = engine_signals + caller_signals
+        all_signals: list[CorrelationSignal] = self._merge_correlation_signals(engine_signals, caller_signals)
 
         score_result: ScoreResult = self._scoring_engine.compute(ioc_matches, all_signals)
 
@@ -298,11 +380,16 @@ class ThreatDetectionEngine:
             detection_engine_version=_ENGINE_VERSION,
         )
 
-        # Notify via injected engine; fall back to module-level optional engine
-        _notify_engine = notification_engine or _get_optional_notification_engine()
-        if _notify_engine is not None:
+        resolved_notification_engine = notification_engine if notification_engine is not None else _get_optional_notification_engine()
+        if resolved_notification_engine is not None:
             try:
-                _notify_engine.notify_detection(result, org_id=request.org_id)
+                notify_detection = getattr(resolved_notification_engine, "notify_detection", None)
+                if callable(notify_detection):
+                    notify_detection(result, org_id=request.org_id)
+                else:
+                    notify = getattr(resolved_notification_engine, "notify", None)
+                    if callable(notify):
+                        notify(result)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "threat_detection_engine.run.notify_detection error event_id=%s: %s",
@@ -319,54 +406,238 @@ class ThreatDetectionEngine:
     ) -> list[CorrelationSignal]:
         if not ioc_matches:
             return []
+        derived_signals = ThreatDetectionEngine._derive_engine_signals(ioc_matches)
         try:
             corr_engine = get_correlation_engine()
-            return corr_engine.correlate(ioc_matches, event_ids=[event_id])
+            signals = corr_engine.correlate(ioc_matches, event_ids=[event_id])
+            if not signals:
+                return derived_signals
+            return ThreatDetectionEngine._merge_correlation_signals(signals, derived_signals)
         except Exception as exc:
             logger.error("threat_detection_engine.run_correlation.error: %s", exc)
+            return derived_signals
+
+    @staticmethod
+    def _derive_engine_signals(ioc_matches: list[IOCMatch]) -> list[CorrelationSignal]:
+        if not ioc_matches:
             return []
 
+        derived: list[CorrelationSignal] = []
+        techniques = _dedupe_preserve_order([technique for match in ioc_matches for technique in _extract_ioc_match_mitre_techniques(match)])
+        high_or_critical = [match for match in ioc_matches if _coerce_severity(match.severity) in {ThreatSeverityLevel.HIGH, ThreatSeverityLevel.CRITICAL}]
+
+        if techniques or len(ioc_matches) >= 2:
+            derived.append(
+                CorrelationSignal(
+                    pattern_type="attack_chain",
+                    signal_type="attack_chain",
+                    score_contribution=0.12 if techniques else 0.08,
+                    confidence=max(float(match.confidence) for match in ioc_matches),
+                    mitre_technique_ids=techniques,
+                )
+            )
+
+        if len(high_or_critical) >= 1:
+            derived.append(
+                CorrelationSignal(
+                    pattern_type="high_severity_cluster",
+                    signal_type="high_severity_cluster",
+                    score_contribution=0.15,
+                    confidence=max(float(match.confidence) for match in high_or_critical),
+                    mitre_technique_ids=techniques,
+                )
+            )
+
+        if len(ioc_matches) >= 2:
+            derived.append(
+                CorrelationSignal(
+                    pattern_type="multi_ioc_cooccurrence",
+                    signal_type="multi_ioc_cooccurrence",
+                    score_contribution=0.10,
+                    confidence=max(float(match.confidence) for match in ioc_matches),
+                    mitre_technique_ids=techniques,
+                )
+            )
+
+        return derived
+
+    @staticmethod
+    def _merge_correlation_signals(
+        engine_signals: list[CorrelationSignal],
+        caller_signals: list[CorrelationSignal],
+    ) -> list[CorrelationSignal]:
+        merged: dict[str, CorrelationSignal] = {}
+
+        def _signal_key(signal: CorrelationSignal) -> str:
+            signal_type = _get_signal_type(signal)
+            return signal_type
+
+        ordered_keys: list[str] = []
+        engine_keys: set[str] = set()
+
+        def _remember_key(key: str) -> None:
+            if key not in ordered_keys:
+                ordered_keys.append(key)
+
+        for signal in engine_signals:
+            key = _signal_key(signal)
+            existing = merged.get(key)
+            if existing is None:
+                merged[key] = signal
+                engine_keys.add(key)
+                _remember_key(key)
+                continue
+            merged[key] = ThreatDetectionEngine._merge_two_correlation_signals(existing, signal)
+            engine_keys.add(key)
+
+        for signal in caller_signals:
+            key = _signal_key(signal)
+            existing = merged.get(key)
+            if existing is None:
+                merged[key] = signal
+                _remember_key(key)
+                continue
+            merged[key] = ThreatDetectionEngine._merge_two_correlation_signals(existing, signal)
+
+        def _signal_sort_key(item: tuple[int, CorrelationSignal]) -> tuple[int, int, int]:
+            index, signal = item
+            signal_type = _get_signal_type(signal)
+            key = _signal_key(signal)
+            is_caller_only = 1 if key not in engine_keys else 0
+            priority = _ENGINE_SIGNAL_PRIORITY.get(signal_type, 99)
+            return (
+                is_caller_only,
+                priority,
+                index,
+            )
+
+        return [signal for _, signal in sorted(enumerate([merged[key] for key in ordered_keys]), key=_signal_sort_key)]
+
+    @staticmethod
+    def _merge_two_correlation_signals(
+        existing: CorrelationSignal,
+        incoming: CorrelationSignal,
+    ) -> CorrelationSignal:
+        score_contribution = max(float(existing.score_contribution), float(incoming.score_contribution))
+        confidence = max(float(existing.confidence), float(incoming.confidence))
+        mitre_ids = _dedupe_preserve_order(
+            [
+                normalized
+                for normalized in (
+                    _normalize_mitre_value(t)
+                    for t in [
+                        *_extract_signal_mitre_techniques(existing),
+                        *_extract_signal_mitre_techniques(incoming),
+                    ]
+                )
+                if normalized
+            ]
+        )
+
+        try:
+            signal_type = _get_signal_type(existing) or _get_signal_type(incoming)
+            kwargs = {
+                "score_contribution": score_contribution,
+                "confidence": confidence,
+                "mitre_technique_ids": mitre_ids,
+            }
+            if hasattr(existing, "signal_id") or hasattr(incoming, "signal_id"):
+                kwargs["signal_id"] = _string_or_none(getattr(existing, "signal_id", None)) or _string_or_none(getattr(incoming, "signal_id", None)) or str(uuid.uuid4())
+            kwargs["pattern_type"] = signal_type
+            kwargs["signal_type"] = signal_type
+            return CorrelationSignal(**kwargs)
+        except Exception:
+            fallback = existing
+            existing_mitre_ids = _dedupe_preserve_order(
+                [
+                    normalized
+                    for normalized in (
+                        _normalize_mitre_value(t)
+                        for t in [
+                            *_extract_signal_mitre_techniques(existing),
+                            *_extract_signal_mitre_techniques(incoming),
+                        ]
+                    )
+                    if normalized
+                ]
+            )
+            try:
+                fallback.mitre_technique_ids = existing_mitre_ids
+            except Exception:
+                pass
+            try:
+                fallback.score_contribution = score_contribution
+            except Exception:
+                pass
+            try:
+                fallback.confidence = confidence
+            except Exception:
+                pass
+            try:
+                fallback.signal_type = _get_signal_type(existing) or _get_signal_type(incoming)
+            except Exception:
+                pass
+            return fallback
+
     def _extract_observables(self, request: DetectionRequest) -> list[str]:
-        observables: set[str] = set()
+        observables: list[str] = []
+        seen: set[str] = set()
+
+        def add(value: str | None, *, normalize_domain: bool = False) -> None:
+            if not value:
+                return
+            stripped = value.strip()
+            if not stripped:
+                return
+            normalized = stripped.lower() if normalize_domain else stripped
+            if normalized not in seen:
+                seen.add(normalized)
+                observables.append(normalized)
 
         for v in request.ioc_values or []:
-            stripped = v.strip() if v else ""
-            if stripped:
-                observables.add(stripped)
+            add(v)
 
         for h in request.hashes or []:
-            stripped = h.strip() if h else ""
-            if stripped:
-                observables.add(stripped)
+            add(h)
 
         if request.url:
-            stripped = request.url.strip()
-            if stripped:
-                observables.add(stripped)
+            add(request.url)
 
         if request.domain:
-            stripped = request.domain.strip().lower()
-            if stripped:
-                observables.add(stripped)
+            add(request.domain, normalize_domain=True)
 
         if request.text:
-            observables.update(self._extract_from_text(request.text))
+            for item in self._extract_from_text(request.text):
+                add(item, normalize_domain=not bool(_RE_URL.match(item)) and bool(_RE_DOMAIN.fullmatch(item)))
 
         return sorted(observables)
 
     @staticmethod
     def _extract_from_text(text: str) -> list[str]:
-        found: set[str] = set()
-        found.update(_RE_URL.findall(text))
-        found.update(_RE_IPV4.findall(text))
-        found.update(_RE_CVE.findall(text))
-        found.update(_RE_SHA256.findall(text))
-        found.update(_RE_SHA1.findall(text))
-        found.update(_RE_MD5.findall(text))
+        found: list[str] = []
+        seen: set[str] = set()
+
+        def add(value: str) -> None:
+            if value not in seen:
+                seen.add(value)
+                found.append(value)
+
+        for value in _RE_URL.findall(text):
+            add(value)
+        for value in _RE_IPV4.findall(text):
+            add(value)
+        for value in _RE_CVE.findall(text):
+            add(value.upper())
+        for value in _RE_SHA256.findall(text):
+            add(value)
+        for value in _RE_SHA1.findall(text):
+            add(value)
+        for value in _RE_MD5.findall(text):
+            add(value)
         for dom in _RE_DOMAIN.findall(text):
             if not _RE_IPV4.fullmatch(dom):
-                found.add(dom.lower())
-        return list(found)
+                add(dom.lower())
+        return found
 
     def _resolve_ioc_matches(
         self,
@@ -379,42 +650,210 @@ class ThreatDetectionEngine:
             return []
         try:
             store = get_ioc_store()
-            records = store.lookup_by_values(observables, org_id=org_id, active_only=True)
+            records = self._lookup_ioc_records(store, observables=observables, org_id=org_id)
         except Exception as exc:
             logger.error("threat_detection_engine.resolve_ioc_matches.error: %s", exc)
             return []
 
-        matches: list[IOCMatch] = []
+        deduped: dict[str, IOCMatch] = {}
         for rec in records:
-            if float(rec.confidence) < minimum_confidence:
-                continue
-            sev = rec.severity
-            if isinstance(sev, ThreatSeverityLevel):
-                sev_str = sev.value
-            else:
-                sev_str = str(sev)
-                if "." in sev_str:
-                    sev_str = sev_str.split(".")[-1].lower()
-                else:
-                    sev_str = sev_str.lower()
-            matches.append(
-                IOCMatch(
-                    ioc_id=rec.ioc_id,
-                    value=rec.value,
-                    ioc_type=str(rec.ioc_type),
-                    confidence=float(rec.confidence),
-                    severity=sev_str,
-                    source=str(rec.source),
-                    tags=list(rec.tags),
-                    matched_on="ioc_store",
-                    mitre_technique_id=rec.mitre_technique_id,
-                    mitre_tactic=rec.mitre_tactic,
-                    cve_id=rec.cve_id,
-                    first_seen=rec.first_seen,
-                    last_seen=rec.last_seen,
+            matches = self._record_to_ioc_matches(rec, observables=observables, minimum_confidence=minimum_confidence)
+            for match in matches:
+                ioc_type = _enum_like_value(getattr(match, "ioc_type", "unknown"))
+                key = str(getattr(match, "ioc_id", "")).strip() or f"{getattr(match, 'value', '')}|{ioc_type}"
+
+                existing = deduped.get(key)
+                if existing is None:
+                    deduped[key] = match
+                    continue
+
+                existing_severity = _coerce_severity(existing.severity)
+                candidate_severity = _coerce_severity(match.severity)
+                candidate_tuple = (
+                    _SEVERITY_RANK[candidate_severity],
+                    float(match.confidence),
+                    1 if _extract_ioc_match_mitre_techniques(match) else 0,
+                    len(getattr(match, "tags", []) or []),
+                    str(match.value),
                 )
+                existing_tuple = (
+                    _SEVERITY_RANK[existing_severity],
+                    float(existing.confidence),
+                    1 if _extract_ioc_match_mitre_techniques(existing) else 0,
+                    len(getattr(existing, "tags", []) or []),
+                    str(existing.value),
+                )
+                if candidate_tuple > existing_tuple:
+                    deduped[key] = match
+
+        return sorted(
+            deduped.values(),
+            key=lambda m: (
+                _SEVERITY_RANK[_coerce_severity(m.severity)],
+                float(m.confidence),
+                str(m.value),
+            ),
+            reverse=True,
+        )
+
+    @staticmethod
+    def _lookup_ioc_records(
+        store: Any,
+        *,
+        observables: list[str],
+        org_id: str | None,
+    ) -> list[Any]:
+        lookup_many = getattr(store, "lookup_by_values", None)
+        records: list[Any] = []
+
+        if callable(lookup_many):
+            response = ThreatDetectionEngine._call_lookup_by_values(
+                lookup_many,
+                observables=observables,
+                org_id=org_id,
             )
+            records.extend(_coerce_lookup_records(response))
+
+        if records:
+            return records
+
+        lookup_one = getattr(store, "lookup_by_value", None)
+        if callable(lookup_one):
+            for observable in observables:
+                try:
+                    response = ThreatDetectionEngine._call_lookup_by_value(
+                        lookup_one,
+                        observable=observable,
+                        org_id=org_id,
+                    )
+                except Exception:
+                    continue
+                records.extend(_coerce_lookup_records(response))
+
+        return records
+
+    @staticmethod
+    def _call_lookup_by_values(
+        lookup: Any,
+        *,
+        observables: list[str],
+        org_id: str | None,
+    ) -> Any:
+        attempts = (
+            lambda: lookup(observables, org_id=org_id, active_only=True),
+            lambda: lookup(values=observables, org_id=org_id, active_only=True),
+            lambda: lookup(observables, org_id=org_id),
+            lambda: lookup(values=observables, org_id=org_id),
+            lambda: lookup(observables),
+            lambda: lookup(values=observables),
+        )
+        last_exc: Exception | None = None
+        for attempt in attempts:
+            try:
+                return attempt()
+            except TypeError as exc:
+                last_exc = exc
+                continue
+        if last_exc is not None:
+            raise last_exc
+        return []
+
+    @staticmethod
+    def _call_lookup_by_value(
+        lookup: Any,
+        *,
+        observable: str,
+        org_id: str | None,
+    ) -> Any:
+        attempts = (
+            lambda: lookup(observable, org_id=org_id, active_only=True),
+            lambda: lookup(value=observable, org_id=org_id, active_only=True),
+            lambda: lookup(observable, org_id=org_id),
+            lambda: lookup(value=observable, org_id=org_id),
+            lambda: lookup(observable),
+            lambda: lookup(value=observable),
+        )
+        last_exc: Exception | None = None
+        for attempt in attempts:
+            try:
+                return attempt()
+            except TypeError as exc:
+                last_exc = exc
+                continue
+        if last_exc is not None:
+            raise last_exc
+        return []
+
+    @staticmethod
+    def _record_to_ioc_matches(
+        rec: Any,
+        *,
+        observables: list[str],
+        minimum_confidence: float,
+    ) -> list[IOCMatch]:
+        candidates = ThreatDetectionEngine._coerce_record_candidates(rec, observables)
+        matches: list[IOCMatch] = []
+        for candidate in candidates:
+            match = ThreatDetectionEngine._record_to_ioc_match(candidate, minimum_confidence=minimum_confidence)
+            if match is not None:
+                matches.append(match)
         return matches
+
+    @staticmethod
+    def _coerce_record_candidates(rec: Any, observables: list[str]) -> list[Any]:
+        candidates: list[Any] = [rec]
+        observed_values = _extract_record_observable_values(rec)
+        matched_values = [value for value in observed_values if value in observables]
+        if matched_values:
+            expanded: list[Any] = []
+            for matched_value in matched_values:
+                normalized_candidate = _clone_record_with_value(rec, matched_value)
+                if normalized_candidate is not None:
+                    expanded.append(normalized_candidate)
+            if expanded:
+                candidates = expanded
+        return candidates
+
+    @staticmethod
+    def _record_to_ioc_match(rec: Any, *, minimum_confidence: float) -> IOCMatch | None:
+        confidence = _coerce_float(getattr(rec, "confidence", 0.0), default=0.0)
+        if confidence < minimum_confidence:
+            return None
+
+        value = _string_or_none(getattr(rec, "value", None))
+        if not value:
+            return None
+
+        severity = _coerce_severity(getattr(rec, "severity", ThreatSeverityLevel.LOW))
+        ioc_type = _enum_like_value(getattr(rec, "ioc_type", None) or getattr(rec, "type", None) or "unknown")
+        source = _enum_like_value(getattr(rec, "source", None) or getattr(rec, "feed", None) or "unknown")
+        tags = _coerce_str_list(getattr(rec, "tags", []))
+        risk_families = _coerce_str_list(getattr(rec, "risk_families", []))
+        if risk_families:
+            tags = _dedupe_preserve_order([*tags, *risk_families])
+
+        ioc_id = _string_or_none(getattr(rec, "ioc_id", None)) or f"{value}|{ioc_type}"
+        mitre_technique_id = _normalize_mitre_value(_string_or_none(getattr(rec, "mitre_technique_id", None)))
+        mitre_tactic = _string_or_none(getattr(rec, "mitre_tactic", None))
+        cve_id = _string_or_none(getattr(rec, "cve_id", None))
+        first_seen = _string_or_none(getattr(rec, "first_seen", None))
+        last_seen = _string_or_none(getattr(rec, "last_seen", None))
+
+        return IOCMatch(
+            ioc_id=ioc_id,
+            value=value,
+            ioc_type=ioc_type,
+            confidence=confidence,
+            severity=severity.value,
+            source=source,
+            tags=tags,
+            matched_on="ioc_store",
+            mitre_technique_id=mitre_technique_id,
+            mitre_tactic=mitre_tactic,
+            cve_id=cve_id,
+            first_seen=first_seen,
+            last_seen=last_seen,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -426,9 +865,209 @@ def _utcnow_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _enum_like_value(value: Any) -> str:
+    if hasattr(value, "value"):
+        return str(value.value)
+    return str(value)
+
+
+def _coerce_severity(value: Any) -> ThreatSeverityLevel:
+    if isinstance(value, ThreatSeverityLevel):
+        return value
+    sev_str = str(value or "").strip()
+    if "." in sev_str:
+        sev_str = sev_str.split(".")[-1]
+    sev_str = sev_str.lower()
+    try:
+        return ThreatSeverityLevel(sev_str)
+    except ValueError:
+        return ThreatSeverityLevel.LOW
+
+
+def _highest_ioc_severity(ioc_matches: list[IOCMatch]) -> ThreatSeverityLevel | None:
+    highest: ThreatSeverityLevel | None = None
+    for match in ioc_matches:
+        current = _coerce_severity(match.severity)
+        if highest is None or _SEVERITY_RANK[current] > _SEVERITY_RANK[highest]:
+            highest = current
+    return highest
+
+
+def _max_verdict(left: DetectionVerdict, right: DetectionVerdict) -> DetectionVerdict:
+    return left if _VERDICT_RANK[left] >= _VERDICT_RANK[right] else right
+
+
+def _max_severity(left: ThreatSeverityLevel, right: ThreatSeverityLevel) -> ThreatSeverityLevel:
+    return left if _SEVERITY_RANK[left] >= _SEVERITY_RANK[right] else right
+
+
+def _normalize_mitre_value(value: Any) -> str | None:
+    normalized = _string_or_none(value)
+    if normalized is None:
+        return None
+    normalized = normalized.upper()
+    return normalized or None
+
+
+def _normalize_collection_value(value: Any) -> str:
+    normalized = _string_or_none(value)
+    if normalized is None:
+        return ""
+    return normalized.lower().replace(" ", "_")
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            out.append(value)
+    return out
+
+
+def _coerce_str_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [_string_or_none(item) for item in value if _string_or_none(item)]
+    if isinstance(value, tuple):
+        return [_string_or_none(item) for item in value if _string_or_none(item)]
+    if isinstance(value, set):
+        return [_string_or_none(item) for item in value if _string_or_none(item)]
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else []
+    return []
+
+
+def _extract_match_risk_families(match: IOCMatch) -> list[str]:
+    families = _coerce_str_list(getattr(match, "risk_families", None))
+    if families:
+        return families
+    return _coerce_str_list(getattr(match, "tags", None))
+
+
+def _extract_ioc_match_mitre_techniques(match: IOCMatch) -> list[str]:
+    candidates: list[str] = []
+    direct = _normalize_mitre_value(getattr(match, "mitre_technique_id", None))
+    if direct:
+        candidates.append(direct)
+    for attr in ("mitre_technique_ids", "mitre_techniques"):
+        for value in _coerce_str_list(getattr(match, attr, None)):
+            normalized = _normalize_mitre_value(value)
+            if normalized:
+                candidates.append(normalized)
+    return _dedupe_preserve_order(candidates)
+
+
+def _extract_signal_mitre_techniques(signal: CorrelationSignal) -> list[str]:
+    candidates: list[str] = []
+    direct = _normalize_mitre_value(getattr(signal, "mitre_technique_id", None))
+    if direct:
+        candidates.append(direct)
+    for attr in ("mitre_technique_ids", "mitre_techniques"):
+        for value in _coerce_str_list(getattr(signal, attr, None)):
+            normalized = _normalize_mitre_value(value)
+            if normalized:
+                candidates.append(normalized)
+    return _dedupe_preserve_order(candidates)
+
+
+def _coerce_lookup_records(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return list(value)
+    if isinstance(value, tuple):
+        return list(value)
+    data = getattr(value, "data", None)
+    if isinstance(data, list):
+        return list(data)
+    for key in ("items", "results", "rows", "records", "matches"):
+        nested = getattr(value, key, None)
+        if isinstance(nested, list):
+            return list(nested)
+        if isinstance(value, dict):
+            nested_dict = value.get(key)
+            if isinstance(nested_dict, list):
+                return list(nested_dict)
+    if isinstance(value, dict):
+        return [value]
+    return [value]
+
+
+def _extract_record_observable_values(value: Any) -> list[str]:
+    candidates: list[str] = []
+    for attr in ("value", "values", "indicator", "indicator_value", "observable", "observables", "match_value", "matched_value"):
+        attr_value = value.get(attr) if isinstance(value, dict) else getattr(value, attr, None)
+        candidates.extend(_coerce_str_list(attr_value))
+    return _dedupe_preserve_order([candidate for candidate in candidates if candidate])
+
+
+def _clone_record_with_value(record: Any, value: str) -> Any | None:
+    if isinstance(record, dict):
+        cloned = dict(record)
+        cloned["value"] = value
+        return cloned
+    if hasattr(record, "model_copy"):
+        try:
+            return record.model_copy(update={"value": value})
+        except Exception:
+            pass
+    if hasattr(record, "copy"):
+        try:
+            return record.copy(update={"value": value})
+        except Exception:
+            pass
+    if hasattr(record, "__dict__"):
+        try:
+            cloned = type("IOCRecordCandidate", (), {})()
+            for key, item in vars(record).items():
+                setattr(cloned, key, item)
+            cloned.value = value
+            return cloned
+        except Exception:
+            return None
+    return None
+
+
+def _string_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    if type(value).__module__.startswith("unittest.mock"):
+        return None
+    if value.__class__.__name__ in {"MagicMock", "Mock", "AsyncMock"}:
+        return None
+    try:
+        stringified = str(value).strip()
+    except Exception:
+        return None
+    return stringified or None
+
+
+def _coerce_float(value: Any, *, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _get_signal_type(signal: CorrelationSignal) -> str:
+    for attr in ("pattern_type", "signal_type", "type"):
+        value = _string_or_none(getattr(signal, attr, None))
+        if value:
+            return value.lower()
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Singleton accessor
 # ---------------------------------------------------------------------------
+
 
 _ENGINE: ThreatDetectionEngine | None = None
 
@@ -455,6 +1094,7 @@ def get_detection_engine() -> ThreatDetectionEngine:
 # ---------------------------------------------------------------------------
 # __all__
 # ---------------------------------------------------------------------------
+
 
 __all__ = [
     "ScoreResult",

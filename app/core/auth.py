@@ -23,11 +23,20 @@ _logger = logging.getLogger(__name__)
 API_KEY_HEADER_NAME = "X-API-Key"
 SESSION_ID_HEADER_NAME = "X-Session-Id"
 ORG_ID_HEADER_NAME = "X-Org-Id"
+ORGANIZATION_ID_HEADER_NAME = "X-Organization-Id"
+TENANT_ID_HEADER_NAME = "X-Tenant-Id"
 AUTHORIZATION_HEADER_NAME = "Authorization"
+
+_RESOLVED_API_KEY_RECORD_REQUEST_STATE_KEY = "_resolved_api_key_record"
 
 api_key_header = APIKeyHeader(name=API_KEY_HEADER_NAME, auto_error=False)
 session_id_header = APIKeyHeader(name=SESSION_ID_HEADER_NAME, auto_error=False)
 org_id_header = APIKeyHeader(name=ORG_ID_HEADER_NAME, auto_error=False)
+organization_id_header = APIKeyHeader(
+    name=ORGANIZATION_ID_HEADER_NAME,
+    auto_error=False,
+)
+tenant_id_header = APIKeyHeader(name=TENANT_ID_HEADER_NAME, auto_error=False)
 authorization_header = APIKeyHeader(name=AUTHORIZATION_HEADER_NAME, auto_error=False)
 
 
@@ -63,6 +72,7 @@ def _get_settings(request: Request) -> Any | None:
             return state_settings
     except Exception:
         pass
+
     try:
         return get_settings()
     except Exception:
@@ -112,6 +122,12 @@ def _extract_configured_api_key(request: Request) -> str | None:
     if settings is None:
         return None
 
+    effective_api_key = _clean_optional_string(
+        getattr(settings, "effective_api_key", None),
+    )
+    if effective_api_key is not None:
+        return effective_api_key
+
     for attr_name in (
         "ironclaw_api_key",
         "internal_platform_api_key",
@@ -132,7 +148,9 @@ def get_secret_key(request: Request) -> str | None:
     settings = _get_settings(request)
     if settings is None:
         return None
-    effective_value = _clean_optional_string(getattr(settings, "effective_secret_key", None))
+    effective_value = _clean_optional_string(
+        getattr(settings, "effective_secret_key", None),
+    )
     if effective_value is not None:
         return effective_value
     value = _clean_optional_string(getattr(settings, "secret_key", None))
@@ -148,7 +166,9 @@ def get_jwt_secret(request: Request) -> str | None:
     settings = _get_settings(request)
     if settings is None:
         return None
-    effective_value = _clean_optional_string(getattr(settings, "effective_jwt_secret", None))
+    effective_value = _clean_optional_string(
+        getattr(settings, "effective_jwt_secret", None),
+    )
     if effective_value is not None:
         return effective_value
     value = _clean_optional_string(getattr(settings, "jwt_secret", None))
@@ -165,6 +185,12 @@ def get_supabase_jwt_secret(request: Request) -> str | None:
     if settings is None:
         return None
 
+    effective_value = _clean_optional_string(
+        getattr(settings, "effective_supabase_jwt_secret", None),
+    )
+    if effective_value is not None:
+        return effective_value
+
     for attr_name in (
         "supabase_jwt_secret",
         "SUPABASE_JWT_SECRET",
@@ -176,13 +202,32 @@ def get_supabase_jwt_secret(request: Request) -> str | None:
     return get_jwt_secret(request)
 
 
+def _get_jwt_algorithm(request: Request) -> str:
+    settings = _get_settings(request)
+    if settings is None:
+        return "HS256"
+
+    effective_value = _clean_optional_string(
+        getattr(settings, "effective_jwt_algorithm", None),
+    )
+    if effective_value is not None:
+        return effective_value.upper()
+
+    for attr_name in ("jwt_algorithm", "JWT_ALGORITHM"):
+        value = _clean_optional_string(getattr(settings, attr_name, None))
+        if value is not None:
+            return value.upper()
+
+    return "HS256"
+
+
 def _touch_record_if_possible(record: APIKeyRecord) -> APIKeyRecord:
     touch = getattr(record, "touch", None)
     if not callable(touch):
         return record
 
     try:
-        updated = cast(APIKeyRecord | None, touch())
+        updated = cast("APIKeyRecord | None", touch())
     except Exception:
         return record
 
@@ -229,6 +274,41 @@ def _resolve_registry_api_key(provided_api_key: str) -> APIKeyRecord | None:
             return _touch_record_if_possible(record)
 
     return None
+
+
+def _get_cached_registry_record(request: Request) -> APIKeyRecord | None:
+    try:
+        return cast(
+            "APIKeyRecord | None",
+            getattr(request.state, _RESOLVED_API_KEY_RECORD_REQUEST_STATE_KEY, None),
+        )
+    except Exception:
+        return None
+
+
+def _cache_registry_record(request: Request, record: APIKeyRecord | None) -> None:
+    try:
+        setattr(request.state, _RESOLVED_API_KEY_RECORD_REQUEST_STATE_KEY, record)
+    except Exception:
+        pass
+
+
+def _resolve_registry_api_key_for_request(
+    request: Request,
+    provided_api_key: str | None,
+) -> APIKeyRecord | None:
+    normalized_api_key = _clean_optional_string(provided_api_key)
+    if normalized_api_key is None:
+        return None
+
+    cached_record = _get_cached_registry_record(request)
+    if cached_record is not None:
+        return cached_record
+
+    record = _resolve_registry_api_key(normalized_api_key)
+    if record is not None:
+        _cache_registry_record(request, record)
+    return record
 
 
 def _has_registry_keys() -> bool:
@@ -280,9 +360,23 @@ def _is_auth_required(request: Request) -> bool:
     if settings is None:
         return _has_registry_keys()
 
+    effective_flag = _coerce_optional_bool(
+        getattr(settings, "effective_auth_required", None),
+    )
+    if effective_flag is not None:
+        return effective_flag
+
     explicit_flag = _coerce_optional_bool(getattr(settings, "auth_required", None))
     if explicit_flag is not None:
         return explicit_flag
+
+    explicit_flag = _coerce_optional_bool(getattr(settings, "AUTH_REQUIRED", None))
+    if explicit_flag is not None:
+        return explicit_flag
+
+    configured_flag = _coerce_optional_bool(getattr(settings, "auth_configured", None))
+    if configured_flag is not None:
+        return configured_flag
 
     if _extract_configured_api_key(request) is not None:
         return True
@@ -334,36 +428,133 @@ def _coerce_principal_id(record: APIKeyRecord | None) -> str | None:
     return None
 
 
-def _coerce_org_id(
+def _extract_header_org_candidates(
     request: Request,
     provided_org_id: str | None,
-    record: APIKeyRecord | None,
-) -> str | None:
-    header_org_id = _clean_optional_string(provided_org_id)
-    if header_org_id is not None:
-        return header_org_id
+    provided_organization_id: str | None,
+    provided_tenant_id: str | None,
+) -> tuple[str | None, str | None]:
+    candidates: list[tuple[str, str | None]] = [
+        (ORG_ID_HEADER_NAME, provided_org_id),
+        (ORGANIZATION_ID_HEADER_NAME, provided_organization_id),
+        (TENANT_ID_HEADER_NAME, provided_tenant_id),
+        (ORG_ID_HEADER_NAME, request.headers.get(ORG_ID_HEADER_NAME)),
+        (
+            ORGANIZATION_ID_HEADER_NAME,
+            request.headers.get(ORGANIZATION_ID_HEADER_NAME),
+        ),
+        (TENANT_ID_HEADER_NAME, request.headers.get(TENANT_ID_HEADER_NAME)),
+    ]
 
-    if record is not None:
-        for attr_name in ("org_id", "organization_id", "tenant_id"):
-            value = _clean_optional_string(getattr(record, attr_name, None))
-            if value is not None:
-                return value
+    normalized_values: list[tuple[str, str]] = []
+    seen_values: set[str] = set()
 
+    for header_name, raw_value in candidates:
+        value = _clean_optional_string(raw_value)
+        if value is None:
+            continue
+        if value not in seen_values:
+            normalized_values.append((header_name, value))
+            seen_values.add(value)
+
+    if not normalized_values:
+        return None, None
+
+    first_header_name, first_value = normalized_values[0]
+    conflicting_values = {value for _, value in normalized_values}
+    if len(conflicting_values) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=("Conflicting organization scope headers provided; send only one organization identifier value"),
+        )
+
+    return first_value, first_header_name
+
+
+def _coerce_org_id_from_record(record: APIKeyRecord | None) -> str | None:
+    if record is None:
+        return None
+
+    for attr_name in ("org_id", "organization_id", "tenant_id"):
+        value = _clean_optional_string(getattr(record, attr_name, None))
+        if value is not None:
+            return value
+
+    return None
+
+
+def _coerce_org_id_from_settings(request: Request) -> str | None:
     settings = _get_settings(request)
     if settings is not None:
         for attr_name in ("org_id", "organization_id", "default_org_id"):
             value = _clean_optional_string(getattr(settings, attr_name, None))
             if value is not None:
                 return value
-
     return None
+
+
+def _coerce_org_id(
+    request: Request,
+    provided_org_id: str | None,
+    provided_organization_id: str | None,
+    provided_tenant_id: str | None,
+    record: APIKeyRecord | None,
+) -> tuple[str | None, str]:
+    header_org_id, header_source = _extract_header_org_candidates(
+        request,
+        provided_org_id,
+        provided_organization_id,
+        provided_tenant_id,
+    )
+    if header_org_id is not None:
+        return header_org_id, header_source or "header"
+
+    record_org_id = _coerce_org_id_from_record(record)
+    if record_org_id is not None:
+        return record_org_id, "api_key_record"
+
+    settings_org_id = _coerce_org_id_from_settings(request)
+    if settings_org_id is not None:
+        return settings_org_id, "settings"
+
+    return None, "none"
 
 
 def _coerce_key_type(record: APIKeyRecord | None) -> str:
     if record is None:
         return "personal"
-    value = _clean_optional_string(getattr(record, "key_type", None))
-    return value if value else "personal"
+
+    for attr_name in ("key_type", "kind"):
+        value = _clean_optional_string(getattr(record, attr_name, None))
+        if value is not None:
+            normalized = value.lower()
+            if normalized in {"org", "organization", "tenant"}:
+                return "org"
+            if normalized in {"personal", "user"}:
+                return "personal"
+            return normalized
+
+    api_key_value = _clean_optional_string(getattr(record, "api_key", None))
+    if api_key_value and api_key_value.startswith("ic_org_"):
+        return "org"
+
+    if _coerce_org_id_from_record(record) is not None:
+        return "org"
+
+    return "personal"
+
+
+def _resolve_registry_principal_type(record: APIKeyRecord | None) -> str:
+    if record is None:
+        return "api_key"
+
+    explicit_principal_type = _clean_optional_string(
+        getattr(record, "principal_type", None),
+    )
+    if explicit_principal_type is not None:
+        return explicit_principal_type
+
+    return "org_key" if _coerce_key_type(record) == "org" else "api_key"
 
 
 def _extract_bearer_token(raw_authorization: str | None) -> str | None:
@@ -403,7 +594,9 @@ def _resolve_bearer_org_id(
     request: Request,
     claims: dict[str, Any],
     provided_org_id: str | None,
-) -> str | None:
+    provided_organization_id: str | None,
+    provided_tenant_id: str | None,
+) -> tuple[str | None, str]:
     for claim_name in (
         "org_id",
         "organization_id",
@@ -412,23 +605,29 @@ def _resolve_bearer_org_id(
     ):
         claim_value = _clean_optional_string(claims.get(claim_name))
         if claim_value is not None:
-            return claim_value
+            return claim_value, f"claim:{claim_name}"
 
     user_metadata = claims.get("user_metadata")
     if isinstance(user_metadata, dict):
         for claim_name in ("org_id", "organization_id", "tenant_id", "orgId"):
             claim_value = _clean_optional_string(user_metadata.get(claim_name))
             if claim_value is not None:
-                return claim_value
+                return claim_value, f"user_metadata:{claim_name}"
 
     app_metadata = claims.get("app_metadata")
     if isinstance(app_metadata, dict):
         for claim_name in ("org_id", "organization_id", "tenant_id", "orgId"):
             claim_value = _clean_optional_string(app_metadata.get(claim_name))
             if claim_value is not None:
-                return claim_value
+                return claim_value, f"app_metadata:{claim_name}"
 
-    return _coerce_org_id(request, provided_org_id, None)
+    return _coerce_org_id(
+        request,
+        provided_org_id,
+        provided_organization_id,
+        provided_tenant_id,
+        None,
+    )
 
 
 def _resolve_bearer_roles(claims: dict[str, Any]) -> tuple[str, ...]:
@@ -540,10 +739,13 @@ def get_bearer_context(
     if token is None:
         return None
 
+    auth_required = _is_auth_required(request)
     secret = get_supabase_jwt_secret(request)
     if not secret:
-        if not _is_auth_required(request):
-            _logger.info("Ignoring Bearer token because auth is disabled and no JWT secret is configured")
+        if not auth_required:
+            _logger.info(
+                "Ignoring Bearer token because auth is disabled and no JWT secret is configured",
+            )
             return None
         _logger.warning("Missing SUPABASE_JWT_SECRET for Bearer auth")
         raise HTTPException(
@@ -551,18 +753,20 @@ def get_bearer_context(
             detail="SUPABASE_JWT_SECRET is not configured",
         )
 
+    algorithm = _get_jwt_algorithm(request)
+
     try:
         claims = cast(
-            dict[str, Any],
+            "dict[str, Any]",
             jwt.decode(
                 token,
                 secret,
-                algorithms=["HS256"],
+                algorithms=[algorithm],
                 options={"verify_aud": False},
             ),
         )
     except jwt.PyJWTError as exc:
-        if not _is_auth_required(request):
+        if not auth_required:
             _logger.info("Ignoring invalid Bearer token because auth is disabled")
             return None
         _logger.warning("Invalid Bearer token: %s", exc)
@@ -573,8 +777,10 @@ def get_bearer_context(
 
     principal_id = _clean_optional_string(claims.get("sub"))
     if principal_id is None:
-        if not _is_auth_required(request):
-            _logger.info("Ignoring Bearer token without sub claim because auth is disabled")
+        if not auth_required:
+            _logger.info(
+                "Ignoring Bearer token without sub claim because auth is disabled",
+            )
             return None
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -613,14 +819,17 @@ def get_api_key(
     configured_api_key = _extract_configured_api_key(request)
 
     if _constant_time_match(configured_api_key, normalized_api_key):
+        _cache_registry_record(request, None)
         return normalized_api_key
 
-    registry_record = _resolve_registry_api_key(normalized_api_key)
+    registry_record = _resolve_registry_api_key_for_request(request, normalized_api_key)
     if registry_record is not None:
         return normalized_api_key
 
     if not auth_required:
-        _logger.info("Allowing unrecognized API key passthrough because auth is disabled")
+        _logger.info(
+            "Allowing unrecognized API key passthrough because auth is disabled",
+        )
         return normalized_api_key
 
     if configured_api_key is None and not _has_registry_keys():
@@ -647,6 +856,8 @@ def get_auth_context(
     bearer_context: BearerAuthContext | None = Depends(get_bearer_context),
     session_id: str | None = Depends(session_id_header),
     provided_org_id: str | None = Depends(org_id_header),
+    provided_organization_id: str | None = Depends(organization_id_header),
+    provided_tenant_id: str | None = Depends(tenant_id_header),
 ) -> AuthContext:
     if _is_preflight_request(request):
         return _preflight_auth_context()
@@ -655,28 +866,40 @@ def get_auth_context(
     normalized_api_key = _clean_optional_string(api_key)
 
     if normalized_api_key:
-        registry_record = _resolve_registry_api_key(normalized_api_key)
+        registry_record = _resolve_registry_api_key_for_request(
+            request,
+            normalized_api_key,
+        )
         principal_type = "platform"
         auth_source = "passthrough"
         auth_method = "api_key"
 
         if registry_record is not None:
-            principal_type = "api_key"
+            principal_type = _resolve_registry_principal_type(registry_record)
             auth_source = "registry"
             auth_method = "registry_api_key"
-        elif _is_auth_required(request):
-            auth_source = "configured"
+        else:
+            configured_api_key = _extract_configured_api_key(request)
+            if _constant_time_match(configured_api_key, normalized_api_key):
+                auth_source = "configured"
 
         resolved_key_type = _coerce_key_type(registry_record)
-        resolved_org_id = _coerce_org_id(request, provided_org_id, registry_record)
+        resolved_org_id, org_source = _coerce_org_id(
+            request,
+            provided_org_id,
+            provided_organization_id,
+            provided_tenant_id,
+            registry_record,
+        )
+        resolved_principal_id = _coerce_principal_id(registry_record)
 
-        if resolved_key_type == "org" and registry_record is not None:
+        if registry_record is not None and resolved_key_type == "org":
             principal_type = "org_key"
 
         return AuthContext(
             api_key=normalized_api_key,
             principal_type=principal_type,
-            principal_id=_coerce_principal_id(registry_record),
+            principal_id=resolved_principal_id,
             session_id=normalized_session_id,
             org_id=resolved_org_id,
             permissions=_coerce_permissions(registry_record),
@@ -685,7 +908,10 @@ def get_auth_context(
             auth_source=auth_source,
             auth_method=auth_method,
             key_type=resolved_key_type,
-            metadata={"header": API_KEY_HEADER_NAME},
+            metadata={
+                "header": API_KEY_HEADER_NAME,
+                "org_source": org_source,
+            },
         )
 
     if isinstance(bearer_context, BearerAuthContext):
@@ -694,18 +920,25 @@ def get_auth_context(
         }
 
         for claim_name in ("email", "role", "aal", "iss"):
-            claim_value = _clean_optional_string(bearer_context.claims.get(claim_name))
+            claim_value = _clean_optional_string(
+                bearer_context.claims.get(claim_name),
+            )
             if claim_value is not None:
                 metadata[claim_name] = claim_value
 
-        resolved_org_id = _resolve_bearer_org_id(
+        resolved_org_id, org_source = _resolve_bearer_org_id(
             request,
             bearer_context.claims,
             provided_org_id,
+            provided_organization_id,
+            provided_tenant_id,
         )
         resolved_roles = _resolve_bearer_roles(bearer_context.claims)
         resolved_permissions = _resolve_bearer_permissions(bearer_context.claims)
-        resolved_principal_type = _resolve_bearer_principal_type(bearer_context.claims)
+        resolved_principal_type = _resolve_bearer_principal_type(
+            bearer_context.claims,
+        )
+        metadata["org_source"] = org_source
 
         return AuthContext(
             api_key=None,
@@ -728,16 +961,25 @@ def get_auth_context(
             detail="Missing API key — provide X-API-Key or Bearer token",
         )
 
+    resolved_org_id, org_source = _coerce_org_id(
+        request,
+        provided_org_id,
+        provided_organization_id,
+        provided_tenant_id,
+        None,
+    )
+
     return AuthContext(
         api_key=None,
         principal_type="anonymous",
         principal_id=None,
         session_id=normalized_session_id,
-        org_id=_clean_optional_string(provided_org_id),
+        org_id=resolved_org_id,
         authenticated=False,
         auth_source="disabled",
         auth_method=None,
         key_type="personal",
+        metadata={"org_source": org_source},
     )
 
 

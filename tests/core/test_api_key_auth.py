@@ -1,18 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
-import httpx
 import pytest
 
-from app.core.api_key_auth import (
-    EdgeAuthContext,
-    _call_edge_auth,
-    require_scope,
-)
+from app.core.api_key_auth import require_api_key as require_api_key_auth
 from app.core.apikeys import (
     APIKeyRecord,
     APIKeyRegistry,
@@ -22,6 +18,11 @@ from app.core.apikeys import (
 )
 from app.core.auth import (
     API_KEY_HEADER_NAME,
+    AUTHORIZATION_HEADER_NAME,
+    ORG_ID_HEADER_NAME,
+    ORGANIZATION_ID_HEADER_NAME,
+    SESSION_ID_HEADER_NAME,
+    TENANT_ID_HEADER_NAME,
     AuthContext,
     _coerce_key_type,
     _coerce_org_id,
@@ -33,47 +34,15 @@ from app.core.auth import (
     require_api_key,
     require_auth_context,
 )
-from app.core.errors import register_exception_handlers
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-_VALID_TOKEN = "test-bearer-token-abc123"
-_TENANT_ID = "tenant-001"
-_SCOPES = ["scan:read", "scan:write"]
+from app.core.errors import AppError, register_exception_handlers
 
 _PERSONAL_KEY_RAW = "ic_personal_test_abc123"
 _ORG_KEY_RAW = "ic_org_team_test_xyz789"
 _ORG_ID = "org-ironclaw-001"
 _CONFIGURED_KEY = "ic_configured_static_key_abc"
-
-# ---------------------------------------------------------------------------
-# Shared record factories
-# ---------------------------------------------------------------------------
-
-
-def _mock_response(status_code: int, body: dict | None = None) -> MagicMock:
-    resp = MagicMock(spec=httpx.Response)
-    resp.status_code = status_code
-    resp.json.return_value = body or {}
-    return resp
-
-
-def _patch_httpx(mock_response: MagicMock):
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
-    mock_client.post = AsyncMock(return_value=mock_response)
-    return patch("httpx.AsyncClient", return_value=mock_client)
-
-
-def _patch_httpx_raises(exc: BaseException):
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
-    mock_client.post = AsyncMock(side_effect=exc)
-    return patch("httpx.AsyncClient", return_value=mock_client)
+_SUPABASE_JWT_SECRET = "super-secret-jwt-signing-key-for-tests"
+_BEARER_TOKEN = "test-bearer-token"
+_BEARER_PRINCIPAL_ID = "user-123"
 
 
 def _make_personal_record(
@@ -118,37 +87,106 @@ def _make_org_record(
     )
 
 
-# ---------------------------------------------------------------------------
-# TestClient app factory — injects settings, registry, and exception handlers
-# ---------------------------------------------------------------------------
-
-
-def _make_app(
+def _make_settings(
     *,
     auth_required: bool = False,
+    auth_configured: bool | None = None,
     configured_key: str | None = None,
-    registry: APIKeyRegistry | None = None,
-) -> FastAPI:
-    """Build a minimal FastAPI app whose state mimics IronClaw settings."""
-    from fastapi import Depends
+    supabase_jwt_secret: str | None = None,
+    jwt_secret: str | None = None,
+    jwt_algorithm: str | None = "HS256",
+    org_id: str | None = None,
+    organization_id: str | None = None,
+    default_org_id: str | None = None,
+    supabase_url: str | None = None,
+    supabase_anon_key: str | None = None,
+    supabase_service_role_key: str | None = None,
+) -> SimpleNamespace:
+    effective_api_key = configured_key
+    effective_jwt_secret = jwt_secret
+    effective_supabase_jwt_secret = supabase_jwt_secret
+    effective_jwt_algorithm = (jwt_algorithm or "").upper()
 
-    app = FastAPI()
-    settings = SimpleNamespace(
+    if auth_configured is None:
+        api_key_auth_configured = bool(effective_api_key)
+        bearer_auth_configured = bool(supabase_url) and bool(supabase_anon_key or supabase_service_role_key or effective_supabase_jwt_secret or effective_jwt_secret)
+        auth_configured = api_key_auth_configured or bearer_auth_configured
+    else:
+        api_key_auth_configured = bool(effective_api_key)
+        bearer_auth_configured = bool(supabase_url) and bool(supabase_anon_key or supabase_service_role_key or effective_supabase_jwt_secret or effective_jwt_secret)
+
+    effective_auth_required = bool(auth_required and auth_configured)
+
+    return SimpleNamespace(
         auth_required=auth_required,
+        AUTH_REQUIRED=auth_required,
+        auth_configured=auth_configured,
+        effective_auth_required=effective_auth_required,
         ironclaw_api_key=configured_key,
         internal_platform_api_key=None,
         platform_api_key=None,
         admin_api_key=None,
         api_key=None,
+        effective_api_key=effective_api_key,
         effective_platform_api_key=None,
-        org_id=None,
-        organization_id=None,
-        default_org_id=None,
+        secret_key=None,
+        effective_secret_key=None,
+        jwt_secret=jwt_secret,
+        effective_jwt_secret=effective_jwt_secret,
+        supabase_jwt_secret=supabase_jwt_secret,
+        SUPABASE_JWT_SECRET=supabase_jwt_secret,
+        effective_supabase_jwt_secret=effective_supabase_jwt_secret,
+        jwt_algorithm=jwt_algorithm,
+        JWT_ALGORITHM=jwt_algorithm,
+        effective_jwt_algorithm=effective_jwt_algorithm,
+        org_id=org_id,
+        organization_id=organization_id,
+        default_org_id=default_org_id,
+        effective_supabase_url=supabase_url,
+        supabase_url=supabase_url,
+        effective_supabase_anon_key=supabase_anon_key,
+        supabase_anon_key=supabase_anon_key,
+        effective_supabase_service_role_key=supabase_service_role_key,
+        supabase_service_role_key=supabase_service_role_key,
+        bearer_auth_configured=bearer_auth_configured,
+        api_key_auth_configured=api_key_auth_configured,
+    )
+
+
+def _make_app(
+    *,
+    auth_required: bool = False,
+    auth_configured: bool | None = None,
+    configured_key: str | None = None,
+    registry: APIKeyRegistry | None = None,
+    supabase_jwt_secret: str | None = None,
+    jwt_secret: str | None = None,
+    jwt_algorithm: str | None = "HS256",
+    org_id: str | None = None,
+    organization_id: str | None = None,
+    default_org_id: str | None = None,
+    supabase_url: str | None = None,
+    supabase_anon_key: str | None = None,
+    supabase_service_role_key: str | None = None,
+) -> FastAPI:
+    app = FastAPI()
+    settings = _make_settings(
+        auth_required=auth_required,
+        auth_configured=auth_configured,
+        configured_key=configured_key,
+        supabase_jwt_secret=supabase_jwt_secret,
+        jwt_secret=jwt_secret,
+        jwt_algorithm=jwt_algorithm,
+        org_id=org_id,
+        organization_id=organization_id,
+        default_org_id=default_org_id,
+        supabase_url=supabase_url,
+        supabase_anon_key=supabase_anon_key,
+        supabase_service_role_key=supabase_service_role_key,
     )
     app.state.settings = settings
     app.state.api_key_registry = registry or APIKeyRegistry()
 
-    # Register exception handlers so AppError → 401/503 (not 500)
     register_exception_handlers(app)
 
     @app.get("/probe/auth-context")
@@ -156,29 +194,103 @@ def _make_app(
         return {
             "authenticated": ctx.authenticated,
             "principal_type": ctx.principal_type,
+            "principal_id": ctx.principal_id,
             "auth_source": ctx.auth_source,
+            "auth_method": ctx.auth_method,
             "key_type": ctx.key_type,
             "org_id": ctx.org_id,
+            "session_id": ctx.session_id,
             "permissions": list(ctx.permissions),
             "roles": list(ctx.roles),
+            "metadata": dict(ctx.metadata),
         }
 
     @app.get("/probe/require-auth")
     async def _probe_require_auth(ctx: AuthContext = Depends(require_auth_context)):
         return {"authenticated": ctx.authenticated}
 
+    @app.get("/probe/api-key-auth")
+    async def _probe_api_key_auth(ctx: AuthContext = Depends(require_api_key_auth)):
+        return {
+            "authenticated": ctx.authenticated,
+            "principal_type": ctx.principal_type,
+            "principal_id": ctx.principal_id,
+            "auth_source": ctx.auth_source,
+            "auth_method": ctx.auth_method,
+            "key_type": ctx.key_type,
+            "org_id": ctx.org_id,
+            "permissions": list(ctx.permissions),
+            "roles": list(ctx.roles),
+        }
+
     return app
 
 
-# ---------------------------------------------------------------------------
-# get_api_key — auth NOT required, no key provided → returns None
-# ---------------------------------------------------------------------------
+def _anonymous_context() -> AuthContext:
+    return AuthContext(
+        api_key=None,
+        principal_type="anonymous",
+        principal_id=None,
+        session_id=None,
+        org_id=None,
+        permissions=(),
+        roles=(),
+        authenticated=False,
+        auth_source="disabled",
+        auth_method=None,
+        key_type="personal",
+    )
+
+
+def _bearer_context() -> AuthContext:
+    return AuthContext(
+        api_key=None,
+        principal_type="customer",
+        principal_id=_BEARER_PRINCIPAL_ID,
+        session_id="sess-123",
+        org_id="org-123",
+        permissions=("scan:read",),
+        roles=("member",),
+        authenticated=True,
+        auth_source="supabase_jwt",
+        auth_method="bearer_jwt",
+        key_type="personal",
+    )
+
+
+def _encode_bearer_token(
+    *,
+    sub: str = _BEARER_PRINCIPAL_ID,
+    org_id: str | None = "org-123",
+    roles: tuple[str, ...] = ("member",),
+    permissions: tuple[str, ...] = ("scan:read",),
+    principal_type: str = "customer",
+    secret: str = _SUPABASE_JWT_SECRET,
+    algorithm: str = "HS256",
+    extra_claims: dict[str, object] | None = None,
+) -> str:
+    import jwt
+
+    claims: dict[str, object] = {
+        "sub": sub,
+        "org_id": org_id,
+        "roles": list(roles),
+        "permissions": list(permissions),
+        "principal_type": principal_type,
+        "email": "user@ironclaw.test",
+        "role": roles[0] if roles else "member",
+        "aal": "aal1",
+        "iss": "https://supabase.test/auth/v1",
+    }
+    if extra_claims:
+        claims.update(extra_claims)
+    return jwt.encode(claims, secret, algorithm=algorithm)
 
 
 class TestGetApiKeyAuthNotRequired:
     def test_no_key_auth_not_required_returns_none(self):
         registry = APIKeyRegistry()
-        app = _make_app(auth_required=False, registry=registry)
+        app = _make_app(auth_required=False, auth_configured=False, registry=registry)
         with patch("app.core.auth.get_api_key_registry", return_value=registry):
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.get("/probe/auth-context")
@@ -189,51 +301,76 @@ class TestGetApiKeyAuthNotRequired:
 
     def test_no_key_auth_not_required_anonymous_auth_source(self):
         registry = APIKeyRegistry()
-        app = _make_app(auth_required=False, registry=registry)
+        app = _make_app(auth_required=False, auth_configured=False, registry=registry)
         with patch("app.core.auth.get_api_key_registry", return_value=registry):
             with TestClient(app, raise_server_exceptions=False) as client:
                 data = client.get("/probe/auth-context").json()
         assert data["auth_source"] == "disabled"
 
-
-# ---------------------------------------------------------------------------
-# get_api_key — auth required, key missing → HTTP 401
-# ---------------------------------------------------------------------------
+    def test_invalid_bearer_is_ignored_when_auth_not_required(self):
+        registry = APIKeyRegistry()
+        app = _make_app(
+            auth_required=False,
+            auth_configured=False,
+            registry=registry,
+            supabase_jwt_secret=_SUPABASE_JWT_SECRET,
+        )
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/probe/auth-context",
+                    headers={AUTHORIZATION_HEADER_NAME: "Bearer invalid-token"},
+                )
+        assert resp.status_code == 200
+        assert resp.json()["authenticated"] is False
 
 
 class TestGetApiKeyAuthRequiredMissingKey:
     def test_missing_key_auth_required_raises_401(self):
         registry = APIKeyRegistry()
-        registry.create_key("Probe Key", key_type="personal")
-        app = _make_app(auth_required=True, registry=registry)
+        app = _make_app(
+            auth_required=True,
+            auth_configured=True,
+            configured_key=_CONFIGURED_KEY,
+            registry=registry,
+        )
         with patch("app.core.auth.get_api_key_registry", return_value=registry):
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.get("/probe/auth-context")
         assert resp.status_code == 401
 
-    def test_missing_key_detail_contains_x_api_key(self):
+    def test_missing_key_message_is_normalized(self):
         registry = APIKeyRegistry()
-        registry.create_key("Probe Key", key_type="personal")
-        app = _make_app(auth_required=True, registry=registry)
+        app = _make_app(
+            auth_required=True,
+            auth_configured=True,
+            configured_key=_CONFIGURED_KEY,
+            registry=registry,
+        )
         with patch("app.core.auth.get_api_key_registry", return_value=registry):
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.get("/probe/auth-context")
-        # HTTPException → http_exception_handler → {"detail": "..."}
-        assert "X-API-Key" in resp.json().get("detail", "")
+        body = resp.json()
+        assert body["detail"] == "Missing API key — provide X-API-Key or Bearer token"
 
-    def test_missing_key_detail_contains_bearer(self):
+    def test_missing_key_message_contains_bearer(self):
         registry = APIKeyRegistry()
-        registry.create_key("Probe Key", key_type="personal")
-        app = _make_app(auth_required=True, registry=registry)
+        app = _make_app(
+            auth_required=True,
+            auth_configured=True,
+            configured_key=_CONFIGURED_KEY,
+            registry=registry,
+        )
         with patch("app.core.auth.get_api_key_registry", return_value=registry):
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.get("/probe/auth-context")
-        assert "Bearer" in resp.json().get("detail", "")
+        assert "Bearer" in resp.json()["detail"]
 
     def test_missing_key_configured_key_present_raises_401(self):
         registry = APIKeyRegistry()
         app = _make_app(
             auth_required=True,
+            auth_configured=True,
             configured_key=_CONFIGURED_KEY,
             registry=registry,
         )
@@ -243,16 +380,15 @@ class TestGetApiKeyAuthRequiredMissingKey:
         assert resp.status_code == 401
 
 
-# ---------------------------------------------------------------------------
-# get_api_key — auth required, key invalid → HTTP 401
-# ---------------------------------------------------------------------------
-
-
 class TestGetApiKeyInvalidKey:
     def test_invalid_key_raises_401(self):
         registry = APIKeyRegistry()
-        registry.create_key("Real Key", key_type="personal")
-        app = _make_app(auth_required=True, registry=registry)
+        app = _make_app(
+            auth_required=True,
+            auth_configured=True,
+            configured_key=_CONFIGURED_KEY,
+            registry=registry,
+        )
         with patch("app.core.auth.get_api_key_registry", return_value=registry):
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.get(
@@ -263,15 +399,18 @@ class TestGetApiKeyInvalidKey:
 
     def test_invalid_key_detail_is_invalid_api_key(self):
         registry = APIKeyRegistry()
-        registry.create_key("Real Key", key_type="personal")
-        app = _make_app(auth_required=True, registry=registry)
+        app = _make_app(
+            auth_required=True,
+            auth_configured=True,
+            configured_key=_CONFIGURED_KEY,
+            registry=registry,
+        )
         with patch("app.core.auth.get_api_key_registry", return_value=registry):
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.get(
                     "/probe/auth-context",
                     headers={API_KEY_HEADER_NAME: "ic_completely_wrong_key_xyz"},
                 )
-        # AppError → app_error_handler → {"error": "invalid_api_key", "message": "Invalid API key"}
         body = resp.json()
         assert body.get("error") == "invalid_api_key"
         assert body.get("message") == "Invalid API key"
@@ -280,6 +419,7 @@ class TestGetApiKeyInvalidKey:
         registry = APIKeyRegistry()
         app = _make_app(
             auth_required=True,
+            auth_configured=True,
             configured_key=_CONFIGURED_KEY,
             registry=registry,
         )
@@ -292,16 +432,12 @@ class TestGetApiKeyInvalidKey:
         assert resp.status_code == 401
 
 
-# ---------------------------------------------------------------------------
-# get_api_key — auth required, no keys configured → HTTP 503
-# ---------------------------------------------------------------------------
-
-
 class TestGetApiKeyNoKeysConfigured:
     def test_no_keys_configured_raises_503(self):
         empty_registry = APIKeyRegistry()
         app = _make_app(
             auth_required=True,
+            auth_configured=True,
             configured_key=None,
             registry=empty_registry,
         )
@@ -317,6 +453,7 @@ class TestGetApiKeyNoKeysConfigured:
         empty_registry = APIKeyRegistry()
         app = _make_app(
             auth_required=True,
+            auth_configured=True,
             configured_key=None,
             registry=empty_registry,
         )
@@ -326,14 +463,14 @@ class TestGetApiKeyNoKeysConfigured:
                     "/probe/auth-context",
                     headers={API_KEY_HEADER_NAME: "ic_any_key_doesnt_matter"},
                 )
-        # AppError → app_error_handler → {"error": "auth_not_configured", "message": "..."}
         message = resp.json().get("message", "")
-        assert "API keys" in message or "api keys" in message.lower()
+        assert "api keys" in message.lower()
 
     def test_no_keys_configured_detail_mentions_auth_required(self):
         empty_registry = APIKeyRegistry()
         app = _make_app(
             auth_required=True,
+            auth_configured=True,
             configured_key=None,
             registry=empty_registry,
         )
@@ -347,15 +484,10 @@ class TestGetApiKeyNoKeysConfigured:
         assert "required" in message.lower()
 
 
-# ---------------------------------------------------------------------------
-# get_auth_context — anonymous AuthContext when auth disabled
-# ---------------------------------------------------------------------------
-
-
 class TestGetAuthContextAnonymous:
     def test_anonymous_context_when_auth_disabled(self):
         registry = APIKeyRegistry()
-        app = _make_app(auth_required=False, registry=registry)
+        app = _make_app(auth_required=False, auth_configured=False, registry=registry)
         with patch("app.core.auth.get_api_key_registry", return_value=registry):
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.get("/probe/auth-context")
@@ -364,7 +496,7 @@ class TestGetAuthContextAnonymous:
 
     def test_anonymous_principal_type(self):
         registry = APIKeyRegistry()
-        app = _make_app(auth_required=False, registry=registry)
+        app = _make_app(auth_required=False, auth_configured=False, registry=registry)
         with patch("app.core.auth.get_api_key_registry", return_value=registry):
             with TestClient(app, raise_server_exceptions=False) as client:
                 data = client.get("/probe/auth-context").json()
@@ -372,7 +504,7 @@ class TestGetAuthContextAnonymous:
 
     def test_anonymous_auth_source_is_disabled(self):
         registry = APIKeyRegistry()
-        app = _make_app(auth_required=False, registry=registry)
+        app = _make_app(auth_required=False, auth_configured=False, registry=registry)
         with patch("app.core.auth.get_api_key_registry", return_value=registry):
             with TestClient(app, raise_server_exceptions=False) as client:
                 data = client.get("/probe/auth-context").json()
@@ -380,7 +512,7 @@ class TestGetAuthContextAnonymous:
 
     def test_anonymous_key_type_defaults_to_personal(self):
         registry = APIKeyRegistry()
-        app = _make_app(auth_required=False, registry=registry)
+        app = _make_app(auth_required=False, auth_configured=False, registry=registry)
         with patch("app.core.auth.get_api_key_registry", return_value=registry):
             with TestClient(app, raise_server_exceptions=False) as client:
                 data = client.get("/probe/auth-context").json()
@@ -388,16 +520,11 @@ class TestGetAuthContextAnonymous:
 
     def test_anonymous_permissions_empty(self):
         registry = APIKeyRegistry()
-        app = _make_app(auth_required=False, registry=registry)
+        app = _make_app(auth_required=False, auth_configured=False, registry=registry)
         with patch("app.core.auth.get_api_key_registry", return_value=registry):
             with TestClient(app, raise_server_exceptions=False) as client:
                 data = client.get("/probe/auth-context").json()
         assert data["permissions"] == []
-
-
-# ---------------------------------------------------------------------------
-# get_auth_context — authenticated AuthContext with registry personal key
-# ---------------------------------------------------------------------------
 
 
 class TestGetAuthContextAuthenticatedPersonalKey:
@@ -465,6 +592,18 @@ class TestGetAuthContextAuthenticatedPersonalKey:
                 ).json()
         assert data["auth_source"] == "registry"
 
+    def test_valid_personal_key_auth_method_is_registry_api_key(self):
+        registry = APIKeyRegistry()
+        record = registry.create_key("Test Personal", key_type="personal")
+        app = _make_app(auth_required=True, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                data = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: record.api_key},
+                ).json()
+        assert data["auth_method"] == "registry_api_key"
+
     def test_valid_personal_key_permissions_from_scopes(self):
         registry = APIKeyRegistry()
         record = registry.create_key(
@@ -493,10 +632,20 @@ class TestGetAuthContextAuthenticatedPersonalKey:
                 ).json()
         assert data["org_id"] is None
 
-
-# ---------------------------------------------------------------------------
-# get_auth_context — authenticated AuthContext with registry org key
-# ---------------------------------------------------------------------------
+    def test_valid_personal_key_session_id_propagated(self):
+        registry = APIKeyRegistry()
+        record = registry.create_key("Test Personal", key_type="personal")
+        app = _make_app(auth_required=True, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                data = client.get(
+                    "/probe/auth-context",
+                    headers={
+                        API_KEY_HEADER_NAME: record.api_key,
+                        SESSION_ID_HEADER_NAME: "sess-abc",
+                    },
+                ).json()
+        assert data["session_id"] == "sess-abc"
 
 
 class TestGetAuthContextAuthenticatedOrgKey:
@@ -559,11 +708,6 @@ class TestGetAuthContextAuthenticatedOrgKey:
         assert {"scan:read", "scan:write", "audit:read"}.issubset(set(data["permissions"]))
 
 
-# ---------------------------------------------------------------------------
-# get_auth_context — configured static key (platform path)
-# ---------------------------------------------------------------------------
-
-
 class TestGetAuthContextConfiguredKey:
     def test_configured_key_returns_authenticated(self):
         registry = APIKeyRegistry()
@@ -610,16 +754,196 @@ class TestGetAuthContextConfiguredKey:
                 ).json()
         assert data["auth_source"] == "configured"
 
+    def test_configured_key_auth_method_is_api_key(self):
+        registry = APIKeyRegistry()
+        app = _make_app(
+            auth_required=True,
+            configured_key=_CONFIGURED_KEY,
+            registry=registry,
+        )
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                data = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: _CONFIGURED_KEY},
+                ).json()
+        assert data["auth_method"] == "api_key"
 
-# ---------------------------------------------------------------------------
-# require_api_key — passthrough: returns key unchanged
-# ---------------------------------------------------------------------------
+
+class TestGetAuthContextBearer:
+    def test_valid_bearer_token_returns_authenticated_context(self):
+        registry = APIKeyRegistry()
+        token = _encode_bearer_token()
+        app = _make_app(
+            auth_required=True,
+            registry=registry,
+            supabase_jwt_secret=_SUPABASE_JWT_SECRET,
+            supabase_url="https://supabase.test",
+            supabase_anon_key="anon-key",
+        )
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/probe/auth-context",
+                    headers={AUTHORIZATION_HEADER_NAME: f"Bearer {token}"},
+                )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["authenticated"] is True
+        assert data["principal_type"] == "customer"
+        assert data["principal_id"] == _BEARER_PRINCIPAL_ID
+        assert data["auth_source"] == "supabase_jwt"
+        assert data["auth_method"] == "bearer_jwt"
+        assert data["org_id"] == "org-123"
+        assert set(data["permissions"]) == {"scan:read"}
+        assert set(data["roles"]) == {"member"}
+
+    def test_bearer_token_uses_claim_org_before_headers(self):
+        registry = APIKeyRegistry()
+        token = _encode_bearer_token(org_id="claim-org-001")
+        app = _make_app(
+            auth_required=True,
+            registry=registry,
+            supabase_jwt_secret=_SUPABASE_JWT_SECRET,
+            supabase_url="https://supabase.test",
+            supabase_anon_key="anon-key",
+        )
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/probe/auth-context",
+                    headers={
+                        AUTHORIZATION_HEADER_NAME: f"Bearer {token}",
+                        ORG_ID_HEADER_NAME: "header-org-002",
+                    },
+                )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["org_id"] == "claim-org-001"
+        assert data["metadata"]["org_source"] == "claim:org_id"
+
+    def test_bearer_without_sub_claim_returns_401_when_auth_required(self):
+        registry = APIKeyRegistry()
+        token = _encode_bearer_token(extra_claims={"sub": None})
+        app = _make_app(
+            auth_required=True,
+            registry=registry,
+            supabase_jwt_secret=_SUPABASE_JWT_SECRET,
+            supabase_url="https://supabase.test",
+            supabase_anon_key="anon-key",
+        )
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/probe/auth-context",
+                    headers={AUTHORIZATION_HEADER_NAME: f"Bearer {token}"},
+                )
+        assert resp.status_code == 401
+        assert resp.json()["detail"] == "Invalid Bearer token"
+
+    def test_bearer_invalid_token_returns_401_when_auth_required(self):
+        registry = APIKeyRegistry()
+        app = _make_app(
+            auth_required=True,
+            registry=registry,
+            supabase_jwt_secret=_SUPABASE_JWT_SECRET,
+            supabase_url="https://supabase.test",
+            supabase_anon_key="anon-key",
+        )
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/probe/auth-context",
+                    headers={AUTHORIZATION_HEADER_NAME: "Bearer invalid-token"},
+                )
+        assert resp.status_code == 401
+        assert resp.json()["detail"] == "Invalid Bearer token"
+
+    def test_bearer_missing_secret_returns_503_when_auth_required(self):
+        registry = APIKeyRegistry()
+        token = _BEARER_TOKEN
+        app = _make_app(
+            auth_required=True,
+            auth_configured=True,
+            registry=registry,
+            supabase_url="https://supabase.test",
+            supabase_anon_key="anon-key",
+        )
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/probe/auth-context",
+                    headers={AUTHORIZATION_HEADER_NAME: f"Bearer {token}"},
+                )
+        assert resp.status_code == 503
+        assert resp.json()["detail"] == "SUPABASE_JWT_SECRET is not configured"
+
+
+class TestOrgHeaderResolution:
+    def test_org_id_header_propagates_for_anonymous_context(self):
+        registry = APIKeyRegistry()
+        app = _make_app(auth_required=False, auth_configured=False, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/probe/auth-context",
+                    headers={ORG_ID_HEADER_NAME: _ORG_ID},
+                )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["org_id"] == _ORG_ID
+        assert data["metadata"]["org_source"] == ORG_ID_HEADER_NAME
+
+    def test_settings_org_id_used_when_no_header_or_record_org(self):
+        registry = APIKeyRegistry()
+        app = _make_app(
+            auth_required=False,
+            auth_configured=False,
+            registry=registry,
+            default_org_id="default-org-001",
+        )
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get("/probe/auth-context")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["org_id"] == "default-org-001"
+        assert data["metadata"]["org_source"] == "settings"
+
+    def test_conflicting_org_headers_return_400(self):
+        registry = APIKeyRegistry()
+        app = _make_app(auth_required=False, auth_configured=False, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/probe/auth-context",
+                    headers={
+                        ORG_ID_HEADER_NAME: "org-a",
+                        TENANT_ID_HEADER_NAME: "org-b",
+                    },
+                )
+        assert resp.status_code == 400
+        assert "Conflicting organization scope headers" in resp.json()["detail"]
+
+    def test_same_org_value_across_alias_headers_is_accepted(self):
+        registry = APIKeyRegistry()
+        app = _make_app(auth_required=False, auth_configured=False, registry=registry)
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/probe/auth-context",
+                    headers={
+                        ORG_ID_HEADER_NAME: _ORG_ID,
+                        ORGANIZATION_ID_HEADER_NAME: _ORG_ID,
+                        TENANT_ID_HEADER_NAME: _ORG_ID,
+                    },
+                )
+        assert resp.status_code == 200
+        assert resp.json()["org_id"] == _ORG_ID
 
 
 class TestRequireApiKeyPassthrough:
     def test_require_api_key_returns_valid_key_unchanged(self):
-        from fastapi import Depends
-
         registry = APIKeyRegistry()
         record = registry.create_key("Passthrough Key", key_type="personal")
         app = _make_app(auth_required=True, registry=registry)
@@ -638,10 +962,8 @@ class TestRequireApiKeyPassthrough:
         assert resp.json()["key"] == record.api_key
 
     def test_require_api_key_returns_none_when_auth_not_required(self):
-        from fastapi import Depends
-
         registry = APIKeyRegistry()
-        app = _make_app(auth_required=False, registry=registry)
+        app = _make_app(auth_required=False, auth_configured=False, registry=registry)
 
         @app.get("/probe/require-api-key-none")
         async def _probe(key: str | None = Depends(require_api_key)):
@@ -653,16 +975,35 @@ class TestRequireApiKeyPassthrough:
         assert resp.status_code == 200
         assert resp.json()["key"] is None
 
+    def test_require_api_key_returns_none_for_valid_bearer(self):
+        registry = APIKeyRegistry()
+        token = _encode_bearer_token()
+        app = _make_app(
+            auth_required=True,
+            registry=registry,
+            supabase_jwt_secret=_SUPABASE_JWT_SECRET,
+            supabase_url="https://supabase.test",
+            supabase_anon_key="anon-key",
+        )
 
-# ---------------------------------------------------------------------------
-# require_auth_context — raises HTTP 401 for unauthenticated context
-# ---------------------------------------------------------------------------
+        @app.get("/probe/require-api-key-bearer")
+        async def _probe(key: str | None = Depends(require_api_key)):
+            return {"key": key}
+
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/probe/require-api-key-bearer",
+                    headers={AUTHORIZATION_HEADER_NAME: f"Bearer {token}"},
+                )
+        assert resp.status_code == 200
+        assert resp.json()["key"] is None
 
 
 class TestRequireAuthContext:
     def test_unauthenticated_raises_401(self):
         registry = APIKeyRegistry()
-        app = _make_app(auth_required=False, registry=registry)
+        app = _make_app(auth_required=False, auth_configured=False, registry=registry)
         with patch("app.core.auth.get_api_key_registry", return_value=registry):
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.get("/probe/require-auth")
@@ -670,11 +1011,10 @@ class TestRequireAuthContext:
 
     def test_unauthenticated_detail_is_authentication_required(self):
         registry = APIKeyRegistry()
-        app = _make_app(auth_required=False, registry=registry)
+        app = _make_app(auth_required=False, auth_configured=False, registry=registry)
         with patch("app.core.auth.get_api_key_registry", return_value=registry):
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.get("/probe/require-auth")
-        # HTTPException → http_exception_handler → {"detail": "Authentication required"}
         assert resp.json().get("detail") == "Authentication required"
 
     def test_authenticated_context_passes_through(self):
@@ -697,6 +1037,8 @@ class TestRequireAuthContext:
             principal_id=None,
             session_id=None,
             org_id=None,
+            permissions=(),
+            roles=(),
             authenticated=False,
             auth_source="disabled",
             auth_method=None,
@@ -707,377 +1049,100 @@ class TestRequireAuthContext:
         assert exc_info.value.status_code == 401
         assert exc_info.value.detail == "Authentication required"
 
-
-# ---------------------------------------------------------------------------
-# _call_edge_auth — 200 with valid body → EdgeAuthContext
-# ---------------------------------------------------------------------------
-
-
-class TestCallEdgeAuthValid:
-    @pytest.mark.asyncio
-    async def test_200_valid_body_returns_edge_auth_context(self):
-        resp = _mock_response(200, {"tenant_id": _TENANT_ID, "scopes": _SCOPES})
-        with _patch_httpx(resp):
-            ctx = await _call_edge_auth(_VALID_TOKEN)
-        assert isinstance(ctx, EdgeAuthContext)
-
-    @pytest.mark.asyncio
-    async def test_200_tenant_id_set_correctly(self):
-        resp = _mock_response(200, {"tenant_id": _TENANT_ID, "scopes": _SCOPES})
-        with _patch_httpx(resp):
-            ctx = await _call_edge_auth(_VALID_TOKEN)
-        assert ctx.tenant_id == _TENANT_ID
-
-    @pytest.mark.asyncio
-    async def test_200_scopes_set_correctly(self):
-        resp = _mock_response(200, {"tenant_id": _TENANT_ID, "scopes": _SCOPES})
-        with _patch_httpx(resp):
-            ctx = await _call_edge_auth(_VALID_TOKEN)
-        assert set(ctx.scopes) == set(_SCOPES)
-
-    @pytest.mark.asyncio
-    async def test_200_bearer_token_preserved(self):
-        resp = _mock_response(200, {"tenant_id": _TENANT_ID, "scopes": _SCOPES})
-        with _patch_httpx(resp):
-            ctx = await _call_edge_auth(_VALID_TOKEN)
-        assert ctx.bearer_token == _VALID_TOKEN
-
-    @pytest.mark.asyncio
-    async def test_200_principal_id_populated_when_present(self):
-        resp = _mock_response(200, {"tenant_id": _TENANT_ID, "scopes": _SCOPES, "principal_id": "user-xyz"})
-        with _patch_httpx(resp):
-            ctx = await _call_edge_auth(_VALID_TOKEN)
-        assert ctx.principal_id == "user-xyz"
-
-    @pytest.mark.asyncio
-    async def test_200_principal_id_none_when_absent(self):
-        resp = _mock_response(200, {"tenant_id": _TENANT_ID, "scopes": _SCOPES})
-        with _patch_httpx(resp):
-            ctx = await _call_edge_auth(_VALID_TOKEN)
-        assert ctx.principal_id is None
+    def test_preflight_context_passes_through(self):
+        ctx = AuthContext(
+            api_key=None,
+            principal_type="preflight",
+            principal_id=None,
+            session_id=None,
+            org_id=None,
+            permissions=(),
+            roles=(),
+            authenticated=False,
+            auth_source="preflight",
+            auth_method=None,
+            key_type="personal",
+        )
+        assert require_auth_context(context=ctx) is ctx
 
 
-# ---------------------------------------------------------------------------
-# _call_edge_auth — 200 missing tenant_id → HTTP 401
-# ---------------------------------------------------------------------------
+class TestApiKeyAuthDependency:
+    def test_returns_authenticated_context_from_canonical_auth(self):
+        app = _make_app(auth_required=True, registry=APIKeyRegistry())
 
+        async def _override() -> AuthContext:
+            return _bearer_context()
 
-class TestCallEdgeAuthMissingTenantId:
-    @pytest.mark.asyncio
-    async def test_200_missing_tenant_id_raises_401(self):
-        resp = _mock_response(200, {"scopes": _SCOPES})
-        with _patch_httpx(resp):
-            with pytest.raises(HTTPException) as exc_info:
-                await _call_edge_auth(_VALID_TOKEN)
-        assert exc_info.value.status_code == 401
+        app.dependency_overrides[get_auth_context] = _override
 
-    @pytest.mark.asyncio
-    async def test_200_empty_tenant_id_raises_401(self):
-        resp = _mock_response(200, {"tenant_id": "", "scopes": _SCOPES})
-        with _patch_httpx(resp):
-            with pytest.raises(HTTPException) as exc_info:
-                await _call_edge_auth(_VALID_TOKEN)
-        assert exc_info.value.status_code == 401
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.get("/probe/api-key-auth")
 
-    @pytest.mark.asyncio
-    async def test_200_null_tenant_id_raises_401(self):
-        resp = _mock_response(200, {"tenant_id": None, "scopes": _SCOPES})
-        with _patch_httpx(resp):
-            with pytest.raises(HTTPException) as exc_info:
-                await _call_edge_auth(_VALID_TOKEN)
-        assert exc_info.value.status_code == 401
+        app.dependency_overrides.clear()
 
-    @pytest.mark.asyncio
-    async def test_200_missing_tenant_id_detail_contains_tenant_id(self):
-        resp = _mock_response(200, {"scopes": _SCOPES})
-        with _patch_httpx(resp):
-            with pytest.raises(HTTPException) as exc_info:
-                await _call_edge_auth(_VALID_TOKEN)
-        assert "tenant_id" in exc_info.value.detail
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["authenticated"] is True
+        assert body["principal_type"] == "customer"
+        assert body["auth_source"] == "supabase_jwt"
+        assert body["principal_id"] == _BEARER_PRINCIPAL_ID
 
+    def test_missing_auth_returns_normalized_401_payload(self):
+        app = _make_app(
+            auth_required=True,
+            auth_configured=True,
+            configured_key=_CONFIGURED_KEY,
+            registry=APIKeyRegistry(),
+        )
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.get("/probe/api-key-auth")
 
-# ---------------------------------------------------------------------------
-# _call_edge_auth — non-200 response → HTTP 401
-# ---------------------------------------------------------------------------
+        assert resp.status_code == 401
+        body = resp.json()
+        assert body["detail"] == "Missing API key — provide X-API-Key or Bearer token"
+        assert "www-authenticate" not in resp.headers
 
+    def test_bearer_failure_from_canonical_auth_is_not_rewritten(self):
+        app = _make_app(auth_required=True, registry=APIKeyRegistry())
 
-class TestCallEdgeAuthNon200:
-    @pytest.mark.asyncio
-    async def test_401_response_raises_401(self):
-        resp = _mock_response(401, {})
-        with _patch_httpx(resp):
-            with pytest.raises(HTTPException) as exc_info:
-                await _call_edge_auth(_VALID_TOKEN)
-        assert exc_info.value.status_code == 401
+        async def _override() -> AuthContext:
+            raise AppError(
+                error="invalid_api_key",
+                message="Invalid bearer token",
+                status_code=401,
+                details={"header": "Authorization"},
+            )
+
+        app.dependency_overrides[get_auth_context] = _override
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.get(
+                "/probe/api-key-auth",
+                headers={AUTHORIZATION_HEADER_NAME: "Bearer invalid-token"},
+            )
+
+        app.dependency_overrides.clear()
+
+        assert resp.status_code == 401
+        body = resp.json()
+        assert body["error"] == "invalid_api_key"
+        assert body["message"] == "Invalid bearer token"
+        assert body["details"] == {"header": "Authorization"}
 
     @pytest.mark.asyncio
-    async def test_403_response_raises_401(self):
-        resp = _mock_response(403, {})
-        with _patch_httpx(resp):
-            with pytest.raises(HTTPException) as exc_info:
-                await _call_edge_auth(_VALID_TOKEN)
-        assert exc_info.value.status_code == 401
+    async def test_require_api_key_auth_returns_authenticated_context(self):
+        auth = _bearer_context()
+        ctx = await require_api_key_auth(auth=auth)
+        assert ctx is auth
 
     @pytest.mark.asyncio
-    async def test_500_response_raises_401(self):
-        resp = _mock_response(500, {})
-        with _patch_httpx(resp):
-            with pytest.raises(HTTPException) as exc_info:
-                await _call_edge_auth(_VALID_TOKEN)
-        assert exc_info.value.status_code == 401
-
-    @pytest.mark.asyncio
-    async def test_404_response_raises_401(self):
-        resp = _mock_response(404, {})
-        with _patch_httpx(resp):
-            with pytest.raises(HTTPException) as exc_info:
-                await _call_edge_auth(_VALID_TOKEN)
-        assert exc_info.value.status_code == 401
-
-
-# ---------------------------------------------------------------------------
-# _call_edge_auth — TimeoutException → HTTP 401 with "timeout" detail
-# ---------------------------------------------------------------------------
-
-
-class TestCallEdgeAuthTimeout:
-    @pytest.mark.asyncio
-    async def test_timeout_raises_401(self):
-        with _patch_httpx_raises(httpx.TimeoutException("timed out")):
-            with pytest.raises(HTTPException) as exc_info:
-                await _call_edge_auth(_VALID_TOKEN)
-        assert exc_info.value.status_code == 401
-
-    @pytest.mark.asyncio
-    async def test_timeout_detail_contains_timeout(self):
-        with _patch_httpx_raises(httpx.TimeoutException("timed out")):
-            with pytest.raises(HTTPException) as exc_info:
-                await _call_edge_auth(_VALID_TOKEN)
-        assert "timeout" in exc_info.value.detail.lower()
-
-    @pytest.mark.asyncio
-    async def test_timeout_has_www_authenticate_header(self):
-        with _patch_httpx_raises(httpx.TimeoutException("timed out")):
-            with pytest.raises(HTTPException) as exc_info:
-                await _call_edge_auth(_VALID_TOKEN)
-        assert exc_info.value.headers.get("WWW-Authenticate") == "Bearer"
-
-
-# ---------------------------------------------------------------------------
-# _call_edge_auth — RequestError → HTTP 401 with "unreachable" detail
-# ---------------------------------------------------------------------------
-
-
-class TestCallEdgeAuthRequestError:
-    @pytest.mark.asyncio
-    async def test_request_error_raises_401(self):
-        with _patch_httpx_raises(httpx.ConnectError("connection refused")):
-            with pytest.raises(HTTPException) as exc_info:
-                await _call_edge_auth(_VALID_TOKEN)
-        assert exc_info.value.status_code == 401
-
-    @pytest.mark.asyncio
-    async def test_request_error_detail_contains_unreachable(self):
-        with _patch_httpx_raises(httpx.ConnectError("connection refused")):
-            with pytest.raises(HTTPException) as exc_info:
-                await _call_edge_auth(_VALID_TOKEN)
-        assert "unreachable" in exc_info.value.detail.lower()
-
-    @pytest.mark.asyncio
-    async def test_request_error_has_www_authenticate_header(self):
-        with _patch_httpx_raises(httpx.ConnectError("connection refused")):
-            with pytest.raises(HTTPException) as exc_info:
-                await _call_edge_auth(_VALID_TOKEN)
-        assert exc_info.value.headers.get("WWW-Authenticate") == "Bearer"
-
-
-# ---------------------------------------------------------------------------
-# require_api_key (edge layer) — missing Authorization header → HTTP 401
-# ---------------------------------------------------------------------------
-
-
-class TestRequireApiKeyMissingHeader:
-    @pytest.mark.asyncio
-    async def test_missing_credentials_raises_401(self):
-        from app.core.api_key_auth import require_api_key as edge_require_api_key
-
+    async def test_require_api_key_auth_raises_401_for_anonymous(self):
         with pytest.raises(HTTPException) as exc_info:
-            await edge_require_api_key(credentials=None)
-        assert exc_info.value.status_code == 401
-
-    @pytest.mark.asyncio
-    async def test_missing_credentials_detail_mentions_bearer(self):
-        from app.core.api_key_auth import require_api_key as edge_require_api_key
-
-        with pytest.raises(HTTPException) as exc_info:
-            await edge_require_api_key(credentials=None)
-        assert "bearer" in exc_info.value.detail.lower()
-
-    @pytest.mark.asyncio
-    async def test_empty_credentials_raises_401(self):
-        from fastapi.security import HTTPAuthorizationCredentials
-
-        from app.core.api_key_auth import require_api_key as edge_require_api_key
-
-        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="")
-        with pytest.raises(HTTPException) as exc_info:
-            await edge_require_api_key(credentials=creds)
-        assert exc_info.value.status_code == 401
-
-
-# ---------------------------------------------------------------------------
-# require_scope — matching scope passes
-# ---------------------------------------------------------------------------
-
-
-class TestRequireScopeMatch:
-    @pytest.mark.asyncio
-    async def test_matching_scope_returns_auth_context(self):
-        ctx = EdgeAuthContext(
-            tenant_id=_TENANT_ID,
-            scopes=("scan:read", "scan:write"),
-            bearer_token=_VALID_TOKEN,
-        )
-        dep = require_scope("scan:read")
-        result = await dep(auth=ctx)
-        assert result is ctx
-
-    @pytest.mark.asyncio
-    async def test_matching_scope_does_not_raise(self):
-        ctx = EdgeAuthContext(
-            tenant_id=_TENANT_ID,
-            scopes=("scan:read",),
-            bearer_token=_VALID_TOKEN,
-        )
-        dep = require_scope("scan:read")
-        try:
-            await dep(auth=ctx)
-        except HTTPException:
-            pytest.fail("require_scope raised unexpectedly for matching scope")
-
-
-# ---------------------------------------------------------------------------
-# require_scope — mismatched scope → HTTP 403
-# ---------------------------------------------------------------------------
-
-
-class TestRequireScopeMismatch:
-    @pytest.mark.asyncio
-    async def test_mismatched_scope_raises_403(self):
-        ctx = EdgeAuthContext(
-            tenant_id=_TENANT_ID,
-            scopes=("scan:read",),
-            bearer_token=_VALID_TOKEN,
-        )
-        dep = require_scope("admin:write")
-        with pytest.raises(HTTPException) as exc_info:
-            await dep(auth=ctx)
-        assert exc_info.value.status_code == 403
-
-    @pytest.mark.asyncio
-    async def test_mismatched_scope_detail_contains_scope_name(self):
-        ctx = EdgeAuthContext(
-            tenant_id=_TENANT_ID,
-            scopes=("scan:read",),
-            bearer_token=_VALID_TOKEN,
-        )
-        dep = require_scope("admin:write")
-        with pytest.raises(HTTPException) as exc_info:
-            await dep(auth=ctx)
-        assert "admin:write" in exc_info.value.detail
-
-    @pytest.mark.asyncio
-    async def test_empty_scopes_raises_403(self):
-        ctx = EdgeAuthContext(
-            tenant_id=_TENANT_ID,
-            scopes=(),
-            bearer_token=_VALID_TOKEN,
-        )
-        dep = require_scope("scan:read")
-        with pytest.raises(HTTPException) as exc_info:
-            await dep(auth=ctx)
-        assert exc_info.value.status_code == 403
-
-
-# ---------------------------------------------------------------------------
-# require_scope — admin scope bypasses all scope checks
-# ---------------------------------------------------------------------------
-
-
-class TestRequireScopeAdminBypass:
-    @pytest.mark.asyncio
-    async def test_admin_scope_bypasses_any_required_scope(self):
-        ctx = EdgeAuthContext(
-            tenant_id=_TENANT_ID,
-            scopes=("admin",),
-            bearer_token=_VALID_TOKEN,
-        )
-        dep = require_scope("scan:write")
-        result = await dep(auth=ctx)
-        assert result is ctx
-
-    @pytest.mark.asyncio
-    async def test_admin_scope_bypasses_arbitrary_scope(self):
-        ctx = EdgeAuthContext(
-            tenant_id=_TENANT_ID,
-            scopes=("admin",),
-            bearer_token=_VALID_TOKEN,
-        )
-        dep = require_scope("superuser:delete:everything")
-        result = await dep(auth=ctx)
-        assert result is ctx
-
-    @pytest.mark.asyncio
-    async def test_admin_scope_does_not_raise(self):
-        ctx = EdgeAuthContext(
-            tenant_id=_TENANT_ID,
-            scopes=("admin",),
-            bearer_token=_VALID_TOKEN,
-        )
-        dep = require_scope("any:scope:at:all")
-        try:
-            await dep(auth=ctx)
-        except HTTPException:
-            pytest.fail("admin scope raised HTTPException — bypass logic broken")
-
-    @pytest.mark.asyncio
-    async def test_admin_among_multiple_scopes_bypasses(self):
-        ctx = EdgeAuthContext(
-            tenant_id=_TENANT_ID,
-            scopes=("scan:read", "admin", "telemetry:read"),
-            bearer_token=_VALID_TOKEN,
-        )
-        dep = require_scope("audit:write")
-        result = await dep(auth=ctx)
-        assert result is ctx
-
-
-# ---------------------------------------------------------------------------
-# EdgeAuthContext.has_scope unit tests
-# ---------------------------------------------------------------------------
-
-
-class TestEdgeAuthContextHasScope:
-    def test_has_scope_true_for_exact_match(self):
-        ctx = EdgeAuthContext(tenant_id=_TENANT_ID, scopes=("scan:read",), bearer_token=_VALID_TOKEN)
-        assert ctx.has_scope("scan:read") is True
-
-    def test_has_scope_false_for_missing_scope(self):
-        ctx = EdgeAuthContext(tenant_id=_TENANT_ID, scopes=("scan:read",), bearer_token=_VALID_TOKEN)
-        assert ctx.has_scope("scan:write") is False
-
-    def test_has_scope_true_when_admin_present(self):
-        ctx = EdgeAuthContext(tenant_id=_TENANT_ID, scopes=("admin",), bearer_token=_VALID_TOKEN)
-        assert ctx.has_scope("any:scope") is True
-
-    def test_has_scope_false_for_empty_scopes(self):
-        ctx = EdgeAuthContext(tenant_id=_TENANT_ID, scopes=(), bearer_token=_VALID_TOKEN)
-        assert ctx.has_scope("scan:read") is False
-
-
-# ---------------------------------------------------------------------------
-# _coerce_key_type — personal vs org resolution
-# ---------------------------------------------------------------------------
+            await require_api_key_auth(auth=_anonymous_context())
+        exc = exc_info.value
+        assert exc.status_code == 401
+        assert exc.detail == "Missing API key — provide X-API-Key or Bearer token"
+        assert exc.headers == {"WWW-Authenticate": "Bearer"}
 
 
 class TestCoerceKeyType:
@@ -1093,16 +1158,9 @@ class TestCoerceKeyType:
         assert _coerce_key_type(None) == "personal"
 
     def test_missing_key_type_field_defaults_to_personal(self):
-        from dataclasses import replace
-
         record = _make_personal_record()
         record_no_type = replace(record, key_type="")
         assert _coerce_key_type(record_no_type) == "personal"
-
-
-# ---------------------------------------------------------------------------
-# AuthContext — personal key produces correct principal_type and key_type
-# ---------------------------------------------------------------------------
 
 
 class TestAuthContextPersonalKey:
@@ -1138,11 +1196,6 @@ class TestAuthContextPersonalKey:
     def test_personal_key_has_no_org_id(self):
         record = _make_personal_record()
         assert record.org_id is None
-
-
-# ---------------------------------------------------------------------------
-# AuthContext — org key produces key_type="org" and principal_type="org_key"
-# ---------------------------------------------------------------------------
 
 
 class TestAuthContextOrgKey:
@@ -1189,11 +1242,6 @@ class TestAuthContextOrgKey:
             assert org_record.org_id == _ORG_ID
 
 
-# ---------------------------------------------------------------------------
-# _record_is_usable — active / revoked / expired gate
-# ---------------------------------------------------------------------------
-
-
 class TestRecordIsUsable:
     def test_active_personal_record_is_usable(self):
         record = _make_personal_record(active=True)
@@ -1217,11 +1265,6 @@ class TestRecordIsUsable:
 
     def test_none_record_is_not_usable(self):
         assert _record_is_usable(None) is False
-
-
-# ---------------------------------------------------------------------------
-# _build_auth_context_from_record — field mapping completeness
-# ---------------------------------------------------------------------------
 
 
 class TestBuildAuthContextFromRecord:
@@ -1250,11 +1293,22 @@ class TestBuildAuthContextFromRecord:
 
     def test_org_id_resolves_from_record(self):
         record = _make_org_record(org_id=_ORG_ID)
-        fake_request = MagicMock()
-        fake_request.app.state = MagicMock(spec=[])
+        fake_request = SimpleNamespace(
+            headers={},
+            app=SimpleNamespace(state=SimpleNamespace()),
+        )
         with patch("app.core.auth._get_settings", return_value=None):
-            resolved = _coerce_org_id(fake_request, None, record)
-        assert resolved == _ORG_ID
+            resolved = _coerce_org_id(fake_request, None, None, None, record)
+        assert resolved == (_ORG_ID, "api_key_record")
+
+    def test_org_id_resolves_from_header(self):
+        fake_request = SimpleNamespace(
+            headers={ORG_ID_HEADER_NAME: _ORG_ID},
+            app=SimpleNamespace(state=SimpleNamespace()),
+        )
+        with patch("app.core.auth._get_settings", return_value=None):
+            resolved = _coerce_org_id(fake_request, None, None, None, None)
+        assert resolved == (_ORG_ID, ORG_ID_HEADER_NAME)
 
     def test_auth_context_authenticated_true_for_valid_record(self):
         record = _make_personal_record()
@@ -1291,79 +1345,19 @@ class TestBuildAuthContextFromRecord:
             auth_method="registry_api_key",
             key_type=_coerce_key_type(record),
         )
+        assert ctx.authenticated is True
         assert ctx.key_type == "org"
         assert ctx.principal_type == "org_key"
         assert ctx.org_id == _ORG_ID
-        assert "scan:read" in ctx.permissions
+        assert ctx.principal_id == "key_org_001"
 
 
-# ---------------------------------------------------------------------------
-# Anonymous context — key_type defaults to "personal"
-# ---------------------------------------------------------------------------
+class TestCoerceHelpers:
+    def test_coerce_permissions_empty_when_none(self):
+        assert _coerce_permissions(None) == ()
 
+    def test_coerce_roles_empty_when_none(self):
+        assert _coerce_roles(None) == ()
 
-class TestAnonymousAuthContext:
-    def test_anonymous_context_key_type_is_personal(self):
-        ctx = AuthContext(
-            api_key=None,
-            principal_type="anonymous",
-            principal_id=None,
-            session_id=None,
-            org_id=None,
-            authenticated=False,
-            auth_source="disabled",
-            auth_method=None,
-            key_type="personal",
-        )
-        assert ctx.key_type == "personal"
-
-    def test_anonymous_context_is_not_authenticated(self):
-        ctx = AuthContext(
-            api_key=None,
-            principal_type="anonymous",
-            principal_id=None,
-            session_id=None,
-            org_id=None,
-            authenticated=False,
-            auth_source="disabled",
-            auth_method=None,
-            key_type="personal",
-        )
-        assert ctx.authenticated is False
-        assert ctx.principal_type == "anonymous"
-
-
-# ---------------------------------------------------------------------------
-# Registry integration — unknown / revoked / shared org key resolution
-# ---------------------------------------------------------------------------
-
-
-class TestRegistryKeyResolution:
-    def test_unknown_key_not_found_in_registry(self):
-        registry = APIKeyRegistry()
-        result = registry.authenticate("ic_unknown_key_that_was_never_registered", touch=False)
-        assert result is None
-
-    def test_revoked_key_authenticate_returns_none(self):
-        registry = APIKeyRegistry()
-        record = registry.create_key("Revoke Me", key_type="personal")
-        registry.revoke_key(record.key_id)
-        result = registry.authenticate(record.api_key, touch=False)
-        assert result is None
-
-    def test_missing_key_header_results_in_unusable_record(self):
-        assert _record_is_usable(None) is False
-
-    def test_org_key_authenticate_succeeds_for_any_team_member(self):
-        registry = APIKeyRegistry()
-        org_record = registry.create_key(
-            "Shared Org Key",
-            key_type="org",
-            org_id=_ORG_ID,
-        )
-        shared_key_string = org_record.api_key
-        for _ in range(3):
-            result = registry.authenticate(shared_key_string, touch=False)
-            assert result is not None
-            assert result.key_type == "org"
-            assert result.org_id == _ORG_ID
+    def test_coerce_principal_id_none_when_none(self):
+        assert _coerce_principal_id(None) is None

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
@@ -43,7 +44,11 @@ def _clear_registry() -> None:
         api_keys_to_id.clear()
 
 
-def _register_registry_key(*, key_id: str = "test-key", api_key: str = "registry-secret") -> None:
+def _register_registry_key(
+    *,
+    key_id: str = "test-key",
+    api_key: str = "registry-secret",
+) -> None:
     registry = get_api_key_registry()
     for attr_name in ("register_api_key", "add_api_key", "upsert_api_key"):
         method = getattr(registry, attr_name, None)
@@ -58,6 +63,29 @@ def _register_registry_key(*, key_id: str = "test-key", api_key: str = "registry
                 except TypeError:
                     pass
     pytest.skip("API key registry does not expose a supported registration method")
+
+
+def _make_request(*, app: FastAPI, authorization: str | None = None) -> Request:
+    headers: list[tuple[bytes, bytes]] = []
+    if authorization is not None:
+        headers.append((b"authorization", authorization.encode("utf-8")))
+
+    return Request(
+        {
+            "type": "http",
+            "app": app,
+            "headers": headers,
+            "method": "GET",
+            "path": "/",
+            "raw_path": b"/",
+            "query_string": b"",
+            "client": ("testclient", 50000),
+            "server": ("testserver", 80),
+            "scheme": "http",
+            "root_path": "",
+            "http_version": "1.1",
+        },
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -309,25 +337,114 @@ def test_app_error_shape_for_invalid_key_is_stable() -> None:
 def test_direct_dependency_raises_auth_not_configured_when_enabled_without_keys() -> None:
     app = FastAPI()
     app.state.settings = SimpleNamespace(auth_required=True)
-    request = Request(
-        {
-            "type": "http",
-            "app": app,
-            "headers": [],
-            "method": "GET",
-            "path": "/",
-            "raw_path": b"/",
-            "query_string": b"",
-            "client": ("testclient", 50000),
-            "server": ("testserver", 80),
-            "scheme": "http",
-            "root_path": "",
-            "http_version": "1.1",
-        },
-    )
+    request = _make_request(app=app)
 
     with pytest.raises(AppError) as exc_info:
         get_api_key(request=request, provided_api_key="anything")
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.error == "auth_not_configured"
+
+
+def test_missing_auth_message_is_normalized_for_required_endpoint() -> None:
+    _register_registry_key(api_key="registry-secret")
+    app = _build_app(settings=SimpleNamespace())
+    client = TestClient(app)
+
+    response = client.get("/auth/required")
+
+    assert response.status_code == 401
+    payload = response.json()
+    assert payload["error"] == "missing_api_key"
+    assert payload["message"] == "Missing API key — provide X-API-Key or Bearer token"
+
+
+def test_get_api_key_accepts_bearer_auth_when_supported_validation_path_succeeds() -> None:
+    app = FastAPI()
+    app.state.settings = SimpleNamespace(auth_required=True)
+    request = _make_request(app=app, authorization="Bearer good-token")
+
+    bearer_context = SimpleNamespace(
+        token="good-token",
+        principal_id="user-123",
+        auth_source="bearer",
+        authenticated=True,
+    )
+
+    with patch("app.core.auth.get_bearer_context", return_value=bearer_context):
+        result = get_api_key(request=request, provided_api_key=None)
+
+    assert result == "good-token"
+
+
+def test_get_api_key_auth_required_does_not_fail_bearer_mode_only_for_missing_jwt_secret() -> None:
+    app = FastAPI()
+    app.state.settings = SimpleNamespace(auth_required=True)
+    request = _make_request(app=app, authorization="Bearer supported-token")
+
+    bearer_context = SimpleNamespace(
+        token="supported-token",
+        principal_id="user-456",
+        auth_source="supabase",
+        authenticated=True,
+    )
+
+    with (
+        patch("app.core.auth.get_bearer_context", return_value=bearer_context),
+        patch.dict("os.environ", {}, clear=False),
+    ):
+        result = get_api_key(request=request, provided_api_key=None)
+
+    assert result == "supported-token"
+
+
+def test_get_api_key_invalid_bearer_token_still_returns_401() -> None:
+    app = FastAPI()
+    app.state.settings = SimpleNamespace(auth_required=True)
+    request = _make_request(app=app, authorization="Bearer invalid-token")
+
+    with patch(
+        "app.core.auth.get_bearer_context",
+        side_effect=AppError(
+            message="Invalid bearer token",
+            error="invalid_api_key",
+            status_code=401,
+            details={"header": "Authorization"},
+        ),
+    ):
+        with pytest.raises(AppError) as exc_info:
+            get_api_key(request=request, provided_api_key=None)
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.error == "invalid_api_key"
+
+
+def test_get_api_key_supported_bearer_mode_does_not_surface_503_for_missing_local_secret() -> None:
+    app = FastAPI()
+    app.state.settings = SimpleNamespace(auth_required=True)
+    request = _make_request(app=app, authorization="Bearer remote-validated-token")
+
+    bearer_context = SimpleNamespace(
+        token="remote-validated-token",
+        principal_id="user-789",
+        auth_source="bearer",
+        authenticated=True,
+    )
+
+    with patch("app.core.auth.get_bearer_context", return_value=bearer_context):
+        result = get_api_key(request=request, provided_api_key=None)
+
+    assert result == "remote-validated-token"
+
+
+def test_get_api_key_preserves_api_key_precedence_when_bearer_header_is_absent() -> None:
+    app = _build_app(settings=SimpleNamespace(platform_api_key="platform-secret"))
+    client = TestClient(app)
+
+    response = client.get(
+        "/auth/required",
+        headers={API_KEY_HEADER_NAME: "platform-secret"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"api_key": "platform-secret"}

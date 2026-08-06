@@ -40,10 +40,7 @@ from ironclaw_sdk import IronclawClient
 
 groq_client = Groq(api_key="your-groq-api-key")
 
-guard = IronclawClient(
-    base_url="http://localhost:8000",
-    api_key="your-ironclaw-api-key"
-)
+guard = IronclawClient(base_url="http://localhost:8000", api_key="your-ironclaw-api-key")
 ```
 
 ---
@@ -53,28 +50,17 @@ guard = IronclawClient(
 ```python
 def guarded_groq(user_message: str, agent_id: str = "groq-agent") -> str:
     # 1. Inspect input
-    input_result = guard.scan(
-        content=user_message,
-        context="user_input",
-        agent_id=agent_id
-    )
+    input_result = guard.scan(content=user_message, context="user_input", agent_id=agent_id)
 
     if input_result.verdict in ("block", "quarantine"):
         raise PermissionError(f"IronClaw blocked input: {input_result.reason}")
 
     # 2. Call Groq
-    response = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": user_message}]
-    )
+    response = groq_client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role": "user", "content": user_message}])
     output = response.choices.message.content
 
     # 3. Inspect output
-    output_result = guard.scan(
-        content=output,
-        context="agent_output",
-        agent_id=agent_id
-    )
+    output_result = guard.scan(content=output, context="agent_output", agent_id=agent_id)
 
     if output_result.verdict in ("block", "quarantine"):
         raise PermissionError(f"IronClaw blocked output: {output_result.reason}")
@@ -88,13 +74,7 @@ def guarded_groq(user_message: str, agent_id: str = "groq-agent") -> str:
 
 ```python
 def guarded_tool_dispatch(tool_name: str, tool_args: dict, agent_id: str) -> dict:
-    result = guard.scan(
-        content=f"{tool_name}({tool_args})",
-        context="tool_call",
-        agent_id=agent_id,
-        tool_name=tool_name,
-        tool_args=tool_args
-    )
+    result = guard.scan(content=f"{tool_name}({tool_args})", context="tool_call", agent_id=agent_id, tool_name=tool_name, tool_args=tool_args)
 
     if result.verdict in ("block", "quarantine"):
         raise PermissionError(f"IronClaw blocked tool call: {result.reason}")

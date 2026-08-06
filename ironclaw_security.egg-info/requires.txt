@@ -2,9 +2,11 @@ fastapi<0.136,>=0.115
 uvicorn[standard]<0.45,>=0.30
 httpx<1.0,>=0.27
 pydantic<3.0,>=2.7
+pydantic-settings<3.0,>=2.3
 python-dotenv<2.0,>=1.0
 requests<3.0,>=2.32
 stripe<10.0,>=7.0.0
+PyJWT>=2.8.0
 typer[all]<0.16,>=0.12
 rich<15.0,>=13.7
 
@@ -23,6 +25,7 @@ respx<1.0,>=0.21
 ruff<1.0,>=0.11
 anyio<5.0,>=4.0
 pydantic-settings<3.0,>=2.3
+stripe<10.0,>=7.0.0
 
 [docker]
 uvicorn[standard]<0.45,>=0.30

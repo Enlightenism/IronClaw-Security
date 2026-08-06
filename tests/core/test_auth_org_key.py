@@ -1,17 +1,7 @@
 from __future__ import annotations
 
 import os
-
-os.environ.setdefault("IRONCLAW_PERSISTENCE_MODE", "memory")
-os.environ.setdefault("ENVIRONMENT", "test")
-os.environ.setdefault("AUTH_REQUIRED", "false")
-os.environ.setdefault("IRONCLAW_RATE_LIMIT_ENABLED", "false")
-os.environ.setdefault("SUPABASE_URL", "")
-os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
-os.environ.setdefault("SUPABASE_KEY", "")
-os.environ.setdefault("SUPABASE_ANON_KEY", "")
-
-from unittest.mock import MagicMock
+from types import SimpleNamespace
 
 import pytest
 
@@ -22,18 +12,20 @@ from app.core.apikeys import (
     create_org_key,
     fingerprint_api_key,
 )
-from app.core.auth import (
-    get_auth_context,
-)
+from app.core.auth import get_auth_context
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
+os.environ.setdefault("IRONCLAW_PERSISTENCE_MODE", "memory")
+os.environ.setdefault("ENVIRONMENT", "test")
+os.environ.setdefault("AUTH_REQUIRED", "false")
+os.environ.setdefault("IRONCLAW_RATE_LIMIT_ENABLED", "false")
+os.environ.setdefault("SUPABASE_URL", "")
+os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
+os.environ.setdefault("SUPABASE_KEY", "")
+os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
 
 @pytest.fixture(autouse=True)
 def _isolated_registry():
-    """Replace the module-level APIKeyRegistry singleton for each test."""
     fresh_registry = APIKeyRegistry()
     original = _apikeys_module._registry
     _apikeys_module._registry = fresh_registry
@@ -48,7 +40,6 @@ def org_id() -> str:
 
 @pytest.fixture()
 def org_key_record(org_id: str, _isolated_registry: APIKeyRegistry) -> APIKeyRecord:
-    """Register a fresh org key in the isolated registry and return the record."""
     return _isolated_registry.create_key(
         "Acme Org Key",
         key_type="org",
@@ -61,7 +52,6 @@ def org_key_record(org_id: str, _isolated_registry: APIKeyRegistry) -> APIKeyRec
 
 @pytest.fixture()
 def personal_key_record(_isolated_registry: APIKeyRegistry) -> APIKeyRecord:
-    """Register a personal (non-org) key in the isolated registry and return the record."""
     return _isolated_registry.create_key(
         "Personal Dev Key",
         key_type="personal",
@@ -71,31 +61,55 @@ def personal_key_record(_isolated_registry: APIKeyRegistry) -> APIKeyRecord:
     )
 
 
-def _make_request(api_key: str) -> MagicMock:
-    """Build a minimal mock Request that auth.py can interrogate."""
-    request = MagicMock()
-    # settings: auth_required=False so missing keys don't 401 during resolution
-    settings = MagicMock()
-    settings.auth_required = False
-    settings.ironclaw_api_key = None
-    settings.internal_platform_api_key = None
-    settings.platform_api_key = None
-    settings.admin_api_key = None
-    settings.api_key = None
-    settings.effective_platform_api_key = None
-    settings.secret_key = None
-    settings.jwt_secret = None
-    settings.org_id = None
-    settings.organization_id = None
-    settings.default_org_id = None
-    request.app.state.settings = settings
-    request.headers = {"X-API-Key": api_key}
-    return request
+def _make_request(api_key: str | None = None):
+    settings = SimpleNamespace(
+        auth_required=False,
+        AUTH_REQUIRED=False,
+        auth_configured=False,
+        effective_auth_required=False,
+        effective_api_key=None,
+        ironclaw_api_key=None,
+        internal_platform_api_key=None,
+        platform_api_key=None,
+        admin_api_key=None,
+        api_key=None,
+        effective_platform_api_key=None,
+        effective_secret_key=None,
+        secret_key=None,
+        effective_jwt_secret=None,
+        jwt_secret=None,
+        effective_supabase_jwt_secret=None,
+        supabase_jwt_secret=None,
+        SUPABASE_JWT_SECRET=None,
+        effective_jwt_algorithm=None,
+        jwt_algorithm=None,
+        JWT_ALGORITHM=None,
+        org_id=None,
+        organization_id=None,
+        default_org_id=None,
+    )
+    headers: dict[str, str] = {}
+    if api_key is not None:
+        headers["X-API-Key"] = api_key
+    return SimpleNamespace(
+        method="GET",
+        headers=headers,
+        state=SimpleNamespace(),
+        app=SimpleNamespace(state=SimpleNamespace(settings=settings)),
+    )
 
 
-# ---------------------------------------------------------------------------
-# create_org_key — module-level factory
-# ---------------------------------------------------------------------------
+def _get_context_for_api_key(api_key: str):
+    request = _make_request(api_key)
+    return get_auth_context(
+        request,
+        api_key=api_key,
+        bearer_context=None,
+        session_id=None,
+        provided_org_id=None,
+        provided_organization_id=None,
+        provided_tenant_id=None,
+    )
 
 
 def test_create_org_key_returns_record_with_key_type_org(org_id: str) -> None:
@@ -124,26 +138,17 @@ def test_create_org_key_fingerprint_is_deterministic(org_id: str) -> None:
     assert record.fingerprint == expected_fp
 
 
-# ---------------------------------------------------------------------------
-# get_auth_context — org key resolves to key_type="org"
-# ---------------------------------------------------------------------------
-
-
 def test_org_key_auth_context_key_type_is_org(
     org_key_record: APIKeyRecord,
-    org_id: str,
 ) -> None:
-    request = _make_request(org_key_record.api_key)
-    ctx = get_auth_context(request, api_key=org_key_record.api_key, session_id=None, provided_org_id=None)
+    ctx = _get_context_for_api_key(org_key_record.api_key)
     assert ctx.key_type == "org"
 
 
 def test_org_key_auth_context_principal_type_is_org_key(
     org_key_record: APIKeyRecord,
-    org_id: str,
 ) -> None:
-    request = _make_request(org_key_record.api_key)
-    ctx = get_auth_context(request, api_key=org_key_record.api_key, session_id=None, provided_org_id=None)
+    ctx = _get_context_for_api_key(org_key_record.api_key)
     assert ctx.principal_type == "org_key"
 
 
@@ -151,83 +156,66 @@ def test_org_key_auth_context_org_id_matches_registered_org(
     org_key_record: APIKeyRecord,
     org_id: str,
 ) -> None:
-    request = _make_request(org_key_record.api_key)
-    ctx = get_auth_context(request, api_key=org_key_record.api_key, session_id=None, provided_org_id=None)
+    ctx = _get_context_for_api_key(org_key_record.api_key)
     assert ctx.org_id == org_id
 
 
 def test_org_key_auth_context_authenticated_is_true(
     org_key_record: APIKeyRecord,
 ) -> None:
-    request = _make_request(org_key_record.api_key)
-    ctx = get_auth_context(request, api_key=org_key_record.api_key, session_id=None, provided_org_id=None)
+    ctx = _get_context_for_api_key(org_key_record.api_key)
     assert ctx.authenticated is True
 
 
 def test_org_key_auth_context_auth_source_is_registry(
     org_key_record: APIKeyRecord,
 ) -> None:
-    request = _make_request(org_key_record.api_key)
-    ctx = get_auth_context(request, api_key=org_key_record.api_key, session_id=None, provided_org_id=None)
+    ctx = _get_context_for_api_key(org_key_record.api_key)
     assert ctx.auth_source == "registry"
+
+
+def test_org_key_auth_context_auth_method_is_registry_api_key(
+    org_key_record: APIKeyRecord,
+) -> None:
+    ctx = _get_context_for_api_key(org_key_record.api_key)
+    assert ctx.auth_method == "registry_api_key"
 
 
 def test_org_key_auth_context_principal_id_equals_key_id(
     org_key_record: APIKeyRecord,
 ) -> None:
-    request = _make_request(org_key_record.api_key)
-    ctx = get_auth_context(request, api_key=org_key_record.api_key, session_id=None, provided_org_id=None)
+    ctx = _get_context_for_api_key(org_key_record.api_key)
     assert ctx.principal_id == org_key_record.key_id
 
 
-# ---------------------------------------------------------------------------
-# Two different callers using the same org key resolve to the same org_id
-# ---------------------------------------------------------------------------
+def test_org_key_auth_context_metadata_header_is_x_api_key(
+    org_key_record: APIKeyRecord,
+) -> None:
+    ctx = _get_context_for_api_key(org_key_record.api_key)
+    assert ctx.metadata["header"] == "X-API-Key"
+
+
+def test_org_key_auth_context_metadata_org_source_is_api_key_record(
+    org_key_record: APIKeyRecord,
+) -> None:
+    ctx = _get_context_for_api_key(org_key_record.api_key)
+    assert ctx.metadata["org_source"] == "api_key_record"
 
 
 def test_two_callers_same_org_key_resolve_same_org_id(
     org_key_record: APIKeyRecord,
     org_id: str,
 ) -> None:
-    """Simulates two team members independently calling get_auth_context with the same org key."""
-    request_member_a = _make_request(org_key_record.api_key)
-    ctx_a = get_auth_context(
-        request_member_a,
-        api_key=org_key_record.api_key,
-        session_id=None,
-        provided_org_id=None,
-    )
-
-    request_member_b = _make_request(org_key_record.api_key)
-    ctx_b = get_auth_context(
-        request_member_b,
-        api_key=org_key_record.api_key,
-        session_id=None,
-        provided_org_id=None,
-    )
-
+    ctx_a = _get_context_for_api_key(org_key_record.api_key)
+    ctx_b = _get_context_for_api_key(org_key_record.api_key)
     assert ctx_a.org_id == ctx_b.org_id == org_id
 
 
 def test_two_callers_same_org_key_resolve_same_key_type(
     org_key_record: APIKeyRecord,
 ) -> None:
-    request_member_a = _make_request(org_key_record.api_key)
-    ctx_a = get_auth_context(
-        request_member_a,
-        api_key=org_key_record.api_key,
-        session_id=None,
-        provided_org_id=None,
-    )
-
-    request_member_b = _make_request(org_key_record.api_key)
-    ctx_b = get_auth_context(
-        request_member_b,
-        api_key=org_key_record.api_key,
-        session_id=None,
-        provided_org_id=None,
-    )
-
+    ctx_a = _get_context_for_api_key(org_key_record.api_key)
+    ctx_b = _get_context_for_api_key(org_key_record.api_key)
     assert ctx_a.key_type == ctx_b.key_type == "org"
     assert ctx_a.principal_type == ctx_b.principal_type == "org_key"
 
@@ -235,73 +223,51 @@ def test_two_callers_same_org_key_resolve_same_key_type(
 def test_two_callers_same_org_key_resolve_same_principal_id(
     org_key_record: APIKeyRecord,
 ) -> None:
-    request_member_a = _make_request(org_key_record.api_key)
-    ctx_a = get_auth_context(
-        request_member_a,
-        api_key=org_key_record.api_key,
-        session_id=None,
-        provided_org_id=None,
-    )
-
-    request_member_b = _make_request(org_key_record.api_key)
-    ctx_b = get_auth_context(
-        request_member_b,
-        api_key=org_key_record.api_key,
-        session_id=None,
-        provided_org_id=None,
-    )
-
+    ctx_a = _get_context_for_api_key(org_key_record.api_key)
+    ctx_b = _get_context_for_api_key(org_key_record.api_key)
     assert ctx_a.principal_id == ctx_b.principal_id == org_key_record.key_id
-
-
-# ---------------------------------------------------------------------------
-# Personal key — get_auth_context resolves correctly
-# ---------------------------------------------------------------------------
 
 
 def test_personal_key_auth_context_key_type_is_personal(
     personal_key_record: APIKeyRecord,
 ) -> None:
-    request = _make_request(personal_key_record.api_key)
-    ctx = get_auth_context(request, api_key=personal_key_record.api_key, session_id=None, provided_org_id=None)
+    ctx = _get_context_for_api_key(personal_key_record.api_key)
     assert ctx.key_type == "personal"
 
 
 def test_personal_key_auth_context_principal_type_is_api_key(
     personal_key_record: APIKeyRecord,
 ) -> None:
-    request = _make_request(personal_key_record.api_key)
-    ctx = get_auth_context(request, api_key=personal_key_record.api_key, session_id=None, provided_org_id=None)
+    ctx = _get_context_for_api_key(personal_key_record.api_key)
     assert ctx.principal_type == "api_key"
 
 
 def test_personal_key_auth_context_org_id_is_none(
     personal_key_record: APIKeyRecord,
 ) -> None:
-    request = _make_request(personal_key_record.api_key)
-    ctx = get_auth_context(request, api_key=personal_key_record.api_key, session_id=None, provided_org_id=None)
+    ctx = _get_context_for_api_key(personal_key_record.api_key)
     assert ctx.org_id is None
 
 
 def test_personal_key_auth_context_authenticated_is_true(
     personal_key_record: APIKeyRecord,
 ) -> None:
-    request = _make_request(personal_key_record.api_key)
-    ctx = get_auth_context(request, api_key=personal_key_record.api_key, session_id=None, provided_org_id=None)
+    ctx = _get_context_for_api_key(personal_key_record.api_key)
     assert ctx.authenticated is True
 
 
 def test_personal_key_auth_context_principal_type_not_org_key(
     personal_key_record: APIKeyRecord,
 ) -> None:
-    request = _make_request(personal_key_record.api_key)
-    ctx = get_auth_context(request, api_key=personal_key_record.api_key, session_id=None, provided_org_id=None)
+    ctx = _get_context_for_api_key(personal_key_record.api_key)
     assert ctx.principal_type != "org_key"
 
 
-# ---------------------------------------------------------------------------
-# Org key vs personal key — isolation across two concurrent registry entries
-# ---------------------------------------------------------------------------
+def test_personal_key_auth_context_principal_id_equals_key_id(
+    personal_key_record: APIKeyRecord,
+) -> None:
+    ctx = _get_context_for_api_key(personal_key_record.api_key)
+    assert ctx.principal_id == personal_key_record.key_id
 
 
 def test_org_and_personal_key_produce_different_principal_types(
@@ -309,11 +275,8 @@ def test_org_and_personal_key_produce_different_principal_types(
     personal_key_record: APIKeyRecord,
     org_id: str,
 ) -> None:
-    req_org = _make_request(org_key_record.api_key)
-    ctx_org = get_auth_context(req_org, api_key=org_key_record.api_key, session_id=None, provided_org_id=None)
-
-    req_personal = _make_request(personal_key_record.api_key)
-    ctx_personal = get_auth_context(req_personal, api_key=personal_key_record.api_key, session_id=None, provided_org_id=None)
+    ctx_org = _get_context_for_api_key(org_key_record.api_key)
+    ctx_personal = _get_context_for_api_key(personal_key_record.api_key)
 
     assert ctx_org.principal_type == "org_key"
     assert ctx_personal.principal_type == "api_key"
@@ -327,18 +290,10 @@ def test_org_and_personal_key_produce_different_key_types(
     org_key_record: APIKeyRecord,
     personal_key_record: APIKeyRecord,
 ) -> None:
-    req_org = _make_request(org_key_record.api_key)
-    ctx_org = get_auth_context(req_org, api_key=org_key_record.api_key, session_id=None, provided_org_id=None)
-
-    req_personal = _make_request(personal_key_record.api_key)
-    ctx_personal = get_auth_context(req_personal, api_key=personal_key_record.api_key, session_id=None, provided_org_id=None)
+    ctx_org = _get_context_for_api_key(org_key_record.api_key)
+    ctx_personal = _get_context_for_api_key(personal_key_record.api_key)
 
     assert ctx_org.key_type != ctx_personal.key_type
-
-
-# ---------------------------------------------------------------------------
-# Revoked org key — auth context authentication behavior
-# ---------------------------------------------------------------------------
 
 
 def test_revoked_org_key_is_not_resolved_by_registry(
@@ -346,7 +301,9 @@ def test_revoked_org_key_is_not_resolved_by_registry(
     _isolated_registry: APIKeyRegistry,
 ) -> None:
     _isolated_registry.revoke_key(org_key_record.key_id)
-    resolved = _isolated_registry.get_by_fingerprint(fingerprint_api_key(org_key_record.api_key))
+    resolved = _isolated_registry.get_by_fingerprint(
+        fingerprint_api_key(org_key_record.api_key),
+    )
     assert resolved is not None
     assert resolved.active is False
 
@@ -359,11 +316,6 @@ def test_revoked_org_key_record_active_is_false(
     assert revoked is not None
     assert revoked.active is False
     assert revoked.revoked_at is not None
-
-
-# ---------------------------------------------------------------------------
-# Multiple org keys for different orgs — complete isolation
-# ---------------------------------------------------------------------------
 
 
 def test_two_org_keys_for_different_orgs_produce_different_org_ids(
@@ -384,11 +336,8 @@ def test_two_org_keys_for_different_orgs_produce_different_org_ids(
         owner_key="ic_org_beta-corp",
     )
 
-    req_alpha = _make_request(record_alpha.api_key)
-    ctx_alpha = get_auth_context(req_alpha, api_key=record_alpha.api_key, session_id=None, provided_org_id=None)
-
-    req_beta = _make_request(record_beta.api_key)
-    ctx_beta = get_auth_context(req_beta, api_key=record_beta.api_key, session_id=None, provided_org_id=None)
+    ctx_alpha = _get_context_for_api_key(record_alpha.api_key)
+    ctx_beta = _get_context_for_api_key(record_beta.api_key)
 
     assert ctx_alpha.org_id == "alpha-corp"
     assert ctx_beta.org_id == "beta-corp"
@@ -415,10 +364,9 @@ def test_two_org_keys_for_different_orgs_produce_different_principal_ids(
         owner_key="ic_org_beta-corp",
     )
 
-    req_alpha = _make_request(record_alpha.api_key)
-    ctx_alpha = get_auth_context(req_alpha, api_key=record_alpha.api_key, session_id=None, provided_org_id=None)
+    ctx_alpha = _get_context_for_api_key(record_alpha.api_key)
+    ctx_beta = _get_context_for_api_key(record_beta.api_key)
 
-    req_beta = _make_request(record_beta.api_key)
-    ctx_beta = get_auth_context(req_beta, api_key=record_beta.api_key, session_id=None, provided_org_id=None)
-
+    assert ctx_alpha.principal_id == record_alpha.key_id
+    assert ctx_beta.principal_id == record_beta.key_id
     assert ctx_alpha.principal_id != ctx_beta.principal_id

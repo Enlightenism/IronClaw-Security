@@ -11,6 +11,7 @@ import httpx
 
 from app.models.webhook import WebhookDeliveryStatus
 from app.persistencebootstrap import InMemoryPersistenceStore
+from app.services import webhook_service as webhook_service_module
 from app.services.webhook_service import (
     EdgeDispatchResult,
     WebhookDeliveryRecord,
@@ -24,13 +25,31 @@ from app.services.webhook_service import (
     _write_delivery_log,
     deliver_webhook,
     dispatch_event,
-    dispatch_verdict_to_edge,
     get_delivery_log,
     list_delivery_logs_for_tenant,
     list_retryable_deliveries,
     retry_failed_delivery,
     verify_webhook_signature,
 )
+
+
+def _resolve_webhook_http_dispatch_name() -> str:
+    for name in ("dispatch_http_post", "_dispatch_http_post", "dispatchhttppost"):
+        if hasattr(webhook_service_module, name):
+            return name
+    raise AssertionError("No webhook HTTP dispatch function found on webhook_service module.")
+
+
+def _resolve_edge_dispatch_name() -> str:
+    for name in ("dispatch_verdict_to_edge", "dispatchverdicttoedge"):
+        if hasattr(webhook_service_module, name):
+            return name
+    raise AssertionError("No edge dispatch function found on webhook_service module.")
+
+
+_WEBHOOK_HTTP_DISPATCH_NAME = _resolve_webhook_http_dispatch_name()
+_EDGE_DISPATCH_NAME = _resolve_edge_dispatch_name()
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -275,30 +294,31 @@ class TestWriteDeliveryLog:
         rows = store.select(_WEBHOOK_DELIVERY_TABLE, filters={"id": record.id})
         assert rows[0]["status"] == WebhookDeliveryStatus.PENDING.value
 
-    def test_upsert_updates_existing_row(self) -> None:
+    def test_rewrite_existing_row_via_update_delivery_log_attempt(self) -> None:
         store = _make_store()
         delivery_id = str(uuid.uuid4())
         record = _make_delivery_record(delivery_id=delivery_id, status=WebhookDeliveryStatus.PENDING)
         _write_delivery_log(record, store=store)
-        updated_record = WebhookDeliveryRecord(
-            id=delivery_id,
-            subscription_id=record.subscription_id,
-            tenant_id=record.tenant_id,
-            event_type=record.event_type,
-            payload_json=record.payload_json,
+
+        delivered_at = datetime.now(UTC).isoformat()
+        _update_delivery_log_attempt(
+            delivery_id,
             status=WebhookDeliveryStatus.SUCCESS,
             attempts=1,
             http_status=200,
             response_body="ok",
             error_detail=None,
-            delivered_at=datetime.now(UTC).isoformat(),
+            delivered_at=delivered_at,
             next_attempt_at=None,
-            created_at=record.created_at,
+            store=store,
         )
-        _write_delivery_log(updated_record, store=store, upsert=True)
+
         rows = store.select(_WEBHOOK_DELIVERY_TABLE, filters={"id": delivery_id})
+        assert len(rows) == 1
         assert rows[0]["status"] == WebhookDeliveryStatus.SUCCESS.value
         assert rows[0]["http_status"] == 200
+        assert rows[0]["response_body"] == "ok"
+        assert rows[0]["delivered_at"] == delivered_at
 
     def test_does_not_raise_on_store_error(self) -> None:
         store = _make_store()
@@ -460,7 +480,7 @@ class TestDeliverWebhook:
         ) -> tuple[int | None, str | None, str | None]:
             return 200, "ok", None
 
-        with patch("app.services.webhook_service._dispatch_http_post", side_effect=_mock_post):
+        with patch.object(webhook_service_module, _WEBHOOK_HTTP_DISPATCH_NAME, side_effect=_mock_post):
             result = deliver_webhook(sub, _EVENT_TYPE, {"action": "scan"}, store=store)
 
         assert result.succeeded is True
@@ -480,7 +500,7 @@ class TestDeliverWebhook:
         def _mock_post(*_a: Any, **_kw: Any) -> tuple[int | None, str | None, str | None]:
             return 503, "server error", "Non-2xx response: HTTP 503"
 
-        with patch("app.services.webhook_service._dispatch_http_post", side_effect=_mock_post):
+        with patch.object(webhook_service_module, _WEBHOOK_HTTP_DISPATCH_NAME, side_effect=_mock_post):
             result = deliver_webhook(sub, _EVENT_TYPE, {"action": "scan"}, store=store)
 
         assert result.status == WebhookDeliveryStatus.FAILED
@@ -497,7 +517,7 @@ class TestDeliverWebhook:
         def _mock_post(*_a: Any, **_kw: Any) -> tuple[int | None, str | None, str | None]:
             return 503, None, "Non-2xx response: HTTP 503"
 
-        with patch("app.services.webhook_service._dispatch_http_post", side_effect=_mock_post):
+        with patch.object(webhook_service_module, _WEBHOOK_HTTP_DISPATCH_NAME, side_effect=_mock_post):
             result = deliver_webhook(sub, _EVENT_TYPE, {"action": "scan"}, store=store)
 
         assert result.status == WebhookDeliveryStatus.EXHAUSTED
@@ -514,7 +534,7 @@ class TestDeliverWebhook:
         def _mock_post(*_a: Any, **_kw: Any) -> tuple[int | None, str | None, str | None]:
             return 404, None, "Non-2xx response: HTTP 404"
 
-        with patch("app.services.webhook_service._dispatch_http_post", side_effect=_mock_post):
+        with patch.object(webhook_service_module, _WEBHOOK_HTTP_DISPATCH_NAME, side_effect=_mock_post):
             result = deliver_webhook(sub, _EVENT_TYPE, {}, store=store)
 
         assert result.status == WebhookDeliveryStatus.EXHAUSTED
@@ -527,7 +547,7 @@ class TestDeliverWebhook:
         def _mock_post(*_a: Any, **_kw: Any) -> tuple[int | None, str | None, str | None]:
             return 200, "ok", None
 
-        with patch("app.services.webhook_service._dispatch_http_post", side_effect=_mock_post):
+        with patch.object(webhook_service_module, _WEBHOOK_HTTP_DISPATCH_NAME, side_effect=_mock_post):
             result = deliver_webhook(
                 sub,
                 _EVENT_TYPE,
@@ -565,7 +585,7 @@ class TestDeliverWebhook:
         def _mock_post(*_a: Any, **_kw: Any) -> tuple[int | None, str | None, str | None]:
             return 200, "ok", None
 
-        with patch("app.services.webhook_service._dispatch_http_post", side_effect=_mock_post):
+        with patch.object(webhook_service_module, _WEBHOOK_HTTP_DISPATCH_NAME, side_effect=_mock_post):
             deliver_webhook(
                 sub,
                 _EVENT_TYPE,
@@ -604,7 +624,7 @@ class TestDispatchEvent:
         def _mock_post(*_a: Any, **_kw: Any) -> tuple[int | None, str | None, str | None]:
             return 200, "ok", None
 
-        with patch("app.services.webhook_service._dispatch_http_post", side_effect=_mock_post):
+        with patch.object(webhook_service_module, _WEBHOOK_HTTP_DISPATCH_NAME, side_effect=_mock_post):
             results = dispatch_event(
                 _TENANT_ID,
                 _EVENT_TYPE,
@@ -625,7 +645,7 @@ class TestDispatchEvent:
         def _mock_post(*_a: Any, **_kw: Any) -> tuple[int | None, str | None, str | None]:
             return 200, "ok", None
 
-        with patch("app.services.webhook_service._dispatch_http_post", side_effect=_mock_post):
+        with patch.object(webhook_service_module, _WEBHOOK_HTTP_DISPATCH_NAME, side_effect=_mock_post):
             results = dispatch_event(
                 _TENANT_ID,
                 _EVENT_TYPE,
@@ -640,7 +660,7 @@ class TestDispatchEvent:
     def test_fire_edge_function_false_skips_edge(self) -> None:
         store = _make_store()
 
-        with patch("app.services.webhook_service.dispatch_verdict_to_edge") as mock_edge:
+        with patch.object(webhook_service_module, _EDGE_DISPATCH_NAME) as mock_edge:
             dispatch_event(
                 _TENANT_ID,
                 _EVENT_TYPE,
@@ -653,8 +673,9 @@ class TestDispatchEvent:
     def test_fire_edge_function_true_calls_edge(self) -> None:
         store = _make_store()
 
-        with patch(
-            "app.services.webhook_service.dispatch_verdict_to_edge",
+        with patch.object(
+            webhook_service_module,
+            _EDGE_DISPATCH_NAME,
             return_value=EdgeDispatchResult(
                 event_type=_EVENT_TYPE,
                 tenant_id=_TENANT_ID,
@@ -691,7 +712,7 @@ class TestDispatchEvent:
                 return 500, None, "server error"
             return 200, "ok", None
 
-        with patch("app.services.webhook_service._dispatch_http_post", side_effect=_mock_post):
+        with patch.object(webhook_service_module, _WEBHOOK_HTTP_DISPATCH_NAME, side_effect=_mock_post):
             results = dispatch_event(
                 _TENANT_ID,
                 _EVENT_TYPE,
@@ -721,7 +742,7 @@ class TestRetryFailedDelivery:
         def _mock_post(*_a: Any, **_kw: Any) -> tuple[int | None, str | None, str | None]:
             return 200, "ok", None
 
-        with patch("app.services.webhook_service._dispatch_http_post", side_effect=_mock_post):
+        with patch.object(webhook_service_module, _WEBHOOK_HTTP_DISPATCH_NAME, side_effect=_mock_post):
             result = retry_failed_delivery(
                 delivery_id=delivery_id,
                 subscription_id=sub.id,
@@ -779,7 +800,7 @@ class TestRetryFailedDelivery:
         def _mock_post(*_a: Any, **_kw: Any) -> tuple[int | None, str | None, str | None]:
             return 200, "ok", None
 
-        with patch("app.services.webhook_service._dispatch_http_post", side_effect=_mock_post):
+        with patch.object(webhook_service_module, _WEBHOOK_HTTP_DISPATCH_NAME, side_effect=_mock_post):
             result = retry_failed_delivery(
                 delivery_id=str(uuid.uuid4()),
                 subscription_id=sub.id,
@@ -910,7 +931,7 @@ class TestDeliveryLogQueries:
 
 
 # ---------------------------------------------------------------------------
-# dispatch_verdict_to_edge
+# edge dispatch
 # ---------------------------------------------------------------------------
 
 
@@ -925,7 +946,8 @@ class TestDispatchVerdictToEdge:
 
     def test_missing_service_role_key_returns_failed_result(self) -> None:
         self._clear_env()
-        result = dispatch_verdict_to_edge(
+        edge_dispatch = getattr(webhook_service_module, _EDGE_DISPATCH_NAME)
+        result = edge_dispatch(
             event_type=_EVENT_TYPE,
             payload={"data": "x"},
             tenant_id=_TENANT_ID,
@@ -937,7 +959,8 @@ class TestDispatchVerdictToEdge:
     def test_missing_supabase_url_returns_failed_result(self) -> None:
         os.environ["SUPABASE_URL"] = ""
         os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "some-key"
-        result = dispatch_verdict_to_edge(
+        edge_dispatch = getattr(webhook_service_module, _EDGE_DISPATCH_NAME)
+        result = edge_dispatch(
             event_type=_EVENT_TYPE,
             payload={},
             tenant_id=_TENANT_ID,
@@ -947,12 +970,13 @@ class TestDispatchVerdictToEdge:
 
     def test_http_success_returns_succeeded_result(self) -> None:
         self._set_env()
+        edge_dispatch = getattr(webhook_service_module, _EDGE_DISPATCH_NAME)
 
         with patch("httpx.Client") as mock_client_class:
             mock_client = mock_client_class.return_value.__enter__.return_value
             mock_client.post.return_value = httpx.Response(200, json={"received": True})
 
-            result = dispatch_verdict_to_edge(
+            result = edge_dispatch(
                 event_type=_EVENT_TYPE,
                 payload={"verdict": "block"},
                 tenant_id=_TENANT_ID,
@@ -965,12 +989,13 @@ class TestDispatchVerdictToEdge:
 
     def test_non_2xx_returns_failed_result_with_detail(self) -> None:
         self._set_env()
+        edge_dispatch = getattr(webhook_service_module, _EDGE_DISPATCH_NAME)
 
         with patch("httpx.Client") as mock_client_class:
             mock_client = mock_client_class.return_value.__enter__.return_value
             mock_client.post.return_value = httpx.Response(502, text="Bad Gateway")
 
-            result = dispatch_verdict_to_edge(
+            result = edge_dispatch(
                 event_type=_EVENT_TYPE,
                 payload={},
                 tenant_id=_TENANT_ID,
@@ -983,12 +1008,13 @@ class TestDispatchVerdictToEdge:
 
     def test_timeout_returns_failed_result(self) -> None:
         self._set_env()
+        edge_dispatch = getattr(webhook_service_module, _EDGE_DISPATCH_NAME)
 
         with patch("httpx.Client") as mock_client_class:
             mock_client = mock_client_class.return_value.__enter__.return_value
             mock_client.post.side_effect = httpx.TimeoutException("timed out")
 
-            result = dispatch_verdict_to_edge(
+            result = edge_dispatch(
                 event_type=_EVENT_TYPE,
                 payload={},
                 tenant_id=_TENANT_ID,
@@ -1001,12 +1027,13 @@ class TestDispatchVerdictToEdge:
 
     def test_generic_exception_returns_failed_result(self) -> None:
         self._set_env()
+        edge_dispatch = getattr(webhook_service_module, _EDGE_DISPATCH_NAME)
 
         with patch("httpx.Client") as mock_client_class:
             mock_client = mock_client_class.return_value.__enter__.return_value
             mock_client.post.side_effect = ConnectionError("network unreachable")
 
-            result = dispatch_verdict_to_edge(
+            result = edge_dispatch(
                 event_type=_EVENT_TYPE,
                 payload={},
                 tenant_id=_TENANT_ID,
@@ -1018,12 +1045,13 @@ class TestDispatchVerdictToEdge:
 
     def test_result_contains_dispatched_at_timestamp(self) -> None:
         self._set_env()
+        edge_dispatch = getattr(webhook_service_module, _EDGE_DISPATCH_NAME)
 
         with patch("httpx.Client") as mock_client_class:
             mock_client = mock_client_class.return_value.__enter__.return_value
             mock_client.post.return_value = httpx.Response(200)
 
-            result = dispatch_verdict_to_edge(
+            result = edge_dispatch(
                 event_type=_EVENT_TYPE,
                 payload={},
                 tenant_id=_TENANT_ID,
