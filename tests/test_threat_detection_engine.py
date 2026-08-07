@@ -62,7 +62,10 @@ def _normalize_mitre(values: list[str] | None) -> list[str]:
 
 
 def _signal_merge_key(signal: CorrelationSignal) -> tuple[str, tuple[str, ...]]:
-    return (_signal_type(signal), tuple(_normalize_mitre(getattr(signal, "mitre_technique_ids", []) or [])))
+    return (
+        _signal_type(signal),
+        tuple(_normalize_mitre(getattr(signal, "mitre_technique_ids", []) or [])),
+    )
 
 
 def _signal_types(signals: list[CorrelationSignal]) -> list[str]:
@@ -474,17 +477,23 @@ class TestThreatDetectionEngineRun:
             mock_corr.correlate.return_value = engine_signals if engine_signals is not None else []
 
         fallback_signals = derived_signals if derived_signals is not None else []
-        notify_engine = notification_engine if notification_engine is not None else MagicMock(spec=[])
 
         with (
             patch("app.services.threat_detection_engine.get_ioc_store", return_value=mock_store),
-            patch("app.services.threat_detection_engine.get_correlation_engine", return_value=mock_corr),
-            patch.object(ThreatDetectionEngine, "_derive_engine_signals", return_value=fallback_signals),
+            patch(
+                "app.services.threat_detection_engine.get_correlation_engine",
+                return_value=mock_corr,
+            ),
+            patch.object(
+                ThreatDetectionEngine,
+                "_derive_engine_signals",
+                return_value=fallback_signals,
+            ),
         ):
             result = self.engine.run(
                 req,
                 correlation_signals=caller_signals,
-                notification_engine=notify_engine,
+                notification_engine=notification_engine,
             )
 
         return result, mock_store, mock_corr
@@ -577,17 +586,25 @@ class TestThreatDetectionEngineRun:
     def test_run_caller_signals_merged_into_result(self) -> None:
         req = _make_request(text="scan this")
         caller_signal = _make_correlation_signal(score_contribution=0.10)
-        result, _, _ = self._run(req, records=[], caller_signals=[caller_signal], derived_signals=[])
+        result, _, _ = self._run(
+            req,
+            records=[],
+            caller_signals=[caller_signal],
+            derived_signals=[],
+        )
         assert any(s.signal_id == caller_signal.signal_id for s in result.correlation_signals)
 
     def test_run_ioc_store_error_returns_empty_matches(self) -> None:
         req = _make_request(text="1.2.3.4")
         with (
-            patch("app.services.threat_detection_engine.get_ioc_store", side_effect=RuntimeError("db down")),
+            patch(
+                "app.services.threat_detection_engine.get_ioc_store",
+                side_effect=RuntimeError("db down"),
+            ),
             patch("app.services.threat_detection_engine.get_correlation_engine") as mock_corr,
         ):
             mock_corr.return_value.correlate.return_value = []
-            result = self.engine.run(req, notification_engine=MagicMock(spec=[]))
+            result = self.engine.run(req, notification_engine=None)
         assert result.ioc_matches == []
         assert result.verdict == DetectionVerdict.ALLOW
 
@@ -601,8 +618,14 @@ class TestThreatDetectionEngineRun:
             mitre_technique_id="T1059",
         )
         fallback = [
-            _make_correlation_signal(pattern_type="attack_chain", mitre_technique_ids=["T1059"]),
-            _make_correlation_signal(pattern_type="high_severity_cluster", mitre_technique_ids=["T1059"]),
+            _make_correlation_signal(
+                pattern_type="attack_chain",
+                mitre_technique_ids=["T1059"],
+            ),
+            _make_correlation_signal(
+                pattern_type="high_severity_cluster",
+                mitre_technique_ids=["T1059"],
+            ),
         ]
         with patch.object(self.engine, "_resolve_ioc_matches", return_value=[match]):
             result, _, _ = self._run(
@@ -685,7 +708,10 @@ class TestThreatDetectionEngineRun:
         with (
             patch("app.services.threat_detection_engine.get_ioc_store") as mock_get_store,
             patch("app.services.threat_detection_engine.get_correlation_engine") as mock_get_corr,
-            patch("app.services.threat_detection_engine._get_optional_notification_engine", return_value=notification_engine),
+            patch(
+                "app.services.threat_detection_engine._get_optional_notification_engine",
+                return_value=notification_engine,
+            ),
             patch.object(ThreatDetectionEngine, "_derive_engine_signals", return_value=[]),
         ):
             store = MagicMock()
@@ -798,12 +824,28 @@ class TestSignalMergeContract:
 
     def test_merge_places_engine_signals_before_caller_signals(self) -> None:
         engine_signals = [
-            _make_correlation_signal(pattern_type="attack_chain", score_contribution=0.12, confidence=0.90),
-            _make_correlation_signal(pattern_type="high_severity_cluster", score_contribution=0.10, confidence=0.80),
+            _make_correlation_signal(
+                pattern_type="attack_chain",
+                score_contribution=0.12,
+                confidence=0.90,
+            ),
+            _make_correlation_signal(
+                pattern_type="high_severity_cluster",
+                score_contribution=0.10,
+                confidence=0.80,
+            ),
         ]
         caller_signals = [
-            _make_correlation_signal(pattern_type="temporal_cluster", score_contribution=0.20, confidence=1.0),
-            _make_correlation_signal(pattern_type="custom_signal", score_contribution=0.01, confidence=0.10),
+            _make_correlation_signal(
+                pattern_type="temporal_cluster",
+                score_contribution=0.20,
+                confidence=1.0,
+            ),
+            _make_correlation_signal(
+                pattern_type="custom_signal",
+                score_contribution=0.01,
+                confidence=0.10,
+            ),
         ]
         merged = self.engine._merge_correlation_signals(engine_signals, caller_signals)
         merged_types = _signal_types(merged)
@@ -839,9 +881,18 @@ class TestSignalMergeContract:
         assert _normalize_mitre(merged_signal.mitre_technique_ids) == ["T1059", "T1078"]
 
     def test_merge_preserves_existing_when_rebuild_fails(self) -> None:
-        existing = _make_correlation_signal(pattern_type="attack_chain", mitre_technique_ids=["T1059"])
-        incoming = _make_correlation_signal(pattern_type="attack_chain", mitre_technique_ids=["T1059"])
-        with patch("app.services.threat_detection_engine.CorrelationSignal", side_effect=RuntimeError("boom")):
+        existing = _make_correlation_signal(
+            pattern_type="attack_chain",
+            mitre_technique_ids=["T1059"],
+        )
+        incoming = _make_correlation_signal(
+            pattern_type="attack_chain",
+            mitre_technique_ids=["T1059"],
+        )
+        with patch(
+            "app.services.threat_detection_engine.CorrelationSignal",
+            side_effect=RuntimeError("boom"),
+        ):
             merged = self.engine._merge_correlation_signals([existing], [incoming])
         assert len(merged) == 1
         assert _signal_type(merged[0]) == "attack_chain"
@@ -908,7 +959,11 @@ class TestLookupAndRecordConversion:
             value="1.2.3.4",
             tags=["tag1", "rf1", "rf2"],
         )
-        rec = _make_ioc_record(ioc_id="test-id", tags=["tag1"], risk_families=["rf1", "rf2"])
+        rec = _make_ioc_record(
+            ioc_id="test-id",
+            tags=["tag1"],
+            risk_families=["rf1", "rf2"],
+        )
         with patch("app.services.threat_detection_engine.IOCMatch", return_value=expected):
             match = self.engine._record_to_ioc_match(rec, minimum_confidence=0.0)
         assert match is not None
@@ -920,14 +975,21 @@ class TestLookupAndRecordConversion:
             value="evil.com",
             ioc_type=IOCTypeEnum.DOMAIN,
         )
-        rec = _make_ioc_record(ioc_id=None, value="evil.com", ioc_type=IOCTypeEnum.DOMAIN)
+        rec = _make_ioc_record(
+            ioc_id=None,
+            value="evil.com",
+            ioc_type=IOCTypeEnum.DOMAIN,
+        )
         with patch("app.services.threat_detection_engine.IOCMatch", return_value=expected):
             match = self.engine._record_to_ioc_match(rec, minimum_confidence=0.0)
         assert match is not None
         assert match.ioc_id == "evil.com|domain"
 
     def test_resolve_ioc_matches_returns_empty_when_store_raises(self) -> None:
-        with patch("app.services.threat_detection_engine.get_ioc_store", side_effect=RuntimeError("db down")):
+        with patch(
+            "app.services.threat_detection_engine.get_ioc_store",
+            side_effect=RuntimeError("db down"),
+        ):
             matches = self.engine._resolve_ioc_matches(
                 observables=["1.2.3.4"],
                 org_id="org-1",
@@ -1009,7 +1071,10 @@ class TestModuleHelpers:
         sig_pattern = _make_correlation_signal(pattern_type="attack_chain")
         assert _signal_type(sig_pattern) == "attack_chain"
 
-        sig_signal = _SignalTypeStub(pattern_type=None, signal_type="high_severity_cluster")
+        sig_signal = _SignalTypeStub(
+            pattern_type=None,
+            signal_type="high_severity_cluster",
+        )
         assert _signal_type(sig_signal) == "high_severity_cluster"
 
     def test_enum_like_value(self) -> None:
@@ -1057,24 +1122,34 @@ class TestEndToEndScenarios:
             mock_corr.correlate.return_value = engine_signals if engine_signals is not None else []
 
         fallback_signals = derived_signals if derived_signals is not None else []
-        notify_engine = notification_engine if notification_engine is not None else MagicMock(spec=[])
 
         with (
             patch("app.services.threat_detection_engine.get_ioc_store", return_value=mock_store),
-            patch("app.services.threat_detection_engine.get_correlation_engine", return_value=mock_corr),
-            patch.object(ThreatDetectionEngine, "_derive_engine_signals", return_value=fallback_signals),
+            patch(
+                "app.services.threat_detection_engine.get_correlation_engine",
+                return_value=mock_corr,
+            ),
+            patch.object(
+                ThreatDetectionEngine,
+                "_derive_engine_signals",
+                return_value=fallback_signals,
+            ),
         ):
             result = self.engine.run(
                 req,
                 correlation_signals=caller_signals,
-                notification_engine=notify_engine,
+                notification_engine=notification_engine,
             )
 
         return result, mock_store, mock_corr
 
     def test_clean_payload_returns_allow(self) -> None:
         req = _make_request(text="completely benign text with no indicators")
-        result, mock_store, _ = self._run_with_records(req, records=[], derived_signals=[])
+        result, mock_store, _ = self._run_with_records(
+            req,
+            records=[],
+            derived_signals=[],
+        )
         assert result.verdict == DetectionVerdict.ALLOW
         assert result.ioc_matches == []
         assert result.correlation_signals == []

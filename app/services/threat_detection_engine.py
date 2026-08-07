@@ -380,15 +380,18 @@ class ThreatDetectionEngine:
             detection_engine_version=_ENGINE_VERSION,
         )
 
-        resolved_notification_engine = notification_engine if notification_engine is not None else _get_optional_notification_engine()
+        resolved_notification_engine = notification_engine
+        if resolved_notification_engine is None:
+            resolved_notification_engine = _get_optional_notification_engine()
+
         if resolved_notification_engine is not None:
             try:
                 notify_detection = getattr(resolved_notification_engine, "notify_detection", None)
-                if callable(notify_detection):
+                if notify_detection is not None:
                     notify_detection(result, org_id=request.org_id)
                 else:
                     notify = getattr(resolved_notification_engine, "notify", None)
-                    if callable(notify):
+                    if notify is not None:
                         notify(result)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
@@ -429,33 +432,45 @@ class ThreatDetectionEngine:
         if techniques or len(ioc_matches) >= 2:
             derived.append(
                 CorrelationSignal(
+                    signal_id=str(uuid.uuid4()),
                     pattern_type="attack_chain",
                     signal_type="attack_chain",
+                    matched_event_ids=[],
+                    contributing_ioc_ids=[],
                     score_contribution=0.12 if techniques else 0.08,
                     confidence=max(float(match.confidence) for match in ioc_matches),
                     mitre_technique_ids=techniques,
+                    description="",
                 )
             )
 
         if len(high_or_critical) >= 1:
             derived.append(
                 CorrelationSignal(
+                    signal_id=str(uuid.uuid4()),
                     pattern_type="high_severity_cluster",
                     signal_type="high_severity_cluster",
+                    matched_event_ids=[],
+                    contributing_ioc_ids=[],
                     score_contribution=0.15,
                     confidence=max(float(match.confidence) for match in high_or_critical),
                     mitre_technique_ids=techniques,
+                    description="",
                 )
             )
 
         if len(ioc_matches) >= 2:
             derived.append(
                 CorrelationSignal(
+                    signal_id=str(uuid.uuid4()),
                     pattern_type="multi_ioc_cooccurrence",
                     signal_type="multi_ioc_cooccurrence",
+                    matched_event_ids=[],
+                    contributing_ioc_ids=[],
                     score_contribution=0.10,
                     confidence=max(float(match.confidence) for match in ioc_matches),
                     mitre_technique_ids=techniques,
+                    description="",
                 )
             )
 
@@ -470,7 +485,7 @@ class ThreatDetectionEngine:
 
         def _signal_key(signal: CorrelationSignal) -> str:
             signal_type = _get_signal_type(signal)
-            return signal_type
+            return signal_type or _signal_identity(signal)
 
         ordered_keys: list[str] = []
         engine_keys: set[str] = set()
@@ -483,7 +498,7 @@ class ThreatDetectionEngine:
             key = _signal_key(signal)
             existing = merged.get(key)
             if existing is None:
-                merged[key] = signal
+                merged[key] = ThreatDetectionEngine._normalize_signal_instance(signal)
                 engine_keys.add(key)
                 _remember_key(key)
                 continue
@@ -494,7 +509,7 @@ class ThreatDetectionEngine:
             key = _signal_key(signal)
             existing = merged.get(key)
             if existing is None:
-                merged[key] = signal
+                merged[key] = ThreatDetectionEngine._normalize_signal_instance(signal)
                 _remember_key(key)
                 continue
             merged[key] = ThreatDetectionEngine._merge_two_correlation_signals(existing, signal)
@@ -511,73 +526,91 @@ class ThreatDetectionEngine:
                 index,
             )
 
-        return [signal for _, signal in sorted(enumerate([merged[key] for key in ordered_keys]), key=_signal_sort_key)]
+        ordered = [merged[key] for key in ordered_keys]
+        return [signal for _, signal in sorted(enumerate(ordered), key=_signal_sort_key)]
+
+    @staticmethod
+    def _normalize_signal_instance(signal: CorrelationSignal) -> CorrelationSignal:
+        normalized = ThreatDetectionEngine._build_signal_payload(signal)
+        try:
+            return CorrelationSignal(**normalized)
+        except Exception:
+            fallback = signal
+            for attr, value in normalized.items():
+                try:
+                    setattr(fallback, attr, value)
+                except Exception:
+                    pass
+            return fallback
 
     @staticmethod
     def _merge_two_correlation_signals(
         existing: CorrelationSignal,
         incoming: CorrelationSignal,
     ) -> CorrelationSignal:
-        score_contribution = max(float(existing.score_contribution), float(incoming.score_contribution))
-        confidence = max(float(existing.confidence), float(incoming.confidence))
-        mitre_ids = _dedupe_preserve_order(
-            [
-                normalized
-                for normalized in (
-                    _normalize_mitre_value(t)
-                    for t in [
-                        *_extract_signal_mitre_techniques(existing),
-                        *_extract_signal_mitre_techniques(incoming),
-                    ]
-                )
-                if normalized
-            ]
-        )
+        existing_payload = ThreatDetectionEngine._build_signal_payload(existing)
+        incoming_payload = ThreatDetectionEngine._build_signal_payload(incoming)
+
+        signal_type = existing_payload["pattern_type"] or incoming_payload["pattern_type"] or _get_signal_type(existing) or _get_signal_type(incoming)
+
+        payload = {
+            "signal_id": existing_payload["signal_id"] or incoming_payload["signal_id"] or str(uuid.uuid4()),
+            "pattern_type": signal_type,
+            "signal_type": signal_type,
+            "matched_event_ids": _dedupe_preserve_order(
+                [
+                    *existing_payload["matched_event_ids"],
+                    *incoming_payload["matched_event_ids"],
+                ]
+            ),
+            "contributing_ioc_ids": _dedupe_preserve_order(
+                [
+                    *existing_payload["contributing_ioc_ids"],
+                    *incoming_payload["contributing_ioc_ids"],
+                ]
+            ),
+            "score_contribution": max(
+                float(existing_payload["score_contribution"]),
+                float(incoming_payload["score_contribution"]),
+            ),
+            "confidence": max(
+                float(existing_payload["confidence"]),
+                float(incoming_payload["confidence"]),
+            ),
+            "mitre_technique_ids": _dedupe_preserve_order(
+                [
+                    *existing_payload["mitre_technique_ids"],
+                    *incoming_payload["mitre_technique_ids"],
+                ]
+            ),
+            "description": existing_payload["description"] or incoming_payload["description"] or "",
+        }
 
         try:
-            signal_type = _get_signal_type(existing) or _get_signal_type(incoming)
-            kwargs = {
-                "score_contribution": score_contribution,
-                "confidence": confidence,
-                "mitre_technique_ids": mitre_ids,
-            }
-            if hasattr(existing, "signal_id") or hasattr(incoming, "signal_id"):
-                kwargs["signal_id"] = _string_or_none(getattr(existing, "signal_id", None)) or _string_or_none(getattr(incoming, "signal_id", None)) or str(uuid.uuid4())
-            kwargs["pattern_type"] = signal_type
-            kwargs["signal_type"] = signal_type
-            return CorrelationSignal(**kwargs)
+            return CorrelationSignal(**payload)
         except Exception:
             fallback = existing
-            existing_mitre_ids = _dedupe_preserve_order(
-                [
-                    normalized
-                    for normalized in (
-                        _normalize_mitre_value(t)
-                        for t in [
-                            *_extract_signal_mitre_techniques(existing),
-                            *_extract_signal_mitre_techniques(incoming),
-                        ]
-                    )
-                    if normalized
-                ]
-            )
-            try:
-                fallback.mitre_technique_ids = existing_mitre_ids
-            except Exception:
-                pass
-            try:
-                fallback.score_contribution = score_contribution
-            except Exception:
-                pass
-            try:
-                fallback.confidence = confidence
-            except Exception:
-                pass
-            try:
-                fallback.signal_type = _get_signal_type(existing) or _get_signal_type(incoming)
-            except Exception:
-                pass
+            for attr, value in payload.items():
+                try:
+                    setattr(fallback, attr, value)
+                except Exception:
+                    pass
             return fallback
+
+    @staticmethod
+    def _build_signal_payload(signal: CorrelationSignal) -> dict[str, Any]:
+        signal_type = _get_signal_type(signal)
+        return {
+            "signal_id": _string_or_none(getattr(signal, "signal_id", None)) or str(uuid.uuid4()),
+            "pattern_type": signal_type,
+            "signal_type": signal_type,
+            "matched_event_ids": _coerce_str_list(getattr(signal, "matched_event_ids", None)),
+            "contributing_ioc_ids": _coerce_str_list(getattr(signal, "contributing_ioc_ids", None)),
+            "score_contribution": _coerce_float(getattr(signal, "score_contribution", 0.0), default=0.0),
+            "confidence": _coerce_float(getattr(signal, "confidence", 0.0), default=0.0),
+            "mitre_technique_ids": _extract_signal_mitre_techniques(signal),
+            "description": _string_or_none(getattr(signal, "description", None)) or "",
+        }
 
     def _extract_observables(self, request: DetectionRequest) -> list[str]:
         observables: list[str] = []
@@ -963,14 +996,47 @@ def _extract_ioc_match_mitre_techniques(match: IOCMatch) -> list[str]:
 
 def _extract_signal_mitre_techniques(signal: CorrelationSignal) -> list[str]:
     candidates: list[str] = []
-    direct = _normalize_mitre_value(getattr(signal, "mitre_technique_id", None))
+
+    raw_mapping: dict[str, Any] = {}
+    for attr in (
+        "mitre_technique_id",
+        "mitre_technique_ids",
+        "mitre_techniques",
+        "metadata",
+        "context",
+        "details",
+        "enrichment",
+        "attributes",
+    ):
+        try:
+            raw_mapping[attr] = getattr(signal, attr, None)
+        except Exception:
+            raw_mapping[attr] = None
+
+    direct = _normalize_mitre_value(raw_mapping.get("mitre_technique_id"))
     if direct:
         candidates.append(direct)
+
     for attr in ("mitre_technique_ids", "mitre_techniques"):
-        for value in _coerce_str_list(getattr(signal, attr, None)):
+        for value in _coerce_str_list(raw_mapping.get(attr)):
             normalized = _normalize_mitre_value(value)
             if normalized:
                 candidates.append(normalized)
+
+    for container_name in ("metadata", "context", "details", "enrichment", "attributes"):
+        container = raw_mapping.get(container_name)
+        if not isinstance(container, dict):
+            continue
+        for key in ("mitre_technique_id", "mitre_technique_ids", "mitre_techniques"):
+            nested_value = container.get(key)
+            normalized_single = _normalize_mitre_value(nested_value)
+            if normalized_single:
+                candidates.append(normalized_single)
+            for value in _coerce_str_list(nested_value):
+                normalized = _normalize_mitre_value(value)
+                if normalized:
+                    candidates.append(normalized)
+
     return _dedupe_preserve_order(candidates)
 
 
@@ -1062,6 +1128,10 @@ def _get_signal_type(signal: CorrelationSignal) -> str:
         if value:
             return value.lower()
     return ""
+
+
+def _signal_identity(signal: CorrelationSignal) -> str:
+    return _string_or_none(getattr(signal, "signal_id", None)) or _string_or_none(getattr(signal, "description", None)) or str(id(signal))
 
 
 # ---------------------------------------------------------------------------
