@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -233,7 +234,7 @@ class _StubDispatcher:
 
 
 @pytest.fixture(autouse=True)
-def _reset_dispatcher_singleton() -> None:
+def _reset_dispatcher_singleton() -> Iterator[None]:
     reset_webhook_dispatcher()
     yield
     reset_webhook_dispatcher()

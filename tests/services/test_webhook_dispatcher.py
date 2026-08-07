@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 import json
 from types import SimpleNamespace
 
@@ -107,7 +108,7 @@ class _MockResponse:
 
 
 @pytest.fixture(autouse=True)
-def _reset_singleton() -> None:
+def _reset_singleton() -> Iterator[None]:
     reset_webhook_dispatcher()
     yield
     reset_webhook_dispatcher()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 import importlib
 from types import SimpleNamespace
 
@@ -31,13 +32,13 @@ from app.ui.billing.payment_methods import (
 
 
 @pytest.fixture()
-def client() -> TestClient:
+def client() -> Iterator[TestClient]:
     with TestClient(_app, raise_server_exceptions=False) as test_client:
         yield test_client
 
 
 @pytest.fixture()
-def authed_client() -> TestClient:
+def authed_client() -> Iterator[TestClient]:
     def _fake_auth_context() -> SimpleNamespace:
         return SimpleNamespace(
             org_id=None,
