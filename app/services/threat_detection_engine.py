@@ -101,6 +101,10 @@ def _get_optional_notification_engine() -> NotificationEngine | None:
         return None
 
 
+def getoptionalnotificationengine() -> NotificationEngine | None:
+    return _get_optional_notification_engine()
+
+
 # ---------------------------------------------------------------------------
 # ScoreResult — internal scoring container
 # ---------------------------------------------------------------------------
@@ -373,7 +377,7 @@ class ThreatDetectionEngine:
             risk_families=score_result.risk_families,
             extracted_indicators=observables,
             rationale=score_result.rationale,
-            mitre_techniques=score_result.mitre_techniques,
+            mitre_techniques=_dedupe_preserve_order(score_result.mitre_techniques),
             context=request.context,
             metadata=request.metadata,
             assessed_at=_utcnow_iso(),
@@ -866,7 +870,12 @@ class ThreatDetectionEngine:
             tags = _dedupe_preserve_order([*tags, *risk_families])
 
         ioc_id = _string_or_none(getattr(rec, "ioc_id", None)) or f"{value}|{ioc_type}"
-        mitre_technique_id = _normalize_mitre_value(_string_or_none(getattr(rec, "mitre_technique_id", None)))
+        mitre_values = _extract_mitre_values(
+            rec,
+            direct_attrs=("mitre_technique_id",),
+            list_attrs=("mitre_technique_ids", "mitre_techniques"),
+        )
+        mitre_technique_id = mitre_values[0] if mitre_values else None
         mitre_tactic = _string_or_none(getattr(rec, "mitre_tactic", None))
         cve_id = _string_or_none(getattr(rec, "cve_id", None))
         first_seen = _string_or_none(getattr(rec, "first_seen", None))
@@ -981,58 +990,61 @@ def _extract_match_risk_families(match: IOCMatch) -> list[str]:
     return _coerce_str_list(getattr(match, "tags", None))
 
 
-def _extract_ioc_match_mitre_techniques(match: IOCMatch) -> list[str]:
+def _extract_mitre_values(
+    source: Any,
+    *,
+    direct_attrs: tuple[str, ...] = (),
+    list_attrs: tuple[str, ...] = (),
+) -> list[str]:
     candidates: list[str] = []
-    direct = _normalize_mitre_value(getattr(match, "mitre_technique_id", None))
-    if direct:
-        candidates.append(direct)
-    for attr in ("mitre_technique_ids", "mitre_techniques"):
-        for value in _coerce_str_list(getattr(match, attr, None)):
+
+    for attr in direct_attrs:
+        normalized = _normalize_mitre_value(getattr(source, attr, None))
+        if normalized:
+            candidates.append(normalized)
+
+    for attr in list_attrs:
+        for value in _coerce_str_list(getattr(source, attr, None)):
             normalized = _normalize_mitre_value(value)
             if normalized:
                 candidates.append(normalized)
+
     return _dedupe_preserve_order(candidates)
+
+
+def _extract_ioc_match_mitre_techniques(match: IOCMatch) -> list[str]:
+    return _extract_mitre_values(
+        match,
+        direct_attrs=("mitre_technique_id",),
+        list_attrs=("mitre_technique_ids", "mitre_techniques"),
+    )
 
 
 def _extract_signal_mitre_techniques(signal: CorrelationSignal) -> list[str]:
     candidates: list[str] = []
 
-    raw_mapping: dict[str, Any] = {}
-    for attr in (
-        "mitre_technique_id",
-        "mitre_technique_ids",
-        "mitre_techniques",
-        "metadata",
-        "context",
-        "details",
-        "enrichment",
-        "attributes",
-    ):
-        try:
-            raw_mapping[attr] = getattr(signal, attr, None)
-        except Exception:
-            raw_mapping[attr] = None
-
-    direct = _normalize_mitre_value(raw_mapping.get("mitre_technique_id"))
-    if direct:
-        candidates.append(direct)
-
-    for attr in ("mitre_technique_ids", "mitre_techniques"):
-        for value in _coerce_str_list(raw_mapping.get(attr)):
-            normalized = _normalize_mitre_value(value)
-            if normalized:
-                candidates.append(normalized)
+    candidates.extend(
+        _extract_mitre_values(
+            signal,
+            direct_attrs=("mitre_technique_id",),
+            list_attrs=("mitre_technique_ids", "mitre_techniques"),
+        )
+    )
 
     for container_name in ("metadata", "context", "details", "enrichment", "attributes"):
-        container = raw_mapping.get(container_name)
+        try:
+            container = getattr(signal, container_name, None)
+        except Exception:
+            container = None
         if not isinstance(container, dict):
             continue
-        for key in ("mitre_technique_id", "mitre_technique_ids", "mitre_techniques"):
-            nested_value = container.get(key)
-            normalized_single = _normalize_mitre_value(nested_value)
-            if normalized_single:
-                candidates.append(normalized_single)
-            for value in _coerce_str_list(nested_value):
+
+        direct = _normalize_mitre_value(container.get("mitre_technique_id"))
+        if direct:
+            candidates.append(direct)
+
+        for key in ("mitre_technique_ids", "mitre_techniques"):
+            for value in _coerce_str_list(container.get(key)):
                 normalized = _normalize_mitre_value(value)
                 if normalized:
                     candidates.append(normalized)
@@ -1161,6 +1173,74 @@ def get_detection_engine() -> ThreatDetectionEngine:
     return _get_engine()
 
 
+def coercefloat(value: Any, *, default: float) -> float:
+    return _coerce_float(value, default=default)
+
+
+def coercelookuprecords(value: Any) -> list[Any]:
+    return _coerce_lookup_records(value)
+
+
+def coerceseverity(value: Any) -> ThreatSeverityLevel:
+    return _coerce_severity(value)
+
+
+def coercestrlist(value: Any) -> list[str]:
+    return _coerce_str_list(value)
+
+
+def dedupepreserveorder(values: list[str]) -> list[str]:
+    return _dedupe_preserve_order(values)
+
+
+def enumlikevalue(value: Any) -> str:
+    return _enum_like_value(value)
+
+
+def extractmatchriskfamilies(match: IOCMatch) -> list[str]:
+    return _extract_match_risk_families(match)
+
+
+def getcorrelationengine() -> Any:
+    return get_correlation_engine()
+
+
+def getdetectionengine() -> ThreatDetectionEngine:
+    return get_detection_engine()
+
+
+def getiocstore() -> Any:
+    return get_ioc_store()
+
+
+def getscoringengine() -> ThreatScoringEngine:
+    return get_scoring_engine()
+
+
+def highestiocseverity(ioc_matches: list[IOCMatch]) -> ThreatSeverityLevel | None:
+    return _highest_ioc_severity(ioc_matches)
+
+
+def maxseverity(left: ThreatSeverityLevel, right: ThreatSeverityLevel) -> ThreatSeverityLevel:
+    return _max_severity(left, right)
+
+
+def maxverdict(left: DetectionVerdict, right: DetectionVerdict) -> DetectionVerdict:
+    return _max_verdict(left, right)
+
+
+def normalizecollectionvalue(value: Any) -> str:
+    return _normalize_collection_value(value)
+
+
+def normalizemitrevalue(value: Any) -> str | None:
+    return _normalize_mitre_value(value)
+
+
+def stringornone(value: Any) -> str | None:
+    return _string_or_none(value)
+
+
 # ---------------------------------------------------------------------------
 # __all__
 # ---------------------------------------------------------------------------
@@ -1170,7 +1250,25 @@ __all__ = [
     "ScoreResult",
     "ThreatDetectionEngine",
     "ThreatScoringEngine",
+    "coercefloat",
+    "coercelookuprecords",
+    "coerceseverity",
+    "coercestrlist",
+    "dedupepreserveorder",
+    "enumlikevalue",
+    "extractmatchriskfamilies",
     "get_correlation_engine",
     "get_detection_engine",
     "get_scoring_engine",
+    "getcorrelationengine",
+    "getdetectionengine",
+    "getiocstore",
+    "getoptionalnotificationengine",
+    "getscoringengine",
+    "highestiocseverity",
+    "maxseverity",
+    "maxverdict",
+    "normalizecollectionvalue",
+    "normalizemitrevalue",
+    "stringornone",
 ]

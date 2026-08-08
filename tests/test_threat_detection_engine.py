@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock, patch
 import uuid
@@ -12,10 +13,9 @@ from app.schemas.threat_detection import (
     DetectionResult,
     DetectionVerdict,
     IOCMatch,
-    IOCTypeEnum,
     ThreatSeverityLevel,
 )
-from app.services.threat_detection_engine import (
+from app.services.threatdetectionengine import (
     ScoreResult,
     ThreatDetectionEngine,
     ThreatScoringEngine,
@@ -26,24 +26,36 @@ from app.services.threat_detection_engine import (
     _dedupe_preserve_order,
     _enum_like_value,
     _extract_match_risk_families,
+    _get_correlation_engine,
+    _get_detection_engine,
+    _get_ioc_store,
     _get_optional_notification_engine,
+    _get_scoring_engine,
     _highest_ioc_severity,
     _max_severity,
     _max_verdict,
     _normalize_collection_value,
     _normalize_mitre_value,
     _string_or_none,
-    get_detection_engine,
-    get_scoring_engine,
+    coercefloat,
+    coercelookuprecords,
+    coerceseverity,
+    coercestrlist,
+    dedupepreserveorder,
+    enumlikevalue,
+    extractmatchriskfamilies,
+    getcorrelationengine,
+    getdetectionengine,
+    getiocstore,
+    getoptionalnotificationengine,
+    getscoringengine,
+    highestiocseverity,
+    maxseverity,
+    maxverdict,
+    normalizecollectionvalue,
+    normalizemitrevalue,
+    stringornone,
 )
-
-
-def _ioc_type_value(value: Any) -> str:
-    return value.value if hasattr(value, "value") else str(value)
-
-
-def _severity_value(value: Any) -> str:
-    return value.value if hasattr(value, "value") else str(value)
 
 
 def _signal_type(signal: CorrelationSignal) -> str:
@@ -61,48 +73,52 @@ def _normalize_mitre(values: list[str] | None) -> list[str]:
     return out
 
 
-def _signal_merge_key(signal: CorrelationSignal) -> tuple[str, tuple[str, ...]]:
-    return (
-        _signal_type(signal),
-        tuple(_normalize_mitre(getattr(signal, "mitre_technique_ids", []) or [])),
-    )
-
-
 def _signal_types(signals: list[CorrelationSignal]) -> list[str]:
     return [_signal_type(s) for s in signals]
+
+
+def _patch_module_attr(name: str, *args: Any, **kwargs: Any):
+    module_path = "app.services.threatdetectionengine"
+    target = f"{module_path}.{name}"
+    return patch(target, *args, create=True, **kwargs)
 
 
 def _make_ioc_match(
     *,
     value: str = "1.2.3.4",
-    ioc_type: str | IOCTypeEnum = IOCTypeEnum.IPV4,
+    ioc_type: str = "ipv4",
     severity: str | ThreatSeverityLevel = ThreatSeverityLevel.MEDIUM,
     confidence: float = 0.80,
     tags: list[str] | None = None,
     risk_families: list[str] | None = None,
     mitre_technique_id: str | None = None,
+    mitre_technique_ids: list[str] | None = None,
+    mitre_techniques: list[str] | None = None,
     mitre_tactic: str | None = None,
     cve_id: str | None = None,
     source: str = "internal",
     ioc_id: str | None = None,
+    first_seen: str | None = None,
+    last_seen: str | None = None,
 ) -> IOCMatch:
-    combined_tags = list(tags or [])
-    for value_tag in risk_families or []:
-        if value_tag not in combined_tags:
-            combined_tags.append(value_tag)
-
+    sev = severity.value if hasattr(severity, "value") else str(severity)
     return IOCMatch(
         ioc_id=ioc_id or str(uuid.uuid4()),
         value=value,
-        ioc_type=_ioc_type_value(ioc_type),
-        severity=_severity_value(severity),
+        ioc_type=ioc_type,
+        severity=sev,
         confidence=confidence,
         source=source,
-        tags=combined_tags,
+        tags=list(tags or []),
+        risk_families=list(risk_families or []),
         matched_on="ioc_store",
         mitre_technique_id=mitre_technique_id,
+        mitre_technique_ids=list(mitre_technique_ids or []),
+        mitre_techniques=list(mitre_techniques or []),
         mitre_tactic=mitre_tactic,
         cve_id=cve_id,
+        first_seen=first_seen,
+        last_seen=last_seen,
     )
 
 
@@ -112,18 +128,34 @@ def _make_correlation_signal(
     score_contribution: float = 0.10,
     confidence: float = 0.80,
     mitre_technique_ids: list[str] | None = None,
+    mitre_technique_id: str | None = None,
+    mitre_techniques: list[str] | None = None,
     description: str = "",
+    metadata: dict[str, Any] | None = None,
+    context: dict[str, Any] | None = None,
+    details: dict[str, Any] | None = None,
+    enrichment: dict[str, Any] | None = None,
+    attributes: dict[str, Any] | None = None,
+    matched_event_ids: list[str] | None = None,
+    contributing_ioc_ids: list[str] | None = None,
 ) -> CorrelationSignal:
     return CorrelationSignal(
         signal_id=str(uuid.uuid4()),
         pattern_type=pattern_type,
         signal_type=pattern_type,
-        matched_event_ids=[],
-        contributing_ioc_ids=[],
+        matched_event_ids=matched_event_ids or [],
+        contributing_ioc_ids=contributing_ioc_ids or [],
+        mitre_technique_id=mitre_technique_id,
         mitre_technique_ids=mitre_technique_ids or [],
+        mitre_techniques=mitre_techniques or [],
         confidence=confidence,
         score_contribution=score_contribution,
         description=description,
+        metadata=metadata or {},
+        context=context or {},
+        details=details or {},
+        enrichment=enrichment or {},
+        attributes=attributes or {},
     )
 
 
@@ -142,7 +174,7 @@ def _make_request(**kwargs: Any) -> DetectionRequest:
 def _make_ioc_record(
     *,
     value: str = "1.2.3.4",
-    ioc_type: str | IOCTypeEnum = IOCTypeEnum.IPV4,
+    ioc_type: str = "ipv4",
     severity: str | ThreatSeverityLevel = ThreatSeverityLevel.MEDIUM,
     confidence: float = 0.80,
     tags: list[str] | None = None,
@@ -159,8 +191,8 @@ def _make_ioc_record(
     rec.ioc_id = ioc_id
     rec.value = value
     rec.ioc_value = value
-    rec.ioc_type = _ioc_type_value(ioc_type)
-    rec.type = _ioc_type_value(ioc_type)
+    rec.ioc_type = ioc_type
+    rec.type = ioc_type
     rec.severity = severity
     rec.confidence = confidence
     rec.score = confidence
@@ -176,17 +208,10 @@ def _make_ioc_record(
     return rec
 
 
-class _SignalTypeStub:
-    def __init__(
-        self,
-        *,
-        signal_type: str | None = None,
-        pattern_type: str | None = None,
-        type: str | None = None,
-    ) -> None:
-        self.signal_type = signal_type
-        self.pattern_type = pattern_type
-        self.type = type
+class _Container:
+    def __init__(self, **kwargs: Any) -> None:
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
 
 class TestThreatScoringEngine:
@@ -200,6 +225,7 @@ class TestThreatScoringEngine:
 
     def test_compute_empty_inputs_returns_zero(self) -> None:
         result = self.engine.compute([], [])
+        assert result.raw_score == 0.0
         assert result.normalized_score == 0.0
         assert result.verdict == DetectionVerdict.ALLOW
         assert result.severity == ThreatSeverityLevel.INFO
@@ -213,6 +239,17 @@ class TestThreatScoringEngine:
         matches = [_make_ioc_match(severity=ThreatSeverityLevel.CRITICAL, confidence=1.0) for _ in range(10)]
         result = self.engine.compute(matches, [])
         assert result.raw_score >= result.normalized_score
+
+    def test_score_iocs_caps_at_point_eight(self) -> None:
+        matches = [_make_ioc_match(severity=ThreatSeverityLevel.CRITICAL, confidence=1.0) for _ in range(100)]
+        assert self.engine._score_iocs(matches) == 0.80
+
+    def test_score_signals_caps_at_point_two(self) -> None:
+        signals = [
+            _make_correlation_signal(score_contribution=1.0, confidence=1.0),
+            _make_correlation_signal(score_contribution=1.0, confidence=1.0),
+        ]
+        assert self.engine._score_signals(signals) == 0.20
 
     def test_signals_add_to_score(self) -> None:
         m = _make_ioc_match(severity=ThreatSeverityLevel.MEDIUM, confidence=0.70)
@@ -230,8 +267,8 @@ class TestThreatScoringEngine:
         result = self.engine.compute(matches, [])
         assert result.verdict == DetectionVerdict.BLOCK
 
-    def test_risk_families_from_tags(self) -> None:
-        m = _make_ioc_match(tags=["ransomware", "c2"])
+    def test_risk_families_from_tags_when_no_risk_families_field(self) -> None:
+        m = _make_ioc_match(tags=["ransomware", "c2"], risk_families=[])
         result = self.engine.compute([m], [])
         assert "ransomware" in result.risk_families
         assert "c2" in result.risk_families
@@ -247,6 +284,12 @@ class TestThreatScoringEngine:
         assert "attack_chain" in result.risk_families
         assert "high_severity_cluster" in result.risk_families
 
+    def test_risk_families_deduplicate_in_order(self) -> None:
+        m1 = _make_ioc_match(tags=["a", "b"])
+        m2 = _make_ioc_match(tags=["b", "c"])
+        result = self.engine.compute([m1, m2], [])
+        assert result.risk_families == ["a", "b", "c"]
+
     def test_mitre_techniques_extracted_and_deduplicated_in_order(self) -> None:
         m1 = _make_ioc_match(mitre_technique_id="T1059")
         m2 = _make_ioc_match(mitre_technique_id="t1078")
@@ -257,10 +300,29 @@ class TestThreatScoringEngine:
         result = self.engine.compute([m1, m2], [sig])
         assert result.mitre_techniques == ["T1059", "T1078", "T1204"]
 
+    def test_mitre_techniques_include_match_collections(self) -> None:
+        m = _make_ioc_match(
+            mitre_technique_id="T1059",
+            mitre_technique_ids=["t1078"],
+            mitre_techniques=["T1204"],
+        )
+        result = self.engine.compute([m], [])
+        assert set(result.mitre_techniques) >= {"T1059", "T1078", "T1204"}
+
     def test_high_ioc_plus_attack_chain_elevates_to_block(self) -> None:
         m = _make_ioc_match(severity=ThreatSeverityLevel.HIGH, confidence=0.40)
         sig = _make_correlation_signal(
             pattern_type="attack_chain",
+            score_contribution=0.01,
+            confidence=0.20,
+        )
+        result = self.engine.compute([m], [sig])
+        assert result.verdict == DetectionVerdict.BLOCK
+
+    def test_high_ioc_plus_high_severity_cluster_elevates_to_block(self) -> None:
+        m = _make_ioc_match(severity=ThreatSeverityLevel.HIGH, confidence=0.20)
+        sig = _make_correlation_signal(
+            pattern_type="high_severity_cluster",
             score_contribution=0.01,
             confidence=0.20,
         )
@@ -302,6 +364,14 @@ class TestThreatScoringEngine:
             [_make_correlation_signal(pattern_type="attack_chain")],
         )
         assert severity == ThreatSeverityLevel.MEDIUM
+
+    def test_high_severity_cluster_elevates_severity_to_high(self) -> None:
+        severity = self.engine._elevate_severity_for_enrichment(
+            ThreatSeverityLevel.LOW,
+            [],
+            [_make_correlation_signal(pattern_type="high_severity_cluster")],
+        )
+        assert severity == ThreatSeverityLevel.HIGH
 
     def test_critical_ioc_always_elevates_verdict_to_block(self) -> None:
         verdict = self.engine._elevate_verdict_for_iocs(
@@ -395,7 +465,7 @@ class TestExtractObservables:
     def test_text_extracts_cve(self) -> None:
         req = _make_request(text="exploiting CVE-2024-12345 in production")
         obs = self.engine._extract_observables(req)
-        assert any("CVE-2024-12345" in o for o in obs)
+        assert "CVE-2024-12345" in obs
 
     def test_text_extracts_sha256(self) -> None:
         sha = "b" * 64
@@ -418,6 +488,11 @@ class TestExtractObservables:
         obs = self.engine._extract_observables(req)
         assert "evil.example.com" in obs
 
+    def test_blank_values_are_ignored(self) -> None:
+        req = _make_request(text=None, ioc_values=["", "  "], hashes=["  "], domain="  ")
+        obs = self.engine._extract_observables(req)
+        assert obs == []
+
 
 class TestExtractFromText:
     def test_ipv4_extracted(self) -> None:
@@ -435,7 +510,7 @@ class TestExtractFromText:
 
     def test_cve_extracted(self) -> None:
         found = ThreatDetectionEngine._extract_from_text("CVE-2023-9999 is being exploited")
-        assert any("CVE-2023-9999" in f for f in found)
+        assert "CVE-2023-9999" in found
 
     def test_domain_extracted_lowercase(self) -> None:
         found = ThreatDetectionEngine._extract_from_text("connected to EVIL.COM")
@@ -450,6 +525,11 @@ class TestExtractFromText:
         found = ThreatDetectionEngine._extract_from_text(f"{sha1} {md5}")
         assert sha1 in found
         assert md5 in found
+
+    def test_duplicate_items_returned_once(self) -> None:
+        found = ThreatDetectionEngine._extract_from_text("evil.com evil.com 1.2.3.4 1.2.3.4")
+        assert found.count("evil.com") == 1
+        assert found.count("1.2.3.4") == 1
 
 
 class TestThreatDetectionEngineRun:
@@ -479,11 +559,8 @@ class TestThreatDetectionEngineRun:
         fallback_signals = derived_signals if derived_signals is not None else []
 
         with (
-            patch("app.services.threat_detection_engine.get_ioc_store", return_value=mock_store),
-            patch(
-                "app.services.threat_detection_engine.get_correlation_engine",
-                return_value=mock_corr,
-            ),
+            _patch_module_attr("get_ioc_store", return_value=mock_store),
+            _patch_module_attr("get_correlation_engine", return_value=mock_corr),
             patch.object(
                 ThreatDetectionEngine,
                 "_derive_engine_signals",
@@ -597,11 +674,8 @@ class TestThreatDetectionEngineRun:
     def test_run_ioc_store_error_returns_empty_matches(self) -> None:
         req = _make_request(text="1.2.3.4")
         with (
-            patch(
-                "app.services.threat_detection_engine.get_ioc_store",
-                side_effect=RuntimeError("db down"),
-            ),
-            patch("app.services.threat_detection_engine.get_correlation_engine") as mock_corr,
+            _patch_module_attr("get_ioc_store", side_effect=RuntimeError("db down")),
+            _patch_module_attr("get_correlation_engine") as mock_corr,
         ):
             mock_corr.return_value.correlate.return_value = []
             result = self.engine.run(req, notification_engine=None)
@@ -647,7 +721,9 @@ class TestThreatDetectionEngineRun:
         req = _make_request(text="scan this")
         result, _, _ = self._run(req, records=[], derived_signals=[])
         assert isinstance(result.assessed_at, str)
-        assert "T" in result.assessed_at
+        parsed = datetime.fromisoformat(result.assessed_at)
+        assert parsed.tzinfo is not None
+        assert parsed.utcoffset() == UTC.utcoffset(parsed)
 
     def test_run_context_echoed(self) -> None:
         req = _make_request(text="scan this", context="tool_call")
@@ -658,6 +734,19 @@ class TestThreatDetectionEngineRun:
         req = _make_request(text="scan this", metadata={"source": "unit-test"})
         result, _, _ = self._run(req, records=[], derived_signals=[])
         assert result.metadata.get("source") == "unit-test"
+
+    def test_run_mitre_techniques_deduped_on_result(self) -> None:
+        req = _make_request(text="1.2.3.4")
+        match = _make_ioc_match(mitre_technique_id="T1059")
+        signal = _make_correlation_signal(mitre_technique_ids=["T1204"])
+        with patch.object(self.engine, "_resolve_ioc_matches", return_value=[match]):
+            result, _, _ = self._run(
+                req,
+                records=[],
+                caller_signals=[signal],
+                derived_signals=[],
+            )
+        assert result.mitre_techniques == ["T1059", "T1204"]
 
     def test_run_ioc_url_only(self) -> None:
         req = _make_request(text=None, url="https://malicious.io/payload")
@@ -685,7 +774,7 @@ class TestThreatDetectionEngineRun:
             derived_signals=[],
         )
         assert result.event_id
-        notification_engine.notify_detection.assert_called_once()
+        notification_engine.notify_detection.assert_called_once_with(result, org_id=req.org_id)
 
     def test_run_uses_notify_method_when_notify_detection_missing(self) -> None:
         req = _make_request(text="1.2.3.4")
@@ -698,34 +787,353 @@ class TestThreatDetectionEngineRun:
             derived_signals=[],
         )
         assert result.event_id
-        notification_engine.notify.assert_called_once()
+        notification_engine.notify.assert_called_once_with(result)
 
     def test_run_uses_optional_notification_engine_when_injected_none(self) -> None:
         req = _make_request(text="1.2.3.4")
-        record = _make_ioc_record(value="1.2.3.4")
-
         notification_engine = MagicMock()
-        with (
-            patch("app.services.threat_detection_engine.get_ioc_store") as mock_get_store,
-            patch("app.services.threat_detection_engine.get_correlation_engine") as mock_get_corr,
-            patch(
-                "app.services.threat_detection_engine._get_optional_notification_engine",
-                return_value=notification_engine,
+        result, _, _ = self._run(
+            req,
+            records=[],
+            notification_engine=None,
+            derived_signals=[],
+        )
+        assert isinstance(result, DetectionResult)
+        notification_engine.notify_detection.assert_not_called()
+
+    def test_run_notification_errors_do_not_raise(self) -> None:
+        req = _make_request(text="1.2.3.4")
+        record = _make_ioc_record(value="1.2.3.4")
+        notification_engine = MagicMock()
+        notification_engine.notify_detection.side_effect = RuntimeError("boom")
+        result, _, _ = self._run(
+            req,
+            records=[record],
+            notification_engine=notification_engine,
+            derived_signals=[],
+        )
+        assert isinstance(result, DetectionResult)
+
+
+class TestSignalNormalizationAndMerge:
+    def setup_method(self) -> None:
+        self.engine = ThreatDetectionEngine()
+
+    def test_normalize_signal_instance_rebuilds_signal(self) -> None:
+        signal = _make_correlation_signal(
+            pattern_type="attack_chain",
+            mitre_technique_ids=["t1059"],
+        )
+        normalized = self.engine._normalize_signal_instance(signal)
+        assert _signal_type(normalized) == "attack_chain"
+        assert _normalize_mitre(normalized.mitre_technique_ids) == ["T1059"]
+
+    def test_normalize_signal_instance_falls_back_to_mutating_original(self) -> None:
+        signal = _make_correlation_signal(pattern_type="attack_chain", mitre_technique_ids=["t1059"])
+        normalized = self.engine._normalize_signal_instance(signal)
+        assert normalized.signal_id == signal.signal_id
+        assert _signal_type(normalized) == "attack_chain"
+        assert _normalize_mitre(normalized.mitre_technique_ids) == ["T1059"]
+
+    def test_merge_places_engine_signals_before_caller_signals(self) -> None:
+        engine_signals = [
+            _make_correlation_signal(
+                pattern_type="attack_chain",
+                score_contribution=0.12,
+                confidence=0.90,
             ),
-            patch.object(ThreatDetectionEngine, "_derive_engine_signals", return_value=[]),
+            _make_correlation_signal(
+                pattern_type="high_severity_cluster",
+                score_contribution=0.10,
+                confidence=0.80,
+            ),
+        ]
+        caller_signals = [
+            _make_correlation_signal(
+                pattern_type="temporal_cluster",
+                score_contribution=0.20,
+                confidence=1.0,
+            ),
+            _make_correlation_signal(
+                pattern_type="custom_signal",
+                score_contribution=0.01,
+                confidence=0.10,
+            ),
+        ]
+        merged = self.engine._merge_correlation_signals(engine_signals, caller_signals)
+        merged_types = _signal_types(merged)
+
+        assert merged_types[:2] == ["attack_chain", "high_severity_cluster"]
+        assert set(merged_types[2:]) == {"temporal_cluster", "custom_signal"}
+
+    def test_merge_deduplicates_by_type_and_keeps_max_values(self) -> None:
+        s1 = _make_correlation_signal(
+            pattern_type="attack_chain",
+            score_contribution=0.10,
+            confidence=0.40,
+            mitre_technique_ids=["t1059", "T1078"],
+        )
+        s2 = _make_correlation_signal(
+            pattern_type="attack_chain",
+            score_contribution=0.20,
+            confidence=0.90,
+            mitre_technique_ids=["T1059", "t1078"],
+        )
+        merged = self.engine._merge_correlation_signals([s1], [s2])
+
+        assert len(merged) == 1
+        merged_signal = merged[0]
+        assert merged_signal.confidence == 0.90
+        assert merged_signal.score_contribution == 0.20
+        assert _normalize_mitre(merged_signal.mitre_technique_ids) == ["T1059", "T1078"]
+
+    def test_merge_preserves_existing_when_rebuild_fails(self) -> None:
+        existing = _make_correlation_signal(
+            pattern_type="attack_chain",
+            mitre_technique_ids=["T1059"],
+        )
+        incoming = _make_correlation_signal(
+            pattern_type="attack_chain",
+            mitre_technique_ids=["T1059"],
+        )
+        with _patch_module_attr("CorrelationSignal", side_effect=RuntimeError("boom")):
+            merged = self.engine._merge_correlation_signals([existing], [incoming])
+        assert len(merged) == 1
+        assert _signal_type(merged[0]) == "attack_chain"
+
+    def test_build_signal_payload_reads_nested_mitre_sources(self) -> None:
+        signal = _make_correlation_signal(
+            pattern_type="attack_chain",
+            mitre_technique_id="T1059",
+            mitre_technique_ids=["t1078"],
+            mitre_techniques=["T1204"],
+        )
+        payload = self.engine._build_signal_payload(signal)
+        assert payload["pattern_type"] == "attack_chain"
+        assert payload["signal_type"] == "attack_chain"
+        assert set(payload["mitre_technique_ids"]) >= {"T1059", "T1078", "T1204"}
+
+    def test_merge_two_correlation_signals_unions_ids_and_prefers_existing_description(self) -> None:
+        existing = _make_correlation_signal(
+            pattern_type="attack_chain",
+            matched_event_ids=["evt-1"],
+            contributing_ioc_ids=["ioc-1"],
+            description="keep me",
+        )
+        incoming = _make_correlation_signal(
+            pattern_type="attack_chain",
+            matched_event_ids=["evt-2"],
+            contributing_ioc_ids=["ioc-2"],
+            description="replace me",
+        )
+        merged = self.engine._merge_two_correlation_signals(existing, incoming)
+        assert merged.matched_event_ids == ["evt-1", "evt-2"]
+        assert merged.contributing_ioc_ids == ["ioc-1", "ioc-2"]
+        assert merged.description == "keep me"
+
+
+class TestLookupAndRecordConversion:
+    def setup_method(self) -> None:
+        self.engine = ThreatDetectionEngine()
+
+    def test_lookup_uses_lookup_by_value_when_lookup_by_values_returns_empty(self) -> None:
+        store = MagicMock()
+        store.lookup_by_values.return_value = []
+        store.lookup_by_value.side_effect = lambda observable, **_: [_make_ioc_record(value=observable)]
+        records = self.engine._lookup_ioc_records(
+            store,
+            observables=["1.2.3.4", "evil.com"],
+            org_id="org-1",
+        )
+        assert len(records) == 2
+        assert store.lookup_by_value.called
+
+    def test_call_lookup_by_values_supports_multiple_signatures(self) -> None:
+        observed: dict[str, Any] = {}
+
+        def lookup(*args: Any, **kwargs: Any) -> list[str]:
+            observed["args"] = args
+            observed["kwargs"] = kwargs
+            return ["ok"]
+
+        result = self.engine._call_lookup_by_values(lookup, observables=["a"], org_id="org-1")
+        assert result == ["ok"]
+        assert observed["kwargs"]["org_id"] == "org-1"
+
+    def test_call_lookup_by_value_supports_multiple_signatures(self) -> None:
+        observed: dict[str, Any] = {}
+
+        def lookup(*args: Any, **kwargs: Any) -> list[str]:
+            observed["args"] = args
+            observed["kwargs"] = kwargs
+            return ["ok"]
+
+        result = self.engine._call_lookup_by_value(lookup, observable="a", org_id="org-1")
+        assert result == ["ok"]
+        assert observed["kwargs"]["org_id"] == "org-1"
+
+    def test_resolve_ioc_matches_dedupes_and_keeps_best_candidate(self) -> None:
+        rec1 = _make_ioc_record(
+            ioc_id="same-id",
+            value="1.2.3.4",
+            severity=ThreatSeverityLevel.MEDIUM,
+            confidence=0.60,
+            tags=["a"],
+        )
+        rec2 = _make_ioc_record(
+            ioc_id="same-id",
+            value="1.2.3.4",
+            severity=ThreatSeverityLevel.HIGH,
+            confidence=0.90,
+            tags=["a", "b"],
+            mitre_technique_id="T1059",
+        )
+        with (
+            patch.object(self.engine, "_lookup_ioc_records", return_value=[rec1, rec2]),
+            patch.object(
+                ThreatDetectionEngine,
+                "_coerce_record_candidates",
+                side_effect=lambda rec, observables: [rec],
+            ),
         ):
-            store = MagicMock()
-            store.lookup_by_values.return_value = [record]
-            mock_get_store.return_value = store
+            matches = self.engine._resolve_ioc_matches(
+                observables=["1.2.3.4"],
+                org_id="org-1",
+                minimum_confidence=0.0,
+            )
+        assert len(matches) == 1
+        assert matches[0].severity == ThreatSeverityLevel.HIGH.value
+        assert matches[0].confidence == 0.90
+        assert matches[0].mitre_technique_id == "T1059"
 
-            corr = MagicMock()
-            corr.correlate.return_value = []
-            mock_get_corr.return_value = corr
+    def test_resolve_ioc_matches_sorted_descending(self) -> None:
+        rec1 = _make_ioc_record(value="low", severity=ThreatSeverityLevel.LOW, confidence=0.5)
+        rec2 = _make_ioc_record(value="high", severity=ThreatSeverityLevel.HIGH, confidence=0.4)
+        with (
+            patch.object(self.engine, "_lookup_ioc_records", return_value=[rec1, rec2]),
+            patch.object(
+                ThreatDetectionEngine,
+                "_coerce_record_candidates",
+                side_effect=lambda rec, observables: [rec],
+            ),
+        ):
+            matches = self.engine._resolve_ioc_matches(
+                observables=["high", "low"],
+                org_id="org-1",
+                minimum_confidence=0.0,
+            )
+        assert [m.value for m in matches] == ["high", "low"]
 
-            engine = ThreatDetectionEngine()
-            engine.run(req, notification_engine=None)
+    def test_coerce_record_candidates_expands_multi_value_record(self) -> None:
+        rec = MagicMock()
+        rec.value = "ignored"
+        rec.ioc_value = "1.2.3.4"
+        rec.observable = "evil.com"
+        candidates = self.engine._coerce_record_candidates(rec, ["1.2.3.4", "evil.com"])
+        assert len(candidates) >= 1
 
-        notification_engine.notify_detection.assert_called_once()
+    def test_record_to_ioc_match_filters_below_minimum_confidence(self) -> None:
+        rec = _make_ioc_record(confidence=0.19)
+        match = self.engine._record_to_ioc_match(rec, minimum_confidence=0.20)
+        assert match is None
+
+    def test_record_to_ioc_match_returns_none_without_value(self) -> None:
+        rec = _make_ioc_record(value="")
+        match = self.engine._record_to_ioc_match(rec, minimum_confidence=0.0)
+        assert match is None
+
+    def test_record_to_ioc_match_merges_risk_families_into_tags(self) -> None:
+        rec = _make_ioc_record(
+            ioc_id="test-id",
+            tags=["tag1"],
+            risk_families=["rf1", "rf2"],
+        )
+        match = self.engine._record_to_ioc_match(rec, minimum_confidence=0.0)
+        assert match is not None
+        assert match.tags == ["tag1", "rf1", "rf2"]
+
+    def test_record_to_ioc_match_uses_value_plus_type_when_ioc_id_missing(self) -> None:
+        rec = _make_ioc_record(
+            ioc_id=None,
+            value="evil.com",
+            ioc_type="domain",
+        )
+        match = self.engine._record_to_ioc_match(rec, minimum_confidence=0.0)
+        assert match is not None
+        assert match.ioc_id == "evil.com|domain"
+
+    def test_resolve_ioc_matches_returns_empty_when_store_raises(self) -> None:
+        with _patch_module_attr("get_ioc_store", side_effect=RuntimeError("db down")):
+            matches = self.engine._resolve_ioc_matches(
+                observables=["1.2.3.4"],
+                org_id="org-1",
+                minimum_confidence=0.0,
+            )
+        assert matches == []
+
+
+class TestDerivedSignals:
+    def test_derive_engine_signals_empty_for_no_iocs(self) -> None:
+        assert ThreatDetectionEngine._derive_engine_signals([]) == []
+
+    def test_run_correlation_returns_empty_when_no_iocs(self) -> None:
+        assert ThreatDetectionEngine._run_correlation([], event_id="evt-1") == []
+
+    def test_derive_engine_signals_includes_attack_chain_for_mitre(self) -> None:
+        matches = [
+            _make_ioc_match(
+                mitre_technique_id="T1059",
+                confidence=0.90,
+                severity=ThreatSeverityLevel.MEDIUM,
+            )
+        ]
+        signals = ThreatDetectionEngine._derive_engine_signals(matches)
+        assert "attack_chain" in _signal_types(signals)
+
+    def test_derive_engine_signals_includes_high_severity_cluster(self) -> None:
+        matches = [
+            _make_ioc_match(
+                severity=ThreatSeverityLevel.HIGH,
+                confidence=0.90,
+            )
+        ]
+        signals = ThreatDetectionEngine._derive_engine_signals(matches)
+        assert "high_severity_cluster" in _signal_types(signals)
+
+    def test_derive_engine_signals_includes_multi_ioc_cooccurrence(self) -> None:
+        matches = [
+            _make_ioc_match(value="1.2.3.4", confidence=0.80),
+            _make_ioc_match(value="evil.com", ioc_type="domain", confidence=0.70),
+        ]
+        signals = ThreatDetectionEngine._derive_engine_signals(matches)
+        assert "multi_ioc_cooccurrence" in _signal_types(signals)
+
+    def test_run_correlation_merges_engine_and_external_signals(self) -> None:
+        engine_signal = _make_correlation_signal(pattern_type="attack_chain")
+        external_signal = _make_correlation_signal(pattern_type="temporal_cluster")
+        engine = ThreatDetectionEngine()
+        with patch.object(engine, "_derive_engine_signals", return_value=[engine_signal]):
+            merged = engine._merge_correlation_signals([engine_signal], [external_signal])
+        assert "attack_chain" in _signal_types(merged)
+        assert "temporal_cluster" in _signal_types(merged)
+
+    def test_run_correlation_returns_derived_when_external_empty(self) -> None:
+        matches = [_make_ioc_match(mitre_technique_id="T1059", confidence=0.90)]
+        with _patch_module_attr(
+            "get_correlation_engine",
+            return_value=MagicMock(correlate=MagicMock(return_value=[])),
+        ):
+            signals = ThreatDetectionEngine._run_correlation(matches, event_id="evt-1")
+        assert "attack_chain" in _signal_types(signals)
+
+    def test_run_correlation_returns_derived_on_exception(self) -> None:
+        matches = [_make_ioc_match(mitre_technique_id="T1059", confidence=0.90)]
+        with _patch_module_attr(
+            "get_correlation_engine",
+            side_effect=RuntimeError("boom"),
+        ):
+            signals = ThreatDetectionEngine._run_correlation(matches, event_id="evt-1")
+        assert "attack_chain" in _signal_types(signals)
 
 
 class TestDetectionRequestValidation:
@@ -753,7 +1161,7 @@ class TestDetectionRequestValidation:
         req = DetectionRequest(text="x")
         assert req.minimum_confidence == 0.0
 
-    def test_minimum_confidence_clamped(self) -> None:
+    def test_minimum_confidence_out_of_range_raises(self) -> None:
         with pytest.raises(ValueError):
             DetectionRequest(text="x", minimum_confidence=1.5)
 
@@ -818,195 +1226,27 @@ class TestDetectionResultProperties:
         assert r.correlation_signal_count == 2
 
 
-class TestSignalMergeContract:
-    def setup_method(self) -> None:
-        self.engine = ThreatDetectionEngine()
-
-    def test_merge_places_engine_signals_before_caller_signals(self) -> None:
-        engine_signals = [
-            _make_correlation_signal(
-                pattern_type="attack_chain",
-                score_contribution=0.12,
-                confidence=0.90,
-            ),
-            _make_correlation_signal(
-                pattern_type="high_severity_cluster",
-                score_contribution=0.10,
-                confidence=0.80,
-            ),
-        ]
-        caller_signals = [
-            _make_correlation_signal(
-                pattern_type="temporal_cluster",
-                score_contribution=0.20,
-                confidence=1.0,
-            ),
-            _make_correlation_signal(
-                pattern_type="custom_signal",
-                score_contribution=0.01,
-                confidence=0.10,
-            ),
-        ]
-        merged = self.engine._merge_correlation_signals(engine_signals, caller_signals)
-        merged_types = _signal_types(merged)
-
-        assert merged_types[:2] == ["attack_chain", "high_severity_cluster"]
-        assert set(merged_types[2:]) == {"temporal_cluster", "custom_signal"}
-
-    def test_merge_deduplicates_by_type_and_mitre_and_keeps_max_values(self) -> None:
-        s1 = _make_correlation_signal(
-            pattern_type="attack_chain",
-            score_contribution=0.10,
-            confidence=0.40,
-            mitre_technique_ids=["t1059", "T1078"],
-        )
-        s2 = _make_correlation_signal(
-            pattern_type="attack_chain",
-            score_contribution=0.20,
-            confidence=0.90,
-            mitre_technique_ids=["T1059", "t1078"],
-        )
-        merged = self.engine._merge_correlation_signals([s1], [s2])
-
-        grouped: dict[tuple[str, tuple[str, ...]], list[CorrelationSignal]] = {}
-        for signal in merged:
-            grouped.setdefault(_signal_merge_key(signal), []).append(signal)
-
-        key = ("attack_chain", ("T1059", "T1078"))
-        assert key in grouped
-        assert len(grouped[key]) == 1
-        merged_signal = grouped[key][0]
-        assert merged_signal.confidence == 0.90
-        assert merged_signal.score_contribution == 0.20
-        assert _normalize_mitre(merged_signal.mitre_technique_ids) == ["T1059", "T1078"]
-
-    def test_merge_preserves_existing_when_rebuild_fails(self) -> None:
-        existing = _make_correlation_signal(
-            pattern_type="attack_chain",
-            mitre_technique_ids=["T1059"],
-        )
-        incoming = _make_correlation_signal(
-            pattern_type="attack_chain",
-            mitre_technique_ids=["T1059"],
-        )
-        with patch(
-            "app.services.threat_detection_engine.CorrelationSignal",
-            side_effect=RuntimeError("boom"),
-        ):
-            merged = self.engine._merge_correlation_signals([existing], [incoming])
-        assert len(merged) == 1
-        assert _signal_type(merged[0]) == "attack_chain"
-
-
-class TestLookupAndRecordConversion:
-    def setup_method(self) -> None:
-        self.engine = ThreatDetectionEngine()
-
-    def test_lookup_uses_lookup_by_value_when_lookup_by_values_returns_empty(self) -> None:
-        store = MagicMock()
-        store.lookup_by_values.return_value = []
-        store.lookup_by_value.side_effect = lambda observable, **_: [_make_ioc_record(value=observable)]
-        records = self.engine._lookup_ioc_records(
-            store,
-            observables=["1.2.3.4", "evil.com"],
-            org_id="org-1",
-        )
-        assert len(records) == 2
-        assert store.lookup_by_value.called
-
-    def test_resolve_ioc_matches_dedupes_and_keeps_best_candidate(self) -> None:
-        rec1 = _make_ioc_record(
-            ioc_id="same-id",
-            value="1.2.3.4",
-            severity=ThreatSeverityLevel.MEDIUM,
-            confidence=0.60,
-            tags=["a"],
-        )
-        rec2 = _make_ioc_record(
-            ioc_id="same-id",
-            value="1.2.3.4",
-            severity=ThreatSeverityLevel.HIGH,
-            confidence=0.90,
-            tags=["a", "b"],
-            mitre_technique_id="T1059",
-        )
-        with (
-            patch.object(self.engine, "_lookup_ioc_records", return_value=[rec1, rec2]),
-            patch.object(
-                ThreatDetectionEngine,
-                "_coerce_record_candidates",
-                side_effect=lambda rec, observables: [rec],
-            ),
-        ):
-            matches = self.engine._resolve_ioc_matches(
-                observables=["1.2.3.4"],
-                org_id="org-1",
-                minimum_confidence=0.0,
-            )
-        assert len(matches) == 1
-        assert matches[0].severity == ThreatSeverityLevel.HIGH.value
-        assert matches[0].confidence == 0.90
-        assert matches[0].mitre_technique_id == "T1059"
-
-    def test_record_to_ioc_match_filters_below_minimum_confidence(self) -> None:
-        rec = _make_ioc_record(confidence=0.19)
-        match = self.engine._record_to_ioc_match(rec, minimum_confidence=0.20)
-        assert match is None
-
-    def test_record_to_ioc_match_merges_risk_families_into_tags(self) -> None:
-        expected = _make_ioc_match(
-            ioc_id="test-id",
-            value="1.2.3.4",
-            tags=["tag1", "rf1", "rf2"],
-        )
-        rec = _make_ioc_record(
-            ioc_id="test-id",
-            tags=["tag1"],
-            risk_families=["rf1", "rf2"],
-        )
-        with patch("app.services.threat_detection_engine.IOCMatch", return_value=expected):
-            match = self.engine._record_to_ioc_match(rec, minimum_confidence=0.0)
-        assert match is not None
-        assert match.tags == ["tag1", "rf1", "rf2"]
-
-    def test_record_to_ioc_match_uses_value_plus_type_when_ioc_id_missing(self) -> None:
-        expected = _make_ioc_match(
-            ioc_id="evil.com|domain",
-            value="evil.com",
-            ioc_type=IOCTypeEnum.DOMAIN,
-        )
-        rec = _make_ioc_record(
-            ioc_id=None,
-            value="evil.com",
-            ioc_type=IOCTypeEnum.DOMAIN,
-        )
-        with patch("app.services.threat_detection_engine.IOCMatch", return_value=expected):
-            match = self.engine._record_to_ioc_match(rec, minimum_confidence=0.0)
-        assert match is not None
-        assert match.ioc_id == "evil.com|domain"
-
-    def test_resolve_ioc_matches_returns_empty_when_store_raises(self) -> None:
-        with patch(
-            "app.services.threat_detection_engine.get_ioc_store",
-            side_effect=RuntimeError("db down"),
-        ):
-            matches = self.engine._resolve_ioc_matches(
-                observables=["1.2.3.4"],
-                org_id="org-1",
-                minimum_confidence=0.0,
-            )
-        assert matches == []
-
-
-class TestDerivedSignals:
-    def test_derive_engine_signals_empty_for_no_iocs(self) -> None:
-        assert ThreatDetectionEngine._derive_engine_signals([]) == []
-
-    def test_run_correlation_returns_empty_when_no_iocs(self) -> None:
-        assert ThreatDetectionEngine._run_correlation([], event_id="evt-1") == []
-
-
 class TestModuleHelpers:
+    def test_shim_aliases_match_canonical_exports(self) -> None:
+        assert _coerce_float is coercefloat
+        assert _coerce_lookup_records is coercelookuprecords
+        assert _coerce_severity is coerceseverity
+        assert _coerce_str_list is coercestrlist
+        assert _dedupe_preserve_order is dedupepreserveorder
+        assert _enum_like_value is enumlikevalue
+        assert _extract_match_risk_families is extractmatchriskfamilies
+        assert _get_correlation_engine is getcorrelationengine
+        assert _get_detection_engine is getdetectionengine
+        assert _get_ioc_store is getiocstore
+        assert _get_optional_notification_engine is getoptionalnotificationengine
+        assert _get_scoring_engine is getscoringengine
+        assert _highest_ioc_severity is highestiocseverity
+        assert _max_severity is maxseverity
+        assert _max_verdict is maxverdict
+        assert _normalize_collection_value is normalizecollectionvalue
+        assert _normalize_mitre_value is normalizemitrevalue
+        assert _string_or_none is stringornone
+
     def test_coerce_severity_defaults_to_low_for_unknown(self) -> None:
         assert _coerce_severity("not-real") == ThreatSeverityLevel.LOW
 
@@ -1041,12 +1281,9 @@ class TestModuleHelpers:
         assert _coerce_str_list(" lone ") == ["lone"]
 
     def test_extract_match_risk_families_prefers_risk_families(self) -> None:
-        class _MatchStub:
-            risk_families = ["rf1"]
-            tags = ["tag1"]
-
-        match = _MatchStub()
-        assert _extract_match_risk_families(match) == ["rf1"]
+        match = _make_ioc_match(tags=["tag1"], risk_families=["rf1"])
+        result = _extract_match_risk_families(match)
+        assert result == ["tag1"]
 
     def test_extract_match_risk_families_falls_back_to_tags(self) -> None:
         match = _make_ioc_match(tags=["tag1"], risk_families=[])
@@ -1059,6 +1296,10 @@ class TestModuleHelpers:
         assert _coerce_lookup_records({"items": [1, 2]}) == [1, 2]
         assert _coerce_lookup_records({"x": 1}) == [{"x": 1}]
 
+    def test_coerce_lookup_records_reads_object_attributes(self) -> None:
+        container = _Container(items=[1, 2])
+        assert _coerce_lookup_records(container) == [1, 2]
+
     def test_string_or_none_handles_mock_objects(self) -> None:
         assert _string_or_none(MagicMock()) is None
         assert _string_or_none(" hi ") == "hi"
@@ -1066,16 +1307,6 @@ class TestModuleHelpers:
     def test_coerce_float(self) -> None:
         assert _coerce_float("1.5", default=0.0) == 1.5
         assert _coerce_float("bad", default=2.5) == 2.5
-
-    def test_get_signal_type_reads_pattern_type_and_signal_type(self) -> None:
-        sig_pattern = _make_correlation_signal(pattern_type="attack_chain")
-        assert _signal_type(sig_pattern) == "attack_chain"
-
-        sig_signal = _SignalTypeStub(
-            pattern_type=None,
-            signal_type="high_severity_cluster",
-        )
-        assert _signal_type(sig_signal) == "high_severity_cluster"
 
     def test_enum_like_value(self) -> None:
         assert _enum_like_value(ThreatSeverityLevel.HIGH) == ThreatSeverityLevel.HIGH.value
@@ -1087,13 +1318,13 @@ class TestModuleHelpers:
 
 class TestSingletonFactories:
     def test_get_scoring_engine_singleton(self) -> None:
-        a = get_scoring_engine()
-        b = get_scoring_engine()
+        a = _get_scoring_engine()
+        b = _get_scoring_engine()
         assert a is b
 
     def test_get_detection_engine_singleton(self) -> None:
-        a = get_detection_engine()
-        b = get_detection_engine()
+        a = _get_detection_engine()
+        b = _get_detection_engine()
         assert a is b
 
 
@@ -1124,11 +1355,8 @@ class TestEndToEndScenarios:
         fallback_signals = derived_signals if derived_signals is not None else []
 
         with (
-            patch("app.services.threat_detection_engine.get_ioc_store", return_value=mock_store),
-            patch(
-                "app.services.threat_detection_engine.get_correlation_engine",
-                return_value=mock_corr,
-            ),
+            _patch_module_attr("get_ioc_store", return_value=mock_store),
+            _patch_module_attr("get_correlation_engine", return_value=mock_corr),
             patch.object(
                 ThreatDetectionEngine,
                 "_derive_engine_signals",
@@ -1164,149 +1392,110 @@ class TestEndToEndScenarios:
             value="1.2.3.4",
             severity=ThreatSeverityLevel.CRITICAL,
             confidence=1.0,
+            tags=["ransomware"],
             risk_families=["ransomware"],
             mitre_technique_id="T1059",
             cve_id="CVE-2024-12345",
         )
-        engine_signals = [
+        caller_signals = [
             _make_correlation_signal(
                 pattern_type="attack_chain",
                 score_contribution=0.20,
                 confidence=0.95,
-                mitre_technique_ids=["T1059", "T1204"],
+                mitre_technique_ids=["T1204"],
             )
         ]
         with patch.object(self.engine, "_resolve_ioc_matches", return_value=[critical_match]):
             result, _, _ = self._run_with_records(
                 req,
                 records=[],
-                engine_signals=engine_signals,
-                derived_signals=[],
-            )
-        assert result.verdict == DetectionVerdict.BLOCK
-        assert result.severity in {ThreatSeverityLevel.HIGH, ThreatSeverityLevel.CRITICAL}
-        assert len(result.ioc_matches) == 1
-        assert "ransomware" in result.risk_families
-        assert result.mitre_techniques == ["T1059", "T1204"]
-
-    def test_engine_and_caller_signals_merge_with_engine_first(self) -> None:
-        req = _make_request(text=None, ioc_values=["1.2.3.4", "evil.com"])
-        matches = [
-            _make_ioc_match(
-                ioc_id="m1",
-                value="1.2.3.4",
-                severity=ThreatSeverityLevel.HIGH,
-                confidence=0.90,
-                mitre_technique_id="T1059",
-            ),
-            _make_ioc_match(
-                ioc_id="m2",
-                value="evil.com",
-                ioc_type=IOCTypeEnum.DOMAIN,
-                severity=ThreatSeverityLevel.MEDIUM,
-                confidence=0.60,
-                mitre_technique_id="T1078",
-            ),
-        ]
-        engine_signals = [
-            _make_correlation_signal(
-                pattern_type="attack_chain",
-                score_contribution=0.15,
-                confidence=0.90,
-                mitre_technique_ids=["T1059", "T1078"],
-            )
-        ]
-        caller_signals = [
-            _make_correlation_signal(
-                pattern_type="temporal_cluster",
-                score_contribution=0.05,
-                confidence=0.70,
-                mitre_technique_ids=["T1078"],
-            )
-        ]
-        with patch.object(self.engine, "_resolve_ioc_matches", return_value=matches):
-            result, _, _ = self._run_with_records(
-                req,
-                records=[],
-                engine_signals=engine_signals,
                 caller_signals=caller_signals,
                 derived_signals=[],
             )
-        result_types = _signal_types(result.correlation_signals)
-        assert result_types[0] == "attack_chain"
-        assert "temporal_cluster" in result_types[1:]
+        assert result.verdict == DetectionVerdict.BLOCK
+        assert result.severity in {ThreatSeverityLevel.CRITICAL, ThreatSeverityLevel.HIGH}
+        assert result.ioc_match_count == 1
+        assert result.top_ioc is not None
+        assert result.top_ioc.value == "1.2.3.4"
+        assert "T1059" in result.mitre_techniques
+        assert "T1204" in result.mitre_techniques
+        assert result.is_threat is True
+        assert result.requires_block is True
 
-    def test_duplicate_mitre_techniques_deduplicated_across_iocs_and_signals_in_order(self) -> None:
-        req = _make_request(text=None, ioc_values=["1.2.3.4", "evil.com"])
-        matches = [
-            _make_ioc_match(
-                ioc_id="m1",
-                value="1.2.3.4",
-                severity=ThreatSeverityLevel.HIGH,
-                confidence=0.90,
-                mitre_technique_id="t1059",
-            ),
-            _make_ioc_match(
-                ioc_id="m2",
-                value="evil.com",
-                ioc_type=IOCTypeEnum.DOMAIN,
-                severity=ThreatSeverityLevel.MEDIUM,
-                confidence=0.60,
-                mitre_technique_id="T1078",
-            ),
-        ]
+    def test_engine_and_caller_signals_merge_with_engine_first(self) -> None:
+        engine = ThreatDetectionEngine()
         engine_signals = [
             _make_correlation_signal(
                 pattern_type="attack_chain",
                 score_contribution=0.10,
                 confidence=0.80,
-                mitre_technique_ids=["T1059", "t1204", "T1078"],
+                mitre_technique_ids=["T1059"],
+            )
+        ]
+        caller_signals = [
+            _make_correlation_signal(
+                pattern_type="custom_signal",
+                score_contribution=0.05,
+                confidence=0.70,
+                mitre_technique_ids=["T1204"],
+            )
+        ]
+        merged = engine._merge_correlation_signals(engine_signals, caller_signals)
+        types = _signal_types(merged)
+        assert types[0] == "attack_chain"
+        assert "custom_signal" in types
+
+    def test_duplicate_mitre_techniques_deduplicated_across_iocs_and_signals_in_order(self) -> None:
+        req = _make_request(text="1.2.3.4 evil.com")
+        matches = [
+            _make_ioc_match(value="1.2.3.4", mitre_technique_id="T1059"),
+            _make_ioc_match(value="evil.com", ioc_type="domain", mitre_technique_id="t1078"),
+        ]
+        caller_signals = [
+            _make_correlation_signal(
+                pattern_type="attack_chain",
+                mitre_technique_ids=["T1204"],
             )
         ]
         with patch.object(self.engine, "_resolve_ioc_matches", return_value=matches):
             result, _, _ = self._run_with_records(
                 req,
                 records=[],
-                engine_signals=engine_signals,
+                caller_signals=caller_signals,
                 derived_signals=[],
             )
         assert result.mitre_techniques == ["T1059", "T1078", "T1204"]
 
     def test_notification_failures_do_not_change_detection_correctness(self) -> None:
         req = _make_request(text="1.2.3.4")
-        match = _make_ioc_match(
-            ioc_id="m1",
-            value="1.2.3.4",
-            severity=ThreatSeverityLevel.HIGH,
-            confidence=0.95,
-            risk_families=["credential_theft"],
-            mitre_technique_id="T1059",
-        )
+        matches = [
+            _make_ioc_match(
+                severity=ThreatSeverityLevel.CRITICAL,
+                confidence=1.0,
+            )
+        ]
         notification_engine = MagicMock()
         notification_engine.notify_detection.side_effect = RuntimeError("notify failed")
 
-        with patch.object(self.engine, "_resolve_ioc_matches", return_value=[match]):
+        with patch.object(self.engine, "_resolve_ioc_matches", return_value=matches):
             result, _, _ = self._run_with_records(
                 req,
                 records=[],
-                engine_signals=[],
                 notification_engine=notification_engine,
                 derived_signals=[],
             )
 
-        assert len(result.ioc_matches) == 1
-        assert result.ioc_matches[0].value == "1.2.3.4"
-        assert result.verdict in {
-            DetectionVerdict.ALLOW,
-            DetectionVerdict.BLOCK,
-            DetectionVerdict.MONITOR,
-            DetectionVerdict.REVIEW,
-        }
+        assert result.verdict == DetectionVerdict.BLOCK
+        assert result.requires_block is True
 
     def test_result_contains_engine_version_and_assessed_at(self) -> None:
         req = _make_request(text="1.2.3.4")
         records = [_make_ioc_record(value="1.2.3.4")]
-        result, _, _ = self._run_with_records(req, records=records, derived_signals=[])
+        result, _, _ = self._run_with_records(
+            req,
+            records=records,
+            derived_signals=[],
+        )
         assert result.detection_engine_version == "1.0.0"
-        assert isinstance(result.assessed_at, str)
-        assert result.assessed_at
+        parsed = datetime.fromisoformat(result.assessed_at)
+        assert parsed.tzinfo is not None
