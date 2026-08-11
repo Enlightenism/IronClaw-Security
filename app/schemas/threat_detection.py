@@ -170,6 +170,9 @@ class IOCMatch(BaseModel):
     )
     mitre_technique_id: str | None = None
     mitre_tactic: str | None = None
+    # Explicit list fields so downstream aggregation can read collections directly
+    mitre_technique_ids: list[str] = Field(default_factory=list)
+    mitre_techniques: list[str] = Field(default_factory=list)
     cve_id: str | None = None
     reference: str | None = None
     first_seen: str | None = None
@@ -190,12 +193,41 @@ class CorrelationSignal(BaseModel):
     pattern_type: str = Field(
         description="e.g. 'multi_ioc_cooccurrence', 'attack_chain', 'temporal_cluster'",
     )
+    # signal_type is an alias-style field maintained for backward compatibility with consumers/tests
+    signal_type: str | None = Field(default=None)
     matched_event_ids: list[str] = Field(default_factory=list)
     contributing_ioc_ids: list[str] = Field(default_factory=list)
     mitre_technique_ids: list[str] = Field(default_factory=list)
+    # Added explicit list for mitre_techniques to match engine expectations
+    mitre_techniques: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0)
     score_contribution: float = Field(ge=0.0, le=1.0)
     description: str = ""
+
+    @model_validator(mode="after")
+    def ensure_signal_and_pattern_aliases(self) -> CorrelationSignal:
+        """
+        Keep pattern_type and signal_type aligned:
+
+        - If signal_type is missing/None/empty, set it to the value of pattern_type.
+        - If pattern_type is missing/empty, but signal_type provided, set pattern_type to signal_type.
+        This maintains the legacy alias behavior expected by tests and other consumers.
+        """
+        pt = (self.pattern_type or "").strip()
+        st = (self.signal_type or "").strip()
+
+        if not pt and st:
+            # pattern_type empty but signal_type provided -> adopt signal_type
+            self.pattern_type = st
+        elif not st and pt:
+            # signal_type missing -> adopt pattern_type
+            self.signal_type = pt
+        # ensure both attributes are consistent (lowercase normalization expected by engine)
+        if isinstance(self.pattern_type, str):
+            self.pattern_type = self.pattern_type.lower()
+        if isinstance(self.signal_type, str):
+            self.signal_type = self.signal_type.lower()
+        return self
 
 
 # ---------------------------------------------------------------------------

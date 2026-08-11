@@ -69,13 +69,16 @@ class IOCRecord:
     org_id: str | None
     mitre_technique_id: str | None
     mitre_tactic: str | None
-    cve_id: str | None
-    first_seen: str
-    last_seen: str
-    expiry: str | None
-    active: bool
-    feed_ingest_id: str
-    extra: dict[str, Any]
+    # New explicit list fields for MITRE techniques (first-class attributes)
+    mitre_technique_ids: list[str] = field(default_factory=list)
+    mitre_techniques: list[str] = field(default_factory=list)
+    cve_id: str | None = None
+    first_seen: str | None = None
+    last_seen: str | None = None
+    expiry: str | None = None
+    active: bool = True
+    feed_ingest_id: str | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -89,6 +92,8 @@ class IOCRecord:
             "description": self.description,
             "org_id": self.org_id,
             "mitre_technique_id": self.mitre_technique_id,
+            "mitre_technique_ids": list(self.mitre_technique_ids),
+            "mitre_techniques": list(self.mitre_techniques),
             "mitre_tactic": self.mitre_tactic,
             "cve_id": self.cve_id,
             "first_seen": self.first_seen,
@@ -261,7 +266,7 @@ def _parse_mitre_attack(
     records: list[IOCRecord] = []
     errors: list[str] = []
     now = _utcnow_iso()
-    objects = stix_bundle.get("objects", [])
+    objects = stix_bundle.get("objects", []) or []
 
     for obj in objects:
         try:
@@ -282,9 +287,7 @@ def _parse_mitre_attack(
             for ref in ext_refs:
                 if ref.get("source_name", "") in ("mitre-attack", "mitre-mobile-attack", "mitre-ics-attack"):
                     mitre_id_raw = ref.get("external_id") or mitre_id_raw
-                    # keep scanning for aliases etc.
             if not mitre_id_raw:
-                # STIX may also include x_mitre_* fields; fallback to none if missing
                 mitre_id_raw = obj.get("external_id") or obj.get("x_mitre_id") or None
 
             if not mitre_id_raw:
@@ -297,7 +300,7 @@ def _parse_mitre_attack(
                 continue
 
             # extract aliases if present (x_mitre_aliases)
-            aliases = []
+            aliases: list[str] = []
             try:
                 raw_aliases = obj.get("x_mitre_aliases", []) or []
                 if isinstance(raw_aliases, list):
@@ -327,6 +330,8 @@ def _parse_mitre_attack(
                     "mitre_aliases": aliases,
                     "mitre_technique_ids": [mitre_id] + [mu.normalize_mitre(a) for a in aliases if mu.normalize_mitre(a)],
                 }
+                # build explicit list for record fields
+                mitre_ids_list = extra["mitre_technique_ids"]
                 severity = ThreatSeverityLevel.HIGH
                 tags = ["mitre-attack", "technique"] + [t for t in tactics if t]
             else:
@@ -338,7 +343,10 @@ def _parse_mitre_attack(
                 extra = {
                     "stix_id": stix_id,
                     "mitre_technique_id": mitre_id,  # include canonical id even for tactic objects
+                    "mitre_technique_ids": [mitre_id],
+                    "mitre_aliases": [],
                 }
+                mitre_ids_list = extra["mitre_technique_ids"]
                 severity = ThreatSeverityLevel.MEDIUM
                 tags = ["mitre-attack", "tactic"]
 
@@ -362,6 +370,8 @@ def _parse_mitre_attack(
                     org_id=org_id,
                     mitre_technique_id=mitre_id if ioc_type == IOCTypeEnum.MITRE_TECHNIQUE else None,
                     mitre_tactic=tactic_str,
+                    mitre_technique_ids=list(mitre_ids_list),
+                    mitre_techniques=list(mitre_ids_list),
                     cve_id=None,
                     first_seen=now,
                     last_seen=now,
@@ -427,6 +437,8 @@ def _parse_cisa_kev(
                     org_id=org_id,
                     mitre_technique_id=None,
                     mitre_tactic=None,
+                    mitre_technique_ids=[],
+                    mitre_techniques=[],
                     cve_id=value,
                     first_seen=now,
                     last_seen=now,
@@ -590,6 +602,26 @@ def _custom_ioc_entry_to_record(
         extra.setdefault("mitre_technique_id", mitre_norm)
         extra.setdefault("mitre_technique_ids", [mitre_norm])
         extra.setdefault("mitre_aliases", [])
+    # If caller passed mitre_technique_ids in extra, normalize them
+    raw_ids = extra.get("mitre_technique_ids", []) or []
+    mitre_ids_list: list[str] = []
+    if isinstance(raw_ids, list):
+        for it in raw_ids:
+            n = mu.normalize_mitre(it)
+            if n:
+                mitre_ids_list.append(n)
+    elif isinstance(raw_ids, str):
+        # comma-separated
+        for it in raw_ids.split(","):
+            n = mu.normalize_mitre(it)
+            if n:
+                mitre_ids_list.append(n)
+    # Ensure the canonical mitre_norm is first if present
+    if mitre_norm and mitre_norm not in mitre_ids_list:
+        mitre_ids_list.insert(0, mitre_norm)
+    # final unique-preserving order
+    seen = set()
+    mitre_ids_list = [x for x in mitre_ids_list if not (x in seen or seen.add(x))]
 
     return IOCRecord(
         ioc_id=ioc_id,
@@ -603,6 +635,8 @@ def _custom_ioc_entry_to_record(
         org_id=org_id,
         mitre_technique_id=mitre_norm,
         mitre_tactic=entry.mitre_tactic,
+        mitre_technique_ids=list(mitre_ids_list),
+        mitre_techniques=list(mitre_ids_list),
         cve_id=entry.cve_id or (value if ioc_type == IOCTypeEnum.CVE else None),
         first_seen=now,
         last_seen=now,
@@ -847,6 +881,14 @@ class ThreatFeedIngestionService:
                 ioc_id = record.ioc_id
                 if ioc_id in self._iocs:
                     existing = self._iocs[ioc_id]
+                    # merge mitre lists preserving order and uniqueness
+                    existing_ids = list(existing.mitre_technique_ids or [])
+                    incoming_ids = list(record.mitre_technique_ids or [])
+                    merged_ids = existing_ids + [x for x in incoming_ids if x not in existing_ids]
+                    existing_techniques = list(existing.mitre_techniques or [])
+                    incoming_techniques = list(record.mitre_techniques or [])
+                    merged_techniques = existing_techniques + [x for x in incoming_techniques if x not in existing_techniques]
+
                     self._iocs[ioc_id] = IOCRecord(
                         ioc_id=existing.ioc_id,
                         ioc_type=existing.ioc_type,
@@ -854,11 +896,13 @@ class ThreatFeedIngestionService:
                         source=existing.source,
                         severity=record.severity,
                         confidence=max(existing.confidence, record.confidence),
-                        tags=list(set(existing.tags) | set(record.tags)),
+                        tags=list(dict.fromkeys([*existing.tags, *record.tags])),
                         description=record.description if record.description else existing.description,
                         org_id=existing.org_id,
                         mitre_technique_id=existing.mitre_technique_id or record.mitre_technique_id,
                         mitre_tactic=existing.mitre_tactic or record.mitre_tactic,
+                        mitre_technique_ids=merged_ids,
+                        mitre_techniques=merged_techniques,
                         cve_id=existing.cve_id or record.cve_id,
                         first_seen=existing.first_seen,
                         last_seen=record.last_seen,
@@ -1073,7 +1117,7 @@ def run_feed_ingestion(
                 iocs_inserted=0,
                 iocs_updated=0,
                 iocs_skipped=0,
-                errors=["STIX_TAXII ingestion requires a TAXIIConfig (discovery_url, collection_id, credentials). Pass taxii_config= to run_feed_ingestion() or supply connection parameters via the adapter."],
+                errors=["STIX_TAXII ingestion requires a TAXIIConfig (discovery_url, collection_id, credentials). Pass taxii_config= to run_feed_ingestion() or supply connection parameters via the API."],
                 started_at=now,
                 completed_at=now,
                 org_id=org_id,
