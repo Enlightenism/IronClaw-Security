@@ -154,12 +154,10 @@ def _extract_tlp_marking(obj: dict[str, Any]) -> str | None:
 
 
 def _extract_mitre_from_labels(labels: list[str]) -> tuple[str | None, str | None]:
-    """Extract MITRE technique_id and tactic from STIX labels.
+    """Extract a single MITRE technique_id (first seen) and tactic from STIX labels.
 
-    Upgrades:
-    - Uses mitre_utils.normalize_mitre to canonicalize technique IDs (uppercase).
-    - Attempts to detect tactic labels by matching against known MITRE tactic names
-      (case-insensitive), normalizing to lowercase/hyphenated form.
+    This convenience returns the first technique (normalized) and a normalized tactic
+    (lowercase, hyphen-separated) when present.
     """
     technique_id: str | None = None
     tactic: str | None = None
@@ -199,6 +197,49 @@ def _extract_mitre_from_labels(labels: list[str]) -> tuple[str | None, str | Non
                 break
 
     return technique_id, tactic
+
+
+def _extract_all_mitre_ids(obj: dict[str, Any], labels: list[str]) -> list[str]:
+    """Extract all MITRE technique IDs found in labels, external_references, name and description.
+
+    Returns deduped, normalized uppercase technique IDs preserving first-seen order.
+    """
+    candidates: list[str] = []
+
+    def _add_from_text(text: str | None) -> None:
+        if not text:
+            return
+        try:
+            for m in _RE_MITRE_TECH.finditer(str(text)):
+                tid = mu.normalize_mitre(m.group(0))
+                if tid:
+                    candidates.append(tid)
+        except Exception:
+            pass
+
+    # From labels (preserve order)
+    for lb in labels:
+        _add_from_text(lb)
+
+    # External references
+    for ref in obj.get("external_references", []) or []:
+        ext_id = str(ref.get("external_id", "") or "")
+        _add_from_text(ext_id)
+        # some references embed technique tokens in description/url
+        _add_from_text(ref.get("description", ""))
+
+    # Name / description fallback
+    _add_from_text(obj.get("name", ""))
+    _add_from_text(obj.get("description", ""))
+
+    # Deduplicate preserving order
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in candidates:
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
 
 
 def _extract_cve_from_labels_and_refs(
@@ -457,7 +498,13 @@ def _parse_stix_indicator(
     severity = _severity_from_confidence(confidence)
     labels = _extract_labels(obj)
     tlp = _extract_tlp_marking(obj)
+    # single technique and tactic for legacy fields
     technique_id, tactic = _extract_mitre_from_labels(labels)
+    # collect all technique ids found in labels/external refs/name/description
+    technique_ids = _extract_all_mitre_ids(obj, labels)
+    # fallback to single technique if none in list
+    if not technique_ids and technique_id:
+        technique_ids = [technique_id]
     cve_id = _extract_cve_from_labels_and_refs(obj, labels)
     description = _description_from_obj(obj)
     valid_from: str = obj.get("valid_from", now)
@@ -466,7 +513,7 @@ def _parse_stix_indicator(
     base_tags = ["stix-indicator", feed_source_label] + [lb for lb in labels if lb]
     if tlp:
         base_tags.append(tlp)
-    if technique_id:
+    if technique_ids:
         base_tags.append("mitre-attack")
 
     pattern_pairs = _extract_indicator_pattern(obj)
@@ -489,9 +536,17 @@ def _parse_stix_indicator(
             extra["tlp"] = tlp
         if cve_id:
             extra["cve_id_extracted"] = cve_id
-        # include mitre extras when present
-        if technique_id:
+        # include mitre extras when present (provide both single and list forms)
+        if technique_ids:
+            extra["mitre_technique_ids"] = technique_ids
+            extra["mitre_techniques"] = technique_ids
+            # keep legacy single-field too
+            extra["mitre_technique_id"] = technique_ids[0]
+        elif technique_id:
             extra["mitre_technique_id"] = technique_id
+            extra["mitre_technique_ids"] = [technique_id]
+            extra["mitre_techniques"] = [technique_id]
+
         if tactic:
             extra["mitre_tactic"] = tactic
 
@@ -506,8 +561,10 @@ def _parse_stix_indicator(
                 tags=list(base_tags),
                 description=description,
                 org_id=org_id,
-                mitre_technique_id=technique_id,
+                mitre_technique_id=technique_ids[0] if technique_ids else technique_id,
                 mitre_tactic=tactic,
+                mitre_technique_ids=list(technique_ids),
+                mitre_techniques=list(technique_ids),
                 cve_id=cve_id,
                 first_seen=valid_from,
                 last_seen=now,
@@ -545,16 +602,19 @@ def _parse_stix_sco(
     labels = _extract_labels(obj)
     tlp = _extract_tlp_marking(obj)
     technique_id, tactic = _extract_mitre_from_labels(labels)
+    technique_ids = _extract_all_mitre_ids(obj, labels)
+    if not technique_ids and technique_id:
+        technique_ids = [technique_id]
     cve_id = _extract_cve_from_labels_and_refs(obj, labels)
     description = _description_from_obj(obj)
 
     tags = ["stix-observable", feed_source_label] + [lb for lb in labels if lb]
     if tlp:
         tags.append(tlp)
-    if technique_id:
-        tags.append("mitre-attack")
-    if tactic and "mitre-attack" not in tags:
-        tags.append("mitre-attack")
+    if technique_ids or technique_id:
+        # indicate mitre presence
+        if "mitre-attack" not in tags:
+            tags.append("mitre-attack")
 
     ioc_id = _ioc_id_for_stix(stix_id, value, ioc_type, org_id)
 
@@ -565,8 +625,14 @@ def _parse_stix_sco(
     }
     if tlp:
         extra["tlp"] = tlp
-    if technique_id:
+    if technique_ids:
+        extra["mitre_technique_ids"] = technique_ids
+        extra["mitre_techniques"] = technique_ids
+        extra["mitre_technique_id"] = technique_ids[0]
+    elif technique_id:
         extra["mitre_technique_id"] = technique_id
+        extra["mitre_technique_ids"] = [technique_id]
+        extra["mitre_techniques"] = [technique_id]
     if tactic:
         extra["mitre_tactic"] = tactic
     if cve_id:
@@ -582,8 +648,10 @@ def _parse_stix_sco(
         tags=tags,
         description=description,
         org_id=org_id,
-        mitre_technique_id=technique_id,
+        mitre_technique_id=technique_ids[0] if technique_ids else technique_id,
         mitre_tactic=tactic,
+        mitre_technique_ids=list(technique_ids),
+        mitre_techniques=list(technique_ids),
         cve_id=cve_id,
         first_seen=now,
         last_seen=now,

@@ -78,7 +78,6 @@ _RE_MD5 = re.compile(r"\b[0-9a-fA-F]{32}\b")
 _RE_CVE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.IGNORECASE)
 _RE_URL = re.compile(r"https?://[^\s\"'>]+")
 
-
 _ENGINE_LOCK = threading.Lock()
 
 
@@ -598,7 +597,44 @@ class ThreatDetectionEngine:
 
     @staticmethod
     def _build_signal_payload(signal: CorrelationSignal) -> dict[str, Any]:
+        """
+        Build a normalized payload dict for a CorrelationSignal.
+
+        Defensive extraction for MITRE technique sources:
+        - Prefer canonical extractor mu.extract_mitre_from_signal which inspects top-level
+          attributes and nested containers.
+        - If canonical extractor misses technique(s), attempt fallbacks:
+            - single attribute 'mitre_technique_id' on the signal
+            - nested 'extra' dict on the signal (and extract from it)
+        - Final result is deduped preserving first-seen order.
+        """
         signal_type = _get_signal_type(signal)
+
+        # Primary canonical extraction (handles nested containers)
+        primary_techs = _extract_signal_mitre_techniques(signal) or []
+
+        # Fallbacks: single attribute and extra dict
+        fallbacks: list[str] = []
+
+        single = _string_or_none(getattr(signal, "mitre_technique_id", None))
+        if single:
+            normalized_single = _normalize_mitre_value(single)
+            if normalized_single:
+                fallbacks.append(normalized_single)
+
+        # If signal has an 'extra' dict, try to extract from it
+        extra = getattr(signal, "extra", None)
+        if isinstance(extra, dict):
+            try:
+                from_extra = mu.extract_mitre_from_source(extra)
+                if from_extra:
+                    fallbacks.extend(from_extra)
+            except Exception:
+                # defensive: ignore extraction errors from misc extra content
+                pass
+
+        combined = _dedupe_preserve_order([*primary_techs, *fallbacks])
+
         return {
             "signal_id": _string_or_none(getattr(signal, "signal_id", None)) or str(uuid.uuid4()),
             "pattern_type": signal_type,
@@ -607,7 +643,7 @@ class ThreatDetectionEngine:
             "contributing_ioc_ids": _coerce_str_list(getattr(signal, "contributing_ioc_ids", None)),
             "score_contribution": _coerce_float(getattr(signal, "score_contribution", 0.0), default=0.0),
             "confidence": _coerce_float(getattr(signal, "confidence", 0.0), default=0.0),
-            "mitre_technique_ids": _extract_signal_mitre_techniques(signal),
+            "mitre_technique_ids": combined,
             "description": _string_or_none(getattr(signal, "description", None)) or "",
         }
 

@@ -5,19 +5,19 @@ This module centralizes normalization, coercion, extraction and ordered
 deduplication of MITRE technique identifiers so the rest of the codebase
 can rely on a single source of truth.
 
-Guiding rules implemented here:
-- Technique IDs are normalized to uppercase (e.g. "T1059" or "T1059.001").
-- Empty / falsy values are ignored.
-- Collection coersion preserves order for list/tuple inputs.
-- Deduplication is "first-seen wins" and preserves insertion order.
-- Signals may contain nested dict containers (metadata, details, enrichment, attributes)
-  — these are inspected for mitre fields when extracting from a CorrelationSignal-like object.
+Notes on recent changes:
+- Normalization is intentionally permissive (uppercases & strips) to support
+  test fixtures and legacy/non-canonical tokens (e.g. "tA" -> "TA").
+- Extraction helpers are defensive and inspect common 'extra' dict containers
+  when direct attributes/keys are missing so callers that store MITRE data in
+  .extra still surface technique lists reliably.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,10 @@ __all__ = [
     "extract_mitre_from_signal",
     "aggregate_mitre_techniques",
 ]
+
+# MITRE technique regex: T#### or T####.###
+_RE_MITRE_TECH = re.compile(r"^T\d{4}(?:\.\d{3})?$", re.IGNORECASE)
+_RE_MITRE_TECH_FIND = re.compile(r"\bT\d{4}(?:\.\d{3})?\b", re.IGNORECASE)
 
 
 # -------------------------
@@ -74,8 +78,15 @@ def _string_or_none(value: Any) -> str | None:
 # -------------------------
 def normalize_mitre(value: Any) -> str | None:
     """
-    Normalize a MITRE technique value to uppercase string (e.g. "T1059").
-    Returns None for empty / invalid values.
+    Normalize a MITRE technique value to an uppercase string.
+
+    Behavior:
+      - Coerce to string and strip whitespace.
+      - Uppercase result.
+      - Return None for empty / non-coercible inputs.
+
+    Note: This function is intentionally permissive to support test fixtures
+    and legacy values that may not strictly conform to T#### formatting.
     """
     s = _string_or_none(value)
     if s is None:
@@ -163,6 +174,8 @@ def extract_mitre_from_source(
     Extraction order:
       - For each name in direct_attrs, read attribute or dict key; normalize single values and append.
       - For each name in list_attrs, coerce to list via coerce_str_list, normalize each and append.
+      - If no results found, attempt to read common 'extra' dict (source.extra or source['extra'])
+        and repeat the same extraction there for backwards compatibility.
     All results are normalized via normalize_mitre() and deduped preserving order.
     """
     candidates: list[str] = []
@@ -188,18 +201,46 @@ def extract_mitre_from_source(
 
     # Direct attrs (single values)
     for attr in direct_attrs:
-        raw = _get_attr(source, attr)
-        norm = normalize_mitre(raw)
-        if norm:
-            candidates.append(norm)
+        try:
+            raw = _get_attr(source, attr)
+            norm = normalize_mitre(raw)
+            if norm:
+                candidates.append(norm)
+        except Exception:
+            # avoid bubbling exceptions during extraction
+            continue
 
     # List attrs (collections)
     for attr in list_attrs:
-        raw = _get_attr(source, attr)
-        for item in coerce_str_list(raw):
-            norm = normalize_mitre(item)
-            if norm:
-                candidates.append(norm)
+        try:
+            raw = _get_attr(source, attr)
+            for item in coerce_str_list(raw):
+                normalized = normalize_mitre(item)
+                if normalized:
+                    candidates.append(normalized)
+        except Exception:
+            continue
+
+    # If nothing found, try to inspect "extra" dict (common fallback)
+    if not candidates:
+        try:
+            extra = _get_attr(source, "extra")
+            if isinstance(extra, dict):
+                # try direct single field inside extra
+                for attr in direct_attrs:
+                    raw = extra.get(attr)
+                    norm = normalize_mitre(raw)
+                    if norm:
+                        candidates.append(norm)
+                # list attrs in extra
+                for attr in list_attrs:
+                    raw = extra.get(attr)
+                    for item in coerce_str_list(raw):
+                        normalized = normalize_mitre(item)
+                        if normalized:
+                            candidates.append(normalized)
+        except Exception:
+            pass
 
     return dedupe_preserve_order(candidates)
 
@@ -212,11 +253,12 @@ def extract_mitre_from_signal(signal: Any) -> list[str]:
     - Check top-level attributes/keys: 'mitre_technique_id', 'mitre_technique_ids', 'mitre_techniques'.
     - Inspect nested dict containers if present: 'metadata', 'context', 'details', 'enrichment', 'attributes'.
       For each container that is a dict, attempt to extract the same keys inside it.
+    - If still empty, inspect a top-level 'extra' dict (or signal.extra) for the same keys.
     - Normalize and dedupe preserving first-seen order.
     """
     candidates: list[str] = []
 
-    # Top-level extraction
+    # Top-level extraction from the signal object
     candidates.extend(
         extract_mitre_from_source(
             signal,
@@ -244,6 +286,21 @@ def extract_mitre_from_signal(signal: Any) -> list[str]:
                 list_attrs=("mitre_technique_ids", "mitre_techniques"),
             )
         )
+
+    # Fallback: inspect 'extra' container if present (common pattern)
+    if not candidates:
+        try:
+            extra = getattr(signal, "extra", None)
+        except Exception:
+            extra = None
+        if isinstance(extra, dict):
+            candidates.extend(
+                extract_mitre_from_source(
+                    extra,
+                    direct_attrs=("mitre_technique_id",),
+                    list_attrs=("mitre_technique_ids", "mitre_techniques"),
+                )
+            )
 
     return dedupe_preserve_order(candidates)
 
@@ -273,12 +330,18 @@ def aggregate_mitre_techniques(ioc_matches: Iterable[Any], signals: Iterable[Any
 
     # Process IOC matches first
     for m in ioc_matches or []:
-        techs = extract_mitre_from_source(m)
+        try:
+            techs = extract_mitre_from_source(m)
+        except Exception:
+            techs = []
         _append_techs(techs)
 
     # Then signals
     for s in signals or []:
-        techs = extract_mitre_from_signal(s)
+        try:
+            techs = extract_mitre_from_signal(s)
+        except Exception:
+            techs = []
         _append_techs(techs)
 
     return out
