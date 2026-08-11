@@ -200,6 +200,8 @@ class CorrelationSignal(BaseModel):
     mitre_technique_ids: list[str] = Field(default_factory=list)
     # Added explicit list for mitre_techniques to match engine expectations
     mitre_techniques: list[str] = Field(default_factory=list)
+    # Added singular field to accept mitre_technique_id directly from tests/builders
+    mitre_technique_id: str | None = None
     confidence: float = Field(ge=0.0, le=1.0)
     score_contribution: float = Field(ge=0.0, le=1.0)
     description: str = ""

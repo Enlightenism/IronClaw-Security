@@ -583,7 +583,6 @@ class ThreatDetectionEngine:
             ),
             "description": existing_payload["description"] or incoming_payload["description"] or "",
         }
-
         try:
             return CorrelationSignal(**payload)
         except Exception:
@@ -605,16 +604,27 @@ class ThreatDetectionEngine:
           attributes and nested containers.
         - If canonical extractor misses technique(s), attempt fallbacks:
             - single attribute 'mitre_technique_id' on the signal
+            - Pydantic v2 'pydantic_extra' dict
+            - signal.dict()/model_dump() keys for MITRE fields
             - nested 'extra' dict on the signal (and extract from it)
         - Final result is deduped preserving first-seen order.
         """
         signal_type = _get_signal_type(signal)
 
-        # Primary canonical extraction (handles nested containers)
         primary_techs = _extract_signal_mitre_techniques(signal) or []
-
-        # Fallbacks: single attribute and extra dict
         fallbacks: list[str] = []
+
+        def _extend_from_source(source: Any) -> None:
+            try:
+                extracted = mu.extract_mitre_from_source(
+                    source,
+                    direct_attrs=("mitre_technique_id",),
+                    list_attrs=("mitre_technique_ids", "mitre_techniques"),
+                )
+            except Exception:
+                extracted = []
+            if extracted:
+                fallbacks.extend(extracted)
 
         single = _string_or_none(getattr(signal, "mitre_technique_id", None))
         if single:
@@ -622,16 +632,24 @@ class ThreatDetectionEngine:
             if normalized_single:
                 fallbacks.append(normalized_single)
 
-        # If signal has an 'extra' dict, try to extract from it
+        pydantic_extra = getattr(signal, "pydantic_extra", None)
+        if isinstance(pydantic_extra, dict):
+            _extend_from_source(pydantic_extra)
+
+        try:
+            signal_dict = None
+            if hasattr(signal, "model_dump") and callable(signal.model_dump):
+                signal_dict = signal.model_dump()
+            elif hasattr(signal, "dict") and callable(signal.dict):
+                signal_dict = signal.dict()
+            if isinstance(signal_dict, dict):
+                _extend_from_source(signal_dict)
+        except Exception:
+            pass
+
         extra = getattr(signal, "extra", None)
         if isinstance(extra, dict):
-            try:
-                from_extra = mu.extract_mitre_from_source(extra)
-                if from_extra:
-                    fallbacks.extend(from_extra)
-            except Exception:
-                # defensive: ignore extraction errors from misc extra content
-                pass
+            _extend_from_source(extra)
 
         combined = _dedupe_preserve_order([*primary_techs, *fallbacks])
 
@@ -1024,7 +1042,7 @@ def _extract_ioc_match_mitre_techniques(match: IOCMatch) -> list[str]:
 
 
 def _extract_signal_mitre_techniques(signal: CorrelationSignal) -> list[str]:
-    # Delegate to canonical extractor that also inspects nested containers.
+    # Delegate to canonical helper that also inspects nested containers.
     return mu.extract_mitre_from_signal(signal)
 
 
