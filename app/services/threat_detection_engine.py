@@ -15,12 +15,12 @@ from app.schemas.threat_detection import (
     IOCMatch,
     ThreatSeverityLevel,
 )
+from app.services import mitre_utils as mu  # canonical MITRE helpers
 from app.services.ioc_store import get_ioc_store
 from app.services.threat_correlation import get_correlation_engine
 
 if TYPE_CHECKING:
     from app.services.notification_service import NotificationEngine
-
 
 logger = logging.getLogger(__name__)
 
@@ -245,19 +245,13 @@ class ThreatScoringEngine:
         ioc_matches: list[IOCMatch],
         signals: list[CorrelationSignal],
     ) -> list[str]:
-        techniques: list[str] = []
-        seen: set[str] = set()
-        for match in ioc_matches:
-            for technique in _extract_ioc_match_mitre_techniques(match):
-                if technique not in seen:
-                    seen.add(technique)
-                    techniques.append(technique)
-        for sig in signals:
-            for tid in _extract_signal_mitre_techniques(sig):
-                if tid not in seen:
-                    seen.add(tid)
-                    techniques.append(tid)
-        return techniques
+        """
+        Use canonical mitre_utils.aggregate_mitre_techniques to collect technique IDs
+        from ioc_matches first (preserving IOC order and intra-match order),
+        then from signals (including nested containers). Results are uppercase and
+        deduped with first-seen preserved.
+        """
+        return mu.aggregate_mitre_techniques(ioc_matches, signals)
 
     @staticmethod
     def _elevate_verdict_for_iocs(
@@ -430,6 +424,7 @@ class ThreatDetectionEngine:
             return []
 
         derived: list[CorrelationSignal] = []
+        # preserve intra-match order and IOC order; mu.extract_mitre_from_source handles single+list fields
         techniques = _dedupe_preserve_order([technique for match in ioc_matches for technique in _extract_ioc_match_mitre_techniques(match)])
         high_or_critical = [match for match in ioc_matches if _coerce_severity(match.severity) in {ThreatSeverityLevel.HIGH, ThreatSeverityLevel.CRITICAL}]
 
@@ -870,7 +865,8 @@ class ThreatDetectionEngine:
             tags = _dedupe_preserve_order([*tags, *risk_families])
 
         ioc_id = _string_or_none(getattr(rec, "ioc_id", None)) or f"{value}|{ioc_type}"
-        mitre_values = _extract_mitre_values(
+        # Use canonical extractor which handles single + list fields and nested containers.
+        mitre_values = mu.extract_mitre_from_source(
             rec,
             direct_attrs=("mitre_technique_id",),
             list_attrs=("mitre_technique_ids", "mitre_techniques"),
@@ -944,11 +940,8 @@ def _max_severity(left: ThreatSeverityLevel, right: ThreatSeverityLevel) -> Thre
 
 
 def _normalize_mitre_value(value: Any) -> str | None:
-    normalized = _string_or_none(value)
-    if normalized is None:
-        return None
-    normalized = normalized.upper()
-    return normalized or None
+    # Delegates to canonical helper; preserves previous contract (uppercase or None)
+    return mu.normalize_mitre(value)
 
 
 def _normalize_collection_value(value: Any) -> str:
@@ -959,28 +952,11 @@ def _normalize_collection_value(value: Any) -> str:
 
 
 def _dedupe_preserve_order(values: list[str]) -> list[str]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        if value not in seen:
-            seen.add(value)
-            out.append(value)
-    return out
+    return mu.dedupe_preserve_order(values)
 
 
 def _coerce_str_list(value: Any) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return [_string_or_none(item) for item in value if _string_or_none(item)]
-    if isinstance(value, tuple):
-        return [_string_or_none(item) for item in value if _string_or_none(item)]
-    if isinstance(value, set):
-        return [_string_or_none(item) for item in value if _string_or_none(item)]
-    if isinstance(value, str):
-        stripped = value.strip()
-        return [stripped] if stripped else []
-    return []
+    return mu.coerce_str_list(value)
 
 
 def _extract_match_risk_families(match: IOCMatch) -> list[str]:
@@ -996,20 +972,11 @@ def _extract_mitre_values(
     direct_attrs: tuple[str, ...] = (),
     list_attrs: tuple[str, ...] = (),
 ) -> list[str]:
-    candidates: list[str] = []
-
-    for attr in direct_attrs:
-        normalized = _normalize_mitre_value(getattr(source, attr, None))
-        if normalized:
-            candidates.append(normalized)
-
-    for attr in list_attrs:
-        for value in _coerce_str_list(getattr(source, attr, None)):
-            normalized = _normalize_mitre_value(value)
-            if normalized:
-                candidates.append(normalized)
-
-    return _dedupe_preserve_order(candidates)
+    """
+    Backwards-compatible wrapper around mu.extract_mitre_from_source.
+    Accepts direct_attrs and list_attrs to control extraction keys.
+    """
+    return mu.extract_mitre_from_source(source, direct_attrs=direct_attrs, list_attrs=list_attrs)
 
 
 def _extract_ioc_match_mitre_techniques(match: IOCMatch) -> list[str]:
@@ -1021,35 +988,8 @@ def _extract_ioc_match_mitre_techniques(match: IOCMatch) -> list[str]:
 
 
 def _extract_signal_mitre_techniques(signal: CorrelationSignal) -> list[str]:
-    candidates: list[str] = []
-
-    candidates.extend(
-        _extract_mitre_values(
-            signal,
-            direct_attrs=("mitre_technique_id",),
-            list_attrs=("mitre_technique_ids", "mitre_techniques"),
-        )
-    )
-
-    for container_name in ("metadata", "context", "details", "enrichment", "attributes"):
-        try:
-            container = getattr(signal, container_name, None)
-        except Exception:
-            container = None
-        if not isinstance(container, dict):
-            continue
-
-        direct = _normalize_mitre_value(container.get("mitre_technique_id"))
-        if direct:
-            candidates.append(direct)
-
-        for key in ("mitre_technique_ids", "mitre_techniques"):
-            for value in _coerce_str_list(container.get(key)):
-                normalized = _normalize_mitre_value(value)
-                if normalized:
-                    candidates.append(normalized)
-
-    return _dedupe_preserve_order(candidates)
+    # Delegate to canonical extractor that also inspects nested containers.
+    return mu.extract_mitre_from_signal(signal)
 
 
 def _coerce_lookup_records(value: Any) -> list[Any]:

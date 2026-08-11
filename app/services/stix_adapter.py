@@ -14,6 +14,9 @@ from app.schemas.threat_detection import (
     ThreatFeedSourceEnum,
     ThreatSeverityLevel,
 )
+
+# Canonical MITRE helpers for normalization
+from app.services import mitre_utils as mu
 from app.services.ioc_store import IOCStore, get_ioc_store
 from app.services.threat_feed_ingestion import (
     FeedIngestResult,
@@ -28,7 +31,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
 _IOC_ID_PREFIX = "ioc-"
 _INGEST_ID_PREFIX = "ingest-"
 _DEFAULT_FETCH_TIMEOUT = 30
@@ -55,6 +57,24 @@ _SEVERITY_FROM_CONFIDENCE: list[tuple[float, str]] = [
 
 _RE_CVE = re.compile(r"CVE-\d{4}-\d{4,}", re.IGNORECASE)
 _RE_MITRE_TECH = re.compile(r"\bT\d{4}(?:\.\d{3})?\b", re.IGNORECASE)
+
+# Known tactic canonical names (lowercase, hyphenated)
+_KNOWN_MITRE_TACTICS = {
+    "initial-access",
+    "execution",
+    "persistence",
+    "privilege-escalation",
+    "defense-evasion",
+    "credential-access",
+    "discovery",
+    "lateral-movement",
+    "collection",
+    "command-and-control",
+    "exfiltration",
+    "impact",
+    "reconnaissance",
+    "resource-development",
+}
 
 # ---------------------------------------------------------------------------
 # TAXII Connection Config
@@ -134,13 +154,50 @@ def _extract_tlp_marking(obj: dict[str, Any]) -> str | None:
 
 
 def _extract_mitre_from_labels(labels: list[str]) -> tuple[str | None, str | None]:
-    """Extract MITRE technique_id and tactic from STIX labels."""
+    """Extract MITRE technique_id and tactic from STIX labels.
+
+    Upgrades:
+    - Uses mitre_utils.normalize_mitre to canonicalize technique IDs (uppercase).
+    - Attempts to detect tactic labels by matching against known MITRE tactic names
+      (case-insensitive), normalizing to lowercase/hyphenated form.
+    """
     technique_id: str | None = None
     tactic: str | None = None
+
     for lb in labels:
-        m = _RE_MITRE_TECH.search(lb)
+        try:
+            m = _RE_MITRE_TECH.search(lb)
+        except Exception:
+            m = None
         if m and technique_id is None:
-            technique_id = m.group(0).upper()
+            # canonicalize using mitre_utils
+            technique_id = mu.normalize_mitre(m.group(0))
+            if technique_id is None:
+                # fallback to uppercase raw match
+                technique_id = m.group(0).upper()
+
+    # Attempt to find tactic labels (e.g., "initial-access", "privilege escalation", etc.)
+    for lb in labels:
+        try:
+            lb_norm = str(lb).strip().lower()
+        except Exception:
+            continue
+        # normalize whitespace and underscores to hyphen
+        lb_hyphen = lb_norm.replace("_", "-").replace(" ", "-")
+        # direct match
+        if lb_hyphen in _KNOWN_MITRE_TACTICS:
+            tactic = lb_hyphen
+            break
+        # sometimes labels include "mitre:initial-access" or similar, try to extract token
+        if ":" in lb_hyphen:
+            parts = lb_hyphen.split(":")
+            for p in parts:
+                if p in _KNOWN_MITRE_TACTICS:
+                    tactic = p
+                    break
+            if tactic:
+                break
+
     return technique_id, tactic
 
 
@@ -210,7 +267,7 @@ def _extract_file_hash(obj: dict[str, Any]) -> tuple[str | None, str]:
     STIX file objects carry hashes dict. Prefer SHA256 > SHA1 > MD5.
     Returns (value, ioc_type).
     """
-    hashes: dict[str, str] = obj.get("hashes", {})
+    hashes: dict[str, str] = obj.get("hashes", {}) or {}
     for algo, ioc_type in (
         ("SHA-256", IOCTypeEnum.SHA256),
         ("SHA256", IOCTypeEnum.SHA256),
@@ -234,7 +291,7 @@ def _extract_indicator_pattern(obj: dict[str, Any]) -> list[tuple[str, str]]:
         [file:hashes.'SHA-256' = 'abc...']
         [email-addr:value = 'foo@bar.com']
     """
-    pattern: str = obj.get("pattern", "")
+    pattern: str = obj.get("pattern", "") or ""
     results: list[tuple[str, str]] = []
 
     _PATTERN_EXTRACTORS: list[tuple[re.Pattern[str], str]] = [
@@ -302,7 +359,7 @@ def parse_stix_bundle(
     source = ThreatFeedSourceEnum.STIX_TAXII
     feed_source_label = source_label or "stix_taxii"
 
-    objects: list[dict[str, Any]] = bundle.get("objects", [])
+    objects: list[dict[str, Any]] = bundle.get("objects", []) or []
     if len(objects) > _MAX_BUNDLE_OBJECTS:
         logger.warning(
             "stix_adapter.parse_bundle bundle_id=%s object_count=%d exceeds max=%d; truncating",
@@ -432,6 +489,11 @@ def _parse_stix_indicator(
             extra["tlp"] = tlp
         if cve_id:
             extra["cve_id_extracted"] = cve_id
+        # include mitre extras when present
+        if technique_id:
+            extra["mitre_technique_id"] = technique_id
+        if tactic:
+            extra["mitre_tactic"] = tactic
 
         records.append(
             IOCRecord(
@@ -489,6 +551,10 @@ def _parse_stix_sco(
     tags = ["stix-observable", feed_source_label] + [lb for lb in labels if lb]
     if tlp:
         tags.append(tlp)
+    if technique_id:
+        tags.append("mitre-attack")
+    if tactic and "mitre-attack" not in tags:
+        tags.append("mitre-attack")
 
     ioc_id = _ioc_id_for_stix(stix_id, value, ioc_type, org_id)
 
@@ -499,6 +565,12 @@ def _parse_stix_sco(
     }
     if tlp:
         extra["tlp"] = tlp
+    if technique_id:
+        extra["mitre_technique_id"] = technique_id
+    if tactic:
+        extra["mitre_tactic"] = tactic
+    if cve_id:
+        extra["cve_id_extracted"] = cve_id
 
     return IOCRecord(
         ioc_id=ioc_id,
@@ -862,7 +934,7 @@ class STIXAdapter:
                     break
 
                 bundle_id = envelope.get("id")
-                objects: list[dict[str, Any]] = envelope.get("objects", [])
+                objects: list[dict[str, Any]] = envelope.get("objects", []) or []
 
                 page_bundle: dict[str, Any] = {
                     "type": "bundle",
@@ -970,7 +1042,6 @@ class STIXAdapter:
 # ---------------------------------------------------------------------------
 # Module-level singleton
 # ---------------------------------------------------------------------------
-
 _STIX_ADAPTER: STIXAdapter | None = None
 
 

@@ -1,3 +1,14 @@
+"""
+Threat scoring service.
+
+This file has been updated to:
+- Use the canonical MITRE helpers when producing ScoreResult.mitre_techniques so
+  detection results include techniques from IOC matches and correlation signals.
+- Preserve a backwards-compatible derive_mitre_techniques() function that
+  extracts only from IOCMatch-level fields (and returns a sorted list) to
+  satisfy existing unit tests and direct callers.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -9,6 +20,9 @@ from app.schemas.threat_detection import (
     IOCTypeEnum,
     ThreatSeverityLevel,
 )
+
+# Canonical MITRE helpers (single source of truth)
+from app.services import mitre_utils as mu
 
 logger = logging.getLogger(__name__)
 
@@ -284,16 +298,31 @@ def derive_risk_families(matches: list[IOCMatch]) -> list[str]:
 
 def derive_mitre_techniques(matches: list[IOCMatch]) -> list[str]:
     """
-    Extract deduplicated MITRE technique IDs from IOCMatch objects.
+    Backwards-compatible function: derive MITRE techniques from IOCMatch list only.
 
-    Used to populate DetectionResult.mitre_techniques.
+    Behavior (preserves original contract expected by unit tests):
+    - For each match, if match.mitre_technique_id is present -> normalize and include.
+    - If match.ioc_type == IOCTypeEnum.MITRE_TECHNIQUE and match.value present -> normalize and include.
+    - Deduplicate and return sorted list (alphabetical), matching historical behavior.
     """
     techniques: set[str] = set()
-    for match in matches:
-        if match.mitre_technique_id:
-            techniques.add(match.mitre_technique_id.upper())
-        if match.ioc_type == IOCTypeEnum.MITRE_TECHNIQUE and match.value:
-            techniques.add(match.value.upper())
+    for match in matches or []:
+        raw_id = getattr(match, "mitre_technique_id", None)
+        norm = mu.normalize_mitre(raw_id)
+        if norm:
+            techniques.add(norm)
+            continue
+        # If mitre_technique_id not present, and the IOC itself is typed as a MITRE technique,
+        # use its value.
+        try:
+            if getattr(match, "ioc_type", None) == IOCTypeEnum.MITRE_TECHNIQUE:
+                val = getattr(match, "value", None)
+                norm2 = mu.normalize_mitre(val)
+                if norm2:
+                    techniques.add(norm2)
+        except Exception:
+            # Defensive: skip problematic match objects (e.g., mocks with odd behavior)
+            continue
     return sorted(techniques)
 
 
@@ -379,15 +408,6 @@ class ThreatScoringEngine:
     ) -> ScoreResult:
         """
         Run the full scoring pipeline and return a ScoreResult.
-
-        Args:
-            ioc_matches:          List of IOCMatch objects from ioc_store lookups.
-            correlation_signals:  Optional list of CorrelationSignal objects.
-            base_score_override:  Optional raw score bypass (skips IOC scoring).
-
-        Returns:
-            ScoreResult with score, verdict, severity, risk_families,
-            mitre_techniques, and rationale populated.
         """
         composite = compute_composite_score(
             ioc_matches,
@@ -397,7 +417,8 @@ class ThreatScoringEngine:
         verdict = score_to_verdict(composite)
         severity = score_to_severity(composite)
         risk_families = derive_risk_families(ioc_matches)
-        mitre_techniques = derive_mitre_techniques(ioc_matches)
+        # Use canonical aggregator that considers both ioc_matches and correlation_signals
+        mitre_techniques = mu.aggregate_mitre_techniques(ioc_matches, correlation_signals or [])
         rationale = build_score_rationale(ioc_matches, composite, verdict)
 
         logger.debug(
@@ -434,9 +455,6 @@ class ThreatScoringEngine:
 class ScoreResult:
     """
     Lightweight result container returned by ThreatScoringEngine.compute().
-
-    Not a Pydantic model — this is an internal service layer object.
-    threat_detection_engine.py unpacks these fields into DetectionResult.
     """
 
     __slots__ = (

@@ -23,6 +23,9 @@ from app.schemas.threat_detection import (
     ThreatSeverityLevel,
 )
 
+# Canonical MITRE helpers for normalization/coercion
+from app.services import mitre_utils as mu
+
 if TYPE_CHECKING:
     from app.services.stix_adapter import TAXIIConfig
 
@@ -32,7 +35,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
 _MITRE_ATTACK_ENTERPRISE_URL = "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json"
 _CISA_KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 _DEFAULT_FETCH_TIMEOUT_SECONDS = 30
@@ -45,7 +47,6 @@ _INGEST_ID_PREFIX = "ingest-"
 # ---------------------------------------------------------------------------
 # Backwards-compatible aliases — keep existing callers working
 # ---------------------------------------------------------------------------
-
 ThreatFeedSource = ThreatFeedSourceEnum
 IOCType = IOCTypeEnum
 ThreatSeverity = ThreatSeverityLevel
@@ -55,8 +56,6 @@ IngestStatus = IngestStatusEnum
 # ---------------------------------------------------------------------------
 # IOC record
 # ---------------------------------------------------------------------------
-
-
 @dataclass(slots=True)
 class IOCRecord:
     ioc_id: str
@@ -104,8 +103,6 @@ class IOCRecord:
 # ---------------------------------------------------------------------------
 # Ingest result
 # ---------------------------------------------------------------------------
-
-
 @dataclass(slots=True)
 class FeedIngestResult:
     ingest_id: str
@@ -141,8 +138,6 @@ class FeedIngestResult:
 # ---------------------------------------------------------------------------
 # IOC filter
 # ---------------------------------------------------------------------------
-
-
 @dataclass
 class IOCFilterRequest:
     source: str | None = None
@@ -161,8 +156,6 @@ class IOCFilterRequest:
 # ---------------------------------------------------------------------------
 # Custom IOC upload input
 # ---------------------------------------------------------------------------
-
-
 @dataclass
 class CustomIOCEntry:
     value: str
@@ -181,8 +174,6 @@ class CustomIOCEntry:
 # ---------------------------------------------------------------------------
 # Utility helpers
 # ---------------------------------------------------------------------------
-
-
 def _utcnow_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
@@ -197,7 +188,7 @@ _RE_MD5 = re.compile(r"^[a-fA-F0-9]{32}$")
 _RE_CVE = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
 _RE_MITRE_TECHNIQUE = re.compile(r"^T\d{4}(?:\.\d{3})?$", re.IGNORECASE)
 _RE_MITRE_TACTIC = re.compile(
-    r"^(initial-access|execution|persistence|privilege-escalation|defense-evasion|" r"credential-access|discovery|lateral-movement|collection|command-and-control|" r"exfiltration|impact|reconnaissance|resource-development)$",
+    r"^(initial-access|execution|persistence|privilege-escalation|defense-evasion|credential-access|discovery|lateral-movement|collection|command-and-control|exfiltration|impact|reconnaissance|resource-development)$",
     re.IGNORECASE,
 )
 _RE_DOMAIN = re.compile(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$")
@@ -252,13 +243,21 @@ def _fetch_json(url: str, timeout: int = _DEFAULT_FETCH_TIMEOUT_SECONDS) -> dict
 # ---------------------------------------------------------------------------
 # MITRE ATT&CK parser
 # ---------------------------------------------------------------------------
-
-
 def _parse_mitre_attack(
     stix_bundle: dict[str, Any],
     ingest_id: str,
     org_id: str | None,
 ) -> tuple[list[IOCRecord], list[str]]:
+    """
+    Parse MITRE ATT&CK STIX bundle, producing IOCRecord entries.
+
+    Upgrades applied:
+    - normalize mitre technique ids to canonical uppercase via mu.normalize_mitre
+    - extract aliases (x_mitre_aliases) into extra["mitre_aliases"]
+    - populate extra["mitre_technique_ids"] with canonical + aliases when present
+    - normalize kill_chain_phases into mitre_tactic (lowercase, hyphenated)
+    - ensure tags include 'mitre-attack' and 'technique' / 'tactic' appropriately
+    """
     records: list[IOCRecord] = []
     errors: list[str] = []
     now = _utcnow_iso()
@@ -272,45 +271,83 @@ def _parse_mitre_attack(
 
             stix_id: str = obj.get("id", "")
             name: str = obj.get("name", "")
-            description_raw: str = obj.get("description", "")
+            description_raw: str = obj.get("description", "") or ""
             is_revoked: bool = obj.get("revoked", False)
             is_deprecated: bool = obj.get("x_mitre_deprecated", False)
             if is_revoked or is_deprecated:
                 continue
 
-            ext_refs: list[dict[str, Any]] = obj.get("external_references", [])
-            mitre_id: str = ""
+            ext_refs: list[dict[str, Any]] = obj.get("external_references", []) or []
+            mitre_id_raw: str | None = None
             for ref in ext_refs:
                 if ref.get("source_name", "") in ("mitre-attack", "mitre-mobile-attack", "mitre-ics-attack"):
-                    mitre_id = ref.get("external_id", "")
-                    break
+                    mitre_id_raw = ref.get("external_id") or mitre_id_raw
+                    # keep scanning for aliases etc.
+            if not mitre_id_raw:
+                # STIX may also include x_mitre_* fields; fallback to none if missing
+                mitre_id_raw = obj.get("external_id") or obj.get("x_mitre_id") or None
 
-            if not mitre_id:
+            if not mitre_id_raw:
                 continue
 
+            # Normalize technique id to canonical form (uppercase T#### or T####.###)
+            mitre_id = mu.normalize_mitre(mitre_id_raw)
+            if not mitre_id:
+                # malformed value; skip
+                continue
+
+            # extract aliases if present (x_mitre_aliases)
+            aliases = []
+            try:
+                raw_aliases = obj.get("x_mitre_aliases", []) or []
+                if isinstance(raw_aliases, list):
+                    aliases = [str(a).strip() for a in raw_aliases if str(a).strip()]
+            except Exception:
+                aliases = []
+
+            # For attack-pattern (techniques) extract kill chain phases for tactic
             if obj_type == "attack-pattern":
                 ioc_type = IOCTypeEnum.MITRE_TECHNIQUE
-                tactics: list[str] = [phase.get("phase_name", "") for phase in obj.get("kill_chain_phases", []) if phase.get("kill_chain_name", "").startswith("mitre")]
-                tactic_str = tactics[0] if tactics else None
-                platforms: list[str] = obj.get("x_mitre_platforms", [])
+                # kill_chain_phases entries often have 'phase_name'
+                tactics = [(phase.get("phase_name") or "").strip() for phase in (obj.get("kill_chain_phases") or []) if phase and (phase.get("kill_chain_name", "").lower().find("mitre") != -1)]
+                # normalize tactic: lower + hyphen (keep original canonical phrasing if already hyphenated)
+                tactic_str = None
+                if tactics:
+                    t = tactics[0].lower().strip()
+                    tactic_str = t.replace(" ", "-")
+                platforms: list[str] = obj.get("x_mitre_platforms", []) or []
                 extra: dict[str, Any] = {
                     "stix_id": stix_id,
                     "platforms": platforms,
-                    "data_sources": obj.get("x_mitre_data_sources", []),
-                    "detection": obj.get("x_mitre_detection", ""),
-                    "permissions_required": obj.get("x_mitre_permissions_required", []),
+                    "data_sources": obj.get("x_mitre_data_sources", []) or [],
+                    "detection": obj.get("x_mitre_detection", "") or "",
+                    "permissions_required": obj.get("x_mitre_permissions_required", []) or [],
+                    # canonical technique id + aliases for consumers
+                    "mitre_technique_id": mitre_id,
+                    "mitre_aliases": aliases,
+                    "mitre_technique_ids": [mitre_id] + [mu.normalize_mitre(a) for a in aliases if mu.normalize_mitre(a)],
                 }
                 severity = ThreatSeverityLevel.HIGH
                 tags = ["mitre-attack", "technique"] + [t for t in tactics if t]
             else:
+                # x-mitre-tactic object
                 ioc_type = IOCTypeEnum.MITRE_TACTIC
-                tactic_str = obj.get("x_mitre_shortname", name.lower().replace(" ", "-"))
-                extra = {"stix_id": stix_id}
+                tactic_candidate = obj.get("x_mitre_shortname") or name
+                t = (tactic_candidate or "").lower().strip()
+                tactic_str = t.replace(" ", "-") if t else None
+                extra = {
+                    "stix_id": stix_id,
+                    "mitre_technique_id": mitre_id,  # include canonical id even for tactic objects
+                }
                 severity = ThreatSeverityLevel.MEDIUM
                 tags = ["mitre-attack", "tactic"]
 
             ioc_id = f"{_IOC_ID_PREFIX}{_sha256_hex('mitre:' + mitre_id)[:16]}"
-            value = _normalize_value(mitre_id, ioc_type)
+            # value uses normalized MITRE (uppercase)
+            value = mu.normalize_mitre(mitre_id)
+
+            # Ensure tags unique and meaningful
+            tags = list(dict.fromkeys(tags))
 
             records.append(
                 IOCRecord(
@@ -343,8 +380,6 @@ def _parse_mitre_attack(
 # ---------------------------------------------------------------------------
 # CISA KEV parser
 # ---------------------------------------------------------------------------
-
-
 def _parse_cisa_kev(
     kev_data: dict[str, Any],
     ingest_id: str,
@@ -353,7 +388,7 @@ def _parse_cisa_kev(
     records: list[IOCRecord] = []
     errors: list[str] = []
     now = _utcnow_iso()
-    vulnerabilities: list[dict[str, Any]] = kev_data.get("vulnerabilities", [])
+    vulnerabilities: list[dict[str, Any]] = kev_data.get("vulnerabilities", []) or []
 
     for vuln in vulnerabilities:
         try:
@@ -361,14 +396,14 @@ def _parse_cisa_kev(
             if not cve_id or not _RE_CVE.match(cve_id):
                 continue
 
-            vendor: str = vuln.get("vendorProject", "")
-            product: str = vuln.get("product", "")
-            vuln_name: str = vuln.get("vulnerabilityName", "")
-            date_added: str = vuln.get("dateAdded", "")
-            short_desc: str = vuln.get("shortDescription", "")
-            required_action: str = vuln.get("requiredAction", "")
-            due_date: str = vuln.get("dueDate", "")
-            known_ransomware: str = vuln.get("knownRansomwareCampaignUse", "Unknown")
+            vendor: str = vuln.get("vendorProject", "") or ""
+            product: str = vuln.get("product", "") or ""
+            vuln_name: str = vuln.get("vulnerabilityName", "") or ""
+            date_added: str = vuln.get("dateAdded", "") or ""
+            short_desc: str = vuln.get("shortDescription", "") or ""
+            required_action: str = vuln.get("requiredAction", "") or ""
+            due_date: str = vuln.get("dueDate", "") or ""
+            known_ransomware: str = vuln.get("knownRansomwareCampaignUse", "Unknown") or "Unknown"
 
             severity = ThreatSeverityLevel.CRITICAL if known_ransomware.lower() == "known" else ThreatSeverityLevel.HIGH
 
@@ -417,8 +452,6 @@ def _parse_cisa_kev(
 # ---------------------------------------------------------------------------
 # Custom IOC parser (CSV + JSON)
 # ---------------------------------------------------------------------------
-
-
 def _parse_custom_ioc_json(
     raw: list[dict[str, Any]] | list[Any],
     ingest_id: str,
@@ -544,8 +577,19 @@ def _custom_ioc_entry_to_record(
     tags = list(entry.tags) + ["custom-ioc"]
     if entry.cve_id:
         tags.append("cve")
+
+    # Normalize mitre technique id if provided and add canonical extras
+    mitre_norm = None
     if entry.mitre_technique_id:
-        tags.append("mitre-attack")
+        mitre_norm = mu.normalize_mitre(entry.mitre_technique_id)
+        if mitre_norm:
+            tags.append("mitre-attack")
+
+    extra = dict(entry.extra)
+    if mitre_norm:
+        extra.setdefault("mitre_technique_id", mitre_norm)
+        extra.setdefault("mitre_technique_ids", [mitre_norm])
+        extra.setdefault("mitre_aliases", [])
 
     return IOCRecord(
         ioc_id=ioc_id,
@@ -557,7 +601,7 @@ def _custom_ioc_entry_to_record(
         tags=tags,
         description=entry.description,
         org_id=org_id,
-        mitre_technique_id=entry.mitre_technique_id,
+        mitre_technique_id=mitre_norm,
         mitre_tactic=entry.mitre_tactic,
         cve_id=entry.cve_id or (value if ioc_type == IOCTypeEnum.CVE else None),
         first_seen=now,
@@ -565,15 +609,13 @@ def _custom_ioc_entry_to_record(
         expiry=entry.expiry,
         active=True,
         feed_ingest_id=ingest_id,
-        extra=dict(entry.extra),
+        extra=extra,
     )
 
 
 # ---------------------------------------------------------------------------
 # ThreatFeedIngestionService
 # ---------------------------------------------------------------------------
-
-
 class ThreatFeedIngestionService:
     """
     Ingestion engine for IronClaw Threat Intelligence.
@@ -588,8 +630,6 @@ class ThreatFeedIngestionService:
     - Maintain per-ingest result history in-memory and persist to Supabase.
     - Provide lookup, filtering, enrichment query, and deactivation APIs
       delegated to IOCStore as the authoritative backing store.
-
-    Enum contracts are owned by app.schemas.threat_detection.
     """
 
     def __init__(
@@ -690,9 +730,9 @@ class ThreatFeedIngestionService:
         records, errors = _parse_cisa_kev(raw, ingest_id, org_id)
         inserted, updated, skipped = self._upsert_iocs(records)
 
-        catalog_version: str = raw.get("catalogVersion", "")
-        date_released: str = raw.get("dateReleased", "")
-        count: int = raw.get("count", 0)
+        catalog_version: str = raw.get("catalogVersion", "") or ""
+        date_released: str = raw.get("dateReleased", "") or ""
+        count: int = raw.get("count", 0) or 0
 
         result = FeedIngestResult(
             ingest_id=ingest_id,
@@ -850,7 +890,9 @@ class ThreatFeedIngestionService:
         return self._store().lookup_by_cve(cve_id, org_id=org_id, active_only=True)
 
     def lookup_by_mitre_technique(self, technique_id: str, *, org_id: str | None = None) -> list[IOCRecord]:
-        return self._store().lookup_by_mitre_technique(technique_id, org_id=org_id, active_only=True)
+        # normalize caller-supplied technique id before delegating
+        normalized = mu.normalize_mitre(technique_id)
+        return self._store().lookup_by_mitre_technique(normalized or technique_id, org_id=org_id, active_only=True)
 
     def filter_iocs(self, req: IOCFilterRequest) -> list[IOCRecord]:
         return self._store().filter_iocs(req)
@@ -962,7 +1004,6 @@ class ThreatFeedIngestionService:
 # ---------------------------------------------------------------------------
 # Module-level singleton
 # ---------------------------------------------------------------------------
-
 _THREAT_FEED_SERVICE = ThreatFeedIngestionService()
 
 
@@ -980,7 +1021,6 @@ def reset_threat_feed_service() -> None:
 # run_feed_ingestion — dispatch adapter called by POST /threat/feeds/refresh
 # Signature: (source, org_id, force, custom_url) -> FeedIngestResult
 # ---------------------------------------------------------------------------
-
 _SUPPORTED_SOURCES = {
     ThreatFeedSourceEnum.MITRE_ATTACK,
     ThreatFeedSourceEnum.CISA_KEV,
@@ -997,31 +1037,6 @@ def run_feed_ingestion(
 ) -> FeedIngestResult:
     """
     Dispatch a single feed ingestion run for the given source.
-
-    Called exclusively by POST /threat/feeds/refresh.
-    Delegates to the singleton ThreatFeedIngestionService methods — no
-    duplicate ingestion logic lives here.
-
-    For STIX_TAXII: delegates to get_stix_adapter().ingest_bundle() if a
-    pre-fetched bundle dict is supplied via taxii_config context, or to
-    get_stix_adapter().ingest_from_taxii() if a TAXIIConfig is provided.
-    If neither is available, returns a typed FAILED result explaining that
-    TAXII ingestion requires a TAXIIConfig.
-
-    Args:
-        source:       Feed source enum value to ingest.
-        org_id:       Scoping org ID; None for global ingest.
-        force:        Reserved for future cache-bypass logic; accepted and
-                      logged but does not alter current ingestion behaviour
-                      (all runs are unconditional at this layer).
-        custom_url:   Optional override URL for the feed endpoint.
-        taxii_config: Optional TAXIIConfig for STIX_TAXII source. When
-                      provided, delegates to STIXAdapter.ingest_from_taxii().
-                      When None and source is STIX_TAXII, returns FAILED with
-                      a clear explanation.
-
-    Returns:
-        FeedIngestResult dataclass with counts and status.
     """
     from app.services.stix_adapter import TAXIIConfig as _TAXIIConfig  # noqa: PLC0415
     from app.services.stix_adapter import get_stix_adapter
@@ -1058,7 +1073,7 @@ def run_feed_ingestion(
                 iocs_inserted=0,
                 iocs_updated=0,
                 iocs_skipped=0,
-                errors=["STIX_TAXII ingestion requires a TAXIIConfig (discovery_url, collection_id, credentials). Pass taxii_config= to run_feed_ingestion() or supply connection parameters via the feed refresh request body."],
+                errors=["STIX_TAXII ingestion requires a TAXIIConfig (discovery_url, collection_id, credentials). Pass taxii_config= to run_feed_ingestion() or supply connection parameters via the adapter."],
                 started_at=now,
                 completed_at=now,
                 org_id=org_id,

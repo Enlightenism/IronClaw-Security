@@ -9,6 +9,7 @@ import threading
 from typing import Any, Protocol
 
 from app.core.supabase import get_supabase_service_client
+from app.services import mitre_utils as mu  # canonical MITRE helpers
 from app.services.threat_feed_ingestion import FeedIngestResult, IOCFilterRequest, IOCRecord
 
 logger = logging.getLogger(__name__)
@@ -74,6 +75,13 @@ def _filter_attr(obj: Any, *names: str, default: Any = None) -> Any:
 
 
 def _record_to_row(record: IOCRecord) -> dict[str, Any]:
+    """
+    Convert an IOCRecord-like object into a DB row dict. MITRE technique IDs
+    are normalized to the canonical uppercase form here to ensure consistent
+    storage and lookups across the system.
+    """
+    mitre_raw = _record_attr(record, "mitre_technique_id", "mitretechniqueid")
+    mitre_norm = mu.normalize_mitre(mitre_raw)
     return {
         "ioc_id": _record_attr(record, "ioc_id", "iocid", default=""),
         "ioc_type": _record_attr(record, "ioc_type", "ioctype", default="unknown"),
@@ -84,7 +92,7 @@ def _record_to_row(record: IOCRecord) -> dict[str, Any]:
         "tags": list(_record_attr(record, "tags", default=[]) or []),
         "description": _record_attr(record, "description", default="") or "",
         "org_id": _record_attr(record, "org_id", "orgid"),
-        "mitre_technique_id": _record_attr(record, "mitre_technique_id", "mitretechniqueid"),
+        "mitre_technique_id": mitre_norm,
         "mitre_tactic": _record_attr(record, "mitre_tactic", "mitretactic"),
         "cve_id": _record_attr(record, "cve_id", "cveid"),
         "first_seen": _record_attr(record, "first_seen", "firstseen", default=_utcnow_iso()),
@@ -166,9 +174,21 @@ def _ingest_result_to_row(result: FeedIngestResult) -> dict[str, Any]:
 
 
 def _merge_record_update(existing: dict[str, Any], record: IOCRecord) -> dict[str, Any]:
+    """
+    Merge an incoming IOCRecord into an existing row. Ensure mitre_technique_id
+    is preserved and normalized. Incoming fields override or augment existing
+    values where appropriate.
+    """
     merged_tags = sorted(set(_parse_tags(existing.get("tags"))) | set(_record_attr(record, "tags", default=[]) or []))
     merged_extra = {**_parse_extra(existing.get("extra")), **dict(_record_attr(record, "extra", default={}) or {})}
     incoming_description = _record_attr(record, "description", default="") or ""
+
+    # Normalize incoming mitre id if present, otherwise preserve existing normalized value
+    incoming_mitre_raw = _record_attr(record, "mitre_technique_id", "mitretechniqueid")
+    incoming_mitre = mu.normalize_mitre(incoming_mitre_raw) if incoming_mitre_raw is not None else None
+    existing_mitre = mu.normalize_mitre(existing.get("mitre_technique_id")) if existing.get("mitre_technique_id") is not None else None
+    final_mitre = incoming_mitre or existing_mitre
+
     return {
         "severity": _record_attr(record, "severity", default=existing.get("severity", "medium")),
         "confidence": max(float(existing.get("confidence", 0.0) or 0.0), float(_record_attr(record, "confidence", default=0.0) or 0.0)),
@@ -179,10 +199,17 @@ def _merge_record_update(existing: dict[str, Any], record: IOCRecord) -> dict[st
         "active": bool(_record_attr(record, "active", default=True)),
         "feed_ingest_id": _record_attr(record, "feed_ingest_id", "feedingestid", default=existing.get("feed_ingest_id", "")),
         "extra": merged_extra,
+        "mitre_technique_id": final_mitre,
     }
 
 
 def _overwrite_record_update(record: IOCRecord) -> dict[str, Any]:
+    """
+    Build a payload that overwrites stored fields with incoming record fields.
+    Normalize MITRE technique id for canonical storage.
+    """
+    mitre_raw = _record_attr(record, "mitre_technique_id", "mitretechniqueid")
+    mitre_norm = mu.normalize_mitre(mitre_raw)
     return {
         "ioc_type": _record_attr(record, "ioc_type", "ioctype", default="unknown"),
         "value": _record_attr(record, "value", default=""),
@@ -192,7 +219,7 @@ def _overwrite_record_update(record: IOCRecord) -> dict[str, Any]:
         "tags": list(_record_attr(record, "tags", default=[]) or []),
         "description": _record_attr(record, "description", default="") or "",
         "org_id": _record_attr(record, "org_id", "orgid"),
-        "mitre_technique_id": _record_attr(record, "mitre_technique_id", "mitretechniqueid"),
+        "mitre_technique_id": mitre_norm,
         "mitre_tactic": _record_attr(record, "mitre_tactic", "mitretactic"),
         "cve_id": _record_attr(record, "cve_id", "cveid"),
         "last_seen": _record_attr(record, "last_seen", "lastseen", default=_utcnow_iso()),
@@ -297,10 +324,16 @@ class InMemoryIOCStoreBackend:
 
     def upsert_ioc(self, record: IOCRecord) -> bool:
         row = _record_to_row(record)
+        # Ensure stored mitre_technique_id is normalized (canonical storage)
+        if row.get("mitre_technique_id"):
+            row["mitre_technique_id"] = mu.normalize_mitre(row["mitre_technique_id"])
         existing = self.fallback_iocs.get(row["ioc_id"])
         if existing:
             merged = dict(existing)
             merged.update(_merge_record_update(existing, record))
+            # Normalize stored existing mitre id if present
+            if merged.get("mitre_technique_id"):
+                merged["mitre_technique_id"] = mu.normalize_mitre(merged["mitre_technique_id"])
             self.fallback_iocs[row["ioc_id"]] = merged
         else:
             self.fallback_iocs[row["ioc_id"]] = row
@@ -318,10 +351,16 @@ class InMemoryIOCStoreBackend:
         updated = 0
         for record in deduped.values():
             row = _record_to_row(record)
+            # normalize mitre on insert
+            if row.get("mitre_technique_id"):
+                row["mitre_technique_id"] = mu.normalize_mitre(row["mitre_technique_id"])
             existing = self.fallback_iocs.get(row["ioc_id"])
             if existing:
                 merged = dict(existing)
                 merged.update(_overwrite_record_update(record) if overwrite else _merge_record_update(existing, record))
+                # normalize merged mitre
+                if merged.get("mitre_technique_id"):
+                    merged["mitre_technique_id"] = mu.normalize_mitre(merged["mitre_technique_id"])
                 self.fallback_iocs[row["ioc_id"]] = merged
                 updated += 1
             else:
@@ -357,6 +396,11 @@ class InMemoryIOCStoreBackend:
         org_id: str | None = None,
         active_only: bool = True,
     ) -> list[IOCRecord]:
+        """
+        Lookup by technique id. Input is normalized to uppercase. The store
+        persists mitre_technique_id in normalized uppercase form, so equality
+        comparison is safe and efficient.
+        """
         normalized = (technique_id or "").strip().upper()
         return self._lookup_in_fallback(
             predicate=lambda row: str(row.get("mitre_technique_id") or "").upper() == normalized,
@@ -405,8 +449,11 @@ class InMemoryIOCStoreBackend:
                 continue
             if active is not None and bool(row.get("active", True)) != active:
                 continue
-            if technique_id is not None and row.get("mitre_technique_id") != technique_id:
-                continue
+            if technique_id is not None:
+                # Normalize both sides to ensure matches even if row had mixed case
+                desired = mu.normalize_mitre(technique_id)
+                if mu.normalize_mitre(row.get("mitre_technique_id")) != desired:
+                    continue
             if cve_id is not None and row.get("cve_id") != cve_id:
                 continue
             if value_contains is not None and value_contains not in str(row.get("value") or ""):
@@ -633,11 +680,18 @@ class IOCStore:
                 return runtime.upsert_ioc(record)
 
             row = _record_to_row(record)
+            # ensure canonical mitre normalization on DB path as well
+            if row.get("mitre_technique_id"):
+                row["mitre_technique_id"] = mu.normalize_mitre(row["mitre_technique_id"])
+
             table = runtime.table(TABLE_IOCS)
-            existing_resp = table.select("ioc_id,confidence,tags,description,extra,expiry").eq("ioc_id", row["ioc_id"]).maybe_single().execute()
+            existing_resp = table.select("ioc_id,confidence,tags,description,extra,expiry,mitre_technique_id").eq("ioc_id", row["ioc_id"]).maybe_single().execute()
             existing = existing_resp.data if existing_resp else None
 
             if existing:
+                # ensure existing mitre value normalized before merging
+                if existing.get("mitre_technique_id"):
+                    existing["mitre_technique_id"] = mu.normalize_mitre(existing.get("mitre_technique_id"))
                 table.update(_merge_record_update(existing, record)).eq("ioc_id", row["ioc_id"]).execute()
             else:
                 table.insert(row).execute()
@@ -674,13 +728,16 @@ class IOCStore:
                 batch_updated = 0
                 try:
                     table = runtime.table(TABLE_IOCS)
-                    existing_resp = table.select("ioc_id,confidence,tags,description,extra,expiry").in_("ioc_id", ioc_ids).execute()
+                    existing_resp = table.select("ioc_id,confidence,tags,description,extra,expiry,mitre_technique_id").in_("ioc_id", ioc_ids).execute()
                     existing_map: dict[str, dict[str, Any]] = {}
                     existing_data = existing_resp.data if existing_resp else []
                     if isinstance(existing_data, dict):
                         existing_map[existing_data["ioc_id"]] = existing_data
                     else:
                         for row in existing_data or []:
+                            # normalize existing mitre values for safe merges
+                            if row.get("mitre_technique_id"):
+                                row["mitre_technique_id"] = mu.normalize_mitre(row.get("mitre_technique_id"))
                             existing_map[row["ioc_id"]] = row
 
                     rows_to_insert: list[dict[str, Any]] = []
@@ -688,8 +745,14 @@ class IOCStore:
 
                     for record in batch:
                         row = _record_to_row(record)
+                        # normalize incoming mitre
+                        if row.get("mitre_technique_id"):
+                            row["mitre_technique_id"] = mu.normalize_mitre(row["mitre_technique_id"])
                         if row["ioc_id"] in existing_map:
                             payload = _overwrite_record_update(record) if overwrite else _merge_record_update(existing_map[row["ioc_id"]], record)
+                            # normalize payload mitre field if present
+                            if payload.get("mitre_technique_id"):
+                                payload["mitre_technique_id"] = mu.normalize_mitre(payload.get("mitre_technique_id"))
                             rows_to_update.append((row["ioc_id"], payload))
                             updated += 1
                             batch_updated += 1
@@ -829,24 +892,28 @@ class IOCStore:
             return []
 
     def filter_iocs(self, req: IOCFilterRequest) -> list[IOCRecord]:
-        source = _filter_attr(req, "source")
-        ioc_type = _filter_attr(req, "ioc_type", "ioctype")
-        severity = _filter_attr(req, "severity")
-        org_id = _filter_attr(req, "org_id", "orgid")
-        active = _filter_attr(req, "active")
-        technique_id = _filter_attr(req, "mitre_technique_id", "mitretechniqueid")
-        cve_id = _filter_attr(req, "cve_id", "cveid")
-        value_contains = _filter_attr(req, "value_contains", "valuecontains")
-        tag = _filter_attr(req, "tag")
-        limit = int(_filter_attr(req, "limit", default=100) or 100)
-        offset = int(_filter_attr(req, "offset", default=0) or 0)
-
         try:
             runtime_type, runtime = self._resolve_runtime()
             if runtime_type == "backend":
+                # Ensure technique param normalised before building query
+                technique_id = _filter_attr(req, "mitre_technique_id", "mitretechniqueid")
+                if technique_id is not None:
+                    technique_id = mu.normalize_mitre(technique_id)
                 return runtime.filter_iocs(req)
 
             q = runtime.table(TABLE_IOCS).select("*")
+            source = _filter_attr(req, "source")
+            ioc_type = _filter_attr(req, "ioc_type", "ioctype")
+            severity = _filter_attr(req, "severity")
+            org_id = _filter_attr(req, "org_id", "orgid")
+            active = _filter_attr(req, "active")
+            technique_id = _filter_attr(req, "mitre_technique_id", "mitretechniqueid")
+            cve_id = _filter_attr(req, "cve_id", "cveid")
+            value_contains = _filter_attr(req, "value_contains", "valuecontains")
+            tag = _filter_attr(req, "tag")
+            limit = int(_filter_attr(req, "limit", default=100) or 100)
+            offset = int(_filter_attr(req, "offset", default=0) or 0)
+
             if source is not None:
                 q = q.eq("source", source)
             if ioc_type is not None:
@@ -858,6 +925,7 @@ class IOCStore:
             if active is not None:
                 q = q.eq("active", active)
             if technique_id is not None:
+                technique_id = mu.normalize_mitre(technique_id)
                 q = q.eq("mitre_technique_id", technique_id)
             if cve_id is not None:
                 q = q.eq("cve_id", cve_id)
