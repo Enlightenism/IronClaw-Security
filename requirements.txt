@@ -11,8 +11,8 @@
 #   With SDK extras:       pip install -e ".[sdk]"
 #   With skill extras:     pip install -e ".[skill]"
 #   With Supabase extras:  pip install -e ".[supabase]"
-#   Docker layer:          pip install -e ".[docker]"
+#   With Docker layer:     pip install -e ".[docker]"
 #
 # Do NOT add version pins here. Edit pyproject.toml only.
 # ============================================================
-# Use: pip install -e ".[dev]"
+# Use: pip install -e .
