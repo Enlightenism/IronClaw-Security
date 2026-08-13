@@ -72,7 +72,7 @@ ALLOWED_REDIRECT_HOSTS: frozenset[str] = frozenset(
     {
         "moving-forward.ca",
         "www.moving-forward.ca",
-        "ironclaw-security-production.up.railway.app",
+        "ironclaw-security.onrender.com",
     }
 )
 

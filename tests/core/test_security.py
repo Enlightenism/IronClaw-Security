@@ -72,11 +72,11 @@ def _build_app(settings: Settings) -> FastAPI:
 def _build_production_like_settings(**overrides: object) -> Settings:
     values: dict[str, object] = {
         "ALLOWED_ORIGINS": "https://moving-forward.ca,https://www.moving-forward.ca",
-        "TRUSTED_HOSTS": "testserver,moving-forward.ca,[www.moving-forward.ca](https://www.moving-forward.ca),ironclaw-security-production.up.railway.app",
+        "TRUSTED_HOSTS": "testserver,moving-forward.ca,www.moving-forward.ca,ironclaw-security.onrender.com",
         "AUTH_REQUIRED": True,
         "API_KEY": "test-api-key",
         "CORS_ALLOWED_METHODS": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-        "CORS_ALLOWED_HEADERS": "Authorization,Content-Type,X-API-Key,X-Request-ID",
+        "CORS_ALLOWED_HEADERS": "Authorization,Content-Type,X-API-Key,X-Request-ID,X-Trace-ID,X-Session-ID,X-Organization-ID,X-Customer-ID,X-Actor-ID,X-Region,X-Environment",
         "CORS_EXPOSE_HEADERS": "X-Request-ID,X-Trace-ID",
     }
     values.update(overrides)
