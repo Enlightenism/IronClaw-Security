@@ -6,6 +6,9 @@ from app.core.access_control import require_access
 from app.core.auth import AuthContext, get_auth_context
 from app.core.org_isolation import require_same_org
 
+_CUSTOMER_PRINCIPAL_TYPES = {"customer"}
+_TRUSTED_API_KEY_PRINCIPAL_TYPES = {"api_key", "org_key", "platform", "platform_api_key"}
+
 
 def _clean(value: object) -> str:
     if not isinstance(value, str):
@@ -13,22 +16,47 @@ def _clean(value: object) -> str:
     return value.strip()
 
 
+def _context_org_id(context: AuthContext) -> str:
+    return _clean(getattr(context, "org_id", None)) or _clean(getattr(context, "organization_id", None))
+
+
 async def require_customer_auth(
     context: AuthContext = Depends(get_auth_context),
 ) -> AuthContext:
-    require_access(
-        context,
-        action="customer_authenticated",
-        required_roles=("customer_admin", "customer_user"),
-        metadata={"dependency": "require_customer_auth"},
-    )
-    if context.principal_type not in {"customer"}:
+    principal_type = _clean(getattr(context, "principal_type", None))
+
+    if principal_type in _CUSTOMER_PRINCIPAL_TYPES:
         require_access(
             context,
-            action="customer_principal_required",
-            required_roles=("platform_admin", "system_admin", "operator_admin"),
-            metadata={"dependency": "require_customer_auth", "reason": "principal_type_mismatch"},
+            action="customer_authenticated",
+            required_roles=("customer_admin", "customer_user"),
+            metadata={"dependency": "require_customer_auth", "principal_type": principal_type},
         )
+        return context
+
+    if principal_type in _TRUSTED_API_KEY_PRINCIPAL_TYPES:
+        require_access(
+            context,
+            action="customer_authenticated",
+            required_roles=("platform_admin", "system_admin", "operator_admin"),
+            metadata={
+                "dependency": "require_customer_auth",
+                "principal_type": principal_type,
+                "auth_mode": "trusted_api_key",
+            },
+        )
+        return context
+
+    require_access(
+        context,
+        action="customer_principal_required",
+        required_roles=("platform_admin", "system_admin", "operator_admin"),
+        metadata={
+            "dependency": "require_customer_auth",
+            "reason": "principal_type_mismatch",
+            "principal_type": principal_type,
+        },
+    )
     return context
 
 
@@ -72,7 +100,7 @@ async def require_customer_org_access(
     x_org_id: str | None = Header(default=None),
     context: AuthContext = Depends(require_customer_read),
 ) -> AuthContext:
-    target_org_id = _clean(x_org_id) or context.org_id
+    target_org_id = _clean(x_org_id) or _context_org_id(context)
     require_same_org(
         context,
         target_org_id=target_org_id,

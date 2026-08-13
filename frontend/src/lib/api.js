@@ -11,6 +11,7 @@ export const API_BASE = `${BACKEND_URL}/api`;
 
 const AUTH_TOKEN_STORAGE_KEY = "ironclaw.auth.token";
 const AUTH_ORG_ID_STORAGE_KEY = "ironclaw.auth.orgId";
+const AUTH_API_KEY_STORAGE_KEY = "ironclaw.auth.apiKey";
 
 const api = axios.create({
   baseURL: API_BASE,
@@ -32,6 +33,20 @@ const getStoredOrgId = () => {
     return "";
   }
 };
+
+const getStoredApiKey = () => {
+  try {
+    return localStorage.getItem(AUTH_API_KEY_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+};
+
+const getConfiguredApiKey = () =>
+  process.env.REACT_APP_API_KEY ||
+  process.env.REACT_APP_PLATFORM_API_KEY ||
+  process.env.REACT_APP_INTERNAL_PLATFORM_API_KEY ||
+  "";
 
 const getOrgIdFromSession = (session) => {
   const user = session?.user;
@@ -67,6 +82,7 @@ const shouldBypassUnauthorizedRedirect = async () => {
 api.interceptors.request.use(async (config) => {
   let accessToken = "";
   let orgId = "";
+  let apiKey = "";
 
   try {
     const {
@@ -88,6 +104,8 @@ api.interceptors.request.use(async (config) => {
     orgId = getStoredOrgId();
   }
 
+  apiKey = getConfiguredApiKey() || getStoredApiKey();
+
   config.headers = config.headers ?? {};
 
   if (accessToken) {
@@ -100,6 +118,12 @@ api.interceptors.request.use(async (config) => {
     config.headers["X-Org-Id"] = orgId;
   } else {
     delete config.headers["X-Org-Id"];
+  }
+
+  if (apiKey) {
+    config.headers["X-API-Key"] = apiKey;
+  } else {
+    delete config.headers["X-API-Key"];
   }
 
   return config;

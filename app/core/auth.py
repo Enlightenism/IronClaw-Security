@@ -20,6 +20,7 @@ from app.core.settings import get_settings
 
 _logger = logging.getLogger(__name__)
 
+
 API_KEY_HEADER_NAME = "X-API-Key"
 SESSION_ID_HEADER_NAME = "X-Session-Id"
 ORG_ID_HEADER_NAME = "X-Org-Id"
@@ -27,7 +28,9 @@ ORGANIZATION_ID_HEADER_NAME = "X-Organization-Id"
 TENANT_ID_HEADER_NAME = "X-Tenant-Id"
 AUTHORIZATION_HEADER_NAME = "Authorization"
 
+
 _RESOLVED_API_KEY_RECORD_REQUEST_STATE_KEY = "_resolved_api_key_record"
+
 
 api_key_header = APIKeyHeader(name=API_KEY_HEADER_NAME, auto_error=False)
 session_id_header = APIKeyHeader(name=SESSION_ID_HEADER_NAME, auto_error=False)
@@ -352,13 +355,17 @@ def _has_registry_keys() -> bool:
     return False
 
 
+def _has_bearer_auth_config(request: Request) -> bool:
+    return get_supabase_jwt_secret(request) is not None
+
+
 def _is_auth_required(request: Request) -> bool:
     if _is_preflight_request(request):
         return False
 
     settings = _get_settings(request)
     if settings is None:
-        return _has_registry_keys()
+        return _has_registry_keys() or _extract_configured_api_key(request) is not None or _has_bearer_auth_config(request)
 
     effective_flag = _coerce_optional_bool(
         getattr(settings, "effective_auth_required", None),
@@ -379,6 +386,9 @@ def _is_auth_required(request: Request) -> bool:
         return configured_flag
 
     if _extract_configured_api_key(request) is not None:
+        return True
+
+    if _has_bearer_auth_config(request):
         return True
 
     return _has_registry_keys()

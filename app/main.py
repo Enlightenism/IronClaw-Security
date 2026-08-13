@@ -16,6 +16,7 @@ from app.core.settings import get_settings
 
 ProtectedDependencyFactory = Callable[[], Any]
 
+
 _log = logging.getLogger(__name__)
 
 
