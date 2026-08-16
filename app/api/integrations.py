@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import base64
 from datetime import UTC, datetime
+import json
+import os
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from app.core.auth import get_auth_context
@@ -183,6 +186,29 @@ class IntegrationTokenResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Debug / token introspection models
+# ---------------------------------------------------------------------------
+
+
+class TokenIntrospectClaims(BaseModel):
+    sub: str | None = None
+    aud: str | list[str] | None = None
+    exp: int | None = None
+    iat: int | None = None
+    iss: str | None = None
+    extra: dict[str, Any] = Field(default_factory=dict)
+
+
+class TokenIntrospectResponse(BaseModel):
+    active: bool
+    alg_in_token: str | None = None
+    expected_alg: str = "HS256"
+    validated_via: str | None = None
+    claims: TokenIntrospectClaims | None = None
+    error: str | None = None
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -294,6 +320,88 @@ def _require_record(integration_id: str) -> Any:
     return record
 
 
+def _decode_jwt_unsafe(token: str) -> tuple[dict[str, Any] | None, str | None]:
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return None, "invalid_token_format"
+
+        header_b64, payload_b64, _ = parts
+
+        def _decode_part(part: str) -> dict[str, Any]:
+            padded = part + "=" * ((4 - len(part) % 4) % 4)
+            raw = base64.urlsafe_b64decode(padded)
+            return json.loads(raw)
+
+        header = _decode_part(header_b64)
+        payload = _decode_part(payload_b64)
+
+        alg = header.get("alg")
+        if not isinstance(alg, str):
+            return None, "missing_alg"
+
+        return payload, alg
+    except Exception:
+        return None, "decode_error"
+
+
+def _introspect_token_from_request(request: Request) -> TokenIntrospectResponse:
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.lower().startswith("bearer "):
+        return TokenIntrospectResponse(
+            active=False,
+            alg_in_token=None,
+            expected_alg="HS256",
+            validated_via=None,
+            claims=None,
+            error="missing_or_invalid_authorization_header",
+        )
+
+    token = auth_header.split(" ", 1)[1]
+    payload, alg = _decode_jwt_unsafe(token)
+
+    if payload is None:
+        return TokenIntrospectResponse(
+            active=False,
+            alg_in_token=None,
+            expected_alg="HS256",
+            validated_via=None,
+            claims=None,
+            error=alg or "decode_error",
+        )
+
+    validated_via: str | None = None
+
+    try:
+        auth_ctx = get_auth_context(request)
+        if getattr(auth_ctx, "user_id", None):
+            validated_via = "supabase_remote"
+    except Exception:
+        try:
+            if payload.get("sub"):
+                validated_via = "local"
+        except Exception:
+            validated_via = None
+
+    claims = TokenIntrospectClaims(
+        sub=payload.get("sub"),
+        aud=payload.get("aud"),
+        exp=payload.get("exp"),
+        iat=payload.get("iat"),
+        iss=payload.get("iss"),
+        extra={k: v for k, v in payload.items() if k not in ("sub", "aud", "exp", "iat", "iss")},
+    )
+
+    return TokenIntrospectResponse(
+        active=True,
+        alg_in_token=alg,
+        expected_alg="HS256",
+        validated_via=validated_via,
+        claims=claims,
+        error=None,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Installer sub-routes  (before /{integration_id} catch-all)
 # ---------------------------------------------------------------------------
@@ -353,6 +461,34 @@ def get_integrations_token(auth: Any = Depends(get_auth_context)) -> Integration
         claude_code_command=f"npx ironclaw-install --key {token} --platform claude-code",
         openclaw_command=f"npx ironclaw-install --key {token} --platform openclaw",
     )
+
+
+# ---------------------------------------------------------------------------
+# Debug / token introspection endpoint
+# ---------------------------------------------------------------------------
+
+
+IS_PRODUCTION = os.environ.get("IRONCLAW_ENV", "development").lower() in ("production", "prod")
+
+
+@router.get("/debug/token-introspect", response_model=TokenIntrospectResponse)
+def debug_token_introspect(
+    request: Request,
+    auth: Any = Depends(get_auth_context),
+) -> TokenIntrospectResponse:
+    if IS_PRODUCTION:
+        raise HTTPException(
+            status_code=403,
+            detail="token_introspect_disabled_in_production",
+        )
+
+    if not getattr(auth, "user_id", None):
+        raise HTTPException(
+            status_code=403,
+            detail="authentication_required",
+        )
+
+    return _introspect_token_from_request(request)
 
 
 # ---------------------------------------------------------------------------

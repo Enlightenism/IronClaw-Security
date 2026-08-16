@@ -17,6 +17,7 @@ from app.core.apikeys import (
 )
 from app.core.errors import AppError
 from app.core.settings import get_settings
+from app.services.supabase_auth import validate_token_via_supabase
 
 _logger = logging.getLogger(__name__)
 
@@ -151,14 +152,17 @@ def get_secret_key(request: Request) -> str | None:
     settings = _get_settings(request)
     if settings is None:
         return None
+
     effective_value = _clean_optional_string(
         getattr(settings, "effective_secret_key", None),
     )
     if effective_value is not None:
         return effective_value
+
     value = _clean_optional_string(getattr(settings, "secret_key", None))
-    if value and value != "changeme-32-chars-minimum!!!!!":
+    if value:
         return value
+
     return None
 
 
@@ -169,14 +173,17 @@ def get_jwt_secret(request: Request) -> str | None:
     settings = _get_settings(request)
     if settings is None:
         return None
+
     effective_value = _clean_optional_string(
         getattr(settings, "effective_jwt_secret", None),
     )
     if effective_value is not None:
         return effective_value
+
     value = _clean_optional_string(getattr(settings, "jwt_secret", None))
-    if value and value != "changeme-jwt-32-chars-minimum!!":
+    if value:
         return value
+
     return None
 
 
@@ -194,10 +201,7 @@ def get_supabase_jwt_secret(request: Request) -> str | None:
     if effective_value is not None:
         return effective_value
 
-    for attr_name in (
-        "supabase_jwt_secret",
-        "SUPABASE_JWT_SECRET",
-    ):
+    for attr_name in ("supabase_jwt_secret", "SUPABASE_JWT_SECRET"):
         value = _clean_optional_string(getattr(settings, attr_name, None))
         if value:
             return value
@@ -224,6 +228,38 @@ def _get_jwt_algorithm(request: Request) -> str:
     return "HS256"
 
 
+def _token_algorithm(token: str) -> str | None:
+    try:
+        header = jwt.get_unverified_header(token)
+    except jwt.PyJWTError:
+        return None
+    return _clean_optional_string(header.get("alg"))
+
+
+def _validate_bearer_token_remotely(
+    request: Request,
+    token: str,
+) -> dict[str, Any] | None:
+    settings = _get_settings(request)
+    try:
+        return validate_token_via_supabase(token, settings=settings)
+    except Exception as exc:
+        _logger.warning("Remote Supabase bearer validation failed: %s", exc)
+        return None
+
+
+def _bearer_token_error(
+    algorithm: str,
+    token_algorithm: str | None,
+) -> dict[str, str | None]:
+    return {
+        "error": "invalid_bearer_token",
+        "detail": "Invalid Bearer token — algorithm mismatch or signature failure",
+        "alg_in_token": token_algorithm,
+        "expected_alg": algorithm,
+    }
+
+
 def _touch_record_if_possible(record: APIKeyRecord) -> APIKeyRecord:
     touch = getattr(record, "touch", None)
     if not callable(touch):
@@ -244,6 +280,7 @@ def _touch_record_if_possible(record: APIKeyRecord) -> APIKeyRecord:
             updater(updated)
         except Exception:
             pass
+
     return updated
 
 
@@ -273,6 +310,7 @@ def _resolve_registry_api_key(provided_api_key: str) -> APIKeyRecord | None:
             record = resolver(fingerprint)
         except Exception:
             record = None
+
         if _record_is_usable(record):
             return _touch_record_if_possible(record)
 
@@ -311,6 +349,7 @@ def _resolve_registry_api_key_for_request(
     record = _resolve_registry_api_key(normalized_api_key)
     if record is not None:
         _cache_registry_record(request, record)
+
     return record
 
 
@@ -356,7 +395,26 @@ def _has_registry_keys() -> bool:
 
 
 def _has_bearer_auth_config(request: Request) -> bool:
-    return get_supabase_jwt_secret(request) is not None
+    settings = _get_settings(request)
+    if settings is None:
+        return False
+
+    return get_supabase_jwt_secret(request) is not None or (
+        _clean_optional_string(
+            getattr(settings, "effective_supabase_url", None),
+        )
+        is not None
+        and (
+            _clean_optional_string(
+                getattr(settings, "effective_supabase_anon_key", None),
+            )
+            is not None
+            or _clean_optional_string(
+                getattr(settings, "effective_supabase_service_role_key", None),
+            )
+            is not None
+        )
+    )
 
 
 def _is_auth_required(request: Request) -> bool:
@@ -373,15 +431,21 @@ def _is_auth_required(request: Request) -> bool:
     if effective_flag is not None:
         return effective_flag
 
-    explicit_flag = _coerce_optional_bool(getattr(settings, "auth_required", None))
+    explicit_flag = _coerce_optional_bool(
+        getattr(settings, "auth_required", None),
+    )
     if explicit_flag is not None:
         return explicit_flag
 
-    explicit_flag = _coerce_optional_bool(getattr(settings, "AUTH_REQUIRED", None))
+    explicit_flag = _coerce_optional_bool(
+        getattr(settings, "AUTH_REQUIRED", None),
+    )
     if explicit_flag is not None:
         return explicit_flag
 
-    configured_flag = _coerce_optional_bool(getattr(settings, "auth_configured", None))
+    configured_flag = _coerce_optional_bool(
+        getattr(settings, "auth_configured", None),
+    )
     if configured_flag is not None:
         return configured_flag
 
@@ -430,7 +494,13 @@ def _coerce_principal_id(record: APIKeyRecord | None) -> str | None:
     if record is None:
         return None
 
-    for attr_name in ("key_id", "id", "client_id", "owner_id", "principal_id"):
+    for attr_name in (
+        "key_id",
+        "id",
+        "client_id",
+        "owner_id",
+        "principal_id",
+    ):
         value = _clean_optional_string(getattr(record, attr_name, None))
         if value is not None:
             return value
@@ -463,6 +533,7 @@ def _extract_header_org_candidates(
         value = _clean_optional_string(raw_value)
         if value is None:
             continue
+
         if value not in seen_values:
             normalized_values.append((header_name, value))
             seen_values.add(value)
@@ -500,6 +571,7 @@ def _coerce_org_id_from_settings(request: Request) -> str | None:
             value = _clean_optional_string(getattr(settings, attr_name, None))
             if value is not None:
                 return value
+
     return None
 
 
@@ -571,8 +643,10 @@ def _extract_bearer_token(raw_authorization: str | None) -> str | None:
     value = _clean_optional_string(raw_authorization)
     if value is None:
         return None
+
     if not value.lower().startswith("bearer "):
         return None
+
     token = value[7:].strip()
     return token or None
 
@@ -581,12 +655,17 @@ def _clean_claim_strings(value: object) -> tuple[str, ...]:
     if isinstance(value, str):
         cleaned = _clean_optional_string(value)
         return (cleaned,) if cleaned else ()
+
     if isinstance(value, (list, tuple, set)):
         return tuple(item for item in (_clean_optional_string(candidate) for candidate in value) if item is not None)
+
     return ()
 
 
-def _extract_claim_values(claims: dict[str, Any], *claim_names: str) -> tuple[str, ...]:
+def _extract_claim_values(
+    claims: dict[str, Any],
+    *claim_names: str,
+) -> tuple[str, ...]:
     values: list[str] = []
     seen: set[str] = set()
 
@@ -619,14 +698,24 @@ def _resolve_bearer_org_id(
 
     user_metadata = claims.get("user_metadata")
     if isinstance(user_metadata, dict):
-        for claim_name in ("org_id", "organization_id", "tenant_id", "orgId"):
+        for claim_name in (
+            "org_id",
+            "organization_id",
+            "tenant_id",
+            "orgId",
+        ):
             claim_value = _clean_optional_string(user_metadata.get(claim_name))
             if claim_value is not None:
                 return claim_value, f"user_metadata:{claim_name}"
 
     app_metadata = claims.get("app_metadata")
     if isinstance(app_metadata, dict):
-        for claim_name in ("org_id", "organization_id", "tenant_id", "orgId"):
+        for claim_name in (
+            "org_id",
+            "organization_id",
+            "tenant_id",
+            "orgId",
+        ):
             claim_value = _clean_optional_string(app_metadata.get(claim_name))
             if claim_value is not None:
                 return claim_value, f"app_metadata:{claim_name}"
@@ -751,39 +840,55 @@ def get_bearer_context(
 
     auth_required = _is_auth_required(request)
     secret = get_supabase_jwt_secret(request)
-    if not secret:
-        if not auth_required:
-            _logger.info(
-                "Ignoring Bearer token because auth is disabled and no JWT secret is configured",
-            )
-            return None
-        _logger.warning("Missing SUPABASE_JWT_SECRET for Bearer auth")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="SUPABASE_JWT_SECRET is not configured",
-        )
-
     algorithm = _get_jwt_algorithm(request)
+    token_algorithm = _token_algorithm(token)
+    claims: dict[str, Any] | None = None
 
-    try:
-        claims = cast(
-            "dict[str, Any]",
-            jwt.decode(
-                token,
-                secret,
-                algorithms=[algorithm],
-                options={"verify_aud": False},
-            ),
-        )
-    except jwt.PyJWTError as exc:
+    if secret:
+        try:
+            claims = cast(
+                "dict[str, Any]",
+                jwt.decode(
+                    token,
+                    secret,
+                    algorithms=[algorithm],
+                    options={"verify_aud": False},
+                ),
+            )
+        except jwt.PyJWTError as exc:
+            _logger.warning(
+                "Local Bearer validation failed: %s; alg_in_token=%s expected_alg=%s",
+                exc,
+                token_algorithm,
+                algorithm,
+            )
+            claims = _validate_bearer_token_remotely(request, token)
+    else:
+        claims = _validate_bearer_token_remotely(request, token)
+
+    if claims is None:
         if not auth_required:
             _logger.info("Ignoring invalid Bearer token because auth is disabled")
             return None
-        _logger.warning("Invalid Bearer token: %s", exc)
+
+        if not secret:
+            _logger.warning(
+                "Bearer auth validation unavailable: SUPABASE_JWT_SECRET is not configured",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=("SUPABASE_JWT_SECRET is not configured; configure or use remote validation via SUPABASE_URL + SUPABASE_ANON_KEY"),
+            )
+
+        _logger.warning(
+            "Invalid Bearer token: alg_in_token=%s expected_alg=%s",
+            token_algorithm,
+            algorithm,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid Bearer token",
-        ) from exc
+            detail=_bearer_token_error(algorithm, token_algorithm),
+        )
 
     principal_id = _clean_optional_string(claims.get("sub"))
     if principal_id is None:
@@ -792,6 +897,7 @@ def get_bearer_context(
                 "Ignoring Bearer token without sub claim because auth is disabled",
             )
             return None
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Bearer token missing sub claim",
@@ -801,6 +907,7 @@ def get_bearer_context(
         token=token,
         principal_id=principal_id,
         claims=claims,
+        auth_source="supabase_jwt" if secret else "supabase_remote",
     )
 
 
@@ -818,12 +925,14 @@ def get_api_key(
     if normalized_api_key is None:
         if isinstance(bearer_context, BearerAuthContext):
             return None
+
         if auth_required:
             _logger.warning("Missing API key")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Missing API key — provide X-API-Key or Bearer token",
             )
+
         return None
 
     configured_api_key = _extract_configured_api_key(request)
@@ -832,7 +941,10 @@ def get_api_key(
         _cache_registry_record(request, None)
         return normalized_api_key
 
-    registry_record = _resolve_registry_api_key_for_request(request, normalized_api_key)
+    registry_record = _resolve_registry_api_key_for_request(
+        request,
+        normalized_api_key,
+    )
     if registry_record is not None:
         return normalized_api_key
 
@@ -1007,11 +1119,13 @@ def require_auth_context(
 ) -> AuthContext:
     if context.principal_type == "preflight":
         return context
+
     if not context.authenticated:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required",
         )
+
     return context
 
 

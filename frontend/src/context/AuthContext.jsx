@@ -33,7 +33,8 @@ const getOrgIdFromSession = (session) => {
 };
 
 const syncAxiosToken = (session) => {
-  const accessToken = session?.access_token;
+  const accessToken =
+    session?.access_token || session?.provider_token || session?.id_token || "";
   const orgId = getOrgIdFromSession(session);
 
   if (accessToken) {
@@ -52,6 +53,23 @@ const syncAxiosToken = (session) => {
     delete api.defaults.headers.common["X-Org-Id"];
     localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
     localStorage.removeItem(AUTH_ORG_ID_STORAGE_KEY);
+  }
+};
+
+export const ensureFrontEndHasFreshSession = async () => {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (session?.access_token) {
+      syncAxiosToken(session);
+      return true;
+    }
+
+    return false;
+  } catch {
+    return false;
   }
 };
 
@@ -182,6 +200,7 @@ export const AuthProvider = ({ children }) => {
       register,
       logout,
       refreshUser,
+      ensureFrontEndHasFreshSession,
     }),
     [user, session, loading, authenticate, register, logout, refreshUser],
   );

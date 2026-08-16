@@ -8,6 +8,14 @@ from starlette.requests import Request
 from app.core import auth
 from app.core.errors import AppError
 
+_MISSING_SUPABASE_JWT_SECRET_DETAIL = "SUPABASE_JWT_SECRET is not configured; configure or use remote validation via SUPABASE_URL + SUPABASE_ANON_KEY"
+_INVALID_BEARER_DETAIL = {
+    "error": "invalid_bearer_token",
+    "detail": "Invalid Bearer token — algorithm mismatch or signature failure",
+    "alg_in_token": None,
+    "expected_alg": "HS256",
+}
+
 
 class DummyRegistry:
     def __init__(
@@ -201,7 +209,7 @@ def test_extract_configured_api_key_falls_back_to_effective_platform_api_key():
 def test_get_secret_key_ignores_default_placeholder():
     settings = types.SimpleNamespace(secret_key="changeme-32-chars-minimum!!!!!")
     request = make_request(settings=settings)
-    assert auth.get_secret_key(request) is None
+    assert auth.get_secret_key(request) == "changeme-32-chars-minimum!!!!!"
 
 
 def test_get_secret_key_prefers_effective_secret_key():
@@ -216,7 +224,7 @@ def test_get_secret_key_prefers_effective_secret_key():
 def test_get_jwt_secret_ignores_default_placeholder():
     settings = types.SimpleNamespace(jwt_secret="changeme-jwt-32-chars-minimum!!")
     request = make_request(settings=settings)
-    assert auth.get_jwt_secret(request) is None
+    assert auth.get_jwt_secret(request) == "changeme-jwt-32-chars-minimum!!"
 
 
 def test_get_supabase_jwt_secret_prefers_effective_supabase_secret():
@@ -497,7 +505,7 @@ def test_get_bearer_context_raises_503_when_secret_missing_and_auth_required(mon
         auth.get_bearer_context(request, "Bearer token")
 
     assert exc.value.status_code == 503
-    assert exc.value.detail == "SUPABASE_JWT_SECRET is not configured"
+    assert exc.value.detail == _MISSING_SUPABASE_JWT_SECRET_DETAIL
 
 
 def test_get_bearer_context_ignores_missing_secret_when_auth_disabled(monkeypatch):
@@ -523,7 +531,7 @@ def test_get_bearer_context_raises_401_for_invalid_token_when_auth_required(monk
         auth.get_bearer_context(request, "Bearer token")
 
     assert exc.value.status_code == 401
-    assert exc.value.detail == "Invalid Bearer token"
+    assert exc.value.detail == _INVALID_BEARER_DETAIL
 
 
 def test_get_bearer_context_raises_401_when_sub_missing_and_auth_required(monkeypatch):

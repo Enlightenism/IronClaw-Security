@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 
 class _SecretsVault:
@@ -322,3 +325,13 @@ def _vault_singleton() -> _SecretsVault:
 
 
 vault: _SecretsVault = _vault_singleton()
+
+
+def log_secrets_vault_startup_status() -> None:
+    """Non-secret startup log for operators.
+    Logs whether SUPABASE_JWT_SECRET is configured (true/false).
+    Must not log the secret value itself.
+    """
+    jwt_secret = vault.supabase_jwt_secret()
+    is_configured = bool(jwt_secret and jwt_secret != "")
+    logger.info("supabase_jwt_secret configured: %s", "true" if is_configured else "false")

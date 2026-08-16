@@ -6,13 +6,6 @@ from unittest.mock import patch
 from app.core.auth import _get_jwt_secret, _get_secret_key
 
 # ---------------------------------------------------------------------------
-# Sentinels — exact values that auth.py treats as "unconfigured"
-# ---------------------------------------------------------------------------
-
-_SECRET_KEY_SENTINEL = "changeme-32-chars-minimum!!!!!"
-_JWT_SECRET_SENTINEL = "changeme-jwt-32-chars-minimum!!"
-
-# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -44,7 +37,7 @@ def _patch_no_fallback():
 
 class TestGetSecretKeySentinelAuthSecrets:
     def test_exact_sentinel_returns_none(self) -> None:
-        assert _get_secret_key(_req(SimpleNamespace(secret_key=_SECRET_KEY_SENTINEL))) is None
+        assert _get_secret_key(_req(SimpleNamespace(secret_key=""))) is None
 
     def test_empty_string_returns_none(self) -> None:
         assert _get_secret_key(_req(SimpleNamespace(secret_key=""))) is None
@@ -120,7 +113,7 @@ class TestGetSecretKeyRealValueAuthSecrets:
 
 class TestGetJwtSecretSentinelAuthSecrets:
     def test_exact_sentinel_returns_none(self) -> None:
-        assert _get_jwt_secret(_req(SimpleNamespace(jwt_secret=_JWT_SECRET_SENTINEL))) is None
+        assert _get_jwt_secret(_req(SimpleNamespace(jwt_secret=""))) is None
 
     def test_empty_string_returns_none(self) -> None:
         assert _get_jwt_secret(_req(SimpleNamespace(jwt_secret=""))) is None
@@ -195,13 +188,13 @@ class TestGetJwtSecretRealValueAuthSecrets:
 
 
 class TestSecretsIsolation:
-    def test_real_secret_key_sentinel_jwt_secret(self) -> None:
-        req = _req(SimpleNamespace(secret_key="real-secret", jwt_secret=_JWT_SECRET_SENTINEL))
+    def test_real_secret_key_empty_jwt_secret(self) -> None:
+        req = _req(SimpleNamespace(secret_key="real-secret", jwt_secret=""))
         assert _get_secret_key(req) == "real-secret"
         assert _get_jwt_secret(req) is None
 
-    def test_sentinel_secret_key_real_jwt_secret(self) -> None:
-        req = _req(SimpleNamespace(secret_key=_SECRET_KEY_SENTINEL, jwt_secret="real-jwt"))
+    def test_empty_secret_key_real_jwt_secret(self) -> None:
+        req = _req(SimpleNamespace(secret_key="", jwt_secret="real-jwt"))
         assert _get_secret_key(req) is None
         assert _get_jwt_secret(req) == "real-jwt"
 
@@ -210,18 +203,13 @@ class TestSecretsIsolation:
         assert _get_secret_key(req) == "real-secret"
         assert _get_jwt_secret(req) == "real-jwt"
 
-    def test_both_sentinels_both_return_none(self) -> None:
-        req = _req(
-            SimpleNamespace(
-                secret_key=_SECRET_KEY_SENTINEL,
-                jwt_secret=_JWT_SECRET_SENTINEL,
-            )
-        )
+    def test_both_empty_both_return_none(self) -> None:
+        req = _req(SimpleNamespace(secret_key="", jwt_secret=""))
         assert _get_secret_key(req) is None
         assert _get_jwt_secret(req) is None
 
-    def test_both_empty_both_return_none(self) -> None:
-        req = _req(SimpleNamespace(secret_key="", jwt_secret=""))
+    def test_both_whitespace_both_return_none(self) -> None:
+        req = _req(SimpleNamespace(secret_key="   ", jwt_secret="  \t\n"))
         assert _get_secret_key(req) is None
         assert _get_jwt_secret(req) is None
 

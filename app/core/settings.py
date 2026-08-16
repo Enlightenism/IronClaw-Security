@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import functools
+import logging
 import os
 from urllib.parse import urlparse
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-SECRET_KEY_SENTINEL = "changeme-32-chars-minimum!!!!!"
-JWT_SECRET_SENTINEL = "changeme-jwt-32-chars-minimum!!"
+_logger = logging.getLogger(__name__)
+
+
+def _require_env(name: str) -> str:
+    value = _normalize_string(os.getenv(name))
+    if not value:
+        raise RuntimeError(f"{name} is not set")
+    return value
 
 
 def _get_vault():
@@ -48,15 +55,19 @@ def _csv_to_list(value: str | None) -> list[str]:
 def _normalize_unique(values: list[str]) -> list[str]:
     normalized: list[str] = []
     seen: set[str] = set()
+
     for value in values:
         item = _normalize_string(value)
         if not item:
             continue
+
         key = item.lower()
         if key in seen:
             continue
+
         seen.add(key)
         normalized.append(item)
+
     return normalized
 
 
@@ -104,6 +115,7 @@ def _host_from_url(value: str) -> str:
     normalized = _normalize_origin(value)
     if not normalized or normalized == "*":
         return ""
+
     parsed = urlparse(normalized)
     return _normalize_host(parsed.netloc)
 
@@ -123,9 +135,9 @@ def _optional_env_file() -> str | None:
     return value or None
 
 
-def _sanitize_secret(value: str | None, *sentinels: str) -> str:
+def _sanitize_secret(value: str | None) -> str:
     normalized = _normalize_string(value)
-    if not normalized or normalized in sentinels:
+    if not normalized:
         return ""
     return normalized
 
@@ -177,10 +189,13 @@ class Settings(BaseSettings):
     # Auth / JWT
     # ------------------------------------------------------------------
     secret_key: str = Field(
-        default=SECRET_KEY_SENTINEL,
+        default_factory=lambda: _require_env("IRONCLAW_SECRET_KEY"),
         alias="IRONCLAW_SECRET_KEY",
     )
-    jwt_secret: str = Field(default=JWT_SECRET_SENTINEL, alias="JWT_SECRET")
+    jwt_secret: str = Field(
+        default_factory=lambda: _require_env("JWT_SECRET"),
+        alias="JWT_SECRET",
+    )
     jwt_algorithm: str = Field(default="", alias="JWT_ALGORITHM")
     access_token_expire_minutes: int = Field(
         default=30,
@@ -340,6 +355,7 @@ class Settings(BaseSettings):
             normalized = _normalize_string(value)
             if normalized:
                 return normalized
+
         return ""
 
     @property
@@ -349,47 +365,34 @@ class Settings(BaseSettings):
     @property
     def effective_secret_key(self) -> str:
         vault = _get_vault()
-        vault_secret = _sanitize_secret(
-            vault.secret_key(),
-            SECRET_KEY_SENTINEL,
-            JWT_SECRET_SENTINEL,
-        )
+        vault_secret = _sanitize_secret(vault.secret_key())
         if vault_secret:
             return vault_secret
-        return _sanitize_secret(
-            self.secret_key,
-            SECRET_KEY_SENTINEL,
-            JWT_SECRET_SENTINEL,
-        )
+
+        return _sanitize_secret(self.secret_key)
 
     @property
     def effective_jwt_secret(self) -> str:
         vault = _get_vault()
-        vault_jwt_secret = _sanitize_secret(
-            vault.jwt_secret(),
-            JWT_SECRET_SENTINEL,
-            SECRET_KEY_SENTINEL,
-        )
+        vault_jwt_secret = _sanitize_secret(vault.jwt_secret())
         if vault_jwt_secret:
             return vault_jwt_secret
-        return _sanitize_secret(
-            self.jwt_secret,
-            JWT_SECRET_SENTINEL,
-            SECRET_KEY_SENTINEL,
-        )
+
+        return _sanitize_secret(self.jwt_secret)
 
     @property
     def effective_supabase_jwt_secret(self) -> str:
         vault = _get_vault()
-        return _sanitize_secret(
-            vault.supabase_jwt_secret(),
-            JWT_SECRET_SENTINEL,
-            SECRET_KEY_SENTINEL,
-        )
+        return _sanitize_secret(vault.supabase_jwt_secret())
 
     @property
     def effective_jwt_algorithm(self) -> str:
         return _normalize_string(self.jwt_algorithm).upper()
+
+    @property
+    def allowed_jwt_algorithms(self) -> list[str]:
+        algorithm = self.effective_jwt_algorithm
+        return [algorithm] if algorithm else []
 
     @property
     def effective_supabase_url(self) -> str:
@@ -467,6 +470,7 @@ class Settings(BaseSettings):
         for origin in self.effective_allowed_origins:
             if origin == "*":
                 return ["*"]
+
             host = _host_from_url(origin)
             if host:
                 derived_hosts.append(host)
@@ -478,14 +482,27 @@ class Settings(BaseSettings):
             host = _host_from_url(base_url)
             if not host:
                 continue
+
             if self.is_production and _is_local_development_host(host):
                 continue
+
             derived_hosts.append(host)
 
         normalized_derived = _normalize_unique(derived_hosts)
         return normalized_derived or ["*"]
 
+    def log_auth_diagnostics(self) -> None:
+        _logger.info(
+            "JWT/Supabase auth configuration: supabase_jwt_secret_configured=%s effective_jwt_algorithm=%s supabase_url_configured=%s supabase_api_key_configured=%s",
+            bool(self.effective_supabase_jwt_secret),
+            self.effective_jwt_algorithm or "<unset>",
+            bool(self.effective_supabase_url),
+            bool(self.effective_supabase_anon_key or self.effective_supabase_service_role_key),
+        )
+
 
 @functools.lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    return Settings(debug=False, reload=False)
+    settings = Settings(debug=False, reload=False)
+    settings.log_auth_diagnostics()
+    return settings

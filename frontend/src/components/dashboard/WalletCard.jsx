@@ -12,7 +12,8 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { useCountUp } from "@/hooks/useCountUp";
-import api, { paymentMethods } from "@/lib/api";
+import api, { payments, paymentMethods } from "@/lib/api";
+import { ensureFrontEndHasFreshSession } from "@/context/AuthContext";
 import { toast } from "sonner";
 
 const TOKENS_PER_UNIT = 25_000;
@@ -237,7 +238,12 @@ const StripeKeyWarning = ({ stripeMode }) => {
   );
 };
 
-const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
+const PaymentMethodPanel = ({
+  organizationId,
+  onPurchase,
+  onAddCard,
+  purchasingId,
+}) => {
   const cachedEntry = useMemo(
     () =>
       organizationId ? (paymentMethodCache.get(organizationId) ?? null) : null,
@@ -477,7 +483,9 @@ const PaymentMethodPanel = ({ organizationId, onPurchase, purchasingId }) => {
       <button
         type="button"
         onClick={() => {
-          if (VALID_PACKAGE_IDS.has(DEFAULT_ADD_CARD_PACKAGE_ID)) {
+          if (onAddCard) {
+            onAddCard();
+          } else if (VALID_PACKAGE_IDS.has(DEFAULT_ADD_CARD_PACKAGE_ID)) {
             onPurchase(DEFAULT_ADD_CARD_PACKAGE_ID);
           }
         }}
@@ -519,6 +527,62 @@ const WalletCard = ({
     },
     [onPurchase],
   );
+
+  const handleCheckoutPurchase = useCallback(
+    async (tierId) => {
+      if (!VALID_PACKAGE_IDS.has(tierId)) {
+        toast.error("Invalid package selected.");
+        return;
+      }
+
+      if (typeof onPurchase !== "function") {
+        toast.error("Purchase action is unavailable.");
+        return;
+      }
+
+      const tier = TIERS.find((t) => t.id === tierId);
+      if (!tier) {
+        toast.error("Package not found.");
+        return;
+      }
+
+      try {
+        await ensureFrontEndHasFreshSession();
+      } catch {
+        // Continue even if refresh fails; backend will surface token errors
+      }
+
+      const payload = {
+        package_id: tierId,
+        success_url: `${window.location.origin}/billing/success`,
+        cancel_url: `${window.location.origin}/billing/cancel`,
+      };
+
+      try {
+        await payments.createCheckout(payload);
+        onPurchase(tierId);
+      } catch (error) {
+        const backendDetail =
+          error?.response?.data?.detail?.error ||
+          error?.response?.data?.detail ||
+          error?.response?.data ||
+          "Checkout failed. Please try again.";
+
+        toast.error(
+          typeof backendDetail === "string"
+            ? backendDetail
+            : "Checkout failed. Please try again.",
+        );
+      }
+    },
+    [onPurchase],
+  );
+
+  const handleAddCardClick = useCallback(() => {
+    if (VALID_PACKAGE_IDS.has(DEFAULT_ADD_CARD_PACKAGE_ID)) {
+      onPurchase(DEFAULT_ADD_CARD_PACKAGE_ID);
+    }
+  }, [onPurchase]);
 
   return (
     <div className="glass-platinum rounded-2xl p-7" data-testid="wallet-card">
@@ -618,7 +682,8 @@ const WalletCard = ({
 
         <PaymentMethodPanel
           organizationId={organizationId}
-          onPurchase={handleTierPurchase}
+          onPurchase={handleCheckoutPurchase}
+          onAddCard={handleAddCardClick}
           purchasingId={purchasingId}
         />
       </div>

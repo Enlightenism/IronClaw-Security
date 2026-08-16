@@ -26,8 +26,6 @@ from app.core.auth import (
 from app.core.errors import register_exception_handlers
 from app.core.settings import get_settings
 
-_SECRET_KEY_SENTINEL = "changeme-32-chars-minimum!!!!!"
-_JWT_SECRET_SENTINEL = "changeme-jwt-32-chars-minimum!!"
 _HS256_SUPABASE_SECRET = "supabase-secret-key-for-tests-32-bytes-min!!"
 _HS256_WRONG_SECRET = "wrong-secret-key-for-tests-32-bytes-min!!!!!"
 _HS512_JWT_SECRET = "jwt-secret-key-for-tests-hs512-64-bytes-minimum-length-value!!!!"
@@ -40,7 +38,7 @@ def _make_request(settings_ns: SimpleNamespace):
 
 class TestGetSecretKeySentinel:
     def test_sentinel_returns_none(self):
-        req = _make_request(SimpleNamespace(secret_key=_SECRET_KEY_SENTINEL))
+        req = _make_request(SimpleNamespace(secret_key=""))
         assert _get_secret_key(req) is None
 
     def test_empty_string_returns_none(self):
@@ -85,7 +83,7 @@ class TestGetSecretKeyRealValue:
         req = _make_request(
             SimpleNamespace(
                 secret_key="real-secret-key-abc",
-                jwt_secret=_JWT_SECRET_SENTINEL,
+                jwt_secret="",
             )
         )
         assert _get_secret_key(req) == "real-secret-key-abc"
@@ -94,7 +92,7 @@ class TestGetSecretKeyRealValue:
 
 class TestGetJwtSecretSentinel:
     def test_sentinel_returns_none(self):
-        req = _make_request(SimpleNamespace(jwt_secret=_JWT_SECRET_SENTINEL))
+        req = _make_request(SimpleNamespace(jwt_secret=""))
         assert _get_jwt_secret(req) is None
 
     def test_empty_string_returns_none(self):
@@ -138,7 +136,7 @@ class TestGetJwtSecretRealValue:
     def test_does_not_bleed_into_secret_key(self):
         req = _make_request(
             SimpleNamespace(
-                secret_key=_SECRET_KEY_SENTINEL,
+                secret_key="",
                 jwt_secret="real-jwt-secret-abc",
             )
         )
@@ -186,11 +184,11 @@ class TestSecretsIndependence:
         assert _get_secret_key(req) == "real-secret"
         assert _get_jwt_secret(req) == "real-jwt"
 
-    def test_both_sentinels_both_return_none(self):
+    def test_both_empty_both_return_none(self):
         req = _make_request(
             SimpleNamespace(
-                secret_key=_SECRET_KEY_SENTINEL,
-                jwt_secret=_JWT_SECRET_SENTINEL,
+                secret_key="",
+                jwt_secret="",
             )
         )
         assert _get_secret_key(req) is None

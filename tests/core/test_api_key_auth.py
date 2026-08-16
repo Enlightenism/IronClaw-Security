@@ -44,6 +44,18 @@ _SUPABASE_JWT_SECRET = "super-secret-jwt-signing-key-for-tests"
 _BEARER_TOKEN = "test-bearer-token"
 _BEARER_PRINCIPAL_ID = "user-123"
 
+_INVALID_BEARER_DETAIL = {
+    "error": "invalid_bearer_token",
+    "detail": "Invalid Bearer token — algorithm mismatch or signature failure",
+    "alg_in_token": "HS256",
+    "expected_alg": "HS256",
+}
+_INVALID_BEARER_DETAIL_WITHOUT_ALG = {
+    **_INVALID_BEARER_DETAIL,
+    "alg_in_token": None,
+}
+_MISSING_SUPABASE_JWT_SECRET_DETAIL = "SUPABASE_JWT_SECRET is not configured; configure or use remote validation via SUPABASE_URL + SUPABASE_ANON_KEY"
+
 
 def _make_personal_record(
     raw_key: str = _PERSONAL_KEY_RAW,
@@ -839,7 +851,7 @@ class TestGetAuthContextBearer:
                     headers={AUTHORIZATION_HEADER_NAME: f"Bearer {token}"},
                 )
         assert resp.status_code == 401
-        assert resp.json()["detail"] == "Invalid Bearer token"
+        assert resp.json()["detail"] == _INVALID_BEARER_DETAIL
 
     def test_bearer_invalid_token_returns_401_when_auth_required(self):
         registry = APIKeyRegistry()
@@ -857,7 +869,7 @@ class TestGetAuthContextBearer:
                     headers={AUTHORIZATION_HEADER_NAME: "Bearer invalid-token"},
                 )
         assert resp.status_code == 401
-        assert resp.json()["detail"] == "Invalid Bearer token"
+        assert resp.json()["detail"] == _INVALID_BEARER_DETAIL_WITHOUT_ALG
 
     def test_bearer_missing_secret_returns_503_when_auth_required(self):
         registry = APIKeyRegistry()
@@ -876,7 +888,7 @@ class TestGetAuthContextBearer:
                     headers={AUTHORIZATION_HEADER_NAME: f"Bearer {token}"},
                 )
         assert resp.status_code == 503
-        assert resp.json()["detail"] == "SUPABASE_JWT_SECRET is not configured"
+        assert resp.json()["detail"] == _MISSING_SUPABASE_JWT_SECRET_DETAIL
 
 
 class TestOrgHeaderResolution:

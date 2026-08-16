@@ -132,6 +132,33 @@ api.interceptors.request.use(async (config) => {
 api.interceptors.response.use(
   (res) => res,
   async (error) => {
+    if (
+      error?.response?.status === 401 &&
+      error.config &&
+      !error.config.__retried
+    ) {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        const newToken = session?.access_token;
+        if (newToken) {
+          const originalAuth = error.config.headers?.Authorization || "";
+          const expectedAuth = `Bearer ${newToken}`;
+
+          if (originalAuth !== expectedAuth) {
+            api.defaults.headers.common.Authorization = expectedAuth;
+            error.config.headers.Authorization = expectedAuth;
+            error.config.__retried = true;
+            return api.request(error.config);
+          }
+        }
+      } catch {
+        // Fall through to sign-out behavior
+      }
+    }
+
     if (error?.response?.status === 401) {
       const hasActiveSession = await shouldBypassUnauthorizedRedirect();
 

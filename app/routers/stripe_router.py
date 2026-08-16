@@ -68,6 +68,8 @@ PACKAGE_UNIT_CREDITS: dict[str, int] = {
 VALID_CHECKOUT_MODES: frozenset[str] = frozenset(m.value for m in StripeCheckoutMode)
 VALID_PACKAGE_IDS: frozenset[str] = frozenset(PACKAGE_PRICE_ENV_MAP.keys())
 
+# Base allowed redirect hosts (kept as conservative default).
+# Additional allowed hosts will be derived from settings at runtime (see _allowed_redirect_hosts()).
 ALLOWED_REDIRECT_HOSTS: frozenset[str] = frozenset(
     {
         "moving-forward.ca",
@@ -114,11 +116,32 @@ def _normalized_host_name(value: str) -> str:
     return (parsed.netloc or "").strip().lower()
 
 
+def _allowed_redirect_hosts() -> frozenset[str]:
+    """Return the set of allowed redirect hosts including configured defaults and derived app host(s)."""
+    hosts = set(ALLOWED_REDIRECT_HOSTS)
+    try:
+        settings = get_settings()
+        # normalized_app_base_url returns a normalized origin (e.g. "https://example.com")
+        app_base = getattr(settings, "normalized_app_base_url", "")
+        if app_base:
+            host = _normalized_host_name(app_base)
+            if host:
+                hosts.add(host)
+        # Also include engine/app host if present (safe to include common local dev hosts)
+        if not settings.is_production:
+            hosts.add("localhost")
+            hosts.add("127.0.0.1")
+    except Exception:
+        # In case settings are not available, fall back to the static set.
+        pass
+    return frozenset(hosts)
+
+
 def _is_allowed_redirect_url(value: str) -> bool:
     if not _is_valid_http_url(value):
         return False
     host = _normalized_host_name(value)
-    return host in ALLOWED_REDIRECT_HOSTS
+    return host in _allowed_redirect_hosts()
 
 
 def _configured_price_id_for_package(package_id: str) -> str:
@@ -290,7 +313,9 @@ class CheckoutSessionCreateRequest(BaseModel):
         if not _is_valid_http_url(normalized):
             raise ValueError("invalid redirect URL, must be absolute http(s) URL")
         if not _is_allowed_redirect_url(normalized):
-            raise ValueError("invalid redirect URL host")
+            # Provide a clear, structured validation message for frontend operators.
+            allowed = sorted(list(_allowed_redirect_hosts()))
+            raise ValueError(f"invalid redirect URL host; allowed_hosts={allowed}")
         return normalized
 
     @field_validator("customer_id", "organization_id", "organizationid", "org_id")
@@ -432,9 +457,14 @@ def _require_org_id(
 def _require_customer_id(svc: StripeService, org_id: str) -> str:
     customer_id = _resolve_customer_id(svc, org_id)
     if not customer_id:
+        # Return structured error object for frontend consumption
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="no_stripe_customer_for_org: No Stripe customer exists for this organization. Call POST /billing/customers first.",
+            detail={
+                "error": "no_stripe_customer_for_org",
+                "detail": "No Stripe customer exists for this organization. Call POST /billing/customers first.",
+                "org_id": org_id,
+            },
         )
     return customer_id
 

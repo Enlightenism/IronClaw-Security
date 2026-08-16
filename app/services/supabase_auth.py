@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+from typing import Any
+
+import httpx
+
+from app.core.settings import Settings, get_settings
+
+
+def _clean_optional_string(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _setting_value(settings: Settings, *names: str) -> str | None:
+    for name in names:
+        value = _clean_optional_string(getattr(settings, name, None))
+        if value is not None:
+            return value
+    return None
+
+
+def _claims_from_supabase_user(user: object) -> dict[str, Any] | None:
+    if not isinstance(user, dict):
+        return None
+
+    user_id = _clean_optional_string(user.get("id"))
+    if user_id is None:
+        return None
+
+    user_metadata = user.get("user_metadata")
+    app_metadata = user.get("app_metadata")
+
+    return {
+        "sub": user_id,
+        "user_metadata": user_metadata if isinstance(user_metadata, dict) else {},
+        "app_metadata": app_metadata if isinstance(app_metadata, dict) else {},
+    }
+
+
+def validate_token_via_supabase(
+    token: str,
+    settings: Settings | None = None,
+    timeout: float = 3.0,
+) -> dict[str, Any] | None:
+    """Validate a bearer token through Supabase's authenticated-user endpoint."""
+    normalized_token = _clean_optional_string(token)
+    if normalized_token is None:
+        return None
+
+    resolved_settings = settings
+    if resolved_settings is None:
+        try:
+            resolved_settings = get_settings()
+        except Exception:
+            return None
+
+    supabase_url = _setting_value(
+        resolved_settings,
+        "effective_supabase_url",
+        "supabase_url",
+        "SUPABASE_URL",
+    )
+    api_key = _setting_value(
+        resolved_settings,
+        "effective_supabase_anon_key",
+        "supabase_anon_key",
+        "SUPABASE_ANON_KEY",
+        "effective_supabase_service_role_key",
+        "supabase_service_role_key",
+        "SUPABASE_SERVICE_ROLE_KEY",
+    )
+    if supabase_url is None or api_key is None:
+        return None
+
+    try:
+        timeout_value = float(timeout)
+    except (TypeError, ValueError):
+        timeout_value = 3.0
+
+    if timeout_value <= 0:
+        timeout_value = 3.0
+
+    endpoint = f"{supabase_url.rstrip('/')}/auth/v1/user"
+    headers = {
+        "Authorization": f"Bearer {normalized_token}",
+        "apikey": api_key,
+    }
+
+    try:
+        response = httpx.get(
+            endpoint,
+            headers=headers,
+            timeout=timeout_value,
+        )
+    except httpx.HTTPError:
+        return None
+    except Exception:
+        return None
+
+    if response.status_code != 200:
+        return None
+
+    try:
+        payload = response.json()
+    except (ValueError, TypeError):
+        return None
+
+    return _claims_from_supabase_user(payload)
