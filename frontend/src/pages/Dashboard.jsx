@@ -33,13 +33,13 @@ const normalizePackageId = (packageId) => {
   switch (packageId) {
     case "pkg_5000":
     case "pkg5000":
-      return "pkg_5000";
+      return "pkg5000";
     case "pkg_25000":
     case "pkg25000":
-      return "pkg_25000";
+      return "pkg25000";
     case "pkg_60000":
     case "pkg60000":
-      return "pkg_60000";
+      return "pkg60000";
     default:
       return "";
   }
@@ -48,11 +48,11 @@ const normalizePackageId = (packageId) => {
 
 const getPackageUnits = (packageId) => {
   switch (normalizePackageId(packageId)) {
-    case "pkg_5000":
+    case "pkg5000":
       return 5000;
-    case "pkg_25000":
+    case "pkg25000":
       return 25000;
-    case "pkg_60000":
+    case "pkg60000":
       return 60000;
     default:
       return 0;
@@ -309,7 +309,8 @@ const Dashboard = () => {
     try {
       const organizationId = data?.organization_id;
       const payload = {
-        event_type: "prompt_injection_attempt",
+        event_type: "prompt_injection",
+        organization_id: organizationId || "org-001",
         payload: {
           source: "dashboard_live_sim",
           timestamp: new Date().toISOString(),
