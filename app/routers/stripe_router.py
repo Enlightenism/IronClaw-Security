@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from app.core.auth import AuthContext, get_auth_context
 from app.core.settings import get_settings
@@ -885,21 +885,53 @@ async def get_or_create_customer(
 
 @api_router.post("/customers", status_code=status.HTTP_200_OK, tags=["billing"])
 async def get_or_create_customer_api(
-    body: CustomerCreateRequest,
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
+    # Keep compatibility: accept JSON body but validate manually for logging consistency
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    try:
+        body = CustomerCreateRequest.model_validate(payload)
+    except ValidationError as exc:
+        logger.warning("stripe_router.get_or_create_customer_validation_error errors=%s keys=%s", exc.errors(), list(payload.keys()) if isinstance(payload, dict) else None)
+        return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"error": "validation_error", "detail": exc.errors()})
     return await get_or_create_customer(body=body, request=request, auth=auth, svc=svc)
 
 
 @router.post("/checkout/sessions", status_code=status.HTTP_201_CREATED, tags=["billing", "checkout"])
 async def create_checkout_session(
-    body: CheckoutSessionCreateRequest,
     request: Request,
     auth: AuthContext = Depends(get_checkout_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
+    # Manual parsing + validation so we can log detailed validation failures and return structured 422.
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        logger.warning("stripe_router.create_checkout_session_invalid_json error=%s", exc)
+        raise _http_400("Invalid JSON body", code="invalid_json_body") from exc
+
+    try:
+        body = CheckoutSessionCreateRequest.model_validate(payload)
+    except ValidationError as exc:
+        # Log structured validation error without exposing full token/content
+        payload_keys = list(payload.keys()) if isinstance(payload, dict) else None
+        logger.warning(
+            "stripe_router.create_checkout_session_validation_error errors=%s payload_keys=%s request_origin=%s",
+            exc.errors(),
+            payload_keys,
+            request.headers.get("origin"),
+        )
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"error": "validation_error", "detail": exc.errors(), "payload_keys": payload_keys},
+        )
+
+    # proceed with original logic using validated `body`
     org_id = _require_org_id(auth=auth, request=request, body=body)
     mode = StripeCheckoutMode(body.mode)
     resolved_price_id, resolved_unit_credits = _normalize_checkout_inputs(body)
@@ -917,6 +949,7 @@ async def create_checkout_session(
             customer_id = None
 
     try:
+        logger.info("stripe_router.create_checkout_session org_id=%s package_id=%s price_id=%s", org_id, body.package_id, resolved_price_id)
         result = svc.create_checkout_session(
             org_id=org_id,
             price_id=resolved_price_id,
@@ -951,12 +984,12 @@ async def create_checkout_session(
 
 @api_router.post("/checkout/sessions", status_code=status.HTTP_201_CREATED, tags=["billing", "checkout"])
 async def create_checkout_session_api(
-    body: CheckoutSessionCreateRequest,
     request: Request,
     auth: AuthContext = Depends(get_checkout_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await create_checkout_session(body=body, request=request, auth=auth, svc=svc)
+    # API alias — reuse the same implementation so validation logging is consistent
+    return await create_checkout_session(request=request, auth=auth, svc=svc)
 
 
 @router.get("/checkout/sessions/{session_id}", status_code=status.HTTP_200_OK, tags=["billing", "checkout"])
@@ -1179,7 +1212,7 @@ async def get_metered_usage_log(
 @api_router.get("/metered/log", status_code=status.HTTP_200_OK, tags=["billing", "metered"])
 async def get_metered_usage_log_api(
     request: Request,
-    limit: int = Query(default=50, ge=1, le=200),
+    limit: int = Query(default=50, ge=1, le=100),
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:

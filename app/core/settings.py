@@ -323,6 +323,15 @@ class Settings(BaseSettings):
     content_security_policy: str = Field(default="", alias="CONTENT_SECURITY_POLICY")
 
     # ------------------------------------------------------------------
+    # Stripe redirect validation
+    # ------------------------------------------------------------------
+    allowed_redirect_hosts: str = Field(
+        default="",
+        alias="ALLOWED_REDIRECT_HOSTS",
+        description="Comma-separated list of allowed hosts for Stripe success/cancel URLs. Production frontend origin should be included.",
+    )
+
+    # ------------------------------------------------------------------
     # Optional integrations
     # ------------------------------------------------------------------
     redis_url: str | None = Field(default=None, alias="REDIS_URL")
@@ -490,6 +499,30 @@ class Settings(BaseSettings):
 
         normalized_derived = _normalize_unique(derived_hosts)
         return normalized_derived or ["*"]
+
+    @property
+    def effective_allowed_redirect_hosts(self) -> list[str]:
+        explicit = _normalize_unique(
+            [_normalize_host(item) for item in _csv_to_list(self.allowed_redirect_hosts) if item.strip()],
+        )
+        if explicit:
+            return explicit
+
+        derived: list[str] = []
+        for origin in self.effective_allowed_origins:
+            if origin == "*":
+                return ["*"]
+            host = _host_from_url(origin)
+            if host:
+                derived.append(host)
+
+        for base_url in (self.normalized_app_base_url,):
+            host = _host_from_url(base_url)
+            if host:
+                derived.append(host)
+
+        normalized = _normalize_unique(derived)
+        return normalized or ["*"]
 
     def log_auth_diagnostics(self) -> None:
         _logger.info(

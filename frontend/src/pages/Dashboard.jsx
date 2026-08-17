@@ -12,18 +12,22 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+
 import IntegrationCard from "@/components/dashboard/IntegrationCard";
 import SecurityAnalysis from "@/components/dashboard/SecurityAnalysis";
 import WalletCard from "@/components/dashboard/WalletCard";
 import { useAuth } from "@/context/AuthContext";
 import api from "@/lib/api";
 
+
 const ATTACKS_PAGE_SIZE = 25;
-const VALID_PACKAGES = ["pkg_5000", "pkg_25000", "pkg_60000"];
+const VALID_PACKAGES = ["pkg5000", "pkg25000", "pkg60000"];
+
 
 const MemoWalletCard = memo(WalletCard);
 const MemoSecurityAnalysis = memo(SecurityAnalysis);
 const MemoIntegrationCard = memo(IntegrationCard);
+
 
 const normalizePackageId = (packageId) => {
   switch (packageId) {
@@ -41,6 +45,7 @@ const normalizePackageId = (packageId) => {
   }
 };
 
+
 const getPackageUnits = (packageId) => {
   switch (normalizePackageId(packageId)) {
     case "pkg_5000":
@@ -54,14 +59,28 @@ const getPackageUnits = (packageId) => {
   }
 };
 
+
 const getErrorMessage = (error) => {
   const rawDetail = error?.response?.data?.detail;
   const rawMessage = error?.response?.data?.message;
   const topError = error?.response?.data?.error;
 
+
+  if (Array.isArray(rawDetail)) {
+    const first = rawDetail[0];
+    if (first && typeof first.msg === "string") {
+      return first.msg;
+    }
+    if (first && typeof first.message === "string") {
+      return first.message;
+    }
+  }
+
+
   if (typeof rawDetail === "string" && rawDetail.trim()) {
     return rawDetail;
   }
+
 
   if (
     rawDetail &&
@@ -72,6 +91,7 @@ const getErrorMessage = (error) => {
     return rawDetail.detail;
   }
 
+
   if (
     rawDetail &&
     typeof rawDetail === "object" &&
@@ -81,38 +101,48 @@ const getErrorMessage = (error) => {
     return rawDetail.error;
   }
 
+
   if (typeof rawMessage === "string" && rawMessage.trim()) {
     return rawMessage;
   }
+
 
   if (typeof topError === "string" && topError.trim()) {
     return topError;
   }
 
+
   if (typeof error?.message === "string" && error.message.trim()) {
     return error.message;
   }
 
+
   return "Could not start checkout.";
 };
 
+
 const AttackFeed = memo(function AttackFeed({ attacks }) {
   const [page, setPage] = useState(1);
+
 
   useEffect(() => {
     setPage(1);
   }, [attacks]);
 
+
   const totalPages = Math.max(1, Math.ceil(attacks.length / ATTACKS_PAGE_SIZE));
+
 
   const paginatedAttacks = useMemo(() => {
     const start = (page - 1) * ATTACKS_PAGE_SIZE;
     return attacks.slice(start, start + ATTACKS_PAGE_SIZE);
   }, [attacks, page]);
 
+
   const startItem =
     attacks.length === 0 ? 0 : (page - 1) * ATTACKS_PAGE_SIZE + 1;
   const endItem = Math.min(page * ATTACKS_PAGE_SIZE, attacks.length);
+
 
   return (
     <section
@@ -134,6 +164,7 @@ const AttackFeed = memo(function AttackFeed({ attacks }) {
         </div>
       </div>
 
+
       {attacks.length === 0 ? (
         <div
           className="rounded-xl border border-dashed border-white/10 bg-black/20 px-4 py-8 text-center text-sm text-[#BFC1C2]"
@@ -150,6 +181,7 @@ const AttackFeed = memo(function AttackFeed({ attacks }) {
                 attack?.timestamp ??
                 attack?.created_at ??
                 `${page}-${index}`;
+
 
               return (
                 <article
@@ -186,6 +218,7 @@ const AttackFeed = memo(function AttackFeed({ attacks }) {
             })}
           </div>
 
+
           <div className="mt-4 flex items-center justify-between gap-3">
             <button
               type="button"
@@ -198,12 +231,14 @@ const AttackFeed = memo(function AttackFeed({ attacks }) {
               Prev
             </button>
 
+
             <div
               className="font-tech text-xs text-[#BFC1C2]"
               data-testid="attack-feed-page"
             >
               Page {page} / {totalPages}
             </div>
+
 
             <button
               type="button"
@@ -224,6 +259,7 @@ const AttackFeed = memo(function AttackFeed({ attacks }) {
   );
 });
 
+
 const Dashboard = () => {
   const { user, session, loading, logout } = useAuth();
   const navigate = useNavigate();
@@ -235,10 +271,13 @@ const Dashboard = () => {
   const [purchasingId, setPurchasingId] = useState(null);
   const polledRef = useRef(false);
 
+
   const isAuthenticated = Boolean(user || session);
+
 
   const fetchDashboard = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoadingData(true);
+
 
     try {
       const [dash, tok] = await Promise.all([
@@ -255,16 +294,48 @@ const Dashboard = () => {
     }
   }, []);
 
+
   useEffect(() => {
     if (!loading && !isAuthenticated) navigate("/");
   }, [isAuthenticated, loading, navigate]);
+
 
   useEffect(() => {
     if (isAuthenticated) fetchDashboard();
   }, [fetchDashboard, isAuthenticated]);
 
+
+  const simulateEvent = useCallback(async () => {
+    try {
+      const organizationId = data?.organization_id;
+      const payload = {
+        event_type: "prompt_injection_attempt",
+        payload: {
+          source: "dashboard_live_sim",
+          timestamp: new Date().toISOString(),
+        },
+      };
+      if (organizationId) {
+        payload.organization_id = organizationId;
+      }
+      await api.post("/events/simulate", payload);
+    } catch (err) {
+      const detail = err?.response?.data?.detail;
+      if (Array.isArray(detail)) {
+        const msg = detail[0]?.msg || detail[0]?.message || "Invalid event payload.";
+        toast.error(msg);
+      } else if (typeof detail === "string") {
+        toast.error(detail);
+      } else {
+        toast.error("Failed to simulate event.");
+      }
+    }
+  }, [data?.organization_id]);
+
+
   useEffect(() => {
     if (!isAuthenticated) return undefined;
+
 
     const refresh = setInterval(
       () => {
@@ -273,24 +344,24 @@ const Dashboard = () => {
       5 * 60 * 1000,
     );
 
+
     const live = setInterval(async () => {
-      try {
-        await api.post("/events/simulate");
-        fetchDashboard({ silent: true });
-      } catch {
-        // handled by interceptor
-      }
+      await simulateEvent();
+      fetchDashboard({ silent: true });
     }, 20000);
+
 
     return () => {
       clearInterval(refresh);
       clearInterval(live);
     };
-  }, [fetchDashboard, isAuthenticated]);
+  }, [fetchDashboard, isAuthenticated, simulateEvent]);
+
 
   const pollPayment = useCallback(
     async (sessionId, packageId, attempts = 0) => {
       const maxAttempts = 6;
+
 
       if (!sessionId) {
         toast.dismiss("pay");
@@ -298,16 +369,19 @@ const Dashboard = () => {
         return;
       }
 
+
       if (attempts >= maxAttempts) {
         toast.dismiss("pay");
         toast.error("Payment status check timed out. Refresh in a moment.");
         return;
       }
 
+
       try {
         const { data: status } = await api.get(
           `/billing/checkout/sessions/${encodeURIComponent(sessionId)}`,
         );
+
 
         if (status?.payment_status === "paid") {
           const units =
@@ -322,12 +396,14 @@ const Dashboard = () => {
           return;
         }
 
+
         if (status?.status === "expired") {
           toast.dismiss("pay");
           toast.error("Payment session expired. Please try again.");
           setPurchasingId(null);
           return;
         }
+
 
         setTimeout(() => pollPayment(sessionId, packageId, attempts + 1), 2000);
       } catch {
@@ -337,11 +413,13 @@ const Dashboard = () => {
     [fetchDashboard],
   );
 
+
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const sessionId = params.get("session_id");
     const checkoutState = params.get("checkout");
     const packageId = normalizePackageId(params.get("package_id") || "");
+
 
     if (checkoutState === "cancel") {
       toast.error("Checkout canceled.");
@@ -349,6 +427,7 @@ const Dashboard = () => {
       setPurchasingId(null);
       return;
     }
+
 
     if (checkoutState === "success" && !sessionId) {
       toast.success("Checkout completed. Refreshing billing state...");
@@ -358,6 +437,7 @@ const Dashboard = () => {
       return;
     }
 
+
     if (sessionId && !polledRef.current) {
       polledRef.current = true;
       toast.loading("Verifying your payment...", { id: "pay" });
@@ -366,16 +446,20 @@ const Dashboard = () => {
     }
   }, [fetchDashboard, location.search, navigate, pollPayment]);
 
+
   const handlePurchase = useCallback(
     async (rawPackageId) => {
       const packageId = normalizePackageId(rawPackageId);
+
 
       if (!VALID_PACKAGES.includes(packageId)) {
         toast.error("Invalid package selected.");
         return;
       }
 
+
       setPurchasingId(packageId);
+
 
       try {
         const organizationId = data?.organization_id ?? "org-001";
@@ -383,22 +467,29 @@ const Dashboard = () => {
         successUrl.searchParams.set("checkout", "success");
         successUrl.searchParams.set("package_id", packageId);
 
+
         const cancelUrl = new URL(`${window.location.origin}/dashboard`);
         cancelUrl.searchParams.set("checkout", "cancel");
         cancelUrl.searchParams.set("package_id", packageId);
 
+
         const { data: res } = await api.post("/billing/checkout/sessions", {
-          package_id: packageId,
-          success_url: successUrl.toString(),
-          cancel_url: cancelUrl.toString(),
-          organization_id: organizationId,
+          packageId,
+          mode: "payment",
+          quantity: 1,
+          successUrl: successUrl.toString(),
+          cancelUrl: cancelUrl.toString(),
+          organizationId,
         });
 
+
         const redirectUrl = res?.checkout_url || res?.url;
+
 
         if (!redirectUrl) {
           throw new Error("Missing checkout URL.");
         }
+
 
         if (typeof window.location.assign === "function") {
           window.location.assign(redirectUrl);
@@ -413,15 +504,18 @@ const Dashboard = () => {
     [data],
   );
 
+
   const handleSignOut = useCallback(async () => {
     await logout();
     navigate("/");
   }, [logout, navigate]);
 
+
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
     fetchDashboard();
   }, [fetchDashboard]);
+
 
   const walletProps = useMemo(
     () => ({
@@ -442,6 +536,7 @@ const Dashboard = () => {
     ],
   );
 
+
   const securityProps = useMemo(
     () => ({
       unitsToday: data?.units_today ?? 0,
@@ -451,6 +546,7 @@ const Dashboard = () => {
     }),
     [data?.attacks, data?.daily_usage, data?.units_today, data?.units_week],
   );
+
 
   const integrationCards = useMemo(
     () => [
@@ -470,7 +566,9 @@ const Dashboard = () => {
     [tokens?.claude_code_command, tokens?.openclaw_command],
   );
 
+
   const attackFeedItems = useMemo(() => data?.attacks ?? [], [data?.attacks]);
+
 
   if (loading || (loadingData && !data)) {
     return (
@@ -479,6 +577,7 @@ const Dashboard = () => {
       </div>
     );
   }
+
 
   return (
     <div className="min-h-screen bg-[#050607] text-white">
@@ -498,6 +597,7 @@ const Dashboard = () => {
             </span>
           </button>
 
+
           <div className="flex items-center gap-3">
             <Link
               to="/inspector"
@@ -513,6 +613,7 @@ const Dashboard = () => {
             >
               <ScrollText size={15} /> Policies
             </Link>
+
 
             <span
               className="font-tech hidden text-sm text-[#BFC1C2] sm:block"
@@ -531,6 +632,7 @@ const Dashboard = () => {
           </div>
         </div>
       </nav>
+
 
       <main className="mx-auto max-w-7xl px-6 py-8">
         <div className="mb-8 flex items-end justify-between">
@@ -557,13 +659,16 @@ const Dashboard = () => {
           </button>
         </div>
 
+
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <MemoWalletCard {...walletProps} />
+
 
           <div className="space-y-6 lg:row-span-2">
             <MemoSecurityAnalysis {...securityProps} />
             <AttackFeed attacks={attackFeedItems} />
           </div>
+
 
           <div className="grid grid-cols-1 gap-6">
             {integrationCards.map((card) => (
@@ -581,5 +686,6 @@ const Dashboard = () => {
     </div>
   );
 };
+
 
 export default Dashboard;

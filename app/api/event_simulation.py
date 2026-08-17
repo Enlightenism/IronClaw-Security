@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, Field, ValidationError
 
 from app.core.auth import AuthContext, get_auth_context
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(tags=["event-simulation"])
 
@@ -47,6 +51,10 @@ class EventSimulationRequest(BaseModel):
     target: str | None = Field(
         default=None,
         description="Optional target resource, path, domain, or data class.",
+    )
+    payload: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional structured payload for the simulated event.",
     )
     metadata: dict[str, Any] = Field(
         default_factory=dict,
@@ -169,12 +177,54 @@ def _serialize_auth(context: AuthContext) -> dict[str, Any]:
     status_code=status.HTTP_200_OK,
 )
 async def simulate_event(
-    request: EventSimulationRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
 ) -> EventSimulationResponse:
-    organization_id = request.organization_id or getattr(auth, "organization_id", None)
+    raw_json: dict[str, Any] | None = None
+    try:
+        raw_json = await request.json()
+    except Exception:
+        raw_json = None
 
-    if not organization_id and request.event_type in {
+    payload_keys = list(raw_json.keys()) if isinstance(raw_json, dict) else []
+
+    try:
+        parsed = EventSimulationRequest(**(raw_json or {}))
+    except ValidationError as exc:
+        errors_summary = [{"loc": list(e.get("loc", [])), "msg": e.get("msg", ""), "type": e.get("type", "")} for e in exc.errors()]
+        logger.warning(
+            "Event simulation validation failed: origin=%s keys=%s errors=%s",
+            getattr(request, "base_url", None),
+            payload_keys,
+            errors_summary,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "validation_failed", "errors": errors_summary},
+        ) from exc
+
+    request_model = parsed
+
+    org_id_from_body = request_model.organization_id
+    org_id_from_auth = getattr(auth, "organization_id", None)
+    organization_id = org_id_from_body or org_id_from_auth
+
+    if org_id_from_body:
+        org_source = "body"
+    elif org_id_from_auth:
+        org_source = "auth"
+    else:
+        org_source = "unresolved"
+
+    logger.debug(
+        "Event simulation organization_id resolution: source=%s body=%s auth=%s final=%s",
+        org_source,
+        org_id_from_body,
+        org_id_from_auth,
+        organization_id,
+    )
+
+    if not organization_id and request_model.event_type in {
         "tool_execution",
         "data_exfiltration",
         "unsafe_action",
@@ -185,22 +235,23 @@ async def simulate_event(
             detail="organization_id is required for this simulation type.",
         )
 
-    verdict, reasons, recommended_actions = _build_verdict(request)
+    verdict, reasons, recommended_actions = _build_verdict(request_model)
 
     event: dict[str, Any] = {
-        "type": request.event_type,
-        "severity": request.severity,
+        "type": request_model.event_type,
+        "severity": request_model.severity,
         "organization_id": organization_id,
-        "actor_id": request.actor_id or getattr(auth, "principal_id", None),
-        "tool_name": request.tool_name,
-        "target": request.target,
-        "metadata": request.metadata,
-        "prompt_present": bool(request.prompt),
+        "actor_id": request_model.actor_id or getattr(auth, "principal_id", None),
+        "tool_name": request_model.tool_name,
+        "target": request_model.target,
+        "payload": request_model.payload,
+        "metadata": request_model.metadata,
+        "prompt_present": bool(request_model.prompt),
     }
 
     return EventSimulationResponse(
-        event_type=request.event_type,
-        severity=request.severity,
+        event_type=request_model.event_type,
+        severity=request_model.severity,
         verdict=verdict,
         reasons=reasons,
         recommended_actions=recommended_actions,
