@@ -10,9 +10,7 @@ from app.core.auth import AuthContext, get_auth_context
 
 logger = logging.getLogger(__name__)
 
-
 router = APIRouter(tags=["event-simulation"])
-
 
 AllowedVerdict = Literal["allow", "warn", "quarantine", "block"]
 AllowedEventType = Literal[
@@ -191,7 +189,14 @@ async def simulate_event(
     try:
         parsed = EventSimulationRequest(**(raw_json or {}))
     except ValidationError as exc:
-        errors_summary = [{"loc": list(e.get("loc", [])), "msg": e.get("msg", ""), "type": e.get("type", "")} for e in exc.errors()]
+        errors_summary = [
+            {
+                "loc": list(e.get("loc", [])),
+                "msg": e.get("msg", ""),
+                "type": e.get("type", ""),
+            }
+            for e in exc.errors()
+        ]
         logger.warning(
             "Event simulation validation failed: origin=%s keys=%s errors=%s",
             getattr(request, "base_url", None),

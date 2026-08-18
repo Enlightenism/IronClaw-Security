@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.auth import get_auth_context
 
@@ -119,7 +119,14 @@ def get_integration_observability(integration_id: str) -> dict[str, object]:
 
 @router.get("/integrations/token")
 async def get_integrations_token(auth: Any = Depends(get_auth_context)) -> dict[str, str]:
-    token = auth.api_key
+    token = getattr(auth, "api_key", None)
+
+    if not isinstance(token, str) or not token.strip():
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Integration token unavailable for the current auth context.",
+        )
+
     return {
         "user_token": token,
         "claude_code_command": f"npx ironclaw-install --key {token} --platform claude-code",
