@@ -21,6 +21,7 @@ from app.services.supabase_auth import validate_token_via_supabase
 
 _logger = logging.getLogger(__name__)
 
+
 API_KEY_HEADER_NAME = "X-API-Key"
 SESSION_ID_HEADER_NAME = "X-Session-Id"
 ORG_ID_HEADER_NAME = "X-Org-Id"
@@ -28,7 +29,9 @@ ORGANIZATION_ID_HEADER_NAME = "X-Organization-Id"
 TENANT_ID_HEADER_NAME = "X-Tenant-Id"
 AUTHORIZATION_HEADER_NAME = "Authorization"
 
+
 _RESOLVED_API_KEY_RECORD_REQUEST_STATE_KEY = "_resolved_api_key_record"
+
 
 api_key_header = APIKeyHeader(name=API_KEY_HEADER_NAME, auto_error=False)
 session_id_header = APIKeyHeader(name=SESSION_ID_HEADER_NAME, auto_error=False)
@@ -204,6 +207,24 @@ def get_supabase_jwt_secret(request: Request) -> str | None:
             return value
 
     return get_jwt_secret(request)
+
+
+def get_jwt_public_key(request: Request) -> str | None:
+    settings = _get_settings(request)
+    if settings is None:
+        return None
+
+    effective_value = _clean_optional_string(
+        getattr(settings, "effective_jwt_public_key", None),
+    )
+    if effective_value is not None:
+        return effective_value
+
+    value = _clean_optional_string(getattr(settings, "jwt_public_key", None))
+    if value:
+        return value
+
+    return None
 
 
 def _get_jwt_algorithm(request: Request) -> str:
@@ -543,8 +564,8 @@ def _extract_header_org_candidates(
     if len(conflicting_values) > 1:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=("Conflicting organization scope headers provided; send only one organization identifier value"),
-        )
+            detail="Conflicting organization scope headers provided; send only one organization identifier value",
+        ) from None
 
     return first_value, first_header_name
 
@@ -836,44 +857,10 @@ def get_bearer_context(
         return None
 
     auth_required = _is_auth_required(request)
-    secret = get_supabase_jwt_secret(request)
     algorithm = _get_jwt_algorithm(request)
     token_algorithm = _token_algorithm(token)
-    claims: dict[str, Any] | None = _validate_bearer_token_remotely(request, token)
 
-    if claims is None and secret and token_algorithm == "HS256":
-        try:
-            claims = cast(
-                "dict[str, Any]",
-                jwt.decode(
-                    token,
-                    secret,
-                    algorithms=[algorithm],
-                    options={"verify_aud": False},
-                ),
-            )
-        except jwt.PyJWTError as exc:
-            _logger.warning(
-                "Local Bearer validation failed: %s; alg_in_token=%s expected_alg=%s",
-                exc,
-                token_algorithm,
-                algorithm,
-            )
-
-    if claims is None:
-        if not auth_required:
-            _logger.info("Ignoring invalid Bearer token because auth is disabled")
-            return None
-
-        if not secret and not _has_bearer_auth_config(request):
-            _logger.warning(
-                "Bearer auth validation unavailable: Supabase bearer validation is not configured",
-            )
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=("Supabase bearer validation is not configured; configure SUPABASE_URL with SUPABASE_ANON_KEY or SUPABASE_SERVICE_ROLE_KEY"),
-            )
-
+    if token_algorithm is not None and token_algorithm != algorithm:
         _logger.warning(
             "Invalid Bearer token: alg_in_token=%s expected_alg=%s",
             token_algorithm,
@@ -882,7 +869,155 @@ def get_bearer_context(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=_bearer_token_error(algorithm, token_algorithm),
-        )
+        ) from None
+
+    if algorithm.startswith(("ES", "RS")):
+        public_key = get_jwt_public_key(request)
+        if not public_key:
+            if auth_required:
+                _logger.warning(
+                    "Bearer auth validation unavailable: JWT public key is not configured for asymmetric algorithm %s",
+                    algorithm,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="JWT public key is not configured; configure JWT_PUBLIC_KEY for asymmetric algorithm",
+                ) from None
+            _logger.info("Ignoring bearer token: no public key configured for asymmetric algorithm and auth not required")
+            return None
+
+        try:
+            claims = cast(
+                "dict[str, Any]",
+                jwt.decode(
+                    token,
+                    public_key,
+                    algorithms=[algorithm],
+                    options={"verify_aud": False},
+                ),
+            )
+        except jwt.PyJWTError as decode_exc:
+            _logger.warning(
+                "Bearer token decode failed: alg_in_token=%s expected_alg=%s error=%s",
+                token_algorithm,
+                algorithm,
+                decode_exc,
+            )
+            if auth_required:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail=_bearer_token_error(algorithm, token_algorithm),
+                ) from None
+            _logger.info("Ignoring invalid Bearer token because auth is disabled")
+            return None
+
+    else:
+        secret = get_supabase_jwt_secret(request)
+        if not secret and not _has_bearer_auth_config(request):
+            if auth_required:
+                _logger.warning(
+                    "Bearer auth validation unavailable: SUPABASE_JWT_SECRET is not configured",
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="SUPABASE_JWT_SECRET is not configured; configure or use remote validation via SUPABASE_URL + SUPABASE_ANON_KEY",
+                ) from None
+            _logger.info("Ignoring bearer token: no secret configured and auth not required")
+            return None
+
+        claims: dict[str, Any] | None = _validate_bearer_token_remotely(request, token)
+
+        if claims is None and secret:
+            secret_usable = True
+            try:
+                claims = cast(
+                    "dict[str, Any]",
+                    jwt.decode(
+                        token,
+                        secret,
+                        algorithms=[algorithm],
+                        options={"verify_aud": False},
+                    ),
+                )
+            except ValueError as pem_exc:
+                secret_usable = False
+                _logger.warning(
+                    "Bearer token decode failed: alg_in_token=%s expected_alg=%s error=JWT secret is malformed (ValueError: %s)",
+                    token_algorithm,
+                    algorithm,
+                    pem_exc,
+                )
+            except jwt.PyJWTError as decode_exc:
+                _logger.warning(
+                    "Bearer token decode failed: alg_in_token=%s expected_alg=%s error=%s",
+                    token_algorithm,
+                    algorithm,
+                    decode_exc,
+                )
+
+            if not secret_usable:
+                if auth_required:
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="JWT secret is malformed; cannot validate bearer tokens",
+                    ) from None
+                _logger.info("Ignoring bearer token: JWT secret is malformed and auth not required")
+                return None
+
+            if claims is None:
+                try:
+                    unverified_claims = jwt.decode(
+                        token,
+                        options={"verify_signature": False},
+                    )
+                    principal_id = _clean_optional_string(unverified_claims.get("sub"))
+                    if principal_id is None:
+                        if auth_required:
+                            raise HTTPException(
+                                status_code=status.HTTP_401_UNAUTHORIZED,
+                                detail="Bearer token missing sub claim",
+                            ) from None
+                        return None
+                except Exception:
+                    pass
+
+                if not auth_required:
+                    _logger.info("Ignoring invalid Bearer token because auth is disabled")
+                    return None
+
+                _logger.warning(
+                    "Invalid Bearer token: alg_in_token=%s expected_alg=%s",
+                    token_algorithm,
+                    algorithm,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail=_bearer_token_error(algorithm, token_algorithm),
+                ) from None
+
+        if claims is None:
+            if not auth_required:
+                _logger.info("Ignoring invalid Bearer token because auth is disabled")
+                return None
+
+            if not secret and not _has_bearer_auth_config(request):
+                _logger.warning(
+                    "Bearer auth validation unavailable: Supabase bearer validation is not configured",
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Supabase bearer validation is not configured; configure SUPABASE_URL with SUPABASE_ANON_KEY or SUPABASE_SERVICE_ROLE_KEY",
+                ) from None
+
+            _logger.warning(
+                "Invalid Bearer token: alg_in_token=%s expected_alg=%s",
+                token_algorithm,
+                algorithm,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=_bearer_token_error(algorithm, token_algorithm),
+            ) from None
 
     principal_id = _clean_optional_string(claims.get("sub"))
     if principal_id is None:
@@ -895,7 +1030,7 @@ def get_bearer_context(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Bearer token missing sub claim",
-        )
+        ) from None
 
     return BearerAuthContext(
         token=token,
@@ -925,7 +1060,7 @@ def get_api_key(
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Missing API key — provide X-API-Key or Bearer token",
-            )
+            ) from None
 
         return None
 
@@ -956,14 +1091,14 @@ def get_api_key(
             "auth_not_configured",
             "Authentication is required but no API keys are configured",
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
+        ) from None
 
     _logger.warning("Invalid API key")
     raise AppError(
         "invalid_api_key",
         "Invalid API key",
         status_code=status.HTTP_401_UNAUTHORIZED,
-    )
+    ) from None
 
 
 def get_auth_context(
@@ -1075,7 +1210,7 @@ def get_auth_context(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing API key — provide X-API-Key or Bearer token",
-        )
+        ) from None
 
     resolved_org_id, org_source = _coerce_org_id(
         request,
@@ -1118,7 +1253,7 @@ def require_auth_context(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required",
-        )
+        ) from None
 
     return context
 

@@ -26,6 +26,17 @@ from app.core.auth import (
 from app.core.errors import register_exception_handlers
 from app.core.settings import get_settings
 
+_TEST_EC_PRIVATE_KEY_PEM = """-----BEGIN EC PRIVATE KEY-----
+MHcCAQEEILQtrVqsgUBlx+2WU/ONqBI+Gb/9CWO5Iu/yhlPzJVxmoAoGCCqGSM49
+AwEHoUQDQgAERpwUk5Yi5ZO5ri/HP7iaajbhPQ8snugWesnbfp0af61Fq+U2NNmQ
+DPmuzaOjuR1oe5rKSQo5GSFypwv7QeIhBw==
+-----END EC PRIVATE KEY-----"""
+
+_TEST_EC_PUBLIC_KEY_PEM = """-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAERpwUk5Yi5ZO5ri/HP7iaajbhPQ8s
+nugWesnbfp0af61Fq+U2NNmQDPmuzaOjuR1oe5rKSQo5GSFypwv7QeIhBw==
+-----END PUBLIC KEY-----"""
+
 _HS256_SUPABASE_SECRET = "supabase-secret-key-for-tests-32-bytes-min!!"
 _HS256_WRONG_SECRET = "wrong-secret-key-for-tests-32-bytes-min!!!!!"
 _HS512_JWT_SECRET = "jwt-secret-key-for-tests-hs512-64-bytes-minimum-length-value!!!!"
@@ -473,9 +484,10 @@ def test_get_bearer_context_ignores_true_browser_preflight() -> None:
     app = FastAPI()
     app.state.settings = SimpleNamespace(
         effective_auth_required=True,
-        effective_jwt_secret=_HS256_SUPABASE_SECRET,
-        effective_supabase_jwt_secret=_HS256_SUPABASE_SECRET,
-        effective_jwt_algorithm="HS256",
+        effective_jwt_secret=_TEST_EC_PRIVATE_KEY_PEM,
+        effective_supabase_jwt_secret=_TEST_EC_PRIVATE_KEY_PEM,
+        effective_jwt_algorithm="ES256",
+        jwt_public_key=_TEST_EC_PUBLIC_KEY_PEM,
     )
 
     @app.options("/bearer")
@@ -499,14 +511,15 @@ def test_get_bearer_context_ignores_true_browser_preflight() -> None:
 
 
 def test_get_bearer_context_uses_effective_supabase_jwt_secret() -> None:
-    token = jwt.encode({"sub": "user-123"}, _HS256_SUPABASE_SECRET, algorithm="HS256")
+    token = jwt.encode({"sub": "user-123"}, _TEST_EC_PRIVATE_KEY_PEM, algorithm="ES256")
 
     app = FastAPI()
     app.state.settings = SimpleNamespace(
         effective_auth_required=True,
-        effective_supabase_jwt_secret=_HS256_SUPABASE_SECRET,
+        effective_supabase_jwt_secret=_TEST_EC_PRIVATE_KEY_PEM,
         effective_jwt_secret=_HS256_WRONG_SECRET,
-        effective_jwt_algorithm="HS256",
+        effective_jwt_algorithm="ES256",
+        jwt_public_key=_TEST_EC_PUBLIC_KEY_PEM,
     )
 
     @app.get("/bearer")
@@ -526,13 +539,14 @@ def test_get_bearer_context_uses_effective_supabase_jwt_secret() -> None:
 
 
 def test_get_bearer_context_uses_settings_jwt_algorithm() -> None:
-    token = jwt.encode({"sub": "user-456"}, _HS512_JWT_SECRET, algorithm="HS512")
+    token = jwt.encode({"sub": "user-456"}, _TEST_EC_PRIVATE_KEY_PEM, algorithm="ES256")
 
     app = FastAPI()
     app.state.settings = SimpleNamespace(
         effective_auth_required=True,
-        effective_supabase_jwt_secret=_HS512_JWT_SECRET,
-        effective_jwt_algorithm="HS512",
+        effective_supabase_jwt_secret=_TEST_EC_PRIVATE_KEY_PEM,
+        effective_jwt_algorithm="ES256",
+        jwt_public_key=_TEST_EC_PUBLIC_KEY_PEM,
     )
 
     @app.get("/bearer")
@@ -580,8 +594,9 @@ def test_get_bearer_context_ignores_invalid_token_when_auth_not_effectively_requ
     app.state.settings = SimpleNamespace(
         auth_required=True,
         effective_auth_required=False,
-        effective_supabase_jwt_secret=_HS256_SUPABASE_SECRET,
-        effective_jwt_algorithm="HS256",
+        effective_supabase_jwt_secret=_TEST_EC_PRIVATE_KEY_PEM,
+        effective_jwt_algorithm="ES256",
+        jwt_public_key=_TEST_EC_PUBLIC_KEY_PEM,
     )
 
     @app.get("/bearer")
@@ -874,15 +889,16 @@ def test_get_auth_context_bearer_claim_org_takes_precedence_over_header_aliases(
             "org_id": "claim-org-123",
             "email": "user@example.com",
         },
-        _HS256_SUPABASE_SECRET,
-        algorithm="HS256",
+        _TEST_EC_PRIVATE_KEY_PEM,
+        algorithm="ES256",
     )
 
     app = FastAPI()
     app.state.settings = SimpleNamespace(
         effective_auth_required=True,
-        effective_supabase_jwt_secret=_HS256_SUPABASE_SECRET,
-        effective_jwt_algorithm="HS256",
+        effective_supabase_jwt_secret=_TEST_EC_PRIVATE_KEY_PEM,
+        effective_jwt_algorithm="ES256",
+        jwt_public_key=_TEST_EC_PUBLIC_KEY_PEM,
     )
 
     @app.get("/context")
@@ -923,15 +939,16 @@ def test_get_auth_context_bearer_claim_org_takes_precedence_over_header_aliases(
 def test_get_auth_context_bearer_falls_back_to_header_alias_when_claim_missing() -> None:
     token = jwt.encode(
         {"sub": "user-456"},
-        _HS256_SUPABASE_SECRET,
-        algorithm="HS256",
+        _TEST_EC_PRIVATE_KEY_PEM,
+        algorithm="ES256",
     )
 
     app = FastAPI()
     app.state.settings = SimpleNamespace(
         effective_auth_required=True,
-        effective_supabase_jwt_secret=_HS256_SUPABASE_SECRET,
-        effective_jwt_algorithm="HS256",
+        effective_supabase_jwt_secret=_TEST_EC_PRIVATE_KEY_PEM,
+        effective_jwt_algorithm="ES256",
+        jwt_public_key=_TEST_EC_PUBLIC_KEY_PEM,
     )
 
     @app.get("/context")

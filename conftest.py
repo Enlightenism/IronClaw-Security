@@ -29,7 +29,7 @@ _TEST_ENV_DEFAULTS: dict[str, str] = {
 
 _SECRET_DEFAULTS: dict[str, str] = {
     "IRONCLAW_SECRET_KEY": "test-secret-key-32-chars-minimum!!",
-    "JWT_SECRET": "test-jwt-secret-key-32-chars-min!",
+    "JWT_SECRET": "test-jwt-secret-key",
 }
 
 _SANITIZED_ENV_KEYS: frozenset[str] = frozenset(set(_TEST_ENV_DEFAULTS) | set(_SECRET_DEFAULTS))

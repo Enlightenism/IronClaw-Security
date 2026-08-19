@@ -353,21 +353,88 @@ class TestJWTDefaults:
         s = Settings(JWT_SECRET="test-jwt-secret")
         assert s.effective_supabase_jwt_secret == "supabase-secret"
 
-    def test_effective_jwt_algorithm_returns_empty_when_unset(self, monkeypatch):
+    def test_effective_jwt_algorithm_uses_canonical_default(self, monkeypatch):
         monkeypatch.delenv("JWT_ALGORITHM", raising=False)
+        monkeypatch.delenv("SUPABASE_JWT_ALGORITHM", raising=False)
         _set_required_secrets(monkeypatch)
         s = get_settings()
-        assert s.effective_jwt_algorithm == ""
+        assert s.effective_jwt_algorithm == "HS256"
+
+    def test_effective_jwt_algorithm_uses_legacy_supabase_algorithm(self, monkeypatch):
+        monkeypatch.delenv("JWT_ALGORITHM", raising=False)
+        monkeypatch.setenv("SUPABASE_JWT_ALGORITHM", "  hs512  ")
+        _set_required_secrets(monkeypatch)
+        s = get_settings()
+        assert s.effective_jwt_algorithm == "HS512"
 
     def test_effective_jwt_algorithm_normalizes_case_and_whitespace(self, monkeypatch):
         s = _fresh(monkeypatch, JWT_ALGORITHM="  rs256  ")
         assert s.effective_jwt_algorithm == "RS256"
 
+    def test_jwt_algorithm_is_asymmetric_for_es_and_rs(self):
+        for algorithm in ("ES256", "RS256"):
+            s = Settings(
+                IRONCLAW_SECRET_KEY="test-ironclaw-secret-key",
+                JWT_SECRET="test-jwt-secret-key",
+                JWT_ALGORITHM=algorithm,
+            )
+            assert s.jwt_algorithm_is_asymmetric is True
+            assert s.jwt_algorithm_is_symmetric is False
+
+    def test_jwt_algorithm_is_symmetric_for_hs(self):
+        s = Settings(
+            IRONCLAW_SECRET_KEY="test-ironclaw-secret-key",
+            JWT_SECRET="test-jwt-secret-key",
+            JWT_ALGORITHM="HS512",
+        )
+        assert s.jwt_algorithm_is_symmetric is True
+        assert s.jwt_algorithm_is_asymmetric is False
+
+    def test_jwt_key_properties_return_normalized_values(self):
+        s = Settings(
+            IRONCLAW_SECRET_KEY="test-ironclaw-secret-key",
+            JWT_SECRET="test-jwt-secret-key",
+            JWT_PRIVATE_KEY="  private-key  ",
+            JWT_PUBLIC_KEY="  public-key  ",
+        )
+        assert s.jwt_private_key_pem == "private-key"
+        assert s.jwt_public_key_pem == "public-key"
+        assert s.effective_jwt_secret == "test-jwt-secret-key"
+
+    def test_jwt_keys_configured_for_symmetric_algorithm(self):
+        s = Settings(
+            IRONCLAW_SECRET_KEY="test-ironclaw-secret-key",
+            JWT_SECRET="test-jwt-secret-key",
+            JWT_ALGORITHM="HS256",
+        )
+        assert s.jwt_keys_configured is True
+        assert s.jwt_keys_missing is False
+
+    def test_jwt_keys_configured_for_asymmetric_algorithm(self):
+        s = Settings(
+            IRONCLAW_SECRET_KEY="test-ironclaw-secret-key",
+            JWT_SECRET="test-jwt-secret-key",
+            JWT_ALGORITHM="ES256",
+            JWT_PUBLIC_KEY="public-key",
+        )
+        assert s.jwt_keys_configured is True
+        assert s.jwt_keys_missing is False
+
+    def test_jwt_keys_missing_for_asymmetric_algorithm_without_public_key(self):
+        s = Settings(
+            IRONCLAW_SECRET_KEY="test-ironclaw-secret-key",
+            JWT_SECRET="test-jwt-secret-key",
+            JWT_ALGORITHM="ES256",
+        )
+        assert s.jwt_keys_configured is False
+        assert s.jwt_keys_missing is True
+
     def test_allowed_jwt_algorithms_empty_when_unset(self, monkeypatch):
         monkeypatch.delenv("JWT_ALGORITHM", raising=False)
+        monkeypatch.delenv("SUPABASE_JWT_ALGORITHM", raising=False)
         _set_required_secrets(monkeypatch)
         s = Settings()
-        assert s.allowed_jwt_algorithms == []
+        assert s.allowed_jwt_algorithms == ["HS256"]
 
     def test_allowed_jwt_algorithms_contains_normalized_algorithm(self):
         s = Settings(
@@ -811,7 +878,10 @@ class TestOptionalIntegrationDefaults:
         assert isinstance(s.redis_url, str)
 
     def test_sentry_dsn_override(self, monkeypatch):
-        s = _fresh(monkeypatch, SENTRY_DSN="https://abc123@o000.ingest.sentry.io/000")
+        s = _fresh(
+            monkeypatch,
+            SENTRY_DSN="https://abc123@o000.ingest.sentry.io/000",
+        )
         assert s.sentry_dsn == "https://abc123@o000.ingest.sentry.io/000"
         assert isinstance(s.sentry_dsn, str)
 
@@ -831,7 +901,10 @@ class TestEngineDefaults:
         assert isinstance(s.engine_base_url, str)
 
     def test_engine_base_url_override(self, monkeypatch):
-        s = _fresh(monkeypatch, ENGINE_BASE_URL="http://engine.ironclaw.internal:9000")
+        s = _fresh(
+            monkeypatch,
+            ENGINE_BASE_URL="http://engine.ironclaw.internal:9000",
+        )
         assert s.engine_base_url == "http://engine.ironclaw.internal:9000"
 
 
@@ -943,7 +1016,10 @@ class TestEffectiveAuthConfiguration:
         )
         assert s.bearer_auth_configured is True
 
-    def test_bearer_auth_configured_true_with_supabase_url_and_jwt_secret(self, monkeypatch):
+    def test_bearer_auth_configured_true_with_supabase_url_and_jwt_secret(
+        self,
+        monkeypatch,
+    ):
         monkeypatch.setenv("JWT_SECRET", "jwt-secret")
         monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
         monkeypatch.setenv("IRONCLAW_SECRET_KEY", "test-ironclaw-secret-key")
@@ -977,7 +1053,10 @@ class TestEffectiveAuthConfiguration:
         s = Settings(AUTH_REQUIRED=False, IRONCLAW_API_KEY="ironclaw-key")
         assert s.effective_auth_required is False
 
-    def test_effective_auth_required_false_when_required_but_unconfigured(self, monkeypatch):
+    def test_effective_auth_required_false_when_required_but_unconfigured(
+        self,
+        monkeypatch,
+    ):
         monkeypatch.delenv("IRONCLAW_API_KEY", raising=False)
         monkeypatch.delenv("INTERNAL_PLATFORM_API_KEY", raising=False)
         monkeypatch.delenv("PLATFORM_API_KEY", raising=False)
@@ -1092,7 +1171,7 @@ class TestGetSettingsCache:
     ):
         get_settings.cache_clear()
         _set_required_secrets(monkeypatch)
-        monkeypatch.setenv("JWT_ALGORITHM", "HS256")
+        monkeypatch.setenv("JWT_ALGORITHM", "ES256")
         monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co")
         monkeypatch.setenv("SUPABASE_ANON_KEY", "anon-key")
         monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
@@ -1104,11 +1183,11 @@ class TestGetSettingsCache:
         diagnostic_message = next(message for message in messages if "JWT/Supabase auth configuration:" in message)
 
         assert "supabase_jwt_secret_configured=" in diagnostic_message
-        assert "effective_jwt_algorithm=HS256" in diagnostic_message
+        assert "effective_jwt_algorithm=ES256" in diagnostic_message
         assert "supabase_url_configured=True" in diagnostic_message
         assert "supabase_api_key_configured=True" in diagnostic_message
         assert "anon-key" not in diagnostic_message
-        assert settings.effective_jwt_algorithm == "HS256"
+        assert settings.effective_jwt_algorithm == "ES256"
 
 
 # ---------------------------------------------------------------------------

@@ -192,11 +192,10 @@ class Settings(BaseSettings):
         default_factory=lambda: _require_env("IRONCLAW_SECRET_KEY"),
         alias="IRONCLAW_SECRET_KEY",
     )
-    jwt_secret: str = Field(
-        default_factory=lambda: _require_env("JWT_SECRET"),
-        alias="JWT_SECRET",
-    )
     jwt_algorithm: str = Field(default="", alias="JWT_ALGORITHM")
+    jwt_private_key: str | None = Field(default=None, alias="JWT_PRIVATE_KEY")
+    jwt_public_key: str | None = Field(default=None, alias="JWT_PUBLIC_KEY")
+    jwt_secret: str | None = Field(default=None, alias="JWT_SECRET")
     access_token_expire_minutes: int = Field(
         default=30,
         alias="ACCESS_TOKEN_EXPIRE_MINUTES",
@@ -387,6 +386,12 @@ class Settings(BaseSettings):
         if vault_jwt_secret:
             return vault_jwt_secret
 
+        vault_supabase_jwt_secret = _sanitize_secret(
+            vault.supabase_jwt_secret(),
+        )
+        if vault_supabase_jwt_secret:
+            return vault_supabase_jwt_secret
+
         return _sanitize_secret(self.jwt_secret)
 
     @property
@@ -396,12 +401,53 @@ class Settings(BaseSettings):
 
     @property
     def effective_jwt_algorithm(self) -> str:
-        return _normalize_string(self.jwt_algorithm).upper()
+        configured = _normalize_string(self.jwt_algorithm).upper()
+        if configured:
+            return configured
+
+        legacy_algorithm = _normalize_string(
+            os.getenv("SUPABASE_JWT_ALGORITHM"),
+        ).upper()
+        if legacy_algorithm:
+            return legacy_algorithm
+
+        return "HS256"
+
+    @property
+    def jwt_algorithm_is_asymmetric(self) -> bool:
+        return self.effective_jwt_algorithm.startswith(("ES", "RS"))
+
+    @property
+    def jwt_algorithm_is_symmetric(self) -> bool:
+        return self.effective_jwt_algorithm.startswith("HS")
+
+    @property
+    def jwt_public_key_pem(self) -> str | None:
+        value = _sanitize_secret(self.jwt_public_key)
+        return value or None
+
+    @property
+    def jwt_private_key_pem(self) -> str | None:
+        value = _sanitize_secret(self.jwt_private_key)
+        return value or None
+
+    @property
+    def jwt_keys_configured(self) -> bool:
+        if self.jwt_algorithm_is_asymmetric:
+            return bool(self.jwt_public_key_pem)
+
+        if self.jwt_algorithm_is_symmetric:
+            return bool(self.effective_jwt_secret)
+
+        return False
+
+    @property
+    def jwt_keys_missing(self) -> bool:
+        return not self.jwt_keys_configured
 
     @property
     def allowed_jwt_algorithms(self) -> list[str]:
-        algorithm = self.effective_jwt_algorithm
-        return [algorithm] if algorithm else []
+        return [self.effective_jwt_algorithm]
 
     @property
     def effective_supabase_url(self) -> str:
@@ -417,7 +463,7 @@ class Settings(BaseSettings):
 
     @property
     def bearer_auth_configured(self) -> bool:
-        return bool(self.effective_supabase_url and (self.effective_supabase_anon_key or self.effective_supabase_service_role_key or self.effective_supabase_jwt_secret or self.effective_jwt_secret))
+        return bool(self.effective_supabase_url and (self.effective_supabase_anon_key or self.effective_supabase_service_role_key or self.effective_supabase_jwt_secret or self.effective_jwt_secret or self.jwt_public_key_pem))
 
     @property
     def api_key_auth_configured(self) -> bool:
@@ -509,9 +555,11 @@ class Settings(BaseSettings):
             return explicit
 
         derived: list[str] = []
+
         for origin in self.effective_allowed_origins:
             if origin == "*":
                 return ["*"]
+
             host = _host_from_url(origin)
             if host:
                 derived.append(host)
@@ -525,13 +573,28 @@ class Settings(BaseSettings):
         return normalized or ["*"]
 
     def log_auth_diagnostics(self) -> None:
+        algorithm = self.effective_jwt_algorithm
+
         _logger.info(
-            "JWT/Supabase auth configuration: supabase_jwt_secret_configured=%s effective_jwt_algorithm=%s supabase_url_configured=%s supabase_api_key_configured=%s",
+            "JWT/Supabase auth configuration: supabase_jwt_secret_configured=%s effective_jwt_algorithm=%s supabase_url_configured=%s supabase_api_key_configured=%s jwt_keys_configured=%s",
             bool(self.effective_supabase_jwt_secret),
-            self.effective_jwt_algorithm or "<unset>",
+            algorithm,
             bool(self.effective_supabase_url),
             bool(self.effective_supabase_anon_key or self.effective_supabase_service_role_key),
+            self.jwt_keys_configured,
         )
+
+        if self.jwt_algorithm_is_asymmetric and not self.jwt_public_key_pem:
+            _logger.warning(
+                "JWT asymmetric algorithm configured but JWT_PUBLIC_KEY is missing: effective_jwt_algorithm=%s",
+                algorithm,
+            )
+
+        if self.jwt_algorithm_is_symmetric and not self.effective_jwt_secret:
+            _logger.warning(
+                "JWT symmetric algorithm configured but JWT_SECRET is missing: effective_jwt_algorithm=%s",
+                algorithm,
+            )
 
 
 @functools.lru_cache(maxsize=1)
