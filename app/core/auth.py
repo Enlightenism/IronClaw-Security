@@ -21,7 +21,6 @@ from app.services.supabase_auth import validate_token_via_supabase
 
 _logger = logging.getLogger(__name__)
 
-
 API_KEY_HEADER_NAME = "X-API-Key"
 SESSION_ID_HEADER_NAME = "X-Session-Id"
 ORG_ID_HEADER_NAME = "X-Org-Id"
@@ -29,9 +28,7 @@ ORGANIZATION_ID_HEADER_NAME = "X-Organization-Id"
 TENANT_ID_HEADER_NAME = "X-Tenant-Id"
 AUTHORIZATION_HEADER_NAME = "Authorization"
 
-
 _RESOLVED_API_KEY_RECORD_REQUEST_STATE_KEY = "_resolved_api_key_record"
-
 
 api_key_header = APIKeyHeader(name=API_KEY_HEADER_NAME, auto_error=False)
 session_id_header = APIKeyHeader(name=SESSION_ID_HEADER_NAME, auto_error=False)
@@ -212,7 +209,7 @@ def get_supabase_jwt_secret(request: Request) -> str | None:
 def _get_jwt_algorithm(request: Request) -> str:
     settings = _get_settings(request)
     if settings is None:
-        return "HS256"
+        return "ES256"
 
     effective_value = _clean_optional_string(
         getattr(settings, "effective_jwt_algorithm", None),
@@ -225,7 +222,7 @@ def _get_jwt_algorithm(request: Request) -> str:
         if value is not None:
             return value.upper()
 
-    return "HS256"
+    return "ES256"
 
 
 def _token_algorithm(token: str) -> str | None:
@@ -399,7 +396,7 @@ def _has_bearer_auth_config(request: Request) -> bool:
     if settings is None:
         return False
 
-    return get_supabase_jwt_secret(request) is not None or (
+    return (
         _clean_optional_string(
             getattr(settings, "effective_supabase_url", None),
         )
@@ -414,7 +411,7 @@ def _has_bearer_auth_config(request: Request) -> bool:
             )
             is not None
         )
-    )
+    ) or get_supabase_jwt_secret(request) is not None
 
 
 def _is_auth_required(request: Request) -> bool:
@@ -842,9 +839,9 @@ def get_bearer_context(
     secret = get_supabase_jwt_secret(request)
     algorithm = _get_jwt_algorithm(request)
     token_algorithm = _token_algorithm(token)
-    claims: dict[str, Any] | None = None
+    claims: dict[str, Any] | None = _validate_bearer_token_remotely(request, token)
 
-    if secret:
+    if claims is None and secret and token_algorithm == "HS256":
         try:
             claims = cast(
                 "dict[str, Any]",
@@ -862,22 +859,19 @@ def get_bearer_context(
                 token_algorithm,
                 algorithm,
             )
-            claims = _validate_bearer_token_remotely(request, token)
-    else:
-        claims = _validate_bearer_token_remotely(request, token)
 
     if claims is None:
         if not auth_required:
             _logger.info("Ignoring invalid Bearer token because auth is disabled")
             return None
 
-        if not secret:
+        if not secret and not _has_bearer_auth_config(request):
             _logger.warning(
-                "Bearer auth validation unavailable: SUPABASE_JWT_SECRET is not configured",
+                "Bearer auth validation unavailable: Supabase bearer validation is not configured",
             )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=("SUPABASE_JWT_SECRET is not configured; configure or use remote validation via SUPABASE_URL + SUPABASE_ANON_KEY"),
+                detail=("Supabase bearer validation is not configured; configure SUPABASE_URL with SUPABASE_ANON_KEY or SUPABASE_SERVICE_ROLE_KEY"),
             )
 
         _logger.warning(
@@ -907,7 +901,7 @@ def get_bearer_context(
         token=token,
         principal_id=principal_id,
         claims=claims,
-        auth_source="supabase_jwt" if secret else "supabase_remote",
+        auth_source="supabase_jwt",
     )
 
 

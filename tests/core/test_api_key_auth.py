@@ -47,8 +47,8 @@ _BEARER_PRINCIPAL_ID = "user-123"
 _INVALID_BEARER_DETAIL = {
     "error": "invalid_bearer_token",
     "detail": "Invalid Bearer token — algorithm mismatch or signature failure",
-    "alg_in_token": "HS256",
-    "expected_alg": "HS256",
+    "alg_in_token": "ES256",
+    "expected_alg": "ES256",
 }
 _INVALID_BEARER_DETAIL_WITHOUT_ALG = {
     **_INVALID_BEARER_DETAIL,
@@ -106,7 +106,7 @@ def _make_settings(
     configured_key: str | None = None,
     supabase_jwt_secret: str | None = None,
     jwt_secret: str | None = None,
-    jwt_algorithm: str | None = "HS256",
+    jwt_algorithm: str | None = "ES256",
     org_id: str | None = None,
     organization_id: str | None = None,
     default_org_id: str | None = None,
@@ -173,7 +173,7 @@ def _make_app(
     registry: APIKeyRegistry | None = None,
     supabase_jwt_secret: str | None = None,
     jwt_secret: str | None = None,
-    jwt_algorithm: str | None = "HS256",
+    jwt_algorithm: str | None = "ES256",
     org_id: str | None = None,
     organization_id: str | None = None,
     default_org_id: str | None = None,
@@ -278,7 +278,7 @@ def _encode_bearer_token(
     permissions: tuple[str, ...] = ("scan:read",),
     principal_type: str = "customer",
     secret: str = _SUPABASE_JWT_SECRET,
-    algorithm: str = "HS256",
+    algorithm: str = "ES256",
     extra_claims: dict[str, object] | None = None,
 ) -> str:
     import jwt

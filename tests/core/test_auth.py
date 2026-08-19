@@ -8,12 +8,12 @@ from starlette.requests import Request
 from app.core import auth
 from app.core.errors import AppError
 
-_MISSING_SUPABASE_JWT_SECRET_DETAIL = "SUPABASE_JWT_SECRET is not configured; configure or use remote validation via SUPABASE_URL + SUPABASE_ANON_KEY"
+_MISSING_SUPABASE_JWT_SECRET_DETAIL = "Supabase bearer validation is not configured; configure SUPABASE_URL with SUPABASE_ANON_KEY or SUPABASE_SERVICE_ROLE_KEY"
 _INVALID_BEARER_DETAIL = {
     "error": "invalid_bearer_token",
     "detail": "Invalid Bearer token — algorithm mismatch or signature failure",
     "alg_in_token": None,
-    "expected_alg": "HS256",
+    "expected_alg": "ES256",
 }
 
 
@@ -249,9 +249,9 @@ def test_get_supabase_jwt_secret_falls_back_to_jwt_secret():
 
 
 def test_get_jwt_algorithm_prefers_effective_value():
-    settings = types.SimpleNamespace(effective_jwt_algorithm="hs512")
+    settings = types.SimpleNamespace(effective_jwt_algorithm="es256")
     request = make_request(settings=settings)
-    assert auth._get_jwt_algorithm(request) == "HS512"
+    assert auth._get_jwt_algorithm(request) == "ES256"
 
 
 def test_touch_record_if_possible_returns_original_when_touch_missing(monkeypatch):
@@ -306,7 +306,11 @@ def test_resolve_registry_api_key_for_request_uses_cache(monkeypatch):
     record = DummyRecord()
     auth._cache_registry_record(request, record)
 
-    monkeypatch.setattr(auth, "_resolve_registry_api_key", lambda _: pytest.fail("should not resolve again"))
+    monkeypatch.setattr(
+        auth,
+        "_resolve_registry_api_key",
+        lambda _: pytest.fail("should not resolve again"),
+    )
 
     assert auth._resolve_registry_api_key_for_request(request, "key") is record
 
@@ -430,11 +434,26 @@ def test_coerce_org_id_prefers_header_then_record_then_settings():
     settings = types.SimpleNamespace(default_org_id="org-settings")
     request = make_request(settings=settings, headers={"X-Org-Id": "org-header"})
 
-    assert auth._coerce_org_id(request, None, None, None, record) == ("org-header", auth.ORG_ID_HEADER_NAME)
+    assert auth._coerce_org_id(request, None, None, None, record) == (
+        "org-header",
+        auth.ORG_ID_HEADER_NAME,
+    )
 
     request_without_header = make_request(settings=settings)
-    assert auth._coerce_org_id(request_without_header, None, None, None, record) == ("org-record", "api_key_record")
-    assert auth._coerce_org_id(request_without_header, None, None, None, None) == ("org-settings", "settings")
+    assert auth._coerce_org_id(
+        request_without_header,
+        None,
+        None,
+        None,
+        record,
+    ) == ("org-record", "api_key_record")
+    assert auth._coerce_org_id(
+        request_without_header,
+        None,
+        None,
+        None,
+        None,
+    ) == ("org-settings", "settings")
 
 
 def test_coerce_key_type_and_registry_principal_type():
@@ -463,16 +482,40 @@ def test_clean_claim_strings_and_extract_claim_values():
 def test_resolve_bearer_org_id_prefers_claims_then_metadata_then_headers():
     request = make_request(headers={"X-Org-Id": "org-header"})
     claims = {"org_id": "org-claim"}
-    assert auth._resolve_bearer_org_id(request, claims, None, None, None) == ("org-claim", "claim:org_id")
+    assert auth._resolve_bearer_org_id(
+        request,
+        claims,
+        None,
+        None,
+        None,
+    ) == ("org-claim", "claim:org_id")
 
     claims = {"user_metadata": {"org_id": "org-user-meta"}}
-    assert auth._resolve_bearer_org_id(request, claims, None, None, None) == ("org-user-meta", "user_metadata:org_id")
+    assert auth._resolve_bearer_org_id(
+        request,
+        claims,
+        None,
+        None,
+        None,
+    ) == ("org-user-meta", "user_metadata:org_id")
 
     claims = {"app_metadata": {"org_id": "org-app-meta"}}
-    assert auth._resolve_bearer_org_id(request, claims, None, None, None) == ("org-app-meta", "app_metadata:org_id")
+    assert auth._resolve_bearer_org_id(
+        request,
+        claims,
+        None,
+        None,
+        None,
+    ) == ("org-app-meta", "app_metadata:org_id")
 
     claims = {}
-    assert auth._resolve_bearer_org_id(request, claims, None, None, None) == ("org-header", auth.ORG_ID_HEADER_NAME)
+    assert auth._resolve_bearer_org_id(
+        request,
+        claims,
+        None,
+        None,
+        None,
+    ) == ("org-header", auth.ORG_ID_HEADER_NAME)
 
 
 def test_resolve_bearer_roles_permissions_and_principal_type():
@@ -520,7 +563,7 @@ def test_get_bearer_context_raises_401_for_invalid_token_when_auth_required(monk
     request = make_request()
     monkeypatch.setattr(auth, "_is_auth_required", lambda req: True)
     monkeypatch.setattr(auth, "get_supabase_jwt_secret", lambda req: "secret")
-    monkeypatch.setattr(auth, "_get_jwt_algorithm", lambda req: "HS256")
+    monkeypatch.setattr(auth, "_get_jwt_algorithm", lambda req: "ES256")
 
     def fake_decode(*args, **kwargs):
         raise jwt.PyJWTError("bad token")
@@ -538,8 +581,12 @@ def test_get_bearer_context_raises_401_when_sub_missing_and_auth_required(monkey
     request = make_request()
     monkeypatch.setattr(auth, "_is_auth_required", lambda req: True)
     monkeypatch.setattr(auth, "get_supabase_jwt_secret", lambda req: "secret")
-    monkeypatch.setattr(auth, "_get_jwt_algorithm", lambda req: "HS256")
-    monkeypatch.setattr(auth.jwt, "decode", lambda *args, **kwargs: {"email": "a@example.com"})
+    monkeypatch.setattr(auth, "_get_jwt_algorithm", lambda req: "ES256")
+    monkeypatch.setattr(
+        auth.jwt,
+        "decode",
+        lambda *args, **kwargs: {"email": "a@example.com"},
+    )
 
     with pytest.raises(HTTPException) as exc:
         auth.get_bearer_context(request, "Bearer token")
@@ -554,7 +601,7 @@ def test_get_bearer_context_returns_context_for_valid_token(monkeypatch):
 
     monkeypatch.setattr(auth, "_is_auth_required", lambda req: True)
     monkeypatch.setattr(auth, "get_supabase_jwt_secret", lambda req: "secret")
-    monkeypatch.setattr(auth, "_get_jwt_algorithm", lambda req: "HS256")
+    monkeypatch.setattr(auth, "_get_jwt_algorithm", lambda req: "ES256")
     monkeypatch.setattr(auth.jwt, "decode", lambda *args, **kwargs: claims)
 
     context = auth.get_bearer_context(request, "Bearer token-123")
@@ -594,7 +641,11 @@ def test_get_api_key_accepts_registry_api_key(monkeypatch):
     request = make_request()
     monkeypatch.setattr(auth, "_is_auth_required", lambda req: True)
     monkeypatch.setattr(auth, "_extract_configured_api_key", lambda req: None)
-    monkeypatch.setattr(auth, "_resolve_registry_api_key_for_request", lambda req, key: DummyRecord())
+    monkeypatch.setattr(
+        auth,
+        "_resolve_registry_api_key_for_request",
+        lambda req, key: DummyRecord(),
+    )
 
     assert auth.get_api_key(request, "registry-key", None) == "registry-key"
 
@@ -603,7 +654,11 @@ def test_get_api_key_passthrough_when_auth_disabled(monkeypatch):
     request = make_request()
     monkeypatch.setattr(auth, "_is_auth_required", lambda req: False)
     monkeypatch.setattr(auth, "_extract_configured_api_key", lambda req: None)
-    monkeypatch.setattr(auth, "_resolve_registry_api_key_for_request", lambda req, key: None)
+    monkeypatch.setattr(
+        auth,
+        "_resolve_registry_api_key_for_request",
+        lambda req, key: None,
+    )
 
     assert auth.get_api_key(request, "unknown-key", None) == "unknown-key"
 
@@ -612,7 +667,11 @@ def test_get_api_key_raises_auth_not_configured(monkeypatch):
     request = make_request()
     monkeypatch.setattr(auth, "_is_auth_required", lambda req: True)
     monkeypatch.setattr(auth, "_extract_configured_api_key", lambda req: None)
-    monkeypatch.setattr(auth, "_resolve_registry_api_key_for_request", lambda req, key: None)
+    monkeypatch.setattr(
+        auth,
+        "_resolve_registry_api_key_for_request",
+        lambda req, key: None,
+    )
     monkeypatch.setattr(auth, "_has_registry_keys", lambda: False)
 
     with pytest.raises(AppError) as exc:
@@ -624,8 +683,16 @@ def test_get_api_key_raises_auth_not_configured(monkeypatch):
 def test_get_api_key_raises_invalid_api_key(monkeypatch):
     request = make_request()
     monkeypatch.setattr(auth, "_is_auth_required", lambda req: True)
-    monkeypatch.setattr(auth, "_extract_configured_api_key", lambda req: "configured-key")
-    monkeypatch.setattr(auth, "_resolve_registry_api_key_for_request", lambda req, key: None)
+    monkeypatch.setattr(
+        auth,
+        "_extract_configured_api_key",
+        lambda req: "configured-key",
+    )
+    monkeypatch.setattr(
+        auth,
+        "_resolve_registry_api_key_for_request",
+        lambda req, key: None,
+    )
     monkeypatch.setattr(auth, "_has_registry_keys", lambda: True)
 
     with pytest.raises(AppError) as exc:
@@ -656,7 +723,11 @@ def test_get_auth_context_from_api_key_registry_record(monkeypatch):
         key_id="key-123",
     )
 
-    monkeypatch.setattr(auth, "_resolve_registry_api_key_for_request", lambda req, key: record)
+    monkeypatch.setattr(
+        auth,
+        "_resolve_registry_api_key_for_request",
+        lambda req, key: record,
+    )
     monkeypatch.setattr(auth, "_extract_configured_api_key", lambda req: None)
 
     context = auth.get_auth_context(
@@ -686,9 +757,21 @@ def test_get_auth_context_from_api_key_registry_record(monkeypatch):
 
 def test_get_auth_context_from_configured_api_key(monkeypatch):
     request = make_request()
-    monkeypatch.setattr(auth, "_resolve_registry_api_key_for_request", lambda req, key: None)
-    monkeypatch.setattr(auth, "_extract_configured_api_key", lambda req: "configured-key")
-    monkeypatch.setattr(auth, "_coerce_org_id", lambda *args, **kwargs: ("org-settings", "settings"))
+    monkeypatch.setattr(
+        auth,
+        "_resolve_registry_api_key_for_request",
+        lambda req, key: None,
+    )
+    monkeypatch.setattr(
+        auth,
+        "_extract_configured_api_key",
+        lambda req: "configured-key",
+    )
+    monkeypatch.setattr(
+        auth,
+        "_coerce_org_id",
+        lambda *args, **kwargs: ("org-settings", "settings"),
+    )
 
     context = auth.get_auth_context(
         request,
@@ -765,7 +848,11 @@ def test_get_auth_context_raises_when_auth_required(monkeypatch):
 def test_get_auth_context_returns_anonymous_when_auth_disabled(monkeypatch):
     request = make_request()
     monkeypatch.setattr(auth, "_is_auth_required", lambda req: False)
-    monkeypatch.setattr(auth, "_coerce_org_id", lambda *args, **kwargs: ("org-public", "settings"))
+    monkeypatch.setattr(
+        auth,
+        "_coerce_org_id",
+        lambda *args, **kwargs: ("org-public", "settings"),
+    )
 
     context = auth.get_auth_context(request, None, None, None, None, None, None)
 

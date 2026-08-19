@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
+import jwt
+from jwt import PyJWKClient
 
 from app.core.settings import Settings, get_settings
 
@@ -33,11 +35,63 @@ def _claims_from_supabase_user(user: object) -> dict[str, Any] | None:
     user_metadata = user.get("user_metadata")
     app_metadata = user.get("app_metadata")
 
-    return {
+    claims: dict[str, Any] = {
         "sub": user_id,
         "user_metadata": user_metadata if isinstance(user_metadata, dict) else {},
         "app_metadata": app_metadata if isinstance(app_metadata, dict) else {},
     }
+
+    for field_name in (
+        "email",
+        "phone",
+        "role",
+        "aud",
+        "session_id",
+        "aal",
+        "amr",
+        "is_anonymous",
+    ):
+        if field_name in user:
+            claims[field_name] = user.get(field_name)
+
+    return claims
+
+
+def _jwks_url(settings: Settings) -> str | None:
+    supabase_url = _setting_value(
+        settings,
+        "effective_supabase_url",
+        "supabase_url",
+        "SUPABASE_URL",
+    )
+    if supabase_url is None:
+        return None
+    return f"{supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
+
+
+def _decode_token_via_jwks(
+    token: str,
+    settings: Settings,
+) -> dict[str, Any] | None:
+    jwks_url = _jwks_url(settings)
+    if jwks_url is None:
+        return None
+
+    try:
+        signing_key = PyJWKClient(jwks_url).get_signing_key_from_jwt(token)
+        claims = jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["ES256", "RS256", "HS256"],
+            options={"verify_aud": False},
+        )
+    except Exception:
+        return None
+
+    if not isinstance(claims, dict):
+        return None
+
+    return claims
 
 
 def validate_token_via_supabase(
@@ -45,7 +99,7 @@ def validate_token_via_supabase(
     settings: Settings | None = None,
     timeout: float = 3.0,
 ) -> dict[str, Any] | None:
-    """Validate a bearer token through Supabase's authenticated-user endpoint."""
+    """Validate a bearer token through Supabase JWT verification, falling back to the authenticated-user endpoint."""
     normalized_token = _clean_optional_string(token)
     if normalized_token is None:
         return None
@@ -56,6 +110,10 @@ def validate_token_via_supabase(
             resolved_settings = get_settings()
         except Exception:
             return None
+
+    claims = _decode_token_via_jwks(normalized_token, resolved_settings)
+    if claims is not None:
+        return claims
 
     supabase_url = _setting_value(
         resolved_settings,
