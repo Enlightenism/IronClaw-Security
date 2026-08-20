@@ -8,6 +8,7 @@ from typing import Any, cast
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import APIKeyHeader
 import jwt
+from jwt import PyJWKClient
 
 from app.core.apikeys import (
     APIKeyRecord,
@@ -252,6 +253,41 @@ def _token_algorithm(token: str) -> str | None:
     except jwt.PyJWTError:
         return None
     return _clean_optional_string(header.get("alg"))
+
+
+def _jwks_url(settings: Any) -> str | None:
+    supabase_url = _clean_optional_string(getattr(settings, "effective_supabase_url", None)) or _clean_optional_string(getattr(settings, "supabase_url", None))
+    if not supabase_url:
+        return None
+    return f"{supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
+
+
+def _decode_with_jwks(
+    token: str,
+    settings: Any,
+    algorithm: str,
+) -> dict[str, Any] | None:
+    jwks_url = _jwks_url(settings)
+    if not jwks_url:
+        return None
+
+    try:
+        jwk_client = PyJWKClient(jwks_url)
+        signing_key = jwk_client.get_signing_key_from_jwt(token)
+
+        key = signing_key.key
+        if hasattr(key, "key"):
+            key = key.key
+
+        claims = jwt.decode(
+            token,
+            key,
+            algorithms=[algorithm],
+            options={"verify_aud": False},
+        )
+        return claims
+    except Exception:
+        return None
 
 
 def _validate_bearer_token_remotely(
@@ -872,68 +908,35 @@ def get_bearer_context(
         ) from None
 
     if algorithm.startswith(("ES", "RS")):
-        public_key = get_jwt_public_key(request)
-        if not public_key:
+        settings = _get_settings(request)
+
+        claims: dict[str, Any] | None = None
+
+        if settings is not None:
+            claims = _decode_with_jwks(token, settings, algorithm)
+
+        if claims is None:
+            public_key = get_jwt_public_key(request)
+            if public_key:
+                try:
+                    claims = cast(
+                        "dict[str, Any]",
+                        jwt.decode(
+                            token,
+                            public_key,
+                            algorithms=[algorithm],
+                            options={"verify_aud": False},
+                        ),
+                    )
+                except jwt.PyJWTError:
+                    pass
+
+        if claims is None:
+            claims = _validate_bearer_token_remotely(request, token)
+
+        if claims is None:
             if auth_required:
-                secret = get_supabase_jwt_secret(request)
-                if secret:
-                    try:
-                        claims = cast(
-                            "dict[str, Any]",
-                            jwt.decode(
-                                token,
-                                secret,
-                                algorithms=["HS256"],
-                                options={"verify_aud": False},
-                            ),
-                        )
-                        principal_id = _clean_optional_string(claims.get("sub"))
-                        if principal_id is None:
-                            if auth_required:
-                                raise HTTPException(
-                                    status_code=status.HTTP_401_UNAUTHORIZED,
-                                    detail="Bearer token missing sub claim",
-                                ) from None
-                            return None
-
-                        return BearerAuthContext(
-                            token=token,
-                            principal_id=principal_id,
-                            claims=claims,
-                            auth_source="supabase_jwt",
-                        )
-                    except jwt.PyJWTError:
-                        pass
-
-                _logger.warning(
-                    "Bearer auth validation unavailable: JWT public key is not configured for asymmetric algorithm %s",
-                    algorithm,
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Bearer token validation failed: asymmetric algorithm configured but JWT_PUBLIC_KEY not available",
-                ) from None
-            _logger.info("Ignoring bearer token: no public key configured for asymmetric algorithm and auth not required")
-            return None
-
-        try:
-            claims = cast(
-                "dict[str, Any]",
-                jwt.decode(
-                    token,
-                    public_key,
-                    algorithms=[algorithm],
-                    options={"verify_aud": False},
-                ),
-            )
-        except jwt.PyJWTError as decode_exc:
-            _logger.warning(
-                "Bearer token decode failed: alg_in_token=%s expected_alg=%s error=%s",
-                token_algorithm,
-                algorithm,
-                decode_exc,
-            )
-            if auth_required:
+                _logger.warning("Bearer token validation failed: all methods exhausted (JWKS, static key, remote)")
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail=_bearer_token_error(algorithm, token_algorithm),
