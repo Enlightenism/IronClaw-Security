@@ -875,13 +875,43 @@ def get_bearer_context(
         public_key = get_jwt_public_key(request)
         if not public_key:
             if auth_required:
+                secret = get_supabase_jwt_secret(request)
+                if secret:
+                    try:
+                        claims = cast(
+                            "dict[str, Any]",
+                            jwt.decode(
+                                token,
+                                secret,
+                                algorithms=["HS256"],
+                                options={"verify_aud": False},
+                            ),
+                        )
+                        principal_id = _clean_optional_string(claims.get("sub"))
+                        if principal_id is None:
+                            if auth_required:
+                                raise HTTPException(
+                                    status_code=status.HTTP_401_UNAUTHORIZED,
+                                    detail="Bearer token missing sub claim",
+                                ) from None
+                            return None
+
+                        return BearerAuthContext(
+                            token=token,
+                            principal_id=principal_id,
+                            claims=claims,
+                            auth_source="supabase_jwt",
+                        )
+                    except jwt.PyJWTError:
+                        pass
+
                 _logger.warning(
                     "Bearer auth validation unavailable: JWT public key is not configured for asymmetric algorithm %s",
                     algorithm,
                 )
                 raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="JWT public key is not configured; configure JWT_PUBLIC_KEY for asymmetric algorithm",
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Bearer token validation failed: asymmetric algorithm configured but JWT_PUBLIC_KEY not available",
                 ) from None
             _logger.info("Ignoring bearer token: no public key configured for asymmetric algorithm and auth not required")
             return None
@@ -1002,11 +1032,11 @@ def get_bearer_context(
 
             if not secret and not _has_bearer_auth_config(request):
                 _logger.warning(
-                    "Bearer auth validation unavailable: Supabase bearer validation is not configured",
+                    "Bearer auth validation unavailable: SUPABASE_JWT_SECRET is not configured",
                 )
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Supabase bearer validation is not configured; configure SUPABASE_URL with SUPABASE_ANON_KEY or SUPABASE_SERVICE_ROLE_KEY",
+                    detail="SUPABASE_JWT_SECRET is not configured; configure or use remote validation via SUPABASE_URL + SUPABASE_ANON_KEY",
                 ) from None
 
             _logger.warning(

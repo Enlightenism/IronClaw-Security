@@ -8,12 +8,12 @@ from starlette.requests import Request
 from app.core import auth
 from app.core.errors import AppError
 
-_MISSING_SUPABASE_JWT_SECRET_DETAIL = "Supabase bearer validation is not configured; configure SUPABASE_URL with SUPABASE_ANON_KEY or SUPABASE_SERVICE_ROLE_KEY"
+_MISSING_SUPABASE_JWT_SECRET_DETAIL = "SUPABASE_JWT_SECRET is not configured; configure or use remote validation via SUPABASE_URL + SUPABASE_ANON_KEY"
 _INVALID_BEARER_DETAIL = {
     "error": "invalid_bearer_token",
     "detail": "Invalid Bearer token — algorithm mismatch or signature failure",
     "alg_in_token": None,
-    "expected_alg": "ES256",
+    "expected_alg": "HS256",
 }
 
 
@@ -563,7 +563,7 @@ def test_get_bearer_context_raises_401_for_invalid_token_when_auth_required(monk
     request = make_request()
     monkeypatch.setattr(auth, "_is_auth_required", lambda req: True)
     monkeypatch.setattr(auth, "get_supabase_jwt_secret", lambda req: "secret")
-    monkeypatch.setattr(auth, "_get_jwt_algorithm", lambda req: "ES256")
+    monkeypatch.setattr(auth, "_get_jwt_algorithm", lambda req: "HS256")
 
     def fake_decode(*args, **kwargs):
         raise jwt.PyJWTError("bad token")
@@ -581,7 +581,7 @@ def test_get_bearer_context_raises_401_when_sub_missing_and_auth_required(monkey
     request = make_request()
     monkeypatch.setattr(auth, "_is_auth_required", lambda req: True)
     monkeypatch.setattr(auth, "get_supabase_jwt_secret", lambda req: "secret")
-    monkeypatch.setattr(auth, "_get_jwt_algorithm", lambda req: "ES256")
+    monkeypatch.setattr(auth, "_get_jwt_algorithm", lambda req: "HS256")
     monkeypatch.setattr(
         auth.jwt,
         "decode",
@@ -601,7 +601,7 @@ def test_get_bearer_context_returns_context_for_valid_token(monkeypatch):
 
     monkeypatch.setattr(auth, "_is_auth_required", lambda req: True)
     monkeypatch.setattr(auth, "get_supabase_jwt_secret", lambda req: "secret")
-    monkeypatch.setattr(auth, "_get_jwt_algorithm", lambda req: "ES256")
+    monkeypatch.setattr(auth, "_get_jwt_algorithm", lambda req: "HS256")
     monkeypatch.setattr(auth.jwt, "decode", lambda *args, **kwargs: claims)
 
     context = auth.get_bearer_context(request, "Bearer token-123")

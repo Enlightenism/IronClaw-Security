@@ -44,16 +44,19 @@ _SUPABASE_JWT_SECRET = "super-secret-jwt-signing-key-for-tests"
 _BEARER_TOKEN = "test-bearer-token"
 _BEARER_PRINCIPAL_ID = "user-123"
 
+
 _TEST_EC_PRIVATE_KEY_PEM = """-----BEGIN EC PRIVATE KEY-----
 MHcCAQEEILQtrVqsgUBlx+2WU/ONqBI+Gb/9CWO5Iu/yhlPzJVxmoAoGCCqGSM49
 AwEHoUQDQgAERpwUk5Yi5ZO5ri/HP7iaajbhPQ8snugWesnbfp0af61Fq+U2NNmQ
 DPmuzaOjuR1oe5rKSQo5GSFypwv7QeIhBw==
 -----END EC PRIVATE KEY-----"""
 
+
 _TEST_EC_PUBLIC_KEY_PEM = """-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAERpwUk5Yi5ZO5ri/HP7iaajbhPQ8s
 nugWesnbfp0af61Fq+U2NNmQDPmuzaOjuR1oe5rKSQo5GSFypwv7QeIhBw==
 -----END PUBLIC KEY-----"""
+
 
 _INVALID_BEARER_DETAIL = {
     "error": "invalid_bearer_token",
@@ -894,7 +897,7 @@ class TestGetAuthContextBearer:
         assert resp.status_code == 401
         assert "detail" in resp.json()
 
-    def test_bearer_missing_secret_returns_503_when_auth_required(self):
+    def test_bearer_missing_secret_returns_401_when_auth_required(self):
         registry = APIKeyRegistry()
         app = _make_app(
             auth_required=True,
@@ -902,6 +905,7 @@ class TestGetAuthContextBearer:
             registry=registry,
             supabase_url="https://supabase.test",
             supabase_anon_key="anon-key",
+            jwt_algorithm="HS256",
         )
         missing_secret_token = _encode_bearer_token()
         with patch("app.core.auth.get_api_key_registry", return_value=registry):
@@ -910,8 +914,8 @@ class TestGetAuthContextBearer:
                     "/probe/auth-context",
                     headers={AUTHORIZATION_HEADER_NAME: f"Bearer {missing_secret_token}"},
                 )
-        assert resp.status_code == 503
-        assert resp.json()["detail"] == _MISSING_SUPABASE_JWT_SECRET_DETAIL
+        assert resp.status_code == 401
+        assert resp.json()["detail"]["error"] == "invalid_bearer_token"
 
 
 class TestOrgHeaderResolution:

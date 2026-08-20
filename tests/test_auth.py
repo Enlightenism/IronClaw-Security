@@ -32,10 +32,12 @@ AwEHoUQDQgAERpwUk5Yi5ZO5ri/HP7iaajbhPQ8snugWesnbfp0af61Fq+U2NNmQ
 DPmuzaOjuR1oe5rKSQo5GSFypwv7QeIhBw==
 -----END EC PRIVATE KEY-----"""
 
+
 _TEST_EC_PUBLIC_KEY_PEM = """-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAERpwUk5Yi5ZO5ri/HP7iaajbhPQ8s
 nugWesnbfp0af61Fq+U2NNmQDPmuzaOjuR1oe5rKSQo5GSFypwv7QeIhBw==
 -----END PUBLIC KEY-----"""
+
 
 _HS256_SUPABASE_SECRET = "supabase-secret-key-for-tests-32-bytes-min!!"
 _HS256_WRONG_SECRET = "wrong-secret-key-for-tests-32-bytes-min!!!!!"
@@ -571,6 +573,7 @@ def test_get_bearer_context_returns_503_when_effective_auth_required_and_secret_
         effective_auth_required=True,
         effective_supabase_jwt_secret=None,
         effective_jwt_secret=None,
+        effective_jwt_algorithm="HS256",
     )
 
     @app.get("/bearer")
