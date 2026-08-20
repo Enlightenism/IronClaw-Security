@@ -8,6 +8,7 @@ data/
 .env.*
 !.env.example
 *.bak
+*.pem
 openapi.json.bak
 
 # Runtime-generated data — never commit
