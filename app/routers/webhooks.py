@@ -807,7 +807,7 @@ async def retry_webhook_delivery(
     delivery_status_val = record.get("status", "")
     if delivery_status_val not in ("failed", "exhausted"):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(f"Delivery status '{delivery_status_val}' is not retryable. Only 'failed' or 'exhausted' deliveries can be retried."),
         )
 

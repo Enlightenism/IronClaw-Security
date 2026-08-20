@@ -49,6 +49,7 @@ Requires-Dist: ruff<1.0,>=0.11; extra == "dev"
 Requires-Dist: anyio<5.0,>=4.0; extra == "dev"
 Requires-Dist: pydantic-settings<3.0,>=2.3; extra == "dev"
 Requires-Dist: stripe<10.0,>=7.0.0; extra == "dev"
+Requires-Dist: cryptography>=42.0.8; extra == "dev"
 Provides-Extra: docker
 Requires-Dist: uvicorn[standard]<0.45,>=0.30; extra == "docker"
 Requires-Dist: pydantic-settings<3.0,>=2.3; extra == "docker"

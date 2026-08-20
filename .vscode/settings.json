@@ -46,5 +46,14 @@
     "**/.mypy_cache": true,
     "**/.ruff_cache": true
   },
-  "deno.enable": true
+  "deno.enable": true,
+
+  "python.analysis.ignore": [
+    "reportUnsupportedDunderAll"
+  ],
+
+  "python.analysis.exclude": [
+    "**/__pycache__",
+    "**/.venv"
+  ]
 }

@@ -517,7 +517,7 @@ async def taxii_ingest(
         len(result.errors),
     )
 
-    response_status = status.HTTP_200_OK if result.status in (IngestStatusEnum.SUCCESS, IngestStatusEnum.PARTIAL) else status.HTTP_422_UNPROCESSABLE_ENTITY
+    response_status = status.HTTP_200_OK if result.status in (IngestStatusEnum.SUCCESS, IngestStatusEnum.PARTIAL) else status.HTTP_422_UNPROCESSABLE_CONTENT
 
     return JSONResponse(
         status_code=response_status,

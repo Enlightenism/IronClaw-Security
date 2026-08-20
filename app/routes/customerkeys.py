@@ -35,7 +35,7 @@ def _utc_now_iso() -> str:
 def _assert_valid_program(program: str) -> ProgramCode:
     if program not in _VALID_PROGRAMS:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Invalid program {program!r}. Must be one of: {sorted(_VALID_PROGRAMS)}",
         )
     return program  # type: ignore[return-value]
@@ -195,7 +195,7 @@ def generate_install_key(payload: GenerateInstallKeyRequest) -> GenerateInstallK
         ) from exc
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
 

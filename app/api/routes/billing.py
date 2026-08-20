@@ -607,7 +607,7 @@ def debit_wallet(
 
     if body.units is None and body.token_count is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Provide either 'units' or 'token_count'.",
         )
 

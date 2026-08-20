@@ -898,7 +898,7 @@ async def get_or_create_customer_api(
         body = CustomerCreateRequest.model_validate(payload)
     except ValidationError as exc:
         logger.warning("stripe_router.get_or_create_customer_validation_error errors=%s keys=%s", exc.errors(), list(payload.keys()) if isinstance(payload, dict) else None)
-        return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"error": "validation_error", "detail": exc.errors()})
+        return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"error": "validation_error", "detail": exc.errors()})
     return await get_or_create_customer(body=body, request=request, auth=auth, svc=svc)
 
 
@@ -927,7 +927,7 @@ async def create_checkout_session(
             request.headers.get("origin"),
         )
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={"error": "validation_error", "detail": exc.errors(), "payload_keys": payload_keys},
         )
 

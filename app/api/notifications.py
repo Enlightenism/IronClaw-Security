@@ -221,7 +221,7 @@ def _validate_review_event(event: NotificationEvent) -> None:
     }
     if event not in allowed:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"event must be one of {[e.value for e in allowed]} for review dispatch.",
         )
 
@@ -234,7 +234,7 @@ def _validate_incident_event(event: NotificationEvent) -> None:
     }
     if event not in allowed:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"event must be one of {[e.value for e in allowed]} for incident dispatch.",
         )
 

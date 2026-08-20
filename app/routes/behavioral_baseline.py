@@ -33,7 +33,7 @@ def record_observation(agent_id: str, payload: dict[str, Any]) -> dict[str, Any]
 
     if not action_type:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="action_type is required.",
         )
 
@@ -50,7 +50,7 @@ def record_observation(agent_id: str, payload: dict[str, Any]) -> dict[str, Any]
         )
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
 
@@ -71,7 +71,7 @@ def record_observations_bulk(agent_id: str, payload: dict[str, Any]) -> dict[str
     observations = payload.get("observations")
     if not isinstance(observations, list) or not observations:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="observations must be a non-empty list.",
         )
 
@@ -85,7 +85,7 @@ def record_observations_bulk(agent_id: str, payload: dict[str, Any]) -> dict[str
         )
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
 
@@ -116,7 +116,7 @@ def get_observations(
         )
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
 
@@ -139,7 +139,7 @@ def get_baseline(agent_id: str) -> dict[str, Any]:
         baseline = get_behavioral_baseline_store().get_baseline(agent_id)
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
 
@@ -174,7 +174,7 @@ def compute_drift(
         )
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
 
@@ -193,7 +193,7 @@ def invalidate_baseline(agent_id: str) -> dict[str, Any]:
         found = get_behavioral_baseline_store().invalidate_baseline(agent_id)
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
 
@@ -218,7 +218,7 @@ def suspend_baseline(agent_id: str) -> dict[str, Any]:
         found = get_behavioral_baseline_store().suspend_baseline(agent_id)
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
 
@@ -246,7 +246,7 @@ def delete_baseline(agent_id: str) -> dict[str, Any]:
         found = get_behavioral_baseline_store().purge_agent(agent_id)
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
 

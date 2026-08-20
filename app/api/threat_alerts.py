@@ -152,7 +152,7 @@ _INCIDENT_EVENTS = {
 def _validate_incident_event(event: NotificationEvent) -> None:
     if event not in _INCIDENT_EVENTS:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"event must be one of {[e.value for e in _INCIDENT_EVENTS]}.",
         )
 

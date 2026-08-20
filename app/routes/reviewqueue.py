@@ -103,7 +103,7 @@ def _parse_status(status_filter: str | None) -> str | None:
         return None
     if normalized not in _VALID_STATUSES:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"invalid status filter: {status_filter}",
         )
     return normalized

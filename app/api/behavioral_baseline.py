@@ -184,7 +184,7 @@ def record_observation(
             metadata=body.metadata,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     return ObservationResponse.from_observation(obs)
 
 
@@ -218,7 +218,7 @@ def record_observations_bulk(
             client_id=body.client_id,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     return BulkObservationResponse(
         agent_id=agent_id,
         ingested=len(recorded),
@@ -237,7 +237,7 @@ def get_baseline(agent_id: str) -> BaselineResponse:
     try:
         baseline = store.get_baseline(agent_id)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     if baseline is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -272,7 +272,7 @@ def compute_drift(
             window_seconds=window_seconds,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     return DriftReportResponse.from_report(report)
 
 
@@ -291,7 +291,7 @@ def get_observations(
     try:
         obs_list = store.get_observations(agent_id, limit=limit, session_id=session_id)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     return ObservationListResponse(
         agent_id=agent_id,
         total=len(obs_list),
@@ -338,7 +338,7 @@ def delete_baseline(
     except HTTPException:
         raise
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
 
 
 @router.post(
@@ -352,7 +352,7 @@ def suspend_baseline(agent_id: str) -> BaselineActionResponse:
     try:
         suspended = store.suspend_baseline(agent_id)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     if not suspended:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -382,7 +382,7 @@ def list_baselines(
     valid_statuses = {"learning", "active", "stale", "suspended"}
     if baseline_status is not None and baseline_status not in valid_statuses:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Invalid status '{baseline_status}'. Must be one of: {sorted(valid_statuses)}.",
         )
     store = get_behavioral_baseline_store()

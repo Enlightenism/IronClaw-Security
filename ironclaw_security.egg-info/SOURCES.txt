@@ -63,6 +63,7 @@ app/api/claude_stream_guard.py
 app/api/customer_auth.py
 app/api/customer_keys.py
 app/api/diagnostics.py
+app/api/event_simulation.py
 app/api/execute.py
 app/api/guard.py
 app/api/guard_action.py
@@ -284,6 +285,7 @@ app/services/integrationverifier.py
 app/services/ioc_store.py
 app/services/malware_service.py
 app/services/malwareservice.py
+app/services/mitre_utils.py
 app/services/notification_engine.py
 app/services/notification_service.py
 app/services/onboarding_service.py
@@ -328,6 +330,7 @@ app/services/sessionservice.py
 app/services/stix_adapter.py
 app/services/stripe_service.py
 app/services/supabase_adapter.py
+app/services/supabase_auth.py
 app/services/telemetry.py
 app/services/telemetry_service.py
 app/services/threat_alerts.py
@@ -338,6 +341,7 @@ app/services/threat_feed_scheduler.py
 app/services/threat_hunt_service.py
 app/services/threat_intel.py
 app/services/threat_scoring.py
+app/services/threatdetectionengine.py
 app/services/threatintel.py
 app/services/update_manager.py
 app/services/usagemetering.py

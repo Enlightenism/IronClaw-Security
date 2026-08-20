@@ -26,6 +26,7 @@ ruff<1.0,>=0.11
 anyio<5.0,>=4.0
 pydantic-settings<3.0,>=2.3
 stripe<10.0,>=7.0.0
+cryptography>=42.0.8
 
 [docker]
 uvicorn[standard]<0.45,>=0.30

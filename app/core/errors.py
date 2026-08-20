@@ -294,7 +294,7 @@ async def validation_exception_handler(
         error_code = "bad_request"
         message = "Request validation failed"
     else:
-        response_status = status.HTTP_422_UNPROCESSABLE_ENTITY
+        response_status = status.HTTP_422_UNPROCESSABLE_CONTENT
         error_code = "validation_error"
         message = "Request validation failed"
 
