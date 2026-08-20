@@ -78,12 +78,21 @@ def _decode_token_via_jwks(
         return None
 
     try:
-        signing_key = PyJWKClient(jwks_url).get_signing_key_from_jwt(token)
+        jwk_client = PyJWKClient(jwks_url)
+        signing_key = jwk_client.get_signing_key_from_jwt(token)
+
+        key = signing_key.key
+        if hasattr(key, "key"):
+            key = key.key
+
         claims = jwt.decode(
             token,
-            signing_key.key,
-            algorithms=["ES256", "RS256", "HS256"],
-            options={"verify_aud": False},
+            key,
+            algorithms=["ES256"],
+            options={
+                "verify_aud": False,
+                "verify_iss": False,
+            },
         )
     except Exception:
         return None
