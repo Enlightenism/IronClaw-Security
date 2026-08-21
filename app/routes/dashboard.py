@@ -14,11 +14,13 @@ from app.core.install_keys import (
     get_install_key_registry,
 )
 from app.core.unit_wallet import UnitWalletRegistry, get_unit_wallet_registry
+from app.dependencies.hybrid_auth import HybridAuthResult, require_hybrid_auth
 
 router = APIRouter(
     prefix="/dashboard",
     tags=["dashboard"],
 )
+
 
 DashboardTone = Literal["neutral", "good", "warning", "critical"]
 DashboardAlertSeverity = Literal["low", "medium", "high", "critical"]
@@ -184,6 +186,7 @@ def _build_install_key_slots(
 @router.get("/overview", response_model=DashboardResponse)
 def get_dashboard_overview(
     owner_key: str,
+    _: HybridAuthResult = Depends(require_hybrid_auth),
     install_key_registry: InstallKeyRegistry = Depends(get_install_key_registry),
     wallet_registry: UnitWalletRegistry = Depends(get_unit_wallet_registry),
     billing_registry: BillingRegistry = Depends(get_billing_registry),
@@ -281,6 +284,7 @@ def get_dashboard_overview(
 @router.get("/units", response_model=DashboardUnitsResponse)
 def get_units_for_owner(
     owner_key: str,
+    _: HybridAuthResult = Depends(require_hybrid_auth),
     registry: InstallKeyRegistry = Depends(get_install_key_registry),
 ) -> DashboardUnitsResponse:
     """
@@ -316,6 +320,7 @@ def get_units_for_owner(
 )
 def record_unit_usage(
     body: RecordKeyUsageRequest,
+    _: HybridAuthResult = Depends(require_hybrid_auth),
     registry: InstallKeyRegistry = Depends(get_install_key_registry),
 ) -> RecordKeyUsageResponse:
     """
