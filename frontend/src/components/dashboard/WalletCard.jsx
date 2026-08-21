@@ -16,9 +16,7 @@ import api, { payments, paymentMethods } from "@/lib/api";
 import { ensureFrontEndHasFreshSession } from "@/context/AuthContext";
 import { toast } from "sonner";
 
-
 const TOKENS_PER_UNIT = 25_000;
-
 
 const TIERS = [
   {
@@ -51,15 +49,12 @@ const TIERS = [
   },
 ];
 
-
 const DEFAULT_ADD_CARD_PACKAGE_ID = "pkg5000";
 const VALID_PACKAGE_IDS = new Set(TIERS.map((t) => t.id));
 const paymentMethodCache = new Map();
 
-
 const getStripePublishableKey = () =>
   process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY ?? "";
-
 
 const getStripeMode = (publishableKey = "") => {
   if (publishableKey.startsWith("pk_live_")) return "live";
@@ -67,14 +62,12 @@ const getStripeMode = (publishableKey = "") => {
   return "unconfigured";
 };
 
-
 const getFirstString = (...values) => {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return "";
 };
-
 
 const getFirstNumber = (...values) => {
   for (const value of values) {
@@ -87,14 +80,12 @@ const getFirstNumber = (...values) => {
   return null;
 };
 
-
 const normalizePaymentMethod = (method, fallbackDefaultId = "") => {
   const methodId = getFirstString(
     method?.methodid,
     method?.paymentmethodid,
     method?.id,
   );
-
 
   const expMonth = getFirstNumber(
     method?.expmonth,
@@ -107,7 +98,6 @@ const normalizePaymentMethod = (method, fallbackDefaultId = "") => {
     method?.card?.exp_year,
   );
 
-
   const brand = getFirstString(
     method?.brand_display,
     method?.branddisplay,
@@ -115,12 +105,9 @@ const normalizePaymentMethod = (method, fallbackDefaultId = "") => {
     method?.card?.brand,
   );
 
-
   const expDisplay = getFirstString(method?.exp_display, method?.expdisplay);
 
-
   const last4 = getFirstString(method?.last4, method?.card?.last4);
-
 
   const status = getFirstString(method?.status);
   const inferredDefault =
@@ -128,7 +115,6 @@ const normalizePaymentMethod = (method, fallbackDefaultId = "") => {
     method?.is_default === true ||
     method?.default === true ||
     (methodId && fallbackDefaultId && methodId === fallbackDefaultId);
-
 
   return {
     raw: method,
@@ -148,7 +134,6 @@ const normalizePaymentMethod = (method, fallbackDefaultId = "") => {
   };
 };
 
-
 const normalizePaymentMethodsResponse = (data) => {
   const rawMethods = Array.isArray(data?.methods)
     ? data.methods
@@ -158,22 +143,18 @@ const normalizePaymentMethodsResponse = (data) => {
         ? data.results
         : [];
 
-
   const defaultId = getFirstString(
     data?.defaultmethodid,
     data?.default_method_id,
     data?.defaultpaymentmethodid,
   );
 
-
   const methods = rawMethods
     .map((method) => normalizePaymentMethod(method, defaultId))
     .filter((method) => method.methodid);
 
-
   const resolvedDefaultId =
     defaultId || methods.find((method) => method.isDefault)?.methodid || "";
-
 
   return {
     methods: methods.map((method) => ({
@@ -185,7 +166,6 @@ const normalizePaymentMethodsResponse = (data) => {
     defaultId: resolvedDefaultId || null,
   };
 };
-
 
 const EnterpriseBadge = () => (
   <div className="flex justify-center">
@@ -213,7 +193,6 @@ const EnterpriseBadge = () => (
   </div>
 );
 
-
 const StripeModeTag = ({ stripeMode }) => {
   if (stripeMode === "unconfigured") {
     return (
@@ -225,7 +204,6 @@ const StripeModeTag = ({ stripeMode }) => {
       </span>
     );
   }
-
 
   const isLive = stripeMode === "live";
   return (
@@ -242,10 +220,8 @@ const StripeModeTag = ({ stripeMode }) => {
   );
 };
 
-
 const StripeKeyWarning = ({ stripeMode }) => {
   if (stripeMode !== "unconfigured") return null;
-
 
   return (
     <div className="mb-4 flex items-start gap-2 rounded-lg border border-[#F59E0B]/30 bg-[#F59E0B]/10 px-3 py-2 text-xs text-[#FDE68A]">
@@ -262,7 +238,6 @@ const StripeKeyWarning = ({ stripeMode }) => {
   );
 };
 
-
 const isValidHttpUrl = (value) => {
   try {
     const u = new URL(value);
@@ -271,7 +246,6 @@ const isValidHttpUrl = (value) => {
     return false;
   }
 };
-
 
 const buildCheckoutPayload = ({
   packageId,
@@ -287,12 +261,15 @@ const buildCheckoutPayload = ({
   }
 
   const qty = Number(quantity) || 1;
-  if (!Number.isFinite(qty) || qty < 1) throw new Error("Quantity must be >= 1");
+  if (!Number.isFinite(qty) || qty < 1)
+    throw new Error("Quantity must be >= 1");
 
   const hasPackage = !!(packageId && String(packageId).trim());
   const hasPrice = !!(priceId && String(priceId).trim());
-  if (hasPackage && hasPrice) throw new Error("Send either packageId or priceId, not both");
-  if (!hasPackage && !hasPrice) throw new Error("Either packageId or priceId is required");
+  if (hasPackage && hasPrice)
+    throw new Error("Send either packageId or priceId, not both");
+  if (!hasPackage && !hasPrice)
+    throw new Error("Either packageId or priceId is required");
 
   const payload = {
     mode: normalizedMode,
@@ -308,11 +285,15 @@ const buildCheckoutPayload = ({
   } else {
     payload.priceId = String(priceId).trim();
     const uc = Number(unitCredits) || 0;
-    if (!Number.isFinite(uc) || uc <= 0) throw new Error("unitCredits must be > 0 when using priceId");
+    if (!Number.isFinite(uc) || uc <= 0)
+      throw new Error("unitCredits must be > 0 when using priceId");
     payload.unitCredits = uc;
   }
 
-  if (!isValidHttpUrl(payload.successUrl) || !isValidHttpUrl(payload.cancelUrl)) {
+  if (
+    !isValidHttpUrl(payload.successUrl) ||
+    !isValidHttpUrl(payload.cancelUrl)
+  ) {
     throw new Error("Invalid success or cancel URL");
   }
 
@@ -320,7 +301,6 @@ const buildCheckoutPayload = ({
 
   return payload;
 };
-
 
 const PaymentMethodPanel = ({
   organizationId,
@@ -334,7 +314,6 @@ const PaymentMethodPanel = ({
     [organizationId],
   );
 
-
   const [methods, setMethods] = useState(() => cachedEntry?.methods ?? []);
   const [defaultId, setDefaultId] = useState(
     () => cachedEntry?.defaultId ?? null,
@@ -344,7 +323,6 @@ const PaymentMethodPanel = ({
   );
   const [actionId, setActionId] = useState(null);
   const hasFetchedRef = useRef(!!cachedEntry);
-
 
   const syncCache = useCallback(
     (nextMethods, nextDefaultId) => {
@@ -357,12 +335,10 @@ const PaymentMethodPanel = ({
     [organizationId],
   );
 
-
   const fetchMethods = useCallback(
     async ({ force = false } = {}) => {
       if (!organizationId) return;
       if (!force && hasFetchedRef.current) return;
-
 
       setLoadingMethods(true);
       try {
@@ -382,10 +358,8 @@ const PaymentMethodPanel = ({
     [organizationId, syncCache],
   );
 
-
   useEffect(() => {
     if (!organizationId) return;
-
 
     const nextCachedEntry = paymentMethodCache.get(organizationId) ?? null;
     if (nextCachedEntry) {
@@ -396,7 +370,6 @@ const PaymentMethodPanel = ({
       return;
     }
 
-
     hasFetchedRef.current = false;
     setMethods([]);
     setDefaultId(null);
@@ -404,16 +377,13 @@ const PaymentMethodPanel = ({
     fetchMethods();
   }, [organizationId, fetchMethods]);
 
-
   const refreshMethods = useCallback(async () => {
     hasFetchedRef.current = false;
     await fetchMethods({ force: true });
   }, [fetchMethods]);
 
-
   const handleSetDefault = async (methodId) => {
     if (!organizationId || !methodId) return;
-
 
     setActionId(methodId);
     try {
@@ -439,10 +409,8 @@ const PaymentMethodPanel = ({
     }
   };
 
-
   const handleDelete = async (methodId) => {
     if (!organizationId || !methodId) return;
-
 
     setActionId(methodId);
     try {
@@ -468,7 +436,6 @@ const PaymentMethodPanel = ({
     }
   };
 
-
   if (loadingMethods) {
     return (
       <div className="flex items-center gap-2 py-2 text-xs text-[#737373]">
@@ -476,7 +443,6 @@ const PaymentMethodPanel = ({
       </div>
     );
   }
-
 
   if (methods.length === 0) {
     return (
@@ -488,13 +454,11 @@ const PaymentMethodPanel = ({
     );
   }
 
-
   return (
     <div className="flex flex-col gap-2">
       {methods.map((m) => {
         const isDefault = m.methodid === defaultId || m.isDefault;
         const busy = actionId === m.methodid;
-
 
         return (
           <div
@@ -544,7 +508,6 @@ const PaymentMethodPanel = ({
               </div>
             </div>
 
-
             <div className="flex items-center gap-1.5">
               {!isDefault && (
                 <button
@@ -581,7 +544,6 @@ const PaymentMethodPanel = ({
         );
       })}
 
-
       <button
         type="button"
         onClick={() => {
@@ -601,7 +563,6 @@ const PaymentMethodPanel = ({
   );
 };
 
-
 const WalletCard = ({
   balance = 0,
   lastPayment,
@@ -614,7 +575,6 @@ const WalletCard = ({
   const stripePublishableKey = getStripePublishableKey();
   const stripeMode = getStripeMode(stripePublishableKey);
 
-
   const handleTierPurchase = useCallback(
     (tierId) => {
       if (!VALID_PACKAGE_IDS.has(tierId)) {
@@ -622,18 +582,15 @@ const WalletCard = ({
         return;
       }
 
-
       if (typeof onPurchase !== "function") {
         toast.error("Purchase action is unavailable.");
         return;
       }
 
-
       onPurchase(tierId);
     },
     [onPurchase],
   );
-
 
   const handleCheckoutPurchase = useCallback(
     async (tierId) => {
@@ -642,12 +599,10 @@ const WalletCard = ({
         return;
       }
 
-
       if (typeof onPurchase !== "function") {
         toast.error("Purchase action is unavailable.");
         return;
       }
-
 
       const tier = TIERS.find((t) => t.id === tierId);
       if (!tier) {
@@ -655,13 +610,11 @@ const WalletCard = ({
         return;
       }
 
-
       try {
         await ensureFrontEndHasFreshSession();
       } catch {
         // Continue even if refresh fails; backend will surface token errors
       }
-
 
       try {
         const payload = buildCheckoutPayload({
@@ -690,7 +643,6 @@ const WalletCard = ({
           error?.message ||
           "Checkout failed. Please try again.";
 
-
         toast.error(
           typeof backendDetail === "string"
             ? backendDetail
@@ -701,13 +653,11 @@ const WalletCard = ({
     [onPurchase, organizationId],
   );
 
-
   const handleAddCardClick = useCallback(() => {
     if (VALID_PACKAGE_IDS.has(DEFAULT_ADD_CARD_PACKAGE_ID)) {
       onPurchase(DEFAULT_ADD_CARD_PACKAGE_ID);
     }
   }, [onPurchase]);
-
 
   return (
     <div className="glass-platinum rounded-2xl p-7" data-testid="wallet-card">
@@ -723,9 +673,7 @@ const WalletCard = ({
         </span>
       </div>
 
-
       <StripeKeyWarning stripeMode={stripeMode} />
-
 
       <div className="mb-1 text-xs uppercase tracking-widest text-[#BFC1C2]">
         Available balance
@@ -742,7 +690,6 @@ const WalletCard = ({
       <p className="mb-6 text-xs text-[#737373]">
         Pay only for what you use. No subscription, no recurring charge.
       </p>
-
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {TIERS.map((t) => (
@@ -788,7 +735,6 @@ const WalletCard = ({
         ))}
       </div>
 
-
       <div
         className="mt-6 rounded-xl border border-white/10 bg-black/30 p-4"
         data-testid="saved-payment-method"
@@ -797,7 +743,6 @@ const WalletCard = ({
           <CreditCard size={14} /> Payment method
           <StripeModeTag stripeMode={stripeMode} />
         </div>
-
 
         {hasPaid && lastPayment && (
           <div className="mb-3 flex items-center gap-2 rounded-lg border border-[#22C55E]/20 bg-[#22C55E]/5 px-3 py-2 text-xs">
@@ -810,7 +755,6 @@ const WalletCard = ({
           </div>
         )}
 
-
         <PaymentMethodPanel
           organizationId={organizationId}
           onPurchase={handleCheckoutPurchase}
@@ -821,6 +765,5 @@ const WalletCard = ({
     </div>
   );
 };
-
 
 export default WalletCard;
