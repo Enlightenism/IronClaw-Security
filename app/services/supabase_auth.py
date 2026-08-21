@@ -24,6 +24,54 @@ def _setting_value(settings: Settings, *names: str) -> str | None:
     return None
 
 
+def _clean_string_list(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        cleaned = _clean_optional_string(value)
+        return (cleaned,) if cleaned is not None else ()
+
+    if isinstance(value, (list, tuple, set)):
+        normalized: list[str] = []
+        seen: set[str] = set()
+
+        for candidate in value:
+            cleaned = _clean_optional_string(candidate)
+            if cleaned is None or cleaned in seen:
+                continue
+            normalized.append(cleaned)
+            seen.add(cleaned)
+
+        return tuple(normalized)
+
+    return ()
+
+
+def _first_non_empty_claim(source: dict[str, Any], *names: str) -> Any | None:
+    for name in names:
+        if name not in source:
+            continue
+        value = source.get(name)
+        if isinstance(value, str):
+            cleaned = _clean_optional_string(value)
+            if cleaned is not None:
+                return cleaned
+            continue
+        if value is not None:
+            return value
+    return None
+
+
+def _resolved_roles_from_metadata(
+    app_metadata: dict[str, Any],
+    user_metadata: dict[str, Any],
+) -> tuple[str, ...]:
+    for metadata in (app_metadata, user_metadata):
+        for field_name in ("roles", "role", "permissions_role"):
+            roles = _clean_string_list(metadata.get(field_name))
+            if roles:
+                return roles
+    return ()
+
+
 def _claims_from_supabase_user(user: object) -> dict[str, Any] | None:
     if not isinstance(user, dict):
         return None
@@ -35,10 +83,13 @@ def _claims_from_supabase_user(user: object) -> dict[str, Any] | None:
     user_metadata = user.get("user_metadata")
     app_metadata = user.get("app_metadata")
 
+    normalized_user_metadata = user_metadata if isinstance(user_metadata, dict) else {}
+    normalized_app_metadata = app_metadata if isinstance(app_metadata, dict) else {}
+
     claims: dict[str, Any] = {
         "sub": user_id,
-        "user_metadata": user_metadata if isinstance(user_metadata, dict) else {},
-        "app_metadata": app_metadata if isinstance(app_metadata, dict) else {},
+        "user_metadata": normalized_user_metadata,
+        "app_metadata": normalized_app_metadata,
     }
 
     for field_name in (
@@ -53,6 +104,27 @@ def _claims_from_supabase_user(user: object) -> dict[str, Any] | None:
     ):
         if field_name in user:
             claims[field_name] = user.get(field_name)
+
+    resolved_roles = _resolved_roles_from_metadata(
+        normalized_app_metadata,
+        normalized_user_metadata,
+    )
+    if resolved_roles:
+        claims["roles"] = list(resolved_roles)
+        if "role" not in claims:
+            claims["role"] = resolved_roles[0]
+
+    resolved_permissions_role = _first_non_empty_claim(
+        normalized_app_metadata,
+        "permissions_role",
+    )
+    if resolved_permissions_role is None:
+        resolved_permissions_role = _first_non_empty_claim(
+            normalized_user_metadata,
+            "permissions_role",
+        )
+    if resolved_permissions_role is not None:
+        claims["permissions_role"] = resolved_permissions_role
 
     return claims
 

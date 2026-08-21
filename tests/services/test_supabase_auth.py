@@ -62,6 +62,8 @@ class TestValidateTokenViaSupabase:
             "sub": "user-123",
             "user_metadata": {"org_id": "org-123"},
             "app_metadata": {"role": "customer"},
+            "role": "customer",
+            "roles": ["customer"],
         }
         request.assert_called_once_with(
             "https://project.supabase.co/auth/v1/user",
