@@ -43,6 +43,7 @@ const getStoredApiKey = () => {
 };
 
 const getConfiguredApiKey = () =>
+  process.env.REACT_APP_IRONCLAW_API_KEY ||
   process.env.REACT_APP_API_KEY ||
   process.env.REACT_APP_PLATFORM_API_KEY ||
   process.env.REACT_APP_INTERNAL_PLATFORM_API_KEY ||
