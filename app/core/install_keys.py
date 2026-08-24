@@ -29,9 +29,12 @@ _VALID_PROGRAMS: frozenset[str] = frozenset({"openclaw", "claude_code"})
 
 # Ordered longest-first so the greedy prefix match is always correct.
 _KNOWN_PREFIXES: Final[tuple[str, ...]] = (
-    _INSTALL_KEY_PREFIX_CLAUDE,  # "ic_install_claude_code_" (longer)
-    _INSTALL_KEY_PREFIX_OPENCLAW,  # "ic_install_openclaw_"
+    _INSTALL_KEY_PREFIX_CLAUDE,
+    _INSTALL_KEY_PREFIX_OPENCLAW,
 )
+
+_PAID_PAYMENT_STATUSES: Final[frozenset[str]] = frozenset({"paid", "success", "succeeded", "complete", "completed", "active", "authorized"})
+_ACTIVE_ENTITLEMENT_STATUSES: Final[frozenset[str]] = frozenset({"active", "paid", "enabled", "granted"})
 
 
 # ---------------------------------------------------------------------------
@@ -57,8 +60,8 @@ def _mask_key(raw_key: str) -> str:
     last 4 characters of the secret token.
 
     Examples:
-      ic_install_openclaw_<secret>     → ic_install_openclaw_...Xy9z
-      ic_install_claude_code_<secret>  → ic_install_claude_code_...Xy9z
+      ic_install_openclaw_<secret>     -> ic_install_openclaw_...Xy9z
+      ic_install_claude_code_<secret>  -> ic_install_claude_code_...Xy9z
 
     For any key shorter than (prefix + 5) characters the entire value is
     masked with '*' so the secret body is never exposed under any input.
@@ -69,7 +72,6 @@ def _mask_key(raw_key: str) -> str:
             if len(secret_part) < 5:
                 return "*" * len(raw_key)
             return f"{prefix}...{secret_part[-4:]}"
-    # Fallback for keys that somehow lack a recognised prefix
     if len(raw_key) <= 12:
         return "*" * len(raw_key)
     return f"{raw_key[:10]}...{raw_key[-4:]}"
@@ -88,6 +90,36 @@ def _constant_time_match(a: str, b: str) -> bool:
     return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
 
 
+def _normalize_payment_status(value: Any) -> str:
+    if value is None:
+        return "unpaid"
+    status = str(value).strip().lower()
+    if not status:
+        return "unpaid"
+    if status in _PAID_PAYMENT_STATUSES:
+        return "paid"
+    return status
+
+
+def _normalize_entitlement_status(value: Any) -> str:
+    if value is None:
+        return "not_active"
+    status = str(value).strip().lower()
+    if not status:
+        return "not_active"
+    if status in _ACTIVE_ENTITLEMENT_STATUSES:
+        return "active"
+    return status
+
+
+def _is_paid_payment_status(value: Any) -> bool:
+    return _normalize_payment_status(value) == "paid"
+
+
+def _is_active_entitlement_status(value: Any) -> bool:
+    return _normalize_entitlement_status(value) == "active"
+
+
 # ---------------------------------------------------------------------------
 # Dataclass
 # ---------------------------------------------------------------------------
@@ -99,14 +131,22 @@ class InstallKeyRecord:
     owner_key: str
     subscription_id: str
     program: ProgramCode
-    raw_key: str
-    raw_key_hash: str
-    masked_key: str
+    raw_key: str = ""
+    raw_key_hash: str = ""
+    masked_key: str = ""
     label: str = ""
-    active: bool = True
+    active: bool = False
+    payment_status: str = "unpaid"
+    entitlements_status: str = "not_active"
+    issued_after_payment: bool = False
+    org_id: str | None = None
+    customer_id: str | None = None
     units_consumed: int = 0
     created_at: datetime = field(default_factory=_utc_now)
     last_used_at: datetime | None = None
+    revoked_at: datetime | None = None
+    purchase_reference: str | None = None
+    checkout_session_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -114,13 +154,36 @@ class InstallKeyRecord:
             raise ValueError(f"Invalid program: {self.program!r}. Must be one of {sorted(_VALID_PROGRAMS)}")
         if self.units_consumed < 0:
             raise ValueError("units_consumed cannot be negative")
+        if not self.owner_key or not str(self.owner_key).strip():
+            raise ValueError("owner_key is required")
+        if self.active and not self.issued_after_payment:
+            raise ValueError("active install keys must be issued_after_payment=True and backed by a paid entitlement")
+        self.payment_status = _normalize_payment_status(self.payment_status)
+        self.entitlements_status = _normalize_entitlement_status(self.entitlements_status)
+        if self.active:
+            self.entitlements_status = "active"
+            self.payment_status = "paid"
+        if not self.raw_key_hash and self.raw_key:
+            self.raw_key_hash = _hash_key(self.raw_key)
+        if self.raw_key and not self.masked_key:
+            self.masked_key = _mask_key(self.raw_key)
+        if not self.masked_key and self.raw_key_hash:
+            self.masked_key = "masked"
+        if self.revoked_at is not None and self.active:
+            self.active = False
+            self.entitlements_status = "revoked"
 
     def to_db_row(self) -> dict[str, Any]:
         return {
             "key_id": self.key_id,
             "owner_key": self.owner_key,
+            "org_id": self.org_id,
+            "customer_id": self.customer_id,
             "subscription_id": self.subscription_id,
             "program": self.program,
+            "payment_status": self.payment_status,
+            "entitlements_status": self.entitlements_status,
+            "issued_after_payment": self.issued_after_payment,
             "raw_key_hash": self.raw_key_hash,
             "masked_key": self.masked_key,
             "label": self.label,
@@ -128,6 +191,9 @@ class InstallKeyRecord:
             "units_consumed": self.units_consumed,
             "created_at": self.created_at.isoformat(),
             "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
+            "revoked_at": self.revoked_at.isoformat() if self.revoked_at else None,
+            "purchase_reference": self.purchase_reference,
+            "checkout_session_id": self.checkout_session_id,
             "metadata": self.metadata,
         }
 
@@ -135,15 +201,23 @@ class InstallKeyRecord:
         return {
             "key_id": self.key_id,
             "owner_key": self.owner_key,
+            "org_id": self.org_id,
+            "customer_id": self.customer_id,
             "subscription_id": self.subscription_id,
             "program": self.program,
+            "payment_status": self.payment_status,
+            "entitlements_status": self.entitlements_status,
+            "issued_after_payment": self.issued_after_payment,
             "masked_key": self.masked_key,
             "label": self.label,
             "active": self.active,
             "units_consumed": self.units_consumed,
             "created_at": self.created_at.isoformat(),
             "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
-            "metadata": self.metadata,
+            "revoked_at": self.revoked_at.isoformat() if self.revoked_at else None,
+            "purchase_reference": self.purchase_reference,
+            "checkout_session_id": self.checkout_session_id,
+            "metadata": dict(self.metadata),
         }
 
 
@@ -159,27 +233,54 @@ def _record_from_row(row: dict[str, Any], *, raw_key: str = "") -> InstallKeyRec
         if isinstance(val, datetime):
             return val
         if isinstance(val, str):
-            return datetime.fromisoformat(val)
+            try:
+                return datetime.fromisoformat(val)
+            except ValueError:
+                return None
         return None
 
     created_raw = _parse_dt(row.get("created_at"))
     created_at = created_raw if created_raw is not None else _utc_now()
+    payment_status = _normalize_payment_status(row.get("payment_status"))
+    entitlements_status = _normalize_entitlement_status(row.get("entitlements_status"))
+    issued_after_payment = bool(row.get("issued_after_payment", payment_status == "paid"))
+    active = bool(row.get("active", False))
 
-    return InstallKeyRecord(
+    if active and not issued_after_payment:
+        issued_after_payment = True
+
+    raw_key_hash_value = row.get("raw_key_hash") or ""
+    if raw_key and not raw_key_hash_value:
+        raw_key_hash_value = _hash_key(raw_key)
+
+    record = InstallKeyRecord(
         key_id=row["key_id"],
         owner_key=row["owner_key"],
-        subscription_id=row["subscription_id"],
+        subscription_id=row.get("subscription_id") or "",
         program=row["program"],
         raw_key=raw_key,
-        raw_key_hash=row["raw_key_hash"],
-        masked_key=row["masked_key"],
+        raw_key_hash=raw_key_hash_value,
+        masked_key=row.get("masked_key") or (_mask_key(raw_key) if raw_key else ""),
         label=row.get("label") or "",
-        active=bool(row.get("active", True)),
+        active=active,
+        payment_status=payment_status,
+        entitlements_status=entitlements_status,
+        issued_after_payment=issued_after_payment,
+        org_id=row.get("org_id"),
+        customer_id=row.get("customer_id"),
         units_consumed=int(row.get("units_consumed", 0)),
         created_at=created_at,
         last_used_at=_parse_dt(row.get("last_used_at")),
+        revoked_at=_parse_dt(row.get("revoked_at")),
+        purchase_reference=row.get("purchase_reference"),
+        checkout_session_id=row.get("checkout_session_id"),
         metadata=row.get("metadata") or {},
     )
+    if record.active and record.payment_status != "paid":
+        record.payment_status = "paid"
+    if record.active and record.entitlements_status != "active":
+        record.entitlements_status = "active"
+    return record
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +290,17 @@ def _record_from_row(row: dict[str, Any], *, raw_key: str = "") -> InstallKeyRec
 
 class InstallKeyError(Exception):
     """Base error for install key operations."""
+
+
+class InstallKeyPaymentRequiredError(InstallKeyError):
+    def __init__(self, owner_key: str, program: ProgramCode, reason: str = "") -> None:
+        message = f"Install key generation requires a successful paid entitlement for owner {owner_key!r} and program {program!r}."
+        if reason:
+            message = f"{message} {reason}"
+        super().__init__(message)
+        self.owner_key = owner_key
+        self.program = program
+        self.reason = reason
 
 
 class InstallKeyNotFoundError(InstallKeyError):
@@ -219,19 +331,17 @@ class InstallKeyRegistry:
     """
     Manages install keys for openclaw and claude_code programs.
 
-    Distinct from APIKeyRegistry (app/core/apikeys.py):
-    - Scoped to post-purchase install keys only
-    - Keys are program-typed (openclaw | claude_code)
-    - One active key per program per owner enforced at DB and in-memory
-    - units_consumed tracked per key and persisted to Supabase
-    - raw_key is returned once at generation and never stored in plaintext
+    This registry enforces a hard entitlement gate:
+      - no active install keys before successful payment/checkout completion
+      - raw keys are returned exactly once, on generation
+      - after issuance, the raw secret is never retrievable from the registry
+      - one active key per program per owner is enforced
+      - active keys are only allowed for paid customers
     """
 
     def __init__(self) -> None:
         self._lock = RLock()
-        # key_id → record (raw_key is empty string after load from DB)
         self._records_by_id: dict[str, InstallKeyRecord] = {}
-        # raw_key_hash → key_id (for authenticate_install_key lookups)
         self._key_id_by_hash: dict[str, str] = {}
         self._loaded = False
 
@@ -251,39 +361,112 @@ class InstallKeyRegistry:
             for row in rows:
                 record = _record_from_row(row)
                 self._records_by_id[record.key_id] = record
-                self._key_id_by_hash[record.raw_key_hash] = record.key_id
+                if record.raw_key_hash:
+                    self._key_id_by_hash[record.raw_key_hash] = record.key_id
         except (SupabaseAPIError, SupabaseClientError, Exception):
             _logger.exception("install_keys: failed to load from Supabase; continuing with empty state")
         self._loaded = True
 
     # ------------------------------------------------------------------
-    # generate_install_key
+    # Internal entitlement validation
     # ------------------------------------------------------------------
 
-    def generate_install_key(
+    def _assert_paid_entitlement(
+        self,
+        *,
+        owner_key: str,
+        program: ProgramCode,
+        payment_status: Any,
+        entitlements_status: Any,
+        issued_after_payment: bool,
+        checkout_session_id: str | None = None,
+        purchase_reference: str | None = None,
+    ) -> None:
+        normalized_payment_status = _normalize_payment_status(payment_status)
+        normalized_entitlement_status = _normalize_entitlement_status(entitlements_status)
+
+        if not issued_after_payment:
+            raise InstallKeyPaymentRequiredError(
+                owner_key,
+                program,
+                reason="issued_after_payment is false; install keys cannot be created before a completed checkout.",
+            )
+
+        if not _is_paid_payment_status(normalized_payment_status):
+            raise InstallKeyPaymentRequiredError(
+                owner_key,
+                program,
+                reason=(f"payment_status is not paid; Stripe checkout must complete successfully before key issuance. payment_status={normalized_payment_status!r}"),
+            )
+
+        if not _is_active_entitlement_status(normalized_entitlement_status):
+            raise InstallKeyPaymentRequiredError(
+                owner_key,
+                program,
+                reason=(f"entitlements_status is not active; the customer does not have a valid paid entitlement. entitlements_status={normalized_entitlement_status!r}"),
+            )
+
+        subscription_reference = purchase_reference or checkout_session_id
+        if not subscription_reference:
+            raise InstallKeyPaymentRequiredError(
+                owner_key,
+                program,
+                reason="missing purchase_reference or checkout_session_id after successful payment completion",
+            )
+
+    # ------------------------------------------------------------------
+    # generate_for_paid_customer
+    # ------------------------------------------------------------------
+
+    def generate_for_paid_customer(
         self,
         owner_key: str,
         subscription_id: str,
         program: ProgramCode,
         *,
+        org_id: str | None = None,
+        customer_id: str | None = None,
+        payment_status: str | None = "paid",
+        entitlements_status: str | None = "active",
+        issued_after_payment: bool = True,
+        purchase_reference: str | None = None,
+        checkout_session_id: str | None = None,
         label: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> InstallKeyRecord:
         """
-        Generate a new install key for owner_key + program.
-        Enforces one active key per program per owner.
-        Returns the record with raw_key populated (only time it is available).
+        Authoritative install-key issuance path.
+
+        This is the only safe way to generate active install keys. It enforces a
+        successful paid entitlement and prevents pre-purchase exposure.
         """
         if program not in _VALID_PROGRAMS:
             raise ValueError(f"Invalid program: {program!r}")
 
+        normalized_owner = str(owner_key).strip().lower()
+        if not normalized_owner:
+            raise ValueError("owner_key is required")
+        if not str(subscription_id).strip():
+            raise ValueError("subscription_id is required for paid issuance")
+
+        normalized_payment_status = _normalize_payment_status(payment_status)
+        normalized_entitlements_status = _normalize_entitlement_status(entitlements_status)
+        self._assert_paid_entitlement(
+            owner_key=normalized_owner,
+            program=program,
+            payment_status=normalized_payment_status,
+            entitlements_status=normalized_entitlements_status,
+            issued_after_payment=issued_after_payment,
+            checkout_session_id=checkout_session_id,
+            purchase_reference=purchase_reference,
+        )
+
         with self._lock:
             self._ensure_loaded()
 
-            # Enforce unique active key per program per owner
             for rec in self._records_by_id.values():
-                if rec.owner_key == owner_key and rec.program == program and rec.active:
-                    raise InstallKeyAlreadyExistsError(owner_key, program)
+                if rec.owner_key == normalized_owner and rec.program == program and rec.active:
+                    raise InstallKeyAlreadyExistsError(normalized_owner, program)
 
             raw_key = _generate_raw_key(program)
             raw_key_hash = _hash_key(raw_key)
@@ -292,21 +475,28 @@ class InstallKeyRegistry:
 
             record = InstallKeyRecord(
                 key_id=key_id,
-                owner_key=owner_key,
-                subscription_id=subscription_id,
+                owner_key=normalized_owner,
+                subscription_id=str(subscription_id).strip(),
                 program=program,
                 raw_key=raw_key,
                 raw_key_hash=raw_key_hash,
                 masked_key=_mask_key(raw_key),
-                label=label.strip(),
+                label=str(label).strip(),
                 active=True,
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+                org_id=org_id.strip() if isinstance(org_id, str) and org_id.strip() else None,
+                customer_id=customer_id.strip() if isinstance(customer_id, str) and customer_id.strip() else None,
                 units_consumed=0,
                 created_at=now,
                 last_used_at=None,
-                metadata=metadata or {},
+                revoked_at=None,
+                purchase_reference=purchase_reference.strip() if isinstance(purchase_reference, str) and purchase_reference.strip() else None,
+                checkout_session_id=checkout_session_id.strip() if isinstance(checkout_session_id, str) and checkout_session_id.strip() else None,
+                metadata=dict(metadata or {}),
             )
 
-            # Persist to Supabase
             try:
                 client = get_supabase_service_client()
                 client.table(_T_INSTALL_KEYS).insert(record.to_db_row()).execute()
@@ -318,9 +508,76 @@ class InstallKeyRegistry:
 
             _logger.info(
                 "install_key_generated",
-                extra={"key_id": key_id, "owner_key": owner_key, "program": program},
+                extra={
+                    "key_id": key_id,
+                    "owner_key": normalized_owner,
+                    "program": program,
+                    "payment_status": "paid",
+                    "issued_after_payment": True,
+                    "checkout_session_id": checkout_session_id,
+                    "purchase_reference": purchase_reference,
+                },
             )
             return record
+
+    # ------------------------------------------------------------------
+    # Backward-compatible wrapper
+    # ------------------------------------------------------------------
+
+    def generate_install_key(
+        self,
+        owner_key: str,
+        subscription_id: str,
+        program: ProgramCode,
+        *,
+        label: str = "",
+        metadata: dict[str, Any] | None = None,
+        payment_status: str | None = None,
+        entitlements_status: str | None = None,
+        issued_after_payment: bool = True,
+        org_id: str | None = None,
+        customer_id: str | None = None,
+        purchase_reference: str | None = None,
+        checkout_session_id: str | None = None,
+    ) -> InstallKeyRecord:
+        """
+        Compatibility wrapper for the old call signature.
+
+        It is intentionally gated to prevent creation without a successful paid
+        entitlement. Old pre-purchase flows should not be allowed through this
+        path anymore.
+        """
+        effective_payment_status = payment_status
+        if effective_payment_status is None and metadata is not None:
+            effective_payment_status = metadata.get("payment_status")
+        if effective_payment_status is None:
+            effective_payment_status = "paid"
+
+        effective_entitlements_status = entitlements_status
+        if effective_entitlements_status is None and metadata is not None:
+            effective_entitlements_status = metadata.get("entitlements_status")
+        if effective_entitlements_status is None:
+            effective_entitlements_status = "active"
+
+        if purchase_reference is None and metadata is not None:
+            purchase_reference = metadata.get("purchase_reference")
+        if checkout_session_id is None and metadata is not None:
+            checkout_session_id = metadata.get("checkout_session_id")
+
+        return self.generate_for_paid_customer(
+            owner_key=owner_key,
+            subscription_id=subscription_id,
+            program=program,
+            org_id=org_id,
+            customer_id=customer_id,
+            payment_status=effective_payment_status,
+            entitlements_status=effective_entitlements_status,
+            issued_after_payment=issued_after_payment,
+            purchase_reference=purchase_reference,
+            checkout_session_id=checkout_session_id,
+            label=label,
+            metadata=metadata,
+        )
 
     # ------------------------------------------------------------------
     # get_keys_for_owner
@@ -348,7 +605,7 @@ class InstallKeyRegistry:
     def authenticate_install_key(self, raw_key: str) -> InstallKeyRecord | None:
         """
         Constant-time authenticate an install key.
-        Returns the record if the key is active, None otherwise.
+        Returns the record if the key is active, paid, and still entitled.
         Updates last_used_at on success.
         """
         candidate_hash = _hash_key(raw_key)
@@ -361,25 +618,34 @@ class InstallKeyRegistry:
             record = self._records_by_id.get(key_id)
             if record is None or not record.active:
                 return None
-            # Constant-time comparison on the hash to prevent timing attacks
+            if record.payment_status != "paid" or record.entitlements_status != "active" or not record.issued_after_payment:
+                return None
+
             if not _constant_time_match(candidate_hash, record.raw_key_hash):
                 return None
 
-            # Touch last_used_at
             now = _utc_now()
             updated = InstallKeyRecord(
                 key_id=record.key_id,
                 owner_key=record.owner_key,
                 subscription_id=record.subscription_id,
                 program=record.program,
-                raw_key="",  # never retained after generation
+                raw_key="",
                 raw_key_hash=record.raw_key_hash,
                 masked_key=record.masked_key,
                 label=record.label,
                 active=record.active,
+                payment_status=record.payment_status,
+                entitlements_status=record.entitlements_status,
+                issued_after_payment=record.issued_after_payment,
+                org_id=record.org_id,
+                customer_id=record.customer_id,
                 units_consumed=record.units_consumed,
                 created_at=record.created_at,
                 last_used_at=now,
+                revoked_at=record.revoked_at,
+                purchase_reference=record.purchase_reference,
+                checkout_session_id=record.checkout_session_id,
                 metadata=record.metadata,
             )
             self._records_by_id[key_id] = updated
@@ -407,6 +673,7 @@ class InstallKeyRegistry:
             if not record.active:
                 return record
 
+            now = _utc_now()
             updated = InstallKeyRecord(
                 key_id=record.key_id,
                 owner_key=record.owner_key,
@@ -417,20 +684,28 @@ class InstallKeyRegistry:
                 masked_key=record.masked_key,
                 label=record.label,
                 active=False,
+                payment_status=record.payment_status,
+                entitlements_status="revoked",
+                issued_after_payment=record.issued_after_payment,
+                org_id=record.org_id,
+                customer_id=record.customer_id,
                 units_consumed=record.units_consumed,
                 created_at=record.created_at,
                 last_used_at=record.last_used_at,
+                revoked_at=now,
+                purchase_reference=record.purchase_reference,
+                checkout_session_id=record.checkout_session_id,
                 metadata=record.metadata,
             )
             self._records_by_id[key_id] = updated
 
             try:
                 client = get_supabase_service_client()
-                client.table(_T_INSTALL_KEYS).update({"active": False}).eq("key_id", key_id).execute()
+                client.table(_T_INSTALL_KEYS).update({"active": False, "entitlements_status": "revoked", "revoked_at": now.isoformat()}).eq("key_id", key_id).execute()
             except (SupabaseAPIError, SupabaseClientError, Exception):
                 _logger.exception("install_keys: failed to persist revocation for %s", key_id)
 
-            _logger.info("install_key_revoked", extra={"key_id": key_id})
+            _logger.info("install_key_revoked", extra={"key_id": key_id, "owner_key": record.owner_key})
             return updated
 
     # ------------------------------------------------------------------
@@ -442,9 +717,6 @@ class InstallKeyRegistry:
         Increment units_consumed for the given key_id and persist to Supabase.
         Raises InstallKeyNotFoundError if key_id is unknown.
         Raises InstallKeyUsageError if key is inactive or units <= 0.
-
-        ``units`` is keyword-only to match the contract relied on by
-        dashboard.py and the billing provisioning call.
         """
         if units <= 0:
             raise InstallKeyUsageError(key_id, "units must be a positive integer")
@@ -456,6 +728,8 @@ class InstallKeyRegistry:
                 raise InstallKeyNotFoundError(key_id)
             if not record.active:
                 raise InstallKeyUsageError(key_id, "key is inactive and cannot record usage")
+            if record.payment_status != "paid" or record.entitlements_status != "active" or not record.issued_after_payment:
+                raise InstallKeyUsageError(key_id, "key is not backed by a valid paid entitlement")
 
             new_consumed = record.units_consumed + units
             now = _utc_now()
@@ -470,16 +744,29 @@ class InstallKeyRegistry:
                 masked_key=record.masked_key,
                 label=record.label,
                 active=record.active,
+                payment_status=record.payment_status,
+                entitlements_status=record.entitlements_status,
+                issued_after_payment=record.issued_after_payment,
+                org_id=record.org_id,
+                customer_id=record.customer_id,
                 units_consumed=new_consumed,
                 created_at=record.created_at,
                 last_used_at=now,
+                revoked_at=record.revoked_at,
+                purchase_reference=record.purchase_reference,
+                checkout_session_id=record.checkout_session_id,
                 metadata=record.metadata,
             )
             self._records_by_id[key_id] = updated
 
             try:
                 client = get_supabase_service_client()
-                client.table(_T_INSTALL_KEYS).update({"units_consumed": new_consumed, "last_used_at": now.isoformat()}).eq("key_id", key_id).execute()
+                client.table(_T_INSTALL_KEYS).update(
+                    {
+                        "units_consumed": new_consumed,
+                        "last_used_at": now.isoformat(),
+                    }
+                ).eq("key_id", key_id).execute()
             except (SupabaseAPIError, SupabaseClientError, Exception):
                 _logger.exception("install_keys: failed to persist usage for %s", key_id)
 
@@ -541,6 +828,7 @@ def _reset_install_key_registry_for_testing() -> None:
 __all__ = [
     "InstallKeyRecord",
     "InstallKeyError",
+    "InstallKeyPaymentRequiredError",
     "InstallKeyNotFoundError",
     "InstallKeyAlreadyExistsError",
     "InstallKeyUsageError",

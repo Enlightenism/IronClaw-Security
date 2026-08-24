@@ -20,6 +20,8 @@ __all__ = [
     "UNIT_PACKAGE_CATALOG",
     "UnitWalletTransaction",
     "UnitLedgerEntry",
+    "InstallKeyUsageSource",
+    "InstallKeyUsageLedgerEntry",
     "UnitWallet",
     "RegistryUnitWallet",
     "RegistryUnitLedgerEntry",
@@ -207,13 +209,69 @@ class UnitLedgerEntry:
 
 
 @dataclass
+class InstallKeyUsageSource:
+    key_id: str
+    owner_key: str
+    program: str
+    balance_units: int = 0
+    total_consumed_units: int = 0
+    total_blocked_attacks: int = 0
+    last_action_at: datetime | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def as_summary(self) -> dict[str, Any]:
+        return {
+            "key_id": self.key_id,
+            "owner_key": self.owner_key,
+            "program": self.program,
+            "balance_units": self.balance_units,
+            "total_consumed_units": self.total_consumed_units,
+            "total_blocked_attacks": self.total_blocked_attacks,
+            "last_action_at": self.last_action_at.isoformat() if self.last_action_at else None,
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass
+class InstallKeyUsageLedgerEntry:
+    entry_id: str
+    owner_key: str
+    key_id: str
+    program: str
+    action_type: str
+    units: int
+    balance_after: int
+    payment_id: str | None = None
+    blocked_attack_count: int = 0
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "entry_id": self.entry_id,
+            "owner_key": self.owner_key,
+            "key_id": self.key_id,
+            "program": self.program,
+            "action_type": self.action_type,
+            "units": self.units,
+            "balance_after": self.balance_after,
+            "payment_id": self.payment_id,
+            "blocked_attack_count": self.blocked_attack_count,
+            "created_at": self.created_at.isoformat(),
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass
 class UnitWallet:
     owner_id: str
     balance_units: int = 0
     total_purchased_units: int = 0
     total_consumed_units: int = 0
     total_refunded_units: int = 0
+    total_blocked_attacks: int = 0
     transactions: list[UnitWalletTransaction] = field(default_factory=list)
+    usage_by_key: dict[str, InstallKeyUsageSource] = field(default_factory=dict)
 
     def purchase_units(
         self,
@@ -289,6 +347,64 @@ class UnitWallet:
             metadata=combined_metadata,
         )
 
+    def consume_units_for_install_key(
+        self,
+        *,
+        key_id: str,
+        program: str,
+        units: int,
+        source: str = "install_key",
+        reference_id: str | None = None,
+        payment_id: str | None = None,
+        action_type: str = "prompt",
+        blocked_attack_count: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> tuple[UnitWalletTransaction, InstallKeyUsageSource]:
+        if not key_id:
+            raise ValueError("key_id is required for install-key consumption")
+        if not program:
+            raise ValueError("program is required for install-key consumption")
+
+        transaction = self.consume_units(
+            units,
+            source=f"{source}:{key_id}",
+            reference_id=reference_id,
+            metadata={
+                "key_id": key_id,
+                "program": program,
+                "payment_id": payment_id,
+                "action_type": action_type,
+                "blocked_attack_count": int(blocked_attack_count),
+                **(metadata or {}),
+            },
+        )
+
+        summary = self.usage_by_key.setdefault(
+            key_id,
+            InstallKeyUsageSource(
+                key_id=key_id,
+                owner_key=self.owner_id,
+                program=program,
+            ),
+        )
+        summary.program = program
+        summary.balance_units = max(self.balance_units, 0)
+        summary.total_consumed_units += int(transaction.units)
+        summary.total_blocked_attacks += int(blocked_attack_count)
+        summary.last_action_at = transaction.created_at
+        summary.metadata.update(
+            {
+                "key_id": key_id,
+                "program": program,
+                "payment_id": payment_id,
+                "action_type": action_type,
+                "blocked_attack_count": int(blocked_attack_count),
+            }
+        )
+
+        self.total_blocked_attacks += int(blocked_attack_count)
+        return transaction, summary
+
     def refund_units(
         self,
         units: int,
@@ -321,8 +437,24 @@ class RegistryUnitWallet:
     total_purchased_units: int = 0
     total_consumed_units: int = 0
     total_refunded_units: int = 0
+    total_blocked_attacks: int = 0
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = field(default_factory=dict)
+    install_key_usage: dict[str, InstallKeyUsageSource] = field(default_factory=dict)
+
+    def as_summary(self) -> dict[str, Any]:
+        return {
+            "wallet_id": self.wallet_id,
+            "owner_key": self.owner_key,
+            "balance_units": self.balance_units,
+            "total_purchased_units": self.total_purchased_units,
+            "total_consumed_units": self.total_consumed_units,
+            "total_refunded_units": self.total_refunded_units,
+            "total_blocked_attacks": self.total_blocked_attacks,
+            "updated_at": self.updated_at.isoformat(),
+            "metadata": dict(self.metadata),
+            "install_key_usage": {key: value.as_summary() for key, value in sorted(self.install_key_usage.items())},
+        }
 
 
 @dataclass
@@ -335,6 +467,18 @@ class RegistryUnitLedgerEntry:
     balance_after: int
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "entry_id": self.entry_id,
+            "wallet_id": self.wallet_id,
+            "owner_key": self.owner_key,
+            "entry_type": self.entry_type,
+            "units": self.units,
+            "balance_after": self.balance_after,
+            "created_at": self.created_at.isoformat(),
+            "metadata": dict(self.metadata),
+        }
 
 
 class SupabaseUnitWalletRepository:
@@ -355,8 +499,12 @@ class SupabaseUnitWalletRepository:
                 "total_purchased_units": wallet.total_purchased_units,
                 "total_consumed_units": wallet.total_consumed_units,
                 "total_refunded_units": wallet.total_refunded_units,
+                "total_blocked_attacks": wallet.total_blocked_attacks,
                 "updated_at": wallet.updated_at.isoformat(),
-                "metadata": wallet.metadata,
+                "metadata": {
+                    **(wallet.metadata or {}),
+                    "install_key_usage": {key: value.as_summary() for key, value in sorted(wallet.install_key_usage.items())},
+                },
             },
             on_conflict="wallet_id",
         ).execute()
@@ -366,6 +514,22 @@ class SupabaseUnitWalletRepository:
         if not result.data:
             return None
         row = result.data[0]
+        metadata = row.get("metadata") or {}
+        install_key_usage_raw = metadata.get("install_key_usage") or {}
+        usage_map: dict[str, InstallKeyUsageSource] = {}
+        for key_id, value in install_key_usage_raw.items():
+            if not isinstance(value, dict):
+                continue
+            usage_map[key_id] = InstallKeyUsageSource(
+                key_id=str(value.get("key_id") or key_id),
+                owner_key=str(value.get("owner_key") or owner_key),
+                program=str(value.get("program") or "unknown"),
+                balance_units=int(value.get("balance_units", 0)),
+                total_consumed_units=int(value.get("total_consumed_units", 0)),
+                total_blocked_attacks=int(value.get("total_blocked_attacks", 0)),
+                last_action_at=datetime.fromisoformat(value["last_action_at"]) if value.get("last_action_at") else None,
+                metadata=dict(value.get("metadata") or {}),
+            )
         return RegistryUnitWallet(
             wallet_id=row["wallet_id"],
             owner_key=row["owner_key"],
@@ -373,8 +537,10 @@ class SupabaseUnitWalletRepository:
             total_purchased_units=row["total_purchased_units"],
             total_consumed_units=row["total_consumed_units"],
             total_refunded_units=row.get("total_refunded_units", 0),
+            total_blocked_attacks=row.get("total_blocked_attacks", 0),
             updated_at=datetime.fromisoformat(row["updated_at"]),
-            metadata=row.get("metadata") or {},
+            metadata=metadata,
+            install_key_usage=usage_map,
         )
 
     def append_ledger_entry(self, entry: RegistryUnitLedgerEntry) -> None:
@@ -556,7 +722,6 @@ class UnitWalletRegistry:
         self._repo.append_ledger_entry(entry)
         return wallet
 
-    # Backward-compat alias — canonical name is credit_units
     def credit(
         self,
         owner_key: str,
@@ -631,20 +796,94 @@ class UnitWalletRegistry:
         self,
         owner_key: str,
         key_id: str,
-        units: int,
         program: str,
-    ) -> RegistryUnitWallet:
-        """Debit wallet units on behalf of an install key usage event.
+        units: int,
+        *,
+        payment_id: str | None = None,
+        action_type: str = "prompt",
+        blocked_attack_count: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> tuple[RegistryUnitWallet, InstallKeyUsageSource, InstallKeyUsageLedgerEntry]:
+        if not key_id:
+            raise ValueError("key_id is required")
+        if not program:
+            raise ValueError("program is required")
+        safe_units = max(0, int(units))
 
-        This is the single entry point all install key usage routes call to
-        debit the wallet. Passes key_id and program into the ledger metadata
-        so every debit is fully traceable back to the install key and program.
-        """
-        return self.debit_units(
-            owner_key=owner_key,
-            units=units,
-            metadata={"key_id": key_id, "program": program},
-        )
+        wallet = self.get_or_create_wallet(owner_key=owner_key)
+
+        with self._lock:
+            if safe_units > wallet.balance_units:
+                raise InsufficientUnitsError(
+                    "Insufficient protection units",
+                    have=wallet.balance_units,
+                    need=safe_units,
+                    owner_key=wallet.owner_key,
+                )
+
+            wallet.balance_units -= safe_units
+            wallet.total_consumed_units += safe_units
+            wallet.total_blocked_attacks += int(blocked_attack_count)
+            wallet.updated_at = datetime.now(UTC)
+
+            usage = wallet.install_key_usage.setdefault(
+                key_id,
+                InstallKeyUsageSource(
+                    key_id=key_id,
+                    owner_key=wallet.owner_key,
+                    program=program,
+                ),
+            )
+            usage.program = program
+            usage.balance_units = max(wallet.balance_units, 0)
+            usage.total_consumed_units += safe_units
+            usage.total_blocked_attacks += int(blocked_attack_count)
+            usage.last_action_at = wallet.updated_at
+            usage.metadata.update(
+                {
+                    "key_id": key_id,
+                    "program": program,
+                    "payment_id": payment_id,
+                    "action_type": action_type,
+                    "blocked_attack_count": int(blocked_attack_count),
+                }
+            )
+
+            entry = InstallKeyUsageLedgerEntry(
+                entry_id=f"ledger_{uuid.uuid4().hex}",
+                owner_key=wallet.owner_key,
+                key_id=key_id,
+                program=program,
+                action_type=action_type,
+                units=safe_units,
+                balance_after=wallet.balance_units,
+                payment_id=payment_id,
+                blocked_attack_count=int(blocked_attack_count),
+                created_at=wallet.updated_at,
+                metadata={
+                    "key_id": key_id,
+                    "program": program,
+                    "payment_id": payment_id,
+                    "action_type": action_type,
+                    "blocked_attack_count": int(blocked_attack_count),
+                    **(metadata or {}),
+                },
+            )
+
+            ledger_entry = RegistryUnitLedgerEntry(
+                entry_id=entry.entry_id,
+                wallet_id=wallet.wallet_id,
+                owner_key=wallet.owner_key,
+                entry_type="install_key_debit",
+                units=safe_units,
+                balance_after=wallet.balance_units,
+                created_at=wallet.updated_at,
+                metadata=entry.as_dict(),
+            )
+
+        self._repo.upsert_wallet(wallet)
+        self._repo.append_ledger_entry(ledger_entry)
+        return wallet, usage, entry
 
     def refund_units(
         self,
@@ -688,6 +927,40 @@ class UnitWalletRegistry:
         limit: int = 100,
     ) -> list[RegistryUnitLedgerEntry]:
         return self._repo.fetch_ledger_entries(owner_key=owner_key, limit=limit)
+
+    def get_key_usage_summary(
+        self,
+        owner_key: str,
+        *,
+        key_id: str | None = None,
+    ) -> dict[str, Any]:
+        wallet = self.get_wallet(owner_key)
+        if wallet is None:
+            return {
+                "owner_key": owner_key.strip().lower(),
+                "wallet_balance_units": 0,
+                "total_consumed_units": 0,
+                "total_blocked_attacks": 0,
+                "install_key_usage": {},
+            }
+
+        if key_id is not None:
+            usage = wallet.install_key_usage.get(key_id)
+            return {
+                "owner_key": wallet.owner_key,
+                "wallet_balance_units": wallet.balance_units,
+                "total_consumed_units": wallet.total_consumed_units,
+                "total_blocked_attacks": wallet.total_blocked_attacks,
+                "install_key_usage": {key_id: usage.as_summary()} if usage is not None else {},
+            }
+
+        return {
+            "owner_key": wallet.owner_key,
+            "wallet_balance_units": wallet.balance_units,
+            "total_consumed_units": wallet.total_consumed_units,
+            "total_blocked_attacks": wallet.total_blocked_attacks,
+            "install_key_usage": {key: value.as_summary() for key, value in sorted(wallet.install_key_usage.items())},
+        }
 
 
 _unit_wallet_registry = UnitWalletRegistry()

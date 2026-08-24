@@ -17,10 +17,13 @@ from app.core.install_keys import (
 # Constants
 # ---------------------------------------------------------------------------
 
+
 _OWNER = "user@ironclaw.test"
 _SUB_ID = "sub-001"
 _OPENCLAW_PREFIX = "ic_install_openclaw_"
 _CLAUDE_PREFIX = "ic_install_claude_code_"
+_CHECKOUT_SESSION_ID = "cs_test_001"
+_PURCHASE_REFERENCE = "sub_001"
 
 
 # ---------------------------------------------------------------------------
@@ -182,91 +185,132 @@ class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
         reg._loaded = True
         return reg
 
+    def _generate_paid_key(self, reg: InstallKeyRegistry, program: str) -> InstallKeyRecord:
+        return reg.generate_for_paid_customer(
+            owner_key=_OWNER,
+            subscription_id=_SUB_ID,
+            program=program,
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=True,
+            checkout_session_id=_CHECKOUT_SESSION_ID,
+            purchase_reference=_PURCHASE_REFERENCE,
+        )
+
     def test_openclaw_happy_path_returns_record(self):
         reg = self._registry()
-        record = reg.generate_install_key(_OWNER, _SUB_ID, "openclaw")
+        record = self._generate_paid_key(reg, "openclaw")
         assert isinstance(record, InstallKeyRecord)
 
     def test_openclaw_happy_path_raw_key_has_correct_prefix(self):
         reg = self._registry()
-        record = reg.generate_install_key(_OWNER, _SUB_ID, "openclaw")
+        record = self._generate_paid_key(reg, "openclaw")
         assert record.raw_key.startswith(_OPENCLAW_PREFIX)
 
     def test_openclaw_happy_path_active_true(self):
         reg = self._registry()
-        record = reg.generate_install_key(_OWNER, _SUB_ID, "openclaw")
+        record = self._generate_paid_key(reg, "openclaw")
         assert record.active is True
 
     def test_openclaw_happy_path_units_consumed_zero(self):
         reg = self._registry()
-        record = reg.generate_install_key(_OWNER, _SUB_ID, "openclaw")
+        record = self._generate_paid_key(reg, "openclaw")
         assert record.units_consumed == 0
 
     def test_openclaw_happy_path_program_correct(self):
         reg = self._registry()
-        record = reg.generate_install_key(_OWNER, _SUB_ID, "openclaw")
+        record = self._generate_paid_key(reg, "openclaw")
         assert record.program == "openclaw"
 
     def test_claude_code_happy_path_raw_key_has_correct_prefix(self):
         reg = self._registry()
-        record = reg.generate_install_key(_OWNER, _SUB_ID, "claude_code")
+        record = self._generate_paid_key(reg, "claude_code")
         assert record.raw_key.startswith(_CLAUDE_PREFIX)
 
     def test_claude_code_happy_path_program_correct(self):
         reg = self._registry()
-        record = reg.generate_install_key(_OWNER, _SUB_ID, "claude_code")
+        record = self._generate_paid_key(reg, "claude_code")
         assert record.program == "claude_code"
 
     def test_claude_code_happy_path_returns_record(self):
         reg = self._registry()
-        record = reg.generate_install_key(_OWNER, _SUB_ID, "claude_code")
+        record = self._generate_paid_key(reg, "claude_code")
         assert isinstance(record, InstallKeyRecord)
 
     def test_duplicate_active_key_raises_already_exists_error(self):
         reg = self._registry()
-        reg.generate_install_key(_OWNER, _SUB_ID, "openclaw")
+        self._generate_paid_key(reg, "openclaw")
         with self.assertRaises(InstallKeyAlreadyExistsError):
-            reg.generate_install_key(_OWNER, _SUB_ID, "openclaw")
+            self._generate_paid_key(reg, "openclaw")
 
     def test_duplicate_error_contains_owner_key(self):
         reg = self._registry()
-        reg.generate_install_key(_OWNER, _SUB_ID, "openclaw")
+        self._generate_paid_key(reg, "openclaw")
         with self.assertRaises(InstallKeyAlreadyExistsError) as ctx:
-            reg.generate_install_key(_OWNER, _SUB_ID, "openclaw")
+            self._generate_paid_key(reg, "openclaw")
         assert _OWNER in str(ctx.exception)
 
     def test_duplicate_error_contains_program(self):
         reg = self._registry()
-        reg.generate_install_key(_OWNER, _SUB_ID, "openclaw")
+        self._generate_paid_key(reg, "openclaw")
         with self.assertRaises(InstallKeyAlreadyExistsError) as ctx:
-            reg.generate_install_key(_OWNER, _SUB_ID, "openclaw")
+            self._generate_paid_key(reg, "openclaw")
         assert "openclaw" in str(ctx.exception)
 
     def test_different_programs_same_owner_does_not_raise(self):
         reg = self._registry()
-        r1 = reg.generate_install_key(_OWNER, _SUB_ID, "openclaw")
-        r2 = reg.generate_install_key(_OWNER, _SUB_ID, "claude_code")
+        r1 = self._generate_paid_key(reg, "openclaw")
+        r2 = self._generate_paid_key(reg, "claude_code")
         assert r1.program != r2.program
 
     def test_invalid_program_raises_value_error(self):
         reg = self._registry()
         with self.assertRaises(ValueError):
-            reg.generate_install_key(_OWNER, _SUB_ID, "badprogram")  # type: ignore[arg-type]
+            reg.generate_for_paid_customer(
+                owner_key=_OWNER,
+                subscription_id=_SUB_ID,
+                program="badprogram",  # type: ignore[arg-type]
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+                checkout_session_id=_CHECKOUT_SESSION_ID,
+                purchase_reference=_PURCHASE_REFERENCE,
+            )
 
     def test_supabase_insert_called_on_generate(self):
         reg = self._registry()
-        reg.generate_install_key(_OWNER, _SUB_ID, "openclaw")
+        self._generate_paid_key(reg, "openclaw")
         self._stub.table.assert_called()
 
     def test_label_stored_on_record(self):
         reg = self._registry()
-        record = reg.generate_install_key(_OWNER, _SUB_ID, "openclaw", label="prod-key")
+        record = reg.generate_for_paid_customer(
+            owner_key=_OWNER,
+            subscription_id=_SUB_ID,
+            program="openclaw",
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=True,
+            checkout_session_id=_CHECKOUT_SESSION_ID,
+            purchase_reference=_PURCHASE_REFERENCE,
+            label="prod-key",
+        )
         assert record.label == "prod-key"
 
     def test_metadata_stored_on_record(self):
         reg = self._registry()
         meta = {"env": "prod"}
-        record = reg.generate_install_key(_OWNER, _SUB_ID, "openclaw", metadata=meta)
+        record = reg.generate_for_paid_customer(
+            owner_key=_OWNER,
+            subscription_id=_SUB_ID,
+            program="openclaw",
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=True,
+            checkout_session_id=_CHECKOUT_SESSION_ID,
+            purchase_reference=_PURCHASE_REFERENCE,
+            metadata=meta,
+        )
         assert record.metadata == meta
 
 
@@ -289,7 +333,16 @@ class TestAuthenticateInstallKey(unittest.TestCase):
     def _registry_with_key(self, program="openclaw", active=True):
         reg = InstallKeyRegistry()
         reg._loaded = True
-        record = reg.generate_install_key(_OWNER, _SUB_ID, program)
+        record = reg.generate_for_paid_customer(
+            owner_key=_OWNER,
+            subscription_id=_SUB_ID,
+            program=program,
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=True,
+            checkout_session_id=_CHECKOUT_SESSION_ID,
+            purchase_reference=_PURCHASE_REFERENCE,
+        )
         raw_key = record.raw_key
         if not active:
             reg.revoke_key(record.key_id)
@@ -361,7 +414,16 @@ class TestRevokeKey(unittest.TestCase):
     def _registry_with_key(self, program="openclaw"):
         reg = InstallKeyRegistry()
         reg._loaded = True
-        record = reg.generate_install_key(_OWNER, _SUB_ID, program)
+        record = reg.generate_for_paid_customer(
+            owner_key=_OWNER,
+            subscription_id=_SUB_ID,
+            program=program,
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=True,
+            checkout_session_id=_CHECKOUT_SESSION_ID,
+            purchase_reference=_PURCHASE_REFERENCE,
+        )
         return reg, record.key_id
 
     def test_active_key_revoked_returns_inactive(self):
@@ -406,7 +468,16 @@ class TestRevokeKey(unittest.TestCase):
     def test_revoke_blocks_authenticate(self):
         reg = InstallKeyRegistry()
         reg._loaded = True
-        record = reg.generate_install_key(_OWNER, _SUB_ID, "openclaw")
+        record = reg.generate_for_paid_customer(
+            owner_key=_OWNER,
+            subscription_id=_SUB_ID,
+            program="openclaw",
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=True,
+            checkout_session_id=_CHECKOUT_SESSION_ID,
+            purchase_reference=_PURCHASE_REFERENCE,
+        )
         raw_key = record.raw_key
         reg.revoke_key(record.key_id)
         assert reg.authenticate_install_key(raw_key) is None
@@ -431,7 +502,16 @@ class TestRecordKeyUsage(unittest.TestCase):
     def _registry_with_key(self, program="openclaw", active=True):
         reg = InstallKeyRegistry()
         reg._loaded = True
-        record = reg.generate_install_key(_OWNER, _SUB_ID, program)
+        record = reg.generate_for_paid_customer(
+            owner_key=_OWNER,
+            subscription_id=_SUB_ID,
+            program=program,
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=True,
+            checkout_session_id=_CHECKOUT_SESSION_ID,
+            purchase_reference=_PURCHASE_REFERENCE,
+        )
         if not active:
             reg.revoke_key(record.key_id)
         return reg, record.key_id
@@ -511,6 +591,18 @@ class TestSummary(unittest.TestCase):
         reg._loaded = True
         return reg
 
+    def _generate_paid_key(self, reg: InstallKeyRegistry, owner_key: str, subscription_id: str, program: str) -> InstallKeyRecord:
+        return reg.generate_for_paid_customer(
+            owner_key=owner_key,
+            subscription_id=subscription_id,
+            program=program,
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=True,
+            checkout_session_id=_CHECKOUT_SESSION_ID,
+            purchase_reference=_PURCHASE_REFERENCE,
+        )
+
     def test_empty_registry_summary_all_zeros(self):
         reg = self._fresh_registry()
         s = reg.summary()
@@ -522,44 +614,44 @@ class TestSummary(unittest.TestCase):
 
     def test_total_count_correct(self):
         reg = self._fresh_registry()
-        reg.generate_install_key(_OWNER, _SUB_ID, "openclaw")
-        reg.generate_install_key(_OWNER, _SUB_ID, "claude_code")
+        self._generate_paid_key(reg, _OWNER, _SUB_ID, "openclaw")
+        self._generate_paid_key(reg, _OWNER, _SUB_ID, "claude_code")
         s = reg.summary()
         assert s["total"] == 2
 
     def test_active_count_correct(self):
         reg = self._fresh_registry()
-        r1 = reg.generate_install_key(_OWNER, _SUB_ID, "openclaw")
-        reg.generate_install_key(_OWNER, _SUB_ID, "claude_code")
+        r1 = self._generate_paid_key(reg, _OWNER, _SUB_ID, "openclaw")
+        self._generate_paid_key(reg, _OWNER, _SUB_ID, "claude_code")
         reg.revoke_key(r1.key_id)
         s = reg.summary()
         assert s["active"] == 1
 
     def test_revoked_count_correct(self):
         reg = self._fresh_registry()
-        r1 = reg.generate_install_key(_OWNER, _SUB_ID, "openclaw")
-        reg.generate_install_key(_OWNER, _SUB_ID, "claude_code")
+        r1 = self._generate_paid_key(reg, _OWNER, _SUB_ID, "openclaw")
+        self._generate_paid_key(reg, _OWNER, _SUB_ID, "claude_code")
         reg.revoke_key(r1.key_id)
         s = reg.summary()
         assert s["revoked"] == 1
 
     def test_openclaw_keys_count(self):
         reg = self._fresh_registry()
-        reg.generate_install_key(_OWNER, _SUB_ID, "openclaw")
-        reg.generate_install_key("other@ironclaw.test", _SUB_ID, "openclaw")
+        self._generate_paid_key(reg, _OWNER, _SUB_ID, "openclaw")
+        self._generate_paid_key(reg, "other@ironclaw.test", _SUB_ID, "openclaw")
         s = reg.summary()
         assert s["openclaw_keys"] == 2
 
     def test_claude_code_keys_count(self):
         reg = self._fresh_registry()
-        reg.generate_install_key(_OWNER, _SUB_ID, "claude_code")
+        self._generate_paid_key(reg, _OWNER, _SUB_ID, "claude_code")
         s = reg.summary()
         assert s["claude_code_keys"] == 1
 
     def test_revoked_active_sum_equals_total(self):
         reg = self._fresh_registry()
-        r1 = reg.generate_install_key(_OWNER, _SUB_ID, "openclaw")
-        reg.generate_install_key(_OWNER, _SUB_ID, "claude_code")
+        r1 = self._generate_paid_key(reg, _OWNER, _SUB_ID, "openclaw")
+        self._generate_paid_key(reg, _OWNER, _SUB_ID, "claude_code")
         reg.revoke_key(r1.key_id)
         s = reg.summary()
         assert s["active"] + s["revoked"] == s["total"]

@@ -80,17 +80,33 @@ def client(_reset_wallet_registry):
 # ---------------------------------------------------------------------------
 
 
-def _fund_wallet(client: TestClient, email: str, package_id: str = "pkg_5000") -> None:
-    resp = client.post(
-        _PURCHASE_PATH,
-        json={
+def _fund_wallet(email: str, package_id: str = "pkg_5000") -> None:
+    source = UNIT_PACKAGE_CATALOG[package_id]
+    registry = _unit_wallet_module.get_unit_wallet_registry()
+    registry.credit_units(
+        owner_key=email,
+        units=int(source["unit_amount"]),
+        metadata={
             "package_id": package_id,
-            "buyer_name": "Fixture Buyer",
-            "buyer_email": email,
-            "metadata": {},
+            "seeded_for_test": True,
         },
     )
-    assert resp.status_code == 201, f"_fund_wallet failed: {resp.status_code} {resp.text}"
+
+
+def _fund_org_wallet(org_id: str, package_id: str = "pkg_5000") -> str:
+    owner_key = f"{ORG_KEY_PREFIX}{org_id}"
+    source = UNIT_PACKAGE_CATALOG[package_id]
+    registry = _unit_wallet_module.get_unit_wallet_registry()
+    registry.credit_units(
+        owner_key=owner_key,
+        units=int(source["unit_amount"]),
+        metadata={
+            "package_id": package_id,
+            "seeded_for_test": True,
+            "org_id": org_id,
+        },
+    )
+    return owner_key
 
 
 # ---------------------------------------------------------------------------
@@ -174,11 +190,12 @@ def test_stale_purchase_path_returns_404_or_405(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
-# POST /billing/purchase — happy path and schema
+# POST /billing/purchase — pending purchase semantics and schema
 # ---------------------------------------------------------------------------
 
 
-def test_purchase_valid_package_returns_201_with_correct_shape(client: TestClient) -> None:
+def test_purchase_valid_package_returns_201_with_pending_shape(client: TestClient) -> None:
+    _fund_wallet("buyer@ironclaw.test")
     resp = client.post(
         _PURCHASE_PATH,
         json={
@@ -193,22 +210,26 @@ def test_purchase_valid_package_returns_201_with_correct_shape(client: TestClien
     assert body["status"] == "ok"
     purchase = body["purchase"]
     assert purchase["package_id"] == "pkg_5000"
-    assert purchase["granted_units"] == 5_000
+    assert purchase["granted_units"] == 0
     assert purchase["token_coverage"] == 5_000 * TOKEN_CHUNK_SIZE
     assert purchase["tokens_per_unit"] == TOKEN_CHUNK_SIZE
     assert purchase["buyer_email"] == "buyer@ironclaw.test"
     assert purchase["purchase_id"].startswith("purch_")
-    assert "openclaw_install_key" in purchase
-    assert "claude_code_install_key" in purchase
-    assert purchase["openclaw_install_key"] is None or isinstance(purchase["openclaw_install_key"], str)
-    assert purchase["claude_code_install_key"] is None or isinstance(purchase["claude_code_install_key"], str)
+    assert purchase["openclaw_install_key"] is None
+    assert purchase["claude_code_install_key"] is None
+    assert purchase["metadata"]["payment_required"] is True
+    assert purchase["metadata"]["payment_status"] == "pending"
+    assert purchase["metadata"]["fulfillment_status"] == "pending"
+    assert purchase["metadata"]["install_keys_provisioned"] is False
+    assert purchase["metadata"]["units_credited"] is False
     wallet = body["wallet"]
     assert wallet["balance_units"] == 5_000
     assert wallet["total_purchased_units"] == 5_000
     assert wallet["owner_key"] == "buyer@ironclaw.test"
 
 
-def test_purchase_team_package_credits_correct_units(client: TestClient) -> None:
+def test_purchase_team_package_returns_pending_without_credit(client: TestClient) -> None:
+    _fund_wallet("team@ironclaw.test", package_id="pkg_5000")
     resp = client.post(
         _PURCHASE_PATH,
         json={
@@ -220,11 +241,14 @@ def test_purchase_team_package_credits_correct_units(client: TestClient) -> None
     )
     assert resp.status_code == 201
     body = resp.json()
-    assert body["purchase"]["granted_units"] == 25_000
-    assert body["wallet"]["balance_units"] == 25_000
+    assert body["purchase"]["granted_units"] == 0
+    assert body["purchase"]["token_coverage"] == 25_000 * TOKEN_CHUNK_SIZE
+    assert body["wallet"]["balance_units"] == 5_000
+    assert body["wallet"]["total_purchased_units"] == 5_000
 
 
-def test_purchase_enterprise_package_credits_correct_units(client: TestClient) -> None:
+def test_purchase_enterprise_package_returns_pending_without_credit(client: TestClient) -> None:
+    _fund_wallet("enterprise@ironclaw.test", package_id="pkg_5000")
     resp = client.post(
         _PURCHASE_PATH,
         json={
@@ -235,7 +259,10 @@ def test_purchase_enterprise_package_credits_correct_units(client: TestClient) -
         },
     )
     assert resp.status_code == 201
-    assert resp.json()["purchase"]["granted_units"] == 60_000
+    body = resp.json()
+    assert body["purchase"]["granted_units"] == 0
+    assert body["purchase"]["token_coverage"] == 60_000 * TOKEN_CHUNK_SIZE
+    assert body["wallet"]["balance_units"] == 5_000
 
 
 def test_purchase_unknown_package_returns_404(client: TestClient) -> None:
@@ -272,6 +299,7 @@ def test_purchase_empty_package_id_returns_422(client: TestClient) -> None:
 
 def test_purchase_org_key_as_buyer_email_passes_validation(client: TestClient) -> None:
     """ic_org_* values must pass BillingPackagePurchaseRequest.validate_email without 422."""
+    _fund_wallet("ic_org_test-org-123")
     resp = client.post(
         _PURCHASE_PATH,
         json={
@@ -281,14 +309,14 @@ def test_purchase_org_key_as_buyer_email_passes_validation(client: TestClient) -
             "metadata": {},
         },
     )
-    # Must not be 422 — validator must pass ic_org_* through without email-format enforcement.
     assert resp.status_code != 422, "ic_org_* buyer_email must bypass email regex validation, got 422"
-    assert resp.status_code in (201, 200)
+    assert resp.status_code in (200, 201)
 
 
 def test_purchase_org_key_as_buyer_email_value_preserved(client: TestClient) -> None:
     """The ic_org_* value must be preserved as-is in the purchase response."""
     org_key_email = "ic_org_test-org-456"
+    _fund_wallet(org_key_email)
     resp = client.post(
         _PURCHASE_PATH,
         json={
@@ -323,7 +351,7 @@ def test_purchase_invalid_email_non_org_key_returns_422(client: TestClient) -> N
 
 def test_debit_with_units_param_returns_200(client: TestClient) -> None:
     owner = "debit-units@ironclaw.test"
-    _fund_wallet(client, owner)
+    _fund_wallet(owner)
     resp = client.post(
         f"/billing/wallet/{owner}/debit",
         json={"units": 10, "reason": "test_debit"},
@@ -339,7 +367,7 @@ def test_debit_with_units_param_returns_200(client: TestClient) -> None:
 
 def test_debit_with_token_count_computes_ceiling_units(client: TestClient) -> None:
     owner = "debit-tokens@ironclaw.test"
-    _fund_wallet(client, owner)
+    _fund_wallet(owner)
     token_count = TOKEN_CHUNK_SIZE + 1
     expected_units = math.ceil(token_count / TOKEN_CHUNK_SIZE)
     assert expected_units == 2
@@ -356,7 +384,7 @@ def test_debit_with_token_count_computes_ceiling_units(client: TestClient) -> No
 
 def test_debit_exact_chunk_boundary_costs_one_unit(client: TestClient) -> None:
     owner = "boundary@ironclaw.test"
-    _fund_wallet(client, owner)
+    _fund_wallet(owner)
     resp = client.post(
         f"/billing/wallet/{owner}/debit",
         json={"token_count": TOKEN_CHUNK_SIZE},
@@ -367,7 +395,7 @@ def test_debit_exact_chunk_boundary_costs_one_unit(client: TestClient) -> None:
 
 def test_debit_one_token_costs_one_unit(client: TestClient) -> None:
     owner = "onetoken@ironclaw.test"
-    _fund_wallet(client, owner)
+    _fund_wallet(owner)
     resp = client.post(
         f"/billing/wallet/{owner}/debit",
         json={"token_count": 1},
@@ -379,7 +407,7 @@ def test_debit_one_token_costs_one_unit(client: TestClient) -> None:
 def test_debit_insufficient_balance_returns_402_with_structured_detail(client: TestClient) -> None:
     """Primary regression: removed catch block must propagate 402 with dict detail."""
     owner = "broke@ironclaw.test"
-    _fund_wallet(client, owner)
+    _fund_wallet(owner)
     resp = client.post(
         f"/billing/wallet/{owner}/debit",
         json={"units": 9_999_999, "reason": "overdraft_test"},
@@ -411,7 +439,7 @@ def test_debit_insufficient_balance_zero_wallet_returns_402(client: TestClient) 
 
 def test_debit_missing_both_units_and_token_count_returns_422(client: TestClient) -> None:
     owner = "noparam@ironclaw.test"
-    _fund_wallet(client, owner)
+    _fund_wallet(owner)
     resp = client.post(
         f"/billing/wallet/{owner}/debit",
         json={"reason": "missing_both"},
@@ -421,7 +449,7 @@ def test_debit_missing_both_units_and_token_count_returns_422(client: TestClient
 
 def test_debit_units_zero_rejected_by_schema(client: TestClient) -> None:
     owner = "zeroparam@ironclaw.test"
-    _fund_wallet(client, owner)
+    _fund_wallet(owner)
     resp = client.post(
         f"/billing/wallet/{owner}/debit",
         json={"units": 0},
@@ -436,7 +464,7 @@ def test_debit_units_zero_rejected_by_schema(client: TestClient) -> None:
 
 def test_refund_returns_200_on_valid_refund_after_credit(client: TestClient) -> None:
     owner = "refund-user@ironclaw.test"
-    _fund_wallet(client, owner)
+    _fund_wallet(owner)
     client.post(
         f"/billing/wallet/{owner}/debit",
         json={"units": 100, "reason": "consumed"},
@@ -456,7 +484,7 @@ def test_refund_returns_200_on_valid_refund_after_credit(client: TestClient) -> 
 
 def test_refund_entry_appears_in_ledger(client: TestClient) -> None:
     owner = "refund-ledger@ironclaw.test"
-    _fund_wallet(client, owner)
+    _fund_wallet(owner)
     client.post(
         f"/billing/wallet/{owner}/debit",
         json={"units": 10, "reason": "pre_refund_debit"},
@@ -485,13 +513,9 @@ def test_refund_units_zero_rejected_by_schema(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_get_wallet_returns_200_and_creates_wallet_if_absent(client: TestClient) -> None:
-    """
-    The route returns 404 when no wallet exists; fund first to ensure
-    the wallet is created, then assert 200 with correct shape.
-    """
+def test_get_wallet_returns_200_when_wallet_exists(client: TestClient) -> None:
     owner = "new-wallet@ironclaw.test"
-    _fund_wallet(client, owner)
+    _fund_wallet(owner)
     resp = client.get(f"/billing/wallet/{owner}")
     assert resp.status_code == 200
     body = resp.json()
@@ -511,7 +535,7 @@ def test_get_wallet_absent_returns_404(client: TestClient) -> None:
 
 def test_get_wallet_returns_funded_balance(client: TestClient) -> None:
     owner = "funded-wallet@ironclaw.test"
-    _fund_wallet(client, owner, package_id="pkg_25000")
+    _fund_wallet(owner, package_id="pkg_25000")
     resp = client.get(f"/billing/wallet/{owner}")
     assert resp.status_code == 200
     assert resp.json()["wallet"]["balance_units"] == 25_000
@@ -519,7 +543,7 @@ def test_get_wallet_returns_funded_balance(client: TestClient) -> None:
 
 def test_get_wallet_is_idempotent_on_repeated_access(client: TestClient) -> None:
     owner = "idempotent-wallet@ironclaw.test"
-    _fund_wallet(client, owner)
+    _fund_wallet(owner)
     r1 = client.get(f"/billing/wallet/{owner}")
     r2 = client.get(f"/billing/wallet/{owner}")
     assert r1.status_code == 200
@@ -534,7 +558,7 @@ def test_get_wallet_is_idempotent_on_repeated_access(client: TestClient) -> None
 
 def test_ledger_returns_200_with_correct_schema(client: TestClient) -> None:
     owner = "ledger-schema@ironclaw.test"
-    _fund_wallet(client, owner)
+    _fund_wallet(owner)
     resp = client.get(f"/billing/wallet/{owner}/ledger")
     assert resp.status_code == 200
     body = resp.json()
@@ -557,21 +581,20 @@ def test_ledger_returns_200_with_correct_schema(client: TestClient) -> None:
         assert field in entry, f"ledger entry missing field: {field!r}"
 
 
-def test_ledger_empty_for_new_wallet_after_purchase(client: TestClient) -> None:
-    """After purchase, ledger must contain at least one credit entry."""
+def test_ledger_contains_credit_entry_after_wallet_seed(client: TestClient) -> None:
     owner = "ledger-after-purchase@ironclaw.test"
-    _fund_wallet(client, owner)
+    _fund_wallet(owner)
     resp = client.get(f"/billing/wallet/{owner}/ledger")
     assert resp.status_code == 200
     entries = resp.json()["entries"]
-    assert len(entries) >= 1, "Ledger must have at least one entry after purchase"
+    assert len(entries) >= 1, "Ledger must have at least one entry after wallet seed"
     entry_types = {e["entry_type"] for e in entries}
-    assert "credit" in entry_types, f"Expected 'credit' entry after purchase, got: {entry_types}"
+    assert "credit" in entry_types, f"Expected 'credit' entry after wallet seed, got: {entry_types}"
 
 
 def test_ledger_debit_and_credit_entries_appear(client: TestClient) -> None:
     owner = "full-ledger@ironclaw.test"
-    _fund_wallet(client, owner)
+    _fund_wallet(owner)
     client.post(
         f"/billing/wallet/{owner}/debit",
         json={"units": 5, "reason": "ledger_verify"},
@@ -584,7 +607,7 @@ def test_ledger_debit_and_credit_entries_appear(client: TestClient) -> None:
 
 def test_ledger_limit_param_respected(client: TestClient) -> None:
     owner = "limit-test@ironclaw.test"
-    _fund_wallet(client, owner)
+    _fund_wallet(owner)
     for _ in range(5):
         client.post(f"/billing/wallet/{owner}/debit", json={"units": 1})
     resp = client.get(f"/billing/wallet/{owner}/ledger?limit=3")
@@ -665,14 +688,14 @@ def test_assert_owner_access_personal_mismatched_principal_returns_403() -> None
 
 
 # ---------------------------------------------------------------------------
-# Org wallet routing — purchase routes unit to org wallet when key_type=org
+# Org wallet routing — purchase resolves to org owner when key_type=org
 # ---------------------------------------------------------------------------
 
 
-def test_purchase_routes_to_org_wallet_when_org_key(client: TestClient) -> None:
-    """When auth context is key_type='org', purchase must credit ic_org_{org_id}."""
+def test_purchase_routes_to_org_owner_when_org_key(client: TestClient) -> None:
+    """When auth context is key_type='org', purchase must resolve to ic_org_{org_id}."""
     org_id = "test-org"
-    org_owner_key = f"{ORG_KEY_PREFIX}{org_id}"
+    org_owner_key = _fund_org_wallet(org_id, package_id="pkg_5000")
 
     def _org_auth_ctx() -> AuthContext:
         return _make_auth_ctx(principal_id=None, org_id=org_id, key_type="org")
@@ -692,6 +715,23 @@ def test_purchase_routes_to_org_wallet_when_org_key(client: TestClient) -> None:
         body = resp.json()
         assert body["purchase"]["owner_key"] == org_owner_key
         assert body["wallet"]["owner_key"] == org_owner_key
+        assert body["wallet"]["balance_units"] == 5_000
+    finally:
+        _app.dependency_overrides[get_auth_context] = _override_get_auth_context
+
+
+def test_org_wallet_get_wallet_returns_seeded_balance(client: TestClient) -> None:
+    org_id = "seeded-org"
+    org_owner_key = _fund_org_wallet(org_id, package_id="pkg_5000")
+
+    def _org_auth_ctx() -> AuthContext:
+        return _make_auth_ctx(principal_id=None, org_id=org_id, key_type="org")
+
+    _app.dependency_overrides[get_auth_context] = _org_auth_ctx
+    try:
+        resp = client.get(f"/billing/wallet/{org_owner_key}")
+        assert resp.status_code == 200
+        assert resp.json()["wallet"]["balance_units"] == 5_000
     finally:
         _app.dependency_overrides[get_auth_context] = _override_get_auth_context
 

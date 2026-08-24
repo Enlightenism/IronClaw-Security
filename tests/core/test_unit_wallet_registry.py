@@ -76,12 +76,6 @@ def test_catalog_package_id_field_matches_key() -> None:
 
 # ---------------------------------------------------------------------------
 # Catalog validation guard — RuntimeError (not AssertionError)
-#
-# The module-level guard in unit_wallet.py raises RuntimeError (via
-# logger.error + raise) for four distinct failure modes. Because the guard
-# runs at import time we mirror its exact logic in a local helper and drive
-# it with patched catalogs — this is the correct pattern since pytest cannot
-# safely re-import a module mid-session without corrupting the import chain.
 # ---------------------------------------------------------------------------
 
 
@@ -543,27 +537,27 @@ def test_debit_units_for_tokens_returns_correct_units_debited(registry: UnitWall
 
 def test_debit_units_for_install_key_reduces_balance(registry: UnitWalletRegistry) -> None:
     registry.credit_units("key_user@ironclaw.test", 1_000)
-    wallet = registry.debit_units_for_install_key(
+    wallet, usage, entry = registry.debit_units_for_install_key(
         owner_key="key_user@ironclaw.test",
         key_id="key_abc123",
-        units=50,
         program="claude",
+        units=50,
     )
     assert wallet.balance_units == 950
     assert wallet.total_consumed_units == 50
 
 
-def test_debit_units_for_install_key_entry_type_is_debit(registry: UnitWalletRegistry) -> None:
+def test_debit_units_for_install_key_entry_type_is_install_key_debit(registry: UnitWalletRegistry) -> None:
     registry.credit_units("key_user@ironclaw.test", 1_000)
     registry.debit_units_for_install_key(
         owner_key="key_user@ironclaw.test",
         key_id="key_abc123",
-        units=50,
         program="claude",
+        units=50,
     )
     entries = registry.list_ledger_entries(owner_key="key_user@ironclaw.test")
-    debit_entry = next(e for e in entries if e.entry_type == "debit")
-    assert debit_entry.entry_type == "debit"
+    debit_entry = next(e for e in entries if e.entry_type == "install_key_debit")
+    assert debit_entry.entry_type == "install_key_debit"
 
 
 def test_debit_units_for_install_key_metadata_contains_key_id(registry: UnitWalletRegistry) -> None:
@@ -571,11 +565,11 @@ def test_debit_units_for_install_key_metadata_contains_key_id(registry: UnitWall
     registry.debit_units_for_install_key(
         owner_key="key_user@ironclaw.test",
         key_id="key_abc123",
-        units=50,
         program="claude",
+        units=50,
     )
     entries = registry.list_ledger_entries(owner_key="key_user@ironclaw.test")
-    debit_entry = next(e for e in entries if e.entry_type == "debit")
+    debit_entry = next(e for e in entries if e.entry_type == "install_key_debit")
     assert debit_entry.metadata.get("key_id") == "key_abc123"
 
 
@@ -584,11 +578,11 @@ def test_debit_units_for_install_key_metadata_contains_program(registry: UnitWal
     registry.debit_units_for_install_key(
         owner_key="key_user@ironclaw.test",
         key_id="key_abc123",
-        units=50,
         program="claude",
+        units=50,
     )
     entries = registry.list_ledger_entries(owner_key="key_user@ironclaw.test")
-    debit_entry = next(e for e in entries if e.entry_type == "debit")
+    debit_entry = next(e for e in entries if e.entry_type == "install_key_debit")
     assert debit_entry.metadata.get("program") == "claude"
 
 
@@ -597,21 +591,21 @@ def test_debit_units_for_install_key_balance_after_is_correct_in_ledger(registry
     registry.debit_units_for_install_key(
         owner_key="key_user@ironclaw.test",
         key_id="key_abc123",
-        units=50,
         program="claude",
+        units=50,
     )
     entries = registry.list_ledger_entries(owner_key="key_user@ironclaw.test")
-    debit_entry = next(e for e in entries if e.entry_type == "debit")
+    debit_entry = next(e for e in entries if e.entry_type == "install_key_debit")
     assert debit_entry.balance_after == 950
 
 
 def test_debit_units_for_install_key_exact_balance_empties_wallet(registry: UnitWalletRegistry) -> None:
     registry.credit_units("key_user@ironclaw.test", 100)
-    wallet = registry.debit_units_for_install_key(
+    wallet, usage, entry = registry.debit_units_for_install_key(
         owner_key="key_user@ironclaw.test",
         key_id="key_exact",
-        units=100,
         program="openai",
+        units=100,
     )
     assert wallet.balance_units == 0
 
@@ -627,8 +621,8 @@ def test_debit_units_for_install_key_raises_insufficient_units_error(registry: U
         registry.debit_units_for_install_key(
             owner_key="key_broke@ironclaw.test",
             key_id="key_over",
-            units=999,
             program="groq",
+            units=999,
         )
 
 
@@ -638,8 +632,8 @@ def test_debit_units_for_install_key_error_have_attribute_is_correct(registry: U
         registry.debit_units_for_install_key(
             owner_key="key_broke@ironclaw.test",
             key_id="key_over",
-            units=999,
             program="groq",
+            units=999,
         )
     assert exc_info.value.have == 10
 
@@ -650,8 +644,8 @@ def test_debit_units_for_install_key_error_need_attribute_is_correct(registry: U
         registry.debit_units_for_install_key(
             owner_key="key_broke@ironclaw.test",
             key_id="key_over",
-            units=999,
             program="groq",
+            units=999,
         )
     assert exc_info.value.need == 999
 
@@ -662,8 +656,8 @@ def test_debit_units_for_install_key_error_does_not_mutate_balance(registry: Uni
         registry.debit_units_for_install_key(
             owner_key="key_broke@ironclaw.test",
             key_id="key_over",
-            units=999,
             program="groq",
+            units=999,
         )
     wallet = registry.get_wallet("key_broke@ironclaw.test")
     assert wallet is not None
@@ -675,8 +669,8 @@ def test_debit_units_for_install_key_zero_wallet_raises_insufficient_units_error
         registry.debit_units_for_install_key(
             owner_key="key_empty@ironclaw.test",
             key_id="key_zero",
-            units=1,
             program="claude",
+            units=1,
         )
     assert exc_info.value.have == 0
     assert exc_info.value.need == 1

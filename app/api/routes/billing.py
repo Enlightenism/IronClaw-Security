@@ -11,10 +11,6 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.core.auth import AuthContext, get_auth_context, require_auth_context
 from app.core.billing import resolve_billing_owner
-from app.core.install_keys import (
-    InstallKeyAlreadyExistsError,
-    get_install_key_registry,
-)
 from app.core.unit_wallet import (
     ORG_KEY_PREFIX,
     TOKEN_CHUNK_SIZE,
@@ -24,18 +20,15 @@ from app.core.unit_wallet import (
 
 logger = logging.getLogger(__name__)
 
-
 router = APIRouter(
     prefix="/billing",
     tags=["billing"],
     dependencies=[Depends(require_auth_context)],
 )
 
-
 _PURCHASES_MAX_SIZE: int = 1_000
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _ORG_KEY_RE = re.compile(r"^ic_org_")
-
 
 _BILLING_PACKAGE_FALLBACK: dict[str, dict[str, Any]] = {
     "pkg_5000": {
@@ -326,7 +319,7 @@ def _assert_owner_access(owner_key: str, auth_ctx: AuthContext) -> None:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
                     "reason": "org_key_mismatch",
-                    "detail": f"Org key does not match wallet owner: expected {expected_owner}, got {owner_key}",
+                    "detail": (f"Org key does not match wallet owner: expected {expected_owner}, got {owner_key}"),
                 },
             )
     else:
@@ -370,43 +363,6 @@ def _get_or_zero_wallet(registry: Any, owner_key: str) -> Any:
     return wallet
 
 
-def _provision_install_keys(
-    owner_key: str,
-    purchase_id: str,
-) -> tuple[str | None, str | None]:
-    registry = get_install_key_registry()
-    openclaw_key: str | None = None
-    claude_key: str | None = None
-
-    for program, slot in (("openclaw", "openclaw"), ("claude_code", "claude_code")):
-        try:
-            record = registry.generate_install_key(
-                owner_key=owner_key,
-                subscription_id=purchase_id,
-                program=program,  # type: ignore[arg-type]
-                label=f"auto-provisioned on purchase {purchase_id}",
-                metadata={"purchase_id": purchase_id, "auto_provisioned": True},
-            )
-            if slot == "openclaw":
-                openclaw_key = record.raw_key
-            else:
-                claude_key = record.raw_key
-        except InstallKeyAlreadyExistsError:
-            logger.info(
-                "billing: install key already exists for owner=%r program=%r — skipping",
-                owner_key,
-                program,
-            )
-        except Exception:
-            logger.exception(
-                "billing: failed to provision install key for owner=%r program=%r",
-                owner_key,
-                program,
-            )
-
-    return openclaw_key, claude_key
-
-
 @router.get(
     "/packages",
     response_model=BillingPackagesResponse,
@@ -415,10 +371,10 @@ def _provision_install_keys(
 def get_packages() -> BillingPackagesResponse:
     packages = [_package_to_view(pid, pkg) for pid, pkg in PACKAGE_CATALOG.items()]
     unit_policy = UnitPolicyView(
-        unit_definition=f"One protection unit covers {TOKEN_CHUNK_SIZE:,} tokens of inspected AI interaction across all active guardrails.",
+        unit_definition=(f"One protection unit covers {TOKEN_CHUNK_SIZE:,} tokens of inspected AI interaction across all active guardrails."),
         token_chunk_size=TOKEN_CHUNK_SIZE,
         delivery_model="prepaid",
-        buyer_positioning="Units are consumed as AI actions pass through IronClaw guardrails. Unused units roll over until your balance is exhausted.",
+        buyer_positioning=("Units are consumed as AI actions pass through IronClaw guardrails. Unused units roll over until your balance is exhausted."),
         protection_layers=[
             ProtectionValueView(
                 title="Prompt Injection Guard",
@@ -474,20 +430,21 @@ def purchase_package(
     registry = get_unit_wallet_registry()
 
     purchase_id = _new_purchase_id()
+    created_at = _utc_now_iso()
+    wallet = _get_or_zero_wallet(registry, owner_key)
 
-    wallet = registry.credit_units(
-        owner_key=owner_key,
-        units=int(pkg["included_units"]),
-        metadata={
-            "package_id": body.package_id,
-            "purchase_id": purchase_id,
-            "buyer_name": body.buyer_name,
-            "buyer_email": buyer_email_normalized,
-            **body.metadata,
-        },
-    )
-
-    openclaw_key, claude_key = _provision_install_keys(owner_key, purchase_id)
+    purchase_metadata = {
+        **body.metadata,
+        "package_id": body.package_id,
+        "buyer_name": body.buyer_name,
+        "buyer_email": buyer_email_normalized,
+        "owner_key": owner_key,
+        "payment_required": True,
+        "payment_status": "pending",
+        "fulfillment_status": "pending",
+        "install_keys_provisioned": False,
+        "units_credited": False,
+    }
 
     purchase = BillingPackagePurchaseView(
         purchase_id=purchase_id,
@@ -497,13 +454,13 @@ def purchase_package(
         buyer_email=buyer_email_normalized,
         owner_key=owner_key,
         price_usd=float(pkg["price_usd"]),
-        granted_units=int(pkg["included_units"]),
+        granted_units=0,
         token_coverage=int(pkg["included_units"]) * TOKEN_CHUNK_SIZE,
         tokens_per_unit=TOKEN_CHUNK_SIZE,
-        created_at=_utc_now_iso(),
-        openclaw_install_key=openclaw_key,
-        claude_code_install_key=claude_key,
-        metadata=body.metadata,
+        created_at=created_at,
+        openclaw_install_key=None,
+        claude_code_install_key=None,
+        metadata=purchase_metadata,
     )
     _append_purchase(purchase)
 
