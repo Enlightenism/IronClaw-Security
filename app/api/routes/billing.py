@@ -354,13 +354,23 @@ def _require_existing_wallet(registry: Any, owner_key: str) -> Any:
 
 def _get_or_zero_wallet(registry: Any, owner_key: str) -> Any:
     wallet = registry.get_wallet(owner_key)
-    if wallet is None:
+    if wallet is not None:
+        return wallet
+    if hasattr(registry, "get_or_create_wallet"):
+        return registry.get_or_create_wallet(owner_key)
 
-        class _ZeroWallet:
-            balance_units = 0
+    class _ZeroWallet:
+        def __init__(self, owner_key_value: str) -> None:
+            self.balance_units = 0
+            self.wallet_id = f"wallet_missing_{uuid.uuid4().hex}"
+            self.owner_key = str(owner_key_value).strip().lower()
+            self.total_purchased_units = 0
+            self.total_consumed_units = 0
+            self.total_refunded_units = 0
+            self.updated_at = datetime.now(UTC)
+            self.metadata: dict[str, Any] = {}
 
-        return _ZeroWallet()
-    return wallet
+    return _ZeroWallet(owner_key)
 
 
 @router.get(

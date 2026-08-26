@@ -155,6 +155,23 @@ def test_generate_org_api_key_uses_org_prefix() -> None:
     assert key.startswith(_ORG_KEY_PREFIX)
 
 
+def test_system_api_key_registry_rejects_install_key_prefixes() -> None:
+    with pytest.raises(ValueError, match="not install keys|install-key"):
+        APIKeyRegistry().create_key("Paid Install Token", prefix="ic_install_openclaw_")
+
+    with pytest.raises(ValueError, match="not install keys|install-key"):
+        APIKeyRegistry().create_key("Install token", api_key="ic_install_claude_code_fake_key")
+
+
+def test_api_key_classification_distinguishes_install_and_system_key_types() -> None:
+    from app.core.apikeys import classify_api_key
+
+    assert classify_api_key("ic_install_openclaw_secret_123") == "install"
+    assert classify_api_key("ic_org_team_abc") == "org"
+    assert classify_api_key("ic_system_secret_abc") == "system"
+    assert classify_api_key("sk_live_abc") == "unknown"
+
+
 def test_generate_org_api_key_is_unique() -> None:
     keys = {generate_org_api_key() for _ in range(20)}
     assert len(keys) == 20

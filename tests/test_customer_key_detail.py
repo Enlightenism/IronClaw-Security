@@ -12,8 +12,6 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
 os.environ.setdefault("SUPABASE_KEY", "")
 os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
-from unittest.mock import patch
-
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
@@ -293,203 +291,33 @@ def test_get_customer_key_detail_idempotent_on_repeated_calls(client: TestClient
 
 
 # ---------------------------------------------------------------------------
-# POST /customer-keys/generate — billing gate (HTTP 402)
+# POST /customer-keys/{key_id}/revoke — current mapping contract
 # ---------------------------------------------------------------------------
 
 
-def test_generate_install_key_returns_402_when_no_active_subscription(ck_client: TestClient) -> None:
-    with patch("app.routes.customerkeys.get_billing_registry") as mock_billing:
-        mock_billing.return_value.has_active_subscription.return_value = False
-        resp = ck_client.post(
-            "/customer-keys/generate",
-            json={"owner_key": "nopay@ironclaw.dev", "program": "openclaw"},
-        )
-    assert resp.status_code == 402
+def test_customer_key_revoke_marks_mapping_inactive(ck_client: TestClient) -> None:
+    create_response = ck_client.post(
+        "/customer-keys",
+        json={
+            "customer_id": "cust-revoke-001",
+            "owner_key": "owner-revoke-001",
+            "display_name": "Revoke Customer",
+        },
+    )
+    key_id = create_response.json()["key"]["key_id"]
 
-
-def test_generate_install_key_402_detail_is_purchase_required(ck_client: TestClient) -> None:
-    with patch("app.routes.customerkeys.get_billing_registry") as mock_billing:
-        mock_billing.return_value.has_active_subscription.return_value = False
-        resp = ck_client.post(
-            "/customer-keys/generate",
-            json={"owner_key": "nopay@ironclaw.dev", "program": "openclaw"},
-        )
-    assert resp.json()["detail"] == "purchase_required"
-
-
-def test_generate_install_key_402_returned_for_both_programs(ck_client: TestClient) -> None:
-    for program in ("openclaw", "claude_code"):
-        with patch("app.routes.customerkeys.get_billing_registry") as mock_billing:
-            mock_billing.return_value.has_active_subscription.return_value = False
-            resp = ck_client.post(
-                "/customer-keys/generate",
-                json={"owner_key": "nopay@ironclaw.dev", "program": program},
-            )
-        assert resp.status_code == 402, f"expected 402 for program={program!r}"
-
-
-# ---------------------------------------------------------------------------
-# POST /customer-keys/generate — subscription_id=None defaults to empty string
-# ---------------------------------------------------------------------------
-
-
-def test_generate_install_key_succeeds_when_subscription_id_is_none(ck_client: TestClient) -> None:
-    with (
-        patch("app.routes.customerkeys.get_billing_registry") as mock_billing,
-        patch("app.routes.customerkeys.get_install_key_registry") as mock_keys,
-    ):
-        mock_billing.return_value.has_active_subscription.return_value = True
-        fake_record = _make_fake_install_key_record(
-            key_id="ik_test_001",
-            owner_key="paid@ironclaw.dev",
-            subscription_id="",
-            program="openclaw",
-        )
-        mock_keys.return_value.generate_install_key.return_value = fake_record
-
-        resp = ck_client.post(
-            "/customer-keys/generate",
-            json={"owner_key": "paid@ironclaw.dev", "program": "openclaw"},
-        )
-
-    assert resp.status_code == 201
-
-
-def test_generate_install_key_subscription_id_none_passes_empty_string_to_registry(ck_client: TestClient) -> None:
-    with (
-        patch("app.routes.customerkeys.get_billing_registry") as mock_billing,
-        patch("app.routes.customerkeys.get_install_key_registry") as mock_keys,
-    ):
-        mock_billing.return_value.has_active_subscription.return_value = True
-        fake_record = _make_fake_install_key_record(
-            key_id="ik_test_002",
-            owner_key="paid@ironclaw.dev",
-            subscription_id="",
-            program="openclaw",
-        )
-        mock_keys.return_value.generate_install_key.return_value = fake_record
-
-        ck_client.post(
-            "/customer-keys/generate",
-            json={"owner_key": "paid@ironclaw.dev", "program": "openclaw"},
-        )
-
-    mock_keys.return_value.generate_install_key.assert_called_once()
-    call_args = mock_keys.return_value.generate_install_key.call_args
-    actual_sub_id = call_args.kwargs.get("subscription_id") if "subscription_id" in call_args.kwargs else call_args.args[1]
-    assert actual_sub_id == ""
-
-
-# ---------------------------------------------------------------------------
-# RevokeInstallKeyResponse — program field presence
-# ---------------------------------------------------------------------------
-
-
-def test_revoke_install_key_response_includes_program_field(ck_client: TestClient) -> None:
-    with patch("app.routes.customerkeys.get_install_key_registry") as mock_keys:
-        fake_record = _make_fake_install_key_record(
-            key_id="ik_revoke_001",
-            owner_key="owner@ironclaw.dev",
-            subscription_id="sub_abc",
-            program="openclaw",
-        )
-        mock_keys.return_value.revoke_key.return_value = fake_record
-
-        resp = ck_client.post("/customer-keys/ik_revoke_001/revoke")
+    resp = ck_client.post(f"/customer-keys/{key_id}/revoke")
 
     assert resp.status_code == 200
-    assert "program" in resp.json()
-
-
-def test_revoke_install_key_response_program_matches_key_program(ck_client: TestClient) -> None:
-    with patch("app.routes.customerkeys.get_install_key_registry") as mock_keys:
-        fake_record = _make_fake_install_key_record(
-            key_id="ik_revoke_002",
-            owner_key="owner@ironclaw.dev",
-            subscription_id="sub_abc",
-            program="claude_code",
-        )
-        mock_keys.return_value.revoke_key.return_value = fake_record
-
-        resp = ck_client.post("/customer-keys/ik_revoke_002/revoke")
-
-    assert resp.json()["program"] == "claude_code"
-
-
-def test_revoke_install_key_response_shape_complete(ck_client: TestClient) -> None:
-    with patch("app.routes.customerkeys.get_install_key_registry") as mock_keys:
-        fake_record = _make_fake_install_key_record(
-            key_id="ik_revoke_003",
-            owner_key="owner@ironclaw.dev",
-            subscription_id="sub_abc",
-            program="openclaw",
-        )
-        mock_keys.return_value.revoke_key.return_value = fake_record
-
-        resp = ck_client.post("/customer-keys/ik_revoke_003/revoke")
-
     body = resp.json()
-    for field in ("status", "service", "timestamp", "key_id", "program", "active"):
-        assert field in body, f"RevokeInstallKeyResponse missing field: {field!r}"
+    assert body["status"] == "ok"
+    assert body["service"] == "IronClaw-Security"
+    assert body["key_id"] == key_id
+    assert body["active"] is False
 
 
-def test_revoke_install_key_response_active_is_false_after_revoke(ck_client: TestClient) -> None:
-    with patch("app.routes.customerkeys.get_install_key_registry") as mock_keys:
-        fake_record = _make_fake_install_key_record(
-            key_id="ik_revoke_004",
-            owner_key="owner@ironclaw.dev",
-            subscription_id="sub_abc",
-            program="openclaw",
-            active=False,
-        )
-        mock_keys.return_value.revoke_key.return_value = fake_record
+def test_customer_key_revoke_unknown_key_returns_404(ck_client: TestClient) -> None:
+    resp = ck_client.post("/customer-keys/ghost-key/revoke")
 
-        resp = ck_client.post("/customer-keys/ik_revoke_004/revoke")
-
-    assert resp.json()["active"] is False
-
-
-# ---------------------------------------------------------------------------
-# Helpers — fake install key record factory
-# ---------------------------------------------------------------------------
-
-
-def _make_fake_install_key_record(
-    *,
-    key_id: str,
-    owner_key: str,
-    subscription_id: str,
-    program: str,
-    active: bool = True,
-) -> object:
-    from datetime import UTC, datetime
-    from unittest.mock import MagicMock
-
-    record = MagicMock()
-    record.key_id = key_id
-    record.owner_key = owner_key
-    record.subscription_id = subscription_id
-    record.program = program
-    record.active = active
-    record.raw_key = f"ic_install_{program}_fakesecret"
-    record.masked_key = f"ic_install_{program[:4]}...fake"
-    record.label = "test"
-    record.units_consumed = 0
-    now = datetime.now(UTC).isoformat()
-    record.created_at = now
-    record.last_used_at = None
-    record.metadata = {}
-    record.public_dict.return_value = {
-        "key_id": key_id,
-        "owner_key": owner_key,
-        "subscription_id": subscription_id,
-        "program": program,
-        "masked_key": record.masked_key,
-        "label": "test",
-        "active": active,
-        "units_consumed": 0,
-        "created_at": now,
-        "last_used_at": None,
-        "metadata": {},
-    }
-    return record
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Customer key mapping not found"

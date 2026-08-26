@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 from app.core.install_keys import (
     InstallKeyAlreadyExistsError,
     InstallKeyNotFoundError,
+    InstallKeyPaymentRequiredError,
     InstallKeyRecord,
     InstallKeyRegistry,
     InstallKeyUsageError,
@@ -237,11 +238,62 @@ class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
         record = self._generate_paid_key(reg, "claude_code")
         assert isinstance(record, InstallKeyRecord)
 
+    def test_legacy_generate_install_key_uses_subscription_reference_when_missing(self):
+        reg = self._registry()
+        record = reg.generate_install_key(
+            owner_key=_OWNER,
+            subscription_id=_SUB_ID,
+            program="openclaw",
+        )
+        assert record.purchase_reference == _SUB_ID
+        assert record.checkout_session_id == _SUB_ID
+        assert record.payment_status == "paid"
+        assert record.entitlements_status == "active"
+
+    def test_legacy_generate_install_key_rejects_unpaid_status(self):
+        reg = self._registry()
+        with self.assertRaises(InstallKeyPaymentRequiredError):
+            reg.generate_install_key(
+                owner_key=_OWNER,
+                subscription_id=_SUB_ID,
+                program="openclaw",
+                payment_status="pending",
+                entitlements_status="active",
+                issued_after_payment=True,
+            )
+
     def test_duplicate_active_key_raises_already_exists_error(self):
         reg = self._registry()
         self._generate_paid_key(reg, "openclaw")
         with self.assertRaises(InstallKeyAlreadyExistsError):
             self._generate_paid_key(reg, "openclaw")
+
+    def test_duplicate_paid_entitlement_record_raises_already_exists_error(self):
+        reg = self._registry()
+        record = reg.generate_for_paid_customer(
+            owner_key="ic_org_org_42",
+            subscription_id=_SUB_ID,
+            program="openclaw",
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=True,
+            checkout_session_id=_CHECKOUT_SESSION_ID,
+            purchase_reference=_PURCHASE_REFERENCE,
+            org_id="Org_42",
+        )
+        reg._records_by_id[record.key_id] = record
+        with self.assertRaises(InstallKeyAlreadyExistsError):
+            reg.generate_for_paid_customer(
+                owner_key="  IC_ORG_ORG_42  ",
+                subscription_id="sub-duplicate",
+                program="openclaw",
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+                checkout_session_id="cs_dup_001",
+                purchase_reference="purchase_dup_001",
+                org_id="Org_42",
+            )
 
     def test_duplicate_error_contains_owner_key(self):
         reg = self._registry()

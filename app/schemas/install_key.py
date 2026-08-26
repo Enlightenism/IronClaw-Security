@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 InstallKeyProgram = Literal["openclaw", "claude_code"]
 InstallKeyIssueEventType = Literal["install_key_issued", "install_key_revoked", "install_key_provisioned"]
@@ -30,8 +30,33 @@ def _normalize_iso_timestamp(value: Any) -> str | None:
     if value is None:
         return None
     if isinstance(value, str):
-        return value.strip() or None
+        normalized = value.strip()
+        return normalized or None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
     return str(value)
+
+
+def _normalize_payment_status(value: Any) -> str:
+    if value is None:
+        return "unpaid"
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return "unpaid"
+    if normalized in {"paid", "success", "succeeded", "complete", "completed", "active", "authorized"}:
+        return "paid"
+    return normalized
+
+
+def _normalize_entitlement_status(value: Any) -> str:
+    if value is None:
+        return "not_active"
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return "not_active"
+    if normalized in {"active", "paid", "enabled", "granted"}:
+        return "active"
+    return normalized
 
 
 def _normalize_program(value: Any) -> str:
@@ -58,15 +83,33 @@ class InstallKeyRecord(_InstallKeySchemaBase):
     masked_key: str = Field(..., min_length=1, max_length=512, description="Masked value that shows only a safe prefix/suffix.")
     label: str = Field(default="", max_length=256, description="Friendly label assigned to the key.")
     active: bool = Field(default=True, description="Whether the install key is enabled for use.")
+    payment_status: str = Field(default="unpaid", description="Normalized payment status for the install key entitlement.")
+    entitlements_status: str = Field(default="not_active", description="Normalized entitlement status for the install key.")
+    issued_after_payment: bool = Field(default=False, description="Whether the key was issued only after a successful checkout/payment completion.")
+    org_id: str | None = Field(default=None, max_length=256, description="Organization identifier if this key is org-scoped.")
+    customer_id: str | None = Field(default=None, max_length=256, description="Stripe customer id or equivalent reference.")
     units_consumed: int = Field(default=0, ge=0, description="Cumulative units consumed by this key.")
     created_at: str = Field(..., description="ISO-8601 UTC timestamp when the key was created.")
     last_used_at: str | None = Field(default=None, description="ISO-8601 UTC timestamp of the most recent successful use.")
+    revoked_at: str | None = Field(default=None, description="ISO-8601 UTC timestamp when the key was revoked.")
+    purchase_reference: str | None = Field(default=None, max_length=512, description="Payment or purchase reference tied to the successful checkout.")
+    checkout_session_id: str | None = Field(default=None, max_length=512, description="Stripe checkout session if known.")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Opaque per-key metadata.")
 
     @field_validator("program", mode="before")
     @classmethod
     def _coerce_program(cls, value: Any) -> str:
         return _normalize_program(value)
+
+    @field_validator("payment_status", mode="before")
+    @classmethod
+    def _normalize_payment_status_field(cls, value: Any) -> str:
+        return _normalize_payment_status(value)
+
+    @field_validator("entitlements_status", mode="before")
+    @classmethod
+    def _normalize_entitlement_status_field(cls, value: Any) -> str:
+        return _normalize_entitlement_status(value)
 
     @field_validator("created_at", mode="before")
     @classmethod
@@ -76,10 +119,19 @@ class InstallKeyRecord(_InstallKeySchemaBase):
             raise ValueError("created_at is required")
         return normalized
 
-    @field_validator("last_used_at", mode="before")
+    @field_validator("last_used_at", "revoked_at", mode="before")
     @classmethod
-    def _normalize_last_used_at(cls, value: Any) -> str | None:
+    def _normalize_optional_timestamps(cls, value: Any) -> str | None:
         return _normalize_iso_timestamp(value)
+
+    @model_validator(mode="after")
+    def _enforce_paid_active_contract(self) -> InstallKeyRecord:
+        if self.active and not self.issued_after_payment:
+            raise ValueError("active install keys must be issued_after_payment=True and backed by a paid entitlement")
+        if self.active:
+            self.payment_status = "paid"
+            self.entitlements_status = "active"
+        return self
 
     @classmethod
     def from_core(cls, record: Any) -> InstallKeyRecord:
@@ -112,9 +164,17 @@ class InstallKeyRecord(_InstallKeySchemaBase):
             masked_key=str(payload.get("masked_key", "")),
             label=str(payload.get("label") or ""),
             active=bool(payload.get("active", True)),
+            payment_status=_normalize_payment_status(payload.get("payment_status", "unpaid")),
+            entitlements_status=_normalize_entitlement_status(payload.get("entitlements_status", "not_active")),
+            issued_after_payment=bool(payload.get("issued_after_payment", False)),
+            org_id=payload.get("org_id"),
+            customer_id=payload.get("customer_id"),
             units_consumed=int(payload.get("units_consumed", 0) or 0),
-            created_at=str(payload.get("created_at") or ""),
+            created_at=_normalize_iso_timestamp(payload.get("created_at")) or "",
             last_used_at=_normalize_iso_timestamp(payload.get("last_used_at")),
+            revoked_at=_normalize_iso_timestamp(payload.get("revoked_at")),
+            purchase_reference=payload.get("purchase_reference"),
+            checkout_session_id=payload.get("checkout_session_id"),
             metadata=metadata,
         )
 
@@ -133,7 +193,13 @@ class InstallKeyIssueEvent(_InstallKeySchemaBase):
     program: InstallKeyProgram = Field(..., description="Program the key is scoped to.")
     masked_key: str = Field(..., min_length=1, max_length=512, description="Masked install key shown to the user.")
     label: str = Field(default="", max_length=256, description="Key label or friendly name.")
+    org_id: str | None = Field(default=None, max_length=256, description="Organization identifier if this key is org-scoped.")
     customer_id: str | None = Field(default=None, max_length=256, description="Stripe/customer identity if known.")
+    payment_status: str = Field(default="unpaid", description="Normalized payment status at issuance time.")
+    entitlements_status: str = Field(default="not_active", description="Normalized entitlement status at issuance time.")
+    issued_after_payment: bool = Field(default=False, description="Whether the key was issued only after payment success.")
+    purchase_reference: str | None = Field(default=None, max_length=512, description="Purchase reference tied to the successful checkout.")
+    checkout_session_id: str | None = Field(default=None, max_length=512, description="Stripe checkout session id if known.")
     issued_at: str = Field(..., description="ISO-8601 UTC timestamp when the key was issued.")
     source: str = Field(default="billing", max_length=128, description="Subsystem that issued the key (billing, cli, manual, etc.).")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Opaque per-event metadata.")
@@ -142,6 +208,16 @@ class InstallKeyIssueEvent(_InstallKeySchemaBase):
     @classmethod
     def _coerce_program(cls, value: Any) -> str:
         return _normalize_program(value)
+
+    @field_validator("payment_status", mode="before")
+    @classmethod
+    def _normalize_payment_status_field(cls, value: Any) -> str:
+        return _normalize_payment_status(value)
+
+    @field_validator("entitlements_status", mode="before")
+    @classmethod
+    def _normalize_entitlement_status_field(cls, value: Any) -> str:
+        return _normalize_entitlement_status(value)
 
     @field_validator("event_type", mode="before")
     @classmethod
@@ -208,7 +284,7 @@ class InstallKeyDashboardSummary(_InstallKeySchemaBase):
     """Canonical dashboard summary for a single owner / wallet scope.
 
     This schema is intentionally aggregate-friendly: it allows the UI and API
-    layer to show active keys, usage totals, program counts, and the concrete
+    layer to show active keys, usage totals, attack totals, program counts, and the concrete
     key records without duplicating logic across the billing, wallet, and
     install-key services.
     """
@@ -218,6 +294,7 @@ class InstallKeyDashboardSummary(_InstallKeySchemaBase):
     total_keys: int = Field(default=0, ge=0, description="Total install key records for this owner.")
     active_keys: int = Field(default=0, ge=0, description="Number of active install keys.")
     total_units_consumed: int = Field(default=0, ge=0, description="Total units consumed across all keys.")
+    total_blocked_attacks: int = Field(default=0, ge=0, description="Total blocked attacks seen across key usage for this owner.")
     wallet_balance_units: int = Field(default=0, ge=0, description="Current balance in the owner's wallet.")
     last_used_at: str | None = Field(default=None, description="Most recent install-key usage timestamp across all keys.")
     keys: list[InstallKeyRecord] = Field(default_factory=list, description="Install keys for this owner, including inactive/revoked rows.")

@@ -28,6 +28,14 @@ logger = logging.getLogger(__name__)
 
 _EMAIL_RE = re.compile(r"[^@]+@[^@]+\.[^@]+")
 _PURCHASES_MAX = 10_000
+_RESERVED_OWNER_KEYS = {
+    "ironclaw-system",
+    "ironclaw-system-owner",
+    "ironclaw-root",
+    "ironclaw-root-owner",
+    "root",
+    "system",
+}
 
 
 router = APIRouter(
@@ -74,6 +82,28 @@ def _wallet_view(wallet: RegistryUnitWallet) -> dict[str, Any]:
     }
 
 
+def _is_paid_payment_status(value: str | None) -> bool:
+    if value is None:
+        return False
+    normalized = str(value).strip().lower()
+    return normalized in {"paid", "succeeded", "success", "completed", "complete", "active", "authorized"}
+
+
+def _has_confirmed_paid_entitlement(payment_status: str | None, entitlement_status: str | None) -> bool:
+    return _is_paid_payment_status(payment_status) and _normalize_entitlement_status(entitlement_status) == "active"
+
+
+def _normalize_entitlement_status(value: str | None) -> str:
+    if value is None:
+        return "not_active"
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return "not_active"
+    if normalized in {"paid", "active", "enabled", "granted", "succeeded", "success", "completed", "complete"}:
+        return "active"
+    return normalized
+
+
 def _assert_owner_access(
     auth_ctx: AuthContext,
     owner_key: str,
@@ -110,6 +140,38 @@ def _assert_owner_access(
                     "action": action,
                 },
             )
+
+
+def _safe_owner_key(auth_ctx: AuthContext, buyer_email: str) -> str:
+    owner_key = resolve_billing_owner(auth_ctx, buyer_email)
+    if not owner_key or owner_key.lower() in _RESERVED_OWNER_KEYS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "status": "invalid_owner_key",
+                "reason": "purchase_checkout_must_not_resolve_to_visible_system_key",
+                "owner_key": owner_key,
+            },
+        )
+    return owner_key
+
+
+def _usage_summary_for_key(
+    *,
+    owner_key: str,
+    program: str,
+    payment_id: str | None,
+    entitlement_status: str,
+) -> dict[str, Any]:
+    return {
+        "owner_key": owner_key,
+        "program": program,
+        "payment_id": payment_id,
+        "entitlement_status": entitlement_status,
+        "usage_count": 0,
+        "units_consumed": 0,
+        "last_seen_at": _utc_now_iso(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +216,16 @@ class BillingPackagesResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class InstallKeyDeliveryView(BaseModel):
+    install_key_id: str | None = None
+    masked_key: str | None = None
+    owner_key: str | None = None
+    program: str | None = None
+    payment_id: str | None = None
+    entitlement_status: str = "not_active"
+    usage_summary: dict[str, Any] = Field(default_factory=dict)
+
+
 class BillingPackagePurchaseRequest(BaseModel):
     package_id: str = Field(min_length=1, max_length=120)
     buyer_name: str = Field(min_length=1, max_length=120)
@@ -180,6 +252,13 @@ class BillingPackagePurchaseView(BaseModel):
     token_coverage: int
     tokens_per_unit: int
     created_at: str
+    payment_id: str | None = None
+    payment_status: str = "pending"
+    entitlement_status: str = "not_active"
+    install_key_id: str | None = None
+    masked_key: str | None = None
+    program: str | None = None
+    usage_summary: dict[str, Any] = Field(default_factory=dict)
     openclaw_install_key: str | None = None
     claude_code_install_key: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -264,7 +343,6 @@ class LedgerResponse(BaseModel):
 # Internal state
 # ---------------------------------------------------------------------------
 
-
 _PURCHASES: list[BillingPackagePurchaseView] = []
 _PURCHASES_LOCK: threading.Lock = threading.Lock()
 
@@ -324,43 +402,110 @@ def _build_unit_policy() -> UnitPolicyView:
 
 
 # ---------------------------------------------------------------------------
-# Install key provisioning helper
+# Install key issuance gating
 # ---------------------------------------------------------------------------
 
 
+def _attach_install_key_delivery(
+    *,
+    purchase: BillingPackagePurchaseView,
+    owner_key: str,
+    program: str,
+    payment_id: str | None,
+    entitlement_status: str,
+    install_key_record: Any | None,
+) -> None:
+    if install_key_record is None:
+        return
+
+    masked_key = getattr(install_key_record, "masked_key", None) or getattr(install_key_record, "raw_key", None)
+    purchase.program = program
+    purchase.payment_id = payment_id
+    purchase.entitlement_status = entitlement_status
+    purchase.install_key_id = getattr(install_key_record, "key_id", None)
+    purchase.masked_key = masked_key
+    purchase.usage_summary = _usage_summary_for_key(
+        owner_key=owner_key,
+        program=program,
+        payment_id=payment_id,
+        entitlement_status=entitlement_status,
+    )
+
+    if program == "openclaw":
+        purchase.openclaw_install_key = masked_key
+    else:
+        purchase.claude_code_install_key = masked_key
+
+
 def _provision_install_keys(
+    *,
     owner_key: str,
     purchase_id: str,
-) -> tuple[str | None, str | None]:
+    payment_id: str | None,
+    payment_status: str | None,
+    entitlement_status: str | None,
+) -> list[InstallKeyDeliveryView]:
+    if not _has_confirmed_paid_entitlement(payment_status, entitlement_status):
+        return []
+
     ik_registry = get_install_key_registry()
-    openclaw_key: str | None = None
-    claude_key: str | None = None
+    results: list[InstallKeyDeliveryView] = []
+    normalized_entitlement = _normalize_entitlement_status(entitlement_status)
 
     for program in ("openclaw", "claude_code"):
         try:
             record = ik_registry.generate_install_key(
                 owner_key=owner_key,
                 subscription_id=purchase_id,
-                program=program,  # type: ignore[arg-type]
-                label=f"auto-provisioned on purchase {purchase_id}",
-                metadata={"purchase_id": purchase_id, "auto_provisioned": True},
+                program=program,
+                label=f"paid-provisioned on purchase {purchase_id}",
+                metadata={
+                    "purchase_id": purchase_id,
+                    "payment_id": payment_id,
+                    "payment_status": payment_status or "paid",
+                    "entitlement_status": normalized_entitlement,
+                    "issued_after_payment": True,
+                    "auto_provisioned": True,
+                },
             )
-            if program == "openclaw":
-                openclaw_key = record.raw_key
-            else:
-                claude_key = record.raw_key
         except InstallKeyAlreadyExistsError:
-            logger.info(
-                "install_key_already_exists_on_purchase",
-                extra={"owner_key": owner_key, "program": program, "purchase_id": purchase_id},
+            existing = next(
+                (item for item in ik_registry.get_keys_for_owner(owner_key) if item.program == program and (item.active or item.payment_status == "paid")),
+                None,
             )
+            if existing is None:
+                continue
+            record = existing
         except Exception:
             logger.exception(
                 "install_key_provision_failed",
-                extra={"owner_key": owner_key, "program": program, "purchase_id": purchase_id},
+                extra={
+                    "owner_key": owner_key,
+                    "program": program,
+                    "purchase_id": purchase_id,
+                    "payment_id": payment_id,
+                },
             )
+            continue
 
-    return openclaw_key, claude_key
+        results.append(
+            InstallKeyDeliveryView(
+                install_key_id=record.key_id,
+                masked_key=record.masked_key,
+                owner_key=record.owner_key,
+                program=record.program,
+                payment_id=payment_id,
+                entitlement_status=normalized_entitlement,
+                usage_summary=_usage_summary_for_key(
+                    owner_key=record.owner_key,
+                    program=record.program,
+                    payment_id=payment_id,
+                    entitlement_status=normalized_entitlement,
+                ),
+            )
+        )
+
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -395,21 +540,11 @@ def purchase_billing_package(
     package_id, package = _require_known_package(payload.package_id)
     unit_amount = int(package["unit_amount"])
 
-    owner_key = resolve_billing_owner(auth_ctx, payload.buyer_email)
-
+    owner_key = _safe_owner_key(auth_ctx, payload.buyer_email)
     purchase_id = _new_purchase_id()
 
     registry = get_unit_wallet_registry()
-    wallet = registry.credit_units(
-        owner_key=owner_key,
-        units=unit_amount,
-        metadata={"purchase_id": purchase_id, "package_id": package_id},
-    )
-
-    openclaw_install_key, claude_code_install_key = _provision_install_keys(
-        owner_key=owner_key,
-        purchase_id=purchase_id,
-    )
+    wallet = registry.get_or_create_wallet(owner_key)
 
     purchase = BillingPackagePurchaseView(
         purchase_id=purchase_id,
@@ -419,19 +554,153 @@ def purchase_billing_package(
         buyer_email=payload.buyer_email,
         owner_key=owner_key,
         price_usd=float(package["price_usd"]),
-        granted_units=unit_amount,
+        granted_units=0,
         token_coverage=unit_amount * TOKEN_CHUNK_SIZE,
         tokens_per_unit=TOKEN_CHUNK_SIZE,
         created_at=_utc_now_iso(),
-        openclaw_install_key=openclaw_install_key,
-        claude_code_install_key=claude_code_install_key,
-        metadata=payload.metadata,
+        payment_status="pending",
+        entitlement_status="not_active",
+        install_key_id=None,
+        masked_key=None,
+        program=None,
+        usage_summary={},
+        openclaw_install_key=None,
+        claude_code_install_key=None,
+        metadata={
+            **payload.metadata,
+            "package_id": package_id,
+            "buyer_name": payload.buyer_name.strip(),
+            "buyer_email": payload.buyer_email,
+            "owner_key": owner_key,
+            "payment_required": True,
+            "payment_status": "pending",
+            "fulfillment_status": "pending",
+            "install_keys_provisioned": False,
+            "units_credited": False,
+        },
     )
 
     with _PURCHASES_LOCK:
         if len(_PURCHASES) >= _PURCHASES_MAX:
             _PURCHASES.pop(0)
         _PURCHASES.append(purchase)
+
+    return BillingPackagePurchaseResponse(
+        status="ok",
+        service="IronClaw-Security",
+        timestamp=_utc_now_iso(),
+        purchase=purchase,
+        wallet=_wallet_view(wallet),
+    )
+
+
+@router.post(
+    "/packages/{purchase_id}/fulfill",
+    response_model=BillingPackagePurchaseResponse,
+)
+def fulfill_billing_purchase(
+    purchase_id: str,
+    payment_id: str | None = None,
+    payment_status: str | None = None,
+    entitlement_status: str | None = None,
+    auth_ctx: AuthContext = Depends(require_auth_context),
+) -> BillingPackagePurchaseResponse:
+    purchase = next((item for item in _PURCHASES if item.purchase_id == purchase_id), None)
+    if purchase is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Purchase not found: {purchase_id!r}",
+        )
+
+    normalized_owner = (purchase.owner_key or "").strip().lower()
+    if normalized_owner and normalized_owner in _RESERVED_OWNER_KEYS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "status": "invalid_owner_key",
+                "reason": "purchase_checkout_must_not_resolve_to_visible_system_key",
+                "owner_key": purchase.owner_key,
+            },
+        )
+
+    normalized_payment_status = str(payment_status or "").strip().lower() or "pending"
+    normalized_entitlement = _normalize_entitlement_status(entitlement_status)
+    registry = get_unit_wallet_registry()
+    wallet = registry.get_or_create_wallet(purchase.owner_key)
+
+    if not _has_confirmed_paid_entitlement(normalized_payment_status, normalized_entitlement):
+        purchase.payment_status = normalized_payment_status if normalized_payment_status != "" else "pending"
+        purchase.entitlement_status = normalized_entitlement
+        purchase.payment_id = payment_id
+        purchase.install_key_id = None
+        purchase.masked_key = None
+        purchase.program = None
+        purchase.usage_summary = {}
+        purchase.openclaw_install_key = None
+        purchase.claude_code_install_key = None
+        purchase.metadata["payment_status"] = purchase.payment_status
+        purchase.metadata["fulfillment_status"] = "pending"
+        purchase.metadata["install_keys_provisioned"] = False
+        return BillingPackagePurchaseResponse(
+            status="ok",
+            service="IronClaw-Security",
+            timestamp=_utc_now_iso(),
+            purchase=purchase,
+            wallet=_wallet_view(wallet),
+        )
+
+    if purchase.payment_status == "paid" and purchase.entitlement_status == "active" and purchase.metadata.get("install_keys_provisioned") is True:
+        return BillingPackagePurchaseResponse(
+            status="ok",
+            service="IronClaw-Security",
+            timestamp=_utc_now_iso(),
+            purchase=purchase,
+            wallet=_wallet_view(wallet),
+        )
+
+    package_id, package = _require_known_package(purchase.package_id)
+    granted_units = int(package["unit_amount"])
+    purchase.payment_id = payment_id or f"pay_{uuid4().hex[:16]}"
+    purchase.payment_status = normalized_payment_status
+    purchase.entitlement_status = normalized_entitlement
+    purchase.granted_units = granted_units
+
+    wallet = registry.credit_units(
+        owner_key=purchase.owner_key,
+        units=granted_units,
+        metadata={
+            "purchase_id": purchase.purchase_id,
+            "package_id": package_id,
+            "payment_id": purchase.payment_id,
+            "source": "fulfillment",
+        },
+    )
+
+    for item in _provision_install_keys(
+        owner_key=purchase.owner_key,
+        purchase_id=purchase.purchase_id,
+        payment_id=purchase.payment_id,
+        payment_status=purchase.payment_status,
+        entitlement_status=purchase.entitlement_status,
+    ):
+        if item.program == "openclaw":
+            purchase.openclaw_install_key = item.masked_key
+        elif item.program == "claude_code":
+            purchase.claude_code_install_key = item.masked_key
+
+        purchase.install_key_id = item.install_key_id
+        purchase.masked_key = item.masked_key
+        purchase.program = item.program
+        purchase.payment_id = item.payment_id
+        purchase.entitlement_status = item.entitlement_status
+        purchase.usage_summary = item.usage_summary
+        purchase.metadata["install_keys_provisioned"] = True
+        purchase.metadata["payment_status"] = "paid"
+        purchase.metadata["fulfillment_status"] = "fulfilled"
+
+    if purchase.install_key_id is None:
+        purchase.metadata["install_keys_provisioned"] = False
+        purchase.metadata["fulfillment_status"] = "fulfilled_without_key"
 
     return BillingPackagePurchaseResponse(
         status="ok",

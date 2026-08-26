@@ -34,8 +34,12 @@ __all__ = [
 ORG_KEY_PREFIX: str = "ic_org_"
 
 
+def _normalize_owner_key(owner_key: str) -> str:
+    return str(owner_key).strip().lower()
+
+
 def is_org_key(owner_key: str) -> bool:
-    return owner_key.strip().lower().startswith(ORG_KEY_PREFIX)
+    return _normalize_owner_key(owner_key).startswith(ORG_KEY_PREFIX)
 
 
 class InsufficientUnitsError(ValueError):
@@ -273,6 +277,44 @@ class UnitWallet:
     transactions: list[UnitWalletTransaction] = field(default_factory=list)
     usage_by_key: dict[str, InstallKeyUsageSource] = field(default_factory=dict)
 
+    @property
+    def owner_key(self) -> str:
+        return self.owner_id
+
+    @owner_key.setter
+    def owner_key(self, value: str) -> None:
+        self.owner_id = str(value).strip().lower()
+
+    def as_summary(self) -> dict[str, Any]:
+        return {
+            "owner_key": self.owner_id,
+            "balance_units": self.balance_units,
+            "total_purchased_units": self.total_purchased_units,
+            "total_consumed_units": self.total_consumed_units,
+            "total_refunded_units": self.total_refunded_units,
+            "total_blocked_attacks": self.total_blocked_attacks,
+            "install_key_usage": {key: value.as_summary() for key, value in sorted(self.usage_by_key.items())},
+        }
+
+    def get_key_usage_summary(self, key_id: str | None = None) -> dict[str, Any]:
+        if key_id is not None:
+            usage = self.usage_by_key.get(key_id)
+            return {
+                "owner_key": self.owner_id,
+                "wallet_balance_units": self.balance_units,
+                "total_consumed_units": self.total_consumed_units,
+                "total_blocked_attacks": self.total_blocked_attacks,
+                "install_key_usage": {key_id: usage.as_summary()} if usage is not None else {},
+            }
+
+        return {
+            "owner_key": self.owner_id,
+            "wallet_balance_units": self.balance_units,
+            "total_consumed_units": self.total_consumed_units,
+            "total_blocked_attacks": self.total_blocked_attacks,
+            "install_key_usage": {key: value.as_summary() for key, value in sorted(self.usage_by_key.items())},
+        }
+
     def purchase_units(
         self,
         units: int,
@@ -365,18 +407,20 @@ class UnitWallet:
         if not program:
             raise ValueError("program is required for install-key consumption")
 
+        canonical_metadata = {
+            **(metadata or {}),
+            "key_id": key_id,
+            "program": program,
+            "payment_id": payment_id,
+            "action_type": action_type,
+            "blocked_attack_count": int(blocked_attack_count),
+        }
+
         transaction = self.consume_units(
             units,
             source=f"{source}:{key_id}",
             reference_id=reference_id,
-            metadata={
-                "key_id": key_id,
-                "program": program,
-                "payment_id": payment_id,
-                "action_type": action_type,
-                "blocked_attack_count": int(blocked_attack_count),
-                **(metadata or {}),
-            },
+            metadata=canonical_metadata,
         )
 
         summary = self.usage_by_key.setdefault(
@@ -441,6 +485,18 @@ class RegistryUnitWallet:
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = field(default_factory=dict)
     install_key_usage: dict[str, InstallKeyUsageSource] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.wallet_id = str(self.wallet_id).strip()
+        self.owner_key = _normalize_owner_key(self.owner_key)
+        if not self.wallet_id:
+            raise ValueError("wallet_id is required")
+        if not self.owner_key:
+            raise ValueError("owner_key is required")
+        if not isinstance(self.metadata, dict):
+            self.metadata = dict(self.metadata or {})
+        if not isinstance(self.install_key_usage, dict):
+            self.install_key_usage = {}
 
     def as_summary(self) -> dict[str, Any]:
         return {
@@ -647,6 +703,12 @@ class UnitWalletRegistry:
         self._wallets_by_owner: dict[str, str] = {}
         self._repo: SupabaseUnitWalletRepository | MemoryUnitWalletRepository = _make_repo()
 
+    @staticmethod
+    def _is_real_wallet(wallet: Any) -> bool:
+        if not isinstance(wallet, RegistryUnitWallet):
+            return False
+        return bool(wallet.wallet_id) and bool(wallet.owner_key)
+
     def _evict_cache_if_needed(self) -> None:
         if len(self._wallets_by_owner) > _WALLET_CACHE_MAX:
             evict_count = _WALLET_CACHE_MAX // 2
@@ -661,15 +723,19 @@ class UnitWalletRegistry:
         owner_key: str,
         metadata: dict[str, Any] | None = None,
     ) -> RegistryUnitWallet:
-        normalized_owner = owner_key.strip().lower()
+        normalized_owner = _normalize_owner_key(owner_key)
 
         with self._lock:
             wallet_id = self._wallets_by_owner.get(normalized_owner)
             if wallet_id is not None:
-                return self._wallets[wallet_id]
+                wallet = self._wallets.get(wallet_id)
+                if self._is_real_wallet(wallet):
+                    return wallet
 
         existing = self._repo.fetch_wallet(normalized_owner)
         if existing is not None:
+            if not self._is_real_wallet(existing):
+                raise ValueError(f"Repository returned an invalid wallet object for owner_key={normalized_owner!r}")
             with self._lock:
                 self._wallets[existing.wallet_id] = existing
                 self._wallets_by_owner[normalized_owner] = existing.wallet_id
@@ -679,7 +745,9 @@ class UnitWalletRegistry:
         with self._lock:
             wallet_id = self._wallets_by_owner.get(normalized_owner)
             if wallet_id is not None:
-                return self._wallets[wallet_id]
+                wallet = self._wallets.get(wallet_id)
+                if self._is_real_wallet(wallet):
+                    return wallet
 
             new_wallet_id = f"wallet_{uuid.uuid4().hex}"
             wallet = RegistryUnitWallet(
@@ -841,6 +909,7 @@ class UnitWalletRegistry:
             usage.last_action_at = wallet.updated_at
             usage.metadata.update(
                 {
+                    **(metadata or {}),
                     "key_id": key_id,
                     "program": program,
                     "payment_id": payment_id,
@@ -848,6 +917,15 @@ class UnitWalletRegistry:
                     "blocked_attack_count": int(blocked_attack_count),
                 }
             )
+
+            canonical_metadata = {
+                **(metadata or {}),
+                "key_id": key_id,
+                "program": program,
+                "payment_id": payment_id,
+                "action_type": action_type,
+                "blocked_attack_count": int(blocked_attack_count),
+            }
 
             entry = InstallKeyUsageLedgerEntry(
                 entry_id=f"ledger_{uuid.uuid4().hex}",
@@ -860,14 +938,7 @@ class UnitWalletRegistry:
                 payment_id=payment_id,
                 blocked_attack_count=int(blocked_attack_count),
                 created_at=wallet.updated_at,
-                metadata={
-                    "key_id": key_id,
-                    "program": program,
-                    "payment_id": payment_id,
-                    "action_type": action_type,
-                    "blocked_attack_count": int(blocked_attack_count),
-                    **(metadata or {}),
-                },
+                metadata=canonical_metadata,
             )
 
             ledger_entry = RegistryUnitLedgerEntry(
@@ -914,12 +985,26 @@ class UnitWalletRegistry:
         return wallet
 
     def get_wallet(self, owner_key: str) -> RegistryUnitWallet | None:
-        normalized_owner = owner_key.strip().lower()
+        normalized_owner = _normalize_owner_key(owner_key)
         with self._lock:
             wallet_id = self._wallets_by_owner.get(normalized_owner)
             if wallet_id is not None:
-                return self._wallets[wallet_id]
-        return self._repo.fetch_wallet(normalized_owner)
+                wallet = self._wallets.get(wallet_id)
+                if self._is_real_wallet(wallet):
+                    return wallet
+                self._wallets_by_owner.pop(normalized_owner, None)
+
+        wallet = self._repo.fetch_wallet(normalized_owner)
+        if wallet is None:
+            return None
+        if not self._is_real_wallet(wallet):
+            raise ValueError(f"Repository returned invalid wallet for owner_key={normalized_owner!r}")
+
+        with self._lock:
+            self._wallets[wallet.wallet_id] = wallet
+            self._wallets_by_owner[normalized_owner] = wallet.wallet_id
+            self._evict_cache_if_needed()
+        return wallet
 
     def list_ledger_entries(
         self,

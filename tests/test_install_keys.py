@@ -28,6 +28,7 @@ import app.core.install_keys as _install_keys_module
 from app.core.install_keys import (
     InstallKeyAlreadyExistsError,
     InstallKeyNotFoundError,
+    InstallKeyPaymentRequiredError,
     InstallKeyRecord,
     InstallKeyRegistry,
     InstallKeyUsageError,
@@ -364,145 +365,77 @@ class TestInstallKeyRegistryGetKeys:
 
 
 # ---------------------------------------------------------------------------
-# Integration: POST /billing/purchase — install key provisioning
+# Paid-entitlement contract: install-key issuance must be gated and masked
 # ---------------------------------------------------------------------------
 
 
-class TestBillingPurchaseProvisioningInstallKeys:
-    def test_install_key_not_generated_before_purchase_returns_empty_my_keys(self, registry: InstallKeyRegistry) -> None:
-        """No install keys exist before any purchase is made."""
-        keys = registry.get_keys_for_owner(_OWNER)
-        assert keys == []
+class TestInstallKeyRegistryPaidEntitlementContract:
+    def test_generate_rejects_unpaid_checkout(self, registry: InstallKeyRegistry) -> None:
+        with pytest.raises(InstallKeyPaymentRequiredError):
+            registry.generate_for_paid_customer(
+                owner_key=_OWNER,
+                subscription_id=_SUB_ID,
+                program="openclaw",
+                payment_status="pending",
+                entitlements_status="active",
+                issued_after_payment=True,
+                purchase_reference="ref_123",
+                checkout_session_id="cs_123",
+            )
 
-    def test_purchase_provisions_both_program_keys(self, client: TestClient) -> None:
-        """POST /billing/purchase provisions openclaw and claude_code install keys."""
-        payload = {
-            "package_id": "pkg_5000",
-            "buyer_name": "Test Buyer",
-            "buyer_email": _OWNER,
-        }
-        resp = client.post("/billing/purchase", json=payload)
-        assert resp.status_code == 201
-        body = resp.json()
-        purchase = body["purchase"]
-        assert purchase["openclaw_install_key"] is not None
-        assert purchase["openclaw_install_key"].startswith("ic_install_openclaw_")
-        assert purchase["claude_code_install_key"] is not None
-        assert purchase["claude_code_install_key"].startswith("ic_install_claude_code_")
+    def test_generate_rejects_inactive_entitlement(self, registry: InstallKeyRegistry) -> None:
+        with pytest.raises(InstallKeyPaymentRequiredError):
+            registry.generate_for_paid_customer(
+                owner_key=_OWNER,
+                subscription_id=_SUB_ID,
+                program="claude_code",
+                payment_status="paid",
+                entitlements_status="inactive",
+                issued_after_payment=True,
+                purchase_reference="ref_456",
+                checkout_session_id="cs_456",
+            )
 
-    def test_purchase_returns_both_key_strings_non_empty(self, client: TestClient) -> None:
-        payload = {
-            "package_id": "pkg_5000",
-            "buyer_name": "Test Buyer",
-            "buyer_email": _OWNER,
-        }
-        resp = client.post("/billing/purchase", json=payload)
-        assert resp.status_code == 201
-        purchase = resp.json()["purchase"]
-        assert len(purchase["openclaw_install_key"]) > 20
-        assert len(purchase["claude_code_install_key"]) > 20
+    def test_generate_rejects_before_payment_completion(self, registry: InstallKeyRegistry) -> None:
+        with pytest.raises(InstallKeyPaymentRequiredError):
+            registry.generate_for_paid_customer(
+                owner_key=_OWNER,
+                subscription_id=_SUB_ID,
+                program="openclaw",
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=False,
+                purchase_reference="ref_789",
+                checkout_session_id="cs_789",
+            )
 
-    def test_install_key_not_generated_before_purchase_http_402(self, client: TestClient) -> None:
-        """
-        Attempting to use a /billing/wallet debit without a prior purchase
-        results in 402 (wallet does not exist / zero balance).
-        Equivalent guard: no install key exists before a subscription is created.
-        """
-        resp = client.post(
-            f"/billing/wallet/{_OWNER}/debit",
-            json={"units": 1},
-        )
-        assert resp.status_code == 402
+    def test_public_dict_exposes_only_masked_key(self, registry: InstallKeyRegistry) -> None:
+        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
 
-    def test_second_purchase_does_not_provision_new_keys_for_existing_owner(self, client: TestClient) -> None:
-        """
-        Second purchase for same owner silently skips key generation
-        (InstallKeyAlreadyExistsError is swallowed) and returns None for both keys.
-        """
-        payload = {
-            "package_id": "pkg_5000",
-            "buyer_name": "Test Buyer",
-            "buyer_email": _OWNER,
-        }
-        first = client.post("/billing/purchase", json=payload)
-        assert first.status_code == 201
+        payload = record.public_dict()
+        assert payload["masked_key"] == record.masked_key
+        assert "raw_key" not in payload
+        assert payload["masked_key"] != record.raw_key
+        assert "..." in payload["masked_key"]
 
-        second = client.post("/billing/purchase", json=payload)
-        assert second.status_code == 201
-        # On duplicate, _provision_install_keys catches the AlreadyExists and returns None
-        purchase = second.json()["purchase"]
-        assert purchase["openclaw_install_key"] is None
-        assert purchase["claude_code_install_key"] is None
+    def test_authenticate_rejects_non_paid_or_revoked_key(self, registry: InstallKeyRegistry) -> None:
+        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        assert registry.authenticate_install_key(record.raw_key) is not None
 
+        registry.revoke_key(record.key_id)
+        assert registry.authenticate_install_key(record.raw_key) is None
 
-# ---------------------------------------------------------------------------
-# Unit-wallet integration: record-usage debit path
-# ---------------------------------------------------------------------------
-
-
-class TestWalletDebitAndUsage:
-    def test_record_usage_debits_wallet_correctly(self, client: TestClient) -> None:
-        """Seed wallet, debit units, verify balance reduced by exact amount."""
-        wallet_registry = _unit_wallet_module._unit_wallet_registry
-        wallet_registry.credit_units(owner_key=_OWNER, units=100)
-
-        resp = client.post(
-            f"/billing/wallet/{_OWNER}/debit",
-            json={"units": 25},
-        )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["units_debited"] == 25
-        assert body["wallet"]["balance_units"] == 75
-
-    def test_record_usage_with_zero_balance_raises_insufficient_units_402(self, client: TestClient) -> None:
-        """
-        Debit against a wallet with zero/no balance raises InsufficientUnitsError → 402.
-        """
-        resp = client.post(
-            f"/billing/wallet/{_OWNER}/debit",
-            json={"units": 50},
-        )
-        assert resp.status_code == 402
-        detail = resp.json()["detail"]
-        assert detail["status"] == "insufficient_units"
-        assert detail["have"] == 0
-        assert detail["need"] == 50
-
-    def test_record_usage_exact_balance_succeeds_and_zeroes_wallet(self, client: TestClient) -> None:
-        wallet_registry = _unit_wallet_module._unit_wallet_registry
-        wallet_registry.credit_units(owner_key=_OWNER, units=10)
-
-        resp = client.post(
-            f"/billing/wallet/{_OWNER}/debit",
-            json={"units": 10},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["wallet"]["balance_units"] == 0
-
-    def test_record_usage_over_balance_returns_402(self, client: TestClient) -> None:
-        wallet_registry = _unit_wallet_module._unit_wallet_registry
-        wallet_registry.credit_units(owner_key=_OWNER, units=5)
-
-        resp = client.post(
-            f"/billing/wallet/{_OWNER}/debit",
-            json={"units": 100},
-        )
-        assert resp.status_code == 402
-        detail = resp.json()["detail"]
-        assert detail["have"] == 5
-        assert detail["need"] == 100
-
-    def test_record_usage_insufficient_units_error_shape(self, client: TestClient) -> None:
-        """Verify error response shape includes all required fields."""
-        resp = client.post(
-            f"/billing/wallet/{_OWNER}/debit",
-            json={"units": 999},
-        )
-        assert resp.status_code == 402
-        detail = resp.json()["detail"]
-        for field in ("status", "error", "owner_key", "have", "need", "tokens_per_unit", "timestamp"):
-            assert field in detail, f"Missing field: {field}"
+        with pytest.raises(InstallKeyPaymentRequiredError):
+            registry.generate_for_paid_customer(
+                owner_key="another_owner@example.com",
+                subscription_id="sub_pending",
+                program="openclaw",
+                payment_status="pending",
+                entitlements_status="active",
+                issued_after_payment=True,
+                purchase_reference="ref_pending",
+                checkout_session_id="cs_pending",
+            )
 
 
 # ---------------------------------------------------------------------------

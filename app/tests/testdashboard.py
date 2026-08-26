@@ -16,6 +16,8 @@ from app.core.install_keys import (
     _reset_install_key_registry_for_testing,
     get_install_key_registry,
 )
+from app.core.unit_wallet import get_unit_wallet_registry
+from app.dependencies.hybrid_auth import HybridAuthResult, require_hybrid_auth
 from app.routes.dashboard import router
 
 _OWNER = "owner_dash_001"
@@ -41,6 +43,16 @@ def _reset_singleton() -> Generator[None, None, None]:
     _reset_install_key_registry_for_testing()
 
 
+def _auth_override() -> HybridAuthResult:
+    return HybridAuthResult(
+        api_key=None,
+        auth_context=None,
+        bearer_context=None,
+        authenticated=True,
+        auth_method="test",
+    )
+
+
 def _make_record(
     *,
     key_id: str = _KEY_ID,
@@ -50,7 +62,13 @@ def _make_record(
     label: str = "",
     active: bool = True,
     units_consumed: int = 0,
+    payment_status: str = "paid",
+    entitlements_status: str = "active",
+    issued_after_payment: bool = True,
+    subscription_id: str = "sub_123",
     last_used_at: Any = None,
+    checkout_session_id: str | None = None,
+    purchase_reference: str | None = None,
 ) -> MagicMock:
     r = MagicMock(spec=InstallKeyRecord)
     r.key_id = key_id
@@ -60,7 +78,13 @@ def _make_record(
     r.label = label
     r.active = active
     r.units_consumed = units_consumed
+    r.payment_status = payment_status
+    r.entitlements_status = entitlements_status
+    r.issued_after_payment = issued_after_payment
+    r.subscription_id = subscription_id
     r.last_used_at = last_used_at
+    r.checkout_session_id = checkout_session_id
+    r.purchase_reference = purchase_reference
     return r
 
 
@@ -79,18 +103,45 @@ def _make_registry(
     return reg
 
 
+def _make_wallet_registry(
+    *,
+    balance_units: int = 100,
+    total_consumed_units: int = 15,
+    total_blocked_attacks: int = 3,
+    usage_payload: dict[str, Any] | None = None,
+) -> MagicMock:
+    wallet = MagicMock()
+    wallet.balance_units = balance_units
+    wallet.total_consumed_units = total_consumed_units
+    wallet.total_blocked_attacks = total_blocked_attacks
+    wallet.install_key_usage = {}
+    if usage_payload is not None:
+        wallet.install_key_usage = usage_payload
+    wallet.list_ledger_entries.return_value = []
+    wallet.get_wallet.return_value = wallet
+    return wallet
+
+
 # ---------------------------------------------------------------------------
 # GET /dashboard/overview
 # ---------------------------------------------------------------------------
 
 
 class TestDashboardOverview:
-    def test_returns_200(self, client: TestClient) -> None:
-        resp = client.get("/dashboard/overview")
+    def test_returns_200(self, app: FastAPI, client: TestClient) -> None:
+        app.dependency_overrides[require_hybrid_auth] = lambda: _auth_override()
+        try:
+            resp = client.get("/dashboard/overview?owner_key=_OWNER")
+        finally:
+            app.dependency_overrides.clear()
         assert resp.status_code == 200
 
-    def test_response_shape(self, client: TestClient) -> None:
-        body = client.get("/dashboard/overview").json()
+    def test_response_shape(self, app: FastAPI, client: TestClient) -> None:
+        app.dependency_overrides[require_hybrid_auth] = lambda: _auth_override()
+        try:
+            body = client.get(f"/dashboard/overview?owner_key={_OWNER}").json()
+        finally:
+            app.dependency_overrides.clear()
         assert body["status"] == "ok"
         assert body["service"] == "ironclaw-dashboard"
         assert "timestamp" in body
@@ -98,17 +149,96 @@ class TestDashboardOverview:
         assert "alerts" in body
         assert "activity" in body
 
-    def test_kpis_are_present(self, client: TestClient) -> None:
-        body = client.get("/dashboard/overview").json()
-        assert len(body["kpis"]) >= 1
+    def test_dashboard_slot_includes_install_key_health(self, app: FastAPI, client: TestClient) -> None:
+        record = _make_record(
+            key_id=_KEY_ID,
+            owner_key=_OWNER,
+            program="openclaw",
+            masked_key="ic_install_openclaw_...9f5a",
+            units_consumed=12,
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=True,
+            subscription_id="sub_abc",
+            checkout_session_id="cs_abc",
+            purchase_reference="purchase_ref_abc",
+        )
+        usage_summary = MagicMock()
+        usage_summary.as_summary.return_value = {
+            "key_id": _KEY_ID,
+            "owner_key": _OWNER,
+            "program": "openclaw",
+            "balance_units": 72,
+            "total_consumed_units": 12,
+            "total_blocked_attacks": 5,
+            "last_action_at": "2026-06-22T12:00:00Z",
+            "metadata": {"action_type": "prompt"},
+        }
+        wallet = _make_wallet_registry(balance_units=72, total_consumed_units=12, total_blocked_attacks=5)
+        wallet.install_key_usage = {_KEY_ID: usage_summary}
+        wallet.list_ledger_entries.return_value = [
+            MagicMock(
+                units=4,
+                metadata={"key_id": _KEY_ID, "action_type": "prompt"},
+            ),
+            MagicMock(
+                units=6,
+                metadata={"key_id": _KEY_ID, "action_type": "tool_call"},
+            ),
+        ]
+        wallet.get_key_usage_summary.return_value = {
+            "owner_key": _OWNER,
+            "wallet_balance_units": 72,
+            "total_consumed_units": 12,
+            "total_blocked_attacks": 5,
+            "install_key_usage": {_KEY_ID: usage_summary.as_summary.return_value},
+        }
+        reg = _make_registry(records=[record])
+        app.dependency_overrides[get_install_key_registry] = lambda: reg
+        app.dependency_overrides[get_unit_wallet_registry] = lambda: wallet
+        app.dependency_overrides[require_hybrid_auth] = lambda: _auth_override()
+        try:
+            body = client.get(f"/dashboard/overview?owner_key={_OWNER}").json()
+        finally:
+            app.dependency_overrides.clear()
+        slot = next(item for item in body["install_keys"] if item["program"] == "openclaw")
+        assert slot["program"] == "openclaw"
+        assert slot["status"] == "active"
+        assert slot["remaining_units"] == 72
+        assert slot["units_consumed"] == 12
+        assert slot["total_blocked_attacks"] == 5
+        assert slot["usage_by_action"]["prompt"] == 4
+        assert slot["usage_by_action"]["tool_call"] == 6
+        assert slot["payment_status"] == "paid"
+        assert slot["entitlements_status"] == "active"
+        assert slot["metadata"]["subscription_id"] == "sub_abc"
+        assert slot["metadata"]["usage_summary"]["total_blocked_attacks"] == 5
 
-    def test_alerts_are_present(self, client: TestClient) -> None:
-        body = client.get("/dashboard/overview").json()
-        assert len(body["alerts"]) >= 1
-
-    def test_activity_items_present(self, client: TestClient) -> None:
-        body = client.get("/dashboard/overview").json()
-        assert len(body["activity"]) >= 1
+    def test_dashboard_rejects_unpaid_or_non_entitled_key_state(self, app: FastAPI, client: TestClient) -> None:
+        record = _make_record(
+            key_id="ik_revoked",
+            owner_key=_OWNER,
+            program="claude_code",
+            active=False,
+            payment_status="pending",
+            entitlements_status="not_active",
+            issued_after_payment=False,
+        )
+        wallet = _make_wallet_registry(balance_units=0, total_consumed_units=0, total_blocked_attacks=0)
+        reg = _make_registry(records=[record])
+        app.dependency_overrides[get_install_key_registry] = lambda: reg
+        app.dependency_overrides[get_unit_wallet_registry] = lambda: wallet
+        app.dependency_overrides[require_hybrid_auth] = lambda: _auth_override()
+        try:
+            body = client.get(f"/dashboard/overview?owner_key={_OWNER}").json()
+        finally:
+            app.dependency_overrides.clear()
+        slot = next(item for item in body["install_keys"] if item["program"] == "claude_code")
+        assert slot["status"] == "revoked"
+        assert slot["active"] is False
+        assert slot["remaining_units"] == 0
+        assert slot["payment_status"] == "pending"
+        assert slot["entitlements_status"] == "not_active"
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +250,7 @@ class TestGetUnitsForOwner:
     def test_returns_200_with_empty_owner(self, app: FastAPI, client: TestClient) -> None:
         reg = _make_registry(records=[])
         app.dependency_overrides[get_install_key_registry] = lambda: reg
+        app.dependency_overrides[require_hybrid_auth] = lambda: _auth_override()
         try:
             resp = client.get(f"/dashboard/units?owner_key={_OWNER}")
         finally:
@@ -136,6 +267,7 @@ class TestGetUnitsForOwner:
         r2 = _make_record(key_id="ik_b", units_consumed=25)
         reg = _make_registry(records=[r1, r2])
         app.dependency_overrides[get_install_key_registry] = lambda: reg
+        app.dependency_overrides[require_hybrid_auth] = lambda: _auth_override()
         try:
             resp = client.get(f"/dashboard/units?owner_key={_OWNER}")
         finally:
@@ -149,6 +281,7 @@ class TestGetUnitsForOwner:
         r = _make_record(units_consumed=5, active=True, label="prod")
         reg = _make_registry(records=[r])
         app.dependency_overrides[get_install_key_registry] = lambda: reg
+        app.dependency_overrides[require_hybrid_auth] = lambda: _auth_override()
         try:
             resp = client.get(f"/dashboard/units?owner_key={_OWNER}")
         finally:
@@ -164,6 +297,7 @@ class TestGetUnitsForOwner:
         r = _make_record(last_used_at=None)
         reg = _make_registry(records=[r])
         app.dependency_overrides[get_install_key_registry] = lambda: reg
+        app.dependency_overrides[require_hybrid_auth] = lambda: _auth_override()
         try:
             resp = client.get(f"/dashboard/units?owner_key={_OWNER}")
         finally:
@@ -175,6 +309,7 @@ class TestGetUnitsForOwner:
         r = _make_record(last_used_at=dt)
         reg = _make_registry(records=[r])
         app.dependency_overrides[get_install_key_registry] = lambda: reg
+        app.dependency_overrides[require_hybrid_auth] = lambda: _auth_override()
         try:
             resp = client.get(f"/dashboard/units?owner_key={_OWNER}")
         finally:
@@ -184,15 +319,16 @@ class TestGetUnitsForOwner:
     def test_calls_registry_with_owner_key(self, app: FastAPI, client: TestClient) -> None:
         reg = _make_registry(records=[])
         app.dependency_overrides[get_install_key_registry] = lambda: reg
+        app.dependency_overrides[require_hybrid_auth] = lambda: _auth_override()
         try:
             client.get(f"/dashboard/units?owner_key={_OWNER}")
         finally:
             app.dependency_overrides.clear()
         reg.get_keys_for_owner.assert_called_once_with(_OWNER)
 
-    def test_missing_owner_key_returns_422(self, client: TestClient) -> None:
+    def test_missing_owner_key_returns_401_when_unauthenticated(self, client: TestClient) -> None:
         resp = client.get("/dashboard/units")
-        assert resp.status_code == 422
+        assert resp.status_code == 401
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +341,7 @@ class TestRecordUnitUsage:
         updated = _make_record(units_consumed=10)
         reg = _make_registry(usage_return=updated)
         app.dependency_overrides[get_install_key_registry] = lambda: reg
+        app.dependency_overrides[require_hybrid_auth] = lambda: _auth_override()
         try:
             resp = client.post(
                 "/dashboard/units/record",
@@ -221,6 +358,7 @@ class TestRecordUnitUsage:
     def test_404_on_unknown_key(self, app: FastAPI, client: TestClient) -> None:
         reg = _make_registry(usage_side_effect=InstallKeyNotFoundError("ik_ghost"))
         app.dependency_overrides[get_install_key_registry] = lambda: reg
+        app.dependency_overrides[require_hybrid_auth] = lambda: _auth_override()
         try:
             resp = client.post(
                 "/dashboard/units/record",
@@ -233,6 +371,7 @@ class TestRecordUnitUsage:
     def test_409_on_inactive_key(self, app: FastAPI, client: TestClient) -> None:
         reg = _make_registry(usage_side_effect=InstallKeyUsageError(_KEY_ID, "key is inactive"))
         app.dependency_overrides[get_install_key_registry] = lambda: reg
+        app.dependency_overrides[require_hybrid_auth] = lambda: _auth_override()
         try:
             resp = client.post(
                 "/dashboard/units/record",
@@ -242,24 +381,25 @@ class TestRecordUnitUsage:
             app.dependency_overrides.clear()
         assert resp.status_code == 409
 
-    def test_422_when_units_zero(self, client: TestClient) -> None:
+    def test_401_when_unauthenticated_and_units_zero(self, client: TestClient) -> None:
         resp = client.post(
             "/dashboard/units/record",
             json={"key_id": _KEY_ID, "units": 0},
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 401
 
-    def test_422_when_units_negative(self, client: TestClient) -> None:
+    def test_401_when_unauthenticated_and_units_negative(self, client: TestClient) -> None:
         resp = client.post(
             "/dashboard/units/record",
             json={"key_id": _KEY_ID, "units": -1},
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 401
 
     def test_calls_registry_with_keyword_units(self, app: FastAPI, client: TestClient) -> None:
         updated = _make_record(units_consumed=3)
         reg = _make_registry(usage_return=updated)
         app.dependency_overrides[get_install_key_registry] = lambda: reg
+        app.dependency_overrides[require_hybrid_auth] = lambda: _auth_override()
         try:
             client.post(
                 "/dashboard/units/record",

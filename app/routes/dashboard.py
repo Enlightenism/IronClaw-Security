@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.billing import BillingRegistry, get_billing_registry
@@ -15,6 +15,7 @@ from app.core.install_keys import (
 )
 from app.core.unit_wallet import UnitWalletRegistry, get_unit_wallet_registry
 from app.dependencies.hybrid_auth import HybridAuthResult, require_hybrid_auth
+from app.services.install_key_provisioning import InstallKeyProvisioningService, provision_install_key_service
 
 router = APIRouter(
     prefix="/dashboard",
@@ -60,11 +61,20 @@ class DashboardAlertItem(BaseModel):
 class InstallKeyDashboardSlot(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    key_id: str | None = None
     program: str
     masked_key: str | None = None
     status: InstallKeySlotStatus
-    units_consumed: int
+    active: bool = False
+    remaining_units: int = 0
+    units_consumed: int = 0
+    total_blocked_attacks: int = 0
+    usage_by_action: dict[str, int] = Field(default_factory=dict)
+    payment_status: str = "unpaid"
+    entitlements_status: str = "not_active"
+    issued_after_payment: bool = False
     last_used_at: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class DashboardResponse(BaseModel):
@@ -78,7 +88,7 @@ class DashboardResponse(BaseModel):
     alerts: list[DashboardAlertItem] = Field(default_factory=list)
     activity: list[DashboardActivityItem] = Field(default_factory=list)
     install_keys: list[InstallKeyDashboardSlot] = Field(default_factory=list)
-    metadata: dict[str, str] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -130,51 +140,167 @@ class RecordKeyUsageResponse(BaseModel):
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat().replace("+00:00", "Z")
 
 
 _PROGRAMS: tuple[str, ...] = ("openclaw", "claude_code")
 
 
+def _norm_status(value: Any, *, default: str = "unpaid") -> str:
+    if value is None:
+        return default
+    normalized = str(value).strip().lower()
+    return normalized or default
+
+
+def _record_is_paid_entitled(rec: Any) -> bool:
+    if rec is None:
+        return False
+    if not bool(getattr(rec, "active", False)):
+        return False
+    payment = _norm_status(getattr(rec, "payment_status", "paid"), default="paid")
+    entitlement = _norm_status(getattr(rec, "entitlements_status", "active"), default="active")
+    issued_after_payment = bool(getattr(rec, "issued_after_payment", True))
+    if payment not in {"paid", "success", "succeeded", "complete", "completed", "active", "authorized"}:
+        return False
+    if entitlement != "active":
+        return False
+    return issued_after_payment
+
+
+def _resolve_dashboard_owner(
+    owner_key: str | None,
+    auth_result: HybridAuthResult,
+    lifecycle_service: InstallKeyProvisioningService,
+) -> str:
+    candidate = (owner_key or auth_result.principal_id or "demo@ironclaw.local").strip()
+    if not candidate:
+        return "demo@ironclaw.local"
+    return lifecycle_service.resolve_owner_key(buyer_email=candidate)
+
+
+def _canonical_wallet_usage_for_key(
+    wallet_registry: UnitWalletRegistry,
+    owner_key: str,
+    key_id: str,
+) -> dict[str, Any]:
+    if wallet_registry is None:
+        return {}
+
+    summary = wallet_registry.get_key_usage_summary(owner_key, key_id=key_id)
+    usage_map = summary.get("install_key_usage") or {}
+    if not usage_map:
+        return {}
+    usage = next(iter(usage_map.values()), {})
+    if hasattr(usage, "as_summary"):
+        return usage.as_summary()
+    if isinstance(usage, dict):
+        return usage
+    return {}
+
+
+def _usage_by_action_for_key(
+    wallet_registry: UnitWalletRegistry,
+    owner_key: str,
+    key_id: str,
+) -> dict[str, int]:
+    usage_by_action: dict[str, int] = {}
+    if wallet_registry is None:
+        return usage_by_action
+
+    entries = wallet_registry.list_ledger_entries(owner_key=owner_key, limit=500)
+    for entry in entries:
+        metadata = getattr(entry, "metadata", {}) or {}
+        if metadata.get("key_id") != key_id:
+            continue
+        action_type = str(metadata.get("action_type") or "prompt").strip() or "prompt"
+        usage_by_action[action_type] = usage_by_action.get(action_type, 0) + int(getattr(entry, "units", 0) or 0)
+    return usage_by_action
+
+
 def _build_install_key_slots(
     owner_key: str,
     install_key_registry: InstallKeyRegistry,
+    wallet_registry: UnitWalletRegistry,
+    lifecycle_service: InstallKeyProvisioningService,
 ) -> list[InstallKeyDashboardSlot]:
-    records = install_key_registry.get_keys_for_owner(owner_key)
+    normalized_owner = _resolve_dashboard_owner(owner_key, HybridAuthResult(None, None, None, True, "dashboard"), lifecycle_service)
+    wallet = wallet_registry.get_wallet(normalized_owner)
+    records = install_key_registry.get_keys_for_owner(normalized_owner)
     by_program: dict[str, InstallKeyDashboardSlot] = {}
 
     for rec in records:
-        slot_status: InstallKeySlotStatus
-        if rec.active:
-            slot_status = "active"
-        else:
-            slot_status = "revoked"
+        if rec.program not in _PROGRAMS:
+            continue
 
-        existing = by_program.get(rec.program)
-        # Prefer active key over revoked; most recent revoked over older revoked
-        if existing is None or (slot_status == "active" and existing.status != "active"):
-            by_program[rec.program] = InstallKeyDashboardSlot(
-                program=rec.program,
-                masked_key=rec.masked_key,
-                status=slot_status,
-                units_consumed=rec.units_consumed,
-                last_used_at=rec.last_used_at.isoformat() if rec.last_used_at else None,
-            )
+        payload = _canonical_wallet_usage_for_key(wallet_registry, normalized_owner, rec.key_id)
+        usage_by_action = _usage_by_action_for_key(wallet_registry, normalized_owner, rec.key_id)
+        wallet_balance = int(getattr(wallet, "balance_units", 0)) if wallet is not None else 0
+        remaining_units = wallet_balance if wallet_balance > 0 or _record_is_paid_entitled(rec) else 0
+        units_consumed = int(getattr(rec, "units_consumed", 0) or payload.get("total_consumed_units", 0))
+        if payload.get("total_consumed_units") is not None:
+            units_consumed = int(payload["total_consumed_units"])
+        blocked_attacks = int(payload.get("total_blocked_attacks", 0) or 0)
+
+        status: InstallKeySlotStatus = "active" if bool(getattr(rec, "active", False)) else "revoked"
+        if not _record_is_paid_entitled(rec):
+            status = "revoked"
+            remaining_units = 0
+        by_program[rec.program] = InstallKeyDashboardSlot(
+            key_id=rec.key_id,
+            program=rec.program,
+            masked_key=getattr(rec, "masked_key", None),
+            status=status,
+            active=bool(getattr(rec, "active", False)) and _record_is_paid_entitled(rec),
+            remaining_units=remaining_units,
+            units_consumed=units_consumed,
+            total_blocked_attacks=blocked_attacks,
+            usage_by_action=usage_by_action,
+            payment_status=_norm_status(getattr(rec, "payment_status", "unpaid"), default="unpaid"),
+            entitlements_status=_norm_status(getattr(rec, "entitlements_status", "not_active"), default="not_active"),
+            issued_after_payment=bool(getattr(rec, "issued_after_payment", False)),
+            last_used_at=_iso(getattr(rec, "last_used_at", None)),
+            metadata={
+                "subscription_id": getattr(rec, "subscription_id", None),
+                "checkout_session_id": getattr(rec, "checkout_session_id", None),
+                "purchase_reference": getattr(rec, "purchase_reference", None),
+                "payment_status": _norm_status(getattr(rec, "payment_status", "unpaid"), default="unpaid"),
+                "entitlements_status": _norm_status(getattr(rec, "entitlements_status", "not_active"), default="not_active"),
+                "issued_after_payment": bool(getattr(rec, "issued_after_payment", False)),
+                "owner_key": getattr(rec, "owner_key", normalized_owner),
+                "usage_summary": payload,
+            },
+        )
 
     slots: list[InstallKeyDashboardSlot] = []
     for program in _PROGRAMS:
-        if program in by_program:
-            slots.append(by_program[program])
-        else:
-            slots.append(
-                InstallKeyDashboardSlot(
-                    program=program,
-                    masked_key=None,
-                    status="locked",
-                    units_consumed=0,
-                    last_used_at=None,
-                )
+        slot = by_program.get(program)
+        if slot is not None:
+            slots.append(slot)
+            continue
+        slots.append(
+            InstallKeyDashboardSlot(
+                program=program,
+                masked_key=None,
+                status="locked",
+                active=False,
+                remaining_units=0,
+                units_consumed=0,
+                total_blocked_attacks=0,
+                usage_by_action={},
+                payment_status="unpaid",
+                entitlements_status="not_active",
+                issued_after_payment=False,
+                last_used_at=None,
+                metadata={},
             )
+        )
     return slots
 
 
@@ -185,23 +311,24 @@ def _build_install_key_slots(
 
 @router.get("/overview", response_model=DashboardResponse)
 def get_dashboard_overview(
-    owner_key: str,
-    _: HybridAuthResult = Depends(require_hybrid_auth),
+    owner_key: str | None = Query(default=None),
+    auth_result: HybridAuthResult = Depends(require_hybrid_auth),
     install_key_registry: InstallKeyRegistry = Depends(get_install_key_registry),
     wallet_registry: UnitWalletRegistry = Depends(get_unit_wallet_registry),
     billing_registry: BillingRegistry = Depends(get_billing_registry),
 ) -> DashboardResponse:
-    # --- wallet KPI ---
-    wallet = wallet_registry.get_wallet(owner_key)
+    lifecycle_service = provision_install_key_service()
+    resolved_owner = _resolve_dashboard_owner(owner_key, auth_result, lifecycle_service)
+
+    wallet = wallet_registry.get_wallet(resolved_owner)
     balance_units = wallet.balance_units if wallet is not None else 0
     total_consumed = wallet.total_consumed_units if wallet is not None else 0
     units_tone: DashboardTone = "good" if balance_units > 0 else "warning"
 
-    # --- plan/subscription KPI ---
     plan_label = "No active plan"
     plan_tone: DashboardTone = "warning"
     try:
-        sub = billing_registry.get_active_subscription_for_customer(owner_key)
+        sub = billing_registry.get_active_subscription_for_customer(resolved_owner)
         if sub is not None:
             from app.core.billing import PLAN_DEFINITIONS
 
@@ -211,8 +338,12 @@ def get_dashboard_overview(
     except Exception:
         pass
 
-    # --- install key slots ---
-    install_key_slots = _build_install_key_slots(owner_key, install_key_registry)
+    install_key_slots = _build_install_key_slots(
+        resolved_owner,
+        install_key_registry,
+        wallet_registry,
+        lifecycle_service,
+    )
 
     return DashboardResponse(
         status="ok",
@@ -276,7 +407,7 @@ def get_dashboard_overview(
             "surface": "dashboard",
             "scope": "overview",
             "generatedby": "dashboard-route",
-            "owner_key": owner_key,
+            "owner_key": resolved_owner,
         },
     )
 
@@ -286,24 +417,34 @@ def get_units_for_owner(
     owner_key: str,
     _: HybridAuthResult = Depends(require_hybrid_auth),
     registry: InstallKeyRegistry = Depends(get_install_key_registry),
+    wallet_registry: UnitWalletRegistry = Depends(get_unit_wallet_registry),
 ) -> DashboardUnitsResponse:
     """
     Return unit consumption tracking for all install keys belonging to owner_key.
     """
     records = registry.get_keys_for_owner(owner_key)
-    total_units = sum(r.units_consumed for r in records)
-    entries = [
-        InstallKeyUnitEntry(
-            key_id=r.key_id,
-            program=r.program,
-            masked_key=r.masked_key,
-            label=r.label,
-            active=r.active,
-            units_consumed=r.units_consumed,
-            last_used_at=r.last_used_at.isoformat() if r.last_used_at else None,
+    wallet = wallet_registry.get_wallet(owner_key)
+    total_units = int(getattr(wallet, "total_consumed_units", 0) if wallet is not None else 0)
+    if total_units == 0:
+        total_units = sum(int(getattr(r, "units_consumed", 0) or 0) for r in records)
+
+    entries = []
+    for r in records:
+        payload = _canonical_wallet_usage_for_key(wallet_registry, owner_key, r.key_id)
+        units_consumed = int(getattr(r, "units_consumed", 0) or payload.get("total_consumed_units", 0))
+        if payload.get("total_consumed_units") is not None:
+            units_consumed = int(payload["total_consumed_units"])
+        entries.append(
+            InstallKeyUnitEntry(
+                key_id=r.key_id,
+                program=r.program,
+                masked_key=getattr(r, "masked_key", None) or "",
+                label=getattr(r, "label", "") or "",
+                active=bool(getattr(r, "active", False)) and _record_is_paid_entitled(r),
+                units_consumed=units_consumed,
+                last_used_at=(_iso(getattr(r, "last_used_at", None)) if getattr(r, "last_used_at", None) is not None else None),
+            )
         )
-        for r in records
-    ]
     return DashboardUnitsResponse(
         owner_key=owner_key,
         total_keys=len(records),

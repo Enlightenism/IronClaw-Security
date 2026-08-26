@@ -701,6 +701,46 @@ def test_get_api_key_raises_invalid_api_key(monkeypatch):
     assert "Invalid API key" in str(exc.value)
 
 
+def test_get_api_key_rejects_install_key_before_registry_lookup(monkeypatch):
+    request = make_request()
+    monkeypatch.setattr(auth, "_is_auth_required", lambda req: True)
+    monkeypatch.setattr(auth, "_extract_configured_api_key", lambda req: None)
+    monkeypatch.setattr(auth, "_has_registry_keys", lambda: True)
+
+    def fail_registry_lookup(req, key):
+        raise AssertionError("install key values must never reach registry resolution")
+
+    monkeypatch.setattr(auth, "_resolve_registry_api_key_for_request", fail_registry_lookup)
+
+    with pytest.raises(AppError) as exc:
+        auth.get_api_key(request, "ic_install_openclaw_secret_123", None)
+
+    assert exc.value.error == "invalid_api_key"
+    assert "install keys" in str(exc.value).lower()
+
+
+def test_get_auth_context_rejects_install_key_directly():
+    request = make_request()
+
+    with pytest.raises(AppError) as exc:
+        auth.get_auth_context(request, "ic_install_openclaw_secret_123", None, None, None, None, None)
+
+    assert exc.value.error == "invalid_api_key"
+    assert "install keys" in str(exc.value).lower()
+
+
+def test_resolve_registry_api_key_rejects_install_key_shape(monkeypatch):
+    request = make_request()
+    monkeypatch.setattr(
+        auth,
+        "get_api_key_registry",
+        lambda: DummyRegistry(record=DummyRecord(api_key="ic_install_openclaw_secret_123"), total=1),
+    )
+
+    assert auth._resolve_registry_api_key_for_request(request, "ic_install_openclaw_secret_123") is None
+    assert auth._resolve_registry_api_key("ic_install_openclaw_secret_123") is None
+
+
 def test_get_auth_context_returns_preflight_context():
     request = make_request(
         method="OPTIONS",

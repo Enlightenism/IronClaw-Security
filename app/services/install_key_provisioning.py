@@ -140,9 +140,24 @@ class InstallKeyProvisioningService:
         source: str = "purchase",
         label: str = "auto-provisioned",
         metadata: dict[str, Any] | None = None,
+        payment_status: str | None = "paid",
+        entitlements_status: str | None = "active",
+        issued_after_payment: bool = True,
+        checkout_session_id: str | None = None,
+        purchase_reference: str | None = None,
+        customer_id: str | None = None,
+        org_id: str | None = None,
+        payment_confirmed: bool | None = None,
     ) -> InstallKeyIssued:
         normalized_owner = self.ensure_entitled_owner(owner_key)
         canonical_program = self._normalise_program(program)
+
+        if payment_confirmed is not None:
+            confirmed = bool(payment_confirmed)
+        else:
+            confirmed = str(payment_status or "").strip().lower() in {"paid", "success", "succeeded", "complete", "completed", "active"}
+        if not confirmed:
+            raise ValueError("Install keys can only be provisioned after successful payment confirmation.")
 
         existing = self._find_active_key(normalized_owner, canonical_program)
         if existing is not None:
@@ -181,10 +196,20 @@ class InstallKeyProvisioningService:
             },
         )
 
+        effective_purchase_reference = purchase_reference or checkout_session_id or subscription_id
+        effective_checkout_session_id = checkout_session_id or purchase_reference or subscription_id
         effective_metadata: dict[str, Any] = {
             "source": source,
             "subscription_id": subscription_id,
             "wallet_owner": normalized_owner,
+            "customer_id": customer_id,
+            "org_id": org_id,
+            "program": canonical_program,
+            "payment_status": payment_status or "paid",
+            "entitlements_status": entitlements_status or "active",
+            "issued_after_payment": bool(issued_after_payment),
+            "purchase_reference": effective_purchase_reference,
+            "checkout_session_id": effective_checkout_session_id,
             "auto_provisioned": True,
             "telemetry": {
                 "event": "install_key.issued",
@@ -197,10 +222,17 @@ class InstallKeyProvisioningService:
         if metadata:
             effective_metadata.update(metadata)
 
-        record = self._install_key_registry.generate_install_key(
+        record = self._install_key_registry.generate_for_paid_customer(
             owner_key=normalized_owner,
             subscription_id=subscription_id,
             program=canonical_program,
+            org_id=org_id,
+            customer_id=customer_id,
+            payment_status=effective_metadata.get("payment_status", "paid"),
+            entitlements_status=effective_metadata.get("entitlements_status", "active"),
+            issued_after_payment=bool(effective_metadata.get("issued_after_payment", True)),
+            purchase_reference=effective_metadata.get("purchase_reference"),
+            checkout_session_id=effective_metadata.get("checkout_session_id"),
             label=label,
             metadata=effective_metadata,
         )
@@ -245,6 +277,12 @@ class InstallKeyProvisioningService:
         auth_ctx: Any | None = None,
         source: str = "purchase",
         metadata: dict[str, Any] | None = None,
+        payment_status: str | None = "paid",
+        entitlements_status: str | None = "active",
+        issued_after_payment: bool = True,
+        checkout_session_id: str | None = None,
+        purchase_reference: str | None = None,
+        payment_confirmed: bool | None = None,
     ) -> dict[str, InstallKeyIssued]:
         """Authoritative purchase-time install-key flow.
 
@@ -261,12 +299,24 @@ class InstallKeyProvisioningService:
         else:
             raise ValueError("Either owner_key or buyer_email/org_id/auth_ctx must be provided")
 
+        if payment_confirmed is not None:
+            confirmed = bool(payment_confirmed)
+        else:
+            confirmed = str(payment_status or "").strip().lower() in {"paid", "success", "succeeded", "complete", "completed", "active"}
+        if not confirmed:
+            raise ValueError("Install keys can only be provisioned after successful payment confirmation.")
+
         normalized_owner = self.ensure_entitled_owner(resolved_owner)
         base_metadata: dict[str, Any] = {
             "customer_id": customer_id,
             "subscription_id": subscription_id,
             "owner_key": normalized_owner,
             "source": source,
+            "payment_status": payment_status or "paid",
+            "entitlements_status": entitlements_status or "active",
+            "issued_after_payment": bool(issued_after_payment),
+            "checkout_session_id": checkout_session_id,
+            "purchase_reference": purchase_reference or checkout_session_id or subscription_id,
             "auto_provisioned": True,
         }
         if metadata:
@@ -283,6 +333,14 @@ class InstallKeyProvisioningService:
                 source=source,
                 label="auto-provisioned",
                 metadata=program_metadata,
+                payment_status=program_metadata.get("payment_status"),
+                entitlements_status=program_metadata.get("entitlements_status"),
+                issued_after_payment=bool(program_metadata.get("issued_after_payment", True)),
+                checkout_session_id=program_metadata.get("checkout_session_id"),
+                purchase_reference=program_metadata.get("purchase_reference"),
+                customer_id=customer_id,
+                org_id=org_id,
+                payment_confirmed=True,
             )
         return results
 

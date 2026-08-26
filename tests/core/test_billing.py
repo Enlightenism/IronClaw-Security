@@ -158,6 +158,12 @@ def test_resolve_billing_owner_org_key_format_is_ic_org_prefix() -> None:
     assert result.startswith("ic_org_")
 
 
+def test_resolve_billing_owner_org_key_alias_uses_org_wallet() -> None:
+    ctx = SimpleNamespace(key_type="org_key", org_id=" Org_42 ")
+    result = resolve_billing_owner(ctx, "user@ironclaw.test")
+    assert result == "ic_org_org_42"
+
+
 def test_resolve_billing_owner_falls_back_to_email_when_org_id_is_none() -> None:
     ctx = SimpleNamespace(key_type="org", org_id=None)
     result = resolve_billing_owner(ctx, "user@ironclaw.test")

@@ -228,6 +228,28 @@ def test_purchase_valid_package_returns_201_with_pending_shape(client: TestClien
     assert wallet["owner_key"] == "buyer@ironclaw.test"
 
 
+def test_purchase_creates_real_wallet_when_missing(client: TestClient) -> None:
+    owner = "new-purchase-wallet@ironclaw.test"
+    resp = client.post(
+        _PURCHASE_PATH,
+        json={
+            "package_id": "pkg_5000",
+            "buyer_name": "Fresh Buyer",
+            "buyer_email": owner,
+            "metadata": {},
+        },
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    wallet = body["wallet"]
+    assert wallet["owner_key"] == owner
+    assert wallet["wallet_id"].startswith("wallet_")
+    assert wallet["balance_units"] == 0
+    assert wallet["total_purchased_units"] == 0
+    assert "updated_at" in wallet
+    assert "metadata" in wallet
+
+
 def test_purchase_team_package_returns_pending_without_credit(client: TestClient) -> None:
     _fund_wallet("team@ironclaw.test", package_id="pkg_5000")
     resp = client.post(

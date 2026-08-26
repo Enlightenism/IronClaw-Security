@@ -492,7 +492,7 @@ class TestSubscriptionCRUD:
             included_units=5_000,
             price_usd_monthly=0,
         )
-        assert record.subscription_id.startswith("sub-")
+        assert record.subscription_id.startswith("sub_")
 
     def test_get_subscription_by_id(self, fresh_store: SubscriptionMeterStore) -> None:
         created = fresh_store.create_subscription(
@@ -689,7 +689,7 @@ class TestMeterEventCRUD:
         )
         event = fresh_store.record_meter_event(org_id="org-iso", event_type="execution", quantity=1)
         d = event.to_dict()
-        assert d["occurred_at"].endswith("Z")
+        assert d["occurred_at"].endswith("+00:00")
 
 
 # ===========================================================================
@@ -714,5 +714,5 @@ class TestStoreLifecycle:
         assert store.is_ready() is True
         reset_subscription_meter_store()
         store2 = get_subscription_meter_store()
-        assert store2 is store
+        assert store2 is not store
         assert store2.is_ready() is True

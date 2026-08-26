@@ -12,6 +12,7 @@ import time
 from typing import Any
 from uuid import uuid4
 
+from app.core.install_keys import InstallKeyAlreadyExistsError, get_install_key_registry
 from app.services.secrets_vault import vault
 from app.supabaseclient import (
     BILLING_TIER_5K_PRICE_USD,
@@ -900,6 +901,104 @@ class StripeService:
         with self._lock:
             self._org_customer_map[org_id] = customer_id
             self._customer_org_map[customer_id] = org_id
+
+    @staticmethod
+    def _is_successful_payment_status(value: Any) -> bool:
+        normalized = str(value).strip().lower() if value is not None else ""
+        return normalized in {"paid", "succeeded", "success", "complete", "completed", "active"}
+
+    def _resolve_owner_key_for_org(self, org_id: str) -> str:
+        normalized = str(org_id).strip().lower()
+        if not normalized:
+            raise ValueError("org_id is required to resolve an owner key")
+        return f"ic_org_{normalized}"
+
+    def _issue_paid_install_keys_for_checkout(
+        self,
+        *,
+        org_id: str,
+        customer_id: str | None,
+        session_id: str,
+        unit_credits: int,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        """Issue the paid install-key entitlement only after a successful payment confirmation.
+
+        This helper is intentionally narrow: it blocks unconfirmed / failed Stripe
+        payment states, while broader entitlement validation is enforced by the
+        webhook orchestration layer before it calls into this method.
+        """
+        payment_status = (metadata or {}).get("payment_status")
+        if payment_status is None or not self._is_successful_payment_status(payment_status):
+            logger.info(
+                "stripe.checkout_install_keys_skipped org=%s session=%s reason=payment_status_not_confirmed payment_status=%s",
+                org_id,
+                session_id,
+                payment_status,
+            )
+            return {}
+
+        owner_key = self._resolve_owner_key_for_org(org_id)
+        registry = get_install_key_registry()
+        results: dict[str, dict[str, Any]] = {}
+        base_metadata: dict[str, Any] = {
+            "source": "stripe.checkout",
+            "org_id": org_id,
+            "customer_id": customer_id,
+            "unit_credits": unit_credits,
+            "checkout_session_id": session_id,
+            "purchase_reference": session_id,
+            "payment_status": "paid",
+            "entitlements_status": "active",
+            "issued_after_payment": True,
+        }
+        if metadata:
+            base_metadata.update(metadata)
+
+        for program in ("openclaw", "claude_code"):
+            existing = next((record for record in registry.get_keys_for_owner(owner_key) if record.program == program and record.active), None)
+            if existing is not None:
+                results[program] = {
+                    "key_id": existing.key_id,
+                    "owner_key": existing.owner_key,
+                    "program": existing.program,
+                    "active": existing.active,
+                    "masked_key": existing.masked_key,
+                    "subscription_id": existing.subscription_id,
+                }
+                continue
+
+            try:
+                record = registry.generate_for_paid_customer(
+                    owner_key=owner_key,
+                    subscription_id=f"checkout:{session_id}",
+                    program=program,
+                    org_id=org_id,
+                    customer_id=customer_id,
+                    payment_status="paid",
+                    entitlements_status="active",
+                    issued_after_payment=True,
+                    purchase_reference=session_id,
+                    checkout_session_id=session_id,
+                    label=f"stripe-checkout:{session_id}",
+                    metadata={**base_metadata, "program": program},
+                )
+            except InstallKeyAlreadyExistsError:
+                fallback = next((record for record in registry.get_keys_for_owner(owner_key) if record.program == program and record.active), None)
+                if fallback is None:
+                    raise
+                record = fallback
+
+            results[program] = {
+                "key_id": record.key_id,
+                "owner_key": record.owner_key,
+                "program": record.program,
+                "active": record.active,
+                "masked_key": record.masked_key,
+                "subscription_id": record.subscription_id,
+            }
+
+        return results
 
     def resolve_org_from_customer(self, customer_id: str) -> str | None:
         with self._lock:
@@ -2007,6 +2106,9 @@ class StripeService:
         unit_credits_raw: str = obj.get("metadata", {}).get("unit_credits", "0")
         customer_id: str | None = obj.get("customer")
         mode: str = obj.get("mode", "payment")
+        payment_status = obj.get("payment_status")
+        if payment_status is None:
+            payment_status = "paid" if obj.get("status") in {None, "", "complete", "completed"} else obj.get("status")
 
         try:
             unit_credits = int(unit_credits_raw)
@@ -2014,6 +2116,7 @@ class StripeService:
             unit_credits = 0
 
         checkout_idem_key = f"checkout_completed:{session_id}"
+        payment_confirmed = self._is_successful_payment_status(payment_status)
 
         with self._lock:
             already_credited = checkout_idem_key in self._processed_event_ids
@@ -2044,19 +2147,45 @@ class StripeService:
             "org_id": org_id,
             "mode": mode,
             "tokens_per_unit": TOKENS_PER_UNIT,
+            "payment_status": payment_status,
+            "payment_confirmed": payment_confirmed,
         }
 
-        if org_id and unit_credits > 0 and not already_credited:
-            self.credit_units(
-                org_id,
-                unit_credits,
-                StripeUnitEventReason.CHECKOUT_COMPLETE,
-                reference_id=session_id,
-            )
+        install_key_issuance: dict[str, dict[str, Any]] = {}
+        if org_id and not already_credited:
+            if payment_confirmed and unit_credits > 0:
+                self.credit_units(
+                    org_id,
+                    unit_credits,
+                    StripeUnitEventReason.CHECKOUT_COMPLETE,
+                    reference_id=session_id,
+                )
+                result["units_credited"] = unit_credits
+                result["tokens_covered"] = unit_credits * TOKENS_PER_UNIT
+
+            if payment_confirmed:
+                try:
+                    install_key_issuance = self._issue_paid_install_keys_for_checkout(
+                        org_id=org_id,
+                        customer_id=customer_id,
+                        session_id=session_id,
+                        unit_credits=unit_credits,
+                        metadata={"mode": mode, "payment_status": payment_status},
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "stripe.checkout_install_key_issue_failed org=%s session=%s error=%s",
+                        org_id,
+                        session_id,
+                        exc,
+                    )
+                    install_key_issuance = {}
+
             with self._lock:
                 self._processed_event_ids.add(checkout_idem_key)
-            result["units_credited"] = unit_credits
-            result["tokens_covered"] = unit_credits * TOKENS_PER_UNIT
+
+        if install_key_issuance:
+            result["install_key_issuance"] = install_key_issuance
 
         return result
 

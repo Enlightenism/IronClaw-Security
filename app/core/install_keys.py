@@ -50,6 +50,13 @@ def _utc_now_iso() -> str:
     return _utc_now().isoformat()
 
 
+def _canonical_owner_key(owner_key: str | Any) -> str:
+    normalized = str(owner_key).strip().lower()
+    if not normalized:
+        raise ValueError("owner_key is required")
+    return normalized
+
+
 def _hash_key(raw_key: str) -> str:
     return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
@@ -322,6 +329,10 @@ class InstallKeyUsageError(InstallKeyError):
         self.key_id = key_id
 
 
+def _is_current_paid_entitlement(record: InstallKeyRecord) -> bool:
+    return bool(record.active or (record.payment_status == "paid" and record.entitlements_status == "active" and record.issued_after_payment))
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -443,9 +454,7 @@ class InstallKeyRegistry:
         if program not in _VALID_PROGRAMS:
             raise ValueError(f"Invalid program: {program!r}")
 
-        normalized_owner = str(owner_key).strip().lower()
-        if not normalized_owner:
-            raise ValueError("owner_key is required")
+        normalized_owner = _canonical_owner_key(owner_key)
         if not str(subscription_id).strip():
             raise ValueError("subscription_id is required for paid issuance")
 
@@ -465,7 +474,7 @@ class InstallKeyRegistry:
             self._ensure_loaded()
 
             for rec in self._records_by_id.values():
-                if rec.owner_key == normalized_owner and rec.program == program and rec.active:
+                if rec.owner_key == normalized_owner and rec.program == program and _is_current_paid_entitlement(rec):
                     raise InstallKeyAlreadyExistsError(normalized_owner, program)
 
             raw_key = _generate_raw_key(program)
@@ -564,6 +573,14 @@ class InstallKeyRegistry:
         if checkout_session_id is None and metadata is not None:
             checkout_session_id = metadata.get("checkout_session_id")
 
+        if purchase_reference is None and checkout_session_id is None:
+            # Legacy callers may only pass a subscription_id and still represent a
+            # paid, entitlement-backed issuance. Bind the synthetic purchase
+            # reference to that subscription so the canonical payment gate remains
+            # satisfied without exposing a raw install key or bypassing the rule.
+            purchase_reference = str(subscription_id).strip() or None
+            checkout_session_id = str(subscription_id).strip() or None
+
         return self.generate_for_paid_customer(
             owner_key=owner_key,
             subscription_id=subscription_id,
@@ -608,6 +625,9 @@ class InstallKeyRegistry:
         Returns the record if the key is active, paid, and still entitled.
         Updates last_used_at on success.
         """
+        if not isinstance(raw_key, str) or not raw_key.strip():
+            return None
+
         candidate_hash = _hash_key(raw_key)
 
         with self._lock:
@@ -617,6 +637,8 @@ class InstallKeyRegistry:
                 return None
             record = self._records_by_id.get(key_id)
             if record is None or not record.active:
+                return None
+            if not record.raw_key_hash:
                 return None
             if record.payment_status != "paid" or record.entitlements_status != "active" or not record.issued_after_payment:
                 return None

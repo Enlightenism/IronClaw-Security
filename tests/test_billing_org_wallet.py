@@ -354,8 +354,7 @@ class TestPurchaseOrgWalletIntegration:
         org_id: str,
         _isolated_wallet_registry: UnitWalletRegistry,
     ) -> None:
-        pkg_id, pkg = _first_package()
-        expected_units = int(pkg["included_units"])
+        pkg_id, _ = _first_package()
         ctx = _org_ctx(org_id)
         with _override_auth(app_instance, ctx) as client:
             resp = client.post(
@@ -363,10 +362,11 @@ class TestPurchaseOrgWalletIntegration:
                 json=_purchase_payload("buyer@example.com", package_id=pkg_id),
             )
         assert resp.status_code == 201
-        assert resp.json()["wallet"]["balance_units"] == expected_units
+        assert resp.json()["wallet"]["balance_units"] == 0
         org_wallet = _isolated_wallet_registry.get_wallet(f"ic_org_{org_id}")
         assert org_wallet is not None
-        assert org_wallet.balance_units == expected_units
+        assert org_wallet.balance_units == 0
+        assert org_wallet.total_purchased_units == 0
 
     def test_org_purchase_does_not_credit_buyer_email_wallet(
         self,
@@ -390,8 +390,7 @@ class TestPurchaseOrgWalletIntegration:
         org_id: str,
         _isolated_wallet_registry: UnitWalletRegistry,
     ) -> None:
-        pkg_id, pkg = _first_package()
-        expected_units_each = int(pkg["included_units"])
+        pkg_id, _ = _first_package()
         ctx = _org_ctx(org_id)
         with _override_auth(app_instance, ctx) as client:
             resp_alice = client.post(
@@ -408,8 +407,10 @@ class TestPurchaseOrgWalletIntegration:
         assert resp_bob.json()["purchase"]["owner_key"] == f"ic_org_{org_id}"
         org_wallet = _isolated_wallet_registry.get_wallet(f"ic_org_{org_id}")
         assert org_wallet is not None
-        assert org_wallet.balance_units == expected_units_each * 2
-        assert org_wallet.total_purchased_units == expected_units_each * 2
+        assert org_wallet.balance_units == 0
+        assert org_wallet.total_purchased_units == 0
+        assert org_wallet.wallet_id == resp_alice.json()["wallet"]["wallet_id"]
+        assert org_wallet.wallet_id == resp_bob.json()["wallet"]["wallet_id"]
 
     def test_two_buyer_emails_same_org_key_share_same_wallet_id(
         self,
@@ -437,8 +438,7 @@ class TestPurchaseOrgWalletIntegration:
         _isolated_wallet_registry: UnitWalletRegistry,
     ) -> None:
         buyer_email = "solo-dev@ironclaw.io"
-        pkg_id, pkg = _first_package()
-        expected_units = int(pkg["included_units"])
+        pkg_id, _ = _first_package()
         ctx = _personal_ctx()
         with _override_auth(app_instance, ctx) as client:
             resp = client.post(
@@ -449,10 +449,11 @@ class TestPurchaseOrgWalletIntegration:
         body = resp.json()
         assert body["purchase"]["owner_key"] == buyer_email
         assert body["wallet"]["owner_key"] == buyer_email
-        assert body["wallet"]["balance_units"] == expected_units
+        assert body["wallet"]["balance_units"] == 0
         email_wallet = _isolated_wallet_registry.get_wallet(buyer_email)
         assert email_wallet is not None
-        assert email_wallet.balance_units == expected_units
+        assert email_wallet.balance_units == 0
+        assert email_wallet.total_purchased_units == 0
 
     def test_personal_key_purchase_does_not_create_org_wallet(
         self,

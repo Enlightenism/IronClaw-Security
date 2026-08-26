@@ -6,6 +6,25 @@ from threading import Lock
 from typing import Any
 
 
+def _normalize_api_key_id(api_key_id: str) -> str:
+    normalized = str(api_key_id).strip()
+    if not normalized:
+        raise ValueError("api_key_id must not be empty")
+    return normalized
+
+
+def _normalize_route(route: str) -> str:
+    normalized = str(route).strip()
+    if not normalized:
+        raise ValueError("route must not be empty")
+    return normalized
+
+
+def _normalize_method(method: str) -> str:
+    normalized = str(method).strip().upper()
+    return normalized or "GET"
+
+
 @dataclass
 class UsageEvent:
     timestamp: datetime
@@ -54,37 +73,49 @@ class UsageMeteringRegistry:
         units: int = 1,
         metadata: dict[str, Any] | None = None,
     ) -> UsageEvent:
+        normalized_api_key_id = _normalize_api_key_id(api_key_id)
+        normalized_route = _normalize_route(route)
+        normalized_method = _normalize_method(method)
+
+        try:
+            normalized_status_code = int(status_code)
+        except (TypeError, ValueError) as exc:
+            raise TypeError("status_code must be int-compatible") from exc
+
+        normalized_units = max(1, int(units))
         now = datetime.now(UTC)
         event = UsageEvent(
             timestamp=now,
-            api_key_id=api_key_id,
-            route=route,
-            method=method.upper(),
-            status_code=status_code,
-            units=max(1, int(units)),
-            metadata=metadata or {},
+            api_key_id=normalized_api_key_id,
+            route=normalized_route,
+            method=normalized_method,
+            status_code=normalized_status_code,
+            units=normalized_units,
+            metadata=dict(metadata or {}),
         )
 
         with self._lock:
             self._events.append(event)
 
-            summary = self._summaries.get(api_key_id)
+            summary = self._summaries.get(normalized_api_key_id)
             if summary is None:
-                summary = UsageSummary(api_key_id=api_key_id)
-                self._summaries[api_key_id] = summary
+                summary = UsageSummary(api_key_id=normalized_api_key_id)
+                self._summaries[normalized_api_key_id] = summary
 
             summary.total_requests += 1
             summary.total_units += event.units
             summary.last_seen_at = now
-            summary.routes[route] = summary.routes.get(route, 0) + 1
+            summary.routes[normalized_route] = summary.routes.get(normalized_route, 0) + 1
 
         return event
 
     def get_summary(self, api_key_id: str) -> UsageSummary:
+        normalized_api_key_id = _normalize_api_key_id(api_key_id)
+
         with self._lock:
-            summary = self._summaries.get(api_key_id)
+            summary = self._summaries.get(normalized_api_key_id)
             if summary is None:
-                return UsageSummary(api_key_id=api_key_id)
+                return UsageSummary(api_key_id=normalized_api_key_id)
             return UsageSummary(
                 api_key_id=summary.api_key_id,
                 total_requests=summary.total_requests,

@@ -144,6 +144,22 @@ def test_has_active_subscription_returns_false_for_unknown_owner(registry: Billi
     assert registry.has_active_subscription("nobody@unknown.dev") is False
 
 
+def test_has_active_subscription_matches_org_key_from_customer_metadata(registry: BillingRegistry) -> None:
+    customer = registry.create_customer(
+        email="orguser@ironclaw.dev",
+        display_name="Org User",
+        plan="team-25k",
+    )
+    customer.metadata["org_id"] = "org-42"
+    registry.create_subscription(
+        customer_id=customer.customer_id,
+        plan="team-25k",
+        status="active",
+    )
+    assert registry.has_active_subscription("ic_org_org-42") is True
+    assert registry.get_active_subscription_for_customer("ic_org_org-42") is not None
+
+
 def test_has_active_subscription_returns_false_when_subscription_is_cancelled(
     registry: BillingRegistry,
 ) -> None:

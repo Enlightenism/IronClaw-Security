@@ -60,6 +60,19 @@ def units_required_for_tokens(token_count: int) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _normalize_owner_value(owner_key: str | None) -> str:
+    """Normalize billing owner values to the canonical lowercase form.
+
+    This keeps email owners and org wallet owners in the same lookup format so
+    the billing registry can resolve a canonical owner key consistently across
+    customer records, subscription checks, and install-key provisioning guards.
+    """
+    if owner_key is None:
+        return ""
+    normalized = str(owner_key).strip().lower()
+    return normalized
+
+
 def resolve_billing_owner(auth_ctx: Any, buyer_email: str) -> str:
     """Return the canonical wallet owner key for a billing operation.
 
@@ -75,11 +88,14 @@ def resolve_billing_owner(auth_ctx: Any, buyer_email: str) -> str:
     This function is the **single source of truth** for org vs. personal
     wallet routing.  No other module should implement this decision.
     """
-    key_type = getattr(auth_ctx, "key_type", None)
+    key_type = str(getattr(auth_ctx, "key_type", "") or "").strip().lower()
     org_id = getattr(auth_ctx, "org_id", None)
-    if key_type == "org" and org_id:
-        return f"ic_org_{org_id}"
-    return buyer_email.strip().lower()
+    normalized_org_id = str(org_id).strip() if org_id is not None else ""
+
+    if (key_type in {"org", "org_key"}) and normalized_org_id:
+        return f"ic_org_{normalized_org_id.strip().lower()}"
+
+    return _normalize_owner_value(buyer_email)
 
 
 PlanCode = Literal["starter-5k", "team-25k", "enterprise-60k"]
@@ -502,18 +518,46 @@ class BillingRegistry:
             self._ensure_loaded()
             return list(self._subscriptions.values())
 
+    def _resolve_customer_for_owner_key(self, owner_key: str) -> BillingCustomer | None:
+        normalized = _normalize_owner_value(owner_key)
+        if not normalized:
+            return None
+
+        for customer in self._customers.values():
+            if customer.customer_id and customer.customer_id.lower() == normalized:
+                return customer
+            if customer.email and customer.email.lower() == normalized:
+                return customer
+
+            metadata = customer.metadata or {}
+            org_id = metadata.get("org_id") or metadata.get("organization_id") or metadata.get("customer_org_id")
+            if org_id is not None:
+                candidate = f"ic_org_{str(org_id).strip().lower()}"
+                if candidate == normalized:
+                    return customer
+
+            if str(customer.customer_id).lower().startswith("ic_org_") and customer.customer_id.lower() == normalized:
+                return customer
+
+        return None
+
     def get_active_subscription_for_customer(
         self,
         owner_key: str,
     ) -> BillingSubscription | None:
-        """Return the first active subscription whose customer_id matches owner_key.
+        """Return the first active subscription for the canonical owner key.
 
-        owner_key is the canonical lookup argument used by get_dashboard_overview
-        and all dashboard callers.  It is treated as a direct customer_id lookup.
+        The caller passes the same owner_key used by resolve_billing_owner, which may
+        be either a normalized email or an org wallet key like ic_org_{org_id}. This
+        lookup must resolve through the customer record itself, not only a direct
+        customer_id match.
         """
         with self._lock:
             self._ensure_loaded()
-            return self._get_active_subscription_unlocked(owner_key)
+            customer = self._resolve_customer_for_owner_key(owner_key)
+            if customer is None:
+                return None
+            return self._get_active_subscription_unlocked(customer.customer_id)
 
     def cancel_subscription(self, subscription_id: str) -> BillingSubscription:
         with self._lock:
@@ -701,25 +745,16 @@ class BillingRegistry:
         """Return True if owner_key has at least one active subscription.
 
         owner_key is the canonical wallet key produced by resolve_billing_owner —
-        either a normalized email address or an ic_org_{org_id} string.
-
-        For personal keys (email), matches by customer email.
-        For org keys (ic_org_{org_id}), matches by customer_id prefix lookup
-        so that org-pooled wallets are correctly gated.
+        either a normalized email address or an ic_org_{org_id} string. The lookup
+        resolves through the customer record so both direct customer_id matches and
+        org-scoped metadata mappings are honored.
         """
         with self._lock:
             self._ensure_loaded()
-            normalized = owner_key.strip().lower()
-            for customer in self._customers.values():
-                if not customer.active:
-                    continue
-                # Org key match: owner_key was stored as customer_id for org customers.
-                # Personal key match: owner_key is the normalized email.
-                if customer.customer_id == normalized or customer.email == normalized:
-                    sub = self._get_active_subscription_unlocked(customer.customer_id)
-                    if sub is not None:
-                        return True
-            return False
+            customer = self._resolve_customer_for_owner_key(owner_key)
+            if customer is None or not customer.active:
+                return False
+            return self._get_active_subscription_unlocked(customer.customer_id) is not None
 
     # ---------------------------------------------------------------------------
     # provision_install_keys_on_purchase
@@ -731,47 +766,42 @@ class BillingRegistry:
         subscription_id: str,
         owner_key: str,
     ) -> dict[str, Any]:
-        """Provision one install key per program (openclaw + claude_code) immediately
-        after a successful create_subscription().
+        """Validate purchasing ownership and entitlement before issuing install keys.
 
-        Gates on has_active_subscription(owner_key). Raises ValueError if no
-        active subscription exists for the owner at call time.
-
-        Returns {"openclaw": InstallKeyRecord, "claude_code": InstallKeyRecord}.
-        Raises InstallKeyAlreadyExistsError on duplicate provisioning attempt.
+        This method is the billing-layer bridge that proves the canonical owner has
+        an active subscription and then delegates actual key issuance to the
+        install-key registry for the paid programs this customer is entitled to.
         """
-        if not self.has_active_subscription(owner_key):
-            raise ValueError(f"Cannot provision install keys: no active subscription found for owner {owner_key!r}")
+        normalized_owner = _normalize_owner_value(owner_key)
+        if not normalized_owner:
+            raise ValueError("owner_key is required for billing provisioning")
+        if not self.has_active_subscription(normalized_owner):
+            raise ValueError(f"Cannot provision install keys: no active subscription found for owner {normalized_owner!r}")
 
         registry = self._get_install_key_registry()
-
-        openclaw_key = registry.generate_install_key(
-            owner_key,
-            subscription_id,
-            "openclaw",
-            label="auto-provisioned",
-            metadata={"customer_id": customer_id, "provisioned_by": "billing"},
-        )
-        claude_key = registry.generate_install_key(
-            owner_key,
-            subscription_id,
-            "claude_code",
-            label="auto-provisioned",
-            metadata={"customer_id": customer_id, "provisioned_by": "billing"},
-        )
+        result: dict[str, Any] = {}
+        for program in ("openclaw", "claude_code"):
+            record = registry.generate_install_key(
+                normalized_owner,
+                subscription_id,
+                program,
+                label="auto-provisioned",
+                metadata={"customer_id": customer_id, "provisioned_by": "billing"},
+            )
+            result[program] = record
 
         logger.info(
-            "install_keys_provisioned",
+            "billing_provisioning_gate_passed",
             extra={
                 "customer_id": customer_id,
                 "subscription_id": subscription_id,
-                "owner_key": owner_key,
-                "openclaw_key_id": openclaw_key.key_id,
-                "claude_key_id": claude_key.key_id,
+                "owner_key": normalized_owner,
+                "has_active_subscription": True,
+                "programs": list(result),
             },
         )
 
-        return {"openclaw": openclaw_key, "claude_code": claude_key}
+        return result
 
 
 _billing_registry: BillingRegistry | None = None

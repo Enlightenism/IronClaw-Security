@@ -465,6 +465,24 @@ class TestGetApiKeyInvalidKey:
                 )
         assert resp.status_code == 401
 
+    def test_install_key_value_is_rejected_by_system_auth(self):
+        registry = APIKeyRegistry()
+        app = _make_app(
+            auth_required=True,
+            auth_configured=True,
+            configured_key=_CONFIGURED_KEY,
+            registry=registry,
+        )
+        with patch("app.core.auth.get_api_key_registry", return_value=registry):
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/probe/auth-context",
+                    headers={API_KEY_HEADER_NAME: "ic_install_openclaw_secret_value_123"},
+                )
+        assert resp.status_code == 401
+        assert resp.json().get("error") == "invalid_api_key"
+        assert "install key" in resp.json().get("message", "").lower()
+
 
 class TestGetApiKeyNoKeysConfigured:
     def test_no_keys_configured_raises_503(self):
@@ -1174,6 +1192,55 @@ class TestApiKeyAuthDependency:
         auth = _bearer_context()
         ctx = await require_api_key_auth(auth=auth)
         assert ctx is auth
+
+    @pytest.mark.asyncio
+    async def test_require_api_key_auth_rejects_install_key_context(self):
+        auth = AuthContext(
+            api_key="ic_install_openclaw_secret_value_123",
+            principal_type="customer",
+            principal_id="customer-123",
+            session_id=None,
+            org_id=None,
+            permissions=("customer:read",),
+            roles=("customer",),
+            authenticated=True,
+            auth_source="install_key",
+            auth_method="install_key",
+            key_type="personal",
+            metadata={"key_kind": "install_key"},
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await require_api_key_auth(auth=auth)
+
+        exc = exc_info.value
+        assert exc.status_code == 401
+        assert "install key" in exc.detail.lower()
+        assert "paid customer install-key registry" in exc.detail.lower()
+
+    @pytest.mark.asyncio
+    async def test_require_api_key_auth_rejects_install_key_shaped_api_value(self):
+        auth = AuthContext(
+            api_key="ic_install_claude_code_secret_value_123",
+            principal_type="customer",
+            principal_id="customer-456",
+            session_id=None,
+            org_id=None,
+            permissions=("customer:read",),
+            roles=("customer",),
+            authenticated=True,
+            auth_source="registry",
+            auth_method="registry_api_key",
+            key_type="personal",
+            metadata={"key_kind": "customer"},
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await require_api_key_auth(auth=auth)
+
+        exc = exc_info.value
+        assert exc.status_code == 401
+        assert "install key" in exc.detail.lower()
 
     @pytest.mark.asyncio
     async def test_require_api_key_auth_raises_401_for_anonymous(self):

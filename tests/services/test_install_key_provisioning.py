@@ -33,6 +33,11 @@ def _make_install_key_record(
     raw_key: str | None = None,
     active: bool = True,
     label: str = "test",
+    issued_after_payment: bool = True,
+    payment_status: str = "paid",
+    entitlements_status: str = "active",
+    purchase_reference: str | None = None,
+    checkout_session_id: str | None = None,
 ) -> InstallKeyRecord:
     resolved_raw_key = raw_key or ("ic_install_openclaw_test_secret_123456" if program == "openclaw" else "ic_install_claude_code_test_secret_abcdef")
     return InstallKeyRecord(
@@ -45,6 +50,11 @@ def _make_install_key_record(
         masked_key=f"{resolved_raw_key[:25]}...{resolved_raw_key[-4:]}",
         label=label,
         active=active,
+        issued_after_payment=issued_after_payment,
+        payment_status=payment_status,
+        entitlements_status=entitlements_status,
+        purchase_reference=purchase_reference or subscription_id,
+        checkout_session_id=checkout_session_id or subscription_id,
         units_consumed=0,
         metadata={"source": "test"},
     )
@@ -57,6 +67,13 @@ def service_components() -> tuple[InstallKeyProvisioningService, MagicMock, Magi
 
     install_key_registry = MagicMock()
     install_key_registry.get_keys_for_owner.return_value = []
+    install_key_registry.generate_for_paid_customer.return_value = _make_install_key_record(
+        owner_key="buyer@ironclaw.test",
+        subscription_id="sub_123",
+        program="openclaw",
+        key_id="ik_paid_001",
+        raw_key="ic_install_openclaw_paid_secret_123456",
+    )
 
     wallet_registry = MagicMock()
     wallet_registry.get_or_create_wallet.return_value = SimpleNamespace(owner_key="buyer@ironclaw.test")
@@ -131,7 +148,7 @@ def test_provision_for_program_generates_key_and_returns_single_use_raw_key(serv
         key_id="ik_open_001",
         raw_key="ic_install_openclaw_secret_123456",
     )
-    install_key_registry.generate_install_key.return_value = record
+    install_key_registry.generate_for_paid_customer.return_value = record
 
     issued = service.provision_for_program(
         owner_key="buyer@ironclaw.test",
@@ -140,6 +157,11 @@ def test_provision_for_program_generates_key_and_returns_single_use_raw_key(serv
         source="purchase",
         label="auto-provisioned",
         metadata={"customer_id": "cus_123"},
+        payment_status="paid",
+        entitlements_status="active",
+        issued_after_payment=True,
+        checkout_session_id="cs_123",
+        purchase_reference="sub_123",
     )
 
     assert isinstance(issued, InstallKeyIssued)
@@ -149,14 +171,19 @@ def test_provision_for_program_generates_key_and_returns_single_use_raw_key(serv
     wallet_registry.get_or_create_wallet.assert_called()
     billing_registry.has_active_subscription.assert_called_with("buyer@ironclaw.test")
 
-    install_key_registry.generate_install_key.assert_called_once()
-    kwargs = install_key_registry.generate_install_key.call_args.kwargs
+    install_key_registry.generate_for_paid_customer.assert_called_once()
+    kwargs = install_key_registry.generate_for_paid_customer.call_args.kwargs
     assert kwargs["owner_key"] == "buyer@ironclaw.test"
     assert kwargs["subscription_id"] == "sub_123"
     assert kwargs["program"] == "openclaw"
     assert kwargs["label"] == "auto-provisioned"
     assert kwargs["metadata"]["customer_id"] == "cus_123"
     assert kwargs["metadata"]["source"] == "purchase"
+    assert kwargs["payment_status"] == "paid"
+    assert kwargs["entitlements_status"] == "active"
+    assert kwargs["issued_after_payment"] is True
+    assert kwargs["checkout_session_id"] == "cs_123"
+    assert kwargs["purchase_reference"] == "sub_123"
 
 
 def test_provision_for_program_reuses_existing_active_key_without_duplicate_generation(service_components: tuple[InstallKeyProvisioningService, MagicMock, MagicMock, MagicMock]) -> None:
@@ -178,7 +205,7 @@ def test_provision_for_program_reuses_existing_active_key_without_duplicate_gene
 
     assert issued.raw_key == ""
     assert issued.record.key_id == "ik_existing_001"
-    install_key_registry.generate_install_key.assert_not_called()
+    install_key_registry.generate_for_paid_customer.assert_not_called()
 
 
 def test_provision_for_program_rejects_unknown_program() -> None:
@@ -206,7 +233,7 @@ def test_provision_for_purchase_generates_both_supported_programs() -> None:
     billing_registry.has_active_subscription.return_value = True
 
     install_key_registry = MagicMock()
-    install_key_registry.generate_install_key.side_effect = [
+    install_key_registry.generate_for_paid_customer.side_effect = [
         _make_install_key_record(
             owner_key="buyer@ironclaw.test",
             subscription_id="sub_123",
@@ -242,7 +269,7 @@ def test_provision_for_purchase_generates_both_supported_programs() -> None:
     assert set(results.keys()) == {"openclaw", "claude_code"}
     assert results["openclaw"].raw_key.startswith("ic_install_openclaw_")
     assert results["claude_code"].raw_key.startswith("ic_install_claude_code_")
-    assert install_key_registry.generate_install_key.call_count == 2
+    assert install_key_registry.generate_for_paid_customer.call_count == 2
 
 
 def test_provision_for_purchase_uses_org_owner_resolution_when_auth_ctx_is_org() -> None:
@@ -250,7 +277,7 @@ def test_provision_for_purchase_uses_org_owner_resolution_when_auth_ctx_is_org()
     billing_registry.has_active_subscription.return_value = True
 
     install_key_registry = MagicMock()
-    install_key_registry.generate_install_key.side_effect = [
+    install_key_registry.generate_for_paid_customer.side_effect = [
         _make_install_key_record(
             owner_key="ic_org_org-42",
             subscription_id="sub_123",
@@ -316,7 +343,7 @@ def test_issue_install_key_calls_same_provisioning_path() -> None:
         key_id="ik_open_manual",
         raw_key="ic_install_openclaw_manual_secret_abc",
     )
-    install_key_registry.generate_install_key.return_value = record
+    install_key_registry.generate_for_paid_customer.return_value = record
 
     wallet_registry = MagicMock()
     wallet_registry.get_or_create_wallet.return_value = object()
@@ -338,7 +365,23 @@ def test_issue_install_key_calls_same_provisioning_path() -> None:
     assert isinstance(issued, InstallKeyIssued)
     assert issued.record.key_id == "ik_open_manual"
     assert issued.raw_key.startswith("ic_install_openclaw_")
-    install_key_registry.generate_install_key.assert_called_once()
+    install_key_registry.generate_for_paid_customer.assert_called_once()
+
+
+def test_provision_for_purchase_rejects_unconfirmed_payment() -> None:
+    service = InstallKeyProvisioningService(
+        install_key_registry=MagicMock(),
+        wallet_registry=MagicMock(),
+        billing_registry=MagicMock(has_active_subscription=MagicMock(return_value=True)),
+    )
+
+    with pytest.raises(ValueError, match="successful payment confirmation"):
+        service.provision_for_purchase(
+            owner_key="buyer@ironclaw.test",
+            subscription_id="sub_123",
+            payment_status="pending",
+            payment_confirmed=False,
+        )
 
 
 # ---------------------------------------------------------------------------

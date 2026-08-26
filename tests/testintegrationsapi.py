@@ -1,18 +1,28 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
 from app.api.integrations import router as integrations_router
+from app.routes.integrations.installer import router as installer_router
 
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
     app = FastAPI()
     app.include_router(integrations_router)
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def installer_client() -> Iterator[TestClient]:
+    app = FastAPI()
+    app.include_router(installer_router)
     with TestClient(app) as test_client:
         yield test_client
 
@@ -113,3 +123,87 @@ def test_verifier_detail_route_validates_blank_integration_id_as_not_found(
 ) -> None:
     response = client.get("/integrations/verifiers/%20")
     assert response.status_code in {404, 422}
+
+
+def test_integration_install_route_requires_paid_install_key(installer_client: TestClient) -> None:
+    response = installer_client.post(
+        "/integrations/integration-openclaw/install",
+        json={
+            "initiated_by": "tester",
+            "platform": "openclaw",
+        },
+    )
+
+    assert response.status_code == 403, response.text
+    assert "paid install key" in response.json()["detail"].lower()
+
+
+def test_integration_install_route_rejects_generic_and_mismatched_keys(installer_client: TestClient) -> None:
+    class _Record:
+        key_id = "ik_paid_123"
+        owner_key = "owner-456"
+        program = "openclaw"
+        payment_status = "paid"
+        entitlements_status = "active"
+        issued_after_payment = True
+
+    with patch("app.routes.integrations.installer.get_install_key_registry") as mock_registry:
+        mock_registry.return_value.authenticate_install_key.return_value = _Record()
+
+        for bad_key in ("sk_live_abc123", "token-123", "ic_org_1234", "ic_install_claude_code_validkey"):
+            response = installer_client.post(
+                "/integrations/integration-openclaw/install",
+                json={
+                    "initiated_by": "tester",
+                    "platform": "openclaw",
+                    "install_key": bad_key,
+                    "owner_key": "owner-456",
+                },
+            )
+            assert response.status_code == 403, response.text
+            assert "paid install key" in response.json()["detail"].lower()
+
+        response = installer_client.post(
+            "/integrations/integration-openclaw/install",
+            json={
+                "initiated_by": "tester",
+                "platform": "openclaw",
+                "install_key": "ic_install_openclaw_validkey",
+                "owner_key": "owner-999",
+            },
+        )
+        assert response.status_code == 403, response.text
+        assert "paid install key" in response.json()["detail"].lower()
+
+
+def test_integration_install_route_accepts_valid_paid_install_key(installer_client: TestClient) -> None:
+    class _Record:
+        key_id = "ik_paid_123"
+        owner_key = "owner-456"
+        program = "openclaw"
+        payment_status = "paid"
+        entitlements_status = "active"
+        issued_after_payment = True
+
+    with patch("app.routes.integrations.installer.get_install_key_registry") as mock_registry:
+        mock_registry.return_value.authenticate_install_key.return_value = _Record()
+        with patch("app.routes.integrations.installer.get_integration_installer") as mock_installer:
+            mock_installer.return_value.install_integration.return_value = {
+                "installed": True,
+                "success": True,
+                "status": "active",
+                "steps": [{"step_id": "step-install", "status": "completed", "detail": "installed"}],
+            }
+            response = installer_client.post(
+                "/integrations/integration-openclaw/install",
+                json={
+                    "initiated_by": "tester",
+                    "platform": "openclaw",
+                    "install_key": "ic_install_openclaw_validkey",
+                    "owner_key": "owner-456",
+                },
+            )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["installation"]["installed"] is True
+    assert response.json()["installation"]["state"] == "active"

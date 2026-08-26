@@ -4,6 +4,7 @@ import importlib
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -69,6 +70,77 @@ def _make_namespace(**values: Any) -> Any:
 
 def _assert_json_serializable(value: Any) -> None:
     json.dumps(value)
+
+
+def test_app_cli_install_requires_paid_customer_install_key() -> None:
+    from app.cli.install import build_install_parser
+
+    parser = build_install_parser()
+    args = parser.parse_args(["openclaw", "--key", "ic_123456", "--owner-key", "owner-456"])
+
+    assert args.key == "ic_123456"
+    assert args.owner_key == "owner-456"
+
+    from app.cli.install import run_install_command
+
+    fake_registry = MagicMock()
+    fake_registry.authenticate_install_key.return_value = None
+    exit_code, payload = run_install_command(
+        "openclaw",
+        key="ic_123456",
+        owner_key="owner-456",
+        registry=fake_registry,
+    )
+
+    assert exit_code == 1
+    assert payload["status"] == "failed"
+    assert "install key unavailable until payment is complete" in payload["message"].lower()
+    assert "ic_123456" not in json.dumps(payload)
+
+
+def test_app_cli_install_rejects_system_api_keys_and_generic_tokens() -> None:
+    from app.cli.install import run_install_command
+
+    for bad_key in ("sk_live_abc123", "token-abc", "ic_org_1234", "ic_123456", "generic-token"):
+        fake_registry = MagicMock()
+        exit_code, payload = run_install_command(
+            "openclaw",
+            key=bad_key,
+            owner_key="owner-456",
+            registry=fake_registry,
+        )
+        assert exit_code == 1
+        assert payload["status"] == "failed"
+        assert "install key unavailable until payment is complete" in payload["message"].lower()
+        assert bad_key not in json.dumps(payload)
+        fake_registry.authenticate_install_key.assert_not_called()
+
+
+def test_app_cli_install_rejects_mismatched_program_and_owner_key() -> None:
+    from app.cli.install import run_install_command
+
+    fake_registry = MagicMock()
+    fake_registry.authenticate_install_key.return_value = MagicMock(
+        key_id="ik_123",
+        owner_key="owner-456",
+        program="openclaw",
+        payment_status="paid",
+        entitlements_status="active",
+        issued_after_payment=True,
+        units_consumed=0,
+    )
+
+    exit_code, payload = run_install_command(
+        "claude-code",
+        key="ic_install_openclaw_abc123",
+        owner_key="owner-456",
+        registry=fake_registry,
+    )
+
+    assert exit_code == 1
+    assert payload["status"] == "failed"
+    assert "install key unavailable until payment is complete" in payload["message"].lower()
+    assert "ic_install_openclaw_abc123" not in json.dumps(payload)
 
 
 def test_installer_module_imports(installer_module: Any) -> None:

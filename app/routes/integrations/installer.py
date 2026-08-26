@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Path, status
 from pydantic import BaseModel, Field
 
+from app.core.install_keys import get_install_key_registry
 from app.services.integrationinstaller import get_integration_installer
 
 router = APIRouter(prefix="/integrations", tags=["integration-installer"])
@@ -102,6 +103,8 @@ class IntegrationInstallRequest(BaseModel):
     platform: str | None = Field(default=None, min_length=1, max_length=120)
     adapter_version: str | None = Field(default=None, min_length=1, max_length=120)
     initiated_by: str | None = Field(default=None, min_length=1, max_length=120)
+    install_key: str | None = Field(default=None, min_length=1, max_length=1024)
+    owner_key: str | None = Field(default=None, min_length=1, max_length=512)
     dry_run: bool = False
     force: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -143,6 +146,78 @@ def _build_step_view(record: Any, fallback_index: int) -> InstallationStepView:
         detail=detail,
         metadata=metadata,
     )
+
+
+def _infer_expected_program(integration_id: str | None) -> str | None:
+    normalized = (integration_id or "").strip().lower()
+    if not normalized:
+        return None
+    if normalized in {"openclaw", "integration-openclaw"}:
+        return "openclaw"
+    if normalized in {"claude-code", "claude_code", "integration-claude-code", "integration-claude_code"}:
+        return "claude_code"
+    return None
+
+
+def _require_paid_install_key(install_key: str | None, owner_key: str | None, *, integration_id: str | None = None) -> None:
+    if not install_key or not str(install_key).strip():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A valid paid install key is required; install key unavailable until payment is complete",
+        )
+
+    candidate = str(install_key).strip()
+    expected_program = _infer_expected_program(integration_id)
+    valid_prefixes = ("ic_install_openclaw_", "ic_install_claude_code_")
+    if expected_program == "openclaw":
+        valid_prefixes = ("ic_install_openclaw_",)
+    elif expected_program == "claude_code":
+        valid_prefixes = ("ic_install_claude_code_",)
+
+    if (
+        candidate.startswith("ic_org_")
+        or candidate.startswith("sk_")
+        or candidate.startswith("ghp_")
+        or candidate.startswith("gho_")
+        or candidate.startswith("github_pat_")
+        or candidate.startswith("token_")
+        or candidate.startswith("secret_")
+        or candidate.startswith("api_")
+        or (candidate.startswith("ic_") and not candidate.startswith(valid_prefixes))
+        or not candidate.startswith(valid_prefixes)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A valid paid install key is required; install key unavailable until payment is complete",
+        )
+
+    normalized_owner = str(owner_key).strip().lower() if owner_key else None
+    registry = get_install_key_registry()
+    record = registry.authenticate_install_key(candidate)
+
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A valid paid install key is required; install key unavailable until payment is complete",
+        )
+
+    if record.payment_status != "paid" or record.entitlements_status != "active" or not record.issued_after_payment:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A valid paid install key is required; install key unavailable until payment is complete",
+        )
+
+    if expected_program and record.program != expected_program:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A valid paid install key is required; install key unavailable until payment is complete",
+        )
+
+    if normalized_owner and record.owner_key != normalized_owner:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A valid paid install key is required; install key unavailable until payment is complete",
+        )
 
 
 def _build_install_response(integration_id: str, result: Any) -> IntegrationInstallResponse:
@@ -200,8 +275,13 @@ def install_integration(
 ) -> IntegrationInstallResponse:
     normalized_id = integration_id.strip()
     effective_request = request or IntegrationInstallRequest()
-    service = get_integration_installer()
+    _require_paid_install_key(
+        effective_request.install_key,
+        effective_request.owner_key,
+        integration_id=normalized_id,
+    )
 
+    service = get_integration_installer()
     result = service.install_integration(
         normalized_id,
         requestedby=effective_request.initiated_by or "system",

@@ -352,7 +352,7 @@ def _record_is_usable(record: APIKeyRecord | None) -> bool:
 
 def _resolve_registry_api_key(provided_api_key: str) -> APIKeyRecord | None:
     normalized_api_key = _clean_optional_string(provided_api_key)
-    if normalized_api_key is None:
+    if normalized_api_key is None or _looks_like_install_key(normalized_api_key):
         return None
 
     registry = get_api_key_registry()
@@ -393,7 +393,7 @@ def _resolve_registry_api_key_for_request(
     provided_api_key: str | None,
 ) -> APIKeyRecord | None:
     normalized_api_key = _clean_optional_string(provided_api_key)
-    if normalized_api_key is None:
+    if normalized_api_key is None or _looks_like_install_key(normalized_api_key):
         return None
 
     cached_record = _get_cached_registry_record(request)
@@ -516,6 +516,13 @@ def _constant_time_match(left: str | None, right: str | None) -> bool:
     if not left or not right:
         return False
     return hmac.compare_digest(left, right)
+
+
+def _looks_like_install_key(value: str | None) -> bool:
+    normalized = _clean_optional_string(value)
+    if normalized is None:
+        return False
+    return normalized.startswith("ic_install_")
 
 
 def _coerce_roles(record: APIKeyRecord | None) -> tuple[str, ...]:
@@ -1084,6 +1091,20 @@ def get_api_key(
     normalized_api_key = _clean_optional_string(provided_api_key)
     auth_required = _is_auth_required(request)
 
+    if _looks_like_install_key(normalized_api_key):
+        _logger.warning(
+            "System auth rejected install-key value",
+            extra={
+                "header": API_KEY_HEADER_NAME,
+                "key_prefix": normalized_api_key[:20],
+            },
+        )
+        raise AppError(
+            "invalid_api_key",
+            "System API authentication does not accept install keys; install keys are issued only after successful payment and entitlement validation",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        ) from None
+
     if normalized_api_key is None:
         if isinstance(bearer_context, BearerAuthContext):
             return None
@@ -1148,6 +1169,20 @@ def get_auth_context(
 
     normalized_session_id = _clean_optional_string(session_id)
     normalized_api_key = _clean_optional_string(api_key)
+
+    if normalized_api_key and _looks_like_install_key(normalized_api_key):
+        _logger.warning(
+            "System auth rejected install-key value in direct auth context",
+            extra={
+                "header": API_KEY_HEADER_NAME,
+                "key_prefix": normalized_api_key[:20],
+            },
+        )
+        raise AppError(
+            "invalid_api_key",
+            "System API authentication does not accept install keys; install keys are issued only after successful payment and entitlement validation",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        ) from None
 
     if normalized_api_key:
         registry_record = _resolve_registry_api_key_for_request(

@@ -45,10 +45,11 @@ def test_end_to_end_claude_code_registry_install_and_verify():
         "resolve-integration",
         "validate-command",
         "prepare-target",
+        "validate-paid-install-key",
         "apply-install",
     ]
 
-    # 3. Perform a dry-run install; status must remain planned.
+    # 3. Perform a dry-run install without a valid paid key; status must remain blocked.
     dry_result = install_integration(
         registry,
         "integration-claude-code",
@@ -60,9 +61,9 @@ def test_end_to_end_claude_code_registry_install_and_verify():
     assert dry_summary["integration_id"] == "integration-claude-code"
     assert dry_summary["installed"] is False
     assert dry_summary["status_before"] == "planned"
-    assert dry_summary["status_after"] == "planned"
+    assert dry_summary["status_after"] == "blocked"
 
-    # 4. Perform a real install; status must transition to active.
+    # 4. Perform a real install without a valid paid key; the payment gate blocks activation.
     real_result = install_integration(
         registry,
         "integration-claude-code",
@@ -71,12 +72,12 @@ def test_end_to_end_claude_code_registry_install_and_verify():
     real_summary = summarize_install_result(real_result)
 
     assert real_summary["integration_id"] == "integration-claude-code"
-    assert real_summary["installed"] is True
-    assert real_summary["status_after"] == "active"
+    assert real_summary["installed"] is False
+    assert real_summary["status_after"] == "blocked"
 
     record_after = get_integration(registry, "integration-claude-code")
     assert record_after is not None
-    assert record_after.status == "active"
+    assert record_after.status == "planned"
 
     # 5. Verify the integration in non-strict mode; should pass with possible warnings.
     verify_result = verify_integration(
@@ -152,7 +153,7 @@ def test_end_to_end_claude_code_cli_install_and_verify(monkeypatch, capsys):
     assert install_payload["integration_id"] == "integration-claude-code"
     assert install_payload["installed"] is False
     assert install_payload["status_before"] == "planned"
-    assert install_payload["status_after"] == "planned"
+    assert install_payload["status_after"] == "blocked"
 
     # 3. Run CLI verify in non-strict mode after dry-run.
     exit_code = run_cli(

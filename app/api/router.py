@@ -9,29 +9,54 @@ from fastapi.routing import APIRoute
 router = APIRouter(prefix="/api", tags=["api"])
 inventory_router = APIRouter(tags=["api-inventory"])
 
-OPTIONAL_API_MODULES: Final[tuple[str, ...]] = (
-    "app.api.routes.billing",
-    "app.api.routes.alerts",
-    "app.api.routes.audit",
-    "app.api.routes.audit_explorer",
-    "app.api.routes.audit_log",
-    "app.api.routes.dashboard",
-    "app.api.routes.deployment",
-    "app.api.routes.execution_dashboard",
-    "app.api.routes.guard",
-    "app.api.routes.incidents",
-    "app.api.routes.integrations",
-    "app.api.routes.llamafirewall",
-    "app.api.routes.onboarding",
-    "app.api.routes.organizations",
-    "app.api.routes.orgs",
-    "app.api.routes.policy",
-    "app.api.routes.quarantine",
-    "app.api.routes.review_queue",
-    "app.api.routes.reviewqueue",
-    "app.api.routes.scan",
-    "app.api.routes.usage",
-    "app.api.threat_feed",
+CANONICAL_BILLING_MODULE: Final[str] = "app.api.routes.billing"
+
+
+def _dedupe_api_modules(module_paths: tuple[str, ...]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for module_path in module_paths:
+        if module_path in seen:
+            continue
+        if module_path == "app.api.billing":
+            continue
+        if module_path.endswith(".billing") and module_path != CANONICAL_BILLING_MODULE:
+            continue
+        seen.add(module_path)
+        ordered.append(module_path)
+
+    if CANONICAL_BILLING_MODULE not in seen:
+        ordered.insert(0, CANONICAL_BILLING_MODULE)
+    return tuple(ordered)
+
+
+OPTIONAL_API_MODULES: Final[tuple[str, ...]] = _dedupe_api_modules(
+    (
+        "app.api.routes.billing",
+        "app.api.routes.alerts",
+        "app.api.routes.audit",
+        "app.api.routes.audit_explorer",
+        "app.api.routes.audit_log",
+        "app.api.routes.dashboard",
+        "app.api.routes.deployment",
+        "app.api.routes.execution_dashboard",
+        "app.api.routes.guard",
+        "app.api.routes.incidents",
+        "app.api.routes.integrations",
+        "app.api.routes.install_key_events",
+        "app.api.routes.llamafirewall",
+        "app.api.routes.onboarding",
+        "app.api.routes.organizations",
+        "app.api.routes.orgs",
+        "app.api.routes.policy",
+        "app.api.routes.quarantine",
+        "app.api.routes.review_queue",
+        "app.api.routes.reviewqueue",
+        "app.api.routes.scan",
+        "app.api.routes.usage",
+        "app.api.threat_feed",
+        "app.api.billing",
+    )
 )
 
 CORE_API_MODULES: Final[tuple[str, ...]] = (
@@ -68,14 +93,23 @@ def _router_label(api_router: APIRouter) -> str:
 
 def get_api_routers() -> list[APIRouter]:
     routers: list[APIRouter] = []
+    seen_modules: set[str] = set()
+
     for module_path in CORE_API_MODULES:
+        if module_path in seen_modules:
+            continue
         core_router = _optional_router(module_path)
         if core_router is not None:
             routers.append(core_router)
+        seen_modules.add(module_path)
+
     for module_path in OPTIONAL_API_MODULES:
+        if module_path in seen_modules:
+            continue
         optional_router = _optional_router(module_path)
         if optional_router is not None:
             routers.append(optional_router)
+        seen_modules.add(module_path)
     return routers
 
 

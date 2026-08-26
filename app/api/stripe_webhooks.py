@@ -17,6 +17,7 @@ from app.services.stripe_service import (
     StripeWebhookEventType,
     get_stripe_service,
 )
+from app.services.usage_metering import get_usage_metering_service
 
 logger = logging.getLogger(__name__)
 
@@ -157,10 +158,26 @@ def _extract_org_id(event_data: dict[str, Any]) -> str | None:
     return None
 
 
+def _owner_key_for_org(org_id: str | None) -> str | None:
+    if org_id is None:
+        return None
+    normalized = str(org_id).strip()
+    if not normalized:
+        return None
+    return f"ic_org_{normalized.lower()}"
+
+
 def _safe_event_type(raw: Any) -> str | None:
     if not isinstance(raw, str):
         return None
     return raw.strip() or None
+
+
+def _is_successful_payment_status(value: Any) -> bool:
+    if value is None:
+        return False
+    normalized = str(value).strip().lower()
+    return normalized in {"paid", "succeeded", "success", "complete", "completed", "active", "authorized"}
 
 
 def _epoch_to_iso(epoch: Any) -> str:
@@ -170,6 +187,176 @@ def _epoch_to_iso(epoch: Any) -> str:
         return datetime.fromtimestamp(int(epoch), tz=UTC).isoformat().replace("+00:00", "Z")
     except (TypeError, ValueError, OSError):
         return _utc_now_iso()
+
+
+def _resolve_event_context(event_data: dict[str, Any], org_id: str | None, svc: Any) -> dict[str, Any]:
+    """Resolve the canonical org, owner_key, customer, and success status for a payment event."""
+    data_obj = (event_data.get("data") or {}).get("object") or {}
+    metadata: dict[str, Any] = data_obj.get("metadata") or {}
+    customer_id = data_obj.get("customer") or metadata.get("customer_id")
+
+    resolved_org = None
+    if org_id:
+        resolved_org = str(org_id).strip() or None
+    if not resolved_org and isinstance(metadata, dict):
+        candidate = metadata.get("org_id") or metadata.get("owner_org_id")
+        if candidate:
+            resolved_org = str(candidate).strip() or None
+    if not resolved_org and customer_id and hasattr(svc, "resolve_org_from_customer"):
+        resolved_org = svc.resolve_org_from_customer(str(customer_id))
+    if not resolved_org and isinstance(data_obj, dict):
+        client_ref = data_obj.get("client_reference_id")
+        if client_ref:
+            resolved_org = str(client_ref).strip() or None
+
+    owner_key = _owner_key_for_org(resolved_org)
+    payment_status = str(data_obj.get("payment_status") or metadata.get("payment_status") or "").strip().lower()
+    if not _is_successful_payment_status(payment_status):
+        payment_status = str(data_obj.get("status") or "").strip().lower()
+
+    return {
+        "session_id": data_obj.get("id") or event_data.get("id"),
+        "org_id": resolved_org,
+        "owner_key": owner_key,
+        "customer_id": str(customer_id).strip() if customer_id else None,
+        "payment_status": payment_status,
+        "mode": str(data_obj.get("mode") or metadata.get("mode") or "payment").strip() or "payment",
+        "metadata": metadata,
+        "amount_total": int(data_obj.get("amount_total") or 0),
+        "currency": str(data_obj.get("currency") or metadata.get("currency") or "usd").lower(),
+    }
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _issue_paid_install_key_orchestration(
+    *,
+    svc: Any,
+    event_type: str,
+    event_id: str,
+    session_id: str | None,
+    org_id: str | None,
+    owner_key: str | None,
+    customer_id: str | None,
+    payment_status: str,
+    unit_credits: int,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    """Perform the post-payment entitlement step only for successful paid events."""
+    if not org_id or not owner_key:
+        return {}
+    if not _is_successful_payment_status(payment_status):
+        return {}
+
+    if not hasattr(svc, "get_active_subscription_for_org"):
+        logger.info(
+            "stripe_webhooks: install_key_orchestration_skipped event=%s org=%s reason=no_active_subscription_lookup",
+            event_id,
+            org_id,
+        )
+        return {}
+
+    active_subscription = svc.get_active_subscription_for_org(org_id)
+    if active_subscription is None:
+        logger.info(
+            "stripe_webhooks: install_key_orchestration_skipped event=%s org=%s reason=no_active_subscription",
+            event_id,
+            org_id,
+        )
+        return {}
+
+    result: dict[str, Any] = {
+        "event_type": event_type,
+        "event_id": event_id,
+        "org_id": org_id,
+        "owner_key": owner_key,
+        "customer_id": customer_id,
+        "payment_status": payment_status,
+        "active_subscription": active_subscription.to_dict() if hasattr(active_subscription, "to_dict") else active_subscription,
+        "usage_telemetry": {},
+        "dashboard_payload": {
+            "owner_key": owner_key,
+            "org_id": org_id,
+            "customer_id": customer_id,
+            "event_type": event_type,
+            "payment_status": payment_status,
+            "usage_telemetry": {},
+        },
+    }
+
+    install_key_issuance: dict[str, Any] = {}
+    try:
+        issuance = svc._issue_paid_install_keys_for_checkout(  # noqa: SLF001
+            org_id=org_id,
+            customer_id=customer_id,
+            session_id=str(session_id or event_id),
+            unit_credits=unit_credits,
+            metadata={
+                "event_type": event_type,
+                "event_id": event_id,
+                "owner_key": owner_key,
+                "customer_id": customer_id,
+                "payment_status": payment_status,
+                **metadata,
+            },
+        )
+        install_key_issuance = issuance
+    except Exception as exc:  # pragma: no cover - defensive logging path
+        logger.warning(
+            "stripe_webhooks: install_key_issuance_failed event=%s org=%s error=%s",
+            event_id,
+            org_id,
+            exc,
+        )
+        install_key_issuance = {}
+
+    if install_key_issuance:
+        result["install_key_issuance"] = install_key_issuance
+        usage_service = get_usage_metering_service()
+        __telemetry: dict[str, Any] = {
+            "owner_key": owner_key,
+            "event_type": event_type,
+            "payment_status": payment_status,
+            "org_id": org_id,
+            "customer_id": customer_id,
+            "units_credited": unit_credits,
+        }
+        for program, record in install_key_issuance.items():
+            key_id = record.get("key_id")
+            usage_service.record_action_event(
+                owner_key=owner_key,
+                key_id=key_id,
+                action="stripe.payment.fulfilled",
+                allowed=True,
+                units_consumed=max(0, unit_credits),
+                metadata={
+                    "event_type": event_type,
+                    "event_id": event_id,
+                    "org_id": org_id,
+                    "customer_id": customer_id,
+                    "program": program,
+                    "payment_status": payment_status,
+                    "session_id": session_id,
+                    "install_key_id": key_id,
+                },
+            )
+            __telemetry.setdefault("keys", {})[program] = {
+                "key_id": key_id,
+                "owner_key": owner_key,
+                "program": program,
+                "masked_key": record.get("masked_key"),
+            }
+        result["usage_telemetry"] = __telemetry
+        result["dashboard_payload"]["usage_telemetry"] = __telemetry
+        result["dashboard_payload"]["install_key_issuance"] = install_key_issuance
+        result["telemetry"] = __telemetry
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -356,7 +543,6 @@ def _svc_handle_subscription_updated(
         metadata=metadata,
     )
 
-    # If subscription renewed and metadata carries unit_credits, credit them
     unit_credits_raw = metadata.get("unit_credits") or metadata.get("units")
     if sub_status == StripeSubscriptionStatus.ACTIVE and unit_credits_raw is not None and _resolved_org:
         try:
@@ -520,16 +706,17 @@ def _handle_checkout_session_completed(
 ) -> bool:
     """
     checkout.session.completed
-    Credit the org with units from the completed checkout session.
+    Validate the successful payment state and then trigger the install-key
+    entitlement pipeline before returning the processed ack.
     """
-    data_obj = (event_data.get("data") or {}).get("object") or {}
-    session_id = data_obj.get("id") or event_id
-    amount_total = data_obj.get("amount_total") or 0
-    currency = (data_obj.get("currency") or "usd").lower()
-    payment_status = data_obj.get("payment_status", "")
-    mode = data_obj.get("mode", "")
+    context = _resolve_event_context(event_data, org_id, svc)
+    session_id = context["session_id"] or event_id
+    payment_status = context["payment_status"]
+    mode = context["mode"]
+    metadata: dict[str, Any] = context["metadata"]
+    unit_credits = _safe_int(metadata.get("unit_credits") or metadata.get("units") or 0)
 
-    if payment_status != "paid":
+    if payment_status not in {"paid", "succeeded", "success", "complete", "completed"}:
         logger.info(
             "stripe_webhooks: checkout.session.completed skipped — payment_status=%s session=%s",
             payment_status,
@@ -537,31 +724,46 @@ def _handle_checkout_session_completed(
         )
         return False
 
-    metadata: dict[str, Any] = data_obj.get("metadata") or {}
-    unit_credits: int = 0
-    raw_credits = metadata.get("unit_credits") or metadata.get("units")
-    if raw_credits is not None:
-        try:
-            unit_credits = int(raw_credits)
-        except (TypeError, ValueError):
-            unit_credits = 0
+    if context.get("org_id"):
+        if context.get("customer_id"):
+            svc.register_customer_mapping(context["org_id"], context["customer_id"])
 
     _svc_handle_checkout_completed(
         svc,
         session_id=session_id,
-        org_id=org_id,
-        amount_total=amount_total,
-        currency=currency,
+        org_id=context["org_id"],
+        amount_total=context["amount_total"],
+        currency=context["currency"],
         mode=mode,
         unit_credits=unit_credits,
         metadata=metadata,
         raw_event_id=event_id,
     )
+
+    orchestration = _issue_paid_install_key_orchestration(
+        svc=svc,
+        event_type=StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED,
+        event_id=event_id,
+        session_id=session_id,
+        org_id=context["org_id"],
+        owner_key=context["owner_key"],
+        customer_id=context["customer_id"],
+        payment_status=payment_status,
+        unit_credits=unit_credits,
+        metadata={
+            "mode": mode,
+            "session_id": session_id,
+            "currency": context["currency"],
+            "amount_total": context["amount_total"],
+        },
+    )
+
     logger.info(
-        "stripe_webhooks: checkout.session.completed processed — session=%s org=%s units=%d",
+        "stripe_webhooks: checkout.session.completed processed — session=%s org=%s units=%d install_keys=%s",
         session_id,
-        org_id,
+        context["org_id"],
         unit_credits,
+        bool(orchestration.get("install_key_issuance")),
     )
     return True
 
@@ -705,32 +907,32 @@ def _handle_invoice_paid(
     org_id: str | None,
     svc: Any,
 ) -> bool:
-    """
-    invoice.paid
-    Renewal path: credit units if this invoice is for a subscription renewal
-    and carries a unit_credits metadata value.
-    """
+    """invoice.paid must only issue install keys when the invoice was actually paid."""
     data_obj = (event_data.get("data") or {}).get("object") or {}
+    context = _resolve_event_context(event_data, org_id, svc)
     invoice_id = data_obj.get("id") or event_id
     subscription_id = data_obj.get("subscription") or None
-    amount_paid = data_obj.get("amount_paid") or 0
-    currency = (data_obj.get("currency") or "usd").lower()
-    billing_reason = data_obj.get("billing_reason") or ""
-    metadata: dict[str, Any] = data_obj.get("metadata") or {}
+    payment_status = context["payment_status"]
+    metadata: dict[str, Any] = context["metadata"]
 
-    unit_credits: int = 0
-    raw_credits = metadata.get("unit_credits") or metadata.get("units")
-    if raw_credits is not None:
-        try:
-            unit_credits = int(raw_credits)
-        except (TypeError, ValueError):
-            unit_credits = 0
+    if payment_status not in {"paid", "succeeded", "success", "complete", "completed"}:
+        logger.info(
+            "stripe_webhooks: invoice.paid skipped — payment_status=%s invoice=%s",
+            payment_status,
+            invoice_id,
+        )
+        return False
+
+    unit_credits = _safe_int(metadata.get("unit_credits") or metadata.get("units") or 0)
+    amount_paid = data_obj.get("amount_paid") or 0
+    currency = context["currency"]
+    billing_reason = data_obj.get("billing_reason") or ""
 
     _svc_handle_invoice_paid(
         svc,
         invoice_id=invoice_id,
         subscription_id=subscription_id,
-        org_id=org_id,
+        org_id=context["org_id"],
         amount_paid=amount_paid,
         currency=currency,
         billing_reason=billing_reason,
@@ -738,13 +940,77 @@ def _handle_invoice_paid(
         metadata=metadata,
         raw_event_id=event_id,
     )
+
+    orchestration = _issue_paid_install_key_orchestration(
+        svc=svc,
+        event_type=StripeWebhookEventType.INVOICE_PAID,
+        event_id=event_id,
+        session_id=subscription_id,
+        org_id=context["org_id"],
+        owner_key=context["owner_key"],
+        customer_id=context["customer_id"],
+        payment_status=payment_status,
+        unit_credits=unit_credits,
+        metadata={
+            "invoice_id": invoice_id,
+            "subscription_id": subscription_id,
+            "billing_reason": billing_reason,
+            "currency": currency,
+            "amount_paid": amount_paid,
+        },
+    )
+
     logger.info(
-        "stripe_webhooks: invoice.paid processed — invoice=%s sub=%s org=%s units=%d billing_reason=%s",
+        "stripe_webhooks: invoice.paid processed — invoice=%s sub=%s org=%s install_keys=%s",
         invoice_id,
         subscription_id,
-        org_id,
-        unit_credits,
-        billing_reason,
+        context["org_id"],
+        bool(orchestration.get("install_key_issuance")),
+    )
+    return True
+
+
+def _handle_payment_intent_succeeded(
+    event_id: str,
+    event_data: dict[str, Any],
+    org_id: str | None,
+    svc: Any,
+) -> bool:
+    """Handle equivalent successful-payment events emitted by Stripe before invoice/checkout handlers."""
+    context = _resolve_event_context(event_data, org_id, svc)
+    data_obj = (event_data.get("data") or {}).get("object") or {}
+    payment_status = context["payment_status"]
+    if not _is_successful_payment_status(payment_status):
+        logger.info(
+            "stripe_webhooks: payment_intent.succeeded skipped — payment_status=%s intent=%s",
+            payment_status,
+            data_obj.get("id") or event_id,
+        )
+        return False
+
+    unit_credits = _safe_int(data_obj.get("metadata", {}).get("unit_credits") or data_obj.get("metadata", {}).get("units") or 0)
+    orchestration = _issue_paid_install_key_orchestration(
+        svc=svc,
+        event_type=StripeWebhookEventType.PAYMENT_INTENT_SUCCEEDED,
+        event_id=event_id,
+        session_id=data_obj.get("id") or event_id,
+        org_id=context["org_id"],
+        owner_key=context["owner_key"],
+        customer_id=context["customer_id"],
+        payment_status=payment_status,
+        unit_credits=unit_credits,
+        metadata={
+            "intent_id": data_obj.get("id"),
+            "currency": context["currency"],
+            "amount_received": data_obj.get("amount_received") or 0,
+            "customer": context["customer_id"],
+        },
+    )
+    logger.info(
+        "stripe_webhooks: payment_intent.succeeded processed — intent=%s org=%s install_keys=%s",
+        data_obj.get("id") or event_id,
+        context["org_id"],
+        bool(orchestration.get("install_key_issuance")),
     )
     return True
 
@@ -850,6 +1116,8 @@ _EVENT_HANDLERS: dict[str, Any] = {
     StripeWebhookEventType.INVOICE_PAYMENT_FAILED: _handle_invoice_payment_failed,
     StripeWebhookEventType.CUSTOMER_CREATED: _handle_customer_created,
     StripeWebhookEventType.CUSTOMER_UPDATED: _handle_customer_updated,
+    StripeWebhookEventType.PAYMENT_INTENT_SUCCEEDED: _handle_payment_intent_succeeded,
+    "charge.succeeded": _handle_payment_intent_succeeded,
 }
 
 

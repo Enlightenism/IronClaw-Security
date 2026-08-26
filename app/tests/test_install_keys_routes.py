@@ -77,6 +77,9 @@ def _make_record(
     units_consumed: int = 0,
     label: str = "",
     last_used_at: str | None = None,
+    payment_status: str = "paid",
+    entitlements_status: str = "active",
+    issued_after_payment: bool = True,
     metadata: dict[str, Any] | None = None,
 ) -> MagicMock:
     record = MagicMock(spec=InstallKeyRecord)
@@ -87,6 +90,9 @@ def _make_record(
     record.raw_key = raw_key
     record.masked_key = f"{raw_key[:10]}...{raw_key[-4:]}"
     record.active = active
+    record.payment_status = payment_status
+    record.entitlements_status = entitlements_status
+    record.issued_after_payment = issued_after_payment
     record.units_consumed = units_consumed
     record.label = label
     record.metadata = metadata or {}
@@ -98,6 +104,9 @@ def _make_record(
         "masked_key": f"{raw_key[:10]}...{raw_key[-4:]}",
         "label": label,
         "active": active,
+        "payment_status": payment_status,
+        "entitlements_status": entitlements_status,
+        "issued_after_payment": issued_after_payment,
         "units_consumed": units_consumed,
         "created_at": _TS,
         "last_used_at": last_used_at,
@@ -294,7 +303,7 @@ class TestGetMyKeys:
 
 
 class TestActivateInstallKey:
-    def test_valid_raw_key_returns_valid_true_and_correct_fields(self, client: TestClient) -> None:
+    def test_valid_raw_key_returns_masked_paid_entitlement_summary(self, client: TestClient) -> None:
         record = _make_record()
         wallet = _make_wallet(balance_units=500)
         install_reg = _make_install_registry(authenticate_result=record)
@@ -312,7 +321,31 @@ class TestActivateInstallKey:
         assert body["valid"] is True
         assert body["owner_key"] == _OWNER
         assert body["program"] == "openclaw"
+        assert body["key_id"] == _KEY_ID_OC
+        assert body["masked_key"] == record.masked_key
+        assert body["payment_status"] == "paid"
+        assert body["entitlements_status"] == "active"
+        assert body["active"] is True
+        assert body["usage_summary"]["program"] == "openclaw"
+        assert body["usage_summary"]["owner_key"] == _OWNER
+        assert _RAW_KEY_OC not in str(body)
         assert body["units_remaining"] == 500
+
+    def test_owner_key_header_mismatch_rejected_during_activation(self, client: TestClient) -> None:
+        record = _make_record(owner_key="different_owner")
+        install_reg = _make_install_registry(authenticate_result=record)
+        wallet_reg = _make_wallet_registry(wallet=_make_wallet(balance_units=250))
+        with (
+            patch(_INSTALL_REGISTRY_TARGET, return_value=install_reg),
+            patch(_WALLET_REGISTRY_TARGET, return_value=wallet_reg),
+        ):
+            resp = client.post(
+                "/install-keys/activate",
+                json={"raw_key": _RAW_KEY_OC},
+                headers={"X-Owner-Key": _OWNER},
+            )
+        assert resp.status_code == 403
+        assert "owner_key" in resp.json()["detail"].lower()
 
     def test_valid_claude_code_key_returns_correct_program(self, client: TestClient) -> None:
         record = _make_record(program="claude_code", raw_key=_RAW_KEY_CC)
@@ -330,6 +363,23 @@ class TestActivateInstallKey:
         assert resp.status_code == 200
         assert resp.json()["program"] == "claude_code"
         assert resp.json()["valid"] is True
+
+    def test_owner_key_header_is_case_insensitive_for_activation(self, client: TestClient) -> None:
+        record = _make_record(owner_key="owner_routes_case_test")
+        wallet = _make_wallet(balance_units=500)
+        install_reg = _make_install_registry(authenticate_result=record)
+        wallet_reg = _make_wallet_registry(wallet=wallet)
+        with (
+            patch(_INSTALL_REGISTRY_TARGET, return_value=install_reg),
+            patch(_WALLET_REGISTRY_TARGET, return_value=wallet_reg),
+        ):
+            resp = client.post(
+                "/install-keys/activate",
+                json={"raw_key": _RAW_KEY_OC},
+                headers={"X-Owner-Key": "OWNER_ROUTES_CASE_TEST"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["owner_key"] == "owner_routes_case_test"
 
     def test_invalid_raw_key_returns_401(self, client: TestClient) -> None:
         install_reg = _make_install_registry(authenticate_result=None)

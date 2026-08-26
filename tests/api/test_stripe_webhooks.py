@@ -1,0 +1,208 @@
+from __future__ import annotations
+
+import json
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+import app.api.stripe_webhooks as stripe_webhooks
+from app.services import stripe_service as stripe_service_mod
+
+_APP = FastAPI()
+_APP.include_router(stripe_webhooks.router)
+
+
+def _make_service() -> MagicMock:
+    service = MagicMock()
+    service._get_webhook_secret.return_value = "whsec_test"
+    service.resolve_org_from_customer.return_value = "org_123"
+    service.get_active_subscription_for_org.return_value = SimpleNamespace(
+        to_dict=lambda: {
+            "id": "sub_123",
+            "org_id": "org_123",
+            "status": "active",
+        }
+    )
+    service._issue_paid_install_keys_for_checkout.return_value = {
+        "openclaw": {
+            "key_id": "ik_openclaw_001",
+            "owner_key": "ic_org_org_123",
+            "program": "openclaw",
+            "masked_key": "ic_install_openclaw_...abcd",
+        },
+        "claude_code": {
+            "key_id": "ik_claude_001",
+            "owner_key": "ic_org_org_123",
+            "program": "claude_code",
+            "masked_key": "ic_install_claude_code_...wxyz",
+        },
+    }
+    return service
+
+
+def _event_payload(
+    *,
+    event_type: str,
+    event_id: str = "evt_123",
+    payment_status: str = "paid",
+    org_id: str = "org_123",
+    customer_id: str = "cus_123",
+    session_id: str = "cs_123",
+    metadata: dict[str, object] | None = None,
+    **overrides: object,
+) -> dict[str, object]:
+    base: dict[str, object] = {
+        "id": event_id,
+        "type": event_type,
+        "data": {
+            "object": {
+                "id": session_id,
+                "metadata": {
+                    "org_id": org_id,
+                    "unit_credits": "50",
+                    **(metadata or {}),
+                },
+                "payment_status": payment_status,
+                "mode": "payment",
+                "customer": customer_id,
+                "amount_total": 2500,
+                "currency": "usd",
+            }
+        },
+    }
+    base["data"]["object"].update(overrides)
+    return base
+
+
+def _post_event(event_data: dict[str, object], *, signature: str = "t=1,v1=test") -> object:
+    client = TestClient(_APP, raise_server_exceptions=False)
+    headers = {"stripe-signature": signature, "content-type": "application/json"}
+    return client.post("/stripe/webhook", content=json.dumps(event_data).encode("utf-8"), headers=headers)
+
+
+def test_checkout_completed_paid_event_credits_units_and_issues_install_keys() -> None:
+    stripe_webhooks.reset_processed_events()
+    service = _make_service()
+    usage_service = MagicMock()
+
+    with patch("app.api.stripe_webhooks.get_stripe_service", return_value=service), patch("app.api.stripe_webhooks._verify_stripe_signature"), patch("app.api.stripe_webhooks.get_usage_metering_service", return_value=usage_service):
+        response = _post_event(_event_payload(event_type="checkout.session.completed"))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["processed"] is True
+    assert payload["event_type"] == "checkout.session.completed"
+    service.credit_units.assert_called_once_with(
+        org_id="org_123",
+        amount=50,
+        reason=stripe_service_mod.StripeUnitEventReason.CHECKOUT_COMPLETE,
+        reference_id="cs_123",
+    )
+    service._issue_paid_install_keys_for_checkout.assert_called_once()
+    usage_service.record_action_event.assert_called()
+
+
+def test_checkout_session_completed_pending_payment_is_skipped() -> None:
+    stripe_webhooks.reset_processed_events()
+    service = _make_service()
+
+    with patch("app.api.stripe_webhooks.get_stripe_service", return_value=service), patch("app.api.stripe_webhooks._verify_stripe_signature"):
+        response = _post_event(
+            _event_payload(
+                event_type="checkout.session.completed",
+                payment_status="pending",
+            )
+        )
+
+    assert response.status_code == 200
+    assert response.json()["processed"] is False
+    service._issue_paid_install_keys_for_checkout.assert_not_called()
+    service.credit_units.assert_not_called()
+
+
+def test_invoice_paid_success_triggers_entitlement_orchestration() -> None:
+    stripe_webhooks.reset_processed_events()
+    service = _make_service()
+    usage_service = MagicMock()
+
+    with patch("app.api.stripe_webhooks.get_stripe_service", return_value=service), patch("app.api.stripe_webhooks._verify_stripe_signature"), patch("app.api.stripe_webhooks.get_usage_metering_service", return_value=usage_service):
+        response = _post_event(
+            _event_payload(
+                event_type="invoice.paid",
+                session_id="inv_123",
+                customer_id="cus_123",
+                metadata={"unit_credits": "25", "billing_reason": "subscription_cycle"},
+                amount_paid=2000,
+                billing_reason="subscription_cycle",
+            )
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["processed"] is True
+    service._issue_paid_install_keys_for_checkout.assert_called_once()
+    usage_service.record_action_event.assert_called()
+
+
+def test_invoice_payment_failed_does_not_issue_install_keys() -> None:
+    stripe_webhooks.reset_processed_events()
+    service = _make_service()
+
+    with patch("app.api.stripe_webhooks.get_stripe_service", return_value=service), patch("app.api.stripe_webhooks._verify_stripe_signature"):
+        response = _post_event(
+            _event_payload(
+                event_type="invoice.payment_failed",
+                payment_status="failed",
+                session_id="inv_124",
+                metadata={"unit_credits": "25"},
+            )
+        )
+
+    assert response.status_code == 200
+    assert response.json()["processed"] is True
+    service._issue_paid_install_keys_for_checkout.assert_not_called()
+
+
+def test_checkout_expired_marks_session_expired() -> None:
+    stripe_webhooks.reset_processed_events()
+    service = _make_service()
+
+    with patch("app.api.stripe_webhooks.get_stripe_service", return_value=service), patch("app.api.stripe_webhooks._verify_stripe_signature"):
+        response = _post_event(_event_payload(event_type="checkout.session.expired", payment_status=""))
+
+    assert response.status_code == 200
+    assert response.json()["processed"] is True
+    service.expire_checkout_session.assert_called_once_with("cs_123")
+
+
+def test_duplicate_event_is_suppressed() -> None:
+    stripe_webhooks.reset_processed_events()
+    service = _make_service()
+
+    with patch("app.api.stripe_webhooks.get_stripe_service", return_value=service), patch("app.api.stripe_webhooks._verify_stripe_signature"):
+        first = _post_event(_event_payload(event_type="checkout.session.completed", event_id="evt_dup_1"))
+        second = _post_event(_event_payload(event_type="checkout.session.completed", event_id="evt_dup_1"))
+
+    assert first.status_code == 200
+    assert first.json()["processed"] is True
+    assert second.status_code == 200
+    assert second.json()["skipped"] is True
+    assert second.json()["skip_reason"] == "Duplicate event — already processed."
+
+
+def test_invalid_json_returns_400() -> None:
+    stripe_webhooks.reset_processed_events()
+    service = _make_service()
+    client = TestClient(_APP, raise_server_exceptions=False)
+
+    with patch("app.api.stripe_webhooks.get_stripe_service", return_value=service), patch("app.api.stripe_webhooks._verify_stripe_signature"):
+        response = client.post(
+            "/stripe/webhook",
+            content=b"{not json}",
+            headers={"stripe-signature": "t=1,v1=test", "content-type": "application/json"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Stripe webhook body is not valid JSON."

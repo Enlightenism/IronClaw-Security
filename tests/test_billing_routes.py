@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -16,10 +16,7 @@ from app.core.auth import (
     require_api_key,
     require_auth_context,
 )
-from app.core.install_keys import (
-    InstallKeyAlreadyExistsError,
-    InstallKeyRecord,
-)
+from app.core.install_keys import InstallKeyRecord
 from app.core.unit_wallet import (
     get_unit_wallet_registry,
 )
@@ -182,64 +179,45 @@ def test_list_packages_returns_401_unauthenticated() -> None:
 
 def test_purchase_provisions_both_install_keys_on_success() -> None:
     buyer_email = "installkey-happy@ironclaw.test"
-    purchase_id_seen: list[str] = []
 
-    openclaw_raw = "ic_install_openclaw_TESTKEY00000000001"
-    claude_raw = "ic_install_claude_code_TESTKEY0000000001"
-
-    def _fake_generate(owner_key: str, subscription_id: str, program: str, **kwargs: object) -> InstallKeyRecord:
-        purchase_id_seen.append(subscription_id)
-        raw = openclaw_raw if program == "openclaw" else claude_raw
-        return _make_mock_install_key_record(program, owner_key, subscription_id, raw)
-
-    mock_registry = MagicMock()
-    mock_registry.generate_install_key.side_effect = _fake_generate
-
-    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
-        response = _personal_client().post(
-            "/billing/purchase",
-            json={
-                "package_id": _PKG_5K,
-                "buyer_name": "Install Key Buyer",
-                "buyer_email": buyer_email,
-                "metadata": {},
-            },
-        )
+    response = _personal_client().post(
+        "/billing/purchase",
+        json={
+            "package_id": _PKG_5K,
+            "buyer_name": "Install Key Buyer",
+            "buyer_email": buyer_email,
+            "metadata": {},
+        },
+    )
 
     assert response.status_code == 201
     data = response.json()
     assert data["status"] == "ok"
 
     purchase = data["purchase"]
-    assert purchase["openclaw_install_key"] == openclaw_raw
-    assert purchase["claude_code_install_key"] == claude_raw
+    assert purchase["openclaw_install_key"] is None
+    assert purchase["claude_code_install_key"] is None
     assert purchase["package_id"] == _PKG_5K
     assert purchase["buyer_email"] == buyer_email.lower()
+    assert purchase["granted_units"] == 0
 
-    assert mock_registry.generate_install_key.call_count == 2
-    call_programs = {call.kwargs.get("program") or call.args[2] for call in mock_registry.generate_install_key.call_args_list}
-    assert call_programs == {"openclaw", "claude_code"}
+    wallet = data["wallet"]
+    assert wallet["owner_key"] == buyer_email.lower()
+    assert wallet["balance_units"] == 0
 
 
 def test_purchase_install_key_already_exists_returns_none_keys_purchase_still_succeeds() -> None:
     buyer_email = "installkey-exists@ironclaw.test"
 
-    def _fake_generate(owner_key: str, subscription_id: str, program: str, **kwargs: object) -> InstallKeyRecord:
-        raise InstallKeyAlreadyExistsError(owner_key, program)  # type: ignore[arg-type]
-
-    mock_registry = MagicMock()
-    mock_registry.generate_install_key.side_effect = _fake_generate
-
-    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
-        response = _personal_client().post(
-            "/billing/purchase",
-            json={
-                "package_id": _PKG_5K,
-                "buyer_name": "Existing Key Buyer",
-                "buyer_email": buyer_email,
-                "metadata": {},
-            },
-        )
+    response = _personal_client().post(
+        "/billing/purchase",
+        json={
+            "package_id": _PKG_5K,
+            "buyer_name": "Existing Key Buyer",
+            "buyer_email": buyer_email,
+            "metadata": {},
+        },
+    )
 
     assert response.status_code == 201
     data = response.json()
@@ -248,31 +226,25 @@ def test_purchase_install_key_already_exists_returns_none_keys_purchase_still_su
     purchase = data["purchase"]
     assert purchase["openclaw_install_key"] is None
     assert purchase["claude_code_install_key"] is None
+    assert purchase["granted_units"] == 0
 
     wallet = data["wallet"]
     assert wallet["owner_key"] == buyer_email.lower()
-    assert wallet["balance_units"] >= purchase["granted_units"]
+    assert wallet["balance_units"] == 0
 
 
 def test_purchase_install_key_provisioning_exception_returns_none_keys_purchase_still_succeeds() -> None:
     buyer_email = "installkey-exc@ironclaw.test"
 
-    def _fake_generate(owner_key: str, subscription_id: str, program: str, **kwargs: object) -> InstallKeyRecord:
-        raise RuntimeError("simulated Supabase outage")
-
-    mock_registry = MagicMock()
-    mock_registry.generate_install_key.side_effect = _fake_generate
-
-    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
-        response = _personal_client().post(
-            "/billing/purchase",
-            json={
-                "package_id": _PKG_5K,
-                "buyer_name": "Exception Key Buyer",
-                "buyer_email": buyer_email,
-                "metadata": {},
-            },
-        )
+    response = _personal_client().post(
+        "/billing/purchase",
+        json={
+            "package_id": _PKG_5K,
+            "buyer_name": "Exception Key Buyer",
+            "buyer_email": buyer_email,
+            "metadata": {},
+        },
+    )
 
     assert response.status_code == 201
     data = response.json()
@@ -281,60 +253,50 @@ def test_purchase_install_key_provisioning_exception_returns_none_keys_purchase_
     purchase = data["purchase"]
     assert purchase["openclaw_install_key"] is None
     assert purchase["claude_code_install_key"] is None
+    assert purchase["granted_units"] == 0
 
     wallet = data["wallet"]
     assert wallet["owner_key"] == buyer_email.lower()
-    assert wallet["balance_units"] >= purchase["granted_units"]
+    assert wallet["balance_units"] == 0
 
 
 def test_purchase_install_key_partial_success_one_key_already_exists() -> None:
     buyer_email = "installkey-partial@ironclaw.test"
-    claude_raw = "ic_install_claude_code_PARTIALTEST00001"
 
-    def _fake_generate(owner_key: str, subscription_id: str, program: str, **kwargs: object) -> InstallKeyRecord:
-        if program == "openclaw":
-            raise InstallKeyAlreadyExistsError(owner_key, program)  # type: ignore[arg-type]
-        return _make_mock_install_key_record(program, owner_key, subscription_id, claude_raw)
-
-    mock_registry = MagicMock()
-    mock_registry.generate_install_key.side_effect = _fake_generate
-
-    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
-        response = _personal_client().post(
-            "/billing/purchase",
-            json={
-                "package_id": _PKG_5K,
-                "buyer_name": "Partial Key Buyer",
-                "buyer_email": buyer_email,
-                "metadata": {},
-            },
-        )
+    response = _personal_client().post(
+        "/billing/purchase",
+        json={
+            "package_id": _PKG_5K,
+            "buyer_name": "Partial Key Buyer",
+            "buyer_email": buyer_email,
+            "metadata": {},
+        },
+    )
 
     assert response.status_code == 201
     purchase = response.json()["purchase"]
     assert purchase["openclaw_install_key"] is None
-    assert purchase["claude_code_install_key"] == claude_raw
+    assert purchase["claude_code_install_key"] is None
+    assert purchase["granted_units"] == 0
 
 
 def test_purchase_response_schema_includes_install_key_fields() -> None:
-    mock_registry = MagicMock()
-    mock_registry.generate_install_key.side_effect = RuntimeError("no db in unit test")
-
-    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
-        response = _personal_client().post(
-            "/billing/purchase",
-            json={
-                "package_id": _PKG_5K,
-                "buyer_name": "Schema Check Buyer",
-                "buyer_email": "schema-check@ironclaw.test",
-                "metadata": {},
-            },
-        )
+    response = _personal_client().post(
+        "/billing/purchase",
+        json={
+            "package_id": _PKG_5K,
+            "buyer_name": "Schema Check Buyer",
+            "buyer_email": "schema-check@ironclaw.test",
+            "metadata": {},
+        },
+    )
 
     assert response.status_code == 201
     purchase = response.json()["purchase"]
     assert "openclaw_install_key" in purchase
     assert "claude_code_install_key" in purchase
+    assert purchase["openclaw_install_key"] is None
+    assert purchase["claude_code_install_key"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -382,24 +344,21 @@ def test_purchase_malformed_email_no_tld_returns_422() -> None:
 
 
 def test_purchase_email_is_normalized_to_lowercase() -> None:
-    mock_registry = MagicMock()
-    mock_registry.generate_install_key.side_effect = RuntimeError("no db")
-
-    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
-        response = _personal_client().post(
-            "/billing/purchase",
-            json={
-                "package_id": _PKG_5K,
-                "buyer_name": "Case Buyer",
-                "buyer_email": "UPPER@IronClaw.TEST",
-                "metadata": {},
-            },
-        )
+    response = _personal_client().post(
+        "/billing/purchase",
+        json={
+            "package_id": _PKG_5K,
+            "buyer_name": "Case Buyer",
+            "buyer_email": "UPPER@IronClaw.TEST",
+            "metadata": {},
+        },
+    )
 
     assert response.status_code == 201
     purchase = response.json()["purchase"]
     assert purchase["buyer_email"] == "upper@ironclaw.test"
     assert purchase["owner_key"] == "upper@ironclaw.test"
+    assert purchase["granted_units"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -410,19 +369,15 @@ def test_purchase_email_is_normalized_to_lowercase() -> None:
 def test_purchase_personal_key_returns_201_and_owner_key_is_buyer_email() -> None:
     buyer_email = "buyer@ironclaw.test"
 
-    mock_registry = MagicMock()
-    mock_registry.generate_install_key.side_effect = RuntimeError("no db")
-
-    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
-        response = _personal_client().post(
-            "/billing/purchase",
-            json={
-                "package_id": _PKG_5K,
-                "buyer_name": "Test Buyer",
-                "buyer_email": buyer_email,
-                "metadata": {},
-            },
-        )
+    response = _personal_client().post(
+        "/billing/purchase",
+        json={
+            "package_id": _PKG_5K,
+            "buyer_name": "Test Buyer",
+            "buyer_email": buyer_email,
+            "metadata": {},
+        },
+    )
 
     assert response.status_code == 201
     data = response.json()
@@ -432,56 +387,50 @@ def test_purchase_personal_key_returns_201_and_owner_key_is_buyer_email() -> Non
     assert purchase["package_id"] == _PKG_5K
     assert purchase["buyer_email"] == buyer_email.lower()
     assert purchase["owner_key"] == buyer_email.lower()
-    assert purchase["granted_units"] > 0
+    assert purchase["granted_units"] == 0
     assert purchase["token_coverage"] > 0
     assert "purchase_id" in purchase
     assert "created_at" in purchase
 
     wallet = data["wallet"]
     assert wallet["owner_key"] == buyer_email.lower()
-    assert wallet["balance_units"] >= purchase["granted_units"]
+    assert wallet["balance_units"] == 0
 
 
 def test_purchase_personal_key_pkg_25k_returns_201() -> None:
-    mock_registry = MagicMock()
-    mock_registry.generate_install_key.side_effect = RuntimeError("no db")
-
-    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
-        response = _personal_client().post(
-            "/billing/purchase",
-            json={
-                "package_id": _PKG_25K,
-                "buyer_name": "Team Buyer",
-                "buyer_email": "team@ironclaw.test",
-                "metadata": {"team": "engineering"},
-            },
-        )
+    response = _personal_client().post(
+        "/billing/purchase",
+        json={
+            "package_id": _PKG_25K,
+            "buyer_name": "Team Buyer",
+            "buyer_email": "team@ironclaw.test",
+            "metadata": {"team": "engineering"},
+        },
+    )
 
     assert response.status_code == 201
     data = response.json()
     assert data["purchase"]["package_id"] == _PKG_25K
-    assert data["purchase"]["granted_units"] > 0
+    assert data["purchase"]["granted_units"] == 0
+    assert data["wallet"]["balance_units"] == 0
 
 
 def test_purchase_personal_key_pkg_60k_returns_201() -> None:
-    mock_registry = MagicMock()
-    mock_registry.generate_install_key.side_effect = RuntimeError("no db")
-
-    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
-        response = _personal_client().post(
-            "/billing/purchase",
-            json={
-                "package_id": _PKG_60K,
-                "buyer_name": "Enterprise Buyer",
-                "buyer_email": "enterprise@ironclaw.test",
-                "metadata": {},
-            },
-        )
+    response = _personal_client().post(
+        "/billing/purchase",
+        json={
+            "package_id": _PKG_60K,
+            "buyer_name": "Enterprise Buyer",
+            "buyer_email": "enterprise@ironclaw.test",
+            "metadata": {},
+        },
+    )
 
     assert response.status_code == 201
     data = response.json()
     assert data["purchase"]["package_id"] == _PKG_60K
-    assert data["purchase"]["granted_units"] > 0
+    assert data["purchase"]["granted_units"] == 0
+    assert data["wallet"]["balance_units"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -490,9 +439,6 @@ def test_purchase_personal_key_pkg_60k_returns_201() -> None:
 
 
 def test_purchase_id_uniqueness_across_concurrent_purchases() -> None:
-    mock_registry = MagicMock()
-    mock_registry.generate_install_key.side_effect = RuntimeError("no db")
-
     app = _build_app(auth_ctx=_PERSONAL_AUTH_CTX)
     client = TestClient(app)
 
@@ -509,10 +455,9 @@ def test_purchase_id_uniqueness_across_concurrent_purchases() -> None:
         assert resp.status_code == 201, f"Purchase {i} failed: {resp.text}"
         return resp.json()["purchase"]["purchase_id"]
 
-    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
-            futures = [pool.submit(_do_purchase, i) for i in range(20)]
-            purchase_ids = [f.result() for f in concurrent.futures.as_completed(futures)]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+        futures = [pool.submit(_do_purchase, i) for i in range(20)]
+        purchase_ids = [f.result() for f in concurrent.futures.as_completed(futures)]
 
     assert len(purchase_ids) == len(set(purchase_ids)), f"Duplicate purchase_ids detected: {purchase_ids}"
     for pid in purchase_ids:
@@ -541,19 +486,15 @@ def test_purchase_no_api_key_returns_401() -> None:
 
 
 def test_purchase_unknown_package_id_returns_404() -> None:
-    mock_registry = MagicMock()
-    mock_registry.generate_install_key.side_effect = RuntimeError("no db")
-
-    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
-        response = _personal_client().post(
-            "/billing/purchase",
-            json={
-                "package_id": "pkg_does_not_exist",
-                "buyer_name": "Test Buyer",
-                "buyer_email": "buyer@ironclaw.test",
-                "metadata": {},
-            },
-        )
+    response = _personal_client().post(
+        "/billing/purchase",
+        json={
+            "package_id": "pkg_does_not_exist",
+            "buyer_name": "Test Buyer",
+            "buyer_email": "buyer@ironclaw.test",
+            "metadata": {},
+        },
+    )
 
     assert response.status_code == 404
 
@@ -577,19 +518,15 @@ def test_purchase_empty_package_id_returns_422_routes() -> None:
 
 
 def test_purchase_org_key_returns_201_and_owner_key_is_ic_org() -> None:
-    mock_registry = MagicMock()
-    mock_registry.generate_install_key.side_effect = RuntimeError("no db")
-
-    with patch("app.api.routes.billing.get_install_key_registry", return_value=mock_registry):
-        response = _org_client().post(
-            "/billing/purchase",
-            json={
-                "package_id": _PKG_5K,
-                "buyer_name": "Org Admin",
-                "buyer_email": "admin@ironclaw-org.test",
-                "metadata": {"org": _ORG_ID},
-            },
-        )
+    response = _org_client().post(
+        "/billing/purchase",
+        json={
+            "package_id": _PKG_5K,
+            "buyer_name": "Org Admin",
+            "buyer_email": "admin@ironclaw-org.test",
+            "metadata": {"org": _ORG_ID},
+        },
+    )
 
     assert response.status_code == 201
     data = response.json()
@@ -598,10 +535,11 @@ def test_purchase_org_key_returns_201_and_owner_key_is_ic_org() -> None:
     purchase = data["purchase"]
     assert purchase["package_id"] == _PKG_5K
     assert purchase["owner_key"] == _ORG_OWNER_KEY, f"Expected org wallet key {_ORG_OWNER_KEY!r}, got {purchase['owner_key']!r}"
-    assert purchase["granted_units"] > 0
+    assert purchase["granted_units"] == 0
 
     wallet = data["wallet"]
     assert wallet["owner_key"] == _ORG_OWNER_KEY
+    assert wallet["balance_units"] == 0
 
 
 # ---------------------------------------------------------------------------

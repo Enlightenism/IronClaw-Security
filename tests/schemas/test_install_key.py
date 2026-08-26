@@ -25,9 +25,17 @@ def _record_payload(**overrides: Any) -> dict[str, Any]:
         "masked_key": "ic_install_openclaw_...d3f4",
         "label": "prod-openclaw",
         "active": True,
+        "payment_status": "paid",
+        "entitlements_status": "active",
+        "issued_after_payment": True,
+        "org_id": "org_42",
+        "customer_id": "cus_001",
         "units_consumed": 12,
         "created_at": _NOW,
         "last_used_at": _NOW,
+        "revoked_at": None,
+        "purchase_reference": "purchase_ref_123",
+        "checkout_session_id": "cs_123",
         "metadata": {"env": "prod", "tier": "team"},
     }
     base.update(overrides)
@@ -44,7 +52,13 @@ def _issue_event_payload(**overrides: Any) -> dict[str, Any]:
         "program": "openclaw",
         "masked_key": "ic_install_openclaw_...d3f4",
         "label": "prod-openclaw",
+        "org_id": "org_42",
         "customer_id": "cus_001",
+        "payment_status": "paid",
+        "entitlements_status": "active",
+        "issued_after_payment": True,
+        "purchase_reference": "purchase_ref_123",
+        "checkout_session_id": "cs_123",
         "issued_at": _NOW,
         "source": "billing",
         "metadata": {"plan_code": "team-25k"},
@@ -78,6 +92,7 @@ def _dashboard_payload(**overrides: Any) -> dict[str, Any]:
         "total_keys": 2,
         "active_keys": 1,
         "total_units_consumed": 25,
+        "total_blocked_attacks": 4,
         "wallet_balance_units": 75,
         "last_used_at": _NOW,
         "keys": [
@@ -111,6 +126,13 @@ def test_install_key_record_valid_minimal_payload():
     assert record.owner_key == "user@ironclaw.test"
     assert record.program == "openclaw"
     assert record.active is True
+    assert record.payment_status == "paid"
+    assert record.entitlements_status == "active"
+    assert record.issued_after_payment is True
+    assert record.org_id == "org_42"
+    assert record.customer_id == "cus_001"
+    assert record.purchase_reference == "purchase_ref_123"
+    assert record.checkout_session_id == "cs_123"
     assert record.units_consumed == 12
     assert record.metadata["env"] == "prod"
 
@@ -185,7 +207,12 @@ def test_install_key_issue_event_valid():
     event = InstallKeyIssueEvent(**_issue_event_payload())
     assert event.event_type == "install_key_issued"
     assert event.program == "openclaw"
+    assert event.payment_status == "paid"
+    assert event.entitlements_status == "active"
+    assert event.issued_after_payment is True
     assert event.customer_id == "cus_001"
+    assert event.purchase_reference == "purchase_ref_123"
+    assert event.checkout_session_id == "cs_123"
 
 
 def test_install_key_issue_event_rejects_unknown_program():
@@ -281,6 +308,7 @@ def test_install_key_dashboard_summary_valid():
     assert summary.total_keys == 2
     assert summary.active_keys == 1
     assert summary.total_units_consumed == 25
+    assert summary.total_blocked_attacks == 4
     assert summary.wallet_balance_units == 75
     assert summary.by_program == {"openclaw": 1, "claude_code": 1}
     assert len(summary.keys) == 2

@@ -587,6 +587,71 @@ class TestHandleCheckoutCompleted:
         svc.handle_webhook_event(event)
         assert svc.get_unit_balance(_ORG).balance == 5_000
 
+    def test_checkout_completed_issues_paid_install_keys_for_org_owner(self, svc: StripeService) -> None:
+        event = _build_checkout_completed_event(unit_credits=5_000, org_id="org-install-keys")
+        result = svc.handle_webhook_event(event)
+        install_keys = result["detail"]["install_key_issuance"]
+        assert install_keys["openclaw"]["owner_key"] == "ic_org_org-install-keys"
+        assert install_keys["claude_code"]["owner_key"] == "ic_org_org-install-keys"
+        assert install_keys["openclaw"]["active"] is True
+        assert install_keys["claude_code"]["active"] is True
+
+    def test_issue_paid_install_keys_requires_successful_payment_confirmation(self, svc: StripeService) -> None:
+        result = svc._issue_paid_install_keys_for_checkout(  # noqa: SLF001
+            org_id="org-no-subscription",
+            customer_id=_CUSTOMER_ID,
+            session_id="cs_missing_entitlement",
+            unit_credits=500,
+            metadata={"payment_status": "paid"},
+        )
+        assert result["openclaw"]["owner_key"] == "ic_org_org-no-subscription"
+        assert result["claude_code"]["owner_key"] == "ic_org_org-no-subscription"
+
+    def test_issue_paid_install_keys_skips_missing_or_pending_payment_status(self, svc: StripeService) -> None:
+        assert (
+            svc._issue_paid_install_keys_for_checkout(  # noqa: SLF001
+                org_id=_ORG,
+                customer_id=_CUSTOMER_ID,
+                session_id="cs_missing_status",
+                unit_credits=500,
+                metadata={},
+            )
+            == {}
+        )
+        assert (
+            svc._issue_paid_install_keys_for_checkout(  # noqa: SLF001
+                org_id=_ORG,
+                customer_id=_CUSTOMER_ID,
+                session_id="cs_pending_status",
+                unit_credits=500,
+                metadata={"payment_status": "pending"},
+            )
+            == {}
+        )
+
+    def test_checkout_completed_pending_payment_never_issues_install_keys(self, svc: StripeService) -> None:
+        event = {
+            "id": "evt_co_pending",
+            "type": StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value,
+            "data": {
+                "object": {
+                    "id": "cs_pending_001",
+                    "mode": "payment",
+                    "customer": _CUSTOMER_ID,
+                    "payment_status": "pending",
+                    "metadata": {
+                        "org_id": "org-pending-checkout",
+                        "unit_credits": "500",
+                    },
+                }
+            },
+        }
+
+        result = svc.handle_webhook_event(event)
+        assert result["action"] == "processed"
+        assert "install_key_issuance" not in result["detail"]
+        assert svc.get_unit_balance("org-pending-checkout").balance == 0
+
     def test_checkout_completed_zero_credits_no_balance_change(self, svc: StripeService) -> None:
         event = _build_checkout_completed_event(unit_credits=0)
         svc.handle_webhook_event(event)
