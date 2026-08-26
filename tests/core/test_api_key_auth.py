@@ -29,6 +29,7 @@ from app.core.auth import (
     _coerce_permissions,
     _coerce_principal_id,
     _coerce_roles,
+    _looks_like_install_key,
     _record_is_usable,
     get_auth_context,
     require_api_key,
@@ -482,6 +483,12 @@ class TestGetApiKeyInvalidKey:
         assert resp.status_code == 401
         assert resp.json().get("error") == "invalid_api_key"
         assert "install key" in resp.json().get("message", "").lower()
+
+    def test_generic_platform_key_is_not_treated_as_install_key_candidate(self):
+        assert _looks_like_install_key("ic_personal_test_abc123") is False
+        assert _looks_like_install_key("ic_org_team_test_xyz789") is False
+        assert _looks_like_install_key("ic_configured_static_key_abc") is False
+        assert _looks_like_install_key("ic_install_openclaw_secret_value_123") is True
 
 
 class TestGetApiKeyNoKeysConfigured:

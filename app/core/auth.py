@@ -12,6 +12,7 @@ from jwt import PyJWKClient
 
 from app.core.apikeys import (
     APIKeyRecord,
+    classify_api_key,
     fingerprint_api_key,
     get_api_key_registry,
     is_api_key_expired,
@@ -519,10 +520,13 @@ def _constant_time_match(left: str | None, right: str | None) -> bool:
 
 
 def _looks_like_install_key(value: str | None) -> bool:
+    """Only the canonical install-key prefix is valid in the paid install-key trust domain.
+
+    Generic IronClaw platform keys (for example, ic_*, ic_org_*, or other internal
+    service credentials) are intentionally not treated as install-key candidates.
+    """
     normalized = _clean_optional_string(value)
-    if normalized is None:
-        return False
-    return normalized.startswith("ic_install_")
+    return classify_api_key(normalized) == "install"
 
 
 def _coerce_roles(record: APIKeyRecord | None) -> tuple[str, ...]:

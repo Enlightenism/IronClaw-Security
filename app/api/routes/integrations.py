@@ -2,11 +2,59 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 
 from app.core.auth import get_auth_context
+from app.core.install_keys import get_install_key_registry
 
 router = APIRouter(tags=["integration-routes"])
+
+
+def _resolve_install_owner(auth: Any) -> str | None:
+    if auth is None:
+        return None
+
+    org_id = str(getattr(auth, "org_id", "") or "").strip()
+    if org_id:
+        return f"ic_org_{org_id.lower()}"
+
+    principal_id = str(getattr(auth, "principal_id", "") or "").strip()
+    if principal_id:
+        return principal_id.lower()
+
+    buyer_email = str(getattr(auth, "email", "") or "").strip()
+    if buyer_email:
+        return buyer_email.lower()
+
+    return None
+
+
+def _select_paid_install_key(owner_key: str | None, program: str) -> str:
+    if not owner_key:
+        return ""
+
+    registry = get_install_key_registry()
+    try:
+        records = registry.get_keys_for_owner(owner_key)
+    except Exception:
+        return ""
+
+    for record in records:
+        if str(getattr(record, "program", "")).strip().lower() != program:
+            continue
+        if not bool(getattr(record, "active", False)):
+            continue
+        if str(getattr(record, "payment_status", "")).strip().lower() != "paid":
+            continue
+        if str(getattr(record, "entitlements_status", "")).strip().lower() != "active":
+            continue
+        if not bool(getattr(record, "issued_after_payment", False)):
+            continue
+        value = str(getattr(record, "masked_key", "") or "").strip()
+        if value:
+            return value
+
+    return ""
 
 
 @router.get("/integrations/installers")
@@ -119,16 +167,23 @@ def get_integration_observability(integration_id: str) -> dict[str, object]:
 
 @router.get("/integrations/token")
 async def get_integrations_token(auth: Any = Depends(get_auth_context)) -> dict[str, str]:
-    token = getattr(auth, "api_key", None)
+    owner_key = _resolve_install_owner(auth)
+    claude_key = _select_paid_install_key(owner_key, "claude_code")
+    openclaw_key = _select_paid_install_key(owner_key, "openclaw")
 
-    if not isinstance(token, str) or not token.strip():
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Integration token unavailable for the current auth context.",
-        )
-
-    return {
-        "user_token": token,
-        "claude_code_command": f"npx ironclaw-install --key {token} --platform claude-code",
-        "openclaw_command": f"npx ironclaw-install --key {token} --platform openclaw",
+    payload: dict[str, str] = {
+        "status": "locked",
+        "user_token": "",
+        "claude_code_command": "",
+        "openclaw_command": "",
     }
+
+    if claude_key:
+        payload["status"] = "ok"
+        payload["claude_code_command"] = f"npx ironclaw-install --key {claude_key} --platform claude-code"
+
+    if openclaw_key:
+        payload["status"] = "ok"
+        payload["openclaw_command"] = f"npx ironclaw-install --key {openclaw_key} --platform openclaw"
+
+    return payload

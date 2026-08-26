@@ -20,7 +20,10 @@ from app.core.install_keys import (
 )
 import app.core.unit_wallet as _unit_wallet_module
 from app.core.unit_wallet import UnitWalletRegistry, get_unit_wallet_registry
+from app.dependencies.hybrid_auth import HybridAuthResult
 from app.main import app as _app
+from app.routes.dashboard import _resolve_dashboard_owner
+from app.services.install_key_provisioning import provision_install_key_service
 
 # ---------------------------------------------------------------------------
 # Env baseline
@@ -373,6 +376,51 @@ class TestDashboardInstallKeySlotLogic:
             assert len(locked) == 2
         finally:
             _clear_registry_overrides()
+
+    def test_install_key_slot_requires_active_paid_record_with_issued_after_payment(self, dashboard_client: TestClient) -> None:
+        record = MagicMock()
+        record.key_id = "key-pending"
+        record.owner_key = _OWNER_KEY
+        record.program = "openclaw"
+        record.masked_key = "ic_install_openclaw_...1234"
+        record.active = True
+        record.payment_status = "pending"
+        record.entitlements_status = "active"
+        record.issued_after_payment = False
+        record.units_consumed = 0
+        record.subscription_id = "sub_123"
+        record.checkout_session_id = None
+        record.purchase_reference = None
+        record.last_used_at = None
+        record.revoked_at = None
+
+        mock_registry = MagicMock(spec=InstallKeyRegistry)
+        mock_registry.get_keys_for_owner.return_value = [record]
+        _apply_registry_overrides(mock_registry, _make_unit_wallet_registry(), _make_billing_registry())
+        try:
+            response = dashboard_client.get(
+                "/dashboard/overview",
+                params={"owner_key": _OWNER_KEY},
+            )
+            assert response.status_code == 200
+            body = response.json()
+            install_keys = body.get("install_keys", [])
+            slot = next(item for item in install_keys if item.get("program") == "openclaw")
+            assert slot["status"] == "locked"
+            assert slot["active"] is False
+        finally:
+            _clear_registry_overrides()
+
+    def test_dashboard_resolve_owner_rejects_generic_api_key_fallback(self) -> None:
+        auth_result = HybridAuthResult(
+            api_key="ic_legacy_system_key",
+            auth_context=None,
+            bearer_context=None,
+            authenticated=True,
+            auth_method="api_key",
+        )
+        owner = _resolve_dashboard_owner(None, auth_result, provision_install_key_service())
+        assert owner == "demo@ironclaw.local"
 
     def test_install_keys_active_count_matches_registry(self, dashboard_client: TestClient) -> None:
         mock_registry = _make_install_key_registry(_OWNER_KEY, locked_count=0, active_count=3, revoked_count=0)

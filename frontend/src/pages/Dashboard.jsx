@@ -1,4 +1,3 @@
-/* global process */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -252,13 +251,9 @@ const Dashboard = () => {
     if (!silent) setLoadingData(true);
 
     try {
-      const headers = {
-        "X-API-Key": process.env.REACT_APP_IRONCLAW_API_KEY,
-      };
-
       const [dash, tok] = await Promise.all([
-        api.get("/dashboard/overview", { headers }),
-        api.get("/integrations/token", { headers }),
+        api.get("/dashboard/overview"),
+        api.get("/integrations/token"),
       ]);
       setData(dash.data);
       setTokens(tok.data);
@@ -292,10 +287,7 @@ const Dashboard = () => {
       if (organizationId) {
         payload.organization_id = organizationId;
       }
-      const headers = {
-        "X-API-Key": process.env.REACT_APP_IRONCLAW_API_KEY,
-      };
-      await api.post("/events/simulate", payload, { headers });
+      await api.post("/events/simulate", payload);
     } catch (err) {
       const detail = err?.response?.data?.detail;
       if (Array.isArray(detail)) {
@@ -348,12 +340,8 @@ const Dashboard = () => {
       }
 
       try {
-        const headers = {
-          "X-API-Key": process.env.REACT_APP_IRONCLAW_API_KEY,
-        };
         const { data: status } = await api.get(
           `/billing/checkout/sessions/${encodeURIComponent(sessionId)}`,
-          { headers },
         );
 
         if (status?.payment_status === "paid") {
@@ -434,21 +422,14 @@ const Dashboard = () => {
         cancelUrl.searchParams.set("checkout", "cancel");
         cancelUrl.searchParams.set("package_id", packageId);
 
-        const headers = {
-          "X-API-Key": process.env.REACT_APP_IRONCLAW_API_KEY,
-        };
-        const { data: res } = await api.post(
-          "/billing/checkout/sessions",
-          {
-            packageId,
-            mode: "payment",
-            quantity: 1,
-            successUrl: successUrl.toString(),
-            cancelUrl: cancelUrl.toString(),
-            organizationId,
-          },
-          { headers },
-        );
+        const { data: res } = await api.post("/billing/checkout/sessions", {
+          packageId,
+          mode: "payment",
+          quantity: 1,
+          successUrl: successUrl.toString(),
+          cancelUrl: cancelUrl.toString(),
+          organizationId,
+        });
 
         const redirectUrl = res?.checkout_url || res?.url;
 
@@ -508,23 +489,30 @@ const Dashboard = () => {
     [data?.attacks, data?.daily_usage, data?.units_today, data?.units_week],
   );
 
-  const integrationCards = useMemo(
-    () => [
+  const integrationCards = useMemo(() => {
+    const hasUnlockedToken =
+      tokens?.status === "ok" ||
+      Boolean(tokens?.claude_code_command || tokens?.openclaw_command);
+
+    if (!hasUnlockedToken) {
+      return [];
+    }
+
+    return [
       {
         title: "Claude Code",
-        command: tokens?.claude_code_command,
+        command: tokens?.claude_code_command || "",
         tint: "gold",
         testid: "claude-code-card",
       },
       {
         title: "Open Claw",
-        command: tokens?.openclaw_command,
+        command: tokens?.openclaw_command || "",
         tint: "platinum",
         testid: "openclaw-card",
       },
-    ],
-    [tokens?.claude_code_command, tokens?.openclaw_command],
-  );
+    ].filter((card) => Boolean(card.command));
+  }, [tokens]);
 
   const attackFeedItems = useMemo(() => data?.attacks ?? [], [data?.attacks]);
 

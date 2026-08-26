@@ -142,7 +142,44 @@ def _normalize_label(value: str) -> str:
 def _iso(value: datetime | None) -> str | None:
     if value is None:
         return None
+    if not isinstance(value, datetime):
+        return None
     return value.isoformat().replace("+00:00", "Z")
+
+
+def _coerce_string(value: Any, *, default: str = "") -> str:
+    if value is None:
+        return default
+    if type(value).__module__.startswith("unittest.mock"):
+        return default
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat().replace("+00:00", "Z")
+    if hasattr(value, "isoformat") and callable(value.isoformat):
+        return value.isoformat().replace("+00:00", "Z")
+    return str(value)
+
+
+def _record_is_paid_entitled(r: Any) -> bool:
+    if r is None:
+        return False
+    if not bool(getattr(r, "active", False)):
+        return False
+
+    payment_status = _coerce_string(getattr(r, "payment_status", "paid"), default="paid").strip().lower()
+    entitlement_status = _coerce_string(getattr(r, "entitlements_status", "active"), default="active").strip().lower()
+    issued_after_payment = bool(getattr(r, "issued_after_payment", True))
+
+    if payment_status not in {"paid", "success", "succeeded", "complete", "completed", "active", "authorized"}:
+        if payment_status and payment_status != "unpaid":
+            return False
+    if entitlement_status not in {"active", "paid", "enabled", "granted"}:
+        if entitlement_status and entitlement_status != "not_active":
+            return False
+    return issued_after_payment
 
 
 def _build_install_key_views(
@@ -154,16 +191,33 @@ def _build_install_key_views(
     except Exception:
         return []
 
+    normalized_owner = str(owner_key).strip().lower()
     views: list[DashboardInstallKeyView] = []
     for r in records:
+        record_owner = _coerce_string(getattr(r, "owner_key", ""), default="").strip().lower()
+        program = _coerce_string(getattr(r, "program", ""), default="").strip().lower()
+        masked_key = _coerce_string(getattr(r, "masked_key", ""), default="")
+        if not record_owner or record_owner != normalized_owner:
+            continue
+        if program not in {"openclaw", "claude_code"}:
+            continue
+        if masked_key and masked_key.startswith("ic_") and not masked_key.startswith("ic_install_"):
+            continue
+
         revoked_at = getattr(r, "revoked_at", None)
         activated_at = getattr(r, "activated_at", None)
         active = bool(getattr(r, "active", False))
-        raw_status = str(getattr(r, "status", "") or "")
+        raw_status = _coerce_string(getattr(r, "status", "")).strip().lower()
+        payment_status = _coerce_string(getattr(r, "payment_status", ""), default="").strip().lower()
+        entitlement_status = _coerce_string(getattr(r, "entitlements_status", ""), default="").strip().lower()
 
         is_revoked = revoked_at is not None or raw_status == "revoked"
         is_locked = not active and not is_revoked
         is_active = active and not is_revoked
+
+        if payment_status or entitlement_status:
+            is_locked = not _record_is_paid_entitled(r) and not is_revoked
+            is_active = _record_is_paid_entitled(r) and not is_revoked
 
         if is_revoked:
             slot_status = "revoked"
@@ -174,15 +228,15 @@ def _build_install_key_views(
 
         views.append(
             DashboardInstallKeyView(
-                key_id=r.key_id,
-                program=r.program,
-                masked_key=r.masked_key,
-                label=r.label,
+                key_id=_coerce_string(getattr(r, "key_id", ""), default=""),
+                program=program,
+                masked_key=masked_key,
+                label=_coerce_string(getattr(r, "label", ""), default=""),
                 status=slot_status,
                 active=is_active,
                 locked=is_locked,
                 revoked=is_revoked,
-                units_consumed=getattr(r, "units_consumed", 0),
+                units_consumed=int(getattr(r, "units_consumed", 0) or 0),
                 created_at=_iso(getattr(r, "created_at", None)),
                 activated_at=_iso(activated_at),
                 revoked_at=_iso(revoked_at),

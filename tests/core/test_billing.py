@@ -182,6 +182,12 @@ def test_resolve_billing_owner_session_auth_returns_email() -> None:
     assert result == "user@ironclaw.test"
 
 
+def test_resolve_billing_owner_generic_auth_does_not_take_over_billing_owner() -> None:
+    ctx = SimpleNamespace(key_type="api_key", org_id="org_123", api_key="ic_system_key")
+    result = resolve_billing_owner(ctx, "Buyer@IronClaw.TEST")
+    assert result == "buyer@ironclaw.test"
+
+
 def test_resolve_billing_owner_no_key_type_attr_returns_email() -> None:
     ctx = SimpleNamespace()
     result = resolve_billing_owner(ctx, "User@IronClaw.TEST")

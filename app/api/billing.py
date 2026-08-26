@@ -418,17 +418,25 @@ def _attach_install_key_delivery(
     if install_key_record is None:
         return
 
-    masked_key = getattr(install_key_record, "masked_key", None) or getattr(install_key_record, "raw_key", None)
+    payment_status = str(getattr(install_key_record, "payment_status", "") or "").strip().lower()
+    normalized_entitlement = _normalize_entitlement_status(entitlement_status)
+    if payment_status != "paid" or normalized_entitlement != "active" or not bool(getattr(install_key_record, "issued_after_payment", False)):
+        return
+
+    masked_key = getattr(install_key_record, "masked_key", None)
+    if masked_key is None:
+        return
+
     purchase.program = program
     purchase.payment_id = payment_id
-    purchase.entitlement_status = entitlement_status
+    purchase.entitlement_status = normalized_entitlement
     purchase.install_key_id = getattr(install_key_record, "key_id", None)
     purchase.masked_key = masked_key
     purchase.usage_summary = _usage_summary_for_key(
         owner_key=owner_key,
         program=program,
         payment_id=payment_id,
-        entitlement_status=entitlement_status,
+        entitlement_status=normalized_entitlement,
     )
 
     if program == "openclaw":
@@ -486,6 +494,15 @@ def _provision_install_keys(
                     "payment_id": payment_id,
                 },
             )
+            continue
+
+        if str(getattr(record, "payment_status", "")).strip().lower() != "paid":
+            continue
+        if _normalize_entitlement_status(getattr(record, "entitlements_status", None)) != "active":
+            continue
+        if not bool(getattr(record, "issued_after_payment", False)):
+            continue
+        if not getattr(record, "masked_key", None):
             continue
 
         results.append(

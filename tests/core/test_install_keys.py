@@ -135,6 +135,14 @@ class TestInstallKeyRecordPostInit(unittest.TestCase):
         record = self._valid_record(program="claude_code")
         assert record.program == "claude_code"
 
+    def test_active_record_requires_paid_payment_status(self):
+        with self.assertRaises(ValueError):
+            self._valid_record(active=True, payment_status="pending", entitlements_status="active", issued_after_payment=True)
+
+    def test_active_record_requires_active_entitlement_status(self):
+        with self.assertRaises(ValueError):
+            self._valid_record(active=True, payment_status="paid", entitlements_status="not_active", issued_after_payment=True)
+
     def test_invalid_program_raises_value_error(self):
         with self.assertRaises(ValueError):
             self._valid_record(program="gpt4")

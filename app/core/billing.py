@@ -73,26 +73,33 @@ def _normalize_owner_value(owner_key: str | None) -> str:
     return normalized
 
 
-def resolve_billing_owner(auth_ctx: Any, buyer_email: str) -> str:
-    """Return the canonical wallet owner key for a billing operation.
+def _is_org_owner_context(auth_ctx: Any) -> bool:
+    """Return True only when the request is explicitly org-scoped.
 
-    When the request is authenticated via an org API key
-    (``auth_ctx.key_type == \"org\"`` and ``auth_ctx.org_id`` is set),
-    all unit consumption is pooled under ``ic_org_{org_id}`` so every team
-    member draws from the same shared wallet and the key format matches the
-    ``_assert_owner_access`` guard in ``app/api/billing.py``.
-
-    For every other authentication type (personal API key, session, etc.),
-    the wallet is scoped to the individual ``buyer_email``.
-
-    This function is the **single source of truth** for org vs. personal
-    wallet routing.  No other module should implement this decision.
+    Generic auth identity, system API keys, and personal/session contexts must
+    never be treated as the billing owner for paid install-key issuance. Only a
+    real org-scoped auth context with an org_id is allowed to resolve to the
+    shared org wallet.
     """
+    if auth_ctx is None:
+        return False
     key_type = str(getattr(auth_ctx, "key_type", "") or "").strip().lower()
     org_id = getattr(auth_ctx, "org_id", None)
     normalized_org_id = str(org_id).strip() if org_id is not None else ""
+    return key_type in {"org", "org_key"} and bool(normalized_org_id)
 
-    if (key_type in {"org", "org_key"}) and normalized_org_id:
+
+def resolve_billing_owner(auth_ctx: Any, buyer_email: str) -> str:
+    """Return the canonical wallet owner key for a billing operation.
+
+    Only an explicit org-auth context can route to the shared org wallet via
+    ``ic_org_{org_id}``. Every other auth context resolves to the paid buyer's
+    canonical email address, ensuring install-key generation follows the
+    subscription owner path rather than a generic system or API identity.
+    """
+    if _is_org_owner_context(auth_ctx):
+        org_id = getattr(auth_ctx, "org_id", None)
+        normalized_org_id = str(org_id).strip() if org_id is not None else ""
         return f"ic_org_{normalized_org_id.strip().lower()}"
 
     return _normalize_owner_value(buyer_email)
@@ -742,19 +749,19 @@ class BillingRegistry:
     # ---------------------------------------------------------------------------
 
     def has_active_subscription(self, owner_key: str) -> bool:
-        """Return True if owner_key has at least one active subscription.
+        """Return True only when the canonical owner has an active paid subscription.
 
-        owner_key is the canonical wallet key produced by resolve_billing_owner —
-        either a normalized email address or an ic_org_{org_id} string. The lookup
-        resolves through the customer record so both direct customer_id matches and
-        org-scoped metadata mappings are honored.
+        This is the real gate that controls install-key issuance. A customer may
+        exist without a live subscription, or have a non-active subscription, but
+        that must not permit paid install-key generation.
         """
         with self._lock:
             self._ensure_loaded()
             customer = self._resolve_customer_for_owner_key(owner_key)
             if customer is None or not customer.active:
                 return False
-            return self._get_active_subscription_unlocked(customer.customer_id) is not None
+            active_sub = self._get_active_subscription_unlocked(customer.customer_id)
+            return active_sub is not None and active_sub.status == "active" and active_sub.remaining_units > 0
 
     # ---------------------------------------------------------------------------
     # provision_install_keys_on_purchase

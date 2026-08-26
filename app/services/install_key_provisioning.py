@@ -91,6 +91,14 @@ class InstallKeyProvisioningService:
             raise ValueError(f"Unsupported install key program: {program!r}. Allowed: {list(_VALID_PROGRAMS)}")
         return program  # type: ignore[return-value]
 
+    @staticmethod
+    def _is_successful_payment_status(value: str | None) -> bool:
+        return str(value or "").strip().lower() == "paid"
+
+    @staticmethod
+    def _has_valid_paid_entitlement(record: InstallKeyRecord) -> bool:
+        return bool(getattr(record, "active", False)) and str(getattr(record, "payment_status", "")).strip().lower() == "paid" and str(getattr(record, "entitlements_status", "")).strip().lower() == "active" and bool(getattr(record, "issued_after_payment", False))
+
     def resolve_owner_key(
         self,
         *,
@@ -100,8 +108,14 @@ class InstallKeyProvisioningService:
     ) -> str:
         """Resolve the canonical wallet/owner identity for the purchaser.
 
-        This mirrors the repo's single source of truth in app.core.billing.resolve_billing_owner.
+        This mirrors the repo's single source of truth in app.core.billing.resolve_billing_owner
+        and explicitly rejects generic API-key / auth-token ownership fallbacks.
         """
+        if auth_ctx is not None:
+            key_type = str(getattr(auth_ctx, "key_type", "") or "").strip().lower()
+            if key_type in {"api_key", "system", "generic", "internal", "service", "auth_token"}:
+                raise ValueError("System API keys and generic auth tokens are not valid install-key owners.")
+
         if auth_ctx is not None:
             resolved = resolve_billing_owner(auth_ctx, (buyer_email or "").strip())
             if resolved:
@@ -125,10 +139,15 @@ class InstallKeyProvisioningService:
         normalized = self._normalize_owner_key(owner_key)
         return self._wallet_registry.get_or_create_wallet(normalized, metadata=metadata or {})
 
-    def _find_active_key(self, owner_key: str, program: ProgramCode) -> InstallKeyRecord | None:
+    def _find_reusable_key(self, owner_key: str, program: ProgramCode) -> InstallKeyRecord | None:
         for record in self._install_key_registry.get_keys_for_owner(owner_key):
-            if record.program == program and record.active:
-                return record
+            if str(getattr(record, "program", "")).strip().lower() != program:
+                continue
+            if not self._has_valid_paid_entitlement(record):
+                continue
+            if str(getattr(record, "owner_key", "")).strip().lower() != owner_key:
+                continue
+            return record
         return None
 
     def provision_for_program(
@@ -152,14 +171,22 @@ class InstallKeyProvisioningService:
         normalized_owner = self.ensure_entitled_owner(owner_key)
         canonical_program = self._normalise_program(program)
 
+        normalized_payment_status = str(payment_status or "").strip().lower()
+        normalized_entitlements_status = str(entitlements_status or "").strip().lower()
         if payment_confirmed is not None:
             confirmed = bool(payment_confirmed)
         else:
-            confirmed = str(payment_status or "").strip().lower() in {"paid", "success", "succeeded", "complete", "completed", "active"}
+            confirmed = normalized_payment_status == "paid" and normalized_entitlements_status == "active" and bool(issued_after_payment)
         if not confirmed:
+            raise ValueError("Install keys can only be provisioned after successful payment confirmation and an active paid entitlement.")
+        if normalized_payment_status != "paid":
             raise ValueError("Install keys can only be provisioned after successful payment confirmation.")
+        if normalized_entitlements_status != "active":
+            raise ValueError("Install keys require an active paid entitlement before issuance.")
+        if not bool(issued_after_payment):
+            raise ValueError("Install keys must be issued only after successful payment confirmation.")
 
-        existing = self._find_active_key(normalized_owner, canonical_program)
+        existing = self._find_reusable_key(normalized_owner, canonical_program)
         if existing is not None:
             _logger.info(
                 "install_key_reused",
@@ -205,9 +232,9 @@ class InstallKeyProvisioningService:
             "customer_id": customer_id,
             "org_id": org_id,
             "program": canonical_program,
-            "payment_status": payment_status or "paid",
-            "entitlements_status": entitlements_status or "active",
-            "issued_after_payment": bool(issued_after_payment),
+            "payment_status": "paid",
+            "entitlements_status": "active",
+            "issued_after_payment": True,
             "purchase_reference": effective_purchase_reference,
             "checkout_session_id": effective_checkout_session_id,
             "auto_provisioned": True,
@@ -221,6 +248,9 @@ class InstallKeyProvisioningService:
         }
         if metadata:
             effective_metadata.update(metadata)
+        effective_metadata["payment_status"] = "paid"
+        effective_metadata["entitlements_status"] = "active"
+        effective_metadata["issued_after_payment"] = True
 
         record = self._install_key_registry.generate_for_paid_customer(
             owner_key=normalized_owner,

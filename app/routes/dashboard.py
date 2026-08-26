@@ -166,7 +166,7 @@ def _record_is_paid_entitled(rec: Any) -> bool:
         return False
     payment = _norm_status(getattr(rec, "payment_status", "paid"), default="paid")
     entitlement = _norm_status(getattr(rec, "entitlements_status", "active"), default="active")
-    issued_after_payment = bool(getattr(rec, "issued_after_payment", True))
+    issued_after_payment = bool(getattr(rec, "issued_after_payment", False))
     if payment not in {"paid", "success", "succeeded", "complete", "completed", "active", "authorized"}:
         return False
     if entitlement != "active":
@@ -179,10 +179,17 @@ def _resolve_dashboard_owner(
     auth_result: HybridAuthResult,
     lifecycle_service: InstallKeyProvisioningService,
 ) -> str:
-    candidate = (owner_key or auth_result.principal_id or "demo@ironclaw.local").strip()
-    if not candidate:
+    if owner_key and str(owner_key).strip():
+        candidate = str(owner_key).strip().lower()
+        if "@" in candidate and not candidate.startswith("ic_"):
+            return candidate
         return "demo@ironclaw.local"
-    return lifecycle_service.resolve_owner_key(buyer_email=candidate)
+
+    principal = (auth_result.principal_id or "").strip()
+    if principal and "@" in principal and not principal.startswith("ic_"):
+        return principal.strip().lower()
+
+    return "demo@ironclaw.local"
 
 
 def _canonical_wallet_usage_for_key(
@@ -248,10 +255,14 @@ def _build_install_key_slots(
             units_consumed = int(payload["total_consumed_units"])
         blocked_attacks = int(payload.get("total_blocked_attacks", 0) or 0)
 
-        status: InstallKeySlotStatus = "active" if bool(getattr(rec, "active", False)) else "revoked"
-        if not _record_is_paid_entitled(rec):
+        if getattr(rec, "revoked_at", None) is not None:
             status = "revoked"
+        elif _record_is_paid_entitled(rec):
+            status = "active"
+        else:
+            status = "locked"
             remaining_units = 0
+
         by_program[rec.program] = InstallKeyDashboardSlot(
             key_id=rec.key_id,
             program=rec.program,

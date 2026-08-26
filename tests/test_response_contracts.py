@@ -384,6 +384,84 @@ def test_dashboard_overview_billing_registry_overridable(client: TestClient) -> 
     mock_billing_registry.get_active_subscription_for_customer.assert_called_once_with("demo@ironclaw.local")
 
 
+def test_dashboard_overview_filters_current_owner_paid_install_keys(client: TestClient) -> None:
+    owner_key = "owner@example.com"
+
+    current_key = MagicMock()
+    current_key.key_id = "ik_current_001"
+    current_key.owner_key = owner_key
+    current_key.program = "openclaw"
+    current_key.masked_key = "ic_install_openclaw_...abcd"
+    current_key.label = "OpenClaw"
+    current_key.active = True
+    current_key.status = "active"
+    current_key.payment_status = "paid"
+    current_key.entitlements_status = "active"
+    current_key.issued_after_payment = True
+    current_key.units_consumed = 7
+    current_key.created_at = None
+    current_key.activated_at = None
+    current_key.revoked_at = None
+    current_key.last_used_at = None
+
+    other_owner_key = MagicMock()
+    other_owner_key.key_id = "ik_other_001"
+    other_owner_key.owner_key = "other@example.com"
+    other_owner_key.program = "claude_code"
+    other_owner_key.masked_key = "ic_install_claude_code_...efgh"
+    other_owner_key.label = "Claude Code"
+    other_owner_key.active = True
+    other_owner_key.status = "active"
+    other_owner_key.payment_status = "paid"
+    other_owner_key.entitlements_status = "active"
+    other_owner_key.issued_after_payment = True
+    other_owner_key.units_consumed = 9
+    other_owner_key.created_at = None
+    other_owner_key.activated_at = None
+    other_owner_key.revoked_at = None
+    other_owner_key.last_used_at = None
+
+    system_api_key = MagicMock()
+    system_api_key.key_id = "key-system-001"
+    system_api_key.owner_key = owner_key
+    system_api_key.program = "system"
+    system_api_key.masked_key = "ic_abc1234567890"
+    system_api_key.label = "System API"
+    system_api_key.active = True
+    system_api_key.status = "active"
+    system_api_key.payment_status = "paid"
+    system_api_key.entitlements_status = "active"
+    system_api_key.issued_after_payment = True
+    system_api_key.units_consumed = 0
+    system_api_key.created_at = None
+    system_api_key.activated_at = None
+    system_api_key.revoked_at = None
+    system_api_key.last_used_at = None
+
+    mock_registry = MagicMock()
+    mock_registry.get_keys_for_owner.return_value = [current_key, other_owner_key, system_api_key]
+
+    app.dependency_overrides[get_unit_wallet_registry] = _make_mock_wallet_registry
+    app.dependency_overrides[get_billing_registry] = _make_mock_billing_registry
+    app.dependency_overrides[get_install_key_registry] = lambda: mock_registry
+    try:
+        response = client.get(f"/dashboard/overview?owner_key={owner_key}")
+    finally:
+        app.dependency_overrides.pop(get_unit_wallet_registry, None)
+        app.dependency_overrides.pop(get_billing_registry, None)
+        app.dependency_overrides.pop(get_install_key_registry, None)
+
+    assert response.status_code == 200
+    body = response.json()
+    keys = body.get("install_keys", [])
+    assert len(keys) == 1
+    assert keys[0]["key_id"] == "ik_current_001"
+    assert keys[0]["program"] == "openclaw"
+    assert keys[0]["status"] == "active"
+    assert body["metadata"]["owner_key"] == owner_key
+    assert all("ic_install_" in item["masked_key"] for item in keys)
+
+
 # ===========================================================================
 # /dashboard/organizations — public shape contracts
 # ===========================================================================

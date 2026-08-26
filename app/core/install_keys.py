@@ -163,10 +163,20 @@ class InstallKeyRecord:
             raise ValueError("units_consumed cannot be negative")
         if not self.owner_key or not str(self.owner_key).strip():
             raise ValueError("owner_key is required")
-        if self.active and not self.issued_after_payment:
-            raise ValueError("active install keys must be issued_after_payment=True and backed by a paid entitlement")
-        self.payment_status = _normalize_payment_status(self.payment_status)
-        self.entitlements_status = _normalize_entitlement_status(self.entitlements_status)
+
+        normalized_payment_status = _normalize_payment_status(self.payment_status)
+        normalized_entitlement_status = _normalize_entitlement_status(self.entitlements_status)
+
+        if self.active:
+            if not self.issued_after_payment:
+                raise ValueError("active install keys must be issued_after_payment=True and backed by a paid entitlement")
+            if normalized_payment_status != "paid":
+                raise ValueError("active install keys require payment_status='paid'")
+            if normalized_entitlement_status != "active":
+                raise ValueError("active install keys require entitlements_status='active'")
+
+        self.payment_status = normalized_payment_status
+        self.entitlements_status = normalized_entitlement_status
         if self.active:
             self.entitlements_status = "active"
             self.payment_status = "paid"

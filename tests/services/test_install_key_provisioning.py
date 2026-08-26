@@ -208,6 +208,37 @@ def test_provision_for_program_reuses_existing_active_key_without_duplicate_gene
     install_key_registry.generate_for_paid_customer.assert_not_called()
 
 
+def test_provision_for_program_rejects_unpaid_existing_or_invalid_entitlement_state() -> None:
+    service = InstallKeyProvisioningService(
+        install_key_registry=MagicMock(),
+        wallet_registry=MagicMock(),
+        billing_registry=MagicMock(has_active_subscription=MagicMock(return_value=True)),
+    )
+    service._install_key_registry.get_keys_for_owner.return_value = [
+        _make_install_key_record(
+            owner_key="buyer@ironclaw.test",
+            subscription_id="sub_123",
+            program="claude_code",
+            key_id="ik_invalid_001",
+            active=False,
+            payment_status="pending",
+            entitlements_status="not_active",
+            issued_after_payment=False,
+            raw_key="ic_install_claude_code_invalid_secret_abc",
+        )
+    ]
+
+    with pytest.raises(ValueError, match="successful payment confirmation"):
+        service.provision_for_program(
+            owner_key="buyer@ironclaw.test",
+            subscription_id="sub_123",
+            program="claude_code",
+            payment_status="pending",
+            entitlements_status="not_active",
+            issued_after_payment=False,
+        )
+
+
 def test_provision_for_program_rejects_unknown_program() -> None:
     service = InstallKeyProvisioningService(
         install_key_registry=MagicMock(),
@@ -324,6 +355,18 @@ def test_provision_for_purchase_requires_owner_or_identity_context() -> None:
 
     with pytest.raises(ValueError, match="Either owner_key or buyer_email/org_id/auth_ctx"):
         service.provision_for_purchase(subscription_id="sub_123")
+
+
+def test_provision_for_purchase_rejects_generic_system_api_key_owner_fallback() -> None:
+    service = InstallKeyProvisioningService(
+        install_key_registry=MagicMock(),
+        wallet_registry=MagicMock(),
+        billing_registry=MagicMock(has_active_subscription=MagicMock(return_value=True)),
+    )
+
+    auth_ctx = SimpleNamespace(key_type="api_key", org_id=None)
+    with pytest.raises(ValueError, match="System API keys and generic auth tokens are not valid install-key owners"):
+        service.resolve_owner_key(auth_ctx=auth_ctx, buyer_email="")
 
 
 # ---------------------------------------------------------------------------

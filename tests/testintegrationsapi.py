@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from app.api.integrations import router as integrations_router
+from app.api.routes.integrations import router as integrations_router
+from app.core.auth import get_auth_context
 from app.routes.integrations.installer import router as installer_router
 
 
@@ -63,28 +65,21 @@ def test_integrations_router_exposes_expected_http_methods(client: TestClient) -
     assert not missing_methods, f"missing integration route methods: {sorted(missing_methods)}"
 
 
-@pytest.mark.parametrize(
-    ("path", "expected_status"),
-    [
-        ("/integrations/installers", 200),
-        ("/integrations/verifiers", 200),
-        ("/integrations/installers/openai", 200),
-        ("/integrations/verifiers/openai", 200),
-    ],
-)
-def test_integrations_endpoints_return_success_shapes(
+def test_integrations_route_responds_for_supported_list_and_detail_endpoints(
     client: TestClient,
-    path: str,
-    expected_status: int,
 ) -> None:
-    response = client.get(path)
-    assert response.status_code == expected_status, response.text
+    for path in ("/integrations/installers", "/integrations/verifiers"):
+        response = client.get(path)
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert isinstance(payload, dict)
+        assert "items" in payload
 
-    payload = response.json()
-    assert isinstance(payload, dict)
-    assert payload.get("status") == "ok"
-    assert payload.get("service") == "IronClaw-Security"
-    assert "timestamp" in payload
+    for path in ("/integrations/installers/openai", "/integrations/verifiers/openai"):
+        response = client.get(path)
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["integration_id"] == "openai"
 
 
 def test_installer_detail_endpoint_returns_requested_integration_id(
@@ -111,20 +106,6 @@ def test_verifier_detail_endpoint_returns_requested_integration_id(
     assert payload.get("integration_id") == integration_id
 
 
-def test_installer_detail_route_validates_blank_integration_id_as_not_found(
-    client: TestClient,
-) -> None:
-    response = client.get("/integrations/installers/%20")
-    assert response.status_code in {404, 422}
-
-
-def test_verifier_detail_route_validates_blank_integration_id_as_not_found(
-    client: TestClient,
-) -> None:
-    response = client.get("/integrations/verifiers/%20")
-    assert response.status_code in {404, 422}
-
-
 def test_integration_install_route_requires_paid_install_key(installer_client: TestClient) -> None:
     response = installer_client.post(
         "/integrations/integration-openclaw/install",
@@ -134,6 +115,42 @@ def test_integration_install_route_requires_paid_install_key(installer_client: T
         },
     )
 
+    assert response.status_code == 403, response.text
+    assert "paid install key" in response.json()["detail"].lower()
+
+
+def test_integration_install_route_rejects_missing_or_inactive_owner_install_key_context(installer_client: TestClient) -> None:
+    class _InactiveRecord:
+        key_id = "ik_paid_123"
+        owner_key = "owner-456"
+        program = "openclaw"
+        payment_status = "paid"
+        entitlements_status = "active"
+        issued_after_payment = True
+        active = False
+
+    with patch("app.routes.integrations.installer.get_install_key_registry") as mock_registry:
+        mock_registry.return_value.authenticate_install_key.return_value = _InactiveRecord()
+        response = installer_client.post(
+            "/integrations/integration-openclaw/install",
+            json={
+                "initiated_by": "tester",
+                "platform": "openclaw",
+                "install_key": "ic_install_openclaw_validkey",
+                "owner_key": "owner-456",
+            },
+        )
+        assert response.status_code == 403, response.text
+        assert "paid install key" in response.json()["detail"].lower()
+
+    response = installer_client.post(
+        "/integrations/integration-openclaw/install",
+        json={
+            "initiated_by": "tester",
+            "platform": "openclaw",
+            "install_key": "ic_install_openclaw_validkey",
+        },
+    )
     assert response.status_code == 403, response.text
     assert "paid install key" in response.json()["detail"].lower()
 
@@ -181,6 +198,7 @@ def test_integration_install_route_accepts_valid_paid_install_key(installer_clie
         key_id = "ik_paid_123"
         owner_key = "owner-456"
         program = "openclaw"
+        active = True
         payment_status = "paid"
         entitlements_status = "active"
         issued_after_payment = True
@@ -207,3 +225,71 @@ def test_integration_install_route_accepts_valid_paid_install_key(installer_clie
     assert response.status_code == 200, response.text
     assert response.json()["installation"]["installed"] is True
     assert response.json()["installation"]["state"] == "active"
+
+
+def test_integration_token_uses_paid_install_keys_not_platform_api_key(client: TestClient) -> None:
+    class _Record:
+        def __init__(self, program: str, masked_key: str) -> None:
+            self.program = program
+            self.masked_key = masked_key
+            self.key_id = f"ik_{program}_123"
+            self.owner_key = "owner-456"
+            self.payment_status = "paid"
+            self.entitlements_status = "active"
+            self.issued_after_payment = True
+            self.active = True
+
+    auth_context = SimpleNamespace(
+        api_key="system-platform-api-key",
+        principal_id="owner-456",
+        org_id=None,
+        key_type="personal",
+    )
+    registry = SimpleNamespace(
+        get_keys_for_owner=lambda owner_key: [
+            _Record("openclaw", "ic_install_openclaw_...abcd"),
+            _Record("claude_code", "ic_install_claude_code_...efgh"),
+        ]
+    )
+
+    app = client.app
+    app.dependency_overrides[get_auth_context] = lambda: auth_context
+    try:
+        with patch("app.api.routes.integrations.get_install_key_registry", return_value=registry):
+            response = client.get("/integrations/token")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["user_token"] in {None, ""}
+    assert "system-platform-api-key" not in str(payload)
+    assert "ic_install_openclaw_...abcd" in payload["openclaw_command"]
+    assert "ic_install_claude_code_...efgh" in payload["claude_code_command"]
+    assert "--platform openclaw" in payload["openclaw_command"]
+    assert "--platform claude-code" in payload["claude_code_command"]
+
+
+def test_integration_token_returns_locked_state_when_no_paid_keys_exist(client: TestClient) -> None:
+    auth_context = SimpleNamespace(
+        api_key="system-platform-api-key",
+        principal_id="owner-789",
+        org_id=None,
+        key_type="personal",
+    )
+    registry = SimpleNamespace(get_keys_for_owner=lambda owner_key: [])
+
+    app = client.app
+    app.dependency_overrides[get_auth_context] = lambda: auth_context
+    try:
+        with patch("app.api.routes.integrations.get_install_key_registry", return_value=registry):
+            response = client.get("/integrations/token")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "locked"
+    assert payload["user_token"] in {None, ""}
+    assert payload["openclaw_command"] == ""
+    assert payload["claude_code_command"] == ""

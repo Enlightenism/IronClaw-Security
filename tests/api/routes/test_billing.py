@@ -17,6 +17,9 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
 os.environ.setdefault("SUPABASE_KEY", "")
 os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
+from types import SimpleNamespace
+
+from app.api.billing import _attach_install_key_delivery
 from app.core.auth import AuthContext, get_auth_context, require_api_key
 import app.core.unit_wallet as _unit_wallet_module
 from app.core.unit_wallet import (
@@ -54,6 +57,44 @@ def _make_auth_ctx(
 def _override_get_auth_context() -> AuthContext:
     """Default auth context override: personal key, no org, principal=None."""
     return _make_auth_ctx(principal_id=None, org_id=None, key_type=None)
+
+
+def test_attach_install_key_delivery_ignores_raw_secret_and_requires_paid_entitlement() -> None:
+    purchase = SimpleNamespace(
+        program=None,
+        payment_id=None,
+        entitlement_status="not_active",
+        install_key_id=None,
+        masked_key=None,
+        openclaw_install_key=None,
+        claude_code_install_key=None,
+        usage_summary={},
+    )
+    record = SimpleNamespace(
+        key_id="ik_raw_secret",
+        masked_key=None,
+        raw_key="ic_system_api_key_legacy_secret",
+        owner_key="buyer@ironclaw.test",
+        program="openclaw",
+        payment_status="pending",
+        entitlements_status="not_active",
+        issued_after_payment=False,
+    )
+
+    _attach_install_key_delivery(
+        purchase=purchase,
+        owner_key="buyer@ironclaw.test",
+        program="openclaw",
+        payment_id="pay_123",
+        entitlement_status="not_active",
+        install_key_record=record,
+    )
+
+    assert purchase.openclaw_install_key is None
+    assert purchase.claude_code_install_key is None
+    assert purchase.install_key_id is None
+    assert purchase.masked_key is None
+    assert purchase.usage_summary == {}
 
 
 @pytest.fixture(autouse=True)

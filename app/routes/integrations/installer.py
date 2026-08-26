@@ -166,6 +166,12 @@ def _require_paid_install_key(install_key: str | None, owner_key: str | None, *,
             detail="A valid paid install key is required; install key unavailable until payment is complete",
         )
 
+    if not owner_key or not str(owner_key).strip():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A valid paid install key is required; install key unavailable until payment is complete",
+        )
+
     candidate = str(install_key).strip()
     expected_program = _infer_expected_program(integration_id)
     valid_prefixes = ("ic_install_openclaw_", "ic_install_claude_code_")
@@ -191,11 +197,11 @@ def _require_paid_install_key(install_key: str | None, owner_key: str | None, *,
             detail="A valid paid install key is required; install key unavailable until payment is complete",
         )
 
-    normalized_owner = str(owner_key).strip().lower() if owner_key else None
+    normalized_owner = str(owner_key).strip().lower()
     registry = get_install_key_registry()
     record = registry.authenticate_install_key(candidate)
 
-    if record is None:
+    if record is None or not getattr(record, "active", True):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="A valid paid install key is required; install key unavailable until payment is complete",
@@ -213,7 +219,7 @@ def _require_paid_install_key(install_key: str | None, owner_key: str | None, *,
             detail="A valid paid install key is required; install key unavailable until payment is complete",
         )
 
-    if normalized_owner and record.owner_key != normalized_owner:
+    if record.owner_key != normalized_owner:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="A valid paid install key is required; install key unavailable until payment is complete",

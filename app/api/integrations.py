@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from app.core.auth import get_auth_context
+from app.core.install_keys import get_install_key_registry
 from app.services.integration_installer import get_integration_installer
 from app.services.integration_registry import get_integration_registry
 from app.services.integration_verifier import get_integration_verifier
@@ -455,11 +456,40 @@ def get_verifier(integration_id: str) -> dict[str, Any]:
 
 @router.get("/token", response_model=IntegrationTokenResponse)
 def get_integrations_token(auth: Any = Depends(get_auth_context)) -> IntegrationTokenResponse:
-    token = str(getattr(auth, "api_key", "") or "")
+    owner_key = str(getattr(auth, "principal_id", "") or "").strip().lower() or str(getattr(auth, "org_id", "") or "").strip().lower()
+    if owner_key.startswith("ic_org_"):
+        owner_key = owner_key
+    elif owner_key:
+        owner_key = owner_key.lower()
+    else:
+        owner_key = None
+
+    registry = get_install_key_registry()
+    install_keys: dict[str, str] = {}
+    if owner_key:
+        for record in registry.get_keys_for_owner(owner_key):
+            if not getattr(record, "active", False):
+                continue
+            if str(getattr(record, "payment_status", "")).strip().lower() != "paid":
+                continue
+            if str(getattr(record, "entitlements_status", "")).strip().lower() != "active":
+                continue
+            if not bool(getattr(record, "issued_after_payment", False)):
+                continue
+            program = str(getattr(record, "program", "")).strip().lower()
+            if program and program not in {"claude_code", "openclaw"}:
+                continue
+            masked = str(getattr(record, "masked_key", "") or "").strip()
+            if masked:
+                install_keys[program] = masked
+
+    claude_key = install_keys.get("claude_code", "")
+    openclaw_key = install_keys.get("openclaw", "")
+
     return IntegrationTokenResponse(
-        user_token=token,
-        claude_code_command=f"npx ironclaw-install --key {token} --platform claude-code",
-        openclaw_command=f"npx ironclaw-install --key {token} --platform openclaw",
+        user_token="",
+        claude_code_command=f"npx ironclaw-install --key {claude_key} --platform claude-code" if claude_key else "",
+        openclaw_command=f"npx ironclaw-install --key {openclaw_key} --platform openclaw" if openclaw_key else "",
     )
 
 

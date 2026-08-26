@@ -116,6 +116,7 @@ const DEFAULT_DASH = {
 };
 
 const DEFAULT_TOKENS = {
+  status: "ok",
   claude_code_command: "ironclaw --token abc",
   openclaw_command: "openclaw --token xyz",
 };
@@ -517,24 +518,16 @@ describe("handlePurchase — valid package", () => {
       await capturedWalletProps.onPurchase("pkg_5000");
     });
 
-    expect(mockApiPost).toHaveBeenCalledWith(
-      "/billing/checkout/sessions",
-      {
-        packageId: "pkg5000",
-        successUrl:
-          "http://localhost/dashboard?checkout=success&package_id=pkg5000",
-        cancelUrl:
-          "http://localhost/dashboard?checkout=cancel&package_id=pkg5000",
-        organizationId: "org-abc",
-        mode: "payment",
-        quantity: 1,
-      },
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          "X-API-Key": expect.any(String),
-        }),
-      }),
-    );
+    expect(mockApiPost).toHaveBeenCalledWith("/billing/checkout/sessions", {
+      packageId: "pkg5000",
+      successUrl:
+        "http://localhost/dashboard?checkout=success&package_id=pkg5000",
+      cancelUrl:
+        "http://localhost/dashboard?checkout=cancel&package_id=pkg5000",
+      organizationId: "org-abc",
+      mode: "payment",
+      quantity: 1,
+    });
   });
 
   it("redirects with window.location.assign when checkout response returns url", async () => {
@@ -1137,11 +1130,6 @@ describe("refresh behavior", () => {
         expect.objectContaining({
           event_type: "prompt_injection",
           organization_id: "org-abc",
-        }),
-        expect.objectContaining({
-          headers: expect.objectContaining({
-            "X-API-Key": expect.any(String),
-          }),
         }),
       );
     });
