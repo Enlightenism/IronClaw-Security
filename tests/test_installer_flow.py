@@ -116,6 +116,24 @@ def test_app_cli_install_rejects_system_api_keys_and_generic_tokens() -> None:
         fake_registry.authenticate_install_key.assert_not_called()
 
 
+def test_app_cli_install_rejects_platform_api_key_variants_before_registry_lookup() -> None:
+    from app.cli.install import run_install_command
+
+    for bad_key in ("platform-api-key", "internal_platform_api_key", "internal-platform-api-key"):
+        fake_registry = MagicMock()
+        exit_code, payload = run_install_command(
+            "openclaw",
+            key=bad_key,
+            owner_key="owner-456",
+            registry=fake_registry,
+        )
+        assert exit_code == 1
+        assert payload["status"] == "failed"
+        assert payload["key_classification"] == "generic_platform_api_key"
+        assert bad_key not in json.dumps(payload)
+        fake_registry.authenticate_install_key.assert_not_called()
+
+
 def test_app_cli_install_rejects_mismatched_program_and_owner_key() -> None:
     from app.cli.install import run_install_command
 

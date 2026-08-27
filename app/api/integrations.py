@@ -321,6 +321,38 @@ def _require_record(integration_id: str) -> Any:
     return record
 
 
+def _looks_like_generic_platform_auth(value: str | None) -> bool:
+    if value is None:
+        return False
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return False
+    generic_prefixes = (
+        "sk_",
+        "ghp_",
+        "gho_",
+        "github_pat_",
+        "token_",
+        "secret_",
+        "api_",
+        "api-key",
+        "api_key",
+        "platform-api-key",
+        "platform_api_key",
+        "system-api-key",
+        "system_api_key",
+        "internal-platform-api-key",
+        "internal_platform_api_key",
+        "bearer ",
+        "x-api-key",
+    )
+    if normalized.startswith(generic_prefixes):
+        return True
+    if normalized.startswith("ic_") and not normalized.startswith("ic_org_"):
+        return True
+    return ("platform" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized)) or ("system" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized)) or ("api" in normalized and "key" in normalized)
+
+
 def _decode_jwt_unsafe(token: str) -> tuple[dict[str, Any] | None, str | None]:
     try:
         parts = token.split(".")
@@ -456,18 +488,29 @@ def get_verifier(integration_id: str) -> dict[str, Any]:
 
 @router.get("/token", response_model=IntegrationTokenResponse)
 def get_integrations_token(auth: Any = Depends(get_auth_context)) -> IntegrationTokenResponse:
-    owner_key = str(getattr(auth, "principal_id", "") or "").strip().lower() or str(getattr(auth, "org_id", "") or "").strip().lower()
-    if owner_key.startswith("ic_org_"):
+    auth_api_key = str(getattr(auth, "api_key", "") or "").strip()
+    if auth_api_key and _looks_like_generic_platform_auth(auth_api_key):
+        return IntegrationTokenResponse(user_token="", claude_code_command="", openclaw_command="")
+
+    owner_key = str(getattr(auth, "principal_id", "") or "").strip().lower()
+    if not owner_key or _looks_like_generic_platform_auth(owner_key):
+        owner_key = str(getattr(auth, "org_id", "") or "").strip().lower()
+    if owner_key and owner_key.startswith("ic_org_"):
         owner_key = owner_key
-    elif owner_key:
-        owner_key = owner_key.lower()
-    else:
+    elif owner_key and owner_key.startswith("ic_"):
         owner_key = None
+    elif owner_key and _looks_like_generic_platform_auth(owner_key):
+        owner_key = None
+    else:
+        owner_key = owner_key or None
 
     registry = get_install_key_registry()
     install_keys: dict[str, str] = {}
     if owner_key:
         for record in registry.get_keys_for_owner(owner_key):
+            record_owner = str(getattr(record, "owner_key", "") or "").strip().lower()
+            if record_owner != owner_key:
+                continue
             if not getattr(record, "active", False):
                 continue
             if str(getattr(record, "payment_status", "")).strip().lower() != "paid":

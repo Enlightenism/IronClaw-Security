@@ -20,6 +20,10 @@ import api from "@/lib/api";
 
 const ATTACKS_PAGE_SIZE = 25;
 const VALID_PACKAGES = ["pkg5000", "pkg25000", "pkg60000"];
+const INSTALL_KEY_PROGRAMS = [
+  { program: "claude_code", label: "Claude Code", tint: "gold" },
+  { program: "openclaw", label: "OpenClaw", tint: "platinum" },
+];
 
 const MemoWalletCard = memo(WalletCard);
 const MemoSecurityAnalysis = memo(SecurityAnalysis);
@@ -489,6 +493,40 @@ const Dashboard = () => {
     [data?.attacks, data?.daily_usage, data?.units_today, data?.units_week],
   );
 
+  const installKeyCards = useMemo(() => {
+    const slotMap = new Map(
+      (Array.isArray(data?.install_keys) ? data.install_keys : []).map((slot) => [
+        slot?.program,
+        slot,
+      ]),
+    );
+
+    return INSTALL_KEY_PROGRAMS.map(({ program, label, tint }) => {
+      const slot = slotMap.get(program) ?? {
+        program,
+        status: "locked",
+        masked_key: "",
+        metadata: {},
+      };
+      const isActive = slot?.status === "active" && Boolean(slot?.masked_key);
+      const placeholderText =
+        slot?.metadata?.placeholder_text ||
+        slot?.metadata?.placeholder ||
+        slot?.metadata?.status_message ||
+        "Keys will be generated after purchase";
+
+      return {
+        program,
+        title: label,
+        tint,
+        testid: `install-key-card-${program}`,
+        status: slot?.status ?? "locked",
+        maskedKey: isActive ? slot.masked_key : "",
+        placeholderText,
+      };
+    });
+  }, [data?.install_keys]);
+
   const integrationCards = useMemo(() => {
     const hasUnlockedToken =
       tokens?.status === "ok" ||
@@ -609,16 +647,58 @@ const Dashboard = () => {
             <AttackFeed attacks={attackFeedItems} />
           </div>
 
-          <div className="grid grid-cols-1 gap-6">
-            {integrationCards.map((card) => (
-              <MemoIntegrationCard
-                key={card.testid}
-                title={card.title}
-                command={card.command}
-                tint={card.tint}
-                testid={card.testid}
-              />
-            ))}
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 gap-6">
+              {installKeyCards.map((card) => (
+                <div
+                  key={card.testid}
+                  data-testid={card.testid}
+                  className="rounded-2xl border border-white/10 bg-white/[0.03] p-5"
+                >
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <h2 className="text-lg font-semibold tracking-tight text-white">
+                      {card.title}
+                    </h2>
+                    <span
+                      className={`rounded-full border px-2 py-1 text-[10px] font-medium uppercase tracking-wide ${
+                        card.status === "active"
+                          ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-300"
+                          : "border-amber-400/30 bg-amber-500/10 text-amber-200"
+                      }`}
+                    >
+                      {card.status}
+                    </span>
+                  </div>
+
+                  {card.maskedKey ? (
+                    <div className="space-y-2">
+                      <div className="text-xs uppercase tracking-[0.2em] text-[#BFC1C2]">
+                        Active install key
+                      </div>
+                      <code className="block break-all rounded-xl border border-emerald-400/20 bg-emerald-500/5 px-3 py-2 font-mono text-sm text-emerald-200">
+                        {card.maskedKey}
+                      </code>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-[#BFC1C2]">
+                      {card.placeholderText}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-1 gap-6">
+              {integrationCards.map((card) => (
+                <MemoIntegrationCard
+                  key={card.testid}
+                  title={card.title}
+                  command={card.command}
+                  tint={card.tint}
+                  testid={card.testid}
+                />
+              ))}
+            </div>
           </div>
         </div>
       </main>

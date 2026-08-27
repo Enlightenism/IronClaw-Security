@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
+from app.api.integrations import router as api_integrations_router
 from app.api.routes.integrations import router as integrations_router
 from app.core.auth import get_auth_context
 from app.routes.integrations.installer import router as installer_router
@@ -192,6 +193,18 @@ def test_integration_install_route_rejects_generic_and_mismatched_keys(installer
         assert response.status_code == 403, response.text
         assert "paid install key" in response.json()["detail"].lower()
 
+        response = installer_client.post(
+            "/integrations/integration-openclaw/install",
+            json={
+                "initiated_by": "tester",
+                "platform": "claude-code",
+                "install_key": "ic_install_openclaw_validkey",
+                "owner_key": "owner-456",
+            },
+        )
+        assert response.status_code == 403, response.text
+        assert "paid install key" in response.json()["detail"].lower()
+
 
 def test_integration_install_route_accepts_valid_paid_install_key(installer_client: TestClient) -> None:
     class _Record:
@@ -268,6 +281,80 @@ def test_integration_token_uses_paid_install_keys_not_platform_api_key(client: T
     assert "ic_install_claude_code_...efgh" in payload["claude_code_command"]
     assert "--platform openclaw" in payload["openclaw_command"]
     assert "--platform claude-code" in payload["claude_code_command"]
+
+
+def test_api_integrations_token_ignores_generic_platform_auth_even_with_registry_data() -> None:
+    api_app = FastAPI()
+    api_app.include_router(api_integrations_router)
+    with TestClient(api_app) as api_client:
+        auth_context = SimpleNamespace(
+            api_key="system-platform-api-key",
+            principal_id="system-platform-api-key",
+            org_id=None,
+            key_type="personal",
+        )
+        registry = SimpleNamespace(
+            get_keys_for_owner=lambda owner_key: [
+                SimpleNamespace(
+                    owner_key="owner-789",
+                    program="openclaw",
+                    active=True,
+                    payment_status="paid",
+                    entitlements_status="active",
+                    issued_after_payment=True,
+                    masked_key="ic_install_openclaw_...wxyz",
+                ),
+                SimpleNamespace(
+                    owner_key="owner-789",
+                    program="claude_code",
+                    active=True,
+                    payment_status="paid",
+                    entitlements_status="active",
+                    issued_after_payment=True,
+                    masked_key="ic_install_claude_code_...qrst",
+                ),
+            ]
+        )
+
+        api_app.dependency_overrides[get_auth_context] = lambda: auth_context
+        try:
+            with patch("app.api.integrations.get_install_key_registry", return_value=registry):
+                response = api_client.get("/integrations/token")
+        finally:
+            api_app.dependency_overrides.clear()
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["user_token"] == ""
+    assert payload["openclaw_command"] == ""
+    assert payload["claude_code_command"] == ""
+    assert "system-platform-api-key" not in str(payload)
+
+
+def test_integration_token_rejects_generic_platform_api_key_owner_fallback(client: TestClient) -> None:
+    auth_context = SimpleNamespace(
+        api_key="system-platform-api-key",
+        principal_id="ic_legacy_system_key",
+        org_id=None,
+        key_type="personal",
+    )
+    registry = SimpleNamespace(get_keys_for_owner=lambda owner_key: [])
+
+    app = client.app
+    app.dependency_overrides[get_auth_context] = lambda: auth_context
+    try:
+        with patch("app.api.routes.integrations.get_install_key_registry", return_value=registry):
+            response = client.get("/integrations/token")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "locked"
+    assert payload["user_token"] in {None, ""}
+    assert payload["openclaw_command"] == ""
+    assert payload["claude_code_command"] == ""
+    assert "system-platform-api-key" not in str(payload)
 
 
 def test_integration_token_returns_locked_state_when_no_paid_keys_exist(client: TestClient) -> None:

@@ -150,6 +150,7 @@ def _iso(value: datetime | None) -> str | None:
 
 
 _PROGRAMS: tuple[str, ...] = ("openclaw", "claude_code")
+_PLACEHOLDER_PURCHASE_MESSAGE = "Keys will be generated after purchase"
 
 
 def _norm_status(value: Any, *, default: str = "unpaid") -> str:
@@ -263,6 +264,25 @@ def _build_install_key_slots(
             status = "locked"
             remaining_units = 0
 
+        metadata: dict[str, Any] = {
+            "subscription_id": getattr(rec, "subscription_id", None),
+            "checkout_session_id": getattr(rec, "checkout_session_id", None),
+            "purchase_reference": getattr(rec, "purchase_reference", None),
+            "payment_status": _norm_status(getattr(rec, "payment_status", "unpaid"), default="unpaid"),
+            "entitlements_status": _norm_status(getattr(rec, "entitlements_status", "not_active"), default="not_active"),
+            "issued_after_payment": bool(getattr(rec, "issued_after_payment", False)),
+            "owner_key": getattr(rec, "owner_key", normalized_owner),
+            "usage_summary": payload,
+        }
+        if status == "locked":
+            metadata.update(
+                {
+                    "placeholder": _PLACEHOLDER_PURCHASE_MESSAGE,
+                    "placeholder_text": _PLACEHOLDER_PURCHASE_MESSAGE,
+                    "status_message": _PLACEHOLDER_PURCHASE_MESSAGE,
+                }
+            )
+
         by_program[rec.program] = InstallKeyDashboardSlot(
             key_id=rec.key_id,
             program=rec.program,
@@ -277,16 +297,7 @@ def _build_install_key_slots(
             entitlements_status=_norm_status(getattr(rec, "entitlements_status", "not_active"), default="not_active"),
             issued_after_payment=bool(getattr(rec, "issued_after_payment", False)),
             last_used_at=_iso(getattr(rec, "last_used_at", None)),
-            metadata={
-                "subscription_id": getattr(rec, "subscription_id", None),
-                "checkout_session_id": getattr(rec, "checkout_session_id", None),
-                "purchase_reference": getattr(rec, "purchase_reference", None),
-                "payment_status": _norm_status(getattr(rec, "payment_status", "unpaid"), default="unpaid"),
-                "entitlements_status": _norm_status(getattr(rec, "entitlements_status", "not_active"), default="not_active"),
-                "issued_after_payment": bool(getattr(rec, "issued_after_payment", False)),
-                "owner_key": getattr(rec, "owner_key", normalized_owner),
-                "usage_summary": payload,
-            },
+            metadata=metadata,
         )
 
     slots: list[InstallKeyDashboardSlot] = []
@@ -309,7 +320,12 @@ def _build_install_key_slots(
                 entitlements_status="not_active",
                 issued_after_payment=False,
                 last_used_at=None,
-                metadata={},
+                metadata={
+                    "placeholder": _PLACEHOLDER_PURCHASE_MESSAGE,
+                    "placeholder_text": _PLACEHOLDER_PURCHASE_MESSAGE,
+                    "status_message": _PLACEHOLDER_PURCHASE_MESSAGE,
+                    "owner_key": normalized_owner,
+                },
             )
         )
     return slots

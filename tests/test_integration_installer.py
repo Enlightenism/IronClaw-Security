@@ -119,6 +119,54 @@ def test_install_integration_rejects_generic_system_keys_before_registry_lookup(
         mock_registry.return_value.authenticate_install_key.assert_not_called()
 
 
+def test_install_integration_rejects_revoked_or_inactive_paid_key():
+    registry = initialize_integration_registry()
+
+    class _RevokedKeyRecord:
+        def __init__(self) -> None:
+            self.key_id = "ik_revoked_123"
+            self.owner_key = "owner-123"
+            self.program = "claude_code"
+            self.payment_status = "paid"
+            self.entitlements_status = "active"
+            self.active = False
+            self.issued_after_payment = True
+
+    with patch("app.services.integration_installer.get_install_key_registry") as mock_registry:
+        mock_registry.return_value.authenticate_install_key.return_value = _RevokedKeyRecord()
+        result = install_integration(
+            registry,
+            "integration-claude-code",
+            requested_by="tester",
+            install_key="ic_install_claude_code_revokedkey",
+            owner_key="owner-123",
+        )
+
+    assert result.installed is False
+    assert result.status_after == "blocked"
+    assert any(step.name == "validate-paid-install-key" and step.state == "failed" for step in result.steps)
+    assert result.steps[-1].metadata["install_key_valid"] is False
+
+
+def test_install_integration_rejects_mismatched_owner_for_valid_key():
+    registry = initialize_integration_registry()
+
+    with patch("app.services.integration_installer.get_install_key_registry") as mock_registry:
+        mock_registry.return_value.authenticate_install_key.return_value = _fake_paid_install_key(owner_key="owner-456")
+        result = install_integration(
+            registry,
+            "integration-openclaw",
+            requested_by="tester",
+            install_key="ic_install_openclaw_validkey",
+            owner_key="owner-123",
+        )
+
+    assert result.installed is False
+    assert result.status_after == "blocked"
+    assert any(step.name == "validate-paid-install-key" and step.state == "failed" for step in result.steps)
+    assert result.steps[-1].metadata["supplied_owner_key"] == "owner-123"
+
+
 def test_install_integration_raises_for_unknown_integration():
     registry = initialize_integration_registry()
 

@@ -189,6 +189,20 @@ describe("request interceptor", () => {
     expect(result.headers.Authorization).toBeUndefined();
     expect(result.headers["X-Org-Id"]).toBeUndefined();
   });
+
+  it("does not set X-API-Key from static platform env values", async () => {
+    process.env.REACT_APP_IRONCLAW_API_KEY = "ic_platform_static_key";
+    process.env.REACT_APP_PLATFORM_API_KEY = "platform-api-legacy";
+    global.localStorage.getItem = jest.fn(() => null);
+
+    const config = { headers: { "X-API-Key": "old-static-key" } };
+    const result = await capturedRequestHandler(config);
+
+    expect(result.headers["X-API-Key"]).toBeUndefined();
+
+    delete process.env.REACT_APP_IRONCLAW_API_KEY;
+    delete process.env.REACT_APP_PLATFORM_API_KEY;
+  });
 });
 
 describe("401 response interceptor", () => {

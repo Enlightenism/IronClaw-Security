@@ -260,6 +260,48 @@ def test_fulfill_purchase_requires_confirmed_payment_and_active_entitlement() ->
     mock_registry.generate_install_key.assert_not_called()
 
 
+def test_fulfill_purchase_rejects_generic_platform_api_key_context() -> None:
+    with _client_for(_PERSONAL_AUTH) as c:
+        create = c.post(
+            "/billing/packages/purchase",
+            json={
+                "package_id": "pkg_5000",
+                "buyer_name": "Platform Buyer",
+                "buyer_email": "customer@example.com",
+                "metadata": {},
+            },
+        )
+        purchase_id = create.json()["purchase"]["purchase_id"]
+
+    platform_auth = AuthContext(
+        api_key="platform-api-key",
+        principal_type="platform",
+        principal_id="platform-123",
+        session_id=None,
+        org_id=None,
+        authenticated=True,
+        auth_source="configured",
+        auth_method="api_key",
+        key_type="platform",
+    )
+
+    with _client_for(platform_auth) as c:
+        mock_registry = MagicMock()
+        mock_registry.get_keys_for_owner.return_value = []
+
+        with patch("app.api.billing.get_install_key_registry", return_value=mock_registry):
+            fulfill = c.post(
+                f"/billing/packages/{purchase_id}/fulfill",
+                params={"payment_id": "pay_platform_123", "payment_status": "paid", "entitlement_status": "active"},
+            )
+
+    assert fulfill.status_code == 403
+    body = fulfill.json()
+    assert body["detail"]["reason"] == "install_key_requires_customer_owner_context"
+    assert body["detail"]["owner_key"] == "customer@example.com"
+    mock_registry.generate_install_key.assert_not_called()
+
+
 def test_wallet_debit_requires_units_or_tokens() -> None:
     with _client_for(_PERSONAL_AUTH) as c:
         response = c.post(

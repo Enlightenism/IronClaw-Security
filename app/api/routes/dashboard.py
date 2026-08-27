@@ -193,6 +193,8 @@ def _build_install_key_views(
 
     normalized_owner = str(owner_key).strip().lower()
     views: list[DashboardInstallKeyView] = []
+    seen_programs: set[str] = set()
+
     for r in records:
         record_owner = _coerce_string(getattr(r, "owner_key", ""), default="").strip().lower()
         program = _coerce_string(getattr(r, "program", ""), default="").strip().lower()
@@ -243,6 +245,32 @@ def _build_install_key_views(
                 last_used_at=_iso(getattr(r, "last_used_at", None)),
             )
         )
+        seen_programs.add(program)
+
+    if not views:
+        return []
+
+    if len(views) == 1:
+        for program in ("openclaw", "claude_code"):
+            if program in seen_programs:
+                continue
+            views.append(
+                DashboardInstallKeyView(
+                    key_id="",
+                    program=program,
+                    masked_key="",
+                    label="",
+                    status="locked",
+                    active=False,
+                    locked=True,
+                    revoked=False,
+                    units_consumed=0,
+                    created_at=None,
+                    activated_at=None,
+                    revoked_at=None,
+                    last_used_at=None,
+                )
+            )
     return views
 
 

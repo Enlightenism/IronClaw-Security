@@ -9,6 +9,9 @@ from app.core.install_keys import get_install_key_registry
 
 router = APIRouter(tags=["integration-routes"])
 
+_PAID_PAYMENT_STATUSES = {"paid", "success", "succeeded", "complete", "completed", "active", "authorized"}
+_ACTIVE_ENTITLEMENT_STATUSES = {"active", "paid", "enabled", "granted"}
+
 
 def _resolve_install_owner(auth: Any) -> str | None:
     if auth is None:
@@ -16,17 +19,58 @@ def _resolve_install_owner(auth: Any) -> str | None:
 
     org_id = str(getattr(auth, "org_id", "") or "").strip()
     if org_id:
-        return f"ic_org_{org_id.lower()}"
+        owner_key = f"ic_org_{org_id.lower()}"
+        if not owner_key.startswith("ic_"):
+            return None
+        return owner_key
 
     principal_id = str(getattr(auth, "principal_id", "") or "").strip()
     if principal_id:
+        if principal_id.startswith("ic_"):
+            return None
         return principal_id.lower()
 
     buyer_email = str(getattr(auth, "email", "") or "").strip()
     if buyer_email:
+        if buyer_email.startswith("ic_"):
+            return None
         return buyer_email.lower()
 
     return None
+
+
+def _is_valid_install_key_record(record: Any, *, owner_key: str, program: str) -> bool:
+    if record is None:
+        return False
+
+    record_owner = str(getattr(record, "owner_key", "") or "").strip().lower()
+    if record_owner != owner_key:
+        return False
+
+    if str(getattr(record, "program", "")).strip().lower() != program:
+        return False
+
+    if not bool(getattr(record, "active", False)):
+        return False
+
+    payment_status = str(getattr(record, "payment_status", "") or "").strip().lower()
+    if payment_status not in _PAID_PAYMENT_STATUSES:
+        return False
+
+    entitlements_status = str(getattr(record, "entitlements_status", "") or "").strip().lower()
+    if entitlements_status not in _ACTIVE_ENTITLEMENT_STATUSES:
+        return False
+
+    if not bool(getattr(record, "issued_after_payment", False)):
+        return False
+
+    masked_key = str(getattr(record, "masked_key", "") or "").strip()
+    if not masked_key:
+        return False
+    if not masked_key.startswith("ic_install_"):
+        return False
+
+    return True
 
 
 def _select_paid_install_key(owner_key: str | None, program: str) -> str:
@@ -40,18 +84,10 @@ def _select_paid_install_key(owner_key: str | None, program: str) -> str:
         return ""
 
     for record in records:
-        if str(getattr(record, "program", "")).strip().lower() != program:
-            continue
-        if not bool(getattr(record, "active", False)):
-            continue
-        if str(getattr(record, "payment_status", "")).strip().lower() != "paid":
-            continue
-        if str(getattr(record, "entitlements_status", "")).strip().lower() != "active":
-            continue
-        if not bool(getattr(record, "issued_after_payment", False)):
+        if not _is_valid_install_key_record(record, owner_key=owner_key, program=program):
             continue
         value = str(getattr(record, "masked_key", "") or "").strip()
-        if value:
+        if value and value.startswith("ic_install_"):
             return value
 
     return ""

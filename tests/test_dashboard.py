@@ -22,7 +22,7 @@ import app.core.unit_wallet as _unit_wallet_module
 from app.core.unit_wallet import UnitWalletRegistry, get_unit_wallet_registry
 from app.dependencies.hybrid_auth import HybridAuthResult
 from app.main import app as _app
-from app.routes.dashboard import _resolve_dashboard_owner
+from app.routes.dashboard import _build_install_key_slots, _resolve_dashboard_owner
 from app.services.install_key_provisioning import provision_install_key_service
 
 # ---------------------------------------------------------------------------
@@ -509,6 +509,21 @@ class TestDashboardInstallKeySlotLogic:
             assert install_keys == []
         finally:
             _clear_registry_overrides()
+
+    def test_install_keys_show_placeholder_before_purchase(self) -> None:
+        mock_registry = MagicMock(spec=InstallKeyRegistry)
+        mock_registry.get_keys_for_owner.return_value = []
+        slots = _build_install_key_slots(
+            _OWNER_KEY,
+            mock_registry,
+            _make_unit_wallet_registry(),
+            provision_install_key_service(),
+        )
+
+        assert len(slots) == 2
+        assert all(slot.status == "locked" for slot in slots)
+        assert all(slot.masked_key is None for slot in slots)
+        assert any("Keys will be generated after purchase" in str(slot.metadata.get("placeholder_text") or slot.metadata.get("placeholder") or slot.metadata.get("status_message") or "") for slot in slots)
 
     def test_install_keys_each_entry_has_required_fields(self, dashboard_client: TestClient) -> None:
         mock_registry = _make_install_key_registry(_OWNER_KEY, locked_count=1, active_count=1, revoked_count=0)

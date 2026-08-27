@@ -4,6 +4,7 @@ import argparse
 import json
 from typing import Any
 
+from app.core.install_key_formats import get_install_key_format_registry
 from app.core.install_keys import get_install_key_registry
 from app.core.unit_wallet import get_unit_wallet_registry
 from app.services.integration_installer import (
@@ -16,7 +17,42 @@ from app.services.integration_registry import (
     initialize_integration_registry,
 )
 
-_VALID_INSTALL_KEY_PREFIXES = ("ic_install_openclaw_", "ic_install_claude_code_")
+_GENERIC_PLATFORM_KEY_PATTERNS = (
+    "platform_api_key",
+    "platform-api-key",
+    "internal_platform_api_key",
+    "internal-platform-api-key",
+    "system_api_key",
+    "system-api-key",
+    "api_key",
+    "api-key",
+    "secret_key",
+    "secret-key",
+    "sk_live_",
+    "sk_test_",
+    "ghp_",
+    "gho_",
+    "github_pat_",
+    "token_",
+    "bearer ",
+)
+
+
+def _is_generic_platform_api_key(candidate: str | None) -> bool:
+    if candidate is None:
+        return False
+    normalized = str(candidate).strip().lower()
+    if not normalized:
+        return False
+    if any(normalized.startswith(pattern) for pattern in _GENERIC_PLATFORM_KEY_PATTERNS):
+        return True
+    if "platform" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized):
+        return True
+    if "system" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized):
+        return True
+    if "api" in normalized and "key" in normalized and normalized not in {"api_key"}:
+        return True
+    return False
 
 
 def _infer_install_program(integration_id: str | None) -> str | None:
@@ -50,20 +86,20 @@ def _normalize_install_key(raw_key: str | None, *, expected_program: str | None 
     candidate = str(raw_key).strip()
     if not candidate:
         return None
+    if _is_generic_platform_api_key(candidate):
+        return None
 
-    expected_prefixes: tuple[str, ...]
-    if expected_program is None:
-        expected_prefixes = _VALID_INSTALL_KEY_PREFIXES
-    else:
-        normalized_program = str(expected_program).strip().lower()
-        if normalized_program == "openclaw":
-            expected_prefixes = ("ic_install_openclaw_",)
-        elif normalized_program == "claude_code":
-            expected_prefixes = ("ic_install_claude_code_",)
-        else:
-            expected_prefixes = _VALID_INSTALL_KEY_PREFIXES
+    format_registry = get_install_key_format_registry()
+    normalized_program = format_registry.normalize_program(expected_program) if expected_program else None
+    if normalized_program is None:
+        if candidate.startswith("ic_install_"):
+            detected = format_registry.parse_program_from_key(candidate)
+            if detected is not None:
+                return candidate
+        return None
 
-    if not candidate.startswith(expected_prefixes):
+    spec = format_registry.get_spec(normalized_program)
+    if not spec.matches_key(candidate):
         return None
     return candidate
 
@@ -77,6 +113,19 @@ def _validate_paid_cli_install_key(
     expected_program = _infer_install_program(integration_id)
     normalized_install_key = _normalize_install_key(install_key, expected_program=expected_program)
     normalized_owner_key = _normalize_owner_key(owner_key)
+
+    if _is_generic_platform_api_key(install_key):
+        return (
+            False,
+            {
+                "install_key_required": True,
+                "install_key_valid": False,
+                "reason": "install key unavailable until payment is complete",
+                "owner_key": normalized_owner_key,
+                "key_classification": "generic_platform_api_key",
+            },
+            "install key unavailable until payment is complete",
+        )
 
     if not normalized_install_key:
         return (

@@ -152,6 +152,64 @@ def test_event_requires_matching_owner_key_for_usage_event(client: TestClient) -
     assert "does not belong" in response.json()["detail"]
 
 
+def test_canonical_usage_and_reporting_events_bind_to_install_key_owner(client: TestClient) -> None:
+    owner_key = "owner_evt_canonical_001"
+    wallet_registry = get_unit_wallet_registry()
+    wallet_registry.credit_units(owner_key, 100, metadata={"seeded": True})
+    record = _make_paid_key(owner_key=owner_key)
+
+    usage_response = client.post(
+        "/install-key-events/ingest",
+        json={
+            "event_id": "evt_usage_canonical_001",
+            "event_type": "install_key_usage_recorded",
+            "key_id": record.key_id,
+            "owner_key": owner_key,
+            "program": "openclaw",
+            "units": 4,
+            "action_type": "prompt",
+            "metadata": {"source": "runtime"},
+        },
+    )
+    assert usage_response.status_code == 200, usage_response.text
+    updated_record = get_install_key_registry().get_key_by_id(record.key_id)
+    assert updated_record is not None
+    assert updated_record.units_consumed == 4
+
+    report_response = client.post(
+        "/install-key-events/ingest",
+        json={
+            "event_id": "evt_report_canonical_001",
+            "event_type": "install_key_reported",
+            "key_id": record.key_id,
+            "owner_key": owner_key,
+            "program": "openclaw",
+            "action_type": "report",
+            "metadata": {"source": "dashboard"},
+        },
+    )
+    assert report_response.status_code == 200, report_response.text
+    wallet = wallet_registry.get_wallet(owner_key)
+    assert wallet is not None
+    assert wallet.metadata["dashboard_sync"]["install_key_reported"]["key_id"] == record.key_id
+    assert wallet.install_key_usage[record.key_id].metadata["last_event_type"] == "install_key_reported"
+
+    generic_response = client.post(
+        "/install-key-events/ingest",
+        json={
+            "event_id": "evt_generic_owner_rejected_001",
+            "event_type": "install_key_usage_recorded",
+            "key_id": record.key_id,
+            "owner_key": "system-platform-api-key",
+            "program": "openclaw",
+            "units": 1,
+            "metadata": {"source": "runtime"},
+        },
+    )
+    assert generic_response.status_code == 403, generic_response.text
+    assert "generic platform auth credential" in generic_response.json()["detail"]
+
+
 def test_missing_key_id_for_blocked_event_is_rejected(client: TestClient) -> None:
     response = client.post(
         "/install-key-events/ingest",

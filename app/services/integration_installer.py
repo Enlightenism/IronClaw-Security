@@ -114,6 +114,38 @@ def _extract_owner_key(extra_metadata: dict[str, Any] | None, *, explicit_owner_
     return None
 
 
+def _looks_like_generic_auth_key(candidate: str) -> bool:
+    normalized = str(candidate).strip().lower()
+    if not normalized:
+        return False
+    generic_prefixes = (
+        "sk_",
+        "ghp_",
+        "gho_",
+        "github_pat_",
+        "token_",
+        "secret_",
+        "api_",
+        "api-key",
+        "api_key",
+        "platform-api-key",
+        "platform_api_key",
+        "internal-platform-api-key",
+        "internal_platform_api_key",
+        "system-api-key",
+        "system_api_key",
+        "bearer ",
+        "x-api-key",
+    )
+    if normalized.startswith(generic_prefixes):
+        return True
+    if ("api" in normalized and "key" in normalized) or ("auth" in normalized and "token" in normalized):
+        return True
+    if "platform" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized):
+        return True
+    return False
+
+
 def _infer_expected_program(record: IntegrationRecord) -> str | None:
     slug = (record.slug or "").strip().lower()
     platform = (record.platform or "").strip().lower()
@@ -147,18 +179,7 @@ def _validate_paid_install_key_for_installation(*, record: IntegrationRecord, in
     elif expected_program == "claude_code":
         valid_prefixes = ("ic_install_claude_code_",)
 
-    if (
-        candidate.startswith("ic_org_")
-        or candidate.startswith("sk_")
-        or candidate.startswith("ghp_")
-        or candidate.startswith("gho_")
-        or candidate.startswith("github_pat_")
-        or candidate.startswith("token_")
-        or candidate.startswith("secret_")
-        or candidate.startswith("api_")
-        or (candidate.startswith("ic_") and not candidate.startswith(valid_prefixes))
-        or not candidate.startswith(valid_prefixes)
-    ):
+    if candidate.startswith("ic_org_") or _looks_like_generic_auth_key(candidate) or (candidate.startswith("ic_") and not candidate.startswith(valid_prefixes)) or not candidate.startswith(valid_prefixes):
         return (
             False,
             {
@@ -176,6 +197,21 @@ def _validate_paid_install_key_for_installation(*, record: IntegrationRecord, in
         return (
             False,
             {"install_key_required": True, "install_key_valid": False, "reason": "install key unavailable until payment is complete", "key_classification": "unrecognized_or_inactive"},
+            "install key unavailable until payment is complete",
+        )
+
+    if not getattr(validated_record, "active", False):
+        return (
+            False,
+            {
+                "install_key_required": True,
+                "install_key_valid": False,
+                "reason": "install key unavailable until payment is complete",
+                "payment_status": getattr(validated_record, "payment_status", "unknown"),
+                "entitlements_status": getattr(validated_record, "entitlements_status", "unknown"),
+                "issued_after_payment": getattr(validated_record, "issued_after_payment", False),
+                "active": False,
+            },
             "install key unavailable until payment is complete",
         )
 

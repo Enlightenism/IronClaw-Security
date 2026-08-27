@@ -850,6 +850,68 @@ describe("dashboard structure", () => {
     expect(capturedWalletProps.balance).toBe(9999);
   });
 
+  it("renders install-key placeholder cards until a paid active key exists", async () => {
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard/overview") {
+        return Promise.resolve({
+          data: {
+            ...DEFAULT_DASH,
+            install_keys: [],
+          },
+        });
+      }
+      if (url === "/integrations/token") {
+        return Promise.resolve({ data: { status: "locked" } });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("install-key-card-claude_code")).toBeInTheDocument();
+      expect(screen.getByTestId("install-key-card-openclaw")).toBeInTheDocument();
+    });
+
+    expect(screen.getAllByText("Keys will be generated after purchase").length).toBeGreaterThan(0);
+  });
+
+  it("renders the masked paid install key only when a valid active install key exists", async () => {
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard/overview") {
+        return Promise.resolve({
+          data: {
+            ...DEFAULT_DASH,
+            install_keys: [
+              {
+                program: "claude_code",
+                status: "active",
+                masked_key: "ic_install_claude_code_...abcd",
+                metadata: {},
+              },
+            ],
+          },
+        });
+      }
+      if (url === "/integrations/token") {
+        return Promise.resolve({ data: { status: "ok", claude_code_command: "ironclaw --token abc" } });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("ic_install_claude_code_...abcd")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("REACT_APP_IRONCLAW_API_KEY")).not.toBeInTheDocument();
+  });
+
   it("renders integration cards after data loads", async () => {
     await act(async () => {
       render(<Dashboard />);

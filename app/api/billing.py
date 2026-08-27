@@ -142,6 +142,34 @@ def _assert_owner_access(
             )
 
 
+def _is_customer_owner_context(auth_ctx: AuthContext | None) -> bool:
+    if auth_ctx is None:
+        return False
+    key_type = str(getattr(auth_ctx, "key_type", "") or "").strip().lower()
+    principal_type = str(getattr(auth_ctx, "principal_type", "") or "").strip().lower()
+    if key_type in {"personal", "customer", "user", "buyer", "org"}:
+        return True
+    if principal_type in {"personal", "customer", "user", "buyer", "org"}:
+        return True
+    return False
+
+
+def _assert_customer_install_key_context(auth_ctx: AuthContext | None, owner_key: str | None) -> None:
+    if _is_customer_owner_context(auth_ctx):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "status": "forbidden",
+            "reason": "install_key_requires_customer_owner_context",
+            "owner_key": owner_key,
+            "principal_type": str(getattr(auth_ctx, "principal_type", "") or "") if auth_ctx is not None else None,
+            "key_type": str(getattr(auth_ctx, "key_type", "") or "") if auth_ctx is not None else None,
+            "action": "fulfill_install_keys",
+        },
+    )
+
+
 def _safe_owner_key(auth_ctx: AuthContext, buyer_email: str) -> str:
     owner_key = resolve_billing_owner(auth_ctx, buyer_email)
     if not owner_key or owner_key.lower() in _RESERVED_OWNER_KEYS:
@@ -153,6 +181,7 @@ def _safe_owner_key(auth_ctx: AuthContext, buyer_email: str) -> str:
                 "owner_key": owner_key,
             },
         )
+    _assert_customer_install_key_context(auth_ctx, owner_key)
     return owner_key
 
 
@@ -628,6 +657,8 @@ def fulfill_billing_purchase(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Purchase not found: {purchase_id!r}",
         )
+
+    _assert_customer_install_key_context(auth_ctx, purchase.owner_key)
 
     normalized_owner = (purchase.owner_key or "").strip().lower()
     if normalized_owner and normalized_owner in _RESERVED_OWNER_KEYS:

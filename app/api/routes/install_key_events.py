@@ -25,8 +25,10 @@ InstallKeyEventType = Literal[
     "action_blocked",
     "prompt_injection_detected",
     "usage_units_debited",
+    "install_key_usage_recorded",
     "install_key_activated",
     "install_key_revoked",
+    "install_key_reported",
 ]
 
 
@@ -68,6 +70,34 @@ def _normalize_program(program: str | None) -> str | None:
     if not normalized:
         return None
     return normalized if normalized in {"openclaw", "claude_code"} else normalized
+
+
+def _looks_like_generic_platform_auth(value: str | None) -> bool:
+    if value is None:
+        return False
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return False
+    generic_prefixes = (
+        "sk_",
+        "ghp_",
+        "gho_",
+        "github_pat_",
+        "token_",
+        "secret_",
+        "api_",
+        "api-key",
+        "api_key",
+        "platform-api-key",
+        "platform_api_key",
+        "system-api-key",
+        "system_api_key",
+        "internal-platform-api-key",
+        "internal_platform_api_key",
+        "bearer ",
+        "x-api-key",
+    )
+    return normalized.startswith(generic_prefixes) or (("platform" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized)) or ("api" in normalized and "key" in normalized))
 
 
 class InstallKeyEventRequest(BaseModel):
@@ -150,6 +180,12 @@ def _ensure_key_context(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="owner_key or key_id is required for install-key telemetry events.",
+        )
+
+    if owner_key is not None and _looks_like_generic_platform_auth(owner_key):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Install-key lifecycle events must resolve to the canonical install-key owner, not the generic platform auth credential.",
         )
 
     return owner_key, program
@@ -292,7 +328,7 @@ def _apply_event(
     metadata = dict(payload.metadata or {})
     metadata.setdefault("source", "install-key-events")
 
-    if event_name == "usage_units_debited":
+    if event_name in {"usage_units_debited", "install_key_usage_recorded"}:
         if payload.key_id is None or payload.units is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -333,6 +369,32 @@ def _apply_event(
             metadata={**metadata, "event_type": event_name},
         )
         return True, {"event_type": event_name, "balance_update": "debit"}
+
+    if event_name == "install_key_reported":
+        if payload.key_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="install_key_reported requires key_id.",
+            )
+        record = _require_key_record(
+            payload=payload,
+            install_key_registry=install_key_registry,
+            owner_key=owner_key,
+            op="install_key_reported",
+        )
+        _sync_wallet_event(
+            wallet_registry=wallet_registry,
+            owner_key=owner_key,
+            key_id=payload.key_id,
+            program=program or record.program,
+            event_type=event_name,
+            units=0,
+            blocked_attack_count=int(payload.blocked_attack_count or 0),
+            action_type=payload.action_type or "reporting",
+            occurred_at=occurred_at,
+            metadata={**metadata, "event_type": event_name},
+        )
+        return True, {"event_type": event_name, "status": "reported"}
 
     if event_name in {"action_blocked", "prompt_injection_detected"}:
         if payload.key_id is None:

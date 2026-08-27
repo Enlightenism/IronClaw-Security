@@ -148,10 +148,8 @@ def _build_step_view(record: Any, fallback_index: int) -> InstallationStepView:
     )
 
 
-def _infer_expected_program(integration_id: str | None) -> str | None:
-    normalized = (integration_id or "").strip().lower()
-    if not normalized:
-        return None
+def _infer_expected_program(integration_id: str | None, *, platform: str | None = None) -> str | None:
+    normalized = (platform or integration_id or "").strip().lower()
     if normalized in {"openclaw", "integration-openclaw"}:
         return "openclaw"
     if normalized in {"claude-code", "claude_code", "integration-claude-code", "integration-claude_code"}:
@@ -159,7 +157,13 @@ def _infer_expected_program(integration_id: str | None) -> str | None:
     return None
 
 
-def _require_paid_install_key(install_key: str | None, owner_key: str | None, *, integration_id: str | None = None) -> None:
+def _require_paid_install_key(
+    install_key: str | None,
+    owner_key: str | None,
+    *,
+    integration_id: str | None = None,
+    platform: str | None = None,
+) -> None:
     if not install_key or not str(install_key).strip():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -173,7 +177,7 @@ def _require_paid_install_key(install_key: str | None, owner_key: str | None, *,
         )
 
     candidate = str(install_key).strip()
-    expected_program = _infer_expected_program(integration_id)
+    expected_program = _infer_expected_program(integration_id, platform=platform)
     valid_prefixes = ("ic_install_openclaw_", "ic_install_claude_code_")
     if expected_program == "openclaw":
         valid_prefixes = ("ic_install_openclaw_",)
@@ -285,6 +289,7 @@ def install_integration(
         effective_request.install_key,
         effective_request.owner_key,
         integration_id=normalized_id,
+        platform=effective_request.platform,
     )
 
     service = get_integration_installer()
