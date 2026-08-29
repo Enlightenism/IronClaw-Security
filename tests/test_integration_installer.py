@@ -82,6 +82,35 @@ def test_install_integration_marks_record_active_with_valid_paid_install_key():
     assert any(step.name == "apply-install" and step.state == "installed" for step in result.steps)
 
 
+def test_install_integration_accepts_supported_multi_platform_paid_keys():
+    registry = initialize_integration_registry()
+    supported = [
+        ("integration-cursor", "ic_install_cursor_validkey", "owner-800", "cursor"),
+        ("integration-goose", "ic_install_goose_validkey", "owner-801", "goose"),
+        ("integration-gemini-cli", "ic_install_gemini_cli_validkey", "owner-802", "gemini_cli"),
+        ("integration-copilot", "ic_install_copilot_validkey", "owner-803", "copilot"),
+        ("integration-security-guardian", "ic_install_security_guardian_validkey", "owner-804", "security_guardian"),
+    ]
+
+    for integration_id, install_key, owner_key, program in supported:
+        with patch("app.services.integration_installer.get_install_key_registry") as mock_registry:
+            mock_registry.return_value.authenticate_install_key.return_value = _fake_paid_install_key(
+                owner_key=owner_key,
+                program=program,
+            )
+            result = install_integration(
+                registry,
+                integration_id,
+                requested_by="tester",
+                install_key=install_key,
+                owner_key=owner_key,
+            )
+
+        assert result.installed is True, integration_id
+        assert result.status_after == "active", integration_id
+        assert any(step.name == "validate-paid-install-key" and step.state == "installed" for step in result.steps), integration_id
+
+
 def test_install_integration_blocks_without_paid_install_key():
     registry = initialize_integration_registry()
 

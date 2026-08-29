@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from app.core.install_key_formats import InstallKeyFormatRegistry
+
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
@@ -115,6 +117,75 @@ class DashboardAlert:
         }
 
 
+_PLACEHOLDER_PURCHASE_MESSAGE = "Keys will be generated after purchase"
+
+_DEFAULT_PLATFORM_FAMILIES: tuple[str, ...] = InstallKeyFormatRegistry.list_programs()
+
+_PLATFORM_LABELS: dict[str, str] = {
+    "openclaw": "OpenClaw",
+    "claude_code": "Claude Code",
+    "cursor": "Cursor",
+    "goose": "Goose",
+    "gemini_cli": "Gemini CLI",
+    "copilot": "GitHub Copilot",
+    "security_guardian": "Security Guardian",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class DashboardInstallKeySlot:
+    key_id: str = ""
+    program: str = ""
+    label: str = ""
+    status: str = "locked"
+    active: bool = False
+    masked_key: str | None = None
+    payment_status: str = "unpaid"
+    entitlements_status: str = "not_active"
+    issued_after_payment: bool = False
+    units_consumed: int = 0
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "key_id": self.key_id,
+            "program": self.program,
+            "label": self.label,
+            "status": self.status,
+            "active": self.active,
+            "masked_key": self.masked_key,
+            "payment_status": self.payment_status,
+            "entitlements_status": self.entitlements_status,
+            "issued_after_payment": self.issued_after_payment,
+            "units_consumed": self.units_consumed,
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DashboardPlatformFamily:
+    family: str
+    platform: str
+    label: str
+    status: str = "locked"
+    installed: bool = False
+    payment_status: str = "unpaid"
+    entitlements_status: str = "not_active"
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "family": self.family,
+            "platform": self.platform,
+            "label": self.label,
+            "status": self.status,
+            "installed": self.installed,
+            "payment_status": self.payment_status,
+            "entitlements_status": self.entitlements_status,
+            "metadata": dict(self.metadata),
+        }
+
+
 @dataclass(frozen=True, slots=True)
 class DashboardOverview:
     service: str = "ironclaw-security"
@@ -134,6 +205,8 @@ class DashboardOverview:
     quarantine_pressure: bool = False
     kpis: tuple[DashboardKPI, ...] = ()
     alerts: tuple[DashboardAlert, ...] = ()
+    platform_families: tuple[DashboardPlatformFamily, ...] = ()
+    install_key_slots: tuple[DashboardInstallKeySlot, ...] = ()
     checked_at: datetime = field(default_factory=_utc_now)
 
     def to_dict(self) -> dict[str, Any]:
@@ -155,6 +228,9 @@ class DashboardOverview:
             "quarantine_pressure": self.quarantine_pressure,
             "kpis": [item.to_dict() for item in self.kpis],
             "alerts": [item.to_dict() for item in self.alerts],
+            "platform_families": [item.to_dict() for item in self.platform_families],
+            "install_key_slots": [item.to_dict() for item in self.install_key_slots],
+            "available_install_key_slots": [item.to_dict() for item in self.install_key_slots],
             "checked_at": _isoformat(self.checked_at),
         }
 
@@ -199,8 +275,127 @@ def _normalize_alert(value: Any) -> DashboardAlert | None:
     )
 
 
+def _normalize_platform_program(value: Any) -> str:
+    normalized = _coerce_str(value).lower().replace(" ", "_").replace("-", "_")
+    normalized = normalized.replace("__", "_").strip("_")
+    stale_legacy_platforms = {
+        "ironclaw",
+        "iron_claw",
+        "standalone_ironclaw",
+        "standalone_iron_claw",
+        "standalone ironclaw",
+    }
+    if normalized in stale_legacy_platforms:
+        return ""
+
+    canonical = InstallKeyFormatRegistry.normalize_program(normalized)
+    if canonical is not None:
+        return canonical
+
+    return normalized if normalized in set(_DEFAULT_PLATFORM_FAMILIES) else ""
+
+
+def _placeholder_slot_metadata(*, owner_key: str | None = None) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "placeholder": _PLACEHOLDER_PURCHASE_MESSAGE,
+        "placeholder_text": _PLACEHOLDER_PURCHASE_MESSAGE,
+        "status_message": _PLACEHOLDER_PURCHASE_MESSAGE,
+    }
+    if owner_key is not None:
+        metadata["owner_key"] = owner_key
+    metadata["requires_subscription"] = True
+    return metadata
+
+
+def _default_platform_families() -> tuple[DashboardPlatformFamily, ...]:
+    return tuple(
+        DashboardPlatformFamily(
+            family=program,
+            platform=program,
+            label=_PLATFORM_LABELS.get(program, program.replace("_", " ").title()),
+            status="locked",
+            installed=False,
+            payment_status="unpaid",
+            entitlements_status="not_active",
+            metadata={"requires_subscription": True, "placeholder": _PLACEHOLDER_PURCHASE_MESSAGE},
+        )
+        for program in _DEFAULT_PLATFORM_FAMILIES
+    )
+
+
+def _default_install_key_slots() -> tuple[DashboardInstallKeySlot, ...]:
+    return tuple(
+        DashboardInstallKeySlot(
+            key_id="",
+            program=program,
+            label=_PLATFORM_LABELS.get(program, program.replace("_", " ").title()),
+            status="locked",
+            active=False,
+            masked_key=None,
+            payment_status="unpaid",
+            entitlements_status="not_active",
+            issued_after_payment=False,
+            units_consumed=0,
+            metadata=_placeholder_slot_metadata(),
+        )
+        for program in _DEFAULT_PLATFORM_FAMILIES
+    )
+
+
+def _normalize_platform_family(value: Any) -> DashboardPlatformFamily | None:
+    if not isinstance(value, dict):
+        return None
+
+    family = _normalize_platform_program(value.get("family") or value.get("platform") or value.get("id"))
+    if not family:
+        return None
+
+    label = _coerce_str(value.get("label") or value.get("display_name") or _PLATFORM_LABELS.get(family, family.replace("_", " ").title()))
+    return DashboardPlatformFamily(
+        family=family,
+        platform=family,
+        label=label,
+        status=_coerce_str(value.get("status") or value.get("install_key_status"), "locked") or "locked",
+        installed=_coerce_bool(value.get("installed"), False),
+        payment_status=_coerce_str(value.get("payment_status"), "unpaid") or "unpaid",
+        entitlements_status=_coerce_str(value.get("entitlements_status"), "not_active") or "not_active",
+        metadata={key: value for key, value in dict(value.get("metadata") or {}).items()},
+    )
+
+
+def _normalize_install_key_slot(value: Any) -> DashboardInstallKeySlot | None:
+    if not isinstance(value, dict):
+        return None
+
+    program = _normalize_platform_program(value.get("program") or value.get("family") or value.get("platform"))
+    if not program:
+        return None
+
+    metadata = dict(value.get("metadata") or {})
+    status = _coerce_str(value.get("status") or value.get("install_key_status"), "locked") or "locked"
+    active = _coerce_bool(value.get("active"), status == "active")
+    label = _coerce_str(value.get("label") or value.get("display_name") or _PLATFORM_LABELS.get(program, program.replace("_", " ").title()))
+
+    return DashboardInstallKeySlot(
+        key_id=_coerce_str(value.get("key_id")),
+        program=program,
+        label=label,
+        status=status,
+        active=active,
+        masked_key=(value.get("masked_key") or None),
+        payment_status=_coerce_str(value.get("payment_status"), "unpaid") or "unpaid",
+        entitlements_status=_coerce_str(value.get("entitlements_status"), "not_active") or "not_active",
+        issued_after_payment=_coerce_bool(value.get("issued_after_payment"), False),
+        units_consumed=_coerce_int(value.get("units_consumed"), 0),
+        metadata=metadata,
+    )
+
+
 def default_dashboard_overview() -> DashboardOverview:
-    return DashboardOverview()
+    return DashboardOverview(
+        platform_families=_default_platform_families(),
+        install_key_slots=_default_install_key_slots(),
+    )
 
 
 def build_dashboard_overview(
@@ -222,6 +417,54 @@ def build_dashboard_overview(
         alerts = tuple(item for entry in raw_alerts if (item := _normalize_alert(entry)) is not None)
     else:
         alerts = current.alerts
+
+    raw_platform_families = source.get("platform_families")
+    if isinstance(raw_platform_families, list):
+        platform_families = tuple(item for entry in raw_platform_families if (item := _normalize_platform_family(entry)) is not None)
+    else:
+        platform_families = current.platform_families or _default_platform_families()
+
+    raw_install_key_slots = source.get("install_key_slots")
+    if isinstance(raw_install_key_slots, list):
+        install_key_slots = tuple(item for entry in raw_install_key_slots if (item := _normalize_install_key_slot(entry)) is not None)
+    else:
+        install_key_slots = current.install_key_slots or _default_install_key_slots()
+
+    if not platform_families and install_key_slots:
+        platform_families = tuple(
+            DashboardPlatformFamily(
+                family=slot.program,
+                platform=slot.program,
+                label=slot.label,
+                status=slot.status,
+                installed=slot.active,
+                payment_status=slot.payment_status,
+                entitlements_status=slot.entitlements_status,
+                metadata={"key_id": slot.key_id, **slot.metadata},
+            )
+            for slot in install_key_slots
+        )
+
+    if not install_key_slots and platform_families:
+        install_key_slots = tuple(
+            DashboardInstallKeySlot(
+                key_id="",
+                program=family.platform,
+                label=family.label,
+                status=family.status if family.status not in {"", "locked"} else "locked",
+                active=bool(family.installed),
+                masked_key=None,
+                payment_status=family.payment_status,
+                entitlements_status=family.entitlements_status,
+                issued_after_payment=False,
+                units_consumed=0,
+                metadata={
+                    **_placeholder_slot_metadata(owner_key=source.get("owner_key")),
+                    **({"key_id": family.platform} if family.platform else {}),
+                },
+            )
+            for family in platform_families
+        )
 
     active_incidents = max(0, _coerce_int(source.get("active_incidents"), current.active_incidents))
     pending_reviews = max(0, _coerce_int(source.get("pending_reviews"), current.pending_reviews))
@@ -260,6 +503,8 @@ def build_dashboard_overview(
         quarantine_pressure=quarantine_pressure,
         kpis=kpis,
         alerts=alerts,
+        platform_families=platform_families,
+        install_key_slots=install_key_slots,
         checked_at=_coerce_datetime(source.get("checked_at"), _utc_now()) or _utc_now(),
     )
 
@@ -293,6 +538,9 @@ def dashboard_overview_summary(overview: DashboardOverview) -> dict[str, Any]:
             "review_backlog_present": overview.review_backlog_present,
             "quarantine_pressure": overview.quarantine_pressure,
         },
+        "platform_families": [item.to_dict() for item in overview.platform_families],
+        "install_key_slots": [item.to_dict() for item in overview.install_key_slots],
+        "available_install_key_slots": [item.to_dict() for item in overview.install_key_slots],
         "kpis": [item.to_dict() for item in overview.kpis],
         "alerts": [item.to_dict() for item in overview.alerts],
         "checked_at": _isoformat(overview.checked_at),

@@ -84,11 +84,20 @@ def _make_key_record(
     Returns a MagicMock shaped like an InstallKeyRecord dataclass.
     The router accesses attributes directly via getattr; dicts will not work.
     """
+    prefix_map = {
+        "openclaw": "ic_install_openclaw_",
+        "claude_code": "ic_install_claude_code_",
+        "cursor": "ic_install_cursor_",
+        "goose": "ic_install_goose_",
+        "gemini_cli": "ic_install_gemini_cli_",
+        "copilot": "ic_install_copilot_",
+        "security_guardian": "ic_install_security_guardian_",
+    }
     r = MagicMock()
     r.key_id = key_id
     r.owner_key = owner_key
     r.program = program
-    r.masked_key = f"{key_id[:6]}...xxxx"
+    r.masked_key = f"{prefix_map.get(program, 'ic_install_openclaw_')}{key_id[:8]}...abcd"
     r.label = label
     r.active = active
     r.units_consumed = 0
@@ -373,7 +382,16 @@ class TestDashboardInstallKeySlotLogic:
             body = response.json()
             install_keys = body.get("install_keys", [])
             locked = [k for k in install_keys if k.get("status") == "locked"]
-            assert len(locked) == 2
+            assert len(locked) == 8
+            assert {k.get("program") for k in locked} == {
+                "openclaw",
+                "claude_code",
+                "cursor",
+                "goose",
+                "gemini_cli",
+                "copilot",
+                "security_guardian",
+            } | {"openclaw"}
         finally:
             _clear_registry_overrides()
 
@@ -506,7 +524,18 @@ class TestDashboardInstallKeySlotLogic:
             assert response.status_code == 200
             body = response.json()
             install_keys = body.get("install_keys", [])
-            assert install_keys == []
+            assert len(install_keys) == 7
+            assert {item["program"] for item in install_keys} == {
+                "openclaw",
+                "claude_code",
+                "cursor",
+                "goose",
+                "gemini_cli",
+                "copilot",
+                "security_guardian",
+            }
+            assert all(item["status"] == "locked" for item in install_keys)
+            assert all(item["masked_key"] is None for item in install_keys)
         finally:
             _clear_registry_overrides()
 
@@ -520,7 +549,16 @@ class TestDashboardInstallKeySlotLogic:
             provision_install_key_service(),
         )
 
-        assert len(slots) == 2
+        assert len(slots) == 7
+        assert {slot.program for slot in slots} == {
+            "openclaw",
+            "claude_code",
+            "cursor",
+            "goose",
+            "gemini_cli",
+            "copilot",
+            "security_guardian",
+        }
         assert all(slot.status == "locked" for slot in slots)
         assert all(slot.masked_key is None for slot in slots)
         assert any("Keys will be generated after purchase" in str(slot.metadata.get("placeholder_text") or slot.metadata.get("placeholder") or slot.metadata.get("status_message") or "") for slot in slots)

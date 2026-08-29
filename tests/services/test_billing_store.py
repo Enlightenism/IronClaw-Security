@@ -250,6 +250,37 @@ def test_provision_install_key_on_purchase_records_status_without_issuing_key(st
     assert payload["purchase_complete"] is True
 
 
+def test_provision_install_key_on_purchase_records_all_supported_platforms_for_purchase(store: SubscriptionMeterStore) -> None:
+    record = store.create_subscription(org_id="org-provision-all", plan_name="team", customer_id="cus_19b")
+    store.mark_purchase_complete(record.subscription_id, payment_id="pay_multi")
+    store.credit_units(record.subscription_id, 1_000)
+
+    updated, payload = store.provision_install_key_on_purchase(
+        record.subscription_id,
+        None,
+        owner_key="owner-3",
+        install_key_id="ik_multi_001",
+        install_key_status="active",
+    )
+
+    assert updated.purchase_complete is True
+    assert isinstance(payload, dict)
+    assert "openclaw" in payload
+    assert "claude_code" in payload
+    assert "cursor" in payload
+    assert "goose" in payload
+    assert "gemini_cli" in payload
+    assert "copilot" in payload
+    assert "security_guardian" in payload
+
+    for program, item in payload.items():
+        assert item["program"] == program
+        assert item["owner_key"] == "owner-3"
+        assert item["active"] is True
+        assert item["payment_status"] == "paid"
+        assert item["entitlements_status"] == "active"
+
+
 # ---------------------------------------------------------------------------
 # list_events
 # ---------------------------------------------------------------------------

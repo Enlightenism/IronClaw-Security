@@ -8,6 +8,8 @@ from typing import Any, Final
 
 from dotenv import load_dotenv
 
+from app.core.install_key_formats import InstallKeyFormatRegistry, normalize_install_key_program
+
 DEFAULT_BASE_URL: Final[str] = "http://127.0.0.1:8000"
 DEFAULT_POLICY_MODE: Final[str] = "review"
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 10.0
@@ -17,7 +19,7 @@ DEFAULT_CONFIG_DIRNAME: Final[str] = ".ironclaw"
 DEFAULT_CONFIG_FILENAME: Final[str] = "config.json"
 DEFAULT_SKILL_FILENAME: Final[str] = "skill.json"
 DEFAULT_ENV_FILENAME: Final[str] = ".env"
-DEFAULT_PROVIDER_TARGETS: Final[tuple[str, str]] = ("claude", "openclaw")
+DEFAULT_PROVIDER_TARGETS: Final[tuple[str, ...]] = tuple(InstallKeyFormatRegistry.list_programs())
 
 
 class IronClawSkillConfigError(RuntimeError):
@@ -140,27 +142,42 @@ def _coerce_policy_mode(value: Any, *, default: str) -> str:
     return lowered
 
 
+def _normalize_provider_target_name(value: Any) -> str:
+    if value is None:
+        raise IronClawSkillConfigError("provider target must not be empty")
+
+    candidate = str(value).strip()
+    if not candidate:
+        raise IronClawSkillConfigError("provider target must not be empty")
+
+    normalized = candidate.lower().replace(" ", "_").replace("-", "_")
+    normalized = normalized.replace("__", "_").strip("_")
+
+    canonical = normalize_install_key_program(normalized)
+    if canonical is None:
+        raise IronClawSkillConfigError(f"Unsupported provider target: {value!r}")
+    return canonical
+
+
 def _coerce_provider_targets(value: Any) -> tuple[str, ...]:
     if value is None:
         return DEFAULT_PROVIDER_TARGETS
 
     if isinstance(value, str):
-        items = [part.strip().lower() for part in value.split(",") if part.strip()]
-    elif isinstance(value, list):
-        items = [str(item).strip().lower() for item in value if str(item).strip()]
+        items = [part.strip() for part in value.split(",") if part.strip()]
+    elif isinstance(value, (list, tuple)):
+        items = [str(item).strip() for item in value if str(item).strip()]
     else:
-        raise IronClawSkillConfigError("provider_targets must be a list or comma-separated string")
+        raise IronClawSkillConfigError("provider_targets must be a list, tuple, or comma-separated string")
 
-    allowed = {"claude", "openclaw"}
     normalized: list[str] = []
     seen: set[str] = set()
 
     for item in items:
-        if item not in allowed:
-            raise IronClawSkillConfigError(f"Unsupported provider target: {item}")
-        if item not in seen:
-            seen.add(item)
-            normalized.append(item)
+        canonical = _normalize_provider_target_name(item)
+        if canonical not in seen:
+            seen.add(canonical)
+            normalized.append(canonical)
 
     return tuple(normalized or DEFAULT_PROVIDER_TARGETS)
 

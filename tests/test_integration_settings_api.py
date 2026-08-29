@@ -57,8 +57,26 @@ def test_integration_settings_contains_known_integrations():
     payload = response.json()
 
     names = {item["name"] for item in payload["providers"]}
-    assert "Claude Code" in names
-    assert "Standalone IronClaw" in names
+    assert {"OpenClaw", "Claude Code", "Cursor", "Goose", "Gemini CLI", "GitHub Copilot", "Security Guardian"} <= names
+
+
+def test_integration_settings_uses_canonical_install_key_family_labels():
+    client = _client()
+
+    response = client.get("/ui/integrations/settings", headers=_auth_headers())
+
+    assert response.status_code == 200
+    payload = response.json()
+
+    programs = {item["installkeyprogram"] for item in payload["providers"] if item.get("installkeyprogram")}
+    assert {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "security_guardian"} <= programs
+
+    names = {item["name"] for item in payload["providers"]}
+    assert "GitHub Copilot" in names
+    assert "Security Guardian" in names
+
+    family_names = {item["installkeyfamily"] for item in payload["settings"] if item.get("installkeyfamily")}
+    assert {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "security_guardian"} <= family_names
 
 
 def test_integration_settings_items_expose_expected_fields():

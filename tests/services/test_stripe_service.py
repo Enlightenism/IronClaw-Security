@@ -596,6 +596,23 @@ class TestHandleCheckoutCompleted:
         assert install_keys["openclaw"]["active"] is True
         assert install_keys["claude_code"]["active"] is True
 
+    def test_checkout_completed_issues_all_supported_platform_install_keys(self, svc: StripeService) -> None:
+        event = _build_checkout_completed_event(unit_credits=5_000, org_id="org-install-keys-all")
+        result = svc.handle_webhook_event(event)
+        install_keys = result["detail"]["install_key_issuance"]
+        expected_programs = {
+            "openclaw",
+            "claude_code",
+            "cursor",
+            "goose",
+            "gemini_cli",
+            "copilot",
+            "security_guardian",
+        }
+        assert set(install_keys) == expected_programs
+        assert all(record["owner_key"] == "ic_org_org-install-keys-all" for record in install_keys.values())
+        assert all(record["active"] is True for record in install_keys.values())
+
     def test_issue_paid_install_keys_requires_successful_payment_confirmation(self, svc: StripeService) -> None:
         result = svc._issue_paid_install_keys_for_checkout(  # noqa: SLF001
             org_id="org-no-subscription",

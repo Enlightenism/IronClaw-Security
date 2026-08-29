@@ -22,7 +22,8 @@ def test_ui_integration_settings_route_returns_expected_shape() -> None:
     assert len(providers) >= 3
 
     names = {provider["name"] for provider in providers}
-    assert {"OpenClaw", "Claude Code", "Standalone IronClaw"} <= names
+    assert {"OpenClaw", "Claude Code"} <= names
+    assert "Standalone IronClaw" not in names
 
     for provider in providers:
         assert isinstance(provider["name"], str)

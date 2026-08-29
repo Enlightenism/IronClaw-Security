@@ -12,7 +12,31 @@ Get from install to your first guarded scan in under 5 minutes.
 
 ---
 
-## Step 1 — Install
+## Step 1 — Install the shared multi-platform package
+
+Install the released package from the public package source:
+
+```bash
+python -m pip install ironclaw-security
+```
+
+Then install the shared Security Guardian bundle across the runtimes you want
+protected:
+
+```bash
+ironclaw install \
+  --provider-target security_guardian \
+  --provider-target openclaw \
+  --provider-target claude_code \
+  --provider-target cursor \
+  --provider-target goose \
+  --provider-target gemini_cli \
+  --provider-target copilot
+```
+
+This is the public installation path for the shared cross-runtime Security
+Guardian package. If you are working from a source checkout, you can still use
+the editable install path:
 
 ```bash
 git clone https://github.com/Enlightenism/IronClaw-Security.git
@@ -67,12 +91,12 @@ print(result.scan_id)  # UUID for audit trail
 
 ## Step 4 — Interpret the Verdict
 
-| Verdict | Your action |
-|---------|-------------|
-| `allow` | Proceed normally |
-| `warn` | Proceed — log the warning, monitor the session |
-| `quarantine` | Do not proceed — submit to review queue |
-| `block` | Do not proceed — reject the action entirely |
+| Verdict      | Your action                                    |
+| ------------ | ---------------------------------------------- |
+| `allow`      | Proceed normally                               |
+| `warn`       | Proceed — log the warning, monitor the session |
+| `quarantine` | Do not proceed — submit to review queue        |
+| `block`      | Do not proceed — reject the action entirely    |
 
 ---
 

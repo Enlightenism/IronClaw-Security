@@ -39,6 +39,139 @@ def _trace_id() -> str:
     return f"cc-{uuid.uuid4().hex}"
 
 
+def _build_secret_scan_context(
+    *,
+    trace_id: str,
+    action_type: str,
+    target: str,
+    client_id: str | None,
+    session_id: str | None,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "trace_id": trace_id,
+        "platform": _PLATFORM,
+        "action_type": action_type,
+        "target": target,
+        "client_id": client_id,
+        "session_id": session_id,
+        "metadata": metadata,
+    }
+
+
+def _run_secret_scan(*, scan_payload: str, context: dict[str, Any]) -> dict[str, Any]:
+    try:
+        scan_result = evaluate_secret_scanner_request(content=scan_payload, context=context)
+        return scan_result if isinstance(scan_result, dict) else scan_result.model_dump()
+    except Exception:
+        try:
+            raw_findings = scan_for_secrets(scan_payload)
+            return {
+                "findings": raw_findings,
+                "scanned": True,
+                "source": "fallback",
+            }
+        except Exception:
+            return {"scanned": False, "findings": [], "source": "error"}
+
+
+def _build_audit_trail(
+    *,
+    trace_id: str,
+    decision_id: str | None,
+    action_type: str,
+    target: str,
+    client_id: str | None,
+    session_id: str | None,
+    risk_score_input: int,
+    risk_score_final: int,
+    risk_level: str,
+    verdict: str,
+    matched_rule_count: int,
+    evaluated_at: str,
+    metadata: dict[str, Any],
+    secret_scan_triggered: bool,
+) -> dict[str, Any]:
+    return {
+        "trace_id": trace_id,
+        "decision_id": decision_id,
+        "platform": _PLATFORM,
+        "adapter_name": _ADAPTER_NAME,
+        "action_type": action_type,
+        "target": target,
+        "client_id": client_id,
+        "session_id": session_id,
+        "risk_score_input": risk_score_input,
+        "risk_score_final": risk_score_final,
+        "risk_level": risk_level,
+        "verdict": verdict,
+        "matched_rule_count": matched_rule_count,
+        "evaluated_at": evaluated_at,
+        "metadata": metadata,
+        "secret_scan_triggered": secret_scan_triggered,
+    }
+
+
+def _build_capabilities(*, include_runtime_details: bool = True) -> list[dict[str, Any]]:
+    capabilities = [
+        {
+            "name": "tool-call-guard",
+            "description": "Guard Claude Code tool calls and command execution through IronClaw policy decisions.",
+            "required": True,
+        },
+        {
+            "name": "secret-scan",
+            "description": "Pre-flight secret scanning on all inbound prompt, command, and tool-call payloads.",
+            "required": True,
+        },
+        {
+            "name": "audit-trail",
+            "description": "Persist the full evaluation path, matched rules, and review outcome for each Claude Code action.",
+            "required": True,
+        },
+        {
+            "name": "policy-enforcement",
+            "description": "Apply runtime policy enforcement with allow, warn, quarantine, and block verdicts.",
+            "required": True,
+        },
+    ]
+    if include_runtime_details:
+        capabilities.append(
+            {
+                "name": "execution-boundary",
+                "description": "Enforce Claude Code execution boundaries for shell commands, file writes, and network operations.",
+                "required": False,
+            }
+        )
+    return capabilities
+
+
+def _normalize_capabilities(raw_caps: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    standard_caps = _build_capabilities()
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for cap in raw_caps or []:
+        if not isinstance(cap, dict):
+            continue
+        name = str(cap.get("name") or cap.get("capability") or "").strip()
+        if not name:
+            continue
+        normalized = dict(cap)
+        normalized["name"] = name
+        if name not in seen:
+            merged.append(normalized)
+            seen.add(name)
+
+    for cap in standard_caps:
+        name = str(cap.get("name") or "").strip()
+        if name and name not in seen:
+            merged.append(dict(cap))
+            seen.add(name)
+
+    return merged
+
+
 def _build_adapter() -> ClaudeCodeAdapter:
     try:
         registry = initialize_integration_registry()
@@ -54,8 +187,8 @@ def _build_adapter() -> ClaudeCodeAdapter:
 class ClaudeCodeEvaluateRequest(BaseModel):
     action_type: str = Field(
         ...,
-        description="Type of Claude Code action: tool_call, shell_command, file_write, etc.",
-        examples=["tool_call"],
+        description="Claude Code runtime action type: tool_call, shell_command, file_write, network_request, prompt_submission, workflow_step, approval, or message.",
+        examples=["tool_call", "shell_command", "file_write"],
     )
     target: str = Field(
         ...,
@@ -82,7 +215,7 @@ class ClaudeCodeEvaluateRequest(BaseModel):
     )
     metadata: dict[str, Any] = Field(
         default_factory=dict,
-        description="Arbitrary caller metadata attached to the audit trail.",
+        description="Arbitrary caller metadata attached to the audit trail; includes request, agent, environment, and workflow context.",
     )
 
 
@@ -116,9 +249,17 @@ class ClaudeCodeHandshakeRequest(BaseModel):
         default="1.0.0",
         description="Requested protocol version.",
     )
+    builder_id: str | None = Field(
+        default=None,
+        description="Optional Claude Code session or builder identifier used for correlation.",
+    )
+    session_id: str | None = Field(
+        default=None,
+        description="Optional session identifier tied to the handshake context.",
+    )
     metadata: dict[str, Any] = Field(
         default_factory=dict,
-        description="Optional connection metadata.",
+        description="Optional connection metadata, environment details, and request trace context.",
     )
 
 
@@ -163,29 +304,17 @@ async def evaluate_claude_code(
     trace_id = _trace_id()
 
     scan_payload = f"{body.target}\n{body.content}".strip()
-    secret_scan_result: dict[str, Any] = {}
-    try:
-        scan_result = evaluate_secret_scanner_request(
-            content=scan_payload,
-            context={
-                "trace_id": trace_id,
-                "platform": _PLATFORM,
-                "action_type": body.action_type,
-                "client_id": body.client_id,
-                "session_id": body.session_id,
-            },
-        )
-        secret_scan_result = scan_result if isinstance(scan_result, dict) else scan_result.model_dump()
-    except Exception:
-        try:
-            raw_findings = scan_for_secrets(scan_payload)
-            secret_scan_result = {
-                "findings": raw_findings,
-                "scanned": True,
-                "source": "fallback",
-            }
-        except Exception:
-            secret_scan_result = {"scanned": False, "findings": [], "source": "error"}
+    secret_scan_result = _run_secret_scan(
+        scan_payload=scan_payload,
+        context=_build_secret_scan_context(
+            trace_id=trace_id,
+            action_type=body.action_type,
+            target=body.target,
+            client_id=body.client_id,
+            session_id=body.session_id,
+            metadata=body.metadata,
+        ),
+    )
 
     secrets_found: list[Any] = secret_scan_result.get("findings", [])
     if secrets_found:
@@ -212,24 +341,22 @@ async def evaluate_claude_code(
             ],
             decision_id=None,
             reviewed_at=_utc_now(),
-            audit_trail={
-                "trace_id": trace_id,
-                "decision_id": None,
-                "platform": _PLATFORM,
-                "adapter_name": _ADAPTER_NAME,
-                "action_type": body.action_type,
-                "target": body.target,
-                "client_id": body.client_id,
-                "session_id": body.session_id,
-                "risk_score_input": body.risk_score,
-                "risk_score_final": 100,
-                "risk_level": "critical",
-                "verdict": "block",
-                "matched_rule_count": 1,
-                "evaluated_at": _utc_now(),
-                "metadata": body.metadata,
-                "secret_scan_triggered": True,
-            },
+            audit_trail=_build_audit_trail(
+                trace_id=trace_id,
+                decision_id=None,
+                action_type=body.action_type,
+                target=body.target,
+                client_id=body.client_id,
+                session_id=body.session_id,
+                risk_score_input=body.risk_score,
+                risk_score_final=100,
+                risk_level="critical",
+                verdict="block",
+                matched_rule_count=1,
+                evaluated_at=_utc_now(),
+                metadata=body.metadata,
+                secret_scan_triggered=True,
+            ),
             secret_scan=secret_scan_result,
         )
 
@@ -269,24 +396,22 @@ async def evaluate_claude_code(
             detail=f"Policy evaluation failed: {exc}",
         ) from exc
 
-    audit_trail: dict[str, Any] = {
-        "trace_id": trace_id,
-        "decision_id": response.decision_id,
-        "platform": _PLATFORM,
-        "adapter_name": _ADAPTER_NAME,
-        "action_type": body.action_type,
-        "target": body.target,
-        "client_id": body.client_id,
-        "session_id": body.session_id,
-        "risk_score_input": body.risk_score,
-        "risk_score_final": response.risk_score,
-        "risk_level": response.risk_level,
-        "verdict": response.verdict,
-        "matched_rule_count": len(response.matched_rules),
-        "evaluated_at": response.reviewed_at,
-        "metadata": body.metadata,
-        "secret_scan_triggered": False,
-    }
+    audit_trail = _build_audit_trail(
+        trace_id=trace_id,
+        decision_id=response.decision_id,
+        action_type=body.action_type,
+        target=body.target,
+        client_id=body.client_id,
+        session_id=body.session_id,
+        risk_score_input=body.risk_score,
+        risk_score_final=response.risk_score,
+        risk_level=response.risk_level,
+        verdict=response.verdict,
+        matched_rule_count=len(response.matched_rules),
+        evaluated_at=response.reviewed_at,
+        metadata=body.metadata,
+        secret_scan_triggered=False,
+    )
 
     return ClaudeCodeEvaluateResponse(
         trace_id=trace_id,
@@ -342,6 +467,8 @@ async def claude_code_handshake(
     if hasattr(handshake, "metadata") and handshake.metadata:
         handshake_meta = dict(handshake.metadata)
 
+    capabilities = _normalize_capabilities(raw_caps)
+
     return ClaudeCodeHandshakeResponse(
         status="ok",
         platform=_PLATFORM,
@@ -349,11 +476,13 @@ async def claude_code_handshake(
         protocol_version=getattr(handshake, "protocol_version", _ADAPTER_VERSION),
         integration_health=getattr(handshake, "status", adapter.health),
         connected_at=getattr(handshake, "connected_at", _utc_now()),
-        capabilities=raw_caps,
+        capabilities=capabilities,
         policy_mode=policy_mode,
         metadata={
             **handshake_meta,
             "client_id": body.client_id,
+            "builder_id": body.builder_id,
+            "session_id": body.session_id,
             "requested_protocol_version": body.protocol_version,
             **body.metadata,
         },
@@ -413,6 +542,8 @@ async def claude_code_manifest() -> ClaudeCodeManifestResponse:
             for cap in caps_attr:
                 raw_caps.append(cap if isinstance(cap, dict) else cap)
 
+    capabilities = _normalize_capabilities(raw_caps)
+
     return ClaudeCodeManifestResponse(
         adapter_name=_ADAPTER_NAME,
         platform=_PLATFORM,
@@ -420,6 +551,6 @@ async def claude_code_manifest() -> ClaudeCodeManifestResponse:
         supported_action_types=claude_code_action_types,
         guarded_tool_categories=guarded_categories,
         policy_bindings=policy_bindings,
-        capabilities=raw_caps,
+        capabilities=capabilities,
         generated_at=_utc_now(),
     )

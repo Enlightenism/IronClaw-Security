@@ -16,6 +16,31 @@ telemetry_events.jsonl
 scan_history.json
 *.jsonl
 
+# Local installer runtime artifacts — never commit
+.ironclaw/
+.ironclaw-user/
+**/.ironclaw/
+**/.ironclaw-user/
+**/config.json
+**/skill.json
+**/.vscode/settings.json
+.claude/
+.claude/**
+**/.claude/
+**/.claude/**
+.cursor/
+.cursor/**
+**/.cursor/
+**/.cursor/**
+.agents/
+.agents/**
+**/.agents/
+**/.agents/**
+.gemini/
+.gemini/**
+**/.gemini/
+**/.gemini/**
+
 # Test fixture data — move to tests/fixtures/
 benign.json
 malicious.json

@@ -6,6 +6,10 @@ from typing import Any
 from app.adapters.base import BaseIntegrationAdapter
 from app.adapters.generic_agent_adapter import GenericAgentAdapter
 from app.adapters.mcp_tool_adapter import McpToolAdapter
+from app.core.install_key_formats import (
+    get_install_key_format_spec,
+    normalize_install_key_program,
+)
 from app.services.integration_registry import (
     IntegrationRegistry,
     get_integration,
@@ -27,6 +31,13 @@ class IntegrationMatrixItem:
     supports_capabilities: bool
     supported_action_types: list[str] = field(default_factory=list)
     capabilities: list[str] = field(default_factory=list)
+    install_key_program: str | None = None
+    install_key_family: str | None = None
+    install_key_prefix: str | None = None
+    install_key_aliases: list[str] = field(default_factory=list)
+    platform_aliases: list[str] = field(default_factory=list)
+    installer_path: str | None = None
+    shared_install_key_family: bool = False
     compatibility_score: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -44,6 +55,13 @@ class IntegrationMatrixItem:
             "supports_capabilities": self.supports_capabilities,
             "supported_action_types": list(self.supported_action_types),
             "capabilities": list(self.capabilities),
+            "install_key_program": self.install_key_program,
+            "install_key_family": self.install_key_family,
+            "install_key_prefix": self.install_key_prefix,
+            "install_key_aliases": list(self.install_key_aliases),
+            "platform_aliases": list(self.platform_aliases),
+            "installer_path": self.installer_path,
+            "shared_install_key_family": self.shared_install_key_family,
             "compatibility_score": self.compatibility_score,
             "metadata": dict(self.metadata),
         }
@@ -90,6 +108,58 @@ def _build_adapter_for_integration(
     return BaseIntegrationAdapter(record=record)
 
 
+def _resolve_install_key_metadata(record: Any) -> dict[str, Any]:
+    candidates = [
+        getattr(record, "platform", None),
+        getattr(record, "slug", None),
+        (getattr(record, "metadata", {}) or {}).get("runtime"),
+        (getattr(record, "metadata", {}) or {}).get("install_key_program"),
+        (getattr(record, "metadata", {}) or {}).get("platform"),
+    ]
+
+    for candidate in candidates:
+        normalized = normalize_install_key_program(candidate)
+        if normalized is None:
+            continue
+        spec = get_install_key_format_spec(normalized)
+        return {
+            "install_key_program": spec.program,
+            "install_key_family": spec.family,
+            "install_key_prefix": spec.prefix,
+            "install_key_aliases": list(spec.platform_aliases),
+            "platform_aliases": list(spec.platform_aliases),
+            "shared_install_key_family": len(spec.platform_aliases) > 1 or spec.program == "security_guardian",
+        }
+
+    return {
+        "install_key_program": None,
+        "install_key_family": None,
+        "install_key_prefix": None,
+        "install_key_aliases": [],
+        "platform_aliases": [],
+        "shared_install_key_family": False,
+    }
+
+
+def _resolve_installer_path(record: Any) -> str | None:
+    candidate_values = [
+        getattr(record, "install_target", None),
+        (getattr(record, "metadata", {}) or {}).get("installer_path"),
+        (getattr(record, "metadata", {}) or {}).get("install_path"),
+        (getattr(record, "metadata", {}) or {}).get("runtime"),
+        getattr(record, "command_name", None),
+        getattr(record, "entrypoint", None),
+    ]
+
+    for candidate in candidate_values:
+        if candidate is None:
+            continue
+        value = str(candidate).strip()
+        if value:
+            return value
+    return None
+
+
 def _compatibility_score(
     *,
     status: str,
@@ -99,6 +169,9 @@ def _compatibility_score(
     supports_capabilities: bool,
     action_count: int,
     capability_count: int,
+    install_key_program: str | None = None,
+    shared_install_key_family: bool = False,
+    installer_path: str | None = None,
 ) -> int:
     score = 0
 
@@ -115,6 +188,12 @@ def _compatibility_score(
         score += 20
     if supports_capabilities:
         score += 10
+    if install_key_program:
+        score += 10
+    if shared_install_key_family:
+        score += 5
+    if installer_path:
+        score += 5
 
     score += min(action_count * 2, 5)
     score += min(capability_count, 5)
@@ -144,6 +223,8 @@ def build_integration_matrix_view(
 
         handshake = adapter.handshake()
         capabilities = list(handshake.capabilities)
+        key_metadata = _resolve_install_key_metadata(record)
+        installer_path = _resolve_installer_path(record)
 
         supported_action_types: list[str] = []
         supported_action_types_method = getattr(adapter, "supported_action_types", None)
@@ -165,6 +246,9 @@ def build_integration_matrix_view(
             supports_capabilities=supports_capabilities,
             action_count=len(supported_action_types),
             capability_count=len(capabilities),
+            install_key_program=key_metadata["install_key_program"],
+            shared_install_key_family=key_metadata["shared_install_key_family"],
+            installer_path=installer_path,
         )
 
         if score >= 75:
@@ -188,10 +272,23 @@ def build_integration_matrix_view(
                 supports_capabilities=supports_capabilities,
                 supported_action_types=supported_action_types,
                 capabilities=capabilities,
+                install_key_program=key_metadata["install_key_program"],
+                install_key_family=key_metadata["install_key_family"],
+                install_key_prefix=key_metadata["install_key_prefix"],
+                install_key_aliases=key_metadata["install_key_aliases"],
+                platform_aliases=key_metadata["platform_aliases"],
+                installer_path=installer_path,
+                shared_install_key_family=key_metadata["shared_install_key_family"],
                 compatibility_score=score,
                 metadata={
                     "requested_by": requested_by,
                     "adapter_class": adapter.__class__.__name__,
+                    "install_key_family": key_metadata["install_key_family"],
+                    "install_key_program": key_metadata["install_key_program"],
+                    "install_target": getattr(record, "install_target", None),
+                    "installer_path": installer_path,
+                    "platform_aliases": key_metadata["platform_aliases"],
+                    "shared_install_key_family": key_metadata["shared_install_key_family"],
                 },
             ),
         )

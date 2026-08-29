@@ -10,6 +10,16 @@ from app.core.install_key_formats import (
     normalize_install_key_program,
 )
 
+_CANONICAL_PROGRAMS: Final[tuple[InstallKeyProgram, ...]] = (
+    "openclaw",
+    "claude_code",
+    "cursor",
+    "goose",
+    "gemini_cli",
+    "copilot",
+    "security_guardian",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class InstallKeyPlatformFormat:
@@ -52,9 +62,21 @@ class InstallKeyFormatRegistryService:
 
     _DEFAULT_REGISTRY: Final[InstallKeyFormatRegistry] = InstallKeyFormatRegistry()
 
+    @staticmethod
+    def _normalized_aliases(aliases: tuple[str, ...]) -> tuple[str, ...]:
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for alias in aliases:
+            key = InstallKeyFormatRegistryService.normalize_platform(alias)
+            if key and key not in seen:
+                seen.add(key)
+                ordered.append(key)
+        return tuple(ordered)
+
     @classmethod
     def normalize_platform(cls, value: str | None) -> str:
-        return cls._DEFAULT_REGISTRY.normalize_platform(value)
+        normalized = cls._DEFAULT_REGISTRY.normalize_platform(value)
+        return normalized or ""
 
     @classmethod
     def normalize_program(cls, value: str | None) -> InstallKeyProgram | None:
@@ -67,15 +89,18 @@ class InstallKeyFormatRegistryService:
     @classmethod
     def get_format_group(cls, program: str | None) -> InstallKeyPlatformFormat:
         spec = cls.get_format_spec(program)
-        canonical_platform = spec.platform_aliases[0] if spec.platform_aliases else spec.aliases[0]
+        normalized_aliases = cls._normalized_aliases(spec.aliases)
+        normalized_platform_aliases = cls._normalized_aliases(spec.platform_aliases)
+        canonical_alias = normalized_platform_aliases[0] if normalized_platform_aliases else normalized_aliases[0] if normalized_aliases else spec.program
+        canonical_platform = cls.normalize_platform(canonical_alias) or spec.program
         return InstallKeyPlatformFormat(
             platform=canonical_platform,
             display_name=spec.display_name,
             program=spec.program,
             family=spec.family,
             prefix=spec.prefix,
-            aliases=spec.aliases,
-            platform_aliases=spec.platform_aliases,
+            aliases=normalized_aliases,
+            platform_aliases=normalized_platform_aliases,
         )
 
     @classmethod
@@ -83,15 +108,17 @@ class InstallKeyFormatRegistryService:
         if platform_name is None:
             raise ValueError("platform_name is required")
         spec = cls._DEFAULT_REGISTRY.get_format_for_platform(platform_name)
-        canonical_platform = cls._canonical_platform_name(spec.program, platform_name)
+        normalized_platform = cls.normalize_platform(platform_name)
+        group = cls.get_format_group(spec.program)
+        canonical_platform = normalized_platform if normalized_platform in group.platform_aliases or normalized_platform in group.aliases else group.platform
         return InstallKeyPlatformFormat(
             platform=canonical_platform,
             display_name=spec.display_name,
             program=spec.program,
             family=spec.family,
             prefix=spec.prefix,
-            aliases=spec.aliases,
-            platform_aliases=spec.platform_aliases,
+            aliases=group.aliases,
+            platform_aliases=group.platform_aliases,
         )
 
     @classmethod
@@ -107,7 +134,7 @@ class InstallKeyFormatRegistryService:
 
     @classmethod
     def list_programs(cls) -> tuple[InstallKeyProgram, ...]:
-        return cls._DEFAULT_REGISTRY.list_programs()
+        return _CANONICAL_PROGRAMS
 
     @classmethod
     def list_format_groups(cls) -> tuple[InstallKeyPlatformFormat, ...]:
@@ -116,18 +143,18 @@ class InstallKeyFormatRegistryService:
     @classmethod
     def list_platforms_for_program(cls, program: str | None) -> tuple[str, ...]:
         spec = cls.get_format_spec(program)
-        seen: set[str] = set()
-        ordered: list[str] = []
-        for alias in (*spec.platform_aliases, *spec.aliases):
-            key = alias.strip().lower().replace("-", "_")
-            if key not in seen:
-                seen.add(key)
-                ordered.append(key)
-        return tuple(ordered)
+        return cls._normalized_aliases((*spec.platform_aliases, *spec.aliases))
 
     @classmethod
     def list_platforms(cls) -> tuple[str, ...]:
-        return cls._DEFAULT_REGISTRY.supported_platforms()
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for program in cls.list_programs():
+            for platform in cls.list_platforms_for_program(program):
+                if platform not in seen:
+                    seen.add(platform)
+                    ordered.append(platform)
+        return tuple(ordered)
 
     @classmethod
     def get_format_family(cls, program: str | None) -> str:

@@ -38,6 +38,87 @@ def _trace_id() -> str:
     return f"oc-{uuid.uuid4().hex}"
 
 
+def _build_secret_scan_context(
+    *,
+    trace_id: str,
+    action_type: str,
+    target: str,
+    builder_id: str | None,
+    workflow_id: str | None,
+    client_id: str | None,
+    session_id: str | None,
+) -> dict[str, Any]:
+    return {
+        "trace_id": trace_id,
+        "platform": _PLATFORM,
+        "action_type": action_type,
+        "target": target,
+        "builder_id": builder_id,
+        "workflow_id": workflow_id,
+        "client_id": client_id,
+        "session_id": session_id,
+    }
+
+
+def _run_secret_scan(*, scan_payload: str, context: dict[str, Any]) -> dict[str, Any]:
+    try:
+        scan_result = evaluate_secret_scanner_request(content=scan_payload, context=context)
+        return scan_result if isinstance(scan_result, dict) else scan_result.model_dump()
+    except Exception:
+        try:
+            raw_findings = scan_for_secrets(scan_payload)
+            return {
+                "findings": raw_findings,
+                "scanned": True,
+                "source": "fallback",
+            }
+        except Exception:
+            return {"scanned": False, "findings": [], "source": "error"}
+
+
+def _build_audit_trail(
+    *,
+    trace_id: str,
+    decision_id: str | None,
+    action_type: str,
+    target: str,
+    builder_id: str | None,
+    workflow_id: str | None,
+    client_id: str | None,
+    session_id: str | None,
+    risk_score_input: int,
+    risk_score_final: int,
+    risk_level: str,
+    verdict: str,
+    should_hold: bool,
+    matched_rule_count: int,
+    evaluated_at: str,
+    metadata: dict[str, Any],
+    secret_scan_triggered: bool,
+) -> dict[str, Any]:
+    return {
+        "trace_id": trace_id,
+        "decision_id": decision_id,
+        "platform": _PLATFORM,
+        "adapter_name": _ADAPTER_NAME,
+        "action_type": action_type,
+        "target": target,
+        "builder_id": builder_id,
+        "workflow_id": workflow_id,
+        "client_id": client_id,
+        "session_id": session_id,
+        "risk_score_input": risk_score_input,
+        "risk_score_final": risk_score_final,
+        "risk_level": risk_level,
+        "verdict": verdict,
+        "should_hold": should_hold,
+        "matched_rule_count": matched_rule_count,
+        "evaluated_at": evaluated_at,
+        "metadata": metadata,
+        "secret_scan_triggered": secret_scan_triggered,
+    }
+
+
 def _build_adapter() -> OpenClawAdapter:
     try:
         registry = initialize_integration_registry()
@@ -191,31 +272,18 @@ async def evaluate_openclaw(
     trace_id = _trace_id()
 
     scan_payload = f"{body.target}\n{body.content}".strip()
-    secret_scan_result: dict[str, Any] = {}
-    try:
-        scan_result = evaluate_secret_scanner_request(
-            content=scan_payload,
-            context={
-                "trace_id": trace_id,
-                "platform": _PLATFORM,
-                "action_type": body.action_type,
-                "builder_id": body.builder_id,
-                "workflow_id": body.workflow_id,
-                "client_id": body.client_id,
-                "session_id": body.session_id,
-            },
-        )
-        secret_scan_result = scan_result if isinstance(scan_result, dict) else scan_result.model_dump()
-    except Exception:
-        try:
-            raw_findings = scan_for_secrets(scan_payload)
-            secret_scan_result = {
-                "findings": raw_findings,
-                "scanned": True,
-                "source": "fallback",
-            }
-        except Exception:
-            secret_scan_result = {"scanned": False, "findings": [], "source": "error"}
+    secret_scan_result = _run_secret_scan(
+        scan_payload=scan_payload,
+        context=_build_secret_scan_context(
+            trace_id=trace_id,
+            action_type=body.action_type,
+            target=body.target,
+            builder_id=body.builder_id,
+            workflow_id=body.workflow_id,
+            client_id=body.client_id,
+            session_id=body.session_id,
+        ),
+    )
 
     secrets_found: list[Any] = secret_scan_result.get("findings", [])
     if secrets_found:
@@ -243,27 +311,25 @@ async def evaluate_openclaw(
             ],
             decision_id=None,
             reviewed_at=_utc_now(),
-            audit_trail={
-                "trace_id": trace_id,
-                "decision_id": None,
-                "platform": _PLATFORM,
-                "adapter_name": _ADAPTER_NAME,
-                "action_type": body.action_type,
-                "target": body.target,
-                "builder_id": body.builder_id,
-                "workflow_id": body.workflow_id,
-                "client_id": body.client_id,
-                "session_id": body.session_id,
-                "risk_score_input": body.risk_score,
-                "risk_score_final": 100,
-                "risk_level": "critical",
-                "verdict": "block",
-                "should_hold": True,
-                "matched_rule_count": 1,
-                "evaluated_at": _utc_now(),
-                "metadata": body.metadata,
-                "secret_scan_triggered": True,
-            },
+            audit_trail=_build_audit_trail(
+                trace_id=trace_id,
+                decision_id=None,
+                action_type=body.action_type,
+                target=body.target,
+                builder_id=body.builder_id,
+                workflow_id=body.workflow_id,
+                client_id=body.client_id,
+                session_id=body.session_id,
+                risk_score_input=body.risk_score,
+                risk_score_final=100,
+                risk_level="critical",
+                verdict="block",
+                should_hold=True,
+                matched_rule_count=1,
+                evaluated_at=_utc_now(),
+                metadata=body.metadata,
+                secret_scan_triggered=True,
+            ),
             secret_scan=secret_scan_result,
         )
 
@@ -305,27 +371,25 @@ async def evaluate_openclaw(
             detail=f"Policy evaluation failed: {exc}",
         ) from exc
 
-    audit_trail: dict[str, Any] = {
-        "trace_id": trace_id,
-        "decision_id": response.decision_id,
-        "platform": _PLATFORM,
-        "adapter_name": _ADAPTER_NAME,
-        "action_type": body.action_type,
-        "target": body.target,
-        "builder_id": body.builder_id,
-        "workflow_id": body.workflow_id,
-        "client_id": body.client_id,
-        "session_id": body.session_id,
-        "risk_score_input": body.risk_score,
-        "risk_score_final": response.risk_score,
-        "risk_level": response.risk_level,
-        "verdict": response.verdict,
-        "should_hold": response.should_hold,
-        "matched_rule_count": len(response.matched_rules),
-        "evaluated_at": response.reviewed_at,
-        "metadata": body.metadata,
-        "secret_scan_triggered": False,
-    }
+    audit_trail = _build_audit_trail(
+        trace_id=trace_id,
+        decision_id=response.decision_id,
+        action_type=body.action_type,
+        target=body.target,
+        builder_id=body.builder_id,
+        workflow_id=body.workflow_id,
+        client_id=body.client_id,
+        session_id=body.session_id,
+        risk_score_input=body.risk_score,
+        risk_score_final=response.risk_score,
+        risk_level=response.risk_level,
+        verdict=response.verdict,
+        should_hold=response.should_hold,
+        matched_rule_count=len(response.matched_rules),
+        evaluated_at=response.reviewed_at,
+        metadata=body.metadata,
+        secret_scan_triggered=False,
+    )
 
     return OpenClawEvaluateResponse(
         trace_id=trace_id,

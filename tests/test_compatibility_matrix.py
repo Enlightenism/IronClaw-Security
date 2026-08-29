@@ -13,10 +13,21 @@ def test_list_compatibility_rules_returns_expected_runtime_families():
 
     rules = list_compatibility_rules(matrix)
 
-    assert len(rules) >= 3
-    assert any(rule.runtime_family == "claude-code" for rule in rules)
-    assert any(rule.runtime_family == "openclaw" for rule in rules)
-    assert any(rule.runtime_family == "generic-agent" for rule in rules)
+    expected_runtime_families = {
+        "claude-code",
+        "openclaw",
+        "cursor",
+        "goose",
+        "gemini-cli",
+        "copilot",
+        "security-guardian",
+        "generic-agent",
+    }
+
+    assert len(rules) >= len(expected_runtime_families)
+    assert {rule.runtime_family for rule in rules} >= expected_runtime_families
+    assert any(rule.metadata.get("install_key_program") == "claude_code" for rule in rules)
+    assert any(rule.metadata.get("install_key_program") == "security_guardian" for rule in rules)
 
 
 def test_evaluate_compatibility_returns_supported_for_claude_code_gen1():
@@ -32,6 +43,30 @@ def test_evaluate_compatibility_returns_supported_for_claude_code_gen1():
     assert decision.version == "0.1.0"
     assert decision.state == "supported"
     assert decision.matched_rule is not None
+    assert decision.metadata["install_key_program"] == "claude_code"
+    assert decision.metadata["install_key_prefix"] == "ic_install_claude_code_"
+
+
+def test_evaluate_compatibility_returns_supported_for_aliases_and_shared_family_assignment():
+    matrix = initialize_compatibility_matrix()
+
+    decision = evaluate_compatibility(
+        matrix,
+        runtime_family="github-copilot",
+        version="0.3.0",
+    )
+    guardian_decision = evaluate_compatibility(
+        matrix,
+        runtime_family="security_guardian",
+        version="0.2.0",
+    )
+
+    assert decision.runtime_family == "copilot"
+    assert decision.state == "supported"
+    assert decision.metadata["install_key_program"] == "copilot"
+    assert guardian_decision.runtime_family == "security-guardian"
+    assert guardian_decision.metadata["install_key_program"] == "security_guardian"
+    assert guardian_decision.metadata["install_key_prefix"] == "ic_install_security_guardian_"
 
 
 def test_evaluate_compatibility_returns_warning_for_generic_agent():

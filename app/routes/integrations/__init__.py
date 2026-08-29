@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.routes.integrations.agent_skills import router as agent_skills_router
 from app.routes.integrations.claude_code import router as claude_code_router
 from app.routes.integrations.compatibility import router as compatibility_router
+from app.routes.integrations.copilot import router as copilot_router
+from app.routes.integrations.cursor import router as cursor_router
+from app.routes.integrations.gemini_cli import router as gemini_cli_router
+from app.routes.integrations.goose import router as goose_router
 from app.routes.integrations.health import router as health_router
 from app.routes.integrations.installer import router as installer_router
 from app.routes.integrations.lifecycle import router as lifecycle_router
@@ -29,3 +34,8 @@ router.include_router(readiness_router)
 router.include_router(observability_router)
 router.include_router(claude_code_router)
 router.include_router(openclaw_router)
+router.include_router(cursor_router)
+router.include_router(goose_router)
+router.include_router(gemini_cli_router)
+router.include_router(copilot_router)
+router.include_router(agent_skills_router)

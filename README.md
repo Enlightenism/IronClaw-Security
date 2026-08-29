@@ -230,6 +230,24 @@ Core v1 files:
 
 ---
 
+## Public install path
+
+Install the released package from the external package index:
+
+```powershell
+python -m pip install ironclaw-security
+```
+
+Then install the shared Security Guardian bundle and the runtime targets you
+want protected:
+
+```powershell
+ironclaw install --provider-target security_guardian --provider-target openclaw --provider-target claude_code
+```
+
+This is the public, user-facing install flow. The Security Guardian package is a
+shared cross-runtime security bundle, not a single-agent or one-off package.
+
 ## Local setup
 
 Copy the environment template and fill in your values before starting:
@@ -238,8 +256,8 @@ Copy the environment template and fill in your values before starting:
 cp .env.example .env
 ```
 
-Install dependencies (editable install — do not run
-`pip install -r requirements.txt` directly):
+Install dependencies for local development and source work (editable install —
+do not run `pip install -r requirements.txt` directly):
 
 ```powershell
 pip install -e ".[dev]"

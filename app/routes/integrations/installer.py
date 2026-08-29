@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Path, status
 from pydantic import BaseModel, Field
 
+from app.core.install_key_formats import get_install_key_format_registry
 from app.core.install_keys import get_install_key_registry
 from app.services.integrationinstaller import get_integration_installer
 
@@ -148,13 +149,56 @@ def _build_step_view(record: Any, fallback_index: int) -> InstallationStepView:
     )
 
 
+def _canonicalize_platform_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return None
+
+    for prefix in ("integration-", "integration_", "platform-"):
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix) :]
+            break
+
+    registry = get_install_key_format_registry()
+    program = registry.normalize_program(normalized)
+    if program is not None:
+        return program
+
+    normalized = normalized.replace("_", "-")
+    return registry.normalize_program(normalized)
+
+
 def _infer_expected_program(integration_id: str | None, *, platform: str | None = None) -> str | None:
-    normalized = (platform or integration_id or "").strip().lower()
-    if normalized in {"openclaw", "integration-openclaw"}:
-        return "openclaw"
-    if normalized in {"claude-code", "claude_code", "integration-claude-code", "integration-claude_code"}:
-        return "claude_code"
+    registry = get_install_key_format_registry()
+    candidates = [platform, integration_id]
+    for candidate in candidates:
+        normalized = _canonicalize_platform_name(candidate)
+        if normalized is not None:
+            return normalized
+        if candidate is not None:
+            canonical = registry.normalize_program(str(candidate).strip().lower().replace("_", "-"))
+            if canonical is not None:
+                return canonical
     return None
+
+
+def _platform_install_command(program: str | None, install_key: str) -> str:
+    registry = get_install_key_format_registry()
+    program_name = (program or "").strip()
+    if not program_name:
+        return ""
+
+    try:
+        spec = registry.get_spec(program_name)
+    except ValueError:
+        return ""
+
+    slug = spec.program
+    platform_name = spec.platform_aliases[0] if spec.platform_aliases else slug
+    return f"npx ironclaw-install --key {install_key} --platform {platform_name}"
 
 
 def _require_paid_install_key(
@@ -178,11 +222,8 @@ def _require_paid_install_key(
 
     candidate = str(install_key).strip()
     expected_program = _infer_expected_program(integration_id, platform=platform)
-    valid_prefixes = ("ic_install_openclaw_", "ic_install_claude_code_")
-    if expected_program == "openclaw":
-        valid_prefixes = ("ic_install_openclaw_",)
-    elif expected_program == "claude_code":
-        valid_prefixes = ("ic_install_claude_code_",)
+    registry = get_install_key_format_registry()
+    valid_prefixes = tuple(spec.prefix for spec in registry.list_specs()) if expected_program is None else (registry.get_spec(expected_program).prefix,)
 
     if (
         candidate.startswith("ic_org_")

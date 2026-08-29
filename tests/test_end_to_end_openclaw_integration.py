@@ -131,6 +131,61 @@ def test_end_to_end_openclaw_registry_install_and_verify():
     assert exec_result.output["request"]["action_type"] == "toolcall"
 
 
+def test_openclaw_route_contract_handshake_manifest_and_secret_scan_gate():
+    client = _client()
+
+    handshake = client.post(
+        "/integrations/openclaw/handshake",
+        headers={"X-API-Key": "test-api-key"},
+        json={
+            "client_id": "benchmark-client",
+            "protocol_version": "1.0.0",
+            "builder_id": "builder-42",
+            "metadata": {"environment": "test"},
+        },
+    )
+    assert handshake.status_code == 200, handshake.text
+    payload = handshake.json()
+    assert payload["status"] == "ok"
+    assert payload["platform"] == "openclaw"
+    assert payload["adapter_name"] == "ironclaw-openclaw"
+    assert any(cap["name"] == "secret-scan" for cap in payload["capabilities"])
+    assert payload["metadata"]["handshake_status"] == "guarded"
+
+    manifest = client.get("/integrations/openclaw/manifest", headers={"X-API-Key": "test-api-key"})
+    assert manifest.status_code == 200, manifest.text
+    manifest_payload = manifest.json()
+    assert manifest_payload["platform"] == "openclaw"
+    assert manifest_payload["adapter_name"] == "ironclaw-openclaw"
+    assert "workflow_step" in manifest_payload["supported_action_types"]
+    assert any(cap["name"] == "audit-trail" for cap in manifest_payload["capabilities"])
+
+    evaluate = client.post(
+        "/integrations/openclaw/evaluate",
+        headers={"X-API-Key": "test-api-key"},
+        json={
+            "action_type": "workflow_step",
+            "target": "deploy-pipeline",
+            "content": "AKIA1234567890EXAMPLE secret token",
+            "builder_id": "builder-42",
+            "workflow_id": "wf-42",
+            "client_id": "benchmark-client",
+            "session_id": "session-42",
+            "risk_score": 30,
+            "metadata": {"tenant": "alpha"},
+        },
+    )
+    assert evaluate.status_code == 200, evaluate.text
+    evaluate_payload = evaluate.json()
+    assert evaluate_payload["verdict"] == "block"
+    assert evaluate_payload["should_block"] is True
+    assert evaluate_payload["should_hold"] is True
+    assert evaluate_payload["secret_scan"]["scanned"] is True
+    assert evaluate_payload["secret_scan"]["findings"]
+    assert evaluate_payload["audit_trail"]["secret_scan_triggered"] is True
+    assert evaluate_payload["audit_trail"]["metadata"]["tenant"] == "alpha"
+
+
 def test_end_to_end_openclaw_cli_install_and_verify(capsys):
     # 1. Run CLI list to make sure OpenClaw appears as an available integration.
     exit_code = run_cli(["list"])

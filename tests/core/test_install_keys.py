@@ -23,6 +23,11 @@ _OWNER = "user@ironclaw.test"
 _SUB_ID = "sub-001"
 _OPENCLAW_PREFIX = "ic_install_openclaw_"
 _CLAUDE_PREFIX = "ic_install_claude_code_"
+_CURSOR_PREFIX = "ic_install_cursor_"
+_GOOSE_PREFIX = "ic_install_goose_"
+_GEMINI_PREFIX = "ic_install_gemini_cli_"
+_COPILOT_PREFIX = "ic_install_copilot_"
+_SKILLS_PREFIX = "ic_install_security_guardian_"
 _CHECKOUT_SESSION_ID = "cs_test_001"
 _PURCHASE_REFERENCE = "sub_001"
 
@@ -135,6 +140,13 @@ class TestInstallKeyRecordPostInit(unittest.TestCase):
         record = self._valid_record(program="claude_code")
         assert record.program == "claude_code"
 
+    def test_valid_alias_programs_normalize_to_canonical_names(self):
+        assert InstallKeyRecord(**{**self._valid_record(program="cursor").__dict__, "program": "cursor"}).program == "cursor"
+        assert InstallKeyRecord(**{**self._valid_record(program="goose").__dict__, "program": "goose"}).program == "goose"
+        assert InstallKeyRecord(**{**self._valid_record(program="gemini-cli").__dict__, "program": "gemini-cli"}).program == "gemini_cli"
+        assert InstallKeyRecord(**{**self._valid_record(program="github-copilot").__dict__, "program": "github-copilot"}).program == "copilot"
+        assert InstallKeyRecord(**{**self._valid_record(program="security-guardian").__dict__, "program": "security-guardian"}).program == "security_guardian"
+
     def test_active_record_requires_paid_payment_status(self):
         with self.assertRaises(ValueError):
             self._valid_record(active=True, payment_status="pending", entitlements_status="active", issued_after_payment=True)
@@ -168,9 +180,11 @@ class TestInstallKeyRecordPostInit(unittest.TestCase):
         with self.assertRaises(ValueError):
             self._valid_record(program="")
 
-    def test_program_case_sensitive_uppercase_raises(self):
-        with self.assertRaises(ValueError):
-            self._valid_record(program="OpenClaw")
+    def test_program_case_insensitive_aliases_normalize(self):
+        record = self._valid_record(program="OpenClaw")
+        assert record.program == "openclaw"
+        gemini = self._valid_record(program="GEMINI-CLI")
+        assert gemini.program == "gemini_cli"
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +259,30 @@ class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
         reg = self._registry()
         record = self._generate_paid_key(reg, "claude_code")
         assert isinstance(record, InstallKeyRecord)
+
+    def test_multi_platform_aliases_generate_canonical_keys(self):
+        reg = self._registry()
+        for program in ("cursor", "goose", "gemini-cli", "github-copilot", "security-guardian"):
+            record = reg.generate_for_paid_customer(
+                owner_key=_OWNER,
+                subscription_id=_SUB_ID,
+                program=program,
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+                checkout_session_id=_CHECKOUT_SESSION_ID,
+                purchase_reference=_PURCHASE_REFERENCE,
+            )
+            assert record.program in {"cursor", "goose", "gemini_cli", "copilot", "security_guardian"}
+            assert record.raw_key.startswith(
+                (
+                    _CURSOR_PREFIX,
+                    _GOOSE_PREFIX,
+                    _GEMINI_PREFIX,
+                    _COPILOT_PREFIX,
+                    _SKILLS_PREFIX,
+                )
+            )
 
     def test_legacy_generate_install_key_uses_subscription_reference_when_missing(self):
         reg = self._registry()

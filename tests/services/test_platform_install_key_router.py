@@ -27,6 +27,12 @@ from app.services.platform_install_key_router import (
         ("claude_code", "claude_code", "ic_install_claude_code_"),
         ("claude-code", "claude_code", "ic_install_claude_code_"),
         ("anthropic", "claude_code", "ic_install_claude_code_"),
+        ("cursor", "cursor", "ic_install_cursor_"),
+        ("cursor-agent", "cursor", "ic_install_cursor_"),
+        ("goose", "goose", "ic_install_goose_"),
+        ("gemini-cli", "gemini_cli", "ic_install_gemini_cli_"),
+        ("github-copilot", "copilot", "ic_install_copilot_"),
+        ("security-guardian", "security_guardian", "ic_install_security_guardian_"),
     ],
 )
 def test_resolve_platform_routes_aliases_to_canonical_install_key_program(platform_name: str, expected_program: str, expected_prefix: str) -> None:
@@ -71,19 +77,60 @@ def test_resolve_group_groups_compatible_platforms_together() -> None:
 def test_list_groups_returns_shared_format_sections() -> None:
     groups = list_platform_install_key_groups()
 
-    assert len(groups) == 2
+    assert len(groups) == 7
     programs = {group.program for group in groups}
-    assert programs == {"openclaw", "claude_code"}
+    assert programs == {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "security_guardian"}
     assert all(group.platforms for group in groups)
+    assert any(group.program == "security_guardian" and "skill" in group.platforms for group in groups)
 
 
 def test_list_platforms_returns_aliases_and_canonical_names() -> None:
     platforms = list_platform_install_key_platforms()
+    expected_alias_mapping = {
+        "openclaw": "openclaw",
+        "ironclaw": "openclaw",
+        "claude_code": "claude_code",
+        "claude-code": "claude_code",
+        "anthropic": "claude_code",
+        "cursor": "cursor",
+        "cursor_agent": "cursor",
+        "cursor-agent": "cursor",
+        "goose": "goose",
+        "goose_agent": "goose",
+        "gemini_cli": "gemini_cli",
+        "gemini-cli": "gemini_cli",
+        "gemini": "gemini_cli",
+        "copilot": "copilot",
+        "github_copilot": "copilot",
+        "github-copilot": "copilot",
+        "githubcopilot": "copilot",
+        "security_guardian": "security_guardian",
+        "security-guardian": "security_guardian",
+        "securityguardian": "security_guardian",
+        "skill": "security_guardian",
+        "skills": "security_guardian",
+    }
+
+    for alias, expected_program in expected_alias_mapping.items():
+        route = PlatformInstallKeyRouter().resolve_platform(alias)
+        assert route.program == expected_program
+        assert route.family == expected_program
+        assert route.canonical_platform in route.group_platforms
+        assert alias in platforms or alias.replace("-", "_") in platforms
 
     assert "openclaw" in platforms
     assert "ironclaw" in platforms
     assert "claude_code" in platforms
     assert "anthropic" in platforms
+    assert "cursor" in platforms
+    assert "cursor_agent" in platforms
+    assert "goose" in platforms
+    assert "gemini_cli" in platforms
+    assert "gemini" in platforms
+    assert "copilot" in platforms
+    assert "githubcopilot" in platforms
+    assert "security_guardian" in platforms
+    assert "skill" in platforms
     assert len(set(platforms)) == len(platforms)
 
 

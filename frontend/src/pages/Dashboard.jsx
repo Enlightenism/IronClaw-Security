@@ -21,9 +21,57 @@ import api from "@/lib/api";
 const ATTACKS_PAGE_SIZE = 25;
 const VALID_PACKAGES = ["pkg5000", "pkg25000", "pkg60000"];
 const INSTALL_KEY_PROGRAMS = [
-  { program: "claude_code", label: "Claude Code", tint: "gold" },
-  { program: "openclaw", label: "OpenClaw", tint: "platinum" },
+  { program: "claude_code", label: "Claude Code", tint: "gold", commandKey: "claude_code_command" },
+  { program: "openclaw", label: "OpenClaw", tint: "platinum", commandKey: "openclaw_command" },
+  { program: "cursor", label: "Cursor", tint: "cyan", commandKey: "cursor_command" },
+  { program: "goose", label: "Goose", tint: "violet", commandKey: "goose_command" },
+  { program: "gemini_cli", label: "Gemini CLI", tint: "emerald", commandKey: "gemini_cli_command" },
+  { program: "copilot", label: "Copilot", tint: "indigo", commandKey: "copilot_command" },
+  {
+    program: "security_guardian",
+    label: "Shared Skill Package",
+    tint: "amber",
+    commandKey: "security_guardian_command",
+  },
 ];
+
+const CARD_TINT_STYLES = {
+  gold: {
+    card: "linear-gradient(135deg, rgba(255,214,102,0.18), rgba(10,12,15,0.9))",
+    border: "rgba(255,215,0,0.42)",
+    glow: "rgba(255,215,0,0.38)",
+  },
+  platinum: {
+    card: "linear-gradient(135deg, rgba(210,221,232,0.15), rgba(10,12,15,0.9))",
+    border: "rgba(180,188,196,0.45)",
+    glow: "rgba(192,208,223,0.32)",
+  },
+  cyan: {
+    card: "linear-gradient(135deg, rgba(69,182,255,0.14), rgba(10,12,15,0.9))",
+    border: "rgba(56,189,248,0.42)",
+    glow: "rgba(56,189,248,0.34)",
+  },
+  violet: {
+    card: "linear-gradient(135deg, rgba(167,139,250,0.16), rgba(10,12,15,0.9))",
+    border: "rgba(168,85,247,0.42)",
+    glow: "rgba(168,85,247,0.28)",
+  },
+  emerald: {
+    card: "linear-gradient(135deg, rgba(16,185,129,0.16), rgba(10,12,15,0.9))",
+    border: "rgba(52,211,153,0.4)",
+    glow: "rgba(52,211,153,0.3)",
+  },
+  indigo: {
+    card: "linear-gradient(135deg, rgba(99,102,241,0.17), rgba(10,12,15,0.9))",
+    border: "rgba(129,140,248,0.42)",
+    glow: "rgba(129,140,248,0.32)",
+  },
+  amber: {
+    card: "linear-gradient(135deg, rgba(251,191,36,0.16), rgba(10,12,15,0.9))",
+    border: "rgba(253,224,71,0.42)",
+    glow: "rgba(253,224,71,0.32)",
+  },
+};
 
 const MemoWalletCard = memo(WalletCard);
 const MemoSecurityAnalysis = memo(SecurityAnalysis);
@@ -247,9 +295,37 @@ const Dashboard = () => {
   const [loadingData, setLoadingData] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [purchasingId, setPurchasingId] = useState(null);
+  const [pointerGlow, setPointerGlow] = useState({ x: 50, y: 25 });
+  const [scrollShift, setScrollShift] = useState(0);
   const polledRef = useRef(false);
 
   const isAuthenticated = Boolean(user || session);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const mediaQuery = typeof window.matchMedia === "function"
+      ? window.matchMedia("(pointer: coarse)")
+      : null;
+    if (mediaQuery && mediaQuery.matches) return undefined;
+
+    const handlePointerMove = (event) => {
+      const x = (event.clientX / window.innerWidth) * 100;
+      const y = (event.clientY / window.innerHeight) * 100;
+      setPointerGlow({ x, y });
+    };
+
+    const handleScroll = () => {
+      setScrollShift(window.scrollY * 0.18);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("scroll", handleScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("scroll", handleScroll);
+    };
+  }, []);
 
   const fetchDashboard = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoadingData(true);
@@ -501,7 +577,7 @@ const Dashboard = () => {
       ]),
     );
 
-    return INSTALL_KEY_PROGRAMS.map(({ program, label, tint }) => {
+    return INSTALL_KEY_PROGRAMS.map(({ program, label, tint, commandKey }) => {
       const slot = slotMap.get(program) ?? {
         program,
         status: "locked",
@@ -519,6 +595,7 @@ const Dashboard = () => {
         program,
         title: label,
         tint,
+        commandKey,
         testid: `install-key-card-${program}`,
         status: slot?.status ?? "locked",
         maskedKey: isActive ? slot.masked_key : "",
@@ -530,26 +607,41 @@ const Dashboard = () => {
   const integrationCards = useMemo(() => {
     const hasUnlockedToken =
       tokens?.status === "ok" ||
-      Boolean(tokens?.claude_code_command || tokens?.openclaw_command);
+      INSTALL_KEY_PROGRAMS.some(({ commandKey }) => Boolean(tokens?.[commandKey]));
 
     if (!hasUnlockedToken) {
       return [];
     }
 
-    return [
-      {
-        title: "Claude Code",
-        command: tokens?.claude_code_command || "",
-        tint: "gold",
-        testid: "claude-code-card",
-      },
-      {
-        title: "Open Claw",
-        command: tokens?.openclaw_command || "",
-        tint: "platinum",
-        testid: "openclaw-card",
-      },
-    ].filter((card) => Boolean(card.command));
+    const toCardTestId = (program) => {
+      switch (program) {
+        case "claude_code":
+          return "claude-code-card";
+        case "openclaw":
+          return "openclaw-card";
+        case "cursor":
+          return "cursor-card";
+        case "goose":
+          return "goose-card";
+        case "gemini_cli":
+          return "gemini_cli-card";
+        case "copilot":
+          return "copilot-card";
+        case "security_guardian":
+          return "security_guardian-card";
+        default:
+          return `${program}-card`;
+      }
+    };
+
+    return INSTALL_KEY_PROGRAMS.filter(({ commandKey }) => Boolean(tokens?.[commandKey]))
+      .map(({ label, tint, program, commandKey }) => ({
+        title: label,
+        command: tokens?.[commandKey] || "",
+        tint,
+        testid: toCardTestId(program),
+      }))
+      .filter((card) => Boolean(card.command));
   }, [tokens]);
 
   const attackFeedItems = useMemo(() => data?.attacks ?? [], [data?.attacks]);
@@ -563,7 +655,46 @@ const Dashboard = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#050607] text-white">
+    <div
+      className="relative min-h-screen overflow-hidden bg-[#050607] text-white"
+      style={{
+        backgroundImage:
+          "radial-gradient(circle at 15% 15%, rgba(255, 215, 0, 0.16), transparent 22%), radial-gradient(circle at 78% 12%, rgba(56, 189, 248, 0.12), transparent 18%), linear-gradient(180deg, rgba(5,6,7,1) 0%, rgba(9,11,16,1) 100%)",
+      }}
+    >
+      <div className="pointer-events-none absolute inset-0 opacity-80">
+        <div
+          className="absolute inset-0"
+          style={{
+            background: `radial-gradient(circle at ${pointerGlow.x}% ${pointerGlow.y}%, rgba(255,215,0,0.20), transparent 18%), radial-gradient(circle at ${100 - pointerGlow.x}% ${pointerGlow.y + 18}%, rgba(56,189,248,0.12), transparent 20%)`,
+            transform: `translateY(${scrollShift}px)`,
+          }}
+        />
+        <div
+          className="absolute -left-24 top-14 h-72 w-72 rounded-full blur-3xl"
+          style={{
+            background: "rgba(255,215,0,0.18)",
+            transform: `translateY(${scrollShift * 0.5}px)`,
+          }}
+        />
+        <div
+          className="absolute -right-20 top-32 h-80 w-80 rounded-full blur-3xl"
+          style={{
+            background: "rgba(56,189,248,0.14)",
+            transform: `translateY(${scrollShift * -0.35}px)`,
+          }}
+        />
+        <div
+          className="absolute inset-0 opacity-20"
+          style={{
+            backgroundImage:
+              "linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px)",
+            backgroundSize: "42px 42px",
+            maskImage: "linear-gradient(180deg, rgba(0,0,0,0.25), rgba(0,0,0,0.8))",
+          }}
+        />
+      </div>
+
       <nav className="sticky top-0 z-40 border-b border-white/10 bg-[#050607]/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <button
@@ -649,43 +780,59 @@ const Dashboard = () => {
 
           <div className="space-y-6">
             <div className="grid grid-cols-1 gap-6">
-              {installKeyCards.map((card) => (
-                <div
-                  key={card.testid}
-                  data-testid={card.testid}
-                  className="rounded-2xl border border-white/10 bg-white/[0.03] p-5"
-                >
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <h2 className="text-lg font-semibold tracking-tight text-white">
-                      {card.title}
-                    </h2>
-                    <span
-                      className={`rounded-full border px-2 py-1 text-[10px] font-medium uppercase tracking-wide ${
-                        card.status === "active"
-                          ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-300"
-                          : "border-amber-400/30 bg-amber-500/10 text-amber-200"
-                      }`}
-                    >
-                      {card.status}
-                    </span>
-                  </div>
-
-                  {card.maskedKey ? (
-                    <div className="space-y-2">
-                      <div className="text-xs uppercase tracking-[0.2em] text-[#BFC1C2]">
-                        Active install key
+              {installKeyCards.map((card) => {
+                const accent = CARD_TINT_STYLES[card.tint] ?? CARD_TINT_STYLES.gold;
+                return (
+                  <div
+                    key={card.testid}
+                    data-testid={card.testid}
+                    className="relative overflow-hidden rounded-2xl border p-5 backdrop-blur-xl transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_0_28px_rgba(255,215,0,0.12)]"
+                    style={{
+                      background: accent.card,
+                      borderColor: accent.border,
+                      boxShadow: `inset 0 1px 0 rgba(255,255,255,0.08), 0 18px 32px rgba(0,0,0,0.25), 0 0 0 1px ${accent.glow}`,
+                    }}
+                  >
+                    <div
+                      className="pointer-events-none absolute inset-0 opacity-90"
+                      style={{
+                        background: `radial-gradient(circle at 20% 0%, ${accent.glow}, transparent 32%)`,
+                      }}
+                    />
+                    <div className="relative">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <h2 className="text-lg font-semibold tracking-tight text-white">
+                          {card.title}
+                        </h2>
+                        <span
+                          className={`rounded-full border px-2 py-1 text-[10px] font-medium uppercase tracking-wide ${
+                            card.status === "active"
+                              ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-300"
+                              : "border-amber-400/30 bg-amber-500/10 text-amber-200"
+                          }`}
+                        >
+                          {card.status}
+                        </span>
                       </div>
-                      <code className="block break-all rounded-xl border border-emerald-400/20 bg-emerald-500/5 px-3 py-2 font-mono text-sm text-emerald-200">
-                        {card.maskedKey}
-                      </code>
+
+                      {card.maskedKey ? (
+                        <div className="space-y-2">
+                          <div className="text-xs uppercase tracking-[0.2em] text-[#BFC1C2]">
+                            Active install key
+                          </div>
+                          <code className="block break-all rounded-xl border border-emerald-400/20 bg-emerald-500/5 px-3 py-2 font-mono text-sm text-emerald-200">
+                            {card.maskedKey}
+                          </code>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-[#BFC1C2]">
+                          {card.placeholderText}
+                        </p>
+                      )}
                     </div>
-                  ) : (
-                    <p className="text-sm text-[#BFC1C2]">
-                      {card.placeholderText}
-                    </p>
-                  )}
-                </div>
-              ))}
+                  </div>
+                );
+              })}
             </div>
 
             <div className="grid grid-cols-1 gap-6">

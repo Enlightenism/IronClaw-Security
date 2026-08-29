@@ -10,6 +10,8 @@ import subprocess
 import sys
 from typing import Any, Final
 
+from app.core.install_key_formats import InstallKeyFormatRegistry, normalize_install_key_program
+
 DEFAULT_BASE_URL: Final[str] = "http://127.0.0.1:8000"
 DEFAULT_CONFIG_DIRNAME: Final[str] = ".ironclaw"
 DEFAULT_CONFIG_FILENAME: Final[str] = "config.json"
@@ -19,7 +21,7 @@ DEFAULT_TIMEOUT_SECONDS: Final[float] = 20.0
 DEFAULT_BACKUP_TARGET: Final[str] = "primary"
 DEFAULT_RESTORE_TARGET: Final[str] = "primary"
 DEFAULT_RETENTION_DAYS: Final[int] = 30
-DEFAULT_PROVIDER_TARGETS: Final[tuple[str, str]] = ("claude", "openclaw")
+DEFAULT_PROVIDER_TARGETS: Final[tuple[str, ...]] = tuple(InstallKeyFormatRegistry.list_programs())
 _SUBPROCESS_TIMEOUT: Final[int] = 300
 
 
@@ -119,12 +121,15 @@ def _normalize_provider_targets(values: tuple[str, ...] | list[str] | None) -> t
     seen: set[str] = set()
 
     for value in values:
-        item = str(value).strip().lower()
+        item = str(value).strip()
         if not item:
             continue
-        if item not in seen:
-            normalized.append(item)
-            seen.add(item)
+        canonical = InstallKeyFormatRegistry.normalize_program(item) or normalize_install_key_program(item)
+        if canonical is None:
+            raise IronClawInstallerError(f"Unsupported provider target: {value!r}")
+        if canonical not in seen:
+            normalized.append(canonical)
+            seen.add(canonical)
 
     if not normalized:
         raise IronClawInstallerError("--provider-target must include at least one non-empty value")
@@ -171,6 +176,23 @@ def _write_text_file(path: Path, content: str, *, overwrite: bool) -> tuple[bool
 
 
 def _build_runtime_config(config: InstallConfig) -> dict[str, Any]:
+    provider_set = set(config.provider_targets)
+    features = {
+        "health": True,
+        "ui": True,
+        "backup": True,
+        "restore": True,
+        "guarded_execution": True,
+        "skill_integration": True,
+        "shared_skill_package": "security_guardian" in provider_set,
+        "claude_integration": "claude_code" in provider_set,
+        "openclaw_integration": "openclaw" in provider_set,
+        "cursor_integration": "cursor" in provider_set,
+        "goose_integration": "goose" in provider_set,
+        "gemini_cli_integration": "gemini_cli" in provider_set,
+        "copilot_integration": "copilot" in provider_set,
+        "security_guardian_integration": "security_guardian" in provider_set,
+    }
     return {
         "schema_version": 1,
         "product": "IronClaw-Security",
@@ -185,20 +207,12 @@ def _build_runtime_config(config: InstallConfig) -> dict[str, Any]:
             "project_root": str(config.project_root),
             "env_file": str(config.env_file),
         },
-        "features": {
-            "health": True,
-            "ui": True,
-            "backup": True,
-            "restore": True,
-            "guarded_execution": True,
-            "skill_integration": True,
-            "claude_integration": "claude" in config.provider_targets,
-            "openclaw_integration": "openclaw" in config.provider_targets,
-        },
+        "features": features,
     }
 
 
 def _build_env_contents(config: InstallConfig) -> str:
+    shared_skill_package = "security_guardian" in set(config.provider_targets)
     values = {
         "ENVIRONMENT": "production",
         "IRONCLAW_BASE_URL": config.base_url,
@@ -211,6 +225,8 @@ def _build_env_contents(config: InstallConfig) -> str:
         "IRONCLAW_BACKUP_ENCRYPTION": "true",
         "IRONCLAW_BACKUP_CHECKSUM": "true",
         "IRONCLAW_PROVIDER_TARGETS": ",".join(config.provider_targets),
+        "IRONCLAW_SHARED_SKILL_PACKAGE": "true" if shared_skill_package else "false",
+        "IRONCLAW_SECURITY_GUARDIAN_INTEGRATION": "true" if shared_skill_package else "false",
         "SECRET_KEY": _strong_secret(),
         "JWT_SECRET": _strong_secret(),
         "API_SECRET": _strong_secret(),
@@ -459,7 +475,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--provider-target",
         action="append",
         default=[],
-        help="Provider target to enable, repeatable, e.g. --provider-target claude --provider-target openclaw",
+        help="Provider target to enable, repeatable, e.g. --provider-target claude_code --provider-target openclaw --provider-target security_guardian",
     )
     parser.add_argument(
         "--no-vscode",

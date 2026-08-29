@@ -11,6 +11,75 @@ router = APIRouter(tags=["integration-routes"])
 
 _PAID_PAYMENT_STATUSES = {"paid", "success", "succeeded", "complete", "completed", "active", "authorized"}
 _ACTIVE_ENTITLEMENT_STATUSES = {"active", "paid", "enabled", "granted"}
+_CANONICAL_PLATFORM_ORDER: tuple[str, ...] = (
+    "claude-code",
+    "openclaw",
+    "cursor",
+    "goose",
+    "gemini-cli",
+    "copilot",
+    "security-guardian",
+)
+
+_SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
+    "claude-code": {
+        "program": "claude_code",
+        "platform": "claude-code",
+        "slug": "claude-code",
+        "shared_package": False,
+        "shared_install_key_family": False,
+        "command_template": "npx ironclaw-install --key {key} --platform claude-code",
+    },
+    "openclaw": {
+        "program": "openclaw",
+        "platform": "openclaw",
+        "slug": "openclaw",
+        "shared_package": False,
+        "shared_install_key_family": False,
+        "command_template": "npx ironclaw-install --key {key} --platform openclaw",
+    },
+    "cursor": {
+        "program": "cursor",
+        "platform": "cursor",
+        "slug": "cursor",
+        "shared_package": False,
+        "shared_install_key_family": False,
+        "command_template": "npx ironclaw-install --key {key} --platform cursor",
+    },
+    "goose": {
+        "program": "goose",
+        "platform": "goose",
+        "slug": "goose",
+        "shared_package": False,
+        "shared_install_key_family": False,
+        "command_template": "npx ironclaw-install --key {key} --platform goose",
+    },
+    "gemini-cli": {
+        "program": "gemini_cli",
+        "platform": "gemini-cli",
+        "slug": "gemini-cli",
+        "shared_package": False,
+        "shared_install_key_family": False,
+        "command_template": "npx ironclaw-install --key {key} --platform gemini-cli",
+    },
+    "copilot": {
+        "program": "copilot",
+        "platform": "copilot",
+        "slug": "copilot",
+        "shared_package": False,
+        "shared_install_key_family": False,
+        "command_template": "npx ironclaw-install --key {key} --platform copilot",
+    },
+    "security-guardian": {
+        "program": "security_guardian",
+        "platform": "security-guardian",
+        "slug": "security-guardian",
+        "shared_package": True,
+        "shared_install_key_family": True,
+        "package_type": "shared-runtime-skill-bundle",
+        "command_template": "npx ironclaw-install --key {key} --platform security-guardian",
+    },
+}
 
 
 def _resolve_install_owner(auth: Any) -> str | None:
@@ -97,8 +166,14 @@ def _select_paid_install_key(owner_key: str | None, program: str) -> str:
 def list_integration_installers() -> dict[str, object]:
     return {
         "items": [
-            {"integration_id": "claude-code", "status": "ready"},
-            {"integration_id": "openclaw", "status": "ready"},
+            {
+                "integration_id": platform_slug,
+                "status": "ready",
+                "program": metadata["program"],
+                "shared_package": metadata.get("shared_package", False),
+                "shared_install_key_family": metadata.get("shared_install_key_family", False),
+            }
+            for platform_slug, metadata in _SUPPORTED_PLATFORM_INSTALLS.items()
         ],
     }
 
@@ -116,8 +191,14 @@ def get_integration_installer(integration_id: str) -> dict[str, str]:
 def list_integration_verifiers() -> dict[str, object]:
     return {
         "items": [
-            {"integration_id": "claude-code", "status": "ready"},
-            {"integration_id": "openclaw", "status": "ready"},
+            {
+                "integration_id": platform_slug,
+                "status": "ready",
+                "program": metadata["program"],
+                "shared_package": metadata.get("shared_package", False),
+                "shared_install_key_family": metadata.get("shared_install_key_family", False),
+            }
+            for platform_slug, metadata in _SUPPORTED_PLATFORM_INSTALLS.items()
         ],
     }
 
@@ -202,24 +283,55 @@ def get_integration_observability(integration_id: str) -> dict[str, object]:
 
 
 @router.get("/integrations/token")
-async def get_integrations_token(auth: Any = Depends(get_auth_context)) -> dict[str, str]:
+async def get_integrations_token(auth: Any = Depends(get_auth_context)) -> dict[str, Any]:
     owner_key = _resolve_install_owner(auth)
-    claude_key = _select_paid_install_key(owner_key, "claude_code")
-    openclaw_key = _select_paid_install_key(owner_key, "openclaw")
+    install_keys: dict[str, str] = {}
+    if owner_key:
+        for program in ("claude_code", "openclaw", "cursor", "goose", "gemini_cli", "copilot", "security_guardian"):
+            masked_key = _select_paid_install_key(owner_key, program)
+            if masked_key:
+                install_keys[program] = masked_key
 
-    payload: dict[str, str] = {
+    payload: dict[str, Any] = {
         "status": "locked",
         "user_token": "",
         "claude_code_command": "",
         "openclaw_command": "",
+        "cursor_command": "",
+        "goose_command": "",
+        "gemini_cli_command": "",
+        "copilot_command": "",
+        "security_guardian_command": "",
+        "supported_platforms": list(_CANONICAL_PLATFORM_ORDER),
+        "command_metadata": {},
+        "install_metadata": {},
     }
 
-    if claude_key:
-        payload["status"] = "ok"
-        payload["claude_code_command"] = f"npx ironclaw-install --key {claude_key} --platform claude-code"
-
-    if openclaw_key:
-        payload["status"] = "ok"
-        payload["openclaw_command"] = f"npx ironclaw-install --key {openclaw_key} --platform openclaw"
+    for platform_slug, metadata in _SUPPORTED_PLATFORM_INSTALLS.items():
+        program = metadata["program"]
+        key = install_keys.get(program, "")
+        command = metadata["command_template"].format(key=key) if key else ""
+        payload["command_metadata"][platform_slug] = command
+        payload["install_metadata"][platform_slug] = {
+            "platform": metadata["platform"],
+            "slug": metadata["slug"],
+            "program": program,
+            "install_key": key,
+            "command": command,
+            "shared_package": metadata.get("shared_package", False),
+            "shared_install_key_family": metadata.get("shared_install_key_family", False),
+            "package_type": metadata.get("package_type", "runtime-install"),
+        }
+        if key:
+            payload["status"] = "ok"
+            payload[f"{platform_slug.replace('-', '_')}_command"] = command
+    if payload["status"] == "ok":
+        payload["claude_code_command"] = payload["command_metadata"].get("claude-code", "")
+        payload["openclaw_command"] = payload["command_metadata"].get("openclaw", "")
+        payload["cursor_command"] = payload["command_metadata"].get("cursor", "")
+        payload["goose_command"] = payload["command_metadata"].get("goose", "")
+        payload["gemini_cli_command"] = payload["command_metadata"].get("gemini-cli", "")
+        payload["copilot_command"] = payload["command_metadata"].get("copilot", "")
+        payload["security_guardian_command"] = payload["command_metadata"].get("security-guardian", "")
 
     return payload

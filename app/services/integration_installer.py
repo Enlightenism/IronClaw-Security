@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+from app.core.install_key_formats import get_install_key_format_registry
 from app.core.install_keys import get_install_key_registry
 from app.services.integration_registry import (
     IntegrationRecord,
@@ -16,8 +17,20 @@ from app.services.integration_registry import (
 _SECURITY_INSTALL_SLUGS: frozenset[str] = frozenset(
     {
         "claude-code",
+        "claude_code",
         "openclaw",
+        "cursor",
+        "cursor-agent",
+        "goose",
+        "goose-agent",
+        "gemini-cli",
+        "gemini_cli",
+        "copilot",
+        "github-copilot",
+        "security-guardian",
+        "security_guardian",
         "generic-agent",
+        "generic_agent",
         "llamafirewall",
     }
 )
@@ -92,7 +105,22 @@ def _extract_install_key(extra_metadata: dict[str, Any] | None, *, explicit_inst
     metadata = dict(extra_metadata or {})
     if explicit_install_key is not None:
         return str(explicit_install_key).strip() or None
-    for key_name in ("install_key", "install_key_value", "raw_install_key", "security_install_key"):
+    for key_name in (
+        "install_key",
+        "installKey",
+        "install_key_value",
+        "installKeyValue",
+        "raw_install_key",
+        "rawInstallKey",
+        "security_install_key",
+        "securityInstallKey",
+        "platform_install_key",
+        "platformInstallKey",
+        "paid_install_key",
+        "paidInstallKey",
+        "customer_install_key",
+        "customerInstallKey",
+    ):
         value = metadata.get(key_name)
         if value is not None:
             candidate = str(value).strip()
@@ -105,7 +133,21 @@ def _extract_owner_key(extra_metadata: dict[str, Any] | None, *, explicit_owner_
     metadata = dict(extra_metadata or {})
     if explicit_owner_key is not None:
         return str(explicit_owner_key).strip() or None
-    for key_name in ("owner_key", "customer_owner_key", "owner", "principal_id"):
+    for key_name in (
+        "owner_key",
+        "customer_owner_key",
+        "owner",
+        "principal_id",
+        "principalId",
+        "owner_id",
+        "ownerId",
+        "customer_id",
+        "customerId",
+        "account_id",
+        "accountId",
+        "user_id",
+        "userId",
+    ):
         value = metadata.get(key_name)
         if value is not None:
             candidate = str(value).strip()
@@ -147,12 +189,24 @@ def _looks_like_generic_auth_key(candidate: str) -> bool:
 
 
 def _infer_expected_program(record: IntegrationRecord) -> str | None:
+    registry = get_install_key_format_registry()
+
+    for candidate in (
+        record.slug,
+        record.platform,
+        record.metadata.get("runtime"),
+        record.metadata.get("program"),
+        record.metadata.get("install_key_program"),
+        record.metadata.get("platform"),
+    ):
+        normalized = registry.normalize_program(candidate)
+        if normalized is not None:
+            return normalized
+
     slug = (record.slug or "").strip().lower()
     platform = (record.platform or "").strip().lower()
-    if slug in {"openclaw", "openclaw-agent"} or platform == "openclaw":
-        return "openclaw"
-    if slug in {"claude-code", "claude_code", "claude"} or platform in {"claude-code", "claude_code"}:
-        return "claude_code"
+    if slug in {"generic-agent", "generic_agent"} or platform in {"generic", "generic-agent", "generic_agent"}:
+        return None
     return None
 
 
@@ -173,11 +227,8 @@ def _validate_paid_install_key_for_installation(*, record: IntegrationRecord, in
         )
 
     expected_program = _infer_expected_program(record)
-    valid_prefixes = ("ic_install_openclaw_", "ic_install_claude_code_")
-    if expected_program == "openclaw":
-        valid_prefixes = ("ic_install_openclaw_",)
-    elif expected_program == "claude_code":
-        valid_prefixes = ("ic_install_claude_code_",)
+    registry = get_install_key_format_registry()
+    valid_prefixes = tuple(spec.prefix for spec in registry.list_specs()) if expected_program is None else (registry.get_spec(expected_program).prefix,)
 
     if candidate.startswith("ic_org_") or _looks_like_generic_auth_key(candidate) or (candidate.startswith("ic_") and not candidate.startswith(valid_prefixes)) or not candidate.startswith(valid_prefixes):
         return (
@@ -186,17 +237,19 @@ def _validate_paid_install_key_for_installation(*, record: IntegrationRecord, in
                 "install_key_required": True,
                 "install_key_valid": False,
                 "reason": "install key unavailable until payment is complete",
+                "expected_program": expected_program,
+                "allowed_prefixes": list(valid_prefixes),
                 "key_classification": "system_api_key_or_generic_token",
             },
             "install key unavailable until payment is complete",
         )
 
-    registry = get_install_key_registry()
-    validated_record = registry.authenticate_install_key(candidate)
+    install_key_registry = get_install_key_registry()
+    validated_record = install_key_registry.authenticate_install_key(candidate)
     if validated_record is None:
         return (
             False,
-            {"install_key_required": True, "install_key_valid": False, "reason": "install key unavailable until payment is complete", "key_classification": "unrecognized_or_inactive"},
+            {"install_key_required": True, "install_key_valid": False, "reason": "install key unavailable until payment is complete", "expected_program": expected_program, "allowed_prefixes": list(valid_prefixes), "key_classification": "unrecognized_or_inactive"},
             "install key unavailable until payment is complete",
         )
 

@@ -71,7 +71,7 @@ class GenericAgentAdapterRequest:
             action_type=self.action_type,
             target=self.target,
             content=self.content,
-            client_id=self.client_id,
+            agent_id=self.client_id,
             session_id=self.session_id,
             metadata=merged_metadata,
         )
@@ -181,8 +181,8 @@ def adapt_policy_decision_to_generic_agent(
     metadata: dict[str, Any] | None = None,
 ) -> GenericAgentAdapterResponse:
     verdict: AdapterVerdict = decision.verdict
-    matched_rules = [match.rule_id for match in decision.matches]
-    reasons = [match.to_dict() for match in decision.matches]
+    matched_rules = [match.rule_id for match in decision.matched_rules]
+    reasons = [match.to_dict() for match in decision.matched_rules]
     should_review = verdict in {"warn", "quarantine"}
     return GenericAgentAdapterResponse(
         adapter_name="ironclaw-generic-agent",

@@ -6,6 +6,10 @@ from typing import Any
 from app.adapters.base import BaseIntegrationAdapter
 from app.adapters.generic_agent_adapter import GenericAgentAdapter
 from app.adapters.mcp_tool_adapter import McpToolAdapter
+from app.core.install_key_formats import (
+    get_install_key_format_spec,
+    normalize_install_key_program,
+)
 from app.services.integration_registry import (
     IntegrationRegistry,
     get_integration,
@@ -23,6 +27,13 @@ class IntegrationDependencyItem:
     dependency_count: int
     dependencies: list[str] = field(default_factory=list)
     capabilities: list[str] = field(default_factory=list)
+    install_key_program: str | None = None
+    install_key_family: str | None = None
+    install_key_prefix: str | None = None
+    install_key_aliases: list[str] = field(default_factory=list)
+    platform_aliases: list[str] = field(default_factory=list)
+    installer_path: str | None = None
+    shared_install_key_family: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -35,6 +46,13 @@ class IntegrationDependencyItem:
             "dependency_count": self.dependency_count,
             "dependencies": list(self.dependencies),
             "capabilities": list(self.capabilities),
+            "install_key_program": self.install_key_program,
+            "install_key_family": self.install_key_family,
+            "install_key_prefix": self.install_key_prefix,
+            "install_key_aliases": list(self.install_key_aliases),
+            "platform_aliases": list(self.platform_aliases),
+            "installer_path": self.installer_path,
+            "shared_install_key_family": self.shared_install_key_family,
             "metadata": dict(self.metadata),
         }
 
@@ -74,6 +92,58 @@ def _build_adapter_for_integration(
         return GenericAgentAdapter(record=record, runtime="claude-code")
 
     return BaseIntegrationAdapter(record=record)
+
+
+def _resolve_install_key_metadata(record: Any) -> dict[str, Any]:
+    candidates = [
+        getattr(record, "platform", None),
+        getattr(record, "slug", None),
+        (getattr(record, "metadata", {}) or {}).get("runtime"),
+        (getattr(record, "metadata", {}) or {}).get("install_key_program"),
+        (getattr(record, "metadata", {}) or {}).get("platform"),
+    ]
+
+    for candidate in candidates:
+        normalized = normalize_install_key_program(candidate)
+        if normalized is None:
+            continue
+        spec = get_install_key_format_spec(normalized)
+        return {
+            "install_key_program": spec.program,
+            "install_key_family": spec.family,
+            "install_key_prefix": spec.prefix,
+            "install_key_aliases": list(spec.platform_aliases),
+            "platform_aliases": list(spec.platform_aliases),
+            "shared_install_key_family": len(spec.platform_aliases) > 1 or spec.program == "security_guardian",
+        }
+
+    return {
+        "install_key_program": None,
+        "install_key_family": None,
+        "install_key_prefix": None,
+        "install_key_aliases": [],
+        "platform_aliases": [],
+        "shared_install_key_family": False,
+    }
+
+
+def _resolve_installer_path(record: Any) -> str | None:
+    candidate_values = [
+        getattr(record, "install_target", None),
+        (getattr(record, "metadata", {}) or {}).get("installer_path"),
+        (getattr(record, "metadata", {}) or {}).get("install_path"),
+        (getattr(record, "metadata", {}) or {}).get("runtime"),
+        getattr(record, "command_name", None),
+        getattr(record, "entrypoint", None),
+    ]
+
+    for candidate in candidate_values:
+        if candidate is None:
+            continue
+        value = str(candidate).strip()
+        if value:
+            return value
+    return None
 
 
 def _derive_dependencies(record: Any, adapter: BaseIntegrationAdapter) -> list[str]:
@@ -126,6 +196,8 @@ def build_integration_dependencies_view(
         handshake = adapter.handshake()
         dependencies = _derive_dependencies(record, adapter)
         total_dependencies += len(dependencies)
+        key_metadata = _resolve_install_key_metadata(record)
+        installer_path = _resolve_installer_path(record)
 
         items.append(
             IntegrationDependencyItem(
@@ -137,9 +209,21 @@ def build_integration_dependencies_view(
                 dependency_count=len(dependencies),
                 dependencies=dependencies,
                 capabilities=list(handshake.capabilities),
+                install_key_program=key_metadata["install_key_program"],
+                install_key_family=key_metadata["install_key_family"],
+                install_key_prefix=key_metadata["install_key_prefix"],
+                install_key_aliases=key_metadata["install_key_aliases"],
+                platform_aliases=key_metadata["platform_aliases"],
+                installer_path=installer_path,
+                shared_install_key_family=key_metadata["shared_install_key_family"],
                 metadata={
                     "requested_by": requested_by,
                     "status": record.status,
+                    "install_key_family": key_metadata["install_key_family"],
+                    "install_key_program": key_metadata["install_key_program"],
+                    "installer_path": installer_path,
+                    "install_target": getattr(record, "install_target", None),
+                    "platform_aliases": key_metadata["platform_aliases"],
                 },
             ),
         )

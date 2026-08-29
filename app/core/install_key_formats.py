@@ -4,21 +4,44 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Final, Literal
 
-InstallKeyProgram = Literal["openclaw", "claude_code"]
+InstallKeyProgram = Literal[
+    "openclaw",
+    "claude_code",
+    "cursor",
+    "goose",
+    "gemini_cli",
+    "copilot",
+    "security_guardian",
+]
 InstallKeyFormatFamily = InstallKeyProgram
 
 _INSTALL_KEY_PREFIX_OPENCLAW: Final[str] = "ic_install_openclaw_"
 _INSTALL_KEY_PREFIX_CLAUDE: Final[str] = "ic_install_claude_code_"
+_INSTALL_KEY_PREFIX_CURSOR: Final[str] = "ic_install_cursor_"
+_INSTALL_KEY_PREFIX_GOOSE: Final[str] = "ic_install_goose_"
+_INSTALL_KEY_PREFIX_GEMINI: Final[str] = "ic_install_gemini_cli_"
+_INSTALL_KEY_PREFIX_COPILOT: Final[str] = "ic_install_copilot_"
+_INSTALL_KEY_PREFIX_SECURITY_GUARDIAN: Final[str] = "ic_install_security_guardian_"
+
+
+def _normalize_platform_token(value: str | None) -> str:
+    if value is None:
+        return ""
+    candidate = str(value).strip().lower()
+    if not candidate:
+        return ""
+    normalized = candidate.replace(" ", "_").replace("-", "_")
+    return normalized.replace("__", "_").strip("_")
 
 
 @dataclass(frozen=True, slots=True)
 class InstallKeyFormatSpec:
     """Canonical format metadata for install-key families.
 
-    This registry is intentionally narrow: it describes the install-key trust
-    domain rather than the generic platform API-key trust domain. It is used to
-    group platforms by format compatibility while preserving the canonical
-    install-key issuance rules enforced by app.core.install_keys.
+    This registry describes the install-key trust domain rather than the generic
+    platform API-key trust domain. It groups platforms by format compatibility
+    while preserving the canonical install-key issuance rules enforced by
+    app.core.install_keys.
     """
 
     family: InstallKeyFormatFamily
@@ -45,21 +68,20 @@ class InstallKeyFormatSpec:
     def parse_program(self, candidate: str | None) -> InstallKeyProgram | None:
         if candidate is None:
             return None
-        normalized = str(candidate).strip().lower()
+        normalized = _normalize_platform_token(candidate)
         if not normalized:
             return None
-        if normalized in self.aliases or normalized in self.platform_aliases:
+        if normalized in tuple(alias.lower().replace(" ", "_").replace("-", "_") for alias in self.aliases) or normalized in tuple(alias.lower().replace(" ", "_").replace("-", "_") for alias in self.platform_aliases):
             return self.program
         return None
 
 
 class InstallKeyFormatRegistry:
-    """Central registry for install-key format families and platform aliases.
+    """Canonical registry for install-key formats and platform aliases.
 
-    The registry intentionally only models install-key families and their
-    canonical program identifiers. It does not perform payment or billing
-    validation; that remains the responsibility of app.core.install_keys and the
-    installation provisioning services.
+    The registry models the install-key trust boundary, not generic API-key
+    families. It is meant to be the single source of truth for which key family
+    corresponds to a given agent platform or install path.
     """
 
     _SPEC_BY_PROGRAM: Final[dict[InstallKeyProgram, InstallKeyFormatSpec]] = {
@@ -68,41 +90,73 @@ class InstallKeyFormatRegistry:
             program="openclaw",
             display_name="OpenClaw",
             prefix=_INSTALL_KEY_PREFIX_OPENCLAW,
-            aliases=("openclaw", "open_claw", "open-claw", "claw"),
-            platform_aliases=("openclaw", "ironclaw", "open_claw", "open-claw"),
+            aliases=("openclaw", "open_claw", "open-claw", "ironclaw"),
+            platform_aliases=("openclaw", "open_claw", "open-claw", "ironclaw"),
         ),
         "claude_code": InstallKeyFormatSpec(
             family="claude_code",
             program="claude_code",
             display_name="Claude Code",
             prefix=_INSTALL_KEY_PREFIX_CLAUDE,
-            aliases=("claude_code", "claude-code", "claude code", "claude"),
+            aliases=("claude_code", "claude-code", "claude code", "claude", "anthropic"),
             platform_aliases=("claude_code", "claude-code", "claude code", "anthropic"),
+        ),
+        "cursor": InstallKeyFormatSpec(
+            family="cursor",
+            program="cursor",
+            display_name="Cursor",
+            prefix=_INSTALL_KEY_PREFIX_CURSOR,
+            aliases=("cursor", "cursor_agent", "cursor-agent", "cursor agent", "cursor_cli", "cursor-cli", "cursor cli"),
+            platform_aliases=("cursor", "cursor_agent", "cursor-agent", "cursor agent", "cursor_cli", "cursor-cli", "cursor cli"),
+        ),
+        "goose": InstallKeyFormatSpec(
+            family="goose",
+            program="goose",
+            display_name="Goose",
+            prefix=_INSTALL_KEY_PREFIX_GOOSE,
+            aliases=("goose", "goose_agent", "goose-agent", "goose agent", "goose_cli", "goose-cli", "goose cli"),
+            platform_aliases=("goose", "goose_agent", "goose-agent", "goose agent", "goose_cli", "goose-cli", "goose cli"),
+        ),
+        "gemini_cli": InstallKeyFormatSpec(
+            family="gemini_cli",
+            program="gemini_cli",
+            display_name="Gemini CLI",
+            prefix=_INSTALL_KEY_PREFIX_GEMINI,
+            aliases=("gemini_cli", "gemini-cli", "gemini cli", "gemini"),
+            platform_aliases=("gemini_cli", "gemini-cli", "gemini cli", "gemini"),
+        ),
+        "copilot": InstallKeyFormatSpec(
+            family="copilot",
+            program="copilot",
+            display_name="GitHub Copilot",
+            prefix=_INSTALL_KEY_PREFIX_COPILOT,
+            aliases=("copilot", "github_copilot", "github-copilot", "github copilot", "githubcopilot"),
+            platform_aliases=("copilot", "github_copilot", "github-copilot", "github copilot", "githubcopilot"),
+        ),
+        "security_guardian": InstallKeyFormatSpec(
+            family="security_guardian",
+            program="security_guardian",
+            display_name="Security Guardian",
+            prefix=_INSTALL_KEY_PREFIX_SECURITY_GUARDIAN,
+            aliases=("security_guardian", "security-guardian", "security guardian", "securityguardian", "security_guardian_skill", "security_guardian_skill_", "skill", "skills"),
+            platform_aliases=("security_guardian", "security-guardian", "security guardian", "securityguardian", "security_guardian_skill", "security_guardian_skill_", "skill", "skills"),
         ),
     }
 
-    _PLATFORM_TO_PROGRAM: Final[dict[str, InstallKeyProgram]] = {alias: program for program, spec in _SPEC_BY_PROGRAM.items() for alias in (*spec.aliases, *spec.platform_aliases)}
+    _PLATFORM_TO_PROGRAM: Final[dict[str, InstallKeyProgram]] = {_normalize_platform_token(alias): program for program, spec in _SPEC_BY_PROGRAM.items() for alias in (*spec.aliases, *spec.platform_aliases) if _normalize_platform_token(alias)}
 
     @classmethod
     def normalize_program(cls, value: str | None) -> InstallKeyProgram | None:
         if value is None:
             return None
-        candidate = str(value).strip().lower()
-        if not candidate:
+        normalized = _normalize_platform_token(value)
+        if not normalized:
             return None
-        normalized = candidate.replace("-", "_")
-        if normalized in cls._PLATFORM_TO_PROGRAM:
-            return cls._PLATFORM_TO_PROGRAM[normalized]
-        return None
+        return cls._PLATFORM_TO_PROGRAM.get(normalized)
 
     @classmethod
     def normalize_platform(cls, value: str | None) -> str:
-        if value is None:
-            return ""
-        candidate = str(value).strip().lower()
-        if not candidate:
-            return ""
-        return candidate.replace("-", "_")
+        return _normalize_platform_token(value)
 
     @classmethod
     def get_spec(cls, program: str | None) -> InstallKeyFormatSpec:
@@ -159,8 +213,8 @@ class InstallKeyFormatRegistry:
         ordered: list[str] = []
         for spec in cls._SPEC_BY_PROGRAM.values():
             for alias in (*spec.platform_aliases, *spec.aliases):
-                key = alias.lower().replace("-", "_")
-                if key not in seen:
+                key = _normalize_platform_token(alias)
+                if key and key not in seen:
                     seen.add(key)
                     ordered.append(key)
         return tuple(ordered)
@@ -199,6 +253,12 @@ __all__ = [
     "get_install_key_format_spec",
     "is_valid_install_key_for_program",
     "iter_supported_install_key_programs",
+    "_normalize_platform_token",
     "_INSTALL_KEY_PREFIX_OPENCLAW",
     "_INSTALL_KEY_PREFIX_CLAUDE",
+    "_INSTALL_KEY_PREFIX_CURSOR",
+    "_INSTALL_KEY_PREFIX_GOOSE",
+    "_INSTALL_KEY_PREFIX_GEMINI",
+    "_INSTALL_KEY_PREFIX_COPILOT",
+    "_INSTALL_KEY_PREFIX_SECURITY_GUARDIAN",
 ]

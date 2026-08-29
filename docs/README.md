@@ -5,6 +5,10 @@ front of agents, tools, and code-execution environments as an enforcement layer
 — inspecting every prompt, tool call, and execution plan before it reaches
 production.
 
+The public installation model is a shared cross-runtime Security Guardian
+package that you install once and then enable across supported runtimes, instead
+of modeling it as a single-agent or one-off package.
+
 ---
 
 ## Documentation Index
@@ -21,6 +25,27 @@ production.
 | [integration_guides/mcp.md](./integration_guides/mcp.md)       | MCP-style toolchain integration guide                                                          |
 
 ---
+
+## Shared runtime package model
+
+The shared Security Guardian package is the canonical cross-runtime bundle for
+IronClaw installation. Install the product package once, then enable the runtime
+families you want protected:
+
+```bash
+python -m pip install ironclaw-security
+ironclaw install \
+  --provider-target security_guardian \
+  --provider-target openclaw \
+  --provider-target claude_code \
+  --provider-target cursor \
+  --provider-target goose \
+  --provider-target gemini_cli \
+  --provider-target copilot
+```
+
+This keeps the runtime package model consistent across the installer,
+quickstart, and integration docs.
 
 ## What IronClaw Does
 

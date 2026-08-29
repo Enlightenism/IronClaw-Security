@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
+
+from app.core.install_key_formats import InstallKeyFormatRegistry, get_install_key_format_spec
 
 router = APIRouter(
     prefix="/ui/integrations",
@@ -19,7 +22,12 @@ class IntegrationProviderView(BaseModel):
     mode: str
     endpoint: str | None = None
     readiness: str = "unknown"
+    installkeyprogram: str | None = None
+    installkeyfamily: str | None = None
+    installkeyprefix: str | None = None
+    installkeyaliases: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class IntegrationSettingsItem(BaseModel):
@@ -36,8 +44,13 @@ class IntegrationSettingsItem(BaseModel):
     configurable: bool
     configurationstate: str
     healthstate: str
+    installkeyprogram: str | None = None
+    installkeyfamily: str | None = None
+    installkeyprefix: str | None = None
+    installkeyaliases: list[str] = Field(default_factory=list)
+    installertype: str | None = None
     tags: list[str] = Field(default_factory=list)
-    metadata: dict[str, str | bool | int | None] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class IntegrationSettingsSummary(BaseModel):
@@ -84,124 +97,106 @@ def _health_state(*, status: str, verified: bool, configurationstate: str) -> st
     return "attention"
 
 
+def _build_provider_metadata(spec: Any) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "install_key_program": spec.program,
+        "install_key_family": spec.family,
+        "install_key_prefix": spec.prefix,
+        "display_name": spec.display_name,
+        "platform_aliases": list(spec.platform_aliases),
+        "aliases": list(spec.aliases),
+    }
+    if spec.program == "security_guardian":
+        metadata["shared_package_semantics"] = "shared package; not a standalone runtime"
+    return metadata
+
+
+def _filter_legacy_provider_names(items: list[IntegrationProviderView]) -> list[IntegrationProviderView]:
+    return [item for item in items if item.name != "Standalone IronClaw"]
+
+
+def _build_platform_config_panels() -> tuple[list[IntegrationProviderView], list[IntegrationSettingsItem]]:
+    providers: list[IntegrationProviderView] = []
+    settings: list[IntegrationSettingsItem] = []
+
+    for program in InstallKeyFormatRegistry.list_programs():
+        spec = get_install_key_format_spec(program)
+        provider_id = spec.program
+        endpoint = f"local://{program}"
+        config_state = "configured" if program in {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot"} else "managed"
+        status = "active"
+        verified = True
+        health = _health_state(
+            status=status,
+            verified=verified,
+            configurationstate=config_state,
+        )
+        metadata = _build_provider_metadata(spec)
+        notes = [
+            f"Uses the {spec.display_name} install-key family.",
+            "Shared key-family semantics are preserved across the matching platform aliases.",
+        ]
+        if spec.program == "security_guardian":
+            notes.append("Security Guardian is a shared package for the supported runtime family set, not a standalone runtime label.")
+
+        providers.append(
+            IntegrationProviderView(
+                providerid=provider_id,
+                name=spec.display_name,
+                enabled=True,
+                mode="guarded",
+                endpoint=endpoint,
+                readiness="ready",
+                installkeyprogram=spec.program,
+                installkeyfamily=spec.family,
+                installkeyprefix=spec.prefix,
+                installkeyaliases=list(spec.platform_aliases),
+                notes=notes,
+                metadata=metadata,
+            ),
+        )
+
+        settings.append(
+            IntegrationSettingsItem(
+                integrationid=provider_id,
+                displayname=spec.display_name,
+                platform=spec.program,
+                status=status,
+                verified=verified,
+                verifiedat=None,
+                settingsroute=f"/ui/integrations/settings/{provider_id}",
+                verificationroute=f"/integrations/verifiers/{provider_id}",
+                manifestroute=f"/integrations/installers/{provider_id}/manifest",
+                adaptermodule=f"app.adapters.{provider_id}",
+                configurable=True,
+                configurationstate=config_state,
+                healthstate=health,
+                installkeyprogram=spec.program,
+                installkeyfamily=spec.family,
+                installkeyprefix=spec.prefix,
+                installkeyaliases=list(spec.platform_aliases),
+                installertype="install-key",
+                tags=[
+                    spec.program,
+                    "install-key",
+                    "platform-config",
+                    *(["shared-package"] if spec.program == "security_guardian" else []),
+                ],
+                metadata={
+                    **metadata,
+                    "endpoint": endpoint,
+                    "mode": "guarded",
+                    "installer_path": endpoint,
+                },
+            ),
+        )
+
+    return _filter_legacy_provider_names(providers), settings
+
+
 def get_integration_settings() -> IntegrationSettingsResponse:
     generated_at = datetime.now(UTC).isoformat()
-
-    providers = [
-        IntegrationProviderView(
-            providerid="openclaw",
-            name="OpenClaw",
-            enabled=True,
-            mode="guarded",
-            endpoint="local://openclaw",
-            readiness="ready",
-            notes=[
-                "Primary builder integration target.",
-                "Guarded execution boundary applies before tool access.",
-            ],
-        ),
-        IntegrationProviderView(
-            providerid="claude-code",
-            name="Claude Code",
-            enabled=True,
-            mode="planned",
-            endpoint=None,
-            readiness="planned",
-            notes=[
-                "Integration contract reserved for future runtime hookup.",
-                "UI page exists now to stabilize frontend configuration shape.",
-            ],
-        ),
-        IntegrationProviderView(
-            providerid="ironclaw-local",
-            name="Standalone IronClaw",
-            enabled=True,
-            mode="local",
-            endpoint="local://ironclaw",
-            readiness="ready",
-            notes=[
-                "Supports local-first guarded execution workflows.",
-            ],
-        ),
-    ]
-
-    settings = [
-        IntegrationSettingsItem(
-            integrationid="openclaw",
-            displayname="OpenClaw",
-            platform="local",
-            status="active",
-            verified=True,
-            verifiedat=generated_at,
-            settingsroute="/ui/integrations/settings",
-            verificationroute="/integrations/verifiers/openclaw",
-            manifestroute="/integrations/installers/openclaw/manifest",
-            adaptermodule="app.adapters.openclawadapter",
-            configurable=True,
-            configurationstate="configured",
-            healthstate=_health_state(
-                status="active",
-                verified=True,
-                configurationstate="configured",
-            ),
-            tags=["primary", "guarded", "local-first"],
-            metadata={
-                "endpoint": "local://openclaw",
-                "mode": "guarded",
-                "buildertarget": True,
-            },
-        ),
-        IntegrationSettingsItem(
-            integrationid="claude-code",
-            displayname="Claude Code",
-            platform="desktop",
-            status="planned",
-            verified=False,
-            verifiedat=None,
-            settingsroute="/ui/integrations/settings",
-            verificationroute="/integrations/verifiers/claude-code",
-            manifestroute="/integrations/installers/claude-code/manifest",
-            adaptermodule="app.adapters.claudecodeadapter",
-            configurable=True,
-            configurationstate="planned",
-            healthstate=_health_state(
-                status="planned",
-                verified=False,
-                configurationstate="planned",
-            ),
-            tags=["planned", "desktop", "future-runtime"],
-            metadata={
-                "endpoint": None,
-                "mode": "planned",
-                "buildertarget": False,
-            },
-        ),
-        IntegrationSettingsItem(
-            integrationid="ironclaw-local",
-            displayname="Standalone IronClaw",
-            platform="local",
-            status="active",
-            verified=True,
-            verifiedat=generated_at,
-            settingsroute="/ui/integrations/settings",
-            verificationroute="/integrations/verifiers/ironclaw-local",
-            manifestroute="/integrations/installers/ironclaw-local/manifest",
-            adaptermodule="app.services.securityorchestrator",
-            configurable=False,
-            configurationstate="managed",
-            healthstate=_health_state(
-                status="active",
-                verified=True,
-                configurationstate="managed",
-            ),
-            tags=["core", "local", "runtime"],
-            metadata={
-                "endpoint": "local://ironclaw",
-                "mode": "local",
-                "buildertarget": False,
-            },
-        ),
-    ]
+    providers, settings = _build_platform_config_panels()
 
     summary = IntegrationSettingsSummary(
         totalintegrations=len(settings),
@@ -264,9 +259,6 @@ def buildintegrationssettingsview() -> HTMLResponse:
       <thead><tr><th>Name</th><th>Mode</th><th>Enabled</th></tr></thead>
       <tbody>
         {providers_rows}
-        <tr><td>OpenAI</td><td>planned</td><td>No</td></tr>
-        <tr><td>Claude</td><td>planned</td><td>No</td></tr>
-        <tr><td>OpenClaw</td><td>guarded</td><td>Yes</td></tr>
       </tbody>
     </table>
   </section>

@@ -240,6 +240,49 @@ def test_integration_install_route_accepts_valid_paid_install_key(installer_clie
     assert response.json()["installation"]["state"] == "active"
 
 
+def test_integration_install_route_normalizes_supported_platform_names(installer_client: TestClient) -> None:
+    for platform, integration_id, program in (
+        ("cursor", "integration-cursor", "cursor"),
+        ("goose-agent", "integration-goose", "goose"),
+        ("gemini-cli", "integration-gemini-cli", "gemini_cli"),
+        ("github-copilot", "integration-copilot", "copilot"),
+    ):
+
+        class _Record:
+            key_id = "ik_paid_123"
+            owner_key = "owner-456"
+            active = True
+            payment_status = "paid"
+            entitlements_status = "active"
+            issued_after_payment = True
+
+        record = _Record()
+        record.program = program
+
+        with patch("app.routes.integrations.installer.get_install_key_registry") as mock_registry:
+            mock_registry.return_value.authenticate_install_key.return_value = record
+            with patch("app.routes.integrations.installer.get_integration_installer") as mock_installer:
+                mock_installer.return_value.install_integration.return_value = {
+                    "installed": True,
+                    "success": True,
+                    "status": "active",
+                    "steps": [{"step_id": "step-install", "status": "completed", "detail": "installed"}],
+                }
+                response = installer_client.post(
+                    f"/integrations/{integration_id}/install",
+                    json={
+                        "initiated_by": "tester",
+                        "platform": platform,
+                        "install_key": f"ic_install_{program}_validkey" if program != "gemini_cli" else "ic_install_gemini_cli_validkey",
+                        "owner_key": "owner-456",
+                    },
+                )
+
+        assert response.status_code == 200, (platform, response.text)
+        assert response.json()["installation"]["installed"] is True
+        assert response.json()["installation"]["state"] == "active"
+
+
 def test_integration_token_uses_paid_install_keys_not_platform_api_key(client: TestClient) -> None:
     class _Record:
         def __init__(self, program: str, masked_key: str) -> None:
@@ -262,6 +305,11 @@ def test_integration_token_uses_paid_install_keys_not_platform_api_key(client: T
         get_keys_for_owner=lambda owner_key: [
             _Record("openclaw", "ic_install_openclaw_...abcd"),
             _Record("claude_code", "ic_install_claude_code_...efgh"),
+            _Record("cursor", "ic_install_cursor_...ijkl"),
+            _Record("goose", "ic_install_goose_...mnop"),
+            _Record("gemini_cli", "ic_install_gemini_cli_...qrst"),
+            _Record("copilot", "ic_install_copilot_...uvwx"),
+            _Record("security_guardian", "ic_install_security_guardian_...yzab"),
         ]
     )
 
@@ -277,10 +325,48 @@ def test_integration_token_uses_paid_install_keys_not_platform_api_key(client: T
     payload = response.json()
     assert payload["user_token"] in {None, ""}
     assert "system-platform-api-key" not in str(payload)
+    assert payload["supported_platforms"] == [
+        "claude-code",
+        "openclaw",
+        "cursor",
+        "goose",
+        "gemini-cli",
+        "copilot",
+        "security-guardian",
+    ]
+    assert payload["install_metadata"]["security-guardian"]["shared_package"] is True
+    assert payload["install_metadata"]["security-guardian"]["shared_install_key_family"] is True
     assert "ic_install_openclaw_...abcd" in payload["openclaw_command"]
     assert "ic_install_claude_code_...efgh" in payload["claude_code_command"]
+    assert "ic_install_cursor_...ijkl" in payload["cursor_command"]
+    assert "ic_install_goose_...mnop" in payload["goose_command"]
+    assert "ic_install_gemini_cli_...qrst" in payload["gemini_cli_command"]
+    assert "ic_install_copilot_...uvwx" in payload["copilot_command"]
+    assert "ic_install_security_guardian_...yzab" in payload["security_guardian_command"]
     assert "--platform openclaw" in payload["openclaw_command"]
     assert "--platform claude-code" in payload["claude_code_command"]
+    assert payload["install_metadata"]["cursor"]["program"] == "cursor"
+    assert payload["command_metadata"]["security-guardian"].startswith("npx ironclaw-install --key")
+
+
+def test_integration_list_endpoints_expose_canonical_platform_metadata(client: TestClient) -> None:
+    for path in ("/integrations/installers", "/integrations/verifiers"):
+        response = client.get(path)
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        platform_ids = [item["integration_id"] for item in payload["items"]]
+        assert platform_ids == [
+            "claude-code",
+            "openclaw",
+            "cursor",
+            "goose",
+            "gemini-cli",
+            "copilot",
+            "security-guardian",
+        ]
+        guardian = next(item for item in payload["items"] if item["integration_id"] == "security-guardian")
+        assert guardian["shared_package"] is True
+        assert guardian["shared_install_key_family"] is True
 
 
 def test_api_integrations_token_ignores_generic_platform_auth_even_with_registry_data() -> None:
@@ -328,6 +414,17 @@ def test_api_integrations_token_ignores_generic_platform_auth_even_with_registry
     assert payload["user_token"] == ""
     assert payload["openclaw_command"] == ""
     assert payload["claude_code_command"] == ""
+    assert payload["supported_platforms"] == [
+        "claude-code",
+        "openclaw",
+        "cursor",
+        "goose",
+        "gemini-cli",
+        "copilot",
+        "security-guardian",
+    ]
+    assert payload["install_metadata"]["security-guardian"]["shared_package"] is True
+    assert payload["install_metadata"]["security-guardian"]["shared_install_key_family"] is True
     assert "system-platform-api-key" not in str(payload)
 
 

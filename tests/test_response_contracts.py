@@ -454,15 +454,30 @@ def test_dashboard_overview_filters_current_owner_paid_install_keys(client: Test
     assert response.status_code == 200
     body = response.json()
     keys = body.get("install_keys", [])
-    assert len(keys) == 2
+    expected_platforms = {
+        "openclaw",
+        "claude_code",
+        "cursor",
+        "goose",
+        "gemini_cli",
+        "copilot",
+        "security_guardian",
+    }
+    assert len(keys) == len(expected_platforms)
     by_program = {item["program"]: item for item in keys}
+    assert expected_platforms.issubset(by_program.keys())
     assert by_program["openclaw"]["key_id"] == "ik_current_001"
     assert by_program["openclaw"]["status"] == "active"
-    assert by_program["claude_code"]["key_id"] == ""
     assert by_program["claude_code"]["status"] == "locked"
+    assert by_program["claude_code"]["payment_status"] == "unpaid"
+    assert by_program["claude_code"]["entitlements_status"] == "not_active"
+    assert by_program["claude_code"]["metadata"]["placeholder"] == "Keys will be generated after purchase"
+    assert by_program["security_guardian"]["status"] == "locked"
     assert body["metadata"]["owner_key"] == owner_key
-    assert all("ic_install_" in item["masked_key"] for item in keys if item["key_id"])
-    assert all(not item["masked_key"].startswith("ic_") or item["masked_key"].startswith("ic_install_") for item in keys)
+    assert all((item["masked_key"] is None and not item["key_id"]) or item["masked_key"].startswith("ic_install_") for item in keys)
+    assert all((not item["key_id"]) or "payment_status" in item for item in keys)
+    assert all((not item["key_id"]) or "entitlements_status" in item for item in keys)
+    assert all("metadata" in item for item in keys)
 
 
 # ===========================================================================

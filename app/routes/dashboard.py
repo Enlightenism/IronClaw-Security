@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.billing import BillingRegistry, get_billing_registry
+from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.core.install_keys import (
     InstallKeyNotFoundError,
     InstallKeyRegistry,
@@ -143,14 +144,28 @@ def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
-def _iso(value: datetime | None) -> str | None:
+def _iso(value: datetime | str | None) -> str | None:
     if value is None:
         return None
+    if isinstance(value, str):
+        return value
     return value.isoformat().replace("+00:00", "Z")
 
 
-_PROGRAMS: tuple[str, ...] = ("openclaw", "claude_code")
+_PROGRAMS: tuple[str, ...] = InstallKeyFormatRegistry.list_programs()
 _PLACEHOLDER_PURCHASE_MESSAGE = "Keys will be generated after purchase"
+
+
+def _canonical_program_name(program: Any) -> str:
+    if program is None:
+        return ""
+    canonical = InstallKeyFormatRegistry.normalize_program(str(program))
+    if canonical is not None:
+        return canonical
+
+    normalized = str(program).strip().lower().replace(" ", "_").replace("-", "_")
+    normalized = normalized.replace("__", "_").strip("_")
+    return normalized
 
 
 def _norm_status(value: Any, *, default: str = "unpaid") -> str:
@@ -244,7 +259,8 @@ def _build_install_key_slots(
     by_program: dict[str, InstallKeyDashboardSlot] = {}
 
     for rec in records:
-        if rec.program not in _PROGRAMS:
+        program = _canonical_program_name(getattr(rec, "program", ""))
+        if not program or program not in _PROGRAMS:
             continue
 
         payload = _canonical_wallet_usage_for_key(wallet_registry, normalized_owner, rec.key_id)
@@ -256,7 +272,8 @@ def _build_install_key_slots(
             units_consumed = int(payload["total_consumed_units"])
         blocked_attacks = int(payload.get("total_blocked_attacks", 0) or 0)
 
-        if getattr(rec, "revoked_at", None) is not None:
+        revoked_at = getattr(rec, "revoked_at", None)
+        if revoked_at is not None and (isinstance(revoked_at, datetime) or (isinstance(revoked_at, str) and revoked_at.strip())):
             status = "revoked"
         elif _record_is_paid_entitled(rec):
             status = "active"
@@ -283,10 +300,10 @@ def _build_install_key_slots(
                 }
             )
 
-        by_program[rec.program] = InstallKeyDashboardSlot(
+        by_program[program] = InstallKeyDashboardSlot(
             key_id=rec.key_id,
-            program=rec.program,
-            masked_key=getattr(rec, "masked_key", None),
+            program=program,
+            masked_key=getattr(rec, "masked_key", None) or None,
             status=status,
             active=bool(getattr(rec, "active", False)) and _record_is_paid_entitled(rec),
             remaining_units=remaining_units,

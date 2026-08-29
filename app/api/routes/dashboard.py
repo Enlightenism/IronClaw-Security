@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.billing import BillingRegistry, BillingSubscription, get_billing_registry
+from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.core.install_keys import InstallKeyNotFoundError, InstallKeyRegistry, get_install_key_registry
 from app.core.settings import Settings, get_settings
 from app.core.unit_wallet import UnitWalletRegistry, get_unit_wallet_registry
@@ -54,17 +55,21 @@ class DashboardQueueView(BaseModel):
 class DashboardInstallKeyView(BaseModel):
     key_id: str
     program: str
-    masked_key: str
+    masked_key: str | None = None
     label: str
     status: str
     active: bool
     locked: bool
     revoked: bool
+    payment_status: str = "unpaid"
+    entitlements_status: str = "not_active"
+    issued_after_payment: bool = False
     units_consumed: int
     created_at: str | None
     activated_at: str | None
     revoked_at: str | None
     last_used_at: str | None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class DashboardWalletKPI(BaseModel):
@@ -189,29 +194,36 @@ def _build_install_key_views(
     try:
         records = registry.get_keys_for_owner(owner_key)
     except Exception:
-        return []
+        records = []
 
     normalized_owner = str(owner_key).strip().lower()
+    supported_programs = tuple(InstallKeyFormatRegistry.list_programs())
+    canonical_prefixes = tuple(spec.prefix for spec in InstallKeyFormatRegistry.list_specs())
+    placeholder_message = "Keys will be generated after purchase"
     views: list[DashboardInstallKeyView] = []
     seen_programs: set[str] = set()
 
     for r in records:
         record_owner = _coerce_string(getattr(r, "owner_key", ""), default="").strip().lower()
-        program = _coerce_string(getattr(r, "program", ""), default="").strip().lower()
-        masked_key = _coerce_string(getattr(r, "masked_key", ""), default="")
+        raw_program = _coerce_string(getattr(r, "program", ""), default="").strip().lower()
+        program = InstallKeyFormatRegistry.normalize_program(raw_program) or raw_program
+        masked_key = _coerce_string(getattr(r, "masked_key", None), default="")
+        masked_key = masked_key.strip() or None
+
         if not record_owner or record_owner != normalized_owner:
             continue
-        if program not in {"openclaw", "claude_code"}:
+        if program not in supported_programs:
             continue
-        if masked_key and masked_key.startswith("ic_") and not masked_key.startswith("ic_install_"):
+        if masked_key is not None and not any(masked_key.startswith(prefix) for prefix in canonical_prefixes):
             continue
 
         revoked_at = getattr(r, "revoked_at", None)
         activated_at = getattr(r, "activated_at", None)
         active = bool(getattr(r, "active", False))
         raw_status = _coerce_string(getattr(r, "status", "")).strip().lower()
-        payment_status = _coerce_string(getattr(r, "payment_status", ""), default="").strip().lower()
-        entitlement_status = _coerce_string(getattr(r, "entitlements_status", ""), default="").strip().lower()
+        payment_status = _coerce_string(getattr(r, "payment_status", ""), default="").strip().lower() or "unpaid"
+        entitlement_status = _coerce_string(getattr(r, "entitlements_status", ""), default="").strip().lower() or "not_active"
+        issued_after_payment = bool(getattr(r, "issued_after_payment", False))
 
         is_revoked = revoked_at is not None or raw_status == "revoked"
         is_locked = not active and not is_revoked
@@ -228,6 +240,21 @@ def _build_install_key_views(
         else:
             slot_status = "active"
 
+        metadata: dict[str, Any] = {
+            "owner_key": normalized_owner,
+            "payment_status": payment_status,
+            "entitlements_status": entitlement_status,
+            "issued_after_payment": issued_after_payment,
+            "subscription_id": _coerce_string(getattr(r, "subscription_id", ""), default=""),
+            "checkout_session_id": _coerce_string(getattr(r, "checkout_session_id", ""), default=""),
+            "purchase_reference": _coerce_string(getattr(r, "purchase_reference", ""), default=""),
+            "status": slot_status,
+        }
+        if slot_status == "locked":
+            metadata["placeholder"] = placeholder_message
+            metadata["placeholder_text"] = placeholder_message
+            metadata["status_message"] = placeholder_message
+
         views.append(
             DashboardInstallKeyView(
                 key_id=_coerce_string(getattr(r, "key_id", ""), default=""),
@@ -238,40 +265,50 @@ def _build_install_key_views(
                 active=is_active,
                 locked=is_locked,
                 revoked=is_revoked,
+                payment_status=payment_status,
+                entitlements_status=entitlement_status,
+                issued_after_payment=issued_after_payment,
                 units_consumed=int(getattr(r, "units_consumed", 0) or 0),
                 created_at=_iso(getattr(r, "created_at", None)),
                 activated_at=_iso(activated_at),
                 revoked_at=_iso(revoked_at),
                 last_used_at=_iso(getattr(r, "last_used_at", None)),
+                metadata=metadata,
             )
         )
         seen_programs.add(program)
 
-    if not views:
-        return []
-
-    if len(views) == 1:
-        for program in ("openclaw", "claude_code"):
-            if program in seen_programs:
-                continue
-            views.append(
-                DashboardInstallKeyView(
-                    key_id="",
-                    program=program,
-                    masked_key="",
-                    label="",
-                    status="locked",
-                    active=False,
-                    locked=True,
-                    revoked=False,
-                    units_consumed=0,
-                    created_at=None,
-                    activated_at=None,
-                    revoked_at=None,
-                    last_used_at=None,
-                )
+    for program in supported_programs:
+        if program in seen_programs:
+            continue
+        views.append(
+            DashboardInstallKeyView(
+                key_id="",
+                program=program,
+                masked_key=None,
+                label="",
+                status="locked",
+                active=False,
+                locked=True,
+                revoked=False,
+                payment_status="unpaid",
+                entitlements_status="not_active",
+                issued_after_payment=False,
+                units_consumed=0,
+                created_at=None,
+                activated_at=None,
+                revoked_at=None,
+                last_used_at=None,
+                metadata={
+                    "owner_key": normalized_owner,
+                    "placeholder": placeholder_message,
+                    "placeholder_text": placeholder_message,
+                    "status_message": placeholder_message,
+                },
             )
-    return views
+        )
+
+    return sorted(views, key=lambda item: supported_programs.index(item.program) if item.program in supported_programs else len(supported_programs))
 
 
 def _build_wallet_kpi(

@@ -319,11 +319,17 @@ def _include_optional_protected_routers(app: FastAPI) -> None:
         _include_optional_router(app, module_path, dependencies=dependencies)
 
     integration_modules = [
+        "app.routes.integrations.agent_skills",
         "app.routes.integrations.claude_code",
         "app.routes.integrations.compatibility",
+        "app.routes.integrations.copilot",
+        "app.routes.integrations.cursor",
+        "app.routes.integrations.gemini_cli",
+        "app.routes.integrations.goose",
         "app.routes.integrations.installer",
         "app.routes.integrations.lifecycle",
         "app.routes.integrations.observability",
+        "app.routes.integrations.openclaw",
         "app.routes.integrations.readiness",
         "app.routes.integrations.rollouts",
         "app.routes.integrations.secrets",

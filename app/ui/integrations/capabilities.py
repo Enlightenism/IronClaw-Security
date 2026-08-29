@@ -11,6 +11,7 @@ from app.services.integration_registry import (
     get_integration,
     list_integrations,
 )
+from app.services.platform_capabilities import get_platform_profile
 
 
 @dataclass(slots=True)
@@ -23,6 +24,7 @@ class IntegrationCapabilityItem:
     protocol_version: str
     capability_count: int
     capabilities: list[str] = field(default_factory=list)
+    capability_matrix: list[dict[str, Any]] = field(default_factory=list)
     supported_action_types: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -36,6 +38,7 @@ class IntegrationCapabilityItem:
             "protocol_version": self.protocol_version,
             "capability_count": self.capability_count,
             "capabilities": list(self.capabilities),
+            "capability_matrix": [dict(item) for item in self.capability_matrix],
             "supported_action_types": list(self.supported_action_types),
             "metadata": dict(self.metadata),
         }
@@ -78,6 +81,31 @@ def _build_adapter_for_integration(
     return BaseIntegrationAdapter(record=record)
 
 
+def _build_capability_matrix(record: Any, *, platform_profile: Any) -> list[dict[str, Any]]:
+    profile_capabilities = {capability.name: capability for capability in getattr(platform_profile, "capabilities", [])}
+    matrix: list[dict[str, Any]] = []
+
+    for capability in getattr(record, "capabilities", []):
+        capability_name = getattr(capability, "name", "")
+        profile_capability = profile_capabilities.get(capability_name)
+        support_level = "unsupported"
+        details = getattr(capability, "details", "") or ""
+
+        if profile_capability is not None:
+            support_level = profile_capability.support
+            details = profile_capability.details or details
+
+        capability_entry = {
+            "name": capability_name,
+            "enabled": getattr(capability, "enabled", False),
+            "support": support_level,
+            "details": details,
+        }
+        matrix.append(capability_entry)
+
+    return matrix
+
+
 def build_integration_capabilities_view(
     *,
     registry: IntegrationRegistry,
@@ -97,12 +125,14 @@ def build_integration_capabilities_view(
             continue
 
         handshake = adapter.handshake()
-        capabilities = list(handshake.capabilities)
+        capabilities = [capability.get("name") for capability in handshake.capabilities if isinstance(capability, dict) and capability.get("name")]
+        platform_profile = get_platform_profile(record.platform)
+        capability_matrix = _build_capability_matrix(record, platform_profile=platform_profile)
         supported_action_types: list[str] = []
         if hasattr(adapter, "supported_action_types"):
             supported_action_types = list(adapter.supported_action_types())  # type: ignore[attr-defined]
 
-        total_capabilities += len(capabilities)
+        total_capabilities += len(capability_matrix)
 
         items.append(
             IntegrationCapabilityItem(
@@ -112,12 +142,22 @@ def build_integration_capabilities_view(
                 platform=record.platform,
                 adapter_class=adapter.__class__.__name__,
                 protocol_version=adapter.protocol_version,
-                capability_count=len(capabilities),
+                capability_count=len(capability_matrix),
                 capabilities=capabilities,
+                capability_matrix=capability_matrix,
                 supported_action_types=supported_action_types,
                 metadata={
                     "requested_by": requested_by,
                     "status": record.status,
+                    "platform_support_summary": (
+                        {
+                            "platform": platform_profile.platform,
+                            "display_name": platform_profile.display_name,
+                            "install_mode": platform_profile.install_mode,
+                        }
+                        if platform_profile is not None
+                        else None
+                    ),
                 },
             ),
         )

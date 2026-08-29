@@ -119,6 +119,48 @@ def test_default_provider_is_present_in_provider_registry_when_defaults_are_load
     assert isinstance(config.providers[config.default_provider].configured, bool)
 
 
+def test_skill_config_coerces_canonical_runtime_family_targets() -> None:
+    from app.core.install_key_formats import InstallKeyFormatRegistry
+    from ironclaw_skill.config import DEFAULT_PROVIDER_TARGETS, _coerce_provider_targets
+
+    expected_targets = InstallKeyFormatRegistry.list_programs()
+
+    assert DEFAULT_PROVIDER_TARGETS == expected_targets
+    assert list(DEFAULT_PROVIDER_TARGETS) == [
+        "openclaw",
+        "claude_code",
+        "cursor",
+        "goose",
+        "gemini_cli",
+        "copilot",
+        "security_guardian",
+    ]
+    assert _coerce_provider_targets("claude,openclaw") == ("claude_code", "openclaw")
+    assert _coerce_provider_targets(["gemini-cli", "github-copilot", "security-guardian"]) == (
+        "gemini_cli",
+        "copilot",
+        "security_guardian",
+    )
+    assert _coerce_provider_targets(("security-guardian", "claude", "github-copilot", "claude")) == (
+        "security_guardian",
+        "claude_code",
+        "copilot",
+    )
+    assert _coerce_provider_targets(["skills", "claude code", "OpenClaw"]) == (
+        "security_guardian",
+        "claude_code",
+        "openclaw",
+    )
+    assert _coerce_provider_targets(None) == expected_targets
+
+    try:
+        _coerce_provider_targets(["not-a-provider"])
+    except Exception as exc:  # pragma: no cover - assertion only for validation behavior
+        assert "Unsupported provider target" in str(exc)
+    else:
+        raise AssertionError("Expected unsupported provider target to raise")
+
+
 def test_enabledproviders_matches_enabled_provider_configs() -> None:
     config = loadconfig(config_path="Z:/this/path/should/not/exist/ironclawskill.json")
 

@@ -39,7 +39,16 @@ def _make_install_key_record(
     purchase_reference: str | None = None,
     checkout_session_id: str | None = None,
 ) -> InstallKeyRecord:
-    resolved_raw_key = raw_key or ("ic_install_openclaw_test_secret_123456" if program == "openclaw" else "ic_install_claude_code_test_secret_abcdef")
+    default_keys = {
+        "openclaw": "ic_install_openclaw_test_secret_123456",
+        "claude_code": "ic_install_claude_code_test_secret_abcdef",
+        "cursor": "ic_install_cursor_test_secret_cursor",
+        "goose": "ic_install_goose_test_secret_goose",
+        "gemini_cli": "ic_install_gemini_cli_test_secret_gemini",
+        "copilot": "ic_install_copilot_test_secret_copilot",
+        "security_guardian": "ic_install_security_guardian_test_secret_guardian",
+    }
+    resolved_raw_key = raw_key or default_keys.get(program, "ic_install_openclaw_test_secret_123456")
     return InstallKeyRecord(
         key_id=key_id,
         owner_key=owner_key,
@@ -239,6 +248,39 @@ def test_provision_for_program_rejects_unpaid_existing_or_invalid_entitlement_st
         )
 
 
+def test_provision_for_program_accepts_aliases_for_supported_runtimes() -> None:
+    service = InstallKeyProvisioningService(
+        install_key_registry=MagicMock(),
+        wallet_registry=MagicMock(),
+        billing_registry=MagicMock(has_active_subscription=MagicMock(return_value=True)),
+    )
+
+    for alias, expected in {
+        "github-copilot": "copilot",
+        "gemini-cli": "gemini_cli",
+        "cursor-agent": "cursor",
+        "security-guardian": "security_guardian",
+        "goose-agent": "goose",
+    }.items():
+        service._install_key_registry.get_keys_for_owner.return_value = []
+        service._install_key_registry.generate_for_paid_customer.return_value = _make_install_key_record(
+            owner_key="buyer@ironclaw.test",
+            subscription_id="sub_123",
+            program=expected,
+            key_id=f"ik_alias_{expected}",
+            raw_key=f"ic_install_{expected}_alias_secret",
+        )
+
+        issued = service.provision_for_program(
+            owner_key="buyer@ironclaw.test",
+            subscription_id="sub_123",
+            program=alias,
+        )
+
+        assert issued.record.program == expected
+        assert issued.record.raw_key.startswith(f"ic_install_{expected}_")
+
+
 def test_provision_for_program_rejects_unknown_program() -> None:
     service = InstallKeyProvisioningService(
         install_key_registry=MagicMock(),
@@ -259,7 +301,7 @@ def test_provision_for_program_rejects_unknown_program() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_provision_for_purchase_generates_both_supported_programs() -> None:
+def test_provision_for_purchase_generates_all_supported_programs() -> None:
     billing_registry = MagicMock()
     billing_registry.has_active_subscription.return_value = True
 
@@ -268,17 +310,19 @@ def test_provision_for_purchase_generates_both_supported_programs() -> None:
         _make_install_key_record(
             owner_key="buyer@ironclaw.test",
             subscription_id="sub_123",
-            program="openclaw",
-            key_id="ik_open_001",
-            raw_key="ic_install_openclaw_purchase_secret_1",
-        ),
-        _make_install_key_record(
-            owner_key="buyer@ironclaw.test",
-            subscription_id="sub_123",
-            program="claude_code",
-            key_id="ik_claude_001",
-            raw_key="ic_install_claude_code_purchase_secret_2",
-        ),
+            program=program,
+            key_id=f"ik_{program}_001",
+            raw_key=f"ic_install_{program}_purchase_secret_1",
+        )
+        for program in (
+            "openclaw",
+            "claude_code",
+            "cursor",
+            "goose",
+            "gemini_cli",
+            "copilot",
+            "security_guardian",
+        )
     ]
 
     wallet_registry = MagicMock()
@@ -297,10 +341,21 @@ def test_provision_for_purchase_generates_both_supported_programs() -> None:
         source="purchase",
     )
 
-    assert set(results.keys()) == {"openclaw", "claude_code"}
-    assert results["openclaw"].raw_key.startswith("ic_install_openclaw_")
-    assert results["claude_code"].raw_key.startswith("ic_install_claude_code_")
-    assert install_key_registry.generate_for_paid_customer.call_count == 2
+    expected_programs = {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "security_guardian"}
+    assert set(results.keys()) == expected_programs
+    for program in expected_programs:
+        assert results[program].raw_key.startswith(
+            {
+                "openclaw": "ic_install_openclaw_",
+                "claude_code": "ic_install_claude_code_",
+                "cursor": "ic_install_cursor_",
+                "goose": "ic_install_goose_",
+                "gemini_cli": "ic_install_gemini_cli_",
+                "copilot": "ic_install_copilot_",
+                "security_guardian": "ic_install_security_guardian_",
+            }[program]
+        )
+    assert install_key_registry.generate_for_paid_customer.call_count == 7
 
 
 def test_provision_for_purchase_uses_org_owner_resolution_when_auth_ctx_is_org() -> None:
@@ -312,17 +367,19 @@ def test_provision_for_purchase_uses_org_owner_resolution_when_auth_ctx_is_org()
         _make_install_key_record(
             owner_key="ic_org_org-42",
             subscription_id="sub_123",
-            program="openclaw",
-            key_id="ik_open_001",
-            raw_key="ic_install_openclaw_org_secret_1",
-        ),
-        _make_install_key_record(
-            owner_key="ic_org_org-42",
-            subscription_id="sub_123",
-            program="claude_code",
-            key_id="ik_claude_001",
-            raw_key="ic_install_claude_code_org_secret_2",
-        ),
+            program=program,
+            key_id=f"ik_{program}_001",
+            raw_key=f"ic_install_{program}_org_secret_1",
+        )
+        for program in (
+            "openclaw",
+            "claude_code",
+            "cursor",
+            "goose",
+            "gemini_cli",
+            "copilot",
+            "security_guardian",
+        )
     ]
 
     wallet_registry = MagicMock()

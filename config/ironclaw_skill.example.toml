@@ -7,7 +7,17 @@ base_url = "http://127.0.0.1:8000"
 policy_mode = "review"
 timeout_seconds = 10.0
 skill_enabled = true
-provider_targets = ["claude", "openclaw"]
+# Canonical install-key runtime families for the shared skill package.
+# Use the same program names as app/core/install_key_formats.py.
+provider_targets = [
+    "claude_code",
+    "openclaw",
+    "cursor",
+    "goose",
+    "gemini_cli",
+    "copilot",
+    "security_guardian",
+]
 
 [service]
 host = "127.0.0.1"

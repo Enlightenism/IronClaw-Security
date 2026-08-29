@@ -97,8 +97,12 @@ class PlatformInstallKeyRouter:
             raise ValueError("platform_name cannot be blank")
 
         format_group = self._format_registry.resolve_for_platform(normalized_platform)
-        group_platforms = self._format_registry.list_platforms_for_program(format_group.program)
-        canonical_platform = normalized_platform if normalized_platform in group_platforms else format_group.platform
+        group_platforms = tuple(dict.fromkeys(self._format_registry.list_platforms_for_program(format_group.program)))
+        canonical_platform = format_group.platform
+        if normalized_platform in group_platforms:
+            canonical_platform = normalized_platform
+        elif canonical_platform not in group_platforms:
+            canonical_platform = group_platforms[0]
 
         return PlatformInstallKeyRoute(
             requested_platform=normalized_platform,
@@ -134,7 +138,7 @@ class PlatformInstallKeyRouter:
         groups: list[PlatformInstallKeyGroup] = []
         for program in self._format_registry.list_programs():
             format_group = self._format_registry.get_format_group(program)
-            platforms = self._format_registry.list_platforms_for_program(program)
+            platforms = tuple(dict.fromkeys(self._format_registry.list_platforms_for_program(program)))
             groups.append(
                 PlatformInstallKeyGroup(
                     family=format_group.family,

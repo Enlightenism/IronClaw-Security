@@ -119,6 +119,11 @@ const DEFAULT_TOKENS = {
   status: "ok",
   claude_code_command: "ironclaw --token abc",
   openclaw_command: "openclaw --token xyz",
+  cursor_command: "cursor --token cursor-123",
+  goose_command: "goose --token goose-456",
+  gemini_cli_command: "gemini --token gemini-789",
+  copilot_command: "copilot --token copilot-001",
+  security_guardian_command: "ironclaw-skill --token guardian-999",
 };
 
 function makeAttack(index) {
@@ -850,7 +855,7 @@ describe("dashboard structure", () => {
     expect(capturedWalletProps.balance).toBe(9999);
   });
 
-  it("renders install-key placeholder cards until a paid active key exists", async () => {
+  it("renders all seven install-key platform cards until a paid active key exists", async () => {
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard/overview") {
         return Promise.resolve({
@@ -873,6 +878,11 @@ describe("dashboard structure", () => {
     await waitFor(() => {
       expect(screen.getByTestId("install-key-card-claude_code")).toBeInTheDocument();
       expect(screen.getByTestId("install-key-card-openclaw")).toBeInTheDocument();
+      expect(screen.getByTestId("install-key-card-cursor")).toBeInTheDocument();
+      expect(screen.getByTestId("install-key-card-goose")).toBeInTheDocument();
+      expect(screen.getByTestId("install-key-card-gemini_cli")).toBeInTheDocument();
+      expect(screen.getByTestId("install-key-card-copilot")).toBeInTheDocument();
+      expect(screen.getByTestId("install-key-card-security_guardian")).toBeInTheDocument();
     });
 
     expect(screen.getAllByText("Keys will be generated after purchase").length).toBeGreaterThan(0);
@@ -912,7 +922,7 @@ describe("dashboard structure", () => {
     expect(screen.queryByText("REACT_APP_IRONCLAW_API_KEY")).not.toBeInTheDocument();
   });
 
-  it("renders integration cards after data loads", async () => {
+  it("renders all platform integration cards after data loads", async () => {
     await act(async () => {
       render(<Dashboard />);
     });
@@ -920,6 +930,11 @@ describe("dashboard structure", () => {
     await waitFor(() => {
       expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
       expect(screen.getByTestId("openclaw-card")).toBeInTheDocument();
+      expect(screen.getByTestId("cursor-card")).toBeInTheDocument();
+      expect(screen.getByTestId("goose-card")).toBeInTheDocument();
+      expect(screen.getByTestId("gemini_cli-card")).toBeInTheDocument();
+      expect(screen.getByTestId("copilot-card")).toBeInTheDocument();
+      expect(screen.getByTestId("security_guardian-card")).toBeInTheDocument();
     });
   });
 

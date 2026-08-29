@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from fastapi.responses import HTMLResponse
 
 from app.ui.integrations.settings import buildintegrationssettingsview
@@ -38,13 +40,50 @@ def test_buildintegrationssettingsview_contains_expected_settings_sections() -> 
         "Default Guard Mode",
         "Bidirectional Sync",
         "Providers",
-        "OpenAI",
-        "Claude",
         "OpenClaw",
+        "Claude Code",
+        "Cursor",
+        "Goose",
+        "Gemini CLI",
+        "GitHub Copilot",
+        "Security Guardian",
     ]
-
     missing_markers = [marker for marker in expected_markers if marker not in content]
     assert not missing_markers, f"missing UI markers: {missing_markers}"
+
+    expected_providers = {
+        "OpenClaw",
+        "Claude Code",
+        "Cursor",
+        "Goose",
+        "Gemini CLI",
+        "GitHub Copilot",
+        "Security Guardian",
+    }
+    present_providers = {marker for marker in expected_providers if marker in content}
+    assert present_providers == expected_providers
+
+    stale_markers = ["OpenAI", "Standalone IronClaw"]
+    assert all(not re.search(rf"(?i)\b{re.escape(marker)}\b", content) for marker in stale_markers), f"stale UI markers present: {stale_markers}"
+
+
+def test_buildintegrationssettingsview_uses_canonical_provider_metadata() -> None:
+    response = buildintegrationssettingsview()
+
+    content = response.body.decode("utf-8")
+    expected_providers = [
+        "OpenClaw",
+        "Claude Code",
+        "Cursor",
+        "Goose",
+        "Gemini CLI",
+        "GitHub Copilot",
+        "Security Guardian",
+    ]
+    for provider in expected_providers:
+        assert provider in content
+    assert "Standalone IronClaw" not in content
+    assert not re.search(r"(?i)\bstandalone\s+ironclaw\b", content)
 
 
 def test_buildintegrationssettingsview_contains_stable_test_ids() -> None:

@@ -223,7 +223,9 @@ class TestDashboardOverview:
             payment_status="pending",
             entitlements_status="not_active",
             issued_after_payment=False,
+            last_used_at="2026-06-22T12:00:00Z",
         )
+        record.revoked_at = "2026-06-22T12:05:00Z"
         wallet = _make_wallet_registry(balance_units=0, total_consumed_units=0, total_blocked_attacks=0)
         reg = _make_registry(records=[record])
         app.dependency_overrides[get_install_key_registry] = lambda: reg
@@ -239,6 +241,38 @@ class TestDashboardOverview:
         assert slot["remaining_units"] == 0
         assert slot["payment_status"] == "pending"
         assert slot["entitlements_status"] == "not_active"
+
+    def test_dashboard_includes_all_supported_runtime_slots(self, app: FastAPI, client: TestClient) -> None:
+        records = [
+            _make_record(key_id="ik_cursor_1", owner_key=_OWNER, program="cursor", masked_key="ic_install_cursor_...ffff"),
+            _make_record(key_id="ik_goose_1", owner_key=_OWNER, program="goose", masked_key="ic_install_goose_...aaaa"),
+            _make_record(key_id="ik_gemini_1", owner_key=_OWNER, program="gemini_cli", masked_key="ic_install_gemini_cli_...bbbb"),
+            _make_record(key_id="ik_copilot_1", owner_key=_OWNER, program="copilot", masked_key="ic_install_copilot_...cccc"),
+            _make_record(key_id="ik_guardian_1", owner_key=_OWNER, program="security_guardian", masked_key="ic_install_security_guardian_...dddd"),
+        ]
+        wallet = _make_wallet_registry(balance_units=125, total_consumed_units=18, total_blocked_attacks=7)
+        reg = _make_registry(records=records)
+        app.dependency_overrides[get_install_key_registry] = lambda: reg
+        app.dependency_overrides[get_unit_wallet_registry] = lambda: wallet
+        app.dependency_overrides[require_hybrid_auth] = lambda: _auth_override()
+        try:
+            body = client.get(f"/dashboard/overview?owner_key={_OWNER}").json()
+        finally:
+            app.dependency_overrides.clear()
+
+        payload_programs = {slot["program"] for slot in body["install_keys"]}
+        expected_programs = {
+            "openclaw",
+            "claude_code",
+            "cursor",
+            "goose",
+            "gemini_cli",
+            "copilot",
+            "security_guardian",
+        }
+        assert expected_programs.issubset(payload_programs)
+        assert any(slot["program"] == "security_guardian" and slot["status"] == "active" for slot in body["install_keys"])
+        assert any(slot["program"] == "cursor" and slot["status"] == "active" for slot in body["install_keys"])
 
 
 # ---------------------------------------------------------------------------

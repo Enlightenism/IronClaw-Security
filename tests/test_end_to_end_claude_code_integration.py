@@ -130,6 +130,59 @@ def test_end_to_end_claude_code_registry_install_and_verify():
     assert exec_result.output["request"]["action_type"] == "toolcall"
 
 
+def test_claude_code_route_contract_handshake_manifest_and_secret_scan_gate():
+    client = _client()
+
+    handshake = client.post(
+        "/integrations/claude-code/handshake",
+        headers={"X-API-Key": "test-api-key"},
+        json={
+            "client_id": "benchmark-client",
+            "protocol_version": "1.0.0",
+            "builder_id": "builder-42",
+            "session_id": "session-42",
+            "metadata": {"environment": "test"},
+        },
+    )
+    assert handshake.status_code == 200, handshake.text
+    handshake_payload = handshake.json()
+    assert handshake_payload["status"] == "ok"
+    assert handshake_payload["platform"] == "claude-code"
+    assert handshake_payload["adapter_name"] == "ironclaw-claude-code"
+    assert any(cap["name"] == "secret-scan" for cap in handshake_payload["capabilities"])
+    assert handshake_payload["metadata"]["builder_id"] == "builder-42"
+    assert handshake_payload["metadata"]["session_id"] == "session-42"
+
+    manifest = client.get("/integrations/claude-code/manifest", headers={"X-API-Key": "test-api-key"})
+    assert manifest.status_code == 200, manifest.text
+    manifest_payload = manifest.json()
+    assert manifest_payload["platform"] == "claude-code"
+    assert manifest_payload["adapter_name"] == "ironclaw-claude-code"
+    assert "tool_call" in manifest_payload["supported_action_types"]
+    assert any(cap["name"] == "audit-trail" for cap in manifest_payload["capabilities"])
+
+    evaluate = client.post(
+        "/integrations/claude-code/evaluate",
+        headers={"X-API-Key": "test-api-key"},
+        json={
+            "action_type": "tool_call",
+            "target": "bash",
+            "content": "AKIA1234567890EXAMPLE secret token",
+            "client_id": "benchmark-client",
+            "session_id": "session-42",
+            "risk_score": 25,
+            "metadata": {"tenant": "alpha"},
+        },
+    )
+    assert evaluate.status_code == 200, evaluate.text
+    evaluate_payload = evaluate.json()
+    assert evaluate_payload["verdict"] == "block"
+    assert evaluate_payload["should_block"] is True
+    assert evaluate_payload["secret_scan"]["scanned"] is True
+    assert evaluate_payload["audit_trail"]["secret_scan_triggered"] is True
+    assert evaluate_payload["audit_trail"]["metadata"]["tenant"] == "alpha"
+
+
 def test_end_to_end_claude_code_cli_install_and_verify(monkeypatch, capsys):
     # 1. Run CLI list to make sure Claude Code appears as an available integration.
     exit_code = run_cli(["list"])

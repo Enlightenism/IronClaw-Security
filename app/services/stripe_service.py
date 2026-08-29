@@ -12,6 +12,7 @@ import time
 from typing import Any
 from uuid import uuid4
 
+from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.core.install_keys import InstallKeyAlreadyExistsError, get_install_key_registry
 from app.services.secrets_vault import vault
 from app.supabaseclient import (
@@ -955,7 +956,9 @@ class StripeService:
         if metadata:
             base_metadata.update(metadata)
 
-        for program in ("openclaw", "claude_code"):
+        supported_programs = tuple(InstallKeyFormatRegistry.list_programs())
+
+        for program in supported_programs:
             existing = next((record for record in registry.get_keys_for_owner(owner_key) if record.program == program and record.active), None)
             if existing is not None:
                 results[program] = {

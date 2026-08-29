@@ -6,14 +6,23 @@ import logging
 from typing import Any, Literal
 
 from app.core.billing import get_billing_registry, resolve_billing_owner
+from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.core.install_keys import InstallKeyRecord, get_install_key_registry
 from app.core.logging import get_logger
 from app.core.unit_wallet import get_unit_wallet_registry
 
 _logger: logging.Logger = get_logger("ironclaw.install_key_provisioning")
 
-ProgramCode = Literal["openclaw", "claude_code"]
-_VALID_PROGRAMS: tuple[ProgramCode, ...] = ("openclaw", "claude_code")
+ProgramCode = Literal[
+    "openclaw",
+    "claude_code",
+    "cursor",
+    "goose",
+    "gemini_cli",
+    "copilot",
+    "security_guardian",
+]
+_VALID_PROGRAMS: tuple[ProgramCode, ...] = tuple(InstallKeyFormatRegistry.list_programs())
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,9 +96,10 @@ class InstallKeyProvisioningService:
 
     @staticmethod
     def _normalise_program(program: str) -> ProgramCode:
-        if program not in _VALID_PROGRAMS:
+        canonical = InstallKeyFormatRegistry.normalize_program(program)
+        if canonical is None:
             raise ValueError(f"Unsupported install key program: {program!r}. Allowed: {list(_VALID_PROGRAMS)}")
-        return program  # type: ignore[return-value]
+        return canonical
 
     @staticmethod
     def _is_successful_payment_status(value: str | None) -> bool:

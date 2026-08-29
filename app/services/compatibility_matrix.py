@@ -5,7 +5,143 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 CompatibilityState = Literal["supported", "warning", "unsupported"]
-RuntimeFamily = Literal["claude-code", "openclaw", "generic-agent"]
+RuntimeFamily = Literal[
+    "claude-code",
+    "openclaw",
+    "cursor",
+    "goose",
+    "gemini-cli",
+    "copilot",
+    "security-guardian",
+    "generic-agent",
+]
+
+_RUNTIME_ALIASES: dict[str, tuple[str, ...]] = {
+    "claude-code": ("claude-code", "claude_code", "claude"),
+    "openclaw": ("openclaw", "open_claw", "open-claw", "ironclaw"),
+    "cursor": ("cursor", "cursor-agent", "cursor_agent", "cursor agent", "cursor-cli", "cursor_cli", "cursor cli"),
+    "goose": ("goose", "goose-agent", "goose_agent", "goose agent", "goose-cli", "goose_cli", "goose cli"),
+    "gemini-cli": ("gemini-cli", "gemini_cli", "gemini cli", "gemini"),
+    "copilot": ("copilot", "github-copilot", "github_copilot", "github copilot", "githubcopilot"),
+    "security-guardian": (
+        "security-guardian",
+        "security_guardian",
+        "security guardian",
+        "securityguardian",
+        "skill",
+        "skills",
+        "security_guardian_skill",
+        "security_guardian_skill_",
+    ),
+    "generic-agent": ("generic-agent", "generic_agent", "generic agent"),
+}
+
+_RUNTIME_CONFIG: dict[str, dict[str, Any]] = {
+    "claude-code": {
+        "min_version": "0.1.0",
+        "max_version": "1.9.99",
+        "state": "supported",
+        "reason": "Claude Code adapter contract is supported for Gen1.",
+        "metadata": {
+            "priority": 1,
+            "install_key_program": "claude_code",
+            "install_key_prefix": "ic_install_claude_code_",
+            "compatible_runtime_aliases": _RUNTIME_ALIASES["claude-code"],
+        },
+    },
+    "openclaw": {
+        "min_version": "0.1.0",
+        "max_version": "1.9.99",
+        "state": "supported",
+        "reason": "OpenClaw adapter contract is supported for Gen1.",
+        "metadata": {
+            "priority": 1,
+            "install_key_program": "openclaw",
+            "install_key_prefix": "ic_install_openclaw_",
+            "compatible_runtime_aliases": _RUNTIME_ALIASES["openclaw"],
+        },
+    },
+    "cursor": {
+        "min_version": "0.1.0",
+        "max_version": "1.9.99",
+        "state": "supported",
+        "reason": "Cursor runtime is supported via the Cursor install-key family and local adapter hooks.",
+        "metadata": {
+            "priority": 2,
+            "install_key_program": "cursor",
+            "install_key_prefix": "ic_install_cursor_",
+            "compatible_runtime_aliases": _RUNTIME_ALIASES["cursor"],
+            "compatible_platform_runtimes": ["cursor", "cursor-agent", "cursor-agent", "cursor cli"],
+        },
+    },
+    "goose": {
+        "min_version": "0.1.0",
+        "max_version": "1.9.99",
+        "state": "supported",
+        "reason": "Goose runtime is supported through its install-key family and local security hooks.",
+        "metadata": {
+            "priority": 2,
+            "install_key_program": "goose",
+            "install_key_prefix": "ic_install_goose_",
+            "compatible_runtime_aliases": _RUNTIME_ALIASES["goose"],
+            "compatible_platform_runtimes": ["goose", "goose-agent", "goose cli"],
+        },
+    },
+    "gemini-cli": {
+        "min_version": "0.1.0",
+        "max_version": "1.9.99",
+        "state": "supported",
+        "reason": "Gemini CLI is supported for direct local runtime guarding and execution review.",
+        "metadata": {
+            "priority": 2,
+            "install_key_program": "gemini_cli",
+            "install_key_prefix": "ic_install_gemini_cli_",
+            "compatible_runtime_aliases": _RUNTIME_ALIASES["gemini-cli"],
+            "compatible_platform_runtimes": ["gemini-cli", "gemini cli", "gemini"],
+        },
+    },
+    "copilot": {
+        "min_version": "0.1.0",
+        "max_version": "1.9.99",
+        "state": "supported",
+        "reason": "GitHub Copilot is supported with the Copilot install-key family and local policy enforcement.",
+        "metadata": {
+            "priority": 2,
+            "install_key_program": "copilot",
+            "install_key_prefix": "ic_install_copilot_",
+            "compatible_runtime_aliases": _RUNTIME_ALIASES["copilot"],
+            "compatible_platform_runtimes": ["copilot", "github-copilot", "github copilot"],
+        },
+    },
+    "security-guardian": {
+        "min_version": "0.1.0",
+        "max_version": "1.9.99",
+        "state": "supported",
+        "reason": "The shared security-guardian skills package can be attached to multiple runtime installers while preserving the same install-key family.",
+        "metadata": {
+            "priority": 3,
+            "install_key_program": "security_guardian",
+            "install_key_prefix": "ic_install_security_guardian_",
+            "compatible_runtime_aliases": _RUNTIME_ALIASES["security-guardian"],
+            "compatible_platform_runtimes": ["security-guardian", "security_guardian", "skill", "skills"],
+            "multi_runtime_assignment": True,
+            "install_key_family_shared_across_platforms": True,
+        },
+    },
+    "generic-agent": {
+        "min_version": "0.1.0",
+        "max_version": "0.9.99",
+        "state": "warning",
+        "reason": "Generic agent support is available but may require custom wrapper hooks.",
+        "metadata": {
+            "priority": 4,
+            "install_key_program": None,
+            "install_key_prefix": None,
+            "compatible_runtime_aliases": _RUNTIME_ALIASES["generic-agent"],
+            "compatible_platform_runtimes": ["generic-agent", "generic agent"],
+        },
+    },
+}
 
 
 def _utc_now() -> str:
@@ -14,6 +150,20 @@ def _utc_now() -> str:
 
 def _normalize_text(value: str | None) -> str:
     return (value or "").strip()
+
+
+def _canonical_runtime_family(value: str | None) -> str:
+    candidate = _normalize_text(value).lower().replace("_", "-")
+    if not candidate:
+        return ""
+
+    for canonical, aliases in _RUNTIME_ALIASES.items():
+        if candidate == canonical:
+            return canonical
+        if candidate in {alias.lower().replace("_", "-") for alias in aliases}:
+            return canonical
+
+    return candidate
 
 
 def _parse_version(version: str) -> tuple[int, int, int]:
@@ -92,40 +242,32 @@ class CompatibilityDecision:
 
 
 def default_compatibility_rules() -> list[CompatibilityRule]:
-    return [
-        CompatibilityRule(
-            runtime_family="claude-code",
-            min_version="0.1.0",
-            max_version="1.9.99",
-            state="supported",
-            reason="Claude Code adapter contract is supported for Gen1.",
-            metadata={"priority": 1},
-        ),
-        CompatibilityRule(
-            runtime_family="openclaw",
-            min_version="0.1.0",
-            max_version="1.9.99",
-            state="supported",
-            reason="OpenClaw adapter contract is supported for Gen1.",
-            metadata={"priority": 1},
-        ),
-        CompatibilityRule(
-            runtime_family="generic-agent",
-            min_version="0.1.0",
-            max_version="0.9.99",
-            state="warning",
-            reason="Generic agent support is available but may require custom wrapper hooks.",
-            metadata={"priority": 1},
-        ),
-    ]
+    rules: list[CompatibilityRule] = []
+    for runtime_family, config in _RUNTIME_CONFIG.items():
+        rules.append(
+            CompatibilityRule(
+                runtime_family=runtime_family,
+                min_version=config["min_version"],
+                max_version=config["max_version"],
+                state=config["state"],
+                reason=config["reason"],
+                metadata=config["metadata"],
+            )
+        )
+    return rules
 
 
 def initialize_compatibility_matrix() -> CompatibilityMatrix:
     return CompatibilityMatrix(
         rules=default_compatibility_rules(),
         metadata={
-            "matrix_version": "1.0.0",
+            "matrix_version": "1.1.0",
             "scope": "IronClaw-Security",
+            "install_key_family_tracking": {
+                "program_key": "install_key_program",
+                "prefix_key": "install_key_prefix",
+                "shared_runtime_assignment": "multi_runtime_assignment",
+            },
         },
     )
 
@@ -137,8 +279,8 @@ def list_compatibility_rules(
 ) -> list[CompatibilityRule]:
     rules = list(matrix.rules)
     if runtime_family:
-        normalized = _normalize_text(runtime_family).lower()
-        rules = [rule for rule in rules if rule.runtime_family == normalized]
+        normalized = _canonical_runtime_family(runtime_family)
+        rules = [rule for rule in rules if _canonical_runtime_family(rule.runtime_family) == normalized]
 
     return sorted(
         rules,
@@ -156,7 +298,7 @@ def evaluate_compatibility(
     runtime_family: str,
     version: str,
 ) -> CompatibilityDecision:
-    normalized_family = _normalize_text(runtime_family).lower()
+    normalized_family = _canonical_runtime_family(runtime_family)
     normalized_version = _normalize_text(version)
 
     if not normalized_family:
@@ -181,7 +323,12 @@ def evaluate_compatibility(
                 state=rule.state,
                 reason=rule.reason,
                 matched_rule=rule.to_dict(),
-                metadata={"matched": True},
+                metadata={
+                    "matched": True,
+                    "install_key_program": rule.metadata.get("install_key_program"),
+                    "install_key_prefix": rule.metadata.get("install_key_prefix"),
+                    "compatible_runtime_aliases": rule.metadata.get("compatible_runtime_aliases", ()),
+                },
             )
 
     return CompatibilityDecision(

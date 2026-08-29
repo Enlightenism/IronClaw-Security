@@ -6,6 +6,10 @@ from typing import Any
 from app.adapters.base import BaseIntegrationAdapter
 from app.adapters.generic_agent_adapter import GenericAgentAdapter
 from app.adapters.mcp_tool_adapter import McpToolAdapter
+from app.core.install_key_formats import (
+    get_install_key_format_spec,
+    normalize_install_key_program,
+)
 from app.services.integration_registry import (
     IntegrationRegistry,
     get_integration,
@@ -32,6 +36,13 @@ class IntegrationCoverageItem:
     verification_fail_count: int
     coverage_score: int
     coverage_tier: str
+    install_key_program: str | None = None
+    install_key_family: str | None = None
+    install_key_prefix: str | None = None
+    install_key_aliases: list[str] = field(default_factory=list)
+    shared_install_key_family: bool = False
+    available: bool = False
+    rollout_status: str = "planned"
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -49,6 +60,13 @@ class IntegrationCoverageItem:
             "verification_fail_count": self.verification_fail_count,
             "coverage_score": self.coverage_score,
             "coverage_tier": self.coverage_tier,
+            "install_key_program": self.install_key_program,
+            "install_key_family": self.install_key_family,
+            "install_key_prefix": self.install_key_prefix,
+            "install_key_aliases": list(self.install_key_aliases),
+            "shared_install_key_family": self.shared_install_key_family,
+            "available": self.available,
+            "rollout_status": self.rollout_status,
             "metadata": dict(self.metadata),
         }
 
@@ -94,6 +112,50 @@ def _build_adapter_for_integration(
     return BaseIntegrationAdapter(record=record)
 
 
+def _resolve_install_key_metadata(record: Any) -> dict[str, Any]:
+    candidates = [
+        getattr(record, "platform", None),
+        getattr(record, "slug", None),
+        (getattr(record, "metadata", {}) or {}).get("runtime"),
+        (getattr(record, "metadata", {}) or {}).get("install_key_program"),
+        (getattr(record, "metadata", {}) or {}).get("platform"),
+    ]
+
+    for candidate in candidates:
+        normalized = normalize_install_key_program(candidate)
+        if normalized is None:
+            continue
+        spec = get_install_key_format_spec(normalized)
+        return {
+            "install_key_program": spec.program,
+            "install_key_family": spec.family,
+            "install_key_prefix": spec.prefix,
+            "install_key_aliases": list(spec.platform_aliases),
+            "shared_install_key_family": len(spec.platform_aliases) > 1 or spec.program == "security_guardian",
+        }
+
+    return {
+        "install_key_program": None,
+        "install_key_family": None,
+        "install_key_prefix": None,
+        "install_key_aliases": [],
+        "shared_install_key_family": False,
+    }
+
+
+def _rollout_status_for_record(record: Any, install_key_program: str | None) -> str:
+    status = str(getattr(record, "status", "") or "").strip().lower()
+    if status == "active" and install_key_program:
+        return "available"
+    if status == "disabled":
+        return "disabled"
+    if status == "deprecated":
+        return "deprecated"
+    if install_key_program:
+        return "planned"
+    return "not_applicable"
+
+
 def _coverage_score(
     *,
     capability_count: int,
@@ -101,6 +163,8 @@ def _coverage_score(
     verification_pass_count: int,
     verification_warn_count: int,
     verification_fail_count: int,
+    install_key_program: str | None = None,
+    available: bool = False,
 ) -> int:
     score = 0
     score += min(capability_count * 10, 40)
@@ -108,6 +172,10 @@ def _coverage_score(
     score += min(verification_pass_count * 5, 30)
     score -= min(verification_warn_count * 5, 10)
     score -= min(verification_fail_count * 15, 45)
+    if install_key_program:
+        score += 10
+    if available:
+        score += 5
     return max(0, min(score, 100))
 
 
@@ -141,6 +209,10 @@ def build_integration_coverage_view(
 
         handshake = adapter.handshake()
         capability_count = len(handshake.capabilities)
+        install_key_metadata = _resolve_install_key_metadata(record)
+        install_key_program = install_key_metadata["install_key_program"]
+        available = bool(install_key_program) and str(getattr(record, "status", "") or "").strip().lower() == "active"
+        rollout_status = _rollout_status_for_record(record, install_key_program)
 
         supported_action_type_count = 0
         if hasattr(adapter, "supported_action_types"):
@@ -160,6 +232,8 @@ def build_integration_coverage_view(
             verification_pass_count=summary["pass_count"],
             verification_warn_count=summary["warn_count"],
             verification_fail_count=summary["fail_count"],
+            install_key_program=install_key_program,
+            available=available,
         )
         tier = _coverage_tier(score)
 
@@ -185,8 +259,17 @@ def build_integration_coverage_view(
                 verification_fail_count=summary["fail_count"],
                 coverage_score=score,
                 coverage_tier=tier,
+                install_key_program=install_key_program,
+                install_key_family=install_key_metadata["install_key_family"],
+                install_key_prefix=install_key_metadata["install_key_prefix"],
+                install_key_aliases=install_key_metadata["install_key_aliases"],
+                shared_install_key_family=install_key_metadata["shared_install_key_family"],
+                available=available,
+                rollout_status=rollout_status,
                 metadata={
                     "requested_by": requested_by,
+                    "install_key_status": rollout_status,
+                    "availability_message": ("Install key is active for this runtime family." if available else "Install key rollout is not active for this runtime family."),
                 },
             ),
         )

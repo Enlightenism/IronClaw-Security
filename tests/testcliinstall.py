@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 from pathlib import Path
+import tomllib
 from typing import Any
 
 import pytest
@@ -45,6 +46,24 @@ def test_installer_module_exports_expected_symbols(install_module: Any) -> None:
     assert not missing, f"Missing installer symbols: {', '.join(missing)}"
 
 
+def test_example_skill_config_uses_canonical_multi_platform_targets(install_module: Any) -> None:
+    config_path = Path(__file__).resolve().parents[1] / "config" / "ironclaw_skill.example.toml"
+    payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
+
+    expected = [
+        "claude_code",
+        "openclaw",
+        "cursor",
+        "goose",
+        "gemini_cli",
+        "copilot",
+        "security_guardian",
+    ]
+
+    assert payload["ironclaw"]["provider_targets"] == expected
+    assert set(payload["ironclaw"]["provider_targets"]) == set(install_module.DEFAULT_PROVIDER_TARGETS)
+
+
 def test_build_install_config_defaults(install_module: Any, tmp_path: Path) -> None:
     parser = install_module.build_parser()
     args = parser.parse_args(
@@ -71,6 +90,15 @@ def test_build_install_config_defaults(install_module: Any, tmp_path: Path) -> N
     assert config.write_env_file is True
     assert config.overwrite is False
     assert config.provider_targets == install_module.DEFAULT_PROVIDER_TARGETS
+    assert list(config.provider_targets) == [
+        "openclaw",
+        "claude_code",
+        "cursor",
+        "goose",
+        "gemini_cli",
+        "copilot",
+        "security_guardian",
+    ]
 
 
 def test_build_install_config_rejects_invalid_retention_days(
@@ -110,11 +138,13 @@ def test_build_install_config_normalizes_provider_targets(
             "openclaw",
             "--provider-target",
             "claude",
+            "--provider-target",
+            "security-guardian",
         ],
     )
 
     config = install_module.build_install_config(args)
-    assert config.provider_targets == ("claude", "openclaw")
+    assert config.provider_targets == ("claude_code", "openclaw", "security_guardian")
 
 
 def test_run_install_writes_expected_files(
@@ -142,6 +172,8 @@ def test_run_install_writes_expected_files(
             "claude",
             "--provider-target",
             "openclaw",
+            "--provider-target",
+            "security-guardian",
         ],
     )
     config = install_module.build_install_config(args)
@@ -161,18 +193,25 @@ def test_run_install_writes_expected_files(
     assert result.skill_config_file.exists()
 
     runtime_payload = json.loads(result.config_file.read_text(encoding="utf-8"))
+    assert runtime_payload["schema_version"] == 1
     assert runtime_payload["product"] == "IronClaw-Security"
+    assert runtime_payload["install_mode"] == "local-bootstrap"
+    assert runtime_payload["skill_mode"] is True
     assert runtime_payload["base_url"] == install_module.DEFAULT_BASE_URL
-    assert runtime_payload["provider_targets"] == ["claude", "openclaw"]
+    assert runtime_payload["provider_targets"] == ["claude_code", "openclaw", "security_guardian"]
+    assert runtime_payload["features"]["shared_skill_package"] is True
+    assert runtime_payload["features"]["security_guardian_integration"] is True
+    assert runtime_payload["features"]["claude_integration"] is True
+    assert runtime_payload["features"]["openclaw_integration"] is True
 
     skill_payload = json.loads(result.skill_config_file.read_text(encoding="utf-8"))
     assert skill_payload["enabled"] is True
-    assert skill_payload["provider_targets"] == ["claude", "openclaw"]
+    assert skill_payload["provider_targets"] == ["claude_code", "openclaw", "security_guardian"]
     assert skill_payload["default_policy_mode"] == "review"
 
     env_contents = result.env_file.read_text(encoding="utf-8")
     assert "IRONCLAW_BASE_URL=http://127.0.0.1:8000" in env_contents
-    assert "IRONCLAW_PROVIDER_TARGETS=claude,openclaw" in env_contents
+    assert "IRONCLAW_PROVIDER_TARGETS=claude_code,openclaw,security_guardian" in env_contents
     assert "API_SECRET=" in env_contents
     assert "JWT_SECRET=" in env_contents
     assert "SECRET_KEY=" in env_contents

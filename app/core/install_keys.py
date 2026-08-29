@@ -21,17 +21,82 @@ _logger: logging.Logger = get_logger("ironclaw.install_keys")
 
 _INSTALL_KEY_PREFIX_OPENCLAW: Final[str] = "ic_install_openclaw_"
 _INSTALL_KEY_PREFIX_CLAUDE: Final[str] = "ic_install_claude_code_"
+_INSTALL_KEY_PREFIX_CURSOR: Final[str] = "ic_install_cursor_"
+_INSTALL_KEY_PREFIX_GOOSE: Final[str] = "ic_install_goose_"
+_INSTALL_KEY_PREFIX_GEMINI: Final[str] = "ic_install_gemini_cli_"
+_INSTALL_KEY_PREFIX_COPILOT: Final[str] = "ic_install_copilot_"
+_INSTALL_KEY_PREFIX_SECURITY_GUARDIAN: Final[str] = "ic_install_security_guardian_"
 _INSTALL_KEY_SECRET_BYTES: Final[int] = 32
 _T_INSTALL_KEYS: Final[str] = "install_keys"
 
-ProgramCode = Literal["openclaw", "claude_code"]
-_VALID_PROGRAMS: frozenset[str] = frozenset({"openclaw", "claude_code"})
+ProgramCode = Literal[
+    "openclaw",
+    "claude_code",
+    "cursor",
+    "goose",
+    "gemini_cli",
+    "copilot",
+    "security_guardian",
+]
+_VALID_PROGRAMS: frozenset[str] = frozenset(
+    {
+        "openclaw",
+        "claude_code",
+        "cursor",
+        "goose",
+        "gemini_cli",
+        "copilot",
+        "security_guardian",
+    }
+)
+
+_CANONICAL_PROGRAM_ALIASES: Final[dict[str, ProgramCode]] = {
+    "openclaw": "openclaw",
+    "open_claw": "openclaw",
+    "open_claw_": "openclaw",
+    "open-claw": "openclaw",
+    "claw": "openclaw",
+    "claude_code": "claude_code",
+    "claude-code": "claude_code",
+    "claude code": "claude_code",
+    "claude": "claude_code",
+    "cursor": "cursor",
+    "cursor_agent": "cursor",
+    "cursor-agent": "cursor",
+    "cursor_cli": "cursor",
+    "cursor-cli": "cursor",
+    "goose": "goose",
+    "goose_agent": "goose",
+    "goose-agent": "goose",
+    "gemini_cli": "gemini_cli",
+    "gemini-cli": "gemini_cli",
+    "gemini cli": "gemini_cli",
+    "gemini": "gemini_cli",
+    "copilot": "copilot",
+    "github_copilot": "copilot",
+    "github-copilot": "copilot",
+    "githubcopilot": "copilot",
+    "security_guardian": "security_guardian",
+    "security-guardian": "security_guardian",
+    "securityguardian": "security_guardian",
+    "security_guardian_skill": "security_guardian",
+    "security_guardian_skill_": "security_guardian",
+    "skill": "security_guardian",
+    "skills": "security_guardian",
+}
+
+_PREFIX_BY_PROGRAM: Final[dict[ProgramCode, str]] = {
+    "openclaw": _INSTALL_KEY_PREFIX_OPENCLAW,
+    "claude_code": _INSTALL_KEY_PREFIX_CLAUDE,
+    "cursor": _INSTALL_KEY_PREFIX_CURSOR,
+    "goose": _INSTALL_KEY_PREFIX_GOOSE,
+    "gemini_cli": _INSTALL_KEY_PREFIX_GEMINI,
+    "copilot": _INSTALL_KEY_PREFIX_COPILOT,
+    "security_guardian": _INSTALL_KEY_PREFIX_SECURITY_GUARDIAN,
+}
 
 # Ordered longest-first so the greedy prefix match is always correct.
-_KNOWN_PREFIXES: Final[tuple[str, ...]] = (
-    _INSTALL_KEY_PREFIX_CLAUDE,
-    _INSTALL_KEY_PREFIX_OPENCLAW,
-)
+_KNOWN_PREFIXES: Final[tuple[str, ...]] = tuple(sorted(_PREFIX_BY_PROGRAM.values(), key=len, reverse=True))
 
 _PAID_PAYMENT_STATUSES: Final[frozenset[str]] = frozenset({"paid", "success", "succeeded", "complete", "completed", "active", "authorized"})
 _ACTIVE_ENTITLEMENT_STATUSES: Final[frozenset[str]] = frozenset({"active", "paid", "enabled", "granted"})
@@ -55,6 +120,25 @@ def _canonical_owner_key(owner_key: str | Any) -> str:
     if not normalized:
         raise ValueError("owner_key is required")
     return normalized
+
+
+def _normalize_program(program: str | Any) -> ProgramCode:
+    candidate = str(program).strip().lower() if program is not None else ""
+    if not candidate:
+        raise ValueError("program is required")
+
+    normalized = candidate.replace(" ", "_").replace("-", "_")
+    normalized = normalized.replace("__", "_")
+    normalized = normalized.strip("_")
+
+    canonical = _CANONICAL_PROGRAM_ALIASES.get(normalized)
+    if canonical is not None:
+        return canonical
+
+    if normalized in _VALID_PROGRAMS:
+        return str(normalized)  # type: ignore[return-value]
+
+    raise ValueError(f"Invalid program: {program!r}. Must be one of {sorted(_VALID_PROGRAMS)}")
 
 
 def _hash_key(raw_key: str) -> str:
@@ -85,7 +169,8 @@ def _mask_key(raw_key: str) -> str:
 
 
 def _generate_raw_key(program: ProgramCode) -> str:
-    prefix = _INSTALL_KEY_PREFIX_OPENCLAW if program == "openclaw" else _INSTALL_KEY_PREFIX_CLAUDE
+    normalized_program = _normalize_program(program)
+    prefix = _PREFIX_BY_PROGRAM[normalized_program]
     return f"{prefix}{secrets.token_urlsafe(_INSTALL_KEY_SECRET_BYTES)}"
 
 
@@ -157,6 +242,7 @@ class InstallKeyRecord:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        self.program = _normalize_program(self.program)
         if self.program not in _VALID_PROGRAMS:
             raise ValueError(f"Invalid program: {self.program!r}. Must be one of {sorted(_VALID_PROGRAMS)}")
         if self.units_consumed < 0:
@@ -461,8 +547,7 @@ class InstallKeyRegistry:
         This is the only safe way to generate active install keys. It enforces a
         successful paid entitlement and prevents pre-purchase exposure.
         """
-        if program not in _VALID_PROGRAMS:
-            raise ValueError(f"Invalid program: {program!r}")
+        normalized_program = _normalize_program(program)
 
         normalized_owner = _canonical_owner_key(owner_key)
         if not str(subscription_id).strip():
@@ -484,10 +569,10 @@ class InstallKeyRegistry:
             self._ensure_loaded()
 
             for rec in self._records_by_id.values():
-                if rec.owner_key == normalized_owner and rec.program == program and _is_current_paid_entitlement(rec):
-                    raise InstallKeyAlreadyExistsError(normalized_owner, program)
+                if rec.owner_key == normalized_owner and rec.program == normalized_program and _is_current_paid_entitlement(rec):
+                    raise InstallKeyAlreadyExistsError(normalized_owner, normalized_program)
 
-            raw_key = _generate_raw_key(program)
+            raw_key = _generate_raw_key(normalized_program)
             raw_key_hash = _hash_key(raw_key)
             key_id = _new_key_id()
             now = _utc_now()
@@ -496,7 +581,7 @@ class InstallKeyRegistry:
                 key_id=key_id,
                 owner_key=normalized_owner,
                 subscription_id=str(subscription_id).strip(),
-                program=program,
+                program=normalized_program,
                 raw_key=raw_key,
                 raw_key_hash=raw_key_hash,
                 masked_key=_mask_key(raw_key),
@@ -530,7 +615,7 @@ class InstallKeyRegistry:
                 extra={
                     "key_id": key_id,
                     "owner_key": normalized_owner,
-                    "program": program,
+                    "program": normalized_program,
                     "payment_status": "paid",
                     "issued_after_payment": True,
                     "checkout_session_id": checkout_session_id,
@@ -566,6 +651,8 @@ class InstallKeyRegistry:
         entitlement. Old pre-purchase flows should not be allowed through this
         path anymore.
         """
+        normalized_program = _normalize_program(program)
+
         effective_payment_status = payment_status
         if effective_payment_status is None and metadata is not None:
             effective_payment_status = metadata.get("payment_status")
@@ -594,7 +681,7 @@ class InstallKeyRegistry:
         return self.generate_for_paid_customer(
             owner_key=owner_key,
             subscription_id=subscription_id,
-            program=program,
+            program=normalized_program,
             org_id=org_id,
             customer_id=customer_id,
             payment_status=effective_payment_status,
@@ -820,12 +907,22 @@ class InstallKeyRegistry:
         active = sum(1 for r in records if r.active)
         openclaw = sum(1 for r in records if r.program == "openclaw")
         claude = sum(1 for r in records if r.program == "claude_code")
+        cursor = sum(1 for r in records if r.program == "cursor")
+        goose = sum(1 for r in records if r.program == "goose")
+        gemini = sum(1 for r in records if r.program == "gemini_cli")
+        copilot = sum(1 for r in records if r.program == "copilot")
+        security_guardian = sum(1 for r in records if r.program == "security_guardian")
         return {
             "total": total,
             "active": active,
             "revoked": total - active,
             "openclaw_keys": openclaw,
             "claude_code_keys": claude,
+            "cursor_keys": cursor,
+            "goose_keys": goose,
+            "gemini_cli_keys": gemini,
+            "copilot_keys": copilot,
+            "security_guardian_keys": security_guardian,
         }
 
 

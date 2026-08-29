@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from threading import RLock
 from typing import TYPE_CHECKING, Any, Final, Literal
 
+from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.core.supabase import SupabaseAPIError, SupabaseClientError, get_supabase_service_client
 
 if TYPE_CHECKING:
@@ -156,6 +157,9 @@ class MeterEventRecord:
 
     def to_dict(self) -> dict[str, Any]:
         return self.as_dict()
+
+
+_SUPPORTED_INSTALL_KEY_PROGRAMS: Final[tuple[str, ...]] = tuple(InstallKeyFormatRegistry.list_programs())
 
 
 class SubscriptionMeterStore:
@@ -520,7 +524,7 @@ class SubscriptionMeterStore:
     def provision_install_key_on_purchase(
         self,
         subscription_id: str,
-        program: Literal["openclaw", "claude_code"],
+        program: str | None,
         owner_key: str,
         *,
         install_key_id: str | None = None,
@@ -531,6 +535,11 @@ class SubscriptionMeterStore:
         The billing store only persists state for the completed checkout and active
         entitlement path. Actual install-key creation remains the responsibility of
         the canonical provisioning service, not this persistence layer.
+
+        When a specific program is supplied, the returned payload remains backward
+        compatible with the single-program shape. When no program is supplied, the
+        payload is keyed by every supported install-key runtime so the purchase can
+        be represented as a full install-key set for the same customer entitlement.
         """
         with self._lock:
             self._ensure_loaded()
@@ -560,16 +569,28 @@ class SubscriptionMeterStore:
             except (SupabaseAPIError, SupabaseClientError, Exception):
                 pass
 
-            payload = {
-                "subscription_id": subscription_id,
-                "owner_key": owner_key,
-                "program": program,
-                "purchase_complete": record.purchase_complete,
-                "payment_status": record.payment_status,
-                "entitlements_status": record.entitlements_status,
-                "install_key_status": record.install_key_status,
-                "install_key_id": record.install_key_id,
-            }
+            def _base_payload(program_name: str) -> dict[str, Any]:
+                entry = {
+                    "subscription_id": subscription_id,
+                    "owner_key": owner_key,
+                    "program": program_name,
+                    "active": record.install_key_status is not None and str(record.install_key_status).strip().lower() == "active",
+                    "purchase_complete": record.purchase_complete,
+                    "payment_status": record.payment_status,
+                    "entitlements_status": record.entitlements_status,
+                    "install_key_status": record.install_key_status,
+                    "install_key_id": record.install_key_id,
+                }
+                return entry
+
+            if program is None:
+                payload: dict[str, Any] = {program_name: _base_payload(program_name) for program_name in _SUPPORTED_INSTALL_KEY_PROGRAMS}
+            else:
+                normalized_program = InstallKeyFormatRegistry.normalize_program(program)
+                if normalized_program is None:
+                    raise ValueError(f"Unsupported install key program: {program!r}")
+                payload = _base_payload(normalized_program)
+
             return record, payload
 
     def list_events(self, subscription_id: str | None = None, limit: int = 100) -> list[MeterEventRecord]:

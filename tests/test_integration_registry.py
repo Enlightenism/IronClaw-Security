@@ -13,6 +13,10 @@ from app.services.integration_registry import (
     summarize_integration_registry,
     update_integration_status,
 )
+from app.ui.integrations.adapters import build_integration_adapters_view
+from app.ui.integrations.coverage import build_integration_coverage_view
+from app.ui.integrations.dependencies import build_integration_dependencies_view
+from app.ui.integrations.matrix import build_integration_matrix_view
 
 
 def _make_record(
@@ -56,10 +60,19 @@ def _make_record(
 def test_default_integrations_returns_expected_seed_data():
     records = default_integrations()
 
-    assert len(records) >= 3
-    assert any(record.slug == "claude-code" for record in records)
-    assert any(record.slug == "openclaw" for record in records)
-    assert any(record.slug == "generic-agent" for record in records)
+    expected_slugs = {
+        "claude-code",
+        "openclaw",
+        "generic-agent",
+        "cursor",
+        "goose",
+        "gemini-cli",
+        "copilot",
+        "security-guardian",
+    }
+
+    assert len(records) >= len(expected_slugs)
+    assert {record.slug for record in records} >= expected_slugs
     assert all(record.integration_id for record in records)
     assert all(record.integration_type in {"adapter", "native", "cli", "remote"} for record in records)
 
@@ -201,3 +214,102 @@ def test_summarize_integration_registry_returns_expected_aggregates():
     assert "one_command_ready_targets" in summary
     assert "claude-code" in summary["one_command_ready_targets"]
     assert "slack-summary" in summary["one_command_ready_targets"]
+
+
+def test_build_integration_adapters_view_tracks_supported_runtime_cards_and_install_key_model():
+    registry = initialize_integration_registry()
+
+    view = build_integration_adapters_view(registry=registry)
+    payload = view.to_dict()
+
+    supported_runtime_cards = payload["metadata"]["supported_runtime_cards"]
+    supported_runtime_programs = {card["install_key_program"] for card in supported_runtime_cards}
+
+    assert {
+        "claude_code",
+        "openclaw",
+        "cursor",
+        "goose",
+        "gemini_cli",
+        "copilot",
+        "security_guardian",
+    } <= supported_runtime_programs
+
+    assert any(item["slug"] == "security-guardian" and item["shared_install_key_family"] for item in payload["items"])
+
+    assert any(item["capability_pills"] for item in payload["items"])
+    assert all(item["platform_cards"] for item in payload["items"])
+    assert all(item["install_key_program"] or item["install_key_program"] is None for item in payload["items"])
+
+
+def test_build_integration_coverage_view_tracks_install_key_rollout_status():
+    registry = initialize_integration_registry()
+    record = _make_record(
+        integration_id="integration-rollout-cursor",
+        slug="rollout-cursor",
+        name="Rollout Cursor Adapter",
+        platform="cursor",
+    )
+    record.status = "active"
+    record.metadata["install_key_program"] = "cursor"
+    register_integration(registry, record)
+
+    view = build_integration_coverage_view(registry=registry)
+    payload = view.to_dict()
+    item = next(item for item in payload["items"] if item["integration_id"] == "integration-rollout-cursor")
+
+    assert item["install_key_program"] == "cursor"
+    assert item["rollout_status"] == "available"
+    assert item["available"] is True
+    assert item["install_key_family"] == "cursor"
+
+
+def test_build_integration_dependencies_view_links_platforms_to_key_family_and_installer_path():
+    registry = initialize_integration_registry()
+    record = _make_record(
+        integration_id="integration-deps-cursor",
+        slug="deps-cursor",
+        name="Cursor Dependency Adapter",
+        platform="cursor",
+    )
+    record.install_target = "local"
+    record.metadata["installer_path"] = "local"
+    record.metadata["install_key_program"] = "cursor"
+    register_integration(registry, record)
+
+    view = build_integration_dependencies_view(registry=registry)
+    payload = view.to_dict()
+    item = next(item for item in payload["items"] if item["integration_id"] == "integration-deps-cursor")
+
+    assert item["install_key_program"] == "cursor"
+    assert item["install_key_family"] == "cursor"
+    assert item["installer_path"] == "local"
+    assert "cursor" in item["install_key_aliases"]
+    assert item["metadata"]["install_key_program"] == "cursor"
+    assert item["metadata"]["installer_path"] == "local"
+
+
+def test_build_integration_matrix_view_tracks_install_key_registry_and_skill_package_model():
+    registry = initialize_integration_registry()
+    record = _make_record(
+        integration_id="integration-matrix-skill",
+        slug="matrix-skill",
+        name="Skill Package Matrix Adapter",
+        platform="security-guardian",
+    )
+    record.install_target = "local"
+    record.metadata["installer_path"] = "local"
+    record.metadata["runtime"] = "skill"
+    register_integration(registry, record)
+
+    view = build_integration_matrix_view(registry=registry)
+    payload = view.to_dict()
+    item = next(item for item in payload["items"] if item["integration_id"] == "integration-matrix-skill")
+
+    assert item["install_key_program"] == "security_guardian"
+    assert item["install_key_family"] == "security_guardian"
+    assert item["installer_path"] == "local"
+    assert item["shared_install_key_family"] is True
+    assert "skill" in item["install_key_aliases"]
+    assert item["metadata"]["install_key_program"] == "security_guardian"
+    assert item["metadata"]["platform_aliases"]
