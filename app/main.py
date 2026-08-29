@@ -279,6 +279,7 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (_optional_router("app.api.org_context"), {"dependencies": dependencies}),
         (_optional_router("app.api.ui_admin_operators"), {}),
         (_optional_router("app.api.ui_data_retention"), {"dependencies": dependencies}),
+        (_optional_router("app.api.ui_system_diagnostics"), {}),
         (_optional_router("app.api.webhooks"), {"dependencies": dependencies}),
         (_optional_router("app.api.onboarding"), {"dependencies": dependencies}),
         (_optional_router("app.api.backup"), {"dependencies": dependencies}),

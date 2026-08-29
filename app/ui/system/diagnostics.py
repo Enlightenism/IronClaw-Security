@@ -221,7 +221,7 @@ def _build_kpis(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/systemdiagnostics", response_model=SystemDiagnosticsResponse)
+@router.get("/system-diagnostics", response_model=SystemDiagnosticsResponse)
 def get_system_diagnostics() -> SystemDiagnosticsResponse:
     checks = _build_checks()
     incidents = _build_active_incidents()

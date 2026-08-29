@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from app.dependencies.api_key import require_api_key
+from app.core.auth import require_api_key
 
 router = APIRouter(
     prefix="/api/review-queue",

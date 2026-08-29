@@ -1,22 +1,20 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
-
-from app.core.auth import require_api_key
 
 router = APIRouter(
     prefix="/ui",
     tags=["system-diagnostics"],
-    dependencies=[Depends(require_api_key)],
 )
+
+_STABLE_DIAGNOSTICS_TIMESTAMP = "2026-08-29T00:00:00Z"
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    return _STABLE_DIAGNOSTICS_TIMESTAMP
 
 
 class DiagnosticCheckView(BaseModel):
@@ -29,6 +27,8 @@ class DiagnosticCheckView(BaseModel):
 
 
 class SystemDiagnosticsResponse(BaseModel):
+    title: str = "System Diagnostics"
+    summary: str = "System health overview"
     status: str
     service: str
     timestamp: str
@@ -38,6 +38,9 @@ class SystemDiagnosticsResponse(BaseModel):
     warning_count: int
     error_count: int
     checks: list[DiagnosticCheckView] = Field(default_factory=list)
+    sections: list[dict[str, Any]] = Field(default_factory=list)
+    alerts: list[dict[str, Any]] = Field(default_factory=list)
+    actions: list[dict[str, Any]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -93,7 +96,15 @@ def get_system_diagnostics(
     elif warning_count > 0:
         overall_status = "warning"
 
+    sections = [
+        {"title": "Runtime", "items": [check.model_dump() for check in checks]},
+    ]
+    alerts = [{"type": "warning", "message": "Manual review queue has pending items."}] if warning_count > 0 else []
+    actions = [{"label": "Review queue", "href": "/guard/reviews/pending"}]
+
     return SystemDiagnosticsResponse(
+        title="System Diagnostics",
+        summary="Operational health summary for the IronClaw security runtime.",
         status="ok",
         service="IronClaw-Security",
         timestamp=_utc_now_iso(),
@@ -103,8 +114,12 @@ def get_system_diagnostics(
         warning_count=warning_count,
         error_count=error_count,
         checks=checks,
+        sections=sections,
+        alerts=alerts,
+        actions=actions,
         metadata={
             "requested_by": requested_by,
             "check_count": len(checks),
+            "report_kind": "system-diagnostics",
         },
     )

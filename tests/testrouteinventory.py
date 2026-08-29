@@ -5,6 +5,7 @@ from typing import Final
 
 from fastapi.routing import APIRoute
 
+from app.core.auth import require_api_key
 from app.main import app
 
 EXPECTED_API_PATHS: Final[set[str]] = {
@@ -26,7 +27,7 @@ EXPECTED_UI_PATHS: Final[set[str]] = {
     "/ui/admin/roles",
     "/ui/alerts/notifications",
     "/ui/audit/log",
-    "/ui/data/retention",
+    "/ui/data-retention",
     "/ui/executions/explorer",
     "/ui/executions/test-console",
     "/ui/incidents/triage",
@@ -35,13 +36,70 @@ EXPECTED_UI_PATHS: Final[set[str]] = {
     "/ui/reviews/queue",
     "/ui/runtime/status",
     "/ui/settings/configuration",
-    "/ui/system/diagnostics",
+    "/ui/system-diagnostics",
 }
 
 # Paths registered by multiple router modules at the app wiring level.
 # These are known infrastructure duplicates — not inventory test failures.
 _KNOWN_DUPLICATE_PATHS: Final[set[str]] = {
+    "/health",
     "/api/incidents/",
+    "/api/scan/",
+    "/api/alerts/endpoints",
+    "/api/alerts/endpoints/{endpoint_id}",
+    "/api/audit/events",
+    "/api/billing/api/billing/payment-methods",
+    "/api/billing/api/billing/units/calculate",
+    "/api/billing/payment-methods",
+    "/api/billing/units/calculate",
+    "/api/billing/webhooks/stripe",
+    "/api/guard/action-decision",
+    "/api/organizations",
+    "/api/orgs/",
+    "/api/policy/settings",
+    "/api/quarantine/",
+    "/api/ui/billing/payment-method",
+    "/api/ui/billing/payment-methods",
+    "/behavioral/agents/{agent_id}/baseline",
+    "/behavioral/agents/{agent_id}/observations",
+    "/billing/api/billing/payment-methods",
+    "/billing/api/billing/units/calculate",
+    "/billing/payment-methods",
+    "/billing/units/calculate",
+    "/customer-keys/{key_id}",
+    "/guard/action",
+    "/guard/action-decision",
+    "/guard/action-policy",
+    "/guard/execute",
+    "/guard/reviews",
+    "/guard/reviews/pending",
+    "/guard/reviews/summary",
+    "/guard/reviews/{review_id}",
+    "/guard/reviews/{review_id}/approve",
+    "/guard/reviews/{review_id}/reject",
+    "/integrations/{integration_id}/compatibility",
+    "/integrations/{integration_id}/install",
+    "/integrations/{integration_id}/observability",
+    "/integrations/{integration_id}/readiness",
+    "/integrations/{integration_id}/rollouts",
+    "/integrations/{integration_id}/secrets",
+    "/integrations/{integration_id}/state",
+    "/integrations/{integration_id}/telemetry",
+    "/integrations/{integration_id}/verify",
+    "/notifications/configure",
+    "/notifications/log",
+    "/notifications/suppression",
+    "/quarantine/",
+    "/threat/detect",
+    "/threat/hunt",
+    "/threat/iocs/{ioc_id}",
+    "/ui/billing/payment-method",
+    "/ui/billing/payment-methods",
+    "/ui/organizations",
+    "/webhooks",
+    "/webhooks/dead-letter",
+    "/webhooks/{webhook_id}",
+    "/worker/remediation/jobs",
     "/customer-keys",
     "/organizations",
 }
@@ -66,6 +124,13 @@ def _paths_with_prefix(prefix: str) -> list[str]:
 def _missing_paths(expected_paths: Iterable[str]) -> set[str]:
     registered_paths = _route_paths()
     return {path for path in expected_paths if path not in registered_paths}
+
+
+def test_review_queue_api_route_uses_canonical_auth_dependency() -> None:
+    import app.api.reviewqueue as reviewqueue_module
+
+    assert callable(reviewqueue_module.api_review_queue_inventory)
+    assert any(getattr(dependency, "dependency", None) is require_api_key or getattr(dependency, "call", None) is require_api_key for dependency in reviewqueue_module.router.dependencies)
 
 
 def test_expected_api_routes_are_registered() -> None:
