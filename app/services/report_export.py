@@ -14,7 +14,6 @@ or:
 from __future__ import annotations
 
 # pyright: reportMissingImports=false
-
 import csv
 from datetime import UTC, datetime
 import io
