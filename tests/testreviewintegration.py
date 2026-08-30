@@ -44,6 +44,16 @@ def test_register_and_escalate_incident_into_review_queue() -> None:
     assert any(item.get("type") == "artifact" for item in queued.evidence)
     assert any(item.get("type") == "incident" for item in queued.evidence)
 
+    serialized = queue.get_review(result.review_id)
+    assert serialized is not None
+    assert serialized["source"] == "incident"
+    assert serialized["priority"] == ReviewPriority.HIGH.value
+    assert serialized["review_id"] == result.review_id
+
+    listed = queue.list_reviews(status=ReviewStatus.PENDING.value)
+    assert any(item["review_id"] == result.review_id for item in listed)
+    assert queue.list_items()[0].review_id == result.review_id
+
 
 def test_escalating_same_incident_updates_existing_review_item() -> None:
     queue = ReviewQueueService()

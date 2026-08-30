@@ -346,7 +346,7 @@ def ui_audit_log_page(
         ),
     ]
 
-    return {
+    payload = {
         "page": "ui-audit-log",
         "title": "Audit Log",
         "summary": "Review operator, admin, customer, and system actions with filterable audit visibility.",
@@ -409,3 +409,29 @@ def ui_audit_log_page(
             },
         ],
     }
+    return payload
+
+
+def build_audit_log_page(
+    *,
+    selected_event_id: str | None = None,
+    filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    filter_values = filters or {}
+    payload = ui_audit_log_page(
+        actor_id=filter_values.get("actor_id"),
+        actor_type=filter_values.get("actor_type"),
+        action=filter_values.get("action") or filter_values.get("event_type"),
+        resource_type=filter_values.get("resource_type"),
+        resource_id=filter_values.get("resource_id"),
+        outcome=filter_values.get("verdict") or filter_values.get("outcome"),
+        severity=filter_values.get("severity"),
+        period=str(filter_values.get("period") or "24h"),
+    )
+
+    if selected_event_id and isinstance(payload.get("table"), dict):
+        rows = payload["table"].get("rows", [])
+        if rows:
+            payload["table"]["rows"] = [row for row in rows if row.get("event_id") == selected_event_id] or rows
+
+    return payload

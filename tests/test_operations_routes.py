@@ -12,6 +12,7 @@ from app.api.routes.onboarding import router as onboarding_router
 from app.api.routes.organizations import router as organizations_router
 from app.api.routes.policy import router as policy_router
 from app.api.routes.quarantine import router as quarantine_router
+from routes import incidents as incidents_routes
 
 
 def _build_test_app() -> FastAPI:
@@ -39,6 +40,11 @@ def _build_test_app() -> FastAPI:
 
 def _headers() -> dict[str, str]:
     return {"X-API-Key": "test-key"}
+
+
+def test_incidents_route_uses_canonical_review_queue_service() -> None:
+    assert incidents_routes.ReviewQueueService.__module__ == "app.review.reviewqueueservice"
+    assert incidents_routes._review_queue_service.__class__.__module__ == "app.review.reviewqueueservice"
 
 
 def test_incidents_route_lists_items() -> None:

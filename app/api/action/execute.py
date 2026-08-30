@@ -6,7 +6,8 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from app.guard.facade import guardandexecuteaction
+from app.facade import guardandexecuteaction
+from app.models.action_execute import ExecuteRequest as FacadeExecuteRequest
 from app.orchestrator.secureruntimepipeline import SecureRuntimePipeline, getactionexecutepipeline
 
 router = APIRouter()
@@ -199,7 +200,7 @@ def _normalize_execution_state(raw_state: str | None, status: ExecutionStatus) -
         value = raw_state.lower()
         if value in {"completed", "executed", "succeeded", "ok"}:
             return "completed"
-        if value in {"queuedforreview", "queued", "pending_review", "pending"}:
+        if value in {"queuedforreview", "queued_for_review", "queued", "pending_review", "pending"}:
             return "queuedforreview"
         if value in {"denied", "blocked", "failed", "error"}:
             return "denied"
@@ -230,17 +231,18 @@ def guardedexecute(
     """
     effective_filepath = payload.filepath or _DEFAULT_FILEPATH
 
-    # Delegate to facade; this returns an ActionExecuteResult instance.
-    responsepayload = guardandexecuteaction(
-        actiontype=payload.actiontype,
+    facade_request = FacadeExecuteRequest(
+        action_type=payload.actiontype,
         target=payload.target,
         content=payload.content,
-        riskscore=payload.riskscore,
-        clientid=payload.clientid,
-        sessionid=payload.sessionid,
-        filepath=effective_filepath,
-        pipeline=pipeline,
+        risk_score=payload.riskscore,
+        client_id=payload.clientid,
+        session_id=payload.sessionid,
+        file_path=effective_filepath,
     )
+
+    # Delegate to the runtime facade; this returns an ActionExecuteResult mapping.
+    responsepayload = guardandexecuteaction(facade_request, pipeline=pipeline)
 
     # Extract raw fields from ActionExecuteResult / summary dict.
     # We access via getattr to tolerate both object-style and dict-style results.[file:1]
@@ -249,16 +251,19 @@ def guardedexecute(
             return responsepayload.get(field, default)
         return getattr(responsepayload, field, default)
 
-    raw_status_code: int = int(_get("responsestatus", HTTPStatus.OK))
-    mapped_status: ExecutionStatus = _map_http_status_to_execution_status(raw_status_code)
+    raw_status_value = _get("response_status", _get("responsestatus", HTTPStatus.OK))
+    if isinstance(raw_status_value, str):
+        mapped_status = _normalize_execution_state(raw_status_value, "completed")
+    else:
+        mapped_status = _map_http_status_to_execution_status(int(raw_status_value))
 
-    raw_exec_state: str | None = _get("executionstate")
+    raw_exec_state: str | None = _get("execution_state", _get("executionstate"))
     execution_state: ExecutionStatus = _normalize_execution_state(raw_exec_state, mapped_status)
 
-    raw_policy_verdict: str | None = _get("policyverdict")
+    raw_policy_verdict: str | None = _get("policy_verdict", _get("policyverdict"))
     policy_verdict: PolicyVerdict = _normalize_policy_verdict(raw_policy_verdict)
 
-    raw_response_action: str | None = _get("responseaction")
+    raw_response_action: str | None = _get("response_action", _get("responseaction"))
     response_action: ResponseAction = _normalize_response_action(raw_response_action, policy_verdict)
 
     # Build the response with safe fallbacks where older components might omit fields.

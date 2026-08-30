@@ -52,6 +52,31 @@ class TestServicesInitExports:
         with pytest.raises(AttributeError, match="has no attribute"):
             _ = services.DOES_NOT_EXIST
 
+    def test_known_lazy_exports_resolve_without_eager_import(self):
+        for module_name in [
+            "app.services.backupservice",
+            "app.services.stix_adapter",
+            "app.services.telemetry_service",
+            "app.services.threat_alerts",
+            "app.services.threat_detection_engine",
+            "app.services.threat_hunt_service",
+            "app.services.threat_scoring",
+            "app.services.webhook_service",
+        ]:
+            sys.modules.pop(module_name, None)
+
+        services = _reload_services_module()
+
+        assert services.__getattr__("BackupService") is not None
+        assert "app.services.backupservice" in sys.modules
+        assert "app.services.stix_adapter" not in sys.modules
+        assert "app.services.telemetry_service" not in sys.modules
+        assert "app.services.threat_alerts" not in sys.modules
+        assert "app.services.threat_detection_engine" not in sys.modules
+        assert "app.services.threat_hunt_service" not in sys.modules
+        assert "app.services.threat_scoring" not in sys.modules
+        assert "app.services.webhook_service" not in sys.modules
+
 
 class TestServicesInitLazyLoading:
     def test_import_does_not_eagerly_import_service_submodules(self):

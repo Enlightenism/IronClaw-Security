@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from review.reviewqueueservice import ReviewPriority, ReviewQueueService
+from app.review.reviewqueueservice import ReviewPriority, ReviewQueueService
 
 
 class IncidentStatus(str):

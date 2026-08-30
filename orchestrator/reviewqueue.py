@@ -149,6 +149,9 @@ class ReviewItem:
         }
 
 
+ReviewQueueItem = ReviewItem
+
+
 class ReviewQueue:
     def __init__(
         self,

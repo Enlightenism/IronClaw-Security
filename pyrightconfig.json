@@ -28,6 +28,7 @@
   "reportMissingModuleSource": "warning",
   "reportAttributeAccessIssue": "none",
   "reportCallIssue": "none",
+  "reportUnsupportedDunderAll": "none",
   "reportOperatorIssue": "warning",
   "reportIndexIssue": "none",
   "reportArgumentType": "none",

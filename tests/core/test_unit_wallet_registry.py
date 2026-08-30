@@ -19,6 +19,7 @@ from app.core.unit_wallet import (
     TOKEN_CHUNK_SIZE,
     UNIT_PACKAGE_CATALOG,
     InsufficientUnitsError,
+    RegistryUnitWallet,
     UnitWalletRegistry,
     units_required_for_tokens,
 )
@@ -287,6 +288,26 @@ def test_credit_units_creates_wallet_on_first_call(registry: UnitWalletRegistry)
     assert wallet.owner_key == "alice@ironclaw.test"
     assert wallet.balance_units == 500
     assert wallet.wallet_id.startswith("wallet_")
+
+
+def test_get_wallet_ignores_invalid_cached_entry_and_fetches_real_wallet(registry: UnitWalletRegistry) -> None:
+    repo_wallet = RegistryUnitWallet(
+        wallet_id="wallet_live_123",
+        owner_key="alice@ironclaw.test",
+        balance_units=42,
+    )
+    registry._wallets["wallet_stale_123"] = object()
+    registry._wallets_by_owner["alice@ironclaw.test"] = "wallet_stale_123"
+    registry._repo = type(
+        "RepoStub",
+        (),
+        {"fetch_wallet": lambda self, owner_key: repo_wallet},
+    )()
+
+    wallet = registry.get_wallet("alice@ironclaw.test")
+
+    assert wallet is repo_wallet
+    assert registry._wallets_by_owner["alice@ironclaw.test"] == "wallet_live_123"
 
 
 def test_credit_units_sets_total_purchased_units(registry: UnitWalletRegistry) -> None:
@@ -689,6 +710,18 @@ def test_get_or_create_wallet_is_idempotent(registry: UnitWalletRegistry) -> Non
 
 def test_get_wallet_returns_none_for_unknown_owner(registry: UnitWalletRegistry) -> None:
     assert registry.get_wallet("nobody@ironclaw.test") is None
+
+
+def test_get_or_create_wallet_ignores_stale_none_cache_entry(registry: UnitWalletRegistry) -> None:
+    owner_key = "stale-cache@ironclaw.test"
+    registry._wallets_by_owner[owner_key] = "stale_wallet_id"
+    registry._wallets["stale_wallet_id"] = None  # type: ignore[assignment]
+
+    wallet = registry.get_or_create_wallet(owner_key)
+
+    assert wallet is not None
+    assert wallet.owner_key == owner_key
+    assert wallet.wallet_id.startswith("wallet_")
 
 
 def test_get_wallet_returns_wallet_after_credit(registry: UnitWalletRegistry) -> None:

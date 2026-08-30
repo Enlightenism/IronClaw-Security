@@ -8,13 +8,22 @@ import pytest
 from app.unitwallet import build_unit_wallet
 
 
-def _balance_of(wallet: Any) -> Decimal:
-    # Prefer payload view when available for consistency
+def _as_payload(wallet: Any) -> dict[str, Any]:
+    if isinstance(wallet, dict):
+        return wallet
     if hasattr(wallet, "as_dict") and callable(wallet.as_dict):
         payload = wallet.as_dict()
-        for name in ("balance", "units", "available_units", "available", "credits"):
-            if name in payload and payload[name] is not None:
-                return Decimal(str(payload[name]))
+        if isinstance(payload, dict):
+            return payload
+    return {}
+
+
+def _balance_of(wallet: Any) -> Decimal:
+    # Prefer payload view when available for consistency
+    payload = _as_payload(wallet)
+    for name in ("balance", "units", "available_units", "available", "credits"):
+        if name in payload and payload[name] is not None:
+            return Decimal(str(payload[name]))
 
     for name in ("balance", "units", "available_units", "available", "credits"):
         if isinstance(wallet, dict) and name in wallet:
@@ -25,11 +34,10 @@ def _balance_of(wallet: Any) -> Decimal:
                 value = value()
             return Decimal(str(value))
 
-    if hasattr(wallet, "as_dict") and callable(wallet.as_dict):
-        payload = wallet.as_dict()
-        for name in ("balance", "units", "available_units", "available", "credits"):
-            if name in payload:
-                return Decimal(str(payload[name]))
+    payload = _as_payload(wallet)
+    for name in ("balance", "units", "available_units", "available", "credits"):
+        if name in payload:
+            return Decimal(str(payload[name]))
 
     raise AssertionError("wallet balance field not found")
 
@@ -44,12 +52,11 @@ def _owner_of(wallet: Any) -> str | None:
         if isinstance(wallet, dict) and name in wallet:
             value = wallet[name]
             return None if value is None else str(value)
-    if hasattr(wallet, "as_dict") and callable(wallet.as_dict):
-        payload = wallet.as_dict()
-        for name in ("owner_id", "ownerid", "owner", "account_id", "accountid"):
-            if name in payload:
-                value = payload[name]
-                return None if value is None else str(value)
+    payload = _as_payload(wallet)
+    for name in ("owner_id", "ownerid", "owner", "account_id", "accountid"):
+        if name in payload:
+            value = payload[name]
+            return None if value is None else str(value)
     return None
 
 
@@ -62,11 +69,10 @@ def _status_of(wallet: Any) -> str | None:
             return None if value is None else str(value)
         if isinstance(wallet, dict) and name in wallet:
             return str(wallet[name])
-    if hasattr(wallet, "as_dict") and callable(wallet.as_dict):
-        payload = wallet.as_dict()
-        for name in ("status", "state"):
-            if name in payload:
-                return str(payload[name])
+    payload = _as_payload(wallet)
+    for name in ("status", "state"):
+        if name in payload:
+            return str(payload[name])
     return None
 
 

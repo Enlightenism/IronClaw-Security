@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 
-from app.ui.uiauditlog import build_audit_log_page
+from ui.uiauditlog import build_audit_log_page
 
 router = APIRouter(tags=["audit-log"])
 

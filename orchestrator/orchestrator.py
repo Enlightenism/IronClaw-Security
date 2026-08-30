@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from orchestrator.executionplan import ExecutionPlan
+from app.orchestrator.execution_plan import ExecutionPlan
 from orchestrator.policyenforcer import EnforcementContext
 from orchestrator.responsecoordinator import CoordinatedResponse, ResponseOutcome
 from orchestrator.reviewqueue import ReviewQueue, ReviewQueueItem

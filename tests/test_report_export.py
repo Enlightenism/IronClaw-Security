@@ -4,6 +4,8 @@ from collections.abc import Generator
 import csv
 from datetime import UTC, datetime, timedelta
 import io
+from pathlib import Path
+import tomllib
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -491,11 +493,28 @@ def test_pdf_export_raises_runtime_error_when_reportlab_missing() -> None:
             svc.export(report_type="meter_events", fmt="pdf")
 
 
+def test_reportlab_declared_as_optional_pdf_dependency() -> None:
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    optional = data["project"]["optional-dependencies"]
+
+    assert any(item.startswith("reportlab") for item in optional["pdf"])
+    assert any(item.startswith("reportlab") for item in optional["dev"])
+    assert any(item.startswith("reportlab") for item in optional["all"])
+
+
 def test_pdf_available_reflects_module_flag() -> None:
     svc = _build_service()
     import app.services.report_export as mod
 
     assert svc.pdf_available() == mod._PDF_AVAILABLE
+
+
+def test_optional_pdf_import_guard_is_defined() -> None:
+    import app.services.report_export as mod
+
+    assert isinstance(mod._PDF_AVAILABLE, bool)
+    assert mod._PDF_IMPORT_ERROR is None or isinstance(mod._PDF_IMPORT_ERROR, str)
 
 
 # ---------------------------------------------------------------------------

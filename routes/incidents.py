@@ -5,13 +5,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from review.incidentservice import IncidentRecord, IncidentService
-from review.reviewqueueservice import ReviewQueueService
+from app.review.incidentservice import IncidentRecord, IncidentService
+from app.review.reviewqueueservice import ReviewQueueService
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 
 _review_queue_service = ReviewQueueService()
-_incident_service = IncidentService(review_queue_service=_review_queue_service)
+_incident_service = IncidentService(review_queue=_review_queue_service)
 
 
 class IncidentCreateRequest(BaseModel):

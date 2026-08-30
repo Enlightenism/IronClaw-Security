@@ -1,4 +1,19 @@
+"""Report export helpers.
+
+PDF rendering is intentionally optional: the core CSV export path remains
+available without additional packages, while PDF generation requires the
+optional `reportlab` dependency. Install it with:
+
+    pip install -e ".[pdf]"
+
+or:
+
+    pip install reportlab
+"""
+
 from __future__ import annotations
+
+# pyright: reportMissingImports=false
 
 import csv
 from datetime import UTC, datetime
@@ -24,6 +39,7 @@ ReportType = Literal["meter_events", "subscriptions", "audit_log", "usage_summar
 # ---------------------------------------------------------------------------
 
 _PDF_AVAILABLE = False
+_PDF_IMPORT_ERROR: str | None = None
 try:
     from reportlab.lib import colors  # type: ignore[import-untyped]
     from reportlab.lib.pagesizes import A4, landscape
@@ -38,8 +54,8 @@ try:
     )
 
     _PDF_AVAILABLE = True
-except ImportError:
-    pass  # PDF export degrades gracefully when reportlab is absent
+except ImportError as exc:
+    _PDF_IMPORT_ERROR = str(exc)
 
 
 def _utcnow() -> datetime:
@@ -199,7 +215,7 @@ def _build_pdf(
     rows: list[list[Any]],
 ) -> bytes:
     if not _PDF_AVAILABLE:
-        raise RuntimeError("reportlab is not installed. Install it with: pip install reportlab")
+        raise RuntimeError('reportlab is not installed for PDF export. Install it with: pip install -e ".[pdf]" or pip install reportlab')
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(

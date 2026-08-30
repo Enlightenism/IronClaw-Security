@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from typing import cast
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.api.action.execute import router as action_execute_router
 from app.facade import guardandexecuteaction, guardandexecuteraw
 from app.models.action_execute import ExecuteRequest
 from app.services.action_execute_service import ExecutorResult
@@ -76,3 +80,27 @@ def test_guardandexecuteraw_usesdefaultfilepath():
     result = cast(ExecutorResult, response["executor_result"])
     assert result.get("file_path") == "app/api/action_execute.py"
     assert response["reasons"]
+
+
+def test_action_execute_route_uses_real_facade_import_and_contract():
+    app = FastAPI()
+    app.include_router(action_execute_router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/execute",
+        json={
+            "actiontype": "httpfetch",
+            "target": "https://example.com",
+            "content": "Fetch a public page for summarization.",
+            "riskscore": 0,
+            "clientid": "test-action-route-001",
+            "sessionid": "sess-action-route-001",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["executionstate"] in {"completed", "queuedforreview", "denied"}
+    assert body["responseaction"] in {"allow", "warn", "quarantine", "block", "review"}
+    assert body["policyverdict"] in {"allow", "warn", "quarantine", "block"}

@@ -728,9 +728,11 @@ class UnitWalletRegistry:
         with self._lock:
             wallet_id = self._wallets_by_owner.get(normalized_owner)
             if wallet_id is not None:
-                wallet = self._wallets.get(wallet_id)
-                if self._is_real_wallet(wallet):
-                    return wallet
+                cached_wallet = self._wallets.get(wallet_id)
+                if cached_wallet is not None:
+                    if isinstance(cached_wallet, RegistryUnitWallet) and self._is_real_wallet(cached_wallet):
+                        return cached_wallet
+                    self._wallets_by_owner.pop(normalized_owner, None)
 
         existing = self._repo.fetch_wallet(normalized_owner)
         if existing is not None:
@@ -746,7 +748,7 @@ class UnitWalletRegistry:
             wallet_id = self._wallets_by_owner.get(normalized_owner)
             if wallet_id is not None:
                 wallet = self._wallets.get(wallet_id)
-                if self._is_real_wallet(wallet):
+                if isinstance(wallet, RegistryUnitWallet) and self._is_real_wallet(wallet):
                     return wallet
 
             new_wallet_id = f"wallet_{uuid.uuid4().hex}"
@@ -989,10 +991,11 @@ class UnitWalletRegistry:
         with self._lock:
             wallet_id = self._wallets_by_owner.get(normalized_owner)
             if wallet_id is not None:
-                wallet = self._wallets.get(wallet_id)
-                if self._is_real_wallet(wallet):
-                    return wallet
-                self._wallets_by_owner.pop(normalized_owner, None)
+                cached_wallet = self._wallets.get(wallet_id)
+                if cached_wallet is not None:
+                    if isinstance(cached_wallet, RegistryUnitWallet) and self._is_real_wallet(cached_wallet):
+                        return cached_wallet
+                    self._wallets_by_owner.pop(normalized_owner, None)
 
         wallet = self._repo.fetch_wallet(normalized_owner)
         if wallet is None:

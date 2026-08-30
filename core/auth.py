@@ -5,8 +5,8 @@ from typing import Literal
 
 from fastapi import Header, HTTPException, Request, status
 
-from core.apikeys import ApiKeyRecord, registry
-from core.settings import get_settings
+from app.core.apikeys import ApiKeyRecord, registry
+from app.core.settings import get_settings
 
 PrincipalType = Literal["system", "customer", "service"]
 

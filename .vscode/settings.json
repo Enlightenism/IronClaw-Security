@@ -48,10 +48,6 @@
   },
   "deno.enable": true,
 
-  "python.analysis.ignore": [
-    "reportUnsupportedDunderAll"
-  ],
-
   "python.analysis.exclude": [
     "**/__pycache__",
     "**/.venv"

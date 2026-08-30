@@ -1725,7 +1725,10 @@ class StripeService:
         Alias for get_subscription(strict=True). Raises StripeSubscriptionNotFoundError if not found.
         Retained for call-site compatibility.
         """
-        return self.get_subscription(subscription_id, strict=True)
+        result = self.get_subscription(subscription_id, strict=True)
+        if result is None:
+            raise StripeSubscriptionNotFoundError(subscription_id)
+        return result
 
     def get_active_subscription_for_org(self, org_id: str) -> SubscriptionResponse | None:
         with self._lock:

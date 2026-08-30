@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.orchestrator.audit_ledger import AuditLedgerEntry, summarize_audit_entries
-from app.orchestrator.checkpoint_manager import CheckpointRecord
+from app.orchestrator.checkpoint_store import CheckpointBundle
 from app.orchestrator.remediation_gate import RemediationGateReport
 from app.orchestrator.replay_controller import ReplayReport
 from app.orchestrator.supervisor import SupervisorSnapshot, summarize_supervisor
@@ -65,22 +65,24 @@ def _utcnow() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _checkpoint_status_counts(checkpoints: list[CheckpointRecord]) -> dict[str, int]:
+def _checkpoint_status_counts(checkpoints: list[CheckpointBundle]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for checkpoint in checkpoints:
-        counts[checkpoint.status] = counts.get(checkpoint.status, 0) + 1
+        status = checkpoint.manifest.status
+        counts[status] = counts.get(status, 0) + 1
     return counts
 
 
-def _checkpoint_rows(checkpoints: list[CheckpointRecord]) -> list[dict[str, Any]]:
-    recent = sorted(checkpoints, key=lambda item: item.created_at, reverse=True)[:10]
+def _checkpoint_rows(checkpoints: list[CheckpointBundle]) -> list[dict[str, Any]]:
+    recent = sorted(checkpoints, key=lambda item: item.manifest.created_at, reverse=True)[:10]
     return [
         {
-            "checkpoint_id": checkpoint.checkpoint_id,
-            "session_id": checkpoint.session_id,
-            "status": checkpoint.status,
-            "target": checkpoint.target,
-            "created_at": checkpoint.created_at,
+            "checkpoint_id": checkpoint.manifest.checkpoint_id,
+            "label": checkpoint.manifest.label,
+            "status": checkpoint.manifest.status,
+            "session_count": checkpoint.manifest.session_count,
+            "trace_count": checkpoint.manifest.trace_count,
+            "created_at": checkpoint.manifest.created_at,
         }
         for checkpoint in recent
     ]
@@ -170,7 +172,7 @@ def _gate_section(gate_reports: list[RemediationGateReport]) -> DashboardSection
     )
 
 
-def _checkpoint_section(checkpoints: list[CheckpointRecord]) -> DashboardSection:
+def _checkpoint_section(checkpoints: list[CheckpointBundle]) -> DashboardSection:
     counts = _checkpoint_status_counts(checkpoints)
     return DashboardSection(
         section_id="checkpoints",
@@ -179,7 +181,7 @@ def _checkpoint_section(checkpoints: list[CheckpointRecord]) -> DashboardSection
             MetricCard("checkpoints-total", "Total checkpoints", len(checkpoints), "neutral"),
             MetricCard("checkpoints-open", "Open", counts.get("open", 0), "warning"),
             MetricCard("checkpoints-closed", "Closed", counts.get("closed", 0), "success"),
-            MetricCard("checkpoints-replayed", "Replayed", counts.get("replayed", 0), "neutral"),
+            MetricCard("checkpoints-created", "Created", counts.get("created", 0), "neutral"),
         ],
         rows=_checkpoint_rows(checkpoints),
     )
@@ -221,7 +223,7 @@ def _audit_section(entries: list[AuditLedgerEntry]) -> DashboardSection:
 
 def _headline_metrics(
     supervisor: SupervisorSnapshot,
-    checkpoints: list[CheckpointRecord],
+    checkpoints: list[CheckpointBundle],
     replay_reports: list[ReplayReport],
     gate_reports: list[RemediationGateReport],
     audit_entries: list[AuditLedgerEntry],
@@ -300,7 +302,7 @@ def _health_summary(
 def build_operations_dashboard(
     *,
     supervisor: SupervisorSnapshot,
-    checkpoints: list[CheckpointRecord],
+    checkpoints: list[CheckpointBundle],
     replay_reports: list[ReplayReport],
     gate_reports: list[RemediationGateReport],
     audit_entries: list[AuditLedgerEntry],

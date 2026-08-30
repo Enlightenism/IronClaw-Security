@@ -417,3 +417,9 @@ def rotate_api_key(
     metadata: dict[str, Any] | None = None,
 ) -> APIKeyRecord | None:
     return _registry.rotate_key(key_id, rotated_by=rotated_by, metadata=metadata)
+
+
+# Legacy-compatible aliases used by older imports and compatibility shims.
+ApiKeyRecord = APIKeyRecord
+ApiKeyRegistry = APIKeyRegistry
+registry = _registry
