@@ -22,6 +22,7 @@ def test_default_dashboard_overview_includes_platform_families_and_slots() -> No
         "goose",
         "gemini_cli",
         "copilot",
+        "hermes",
         "security_guardian",
     ]
     assert all(slot.status == "locked" for slot in overview.install_key_slots)
@@ -74,6 +75,15 @@ def test_build_dashboard_overview_normalizes_runtime_slots_and_platform_metadata
                     "payment_status": "unpaid",
                     "entitlements_status": "not_active",
                 },
+                {
+                    "family": "hermes-agent",
+                    "platform": "hermes_agent",
+                    "label": "Hermes",
+                    "status": "active",
+                    "installed": True,
+                    "payment_status": "paid",
+                    "entitlements_status": "active",
+                },
             ],
             "install_key_slots": [
                 {
@@ -100,6 +110,18 @@ def test_build_dashboard_overview_normalizes_runtime_slots_and_platform_metadata
                     "units_consumed": 0,
                     "metadata": {"placeholder": "Keys will be generated after purchase"},
                 },
+                {
+                    "program": "hermes-agent",
+                    "label": "Hermes",
+                    "status": "active",
+                    "active": True,
+                    "masked_key": "ic_install_hermes_...abcd",
+                    "payment_status": "paid",
+                    "entitlements_status": "active",
+                    "issued_after_payment": True,
+                    "units_consumed": 3,
+                    "metadata": {"placeholder": "Keys will be generated after purchase"},
+                },
             ],
         }
     )
@@ -110,6 +132,8 @@ def test_build_dashboard_overview_normalizes_runtime_slots_and_platform_metadata
     assert overview.install_key_slots[0].status == "active"
     assert overview.install_key_slots[1].program == "goose"
     assert overview.install_key_slots[1].metadata["placeholder"] == "Keys will be generated after purchase"
+    assert {slot.program for slot in overview.install_key_slots} >= {"claude_code", "goose", "hermes"}
+    assert any(slot.program == "hermes" and slot.status == "active" for slot in overview.install_key_slots)
 
 
 def test_dashboard_overview_summary_shares_platform_matrix() -> None:

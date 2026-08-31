@@ -336,7 +336,7 @@ def test_provision_install_keys_raises_value_error_when_subscription_cancelled(
 # ---------------------------------------------------------------------------
 
 
-def test_provision_install_keys_calls_generate_install_key_twice(
+def test_provision_install_keys_calls_generate_install_key_thrice(
     registry: BillingRegistry,
     mock_install_key_registry: MagicMock,
     customer: BillingCustomer,
@@ -345,13 +345,14 @@ def test_provision_install_keys_calls_generate_install_key_twice(
     mock_install_key_registry.generate_install_key.side_effect = [
         _make_install_key_record(customer.email, active_sub.subscription_id, "openclaw"),
         _make_install_key_record(customer.email, active_sub.subscription_id, "claude_code"),
+        _make_install_key_record(customer.email, active_sub.subscription_id, "hermes"),
     ]
     registry.provision_install_keys_on_purchase(
         customer_id=customer.customer_id,
         subscription_id=active_sub.subscription_id,
         owner_key=customer.email,
     )
-    assert mock_install_key_registry.generate_install_key.call_count == 2
+    assert mock_install_key_registry.generate_install_key.call_count == 3
 
 
 def test_provision_install_keys_calls_generate_install_key_with_openclaw_args(
@@ -363,6 +364,7 @@ def test_provision_install_keys_calls_generate_install_key_with_openclaw_args(
     mock_install_key_registry.generate_install_key.side_effect = [
         _make_install_key_record(customer.email, active_sub.subscription_id, "openclaw"),
         _make_install_key_record(customer.email, active_sub.subscription_id, "claude_code"),
+        _make_install_key_record(customer.email, active_sub.subscription_id, "hermes"),
     ]
     registry.provision_install_keys_on_purchase(
         customer_id=customer.customer_id,
@@ -388,6 +390,7 @@ def test_provision_install_keys_calls_generate_install_key_with_claude_code_args
     mock_install_key_registry.generate_install_key.side_effect = [
         _make_install_key_record(customer.email, active_sub.subscription_id, "openclaw"),
         _make_install_key_record(customer.email, active_sub.subscription_id, "claude_code"),
+        _make_install_key_record(customer.email, active_sub.subscription_id, "hermes"),
     ]
     registry.provision_install_keys_on_purchase(
         customer_id=customer.customer_id,
@@ -404,7 +407,7 @@ def test_provision_install_keys_calls_generate_install_key_with_claude_code_args
     )
 
 
-def test_provision_install_keys_openclaw_called_before_claude_code(
+def test_provision_install_keys_openclaw_called_before_claude_code_before_hermes(
     registry: BillingRegistry,
     mock_install_key_registry: MagicMock,
     customer: BillingCustomer,
@@ -422,7 +425,33 @@ def test_provision_install_keys_openclaw_called_before_claude_code(
         subscription_id=active_sub.subscription_id,
         owner_key=customer.email,
     )
-    assert calls_log == ["openclaw", "claude_code"]
+    assert calls_log == ["openclaw", "claude_code", "hermes"]
+
+
+def test_provision_install_keys_calls_generate_install_key_with_hermes_args(
+    registry: BillingRegistry,
+    mock_install_key_registry: MagicMock,
+    customer: BillingCustomer,
+    active_sub: BillingSubscription,
+) -> None:
+    mock_install_key_registry.generate_install_key.side_effect = [
+        _make_install_key_record(customer.email, active_sub.subscription_id, "openclaw"),
+        _make_install_key_record(customer.email, active_sub.subscription_id, "claude_code"),
+        _make_install_key_record(customer.email, active_sub.subscription_id, "hermes"),
+    ]
+    registry.provision_install_keys_on_purchase(
+        customer_id=customer.customer_id,
+        subscription_id=active_sub.subscription_id,
+        owner_key=customer.email,
+    )
+    third_call = mock_install_key_registry.generate_install_key.call_args_list[2]
+    assert third_call == call(
+        customer.email,
+        active_sub.subscription_id,
+        "hermes",
+        label="auto-provisioned",
+        metadata={"customer_id": customer.customer_id, "provisioned_by": "billing"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -438,7 +467,8 @@ def test_provision_install_keys_returns_dict_with_openclaw_key(
 ) -> None:
     openclaw_record = _make_install_key_record(customer.email, active_sub.subscription_id, "openclaw")
     claude_record = _make_install_key_record(customer.email, active_sub.subscription_id, "claude_code")
-    mock_install_key_registry.generate_install_key.side_effect = [openclaw_record, claude_record]
+    hermes_record = _make_install_key_record(customer.email, active_sub.subscription_id, "hermes")
+    mock_install_key_registry.generate_install_key.side_effect = [openclaw_record, claude_record, hermes_record]
     result = registry.provision_install_keys_on_purchase(
         customer_id=customer.customer_id,
         subscription_id=active_sub.subscription_id,
@@ -455,7 +485,8 @@ def test_provision_install_keys_returns_dict_with_claude_code_key(
 ) -> None:
     openclaw_record = _make_install_key_record(customer.email, active_sub.subscription_id, "openclaw")
     claude_record = _make_install_key_record(customer.email, active_sub.subscription_id, "claude_code")
-    mock_install_key_registry.generate_install_key.side_effect = [openclaw_record, claude_record]
+    hermes_record = _make_install_key_record(customer.email, active_sub.subscription_id, "hermes")
+    mock_install_key_registry.generate_install_key.side_effect = [openclaw_record, claude_record, hermes_record]
     result = registry.provision_install_keys_on_purchase(
         customer_id=customer.customer_id,
         subscription_id=active_sub.subscription_id,
@@ -464,7 +495,7 @@ def test_provision_install_keys_returns_dict_with_claude_code_key(
     assert result["claude_code"] is claude_record
 
 
-def test_provision_install_keys_return_dict_has_exactly_two_keys(
+def test_provision_install_keys_return_dict_has_exactly_three_keys(
     registry: BillingRegistry,
     mock_install_key_registry: MagicMock,
     customer: BillingCustomer,
@@ -473,13 +504,14 @@ def test_provision_install_keys_return_dict_has_exactly_two_keys(
     mock_install_key_registry.generate_install_key.side_effect = [
         _make_install_key_record(customer.email, active_sub.subscription_id, "openclaw"),
         _make_install_key_record(customer.email, active_sub.subscription_id, "claude_code"),
+        _make_install_key_record(customer.email, active_sub.subscription_id, "hermes"),
     ]
     result = registry.provision_install_keys_on_purchase(
         customer_id=customer.customer_id,
         subscription_id=active_sub.subscription_id,
         owner_key=customer.email,
     )
-    assert set(result.keys()) == {"openclaw", "claude_code"}
+    assert set(result.keys()) == {"openclaw", "claude_code", "hermes"}
 
 
 def test_provision_install_keys_openclaw_value_is_install_key_record(
@@ -491,6 +523,7 @@ def test_provision_install_keys_openclaw_value_is_install_key_record(
     mock_install_key_registry.generate_install_key.side_effect = [
         _make_install_key_record(customer.email, active_sub.subscription_id, "openclaw"),
         _make_install_key_record(customer.email, active_sub.subscription_id, "claude_code"),
+        _make_install_key_record(customer.email, active_sub.subscription_id, "hermes"),
     ]
     result = registry.provision_install_keys_on_purchase(
         customer_id=customer.customer_id,
@@ -509,6 +542,7 @@ def test_provision_install_keys_claude_code_value_is_install_key_record(
     mock_install_key_registry.generate_install_key.side_effect = [
         _make_install_key_record(customer.email, active_sub.subscription_id, "openclaw"),
         _make_install_key_record(customer.email, active_sub.subscription_id, "claude_code"),
+        _make_install_key_record(customer.email, active_sub.subscription_id, "hermes"),
     ]
     result = registry.provision_install_keys_on_purchase(
         customer_id=customer.customer_id,
@@ -527,6 +561,7 @@ def test_provision_install_keys_openclaw_record_program_is_openclaw(
     mock_install_key_registry.generate_install_key.side_effect = [
         _make_install_key_record(customer.email, active_sub.subscription_id, "openclaw"),
         _make_install_key_record(customer.email, active_sub.subscription_id, "claude_code"),
+        _make_install_key_record(customer.email, active_sub.subscription_id, "hermes"),
     ]
     result = registry.provision_install_keys_on_purchase(
         customer_id=customer.customer_id,
@@ -545,6 +580,7 @@ def test_provision_install_keys_claude_code_record_program_is_claude_code(
     mock_install_key_registry.generate_install_key.side_effect = [
         _make_install_key_record(customer.email, active_sub.subscription_id, "openclaw"),
         _make_install_key_record(customer.email, active_sub.subscription_id, "claude_code"),
+        _make_install_key_record(customer.email, active_sub.subscription_id, "hermes"),
     ]
     result = registry.provision_install_keys_on_purchase(
         customer_id=customer.customer_id,

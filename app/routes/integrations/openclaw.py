@@ -119,26 +119,44 @@ def _build_audit_trail(
     }
 
 
+def _canonical_adapter_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    normalized = dict(metadata or {})
+    normalized["runtime"] = _PLATFORM
+    normalized["workflow_mode"] = "builder-guard"
+    return normalized
+
+
 def _build_adapter() -> OpenClawAdapter:
     try:
         registry = initialize_integration_registry()
-        return build_openclaw_adapter(registry)
+        adapter = build_openclaw_adapter(registry)
     except KeyError:
         from app.services.integration_registry import IntegrationRecord
 
         fallback_record = IntegrationRecord(
             integration_id="integration-openclaw",
             name="OpenClaw",
+            slug="openclaw",
             platform=_PLATFORM,
-            enabled=True,
+            integration_type="adapter",
+            status="planned",
+            version=_ADAPTER_VERSION,
+            command_name="ironclaw install openclaw",
+            description="Adapter layer for OpenClaw-style builder and agent runtimes.",
+            entrypoint="app.adapters.openclaw_adapter",
+            install_target="local",
             metadata={"runtime": _PLATFORM, "workflow_mode": "builder-guard"},
         )
-        return OpenClawAdapter(
+        adapter = OpenClawAdapter(
             record=fallback_record,
             protocol_version=_ADAPTER_VERSION,
             health="ready",
             metadata={"runtime": _PLATFORM, "workflow_mode": "builder-guard"},
         )
+
+    adapter.runtime = _PLATFORM
+    adapter.metadata = _canonical_adapter_metadata(getattr(adapter, "metadata", None))
+    return adapter
 
 
 # ---------- Request / Response Models ----------
@@ -455,6 +473,7 @@ async def openclaw_handshake(
         {"name": "should-hold", "description": "OpenClaw-specific hold flag for non-allow verdicts"},
         {"name": "audit-trail", "description": "Full auditable decision trail per workflow action"},
     ]
+    adapter_metadata = _canonical_adapter_metadata(getattr(adapter, "metadata", None))
 
     return OpenClawHandshakeResponse(
         status="ok",
@@ -466,6 +485,7 @@ async def openclaw_handshake(
         capabilities=capabilities,
         policy_mode=policy_mode,
         metadata={
+            **adapter_metadata,
             "client_id": body.client_id,
             "builder_id": body.builder_id,
             "requested_protocol_version": body.protocol_version,

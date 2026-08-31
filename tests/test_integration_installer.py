@@ -89,7 +89,8 @@ def test_install_integration_accepts_supported_multi_platform_paid_keys():
         ("integration-goose", "ic_install_goose_validkey", "owner-801", "goose"),
         ("integration-gemini-cli", "ic_install_gemini_cli_validkey", "owner-802", "gemini_cli"),
         ("integration-copilot", "ic_install_copilot_validkey", "owner-803", "copilot"),
-        ("integration-security-guardian", "ic_install_security_guardian_validkey", "owner-804", "security_guardian"),
+        ("integration-hermes", "ic_install_hermes_validkey", "owner-804", "hermes"),
+        ("integration-security-guardian", "ic_install_security_guardian_validkey", "owner-805", "security_guardian"),
     ]
 
     for integration_id, install_key, owner_key, program in supported:

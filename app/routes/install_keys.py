@@ -19,7 +19,7 @@ router = APIRouter(
     tags=["install-keys"],
 )
 
-_VALID_PROGRAMS: frozenset[str] = frozenset({"openclaw", "claude_code"})
+_VALID_PROGRAMS: frozenset[str] = frozenset({"openclaw", "claude_code", "hermes"})
 
 
 # ---------------------------------------------------------------------------

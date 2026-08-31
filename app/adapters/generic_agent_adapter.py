@@ -63,6 +63,8 @@ class GenericAgentAdapterRequest:
         merged_metadata = dict(self.metadata)
         if self.agent_id:
             merged_metadata["agent_id"] = self.agent_id
+        elif self.client_id:
+            merged_metadata["agent_id"] = self.client_id
         if self.agent_name:
             merged_metadata["agent_name"] = self.agent_name
         if self.runtime_name:
@@ -71,7 +73,7 @@ class GenericAgentAdapterRequest:
             action_type=self.action_type,
             target=self.target,
             content=self.content,
-            agent_id=self.client_id,
+            agent_id=self.agent_id or self.client_id,
             session_id=self.session_id,
             metadata=merged_metadata,
         )
@@ -179,14 +181,20 @@ def adapt_policy_decision_to_generic_agent(
     trace_id: str | None = None,
     request: GenericAgentAdapterRequest | None = None,
     metadata: dict[str, Any] | None = None,
+    platform: str | None = None,
 ) -> GenericAgentAdapterResponse:
     verdict: AdapterVerdict = decision.verdict
     matched_rules = [match.rule_id for match in decision.matched_rules]
     reasons = [match.to_dict() for match in decision.matched_rules]
     should_review = verdict in {"warn", "quarantine"}
+    resolved_runtime = (request.runtime_name if request else None) or (metadata or {}).get("runtime") or platform or "generic"
+    resolved_platform = resolved_runtime if resolved_runtime in {"hermes", "claude-code", "openclaw", "generic-agent", "generic"} else "generic"
+    response_metadata = dict(metadata or {})
+    response_metadata.setdefault("runtime", resolved_runtime)
+    response_metadata.setdefault("platform", resolved_platform)
     return GenericAgentAdapterResponse(
         adapter_name="ironclaw-generic-agent",
-        platform="generic",
+        platform=resolved_platform,
         mode=mode,
         verdict=verdict,
         should_allow=verdict == "allow",
@@ -202,7 +210,7 @@ def adapt_policy_decision_to_generic_agent(
         decision_id=decision.decision_id,
         trace_id=trace_id,
         request=request.to_dict() if request else {},
-        metadata=dict(metadata or {}),
+        metadata=response_metadata,
     )
 
 
@@ -214,6 +222,7 @@ def evaluate_generic_agent_request(
     mode: AdapterExecutionMode = "enforce",
     trace_id: str | None = None,
     metadata: dict[str, Any] | None = None,
+    platform: str | None = None,
 ) -> GenericAgentAdapterResponse:
     decision = evaluate_policy(
         engine,
@@ -226,6 +235,7 @@ def evaluate_generic_agent_request(
         trace_id=trace_id,
         request=request,
         metadata=metadata,
+        platform=platform,
     )
 
 

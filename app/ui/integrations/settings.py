@@ -123,7 +123,7 @@ def _build_platform_config_panels() -> tuple[list[IntegrationProviderView], list
         spec = get_install_key_format_spec(program)
         provider_id = spec.program
         endpoint = f"local://{program}"
-        config_state = "configured" if program in {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot"} else "managed"
+        config_state = "configured" if program in {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"} else "managed"
         status = "active"
         verified = True
         health = _health_state(

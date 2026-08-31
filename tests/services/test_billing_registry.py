@@ -448,7 +448,7 @@ def test_provision_install_keys_raises_value_error_when_no_active_subscription(
         )
 
 
-def test_provision_install_keys_calls_generate_for_both_programs(
+def test_provision_install_keys_calls_generate_for_supported_programs(
     registry_with_active_customer: tuple[BillingRegistry, str, str],
 ) -> None:
     reg, cid, sid = registry_with_active_customer
@@ -459,10 +459,8 @@ def test_provision_install_keys_calls_generate_for_both_programs(
         owner_key="active@ironclaw.dev",
     )
     programs_called = {c["program"] for c in stub.calls}
-    assert "openclaw" in programs_called
-    assert "claude_code" in programs_called
-    assert "openclaw" in result
-    assert "claude_code" in result
+    assert {"openclaw", "claude_code", "hermes"}.issubset(programs_called)
+    assert {"openclaw", "claude_code", "hermes"}.issubset(result)
 
 
 def test_provision_install_keys_passes_correct_owner_key(

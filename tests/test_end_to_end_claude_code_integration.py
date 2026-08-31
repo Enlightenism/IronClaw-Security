@@ -130,6 +130,36 @@ def test_end_to_end_claude_code_registry_install_and_verify():
     assert exec_result.output["request"]["action_type"] == "toolcall"
 
 
+def test_claude_code_route_reinforces_canonical_runtime_contract(monkeypatch):
+    registry = initialize_integration_registry()
+    record = get_integration(registry, "integration-claude-code")
+    drifted_adapter = ClaudeCodeAdapter(
+        record=record,
+        metadata={"runtime": "hermes", "guard_mode": "loose"},
+    )
+    monkeypatch.setattr("app.routes.integrations.claude_code.build_claude_code_adapter", lambda _registry: drifted_adapter)
+
+    client = _client()
+    handshake = client.post(
+        "/integrations/claude-code/handshake",
+        headers={"X-API-Key": "test-api-key"},
+        json={
+            "client_id": "benchmark-client",
+            "protocol_version": "1.0.0",
+            "builder_id": "builder-42",
+            "session_id": "session-42",
+            "metadata": {"environment": "test"},
+        },
+    )
+
+    assert handshake.status_code == 200, handshake.text
+    payload = handshake.json()
+    assert payload["platform"] == "claude-code"
+    assert payload["adapter_name"] == "ironclaw-claude-code"
+    assert payload["metadata"]["runtime"] == "claude-code"
+    assert payload["metadata"]["guard_mode"] == "strict"
+
+
 def test_claude_code_route_contract_handshake_manifest_and_secret_scan_gate():
     client = _client()
 

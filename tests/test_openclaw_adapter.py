@@ -16,6 +16,20 @@ def test_build_openclaw_adapter_returns_expected_adapter():
     assert adapter.record.platform == "openclaw"
 
 
+def test_openclaw_adapter_keeps_canonical_runtime_metadata_even_if_overridden():
+    registry = initialize_integration_registry()
+    adapter = OpenClawAdapter(
+        record=build_openclaw_adapter(registry).record,
+        metadata={"runtime": "hermes", "workflow_mode": "loose"},
+    )
+
+    assert adapter.runtime == "openclaw"
+    assert adapter.metadata["runtime"] == "openclaw"
+    assert adapter.metadata["workflow_mode"] == "builder-guard"
+    assert adapter.base_metadata()["runtime"] == "openclaw"
+    assert adapter.base_metadata()["workflow_mode"] == "builder-guard"
+
+
 def test_openclaw_adapter_handshake_contains_expected_metadata():
     registry = initialize_integration_registry()
     adapter = build_openclaw_adapter(registry)

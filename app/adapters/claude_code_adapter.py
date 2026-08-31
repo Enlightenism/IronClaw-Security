@@ -241,10 +241,10 @@ class ClaudeCodeAdapter:
     def __post_init__(self) -> None:
         if self.metadata is None:
             self.metadata = {}
+        self.metadata["runtime"] = self.runtime
+        self.metadata["guard_mode"] = self.guard_mode
         if self.record is not None:
             self.metadata.setdefault("integration_id", self.record.integration_id)
-            self.metadata.setdefault("runtime", self.runtime)
-            self.metadata.setdefault("guard_mode", self.guard_mode)
 
     @property
     def adapter_slug(self) -> str:
@@ -255,15 +255,18 @@ class ClaudeCodeAdapter:
         return self.record.platform if self.record else "claude-code"
 
     def base_metadata(self) -> dict[str, Any]:
+        metadata = dict(self.metadata)
+        metadata["runtime"] = self.runtime
+        metadata["guard_mode"] = self.guard_mode
         if self.record is None:
-            return dict(self.metadata)
+            return metadata
         return {
             "integration_id": self.record.integration_id,
             "integration_type": self.record.integration_type,
             "integration_status": self.record.status,
             "protocol_version": self.protocol_version,
             "adapter_health": self.health,
-            **self.metadata,
+            **metadata,
         }
 
     def handshake(self) -> Any:

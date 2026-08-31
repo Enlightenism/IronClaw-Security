@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.services.install_key_format_registry import (
     InstallKeyFormatRegistryService,
     InstallKeyPlatformFormat,
@@ -26,9 +27,15 @@ from app.services.install_key_format_registry import (
         ("cursor", "cursor", "ic_install_cursor_"),
         ("cursor-agent", "cursor", "ic_install_cursor_"),
         ("goose", "goose", "ic_install_goose_"),
+        ("goose-agent", "goose", "ic_install_goose_"),
         ("gemini-cli", "gemini_cli", "ic_install_gemini_cli_"),
+        ("gemini_cli", "gemini_cli", "ic_install_gemini_cli_"),
         ("github-copilot", "copilot", "ic_install_copilot_"),
+        ("githubcopilot", "copilot", "ic_install_copilot_"),
+        ("hermes-agent", "hermes", "ic_install_hermes_"),
+        ("hermes-cli", "hermes", "ic_install_hermes_"),
         ("security-guardian", "security_guardian", "ic_install_security_guardian_"),
+        ("securityguardian", "security_guardian", "ic_install_security_guardian_"),
     ],
 )
 def test_resolve_for_platform_matches_canonical_format_family(platform_name: str, expected_program: str, expected_prefix: str) -> None:
@@ -50,6 +57,7 @@ def test_resolve_for_platform_matches_canonical_format_family(platform_name: str
         ("ic_install_goose_abc123", "goose"),
         ("ic_install_gemini_cli_abc123", "gemini_cli"),
         ("ic_install_copilot_abc123", "copilot"),
+        ("ic_install_hermes_abc123", "hermes"),
         ("ic_install_security_guardian_abc123", "security_guardian"),
     ],
 )
@@ -85,6 +93,12 @@ def test_normalize_platform_returns_canonical_lowercase_slug(value: str | None, 
         ("openclaw", "openclaw", True),
         ("claude-code", "claude_code", True),
         ("anthropic", "claude_code", True),
+        ("cursor", "cursor", True),
+        ("goose-agent", "goose", True),
+        ("gemini_cli", "gemini_cli", True),
+        ("githubcopilot", "copilot", True),
+        ("hermes-cli", "hermes", True),
+        ("securityguardian", "security_guardian", True),
         ("generic", "openclaw", False),
         ("groq", "claude_code", False),
     ],
@@ -98,6 +112,12 @@ def test_is_compatible_install_key_platform_checks_platform_to_program_mapping(p
     [
         ("openclaw", "abc123", "ic_install_openclaw_"),
         ("claude_code", "secret456", "ic_install_claude_code_"),
+        ("cursor", "cursor-secret", "ic_install_cursor_"),
+        ("goose", "goose-secret", "ic_install_goose_"),
+        ("gemini_cli", "gemini-secret", "ic_install_gemini_cli_"),
+        ("copilot", "copilot-secret", "ic_install_copilot_"),
+        ("hermes", "hermes-secret", "ic_install_hermes_"),
+        ("security_guardian", "guardian-secret", "ic_install_security_guardian_"),
     ],
 )
 def test_format_key_for_program_builds_canonical_value(program: str, secret: str, expected_prefix: str) -> None:
@@ -112,6 +132,14 @@ def test_format_key_for_program_rejects_blank_secret() -> None:
         InstallKeyFormatRegistryService.format_key_for_program("openclaw", "")
 
 
+def test_service_registry_tracks_the_canonical_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    drifted_programs = ("openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes")
+    monkeypatch.setattr(InstallKeyFormatRegistry, "list_programs", classmethod(lambda cls: drifted_programs))
+
+    assert InstallKeyFormatRegistryService.list_programs() == drifted_programs
+    assert {group.program for group in InstallKeyFormatRegistryService.list_format_groups()} == set(drifted_programs)
+
+
 def test_list_programs_cover_the_full_canonical_runtime_set() -> None:
     assert InstallKeyFormatRegistryService.list_programs() == (
         "openclaw",
@@ -120,6 +148,7 @@ def test_list_programs_cover_the_full_canonical_runtime_set() -> None:
         "goose",
         "gemini_cli",
         "copilot",
+        "hermes",
         "security_guardian",
     )
 
@@ -137,6 +166,8 @@ def test_list_platforms_returns_unique_supported_aliases() -> None:
     assert "gemini" in platforms
     assert "copilot" in platforms
     assert "githubcopilot" in platforms
+    assert "hermes" in platforms
+    assert "hermes_cli" in platforms
     assert "security_guardian" in platforms
     assert "skill" in platforms
     assert len(set(platforms)) == len(platforms)
@@ -168,9 +199,9 @@ def test_list_platforms_for_program_uses_full_runtime_grouping() -> None:
 def test_list_format_groups_returns_canonical_registry_entries() -> None:
     groups = list_install_key_format_groups()
 
-    assert len(groups) == 7
+    assert len(groups) == 8
     programs = {group.program for group in groups}
-    assert programs == {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "security_guardian"}
+    assert programs == {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes", "security_guardian"}
 
     by_program = {group.program: group for group in groups}
     assert by_program["openclaw"].prefix == "ic_install_openclaw_"
@@ -179,6 +210,7 @@ def test_list_format_groups_returns_canonical_registry_entries() -> None:
     assert by_program["goose"].prefix == "ic_install_goose_"
     assert by_program["gemini_cli"].prefix == "ic_install_gemini_cli_"
     assert by_program["copilot"].prefix == "ic_install_copilot_"
+    assert by_program["hermes"].prefix == "ic_install_hermes_"
     assert by_program["security_guardian"].prefix == "ic_install_security_guardian_"
     assert by_program["security_guardian"].platform == "security_guardian"
 

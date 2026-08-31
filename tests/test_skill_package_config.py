@@ -133,6 +133,7 @@ def test_skill_config_coerces_canonical_runtime_family_targets() -> None:
         "goose",
         "gemini_cli",
         "copilot",
+        "hermes",
         "security_guardian",
     ]
     assert _coerce_provider_targets("claude,openclaw") == ("claude_code", "openclaw")

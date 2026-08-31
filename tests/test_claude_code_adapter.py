@@ -28,6 +28,19 @@ def test_claude_code_adapter_record_identity():
     assert adapter.record.platform == "claude-code"
 
 
+def test_claude_code_adapter_keeps_canonical_runtime_metadata_even_if_overridden():
+    adapter = ClaudeCodeAdapter(
+        record=_make_adapter().record,
+        metadata={"runtime": "hermes", "guard_mode": "loose"},
+    )
+
+    assert adapter.runtime == "claude-code"
+    assert adapter.metadata["runtime"] == "claude-code"
+    assert adapter.metadata["guard_mode"] == "strict"
+    assert adapter.base_metadata()["runtime"] == "claude-code"
+    assert adapter.base_metadata()["guard_mode"] == "strict"
+
+
 def test_claude_code_adapter_handshake_contains_expected_metadata():
     adapter = _make_adapter()
 

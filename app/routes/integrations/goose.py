@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 
 from app.adapters.generic_agent_adapter import (
     GenericAgentAdapter,
-    build_generic_agent_adapter,
     build_generic_agent_adapter_request,
     evaluate_generic_agent_request,
 )
@@ -193,16 +192,32 @@ def _normalize_capabilities(raw_caps: list[dict[str, Any]] | None) -> list[dict[
     return merged
 
 
+def _canonical_adapter_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    normalized = dict(metadata or {})
+    normalized["runtime"] = _PLATFORM
+    normalized["guard_mode"] = "strict"
+    return normalized
+
+
 def _build_adapter() -> GenericAgentAdapter:
     try:
         registry = initialize_integration_registry()
-        return build_generic_agent_adapter(registry)
-    except KeyError:
-        return GenericAgentAdapter(
-            protocol_version=_ADAPTER_VERSION,
-            health="ready",
-            metadata={"runtime": _PLATFORM, "guard_mode": "strict"},
-        )
+        record = registry.items.get("integration-goose")
+        if record is not None:
+            return GenericAgentAdapter(
+                record=record,
+                protocol_version=_ADAPTER_VERSION,
+                health="ready",
+                metadata={"runtime": _PLATFORM, "guard_mode": "strict"},
+            )
+    except Exception:
+        pass
+
+    return GenericAgentAdapter(
+        protocol_version=_ADAPTER_VERSION,
+        health="ready",
+        metadata={"runtime": _PLATFORM, "guard_mode": "strict"},
+    )
 
 
 class GooseEvaluateRequest(BaseModel):
@@ -404,8 +419,7 @@ async def evaluate_goose(body: GooseEvaluateRequest) -> GooseEvaluateResponse:
 
     response.platform = _PLATFORM
     response.adapter_name = _ADAPTER_NAME
-    response.metadata["runtime"] = _PLATFORM
-    response.metadata["guard_mode"] = "strict"
+    response.metadata = _canonical_adapter_metadata(response.metadata)
 
     audit_trail = _build_audit_trail(
         trace_id=trace_id,
@@ -488,6 +502,8 @@ async def goose_handshake(body: GooseHandshakeRequest) -> GooseHandshakeResponse
         ]
     )
 
+    adapter_metadata = _canonical_adapter_metadata(getattr(adapter, "metadata", None))
+
     return GooseHandshakeResponse(
         status="ok",
         platform=_PLATFORM,
@@ -498,6 +514,7 @@ async def goose_handshake(body: GooseHandshakeRequest) -> GooseHandshakeResponse
         capabilities=capabilities,
         policy_mode=engine.mode,
         metadata={
+            **adapter_metadata,
             "client_id": body.client_id,
             "session_id": body.session_id,
             "requested_protocol_version": body.protocol_version,

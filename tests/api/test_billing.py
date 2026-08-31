@@ -153,7 +153,7 @@ def test_fulfill_purchase_can_issue_install_key_after_successful_payment() -> No
 
         mock_registry = MagicMock()
         mock_registry.get_keys_for_owner.return_value = []
-        record = InstallKeyRecord(
+        openclaw_record = InstallKeyRecord(
             key_id="ik_test_123",
             owner_key="paid@example.com",
             subscription_id=purchase_id,
@@ -168,7 +168,22 @@ def test_fulfill_purchase_can_issue_install_key_after_successful_payment() -> No
             issued_after_payment=True,
             metadata={"purchase_id": purchase_id, "auto_provisioned": True},
         )
-        mock_registry.generate_install_key.return_value = record
+        hermes_record = InstallKeyRecord(
+            key_id="ik_hermes_456",
+            owner_key="paid@example.com",
+            subscription_id=purchase_id,
+            program="hermes",
+            raw_key="ic_install_hermes_1A2B3C4D5E6F7G8H9J",
+            raw_key_hash="def456",
+            masked_key="ic_install_hermes_...9J",
+            label="hermes-provisioned",
+            active=True,
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=True,
+            metadata={"purchase_id": purchase_id, "auto_provisioned": True},
+        )
+        mock_registry.generate_install_key.side_effect = [openclaw_record, hermes_record]
 
         with patch("app.api.billing.get_install_key_registry", return_value=mock_registry):
             fulfill = c.post(
@@ -181,10 +196,12 @@ def test_fulfill_purchase_can_issue_install_key_after_successful_payment() -> No
     payment = body["purchase"]
     assert payment["payment_id"] == "pay_123"
     assert payment["entitlement_status"] == "active"
-    assert payment["install_key_id"] == "ik_test_123"
-    assert payment["masked_key"] == "ic_install_openclaw_...9J"
-    assert payment["program"] == "openclaw"
-    assert payment["usage_summary"]["program"] == "openclaw"
+    assert payment["install_key_id"] == "ik_hermes_456"
+    assert payment["masked_key"] == "ic_install_hermes_...9J"
+    assert payment["program"] == "hermes"
+    assert payment["openclaw_install_key"] == "ic_install_openclaw_...9J"
+    assert payment["hermes_install_key"] == "ic_install_hermes_...9J"
+    assert payment["usage_summary"]["program"] == "hermes"
     assert payment["usage_summary"]["entitlement_status"] == "active"
     assert payment["metadata"]["install_keys_provisioned"] is True
     assert body["wallet"]["owner_key"] == "paid@example.com"

@@ -607,6 +607,7 @@ class TestHandleCheckoutCompleted:
             "goose",
             "gemini_cli",
             "copilot",
+            "hermes",
             "security_guardian",
         }
         assert set(install_keys) == expected_programs

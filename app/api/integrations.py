@@ -188,6 +188,7 @@ class IntegrationTokenResponse(BaseModel):
     goose_command: str = ""
     gemini_cli_command: str = ""
     copilot_command: str = ""
+    hermes_command: str = ""
     security_guardian_command: str = ""
     supported_platforms: list[str] = Field(default_factory=list)
     command_metadata: dict[str, str] = Field(default_factory=dict)
@@ -336,6 +337,7 @@ _CANONICAL_PLATFORM_ORDER: tuple[str, ...] = (
     "goose",
     "gemini-cli",
     "copilot",
+    "hermes",
     "security-guardian",
 )
 
@@ -387,6 +389,14 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "shared_package": False,
         "shared_install_key_family": False,
         "command_template": "npx ironclaw-install --key {key} --platform copilot",
+    },
+    "hermes": {
+        "program": "hermes",
+        "platform": "hermes",
+        "slug": "hermes",
+        "shared_package": False,
+        "shared_install_key_family": False,
+        "command_template": "npx ironclaw-install --key {key} --platform hermes",
     },
     "security-guardian": {
         "program": "security_guardian",
@@ -639,6 +649,7 @@ def get_integrations_token(auth: Any = Depends(get_auth_context)) -> Integration
             goose_command="",
             gemini_cli_command="",
             copilot_command="",
+            hermes_command="",
             security_guardian_command="",
             supported_platforms=list(_CANONICAL_PLATFORM_ORDER),
             command_metadata=empty_command_metadata,
@@ -667,6 +678,7 @@ def get_integrations_token(auth: Any = Depends(get_auth_context)) -> Integration
         goose_command=command_metadata.get("goose", ""),
         gemini_cli_command=command_metadata.get("gemini-cli", ""),
         copilot_command=command_metadata.get("copilot", ""),
+        hermes_command=command_metadata.get("hermes", ""),
         security_guardian_command=command_metadata.get("security-guardian", ""),
         supported_platforms=supported_platforms,
         command_metadata=command_metadata,

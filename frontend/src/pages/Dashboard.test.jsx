@@ -876,16 +876,28 @@ describe("dashboard structure", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId("install-key-card-claude_code")).toBeInTheDocument();
-      expect(screen.getByTestId("install-key-card-openclaw")).toBeInTheDocument();
+      expect(
+        screen.getByTestId("install-key-card-claude_code"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("install-key-card-openclaw"),
+      ).toBeInTheDocument();
       expect(screen.getByTestId("install-key-card-cursor")).toBeInTheDocument();
       expect(screen.getByTestId("install-key-card-goose")).toBeInTheDocument();
-      expect(screen.getByTestId("install-key-card-gemini_cli")).toBeInTheDocument();
-      expect(screen.getByTestId("install-key-card-copilot")).toBeInTheDocument();
-      expect(screen.getByTestId("install-key-card-security_guardian")).toBeInTheDocument();
+      expect(
+        screen.getByTestId("install-key-card-gemini_cli"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("install-key-card-copilot"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("install-key-card-security_guardian"),
+      ).toBeInTheDocument();
     });
 
-    expect(screen.getAllByText("Keys will be generated after purchase").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText("Keys will be generated after purchase").length,
+    ).toBeGreaterThan(0);
   });
 
   it("renders the masked paid install key only when a valid active install key exists", async () => {
@@ -906,7 +918,9 @@ describe("dashboard structure", () => {
         });
       }
       if (url === "/integrations/token") {
-        return Promise.resolve({ data: { status: "ok", claude_code_command: "ironclaw --token abc" } });
+        return Promise.resolve({
+          data: { status: "ok", claude_code_command: "ironclaw --token abc" },
+        });
       }
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
@@ -916,10 +930,14 @@ describe("dashboard structure", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("ic_install_claude_code_...abcd")).toBeInTheDocument();
+      expect(
+        screen.getByText("ic_install_claude_code_...abcd"),
+      ).toBeInTheDocument();
     });
 
-    expect(screen.queryByText("REACT_APP_IRONCLAW_API_KEY")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("REACT_APP_IRONCLAW_API_KEY"),
+    ).not.toBeInTheDocument();
   });
 
   it("renders all platform integration cards after data loads", async () => {

@@ -91,6 +91,7 @@ def _make_key_record(
         "goose": "ic_install_goose_",
         "gemini_cli": "ic_install_gemini_cli_",
         "copilot": "ic_install_copilot_",
+        "hermes": "ic_install_hermes_",
         "security_guardian": "ic_install_security_guardian_",
     }
     r = MagicMock()
@@ -382,7 +383,7 @@ class TestDashboardInstallKeySlotLogic:
             body = response.json()
             install_keys = body.get("install_keys", [])
             locked = [k for k in install_keys if k.get("status") == "locked"]
-            assert len(locked) == 8
+            assert len(locked) == 9
             assert {k.get("program") for k in locked} == {
                 "openclaw",
                 "claude_code",
@@ -390,8 +391,9 @@ class TestDashboardInstallKeySlotLogic:
                 "goose",
                 "gemini_cli",
                 "copilot",
+                "hermes",
                 "security_guardian",
-            } | {"openclaw"}
+            }
         finally:
             _clear_registry_overrides()
 
@@ -524,7 +526,7 @@ class TestDashboardInstallKeySlotLogic:
             assert response.status_code == 200
             body = response.json()
             install_keys = body.get("install_keys", [])
-            assert len(install_keys) == 7
+            assert len(install_keys) == 8
             assert {item["program"] for item in install_keys} == {
                 "openclaw",
                 "claude_code",
@@ -532,6 +534,7 @@ class TestDashboardInstallKeySlotLogic:
                 "goose",
                 "gemini_cli",
                 "copilot",
+                "hermes",
                 "security_guardian",
             }
             assert all(item["status"] == "locked" for item in install_keys)
@@ -549,7 +552,7 @@ class TestDashboardInstallKeySlotLogic:
             provision_install_key_service(),
         )
 
-        assert len(slots) == 7
+        assert len(slots) == 8
         assert {slot.program for slot in slots} == {
             "openclaw",
             "claude_code",
@@ -557,11 +560,43 @@ class TestDashboardInstallKeySlotLogic:
             "goose",
             "gemini_cli",
             "copilot",
+            "hermes",
             "security_guardian",
         }
         assert all(slot.status == "locked" for slot in slots)
         assert all(slot.masked_key is None for slot in slots)
         assert any("Keys will be generated after purchase" in str(slot.metadata.get("placeholder_text") or slot.metadata.get("placeholder") or slot.metadata.get("status_message") or "") for slot in slots)
+
+    def test_install_keys_hermes_slot_shows_active_paid_masked_key(self, dashboard_client: TestClient) -> None:
+        mock_registry = MagicMock(spec=InstallKeyRegistry)
+        hermes_record = _make_key_record(
+            "key-hermes-active",
+            _OWNER_KEY,
+            "hermes",
+            active=True,
+            activated_at=datetime(2025, 1, 1, tzinfo=UTC),
+            label="Hermes Key",
+        )
+        hermes_record.payment_status = "paid"
+        hermes_record.entitlements_status = "active"
+        hermes_record.issued_after_payment = True
+        hermes_record.masked_key = "ic_install_hermes_...abcd"
+        mock_registry.get_keys_for_owner.return_value = [hermes_record]
+        _apply_registry_overrides(mock_registry, _make_unit_wallet_registry(), _make_billing_registry())
+        try:
+            response = dashboard_client.get(
+                "/dashboard/overview",
+                params={"owner_key": _OWNER_KEY},
+            )
+            assert response.status_code == 200
+            body = response.json()
+            slot = next(item for item in body.get("install_keys", []) if item.get("program") == "hermes")
+            assert slot["status"] == "active"
+            assert slot["active"] is True
+            assert slot["payment_status"] == "paid"
+            assert slot["masked_key"] == "ic_install_hermes_...abcd"
+        finally:
+            _clear_registry_overrides()
 
     def test_install_keys_each_entry_has_required_fields(self, dashboard_client: TestClient) -> None:
         mock_registry = _make_install_key_registry(_OWNER_KEY, locked_count=1, active_count=1, revoked_count=0)

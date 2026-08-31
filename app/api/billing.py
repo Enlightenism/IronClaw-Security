@@ -290,6 +290,7 @@ class BillingPackagePurchaseView(BaseModel):
     usage_summary: dict[str, Any] = Field(default_factory=dict)
     openclaw_install_key: str | None = None
     claude_code_install_key: str | None = None
+    hermes_install_key: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -470,8 +471,10 @@ def _attach_install_key_delivery(
 
     if program == "openclaw":
         purchase.openclaw_install_key = masked_key
-    else:
+    elif program == "claude_code":
         purchase.claude_code_install_key = masked_key
+    elif program == "hermes":
+        purchase.hermes_install_key = masked_key
 
 
 def _provision_install_keys(
@@ -489,7 +492,7 @@ def _provision_install_keys(
     results: list[InstallKeyDeliveryView] = []
     normalized_entitlement = _normalize_entitlement_status(entitlement_status)
 
-    for program in ("openclaw", "claude_code"):
+    for program in ("openclaw", "claude_code", "hermes"):
         try:
             record = ik_registry.generate_install_key(
                 owner_key=owner_key,
@@ -612,6 +615,7 @@ def purchase_billing_package(
         usage_summary={},
         openclaw_install_key=None,
         claude_code_install_key=None,
+        hermes_install_key=None,
         metadata={
             **payload.metadata,
             "package_id": package_id,
@@ -686,6 +690,7 @@ def fulfill_billing_purchase(
         purchase.usage_summary = {}
         purchase.openclaw_install_key = None
         purchase.claude_code_install_key = None
+        purchase.hermes_install_key = None
         purchase.metadata["payment_status"] = purchase.payment_status
         purchase.metadata["fulfillment_status"] = "pending"
         purchase.metadata["install_keys_provisioned"] = False
@@ -735,6 +740,8 @@ def fulfill_billing_purchase(
             purchase.openclaw_install_key = item.masked_key
         elif item.program == "claude_code":
             purchase.claude_code_install_key = item.masked_key
+        elif item.program == "hermes":
+            purchase.hermes_install_key = item.masked_key
 
         purchase.install_key_id = item.install_key_id
         purchase.masked_key = item.masked_key

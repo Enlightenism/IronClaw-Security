@@ -172,16 +172,28 @@ def _normalize_capabilities(raw_caps: list[dict[str, Any]] | None) -> list[dict[
     return merged
 
 
+def _canonical_adapter_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    normalized = dict(metadata or {})
+    normalized["runtime"] = "claude-code"
+    normalized["guard_mode"] = "strict"
+    return normalized
+
+
 def _build_adapter() -> ClaudeCodeAdapter:
     try:
         registry = initialize_integration_registry()
-        return build_claude_code_adapter(registry)
+        adapter = build_claude_code_adapter(registry)
     except KeyError:
-        return ClaudeCodeAdapter(
+        adapter = ClaudeCodeAdapter(
             protocol_version=_ADAPTER_VERSION,
             health="ready",
             metadata={"runtime": "claude-code", "guard_mode": "strict"},
         )
+
+    adapter.runtime = "claude-code"
+    adapter.guard_mode = "strict"
+    adapter.metadata = _canonical_adapter_metadata(getattr(adapter, "metadata", None))
+    return adapter
 
 
 class ClaudeCodeEvaluateRequest(BaseModel):
@@ -465,7 +477,7 @@ async def claude_code_handshake(
 
     handshake_meta: dict[str, Any] = {}
     if hasattr(handshake, "metadata") and handshake.metadata:
-        handshake_meta = dict(handshake.metadata)
+        handshake_meta = _canonical_adapter_metadata(handshake.metadata)
 
     capabilities = _normalize_capabilities(raw_caps)
 
@@ -537,6 +549,9 @@ async def claude_code_manifest() -> ClaudeCodeManifestResponse:
 
     raw_caps: list[dict[str, Any]] = []
     if manifest_data is not None:
+        manifest_meta = _canonical_adapter_metadata(getattr(manifest_data, "metadata", None))
+        if hasattr(manifest_data, "metadata"):
+            manifest_data.metadata = manifest_meta
         caps_attr = getattr(manifest_data, "capabilities", None)
         if caps_attr:
             for cap in caps_attr:

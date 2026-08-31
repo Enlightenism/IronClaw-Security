@@ -46,6 +46,7 @@ def _make_install_key_record(
         "goose": "ic_install_goose_test_secret_goose",
         "gemini_cli": "ic_install_gemini_cli_test_secret_gemini",
         "copilot": "ic_install_copilot_test_secret_copilot",
+        "hermes": "ic_install_hermes_test_secret_hermes",
         "security_guardian": "ic_install_security_guardian_test_secret_guardian",
     }
     resolved_raw_key = raw_key or default_keys.get(program, "ic_install_openclaw_test_secret_123456")
@@ -259,6 +260,7 @@ def test_provision_for_program_accepts_aliases_for_supported_runtimes() -> None:
         "github-copilot": "copilot",
         "gemini-cli": "gemini_cli",
         "cursor-agent": "cursor",
+        "hermes-agent": "hermes",
         "security-guardian": "security_guardian",
         "goose-agent": "goose",
     }.items():
@@ -279,6 +281,63 @@ def test_provision_for_program_accepts_aliases_for_supported_runtimes() -> None:
 
         assert issued.record.program == expected
         assert issued.record.raw_key.startswith(f"ic_install_{expected}_")
+
+
+@pytest.mark.parametrize(
+    ("program", "alias", "expected_prefix"),
+    [
+        ("cursor", "cursor-agent", "ic_install_cursor_"),
+        ("goose", "goose-agent", "ic_install_goose_"),
+        ("gemini_cli", "gemini-cli", "ic_install_gemini_cli_"),
+        ("copilot", "github-copilot", "ic_install_copilot_"),
+        ("security_guardian", "security-guardian", "ic_install_security_guardian_"),
+        ("hermes", "hermes-agent", "ic_install_hermes_"),
+    ],
+)
+def test_provision_for_program_generates_modern_runtime_keys_only_after_paid_entitlement(program: str, alias: str, expected_prefix: str) -> None:
+    service = InstallKeyProvisioningService(
+        install_key_registry=MagicMock(),
+        wallet_registry=MagicMock(),
+        billing_registry=MagicMock(has_active_subscription=MagicMock(return_value=True)),
+    )
+    service._install_key_registry.get_keys_for_owner.return_value = []
+    service._install_key_registry.generate_for_paid_customer.return_value = _make_install_key_record(
+        owner_key="buyer@ironclaw.test",
+        subscription_id="sub_123",
+        program=program,
+        key_id=f"ik_{program}_001",
+        raw_key=f"{expected_prefix}runtime_secret_123",
+    )
+
+    issued = service.provision_for_program(
+        owner_key="buyer@ironclaw.test",
+        subscription_id="sub_123",
+        program=alias,
+        payment_status="paid",
+        entitlements_status="active",
+        issued_after_payment=True,
+    )
+
+    assert issued.record.program == program
+    assert issued.raw_key.startswith(expected_prefix)
+
+
+def test_provision_for_program_rejects_hermes_when_payment_not_confirmed() -> None:
+    service = InstallKeyProvisioningService(
+        install_key_registry=MagicMock(),
+        wallet_registry=MagicMock(),
+        billing_registry=MagicMock(has_active_subscription=MagicMock(return_value=True)),
+    )
+
+    with pytest.raises(ValueError, match="successful payment confirmation"):
+        service.provision_for_program(
+            owner_key="buyer@ironclaw.test",
+            subscription_id="sub_123",
+            program="hermes",
+            payment_status="pending",
+            entitlements_status="active",
+            issued_after_payment=True,
+        )
 
 
 def test_provision_for_program_rejects_unknown_program() -> None:
@@ -321,6 +380,7 @@ def test_provision_for_purchase_generates_all_supported_programs() -> None:
             "goose",
             "gemini_cli",
             "copilot",
+            "hermes",
             "security_guardian",
         )
     ]
@@ -341,7 +401,7 @@ def test_provision_for_purchase_generates_all_supported_programs() -> None:
         source="purchase",
     )
 
-    expected_programs = {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "security_guardian"}
+    expected_programs = {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes", "security_guardian"}
     assert set(results.keys()) == expected_programs
     for program in expected_programs:
         assert results[program].raw_key.startswith(
@@ -352,10 +412,11 @@ def test_provision_for_purchase_generates_all_supported_programs() -> None:
                 "goose": "ic_install_goose_",
                 "gemini_cli": "ic_install_gemini_cli_",
                 "copilot": "ic_install_copilot_",
+                "hermes": "ic_install_hermes_",
                 "security_guardian": "ic_install_security_guardian_",
             }[program]
         )
-    assert install_key_registry.generate_for_paid_customer.call_count == 7
+    assert install_key_registry.generate_for_paid_customer.call_count == 8
 
 
 def test_provision_for_purchase_uses_org_owner_resolution_when_auth_ctx_is_org() -> None:
@@ -378,6 +439,7 @@ def test_provision_for_purchase_uses_org_owner_resolution_when_auth_ctx_is_org()
             "goose",
             "gemini_cli",
             "copilot",
+            "hermes",
             "security_guardian",
         )
     ]

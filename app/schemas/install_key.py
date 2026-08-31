@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-InstallKeyProgram = Literal["openclaw", "claude_code"]
+InstallKeyProgram = Literal["openclaw", "claude_code", "hermes"]
 InstallKeyIssueEventType = Literal["install_key_issued", "install_key_revoked", "install_key_provisioned"]
 InstallKeyUsageEventType = Literal["install_key_usage_recorded"]
 
@@ -63,8 +63,8 @@ def _normalize_program(value: Any) -> str:
     if value is None:
         raise ValueError("program is required")
     normalized = str(value).strip().lower()
-    if normalized not in {"openclaw", "claude_code"}:
-        raise ValueError("program must be one of: openclaw, claude_code")
+    if normalized not in {"openclaw", "claude_code", "hermes"}:
+        raise ValueError("program must be one of: openclaw, claude_code, hermes")
     return normalized
 
 

@@ -43,6 +43,17 @@ def test_integrations_router_registers_expected_paths(client: TestClient) -> Non
     assert not missing_paths, f"missing integration routes: {sorted(missing_paths)}"
 
 
+def test_package_integrations_router_registers_hermes_endpoints() -> None:
+    from app.routes.integrations import router as package_router
+
+    app = FastAPI()
+    app.include_router(package_router)
+
+    route_paths = {route.path for route in app.routes}
+    assert "/integrations/hermes/health" in route_paths
+    assert "/integrations/hermes/manifest" in route_paths
+
+
 def test_integrations_router_exposes_expected_http_methods(client: TestClient) -> None:
     route_methods = {
         (
@@ -309,6 +320,7 @@ def test_integration_token_uses_paid_install_keys_not_platform_api_key(client: T
             _Record("goose", "ic_install_goose_...mnop"),
             _Record("gemini_cli", "ic_install_gemini_cli_...qrst"),
             _Record("copilot", "ic_install_copilot_...uvwx"),
+            _Record("hermes", "ic_install_hermes_...abcd"),
             _Record("security_guardian", "ic_install_security_guardian_...yzab"),
         ]
     )
@@ -332,6 +344,7 @@ def test_integration_token_uses_paid_install_keys_not_platform_api_key(client: T
         "goose",
         "gemini-cli",
         "copilot",
+        "hermes",
         "security-guardian",
     ]
     assert payload["install_metadata"]["security-guardian"]["shared_package"] is True
@@ -342,10 +355,12 @@ def test_integration_token_uses_paid_install_keys_not_platform_api_key(client: T
     assert "ic_install_goose_...mnop" in payload["goose_command"]
     assert "ic_install_gemini_cli_...qrst" in payload["gemini_cli_command"]
     assert "ic_install_copilot_...uvwx" in payload["copilot_command"]
+    assert "ic_install_hermes_...abcd" in payload["hermes_command"]
     assert "ic_install_security_guardian_...yzab" in payload["security_guardian_command"]
     assert "--platform openclaw" in payload["openclaw_command"]
     assert "--platform claude-code" in payload["claude_code_command"]
     assert payload["install_metadata"]["cursor"]["program"] == "cursor"
+    assert payload["install_metadata"]["hermes"]["program"] == "hermes"
     assert payload["command_metadata"]["security-guardian"].startswith("npx ironclaw-install --key")
 
 
@@ -362,6 +377,7 @@ def test_integration_list_endpoints_expose_canonical_platform_metadata(client: T
             "goose",
             "gemini-cli",
             "copilot",
+            "hermes",
             "security-guardian",
         ]
         guardian = next(item for item in payload["items"] if item["integration_id"] == "security-guardian")
@@ -421,10 +437,12 @@ def test_api_integrations_token_ignores_generic_platform_auth_even_with_registry
         "goose",
         "gemini-cli",
         "copilot",
+        "hermes",
         "security-guardian",
     ]
     assert payload["install_metadata"]["security-guardian"]["shared_package"] is True
     assert payload["install_metadata"]["security-guardian"]["shared_install_key_family"] is True
+    assert payload["install_metadata"]["hermes"]["program"] == "hermes"
     assert "system-platform-api-key" not in str(payload)
 
 

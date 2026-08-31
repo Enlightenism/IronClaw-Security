@@ -8,6 +8,7 @@ CompatibilityState = Literal["supported", "warning", "unsupported"]
 RuntimeFamily = Literal[
     "claude-code",
     "openclaw",
+    "hermes",
     "cursor",
     "goose",
     "gemini-cli",
@@ -19,6 +20,7 @@ RuntimeFamily = Literal[
 _RUNTIME_ALIASES: dict[str, tuple[str, ...]] = {
     "claude-code": ("claude-code", "claude_code", "claude"),
     "openclaw": ("openclaw", "open_claw", "open-claw", "ironclaw"),
+    "hermes": ("hermes", "hermes-agent", "hermes_agent", "hermes agent", "hermes-cli", "hermes_cli", "hermes cli"),
     "cursor": ("cursor", "cursor-agent", "cursor_agent", "cursor agent", "cursor-cli", "cursor_cli", "cursor cli"),
     "goose": ("goose", "goose-agent", "goose_agent", "goose agent", "goose-cli", "goose_cli", "goose cli"),
     "gemini-cli": ("gemini-cli", "gemini_cli", "gemini cli", "gemini"),
@@ -59,6 +61,19 @@ _RUNTIME_CONFIG: dict[str, dict[str, Any]] = {
             "install_key_program": "openclaw",
             "install_key_prefix": "ic_install_openclaw_",
             "compatible_runtime_aliases": _RUNTIME_ALIASES["openclaw"],
+        },
+    },
+    "hermes": {
+        "min_version": "0.1.0",
+        "max_version": "1.9.99",
+        "state": "supported",
+        "reason": "Hermes adapter contract is supported for Gen1 with the standard Hermes install-key family and local guard review.",
+        "metadata": {
+            "priority": 2,
+            "install_key_program": "hermes",
+            "install_key_prefix": "ic_install_hermes_",
+            "compatible_runtime_aliases": _RUNTIME_ALIASES["hermes"],
+            "compatible_platform_runtimes": ["hermes", "hermes-agent", "hermes cli"],
         },
     },
     "cursor": {

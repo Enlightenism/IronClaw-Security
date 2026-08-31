@@ -1,12 +1,13 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ShieldCheck, Loader2, X, Mail, Lock } from "lucide-react";
+import { Loader2, X, Mail, Lock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 import { useDebounce } from "@/hooks/useDebounce";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const AUTH_LOGO_SRC = "/images/Golden%20Knight%20Logo128.png";
 
 const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
   const [mode, setMode] = useState(initialMode);
@@ -166,8 +167,12 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
           </button>
 
           <div className="mb-7 flex flex-col items-center text-center">
-            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-xl border border-[#FFD700]/30 bg-[#C9A84C]/10">
-              <ShieldCheck className="text-[#FFD700]" size={28} />
+            <div className="mb-4 flex h-14 w-14 items-center justify-center overflow-hidden rounded-xl border border-[#FFD700]/30 bg-[#C9A84C]/10 p-2">
+              <img
+                src={AUTH_LOGO_SRC}
+                alt="IronClaw-Security"
+                className="brand-logo-image modal-brand-logo"
+              />
             </div>
             <h2 className="text-2xl font-semibold tracking-tight text-white">
               {mode === "signup" ? "Deploy your defenses" : "Operator sign in"}

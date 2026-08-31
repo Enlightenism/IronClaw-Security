@@ -128,6 +128,7 @@ _PLATFORM_LABELS: dict[str, str] = {
     "goose": "Goose",
     "gemini_cli": "Gemini CLI",
     "copilot": "GitHub Copilot",
+    "hermes": "Hermes",
     "security_guardian": "Security Guardian",
 }
 

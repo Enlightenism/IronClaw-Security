@@ -327,6 +327,7 @@ def _include_optional_protected_routers(app: FastAPI) -> None:
         "app.routes.integrations.cursor",
         "app.routes.integrations.gemini_cli",
         "app.routes.integrations.goose",
+        "app.routes.integrations.hermes",
         "app.routes.integrations.installer",
         "app.routes.integrations.lifecycle",
         "app.routes.integrations.observability",

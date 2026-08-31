@@ -18,6 +18,7 @@ _CANONICAL_PLATFORM_ORDER: tuple[str, ...] = (
     "goose",
     "gemini-cli",
     "copilot",
+    "hermes",
     "security-guardian",
 )
 
@@ -69,6 +70,14 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "shared_package": False,
         "shared_install_key_family": False,
         "command_template": "npx ironclaw-install --key {key} --platform copilot",
+    },
+    "hermes": {
+        "program": "hermes",
+        "platform": "hermes",
+        "slug": "hermes",
+        "shared_package": False,
+        "shared_install_key_family": False,
+        "command_template": "npx ironclaw-install --key {key} --platform hermes",
     },
     "security-guardian": {
         "program": "security_guardian",
@@ -287,7 +296,7 @@ async def get_integrations_token(auth: Any = Depends(get_auth_context)) -> dict[
     owner_key = _resolve_install_owner(auth)
     install_keys: dict[str, str] = {}
     if owner_key:
-        for program in ("claude_code", "openclaw", "cursor", "goose", "gemini_cli", "copilot", "security_guardian"):
+        for program in ("claude_code", "openclaw", "cursor", "goose", "gemini_cli", "copilot", "hermes", "security_guardian"):
             masked_key = _select_paid_install_key(owner_key, program)
             if masked_key:
                 install_keys[program] = masked_key
@@ -301,6 +310,7 @@ async def get_integrations_token(auth: Any = Depends(get_auth_context)) -> dict[
         "goose_command": "",
         "gemini_cli_command": "",
         "copilot_command": "",
+        "hermes_command": "",
         "security_guardian_command": "",
         "supported_platforms": list(_CANONICAL_PLATFORM_ORDER),
         "command_metadata": {},
@@ -332,6 +342,7 @@ async def get_integrations_token(auth: Any = Depends(get_auth_context)) -> dict[
         payload["goose_command"] = payload["command_metadata"].get("goose", "")
         payload["gemini_cli_command"] = payload["command_metadata"].get("gemini-cli", "")
         payload["copilot_command"] = payload["command_metadata"].get("copilot", "")
+        payload["hermes_command"] = payload["command_metadata"].get("hermes", "")
         payload["security_guardian_command"] = payload["command_metadata"].get("security-guardian", "")
 
     return payload

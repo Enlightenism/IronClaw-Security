@@ -30,9 +30,16 @@ from app.services.platform_install_key_router import (
         ("cursor", "cursor", "ic_install_cursor_"),
         ("cursor-agent", "cursor", "ic_install_cursor_"),
         ("goose", "goose", "ic_install_goose_"),
+        ("goose-agent", "goose", "ic_install_goose_"),
         ("gemini-cli", "gemini_cli", "ic_install_gemini_cli_"),
+        ("gemini_cli", "gemini_cli", "ic_install_gemini_cli_"),
         ("github-copilot", "copilot", "ic_install_copilot_"),
+        ("githubcopilot", "copilot", "ic_install_copilot_"),
+        ("hermes", "hermes", "ic_install_hermes_"),
+        ("hermes-agent", "hermes", "ic_install_hermes_"),
+        ("hermes-cli", "hermes", "ic_install_hermes_"),
         ("security-guardian", "security_guardian", "ic_install_security_guardian_"),
+        ("securityguardian", "security_guardian", "ic_install_security_guardian_"),
     ],
 )
 def test_resolve_platform_routes_aliases_to_canonical_install_key_program(platform_name: str, expected_program: str, expected_prefix: str) -> None:
@@ -53,8 +60,15 @@ def test_resolve_platform_routes_aliases_to_canonical_install_key_program(platfo
         ("ironclaw", "ic_install_openclaw_secret_123", True),
         ("claude-code", "ic_install_claude_code_secret_123", True),
         ("anthropic", "ic_install_claude_code_secret_123", True),
+        ("cursor", "ic_install_cursor_secret_123", True),
+        ("goose-agent", "ic_install_goose_secret_123", True),
+        ("gemini_cli", "ic_install_gemini_cli_secret_123", True),
+        ("github-copilot", "ic_install_copilot_secret_123", True),
+        ("hermes-agent", "ic_install_hermes_secret_123", True),
+        ("security-guardian", "ic_install_security_guardian_secret_123", True),
         ("openclaw", "ic_install_claude_code_secret_123", False),
         ("claude_code", "ic_install_openclaw_secret_123", False),
+        ("hermes", "ic_install_copilot_secret_123", False),
     ],
 )
 def test_is_valid_platform_key_matches_canonical_prefix_for_the_platform_family(platform_name: str, candidate: str, expected: bool) -> None:
@@ -77,11 +91,12 @@ def test_resolve_group_groups_compatible_platforms_together() -> None:
 def test_list_groups_returns_shared_format_sections() -> None:
     groups = list_platform_install_key_groups()
 
-    assert len(groups) == 7
+    assert len(groups) == 8
     programs = {group.program for group in groups}
-    assert programs == {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "security_guardian"}
+    assert programs == {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes", "security_guardian"}
     assert all(group.platforms for group in groups)
     assert any(group.program == "security_guardian" and "skill" in group.platforms for group in groups)
+    assert any(group.program == "hermes" and "hermes" in group.platforms for group in groups)
 
 
 def test_list_platforms_returns_aliases_and_canonical_names() -> None:
@@ -97,6 +112,7 @@ def test_list_platforms_returns_aliases_and_canonical_names() -> None:
         "cursor-agent": "cursor",
         "goose": "goose",
         "goose_agent": "goose",
+        "goose-agent": "goose",
         "gemini_cli": "gemini_cli",
         "gemini-cli": "gemini_cli",
         "gemini": "gemini_cli",
@@ -104,6 +120,11 @@ def test_list_platforms_returns_aliases_and_canonical_names() -> None:
         "github_copilot": "copilot",
         "github-copilot": "copilot",
         "githubcopilot": "copilot",
+        "hermes": "hermes",
+        "hermes_agent": "hermes",
+        "hermes-agent": "hermes",
+        "hermes_cli": "hermes",
+        "hermes-cli": "hermes",
         "security_guardian": "security_guardian",
         "security-guardian": "security_guardian",
         "securityguardian": "security_guardian",
@@ -129,6 +150,8 @@ def test_list_platforms_returns_aliases_and_canonical_names() -> None:
     assert "gemini" in platforms
     assert "copilot" in platforms
     assert "githubcopilot" in platforms
+    assert "hermes" in platforms
+    assert "hermes_cli" in platforms
     assert "security_guardian" in platforms
     assert "skill" in platforms
     assert len(set(platforms)) == len(platforms)

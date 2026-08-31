@@ -13,6 +13,7 @@ from app.schemas.install_key_platform import InstallKeyPlatform, InstallKeyPlatf
         ("ironclaw", "openclaw", "openclaw", "IronClaw", "ironclaw"),
         ("claude-code", "claude_code", "claude_code", "Claude Code", "claude_code"),
         ("Anthropic", "claude_code", "claude_code", "Anthropic", "anthropic"),
+        ("Hermes", "hermes", "hermes", "Hermes", "hermes"),
     ],
 )
 def test_install_key_platform_normalizes_platform_and_program(platform: str, program: str, family: str, display_name: str, expected_platform: str) -> None:

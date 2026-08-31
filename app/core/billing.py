@@ -787,7 +787,7 @@ class BillingRegistry:
 
         registry = self._get_install_key_registry()
         result: dict[str, Any] = {}
-        for program in ("openclaw", "claude_code"):
+        for program in ("openclaw", "claude_code", "hermes"):
             record = registry.generate_install_key(
                 normalized_owner,
                 subscription_id,

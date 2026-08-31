@@ -25,6 +25,7 @@ _INSTALL_KEY_PREFIX_CURSOR: Final[str] = "ic_install_cursor_"
 _INSTALL_KEY_PREFIX_GOOSE: Final[str] = "ic_install_goose_"
 _INSTALL_KEY_PREFIX_GEMINI: Final[str] = "ic_install_gemini_cli_"
 _INSTALL_KEY_PREFIX_COPILOT: Final[str] = "ic_install_copilot_"
+_INSTALL_KEY_PREFIX_HERMES: Final[str] = "ic_install_hermes_"
 _INSTALL_KEY_PREFIX_SECURITY_GUARDIAN: Final[str] = "ic_install_security_guardian_"
 _INSTALL_KEY_SECRET_BYTES: Final[int] = 32
 _T_INSTALL_KEYS: Final[str] = "install_keys"
@@ -36,6 +37,7 @@ ProgramCode = Literal[
     "goose",
     "gemini_cli",
     "copilot",
+    "hermes",
     "security_guardian",
 ]
 _VALID_PROGRAMS: frozenset[str] = frozenset(
@@ -46,6 +48,7 @@ _VALID_PROGRAMS: frozenset[str] = frozenset(
         "goose",
         "gemini_cli",
         "copilot",
+        "hermes",
         "security_guardian",
     }
 )
@@ -76,6 +79,11 @@ _CANONICAL_PROGRAM_ALIASES: Final[dict[str, ProgramCode]] = {
     "github_copilot": "copilot",
     "github-copilot": "copilot",
     "githubcopilot": "copilot",
+    "hermes": "hermes",
+    "hermes_agent": "hermes",
+    "hermes-agent": "hermes",
+    "hermes_cli": "hermes",
+    "hermes-cli": "hermes",
     "security_guardian": "security_guardian",
     "security-guardian": "security_guardian",
     "securityguardian": "security_guardian",
@@ -92,6 +100,7 @@ _PREFIX_BY_PROGRAM: Final[dict[ProgramCode, str]] = {
     "goose": _INSTALL_KEY_PREFIX_GOOSE,
     "gemini_cli": _INSTALL_KEY_PREFIX_GEMINI,
     "copilot": _INSTALL_KEY_PREFIX_COPILOT,
+    "hermes": _INSTALL_KEY_PREFIX_HERMES,
     "security_guardian": _INSTALL_KEY_PREFIX_SECURITY_GUARDIAN,
 }
 
@@ -912,6 +921,7 @@ class InstallKeyRegistry:
         gemini = sum(1 for r in records if r.program == "gemini_cli")
         copilot = sum(1 for r in records if r.program == "copilot")
         security_guardian = sum(1 for r in records if r.program == "security_guardian")
+        hermes = sum(1 for r in records if r.program == "hermes")
         return {
             "total": total,
             "active": active,
@@ -922,6 +932,7 @@ class InstallKeyRegistry:
             "goose_keys": goose,
             "gemini_cli_keys": gemini,
             "copilot_keys": copilot,
+            "hermes_keys": hermes,
             "security_guardian_keys": security_guardian,
         }
 

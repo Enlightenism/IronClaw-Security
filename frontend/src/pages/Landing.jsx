@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { motion } from "framer-motion";
 import { useNavigate, Link } from "react-router-dom";
 import {
-  ShieldCheck,
   Syringe,
   ShieldAlert,
   ScrollText,
@@ -170,6 +169,118 @@ const LiveCounter = ({
   );
 };
 
+const BRAND_LOGO_SRC = "/images/logo128pxl.svg";
+const KNIGHT_IMAGE_SRC = "/images/Golden%20Knight%204k%202gb.png";
+
+const LANDING_PROTECTION_ITEMS = [
+  "Direct prompt injection",
+  "Indirect prompt injection",
+  "Hidden instructions",
+  "Jailbreak attacks",
+  "Policy violations",
+  "Tool poisoning",
+  "Data exfiltration",
+  "Sensitive information disclosure",
+  "Training data poisoning",
+  "Model backdoors",
+  "Evasion attacks",
+  "Abuse attacks",
+  "Privacy attacks",
+  "Membership inference",
+  "Model inversion",
+  "Model extraction",
+  "Property inference",
+  "Insecure output handling",
+  "System prompt leakage",
+  "Excessive agency",
+  "Insecure plugin design",
+  "Supply chain vulnerabilities",
+  "Model denial of service",
+  "Unbounded consumption",
+  "Hallucination manipulation",
+  "Social engineering attacks",
+  "Malicious agent skills",
+  "Malicious MCP tools",
+  "Remote code execution",
+  "Server-side request forgery (SSRF)",
+  "Cross-site scripting (XSS)",
+  "Cross-site request forgery (CSRF)",
+  "SQL injection",
+  "Command injection",
+  "Malware installation",
+  "Ransomware deployment",
+  "Silent data exfiltration via tool parameters",
+];
+
+const PROTECTED_PLATFORMS = [
+  {
+    name: "Claude Code",
+    howItWorks:
+      "Agent reads your repo, tickets, docs, tool output, and web content, then plans and executes commands (edit files, run tests, call tools) based on those inputs.",
+    vulnerability: [
+      "Indirect prompt injection: malicious instructions hidden in files, comments, tickets, API responses, or docs that Claude Code reads as part of normal coding work; the agent treats those lines like trustworthy guidance and follows them (e.g., ignore your safety rules, run this script, send secrets here).",
+      "Tool misuse & command execution: once injection succeeds, attacker content can steer the agent to run dangerous shell commands, change configuration, or leak secrets from files it has access to.",
+      "Malicious skills / extensions: unvetted SKILLs or MCP tools can be packaged with extra instructions or code paths that exfiltrate data or weaken guardrails; install keys make these trivial to add if the user is not careful.",
+      "Agent identity / inbox spoofing: current agent team designs often use plain strings for agent IDs and messages; attackers or buggy processes on the same system can impersonate agents or tamper with agent mailboxes.",
+    ],
+  },
+  {
+    name: "OpenClaw",
+    howItWorks:
+      "Local autonomous agent runtime that connects LLMs to real tools: shell, scripts, apps, email, web, SaaS APIs, etc., via a config like openclaw.json and marketplace skills (ClawHub).",
+    vulnerability: [
+      "Prompt injection into tools/workflows: agents consume instructions from tasks, emails, web pages, logs, and tool outputs; malicious text in any of these can persuade OpenClaw to run risky commands or leak data.",
+      "Malicious skills from ClawHub: audits have found that ~41% of skills have security flaws and around 20% silently send data to external servers; attackers publish fake trade bots or utilities that actually install stealers or backdoors.",
+      "Command execution + system access: OpenClaw can run shell commands and access files; prompt-controlled workflows give an attacker a path to run arbitrary code or copy files if injection succeeds.",
+      "Plaintext secrets in config: API keys and credentials often sit in openclaw.json or env vars; indirect prompt injection plus tool misuse can read and exfiltrate those.",
+    ],
+  },
+  {
+    name: "Cursor",
+    howItWorks:
+      "IDE that runs agents over your codebase, tasks, and docs, with auto-run for commands and test runs; Agent Skills extend the agent with domain workflows.",
+    vulnerability: [
+      "Indirect prompt injection: hidden instructions in code comments, README, wiki pages, external docs or tool responses can hijack Cursor's planning (rewrite this file to send data to X, disable tests, add a backdoor).",
+      "Auto-run commands: in Auto-Run mode, Cursor can execute shell commands on its own; injection that slips past its deny list can push malicious commands or modify lockfiles, pipelines, etc.",
+      "Skills as extra attack surface: Agent Skills are just SKILL.md + scripts/resources; a malicious skill can guide the agent to misuse tools or call shady binaries. Install keys make these easy for non-expert users to add.",
+      "Secrets in context: agents often see .env, config, and dependency files; injected content can persuade them to output or send those secrets elsewhere.",
+    ],
+  },
+  {
+    name: "Goose",
+    howItWorks:
+      "General-purpose agent (CLI, desktop, API) that can edit files, run tests, install software, execute commands, manage workflows, and use any of ~15+ model providers (including local models).",
+    vulnerability: [
+      "Prompt injection in system-level tasks: Goose agents read tasks, config, logs, web/API responses, etc. Malicious instructions there can steer it to install packages, alter services, or touch sensitive files.",
+      "Unvetted third-party skills: since Goose is open-source and skill ecosystems are wide, a malicious SKILL or plugin can ship shell commands, network code, or data exfiltration disguised as helpers.",
+      "Weak isolation: many users run Goose directly on their main machine; a compromised agent session has direct access to home directories, code repos, and credential stores.",
+      "Non-LLM malware: skills can silently drop binaries or scheduled tasks; injection can instruct Goose to download and run malware from a URL.",
+    ],
+  },
+  {
+    name: "Gemini CLI",
+    howItWorks:
+      "CLI that runs Gemini-based agents with tool access and Agent Skills; skills provide bespoke knowledge and workflows for automation and data tasks.",
+    vulnerability: [
+      "Indirect injection from external data: instructions hidden in web pages, PDFs, docs, or tool output can override system prompts, making the agent ignore safety or call dangerous tools.",
+      "Tool-calling abuse: once an injection convinces the agent that this is part of the workflow, it can send unexpected HTTP requests, push config changes, or run test scripts with harmful parameters.",
+      "Skills as supply chain: a malicious skill can embed harmful instructions or scripts under the guise of automation; installed via npx skills add, it becomes trusted logic for the agent.",
+      "Credential exposure: agents can see local files and environment variables; injection can ask the agent to print or send them to remote endpoints.",
+    ],
+  },
+  {
+    name: "GitHub Copilot Agents + Agent Skills",
+    howItWorks:
+      "Copilot agents run inside editors/CLI, reading your repo, issues, comments, and sometimes external docs; Agent Skills are folders of instructions, scripts, and resources that modify agent behavior for specialized tasks.",
+    vulnerability: [
+      "Prompt injection inside repos and issues: a malicious PR comment, issue description, or code comment can instruct Copilot to refactor in ways that introduce backdoors, disable checks, or leak sensitive snippets.",
+      "Agent hijacking via skills: a compromised or malicious SKILL.md can subtly change how Copilot agents interpret tasks and call tools (for example, run extra commands, send data to a logging endpoint you do not expect).",
+      "Secrets in context: Copilot agents can see .env, config, and CI files; injection or bad skills can cause them to echo keys/tokens in comments, logs, or remote requests.",
+      "No cryptographic agent identity: like other agent frameworks, identities are mostly strings + configs; there is no default signed message layer, so any extension/process can potentially impersonate an agent if not sandboxed.",
+    ],
+  },
+];
+
 const Landing = () => {
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState("signin");
@@ -224,9 +335,11 @@ const Landing = () => {
     <div className="relative min-h-screen overflow-hidden bg-[#050607] text-white">
       <nav className="relative z-20 mx-auto flex max-w-7xl items-center justify-between px-6 py-6">
         <div className="flex items-center gap-2.5" data-testid="brand-logo">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#FFD700]/30 bg-[#C9A84C]/10">
-            <ShieldCheck className="text-[#FFD700]" size={20} />
-          </div>
+          <img
+            src={BRAND_LOGO_SRC}
+            alt="IronClaw-Security"
+            className="brand-logo-image"
+          />
           <span className="font-tech text-base font-bold tracking-tight sm:text-lg">
             IRONCLAW<span className="metal-gold-text">-SECURITY</span>
           </span>
@@ -358,6 +471,22 @@ const Landing = () => {
               Sign Up <ArrowRight size={18} />
             </button>
           </motion.div>
+
+          <motion.div
+            variants={fadeUp}
+            initial="hidden"
+            animate="show"
+            custom={5}
+            className="mt-12 flex justify-center"
+          >
+            <div className="glow-frame rounded-[2rem] border border-[#FFD700]/20 bg-[#0a0b0d]/80 p-2 shadow-[0_0_42px_rgba(255,215,0,0.18)] backdrop-blur-sm">
+              <img
+                src={KNIGHT_IMAGE_SRC}
+                alt="IronClaw-Security knight defender"
+                className="hero-image"
+              />
+            </div>
+          </motion.div>
         </div>
       </section>
 
@@ -417,6 +546,113 @@ const Landing = () => {
                   </motion.div>
                 );
               })}
+            </div>
+          </section>
+
+          <section className="relative z-10 mx-auto max-w-6xl px-6 py-8">
+            <motion.div
+              variants={fadeUp}
+              initial="hidden"
+              whileInView="show"
+              viewport={{ once: true, margin: "-80px" }}
+              className="glass-gold overflow-hidden rounded-3xl p-8 sm:p-10"
+            >
+              <div className="mb-5 inline-block rounded-full border border-[#FFD700]/30 bg-[#C9A84C]/10 px-4 py-1 font-tech text-xs uppercase tracking-[0.3em] text-[#FFD700]">
+                Protection From:
+              </div>
+              <h3 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+                <span className="text-gold-gradient">Protection From:</span>
+              </h3>
+              <div className="mt-8 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {LANDING_PROTECTION_ITEMS.map((item) => (
+                  <div
+                    key={item}
+                    className="flex items-start gap-3 rounded-2xl border border-[#FFD700]/15 bg-black/20 p-3 text-left"
+                  >
+                    <div className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full border border-[#FFD700]/30 bg-[#C9A84C]/10">
+                      <Check size={14} className="text-[#FFD700]" />
+                    </div>
+                    <p className="font-tech text-[0.72rem] leading-relaxed text-[#f6d66b] md:text-[0.78rem]">
+                      {item}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          </section>
+
+          <section className="relative z-10 mx-auto max-w-6xl px-6 py-20">
+            <motion.div
+              variants={fadeUp}
+              initial="hidden"
+              whileInView="show"
+              viewport={{ once: true, margin: "-80px" }}
+              className="mb-10 text-center"
+            >
+              <div className="mb-3 inline-block rounded-full border border-[#FFD700]/30 bg-[#C9A84C]/10 px-4 py-1 font-tech text-xs uppercase tracking-[0.3em] text-[#FFD700]">
+                Platform Coverage
+              </div>
+              <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+                Platforms Protected By{" "}
+                <span className="metal-gold-text">Gen 1 IronClaw-Security</span>
+              </h2>
+            </motion.div>
+
+            <div className="space-y-5">
+              {PROTECTED_PLATFORMS.map((platform, index) => (
+                <motion.div
+                  key={platform.name}
+                  variants={fadeUp}
+                  custom={index}
+                  initial="hidden"
+                  whileInView="show"
+                  viewport={{ once: true, margin: "-40px" }}
+                  className="rounded-3xl border border-[#FFD700]/25 bg-[#0b0d10]/70 p-5 text-left shadow-[0_0_0_1px_rgba(255,215,0,0.12),0_16px_36px_rgba(0,0,0,0.25)] backdrop-blur-sm sm:p-6"
+                >
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <h3 className="text-2xl font-semibold tracking-tight text-white">
+                      <span className="metal-gold-text">{platform.name}</span>
+                    </h3>
+                    <span className="font-tech text-[10px] uppercase tracking-[0.28em] text-[#FFD700]">
+                      Protected
+                    </span>
+                  </div>
+
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <div className="rounded-2xl border border-[#FFD700]/15 bg-[#101214]/70 p-4">
+                      <div className="mb-2 font-tech text-[10px] uppercase tracking-[0.26em] text-[#BFC1C2]">
+                        How it works
+                      </div>
+                      <p className="text-sm leading-relaxed text-[#E5E4E2]">
+                        {platform.howItWorks}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-[#FFD700]/15 bg-[#101214]/70 p-4">
+                      <div className="mb-2 font-tech text-[10px] uppercase tracking-[0.26em] text-[#BFC1C2]">
+                        Why it&apos;s vulnerable
+                      </div>
+                      <ul className="space-y-2 text-sm leading-relaxed text-[#E5E4E2]">
+                        {platform.vulnerability.map((item) => (
+                          <li key={item} className="flex gap-2">
+                            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#FFD700]" />
+                            <span>{item}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+
+            <div className="mt-8 text-center text-sm text-[#BFC1C2]">
+              <span className="font-tech text-[10px] uppercase tracking-[0.26em] text-[#FFD700]">
+                Sources:
+              </span>{" "}
+              <span className="text-[#E5E4E2]">
+                OWASP LLM Top 10, NIST adversarial ML taxonomy.
+              </span>
             </div>
           </section>
 
@@ -496,7 +732,11 @@ const Landing = () => {
           <footer className="relative z-10 border-t border-white/10 py-10">
             <div className="mx-auto flex max-w-7xl flex-col items-center gap-4 px-6 text-center">
               <div className="flex items-center gap-2">
-                <ShieldCheck className="text-[#FFD700]" size={16} />
+                <img
+                  src={BRAND_LOGO_SRC}
+                  alt="IronClaw-Security"
+                  className="footer-brand-logo"
+                />
                 <span className="font-tech text-sm font-bold tracking-tight">
                   IRONCLAW<span className="metal-gold-text">-SECURITY</span>
                 </span>

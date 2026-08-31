@@ -10,16 +10,6 @@ from app.core.install_key_formats import (
     normalize_install_key_program,
 )
 
-_CANONICAL_PROGRAMS: Final[tuple[InstallKeyProgram, ...]] = (
-    "openclaw",
-    "claude_code",
-    "cursor",
-    "goose",
-    "gemini_cli",
-    "copilot",
-    "security_guardian",
-)
-
 
 @dataclass(frozen=True, slots=True)
 class InstallKeyPlatformFormat:
@@ -134,7 +124,7 @@ class InstallKeyFormatRegistryService:
 
     @classmethod
     def list_programs(cls) -> tuple[InstallKeyProgram, ...]:
-        return _CANONICAL_PROGRAMS
+        return cls._DEFAULT_REGISTRY.list_programs()
 
     @classmethod
     def list_format_groups(cls) -> tuple[InstallKeyPlatformFormat, ...]:

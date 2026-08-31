@@ -20,6 +20,7 @@ ProgramCode = Literal[
     "goose",
     "gemini_cli",
     "copilot",
+    "hermes",
     "security_guardian",
 ]
 _VALID_PROGRAMS: tuple[ProgramCode, ...] = tuple(InstallKeyFormatRegistry.list_programs())

@@ -276,9 +276,9 @@ class OpenClawAdapter(BaseIntegrationAdapter):
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        self.metadata["runtime"] = self.runtime
+        self.metadata["workflow_mode"] = self.workflow_mode
         self.metadata.setdefault("integration_id", self.record.integration_id)
-        self.metadata.setdefault("runtime", self.runtime)
-        self.metadata.setdefault("workflow_mode", self.workflow_mode)
 
     def execute(self, request: AdapterExecutionRequest) -> AdapterExecutionResult:
         """Execute a guarded OpenClaw workflow action."""

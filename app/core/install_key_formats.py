@@ -11,6 +11,7 @@ InstallKeyProgram = Literal[
     "goose",
     "gemini_cli",
     "copilot",
+    "hermes",
     "security_guardian",
 ]
 InstallKeyFormatFamily = InstallKeyProgram
@@ -21,6 +22,7 @@ _INSTALL_KEY_PREFIX_CURSOR: Final[str] = "ic_install_cursor_"
 _INSTALL_KEY_PREFIX_GOOSE: Final[str] = "ic_install_goose_"
 _INSTALL_KEY_PREFIX_GEMINI: Final[str] = "ic_install_gemini_cli_"
 _INSTALL_KEY_PREFIX_COPILOT: Final[str] = "ic_install_copilot_"
+_INSTALL_KEY_PREFIX_HERMES: Final[str] = "ic_install_hermes_"
 _INSTALL_KEY_PREFIX_SECURITY_GUARDIAN: Final[str] = "ic_install_security_guardian_"
 
 
@@ -132,6 +134,14 @@ class InstallKeyFormatRegistry:
             prefix=_INSTALL_KEY_PREFIX_COPILOT,
             aliases=("copilot", "github_copilot", "github-copilot", "github copilot", "githubcopilot"),
             platform_aliases=("copilot", "github_copilot", "github-copilot", "github copilot", "githubcopilot"),
+        ),
+        "hermes": InstallKeyFormatSpec(
+            family="hermes",
+            program="hermes",
+            display_name="Hermes",
+            prefix=_INSTALL_KEY_PREFIX_HERMES,
+            aliases=("hermes", "hermes_agent", "hermes-agent", "hermes agent", "hermes_cli", "hermes-cli", "hermes cli"),
+            platform_aliases=("hermes", "hermes_agent", "hermes-agent", "hermes agent", "hermes_cli", "hermes-cli", "hermes cli"),
         ),
         "security_guardian": InstallKeyFormatSpec(
             family="security_guardian",
@@ -260,5 +270,6 @@ __all__ = [
     "_INSTALL_KEY_PREFIX_GOOSE",
     "_INSTALL_KEY_PREFIX_GEMINI",
     "_INSTALL_KEY_PREFIX_COPILOT",
+    "_INSTALL_KEY_PREFIX_HERMES",
     "_INSTALL_KEY_PREFIX_SECURITY_GUARDIAN",
 ]

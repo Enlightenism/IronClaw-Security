@@ -69,10 +69,28 @@ def test_default_integrations_returns_expected_seed_data():
         "gemini-cli",
         "copilot",
         "security-guardian",
+        "hermes",
+    }
+    platform_by_slug = {record.slug: record.platform for record in records}
+    modern_runtime_matrix = {
+        "cursor": "cursor",
+        "goose": "goose",
+        "gemini-cli": "gemini-cli",
+        "copilot": "copilot",
+        "security-guardian": "security-guardian",
+        "hermes": "hermes",
     }
 
     assert len(records) >= len(expected_slugs)
     assert {record.slug for record in records} >= expected_slugs
+    assert {slug for slug in modern_runtime_matrix if platform_by_slug.get(slug) == modern_runtime_matrix[slug]} == set(modern_runtime_matrix)
+    assert platform_by_slug["hermes"] == "hermes"
+    assert platform_by_slug["cursor"] == "cursor"
+    assert platform_by_slug["goose"] == "goose"
+    assert platform_by_slug["gemini-cli"] == "gemini-cli"
+    assert platform_by_slug["copilot"] == "copilot"
+    assert platform_by_slug["security-guardian"] == "security-guardian"
+    assert any(record.slug == "hermes" and record.platform == "hermes" and record.entrypoint == "app.adapters.hermes_adapter" for record in records)
     assert all(record.integration_id for record in records)
     assert all(record.integration_type in {"adapter", "native", "cli", "remote"} for record in records)
 
@@ -233,8 +251,10 @@ def test_build_integration_adapters_view_tracks_supported_runtime_cards_and_inst
         "gemini_cli",
         "copilot",
         "security_guardian",
+        "hermes",
     } <= supported_runtime_programs
 
+    assert any(item["slug"] == "hermes" and item["install_key_program"] == "hermes" for item in payload["items"])
     assert any(item["slug"] == "security-guardian" and item["shared_install_key_family"] for item in payload["items"])
 
     assert any(item["capability_pills"] for item in payload["items"])

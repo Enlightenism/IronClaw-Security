@@ -131,6 +131,35 @@ def test_end_to_end_openclaw_registry_install_and_verify():
     assert exec_result.output["request"]["action_type"] == "toolcall"
 
 
+def test_openclaw_route_reinforces_canonical_runtime_contract(monkeypatch):
+    registry = initialize_integration_registry()
+    record = get_integration(registry, "integration-openclaw")
+    drifted_adapter = OpenClawAdapter(
+        record=record,
+        metadata={"runtime": "hermes", "workflow_mode": "loose"},
+    )
+    monkeypatch.setattr("app.routes.integrations.openclaw._build_adapter", lambda: drifted_adapter)
+
+    client = _client()
+    handshake = client.post(
+        "/integrations/openclaw/handshake",
+        headers={"X-API-Key": "test-api-key"},
+        json={
+            "client_id": "benchmark-client",
+            "protocol_version": "1.0.0",
+            "builder_id": "builder-42",
+            "metadata": {"environment": "test"},
+        },
+    )
+
+    assert handshake.status_code == 200, handshake.text
+    payload = handshake.json()
+    assert payload["platform"] == "openclaw"
+    assert payload["adapter_name"] == "ironclaw-openclaw"
+    assert payload["metadata"]["runtime"] == "openclaw"
+    assert payload["metadata"]["workflow_mode"] == "builder-guard"
+
+
 def test_openclaw_route_contract_handshake_manifest_and_secret_scan_gate():
     client = _client()
 

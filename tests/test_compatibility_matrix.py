@@ -16,6 +16,7 @@ def test_list_compatibility_rules_returns_expected_runtime_families():
     expected_runtime_families = {
         "claude-code",
         "openclaw",
+        "hermes",
         "cursor",
         "goose",
         "gemini-cli",
@@ -67,6 +68,21 @@ def test_evaluate_compatibility_returns_supported_for_aliases_and_shared_family_
     assert guardian_decision.runtime_family == "security-guardian"
     assert guardian_decision.metadata["install_key_program"] == "security_guardian"
     assert guardian_decision.metadata["install_key_prefix"] == "ic_install_security_guardian_"
+
+
+def test_evaluate_compatibility_returns_supported_for_hermes():
+    matrix = initialize_compatibility_matrix()
+
+    decision = evaluate_compatibility(
+        matrix,
+        runtime_family="hermes",
+        version="0.4.0",
+    )
+
+    assert decision.runtime_family == "hermes"
+    assert decision.state == "supported"
+    assert decision.metadata["install_key_program"] == "hermes"
+    assert decision.metadata["install_key_prefix"] == "ic_install_hermes_"
 
 
 def test_evaluate_compatibility_returns_warning_for_generic_agent():

@@ -27,6 +27,7 @@ _CURSOR_PREFIX = "ic_install_cursor_"
 _GOOSE_PREFIX = "ic_install_goose_"
 _GEMINI_PREFIX = "ic_install_gemini_cli_"
 _COPILOT_PREFIX = "ic_install_copilot_"
+_HERMES_PREFIX = "ic_install_hermes_"
 _SKILLS_PREFIX = "ic_install_security_guardian_"
 _CHECKOUT_SESSION_ID = "cs_test_001"
 _PURCHASE_REFERENCE = "sub_001"
@@ -110,6 +111,26 @@ class TestMaskKey(unittest.TestCase):
         assert masked.startswith(raw[:10])
         assert masked.endswith(raw[-4:])
 
+    def test_runtime_family_keys_mask_middle_secret_without_exposing_full_value(self):
+        raw_keys = (
+            _CURSOR_PREFIX + "cursor_secret_value_123",
+            _GOOSE_PREFIX + "goose_secret_value_123",
+            _GEMINI_PREFIX + "gemini_secret_value_123",
+            _COPILOT_PREFIX + "copilot_secret_value_123",
+            _HERMES_PREFIX + "hermes_secret_value_123",
+            _SKILLS_PREFIX + "security_guardian_secret_123",
+        )
+
+        for raw in raw_keys:
+            prefix = next(item for item in (_CURSOR_PREFIX, _GOOSE_PREFIX, _GEMINI_PREFIX, _COPILOT_PREFIX, _HERMES_PREFIX, _SKILLS_PREFIX) if raw.startswith(item))
+            secret = raw[len(prefix) :]
+            masked = _mask_key(raw)
+            assert masked.startswith(prefix)
+            assert masked.endswith(secret[-4:])
+            assert "..." in masked
+            assert secret not in masked
+            assert raw not in masked
+
 
 # ---------------------------------------------------------------------------
 # TestInstallKeyRecordPostInit
@@ -141,11 +162,20 @@ class TestInstallKeyRecordPostInit(unittest.TestCase):
         assert record.program == "claude_code"
 
     def test_valid_alias_programs_normalize_to_canonical_names(self):
-        assert InstallKeyRecord(**{**self._valid_record(program="cursor").__dict__, "program": "cursor"}).program == "cursor"
-        assert InstallKeyRecord(**{**self._valid_record(program="goose").__dict__, "program": "goose"}).program == "goose"
-        assert InstallKeyRecord(**{**self._valid_record(program="gemini-cli").__dict__, "program": "gemini-cli"}).program == "gemini_cli"
-        assert InstallKeyRecord(**{**self._valid_record(program="github-copilot").__dict__, "program": "github-copilot"}).program == "copilot"
-        assert InstallKeyRecord(**{**self._valid_record(program="security-guardian").__dict__, "program": "security-guardian"}).program == "security_guardian"
+        alias_map = {
+            "cursor": "cursor",
+            "cursor-agent": "cursor",
+            "goose": "goose",
+            "goose-agent": "goose",
+            "gemini-cli": "gemini_cli",
+            "github-copilot": "copilot",
+            "security-guardian": "security_guardian",
+            "hermes-agent": "hermes",
+        }
+
+        for alias, canonical in alias_map.items():
+            record = InstallKeyRecord(**{**self._valid_record(program=alias).__dict__, "program": alias})
+            assert record.program == canonical
 
     def test_active_record_requires_paid_payment_status(self):
         with self.assertRaises(ValueError):
@@ -156,8 +186,9 @@ class TestInstallKeyRecordPostInit(unittest.TestCase):
             self._valid_record(active=True, payment_status="paid", entitlements_status="not_active", issued_after_payment=True)
 
     def test_invalid_program_raises_value_error(self):
-        with self.assertRaises(ValueError):
-            self._valid_record(program="gpt4")
+        for bad_program in ("gpt4", "not_a_supported_family", "security_guardian_cli"):
+            with self.assertRaises(ValueError):
+                self._valid_record(program=bad_program)
 
     def test_invalid_program_message_contains_program_name(self):
         with self.assertRaises(ValueError) as ctx:
@@ -262,7 +293,7 @@ class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
 
     def test_multi_platform_aliases_generate_canonical_keys(self):
         reg = self._registry()
-        for program in ("cursor", "goose", "gemini-cli", "github-copilot", "security-guardian"):
+        for program in ("cursor", "goose", "gemini-cli", "github-copilot", "security-guardian", "hermes"):
             record = reg.generate_for_paid_customer(
                 owner_key=_OWNER,
                 subscription_id=_SUB_ID,
@@ -273,16 +304,32 @@ class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
                 checkout_session_id=_CHECKOUT_SESSION_ID,
                 purchase_reference=_PURCHASE_REFERENCE,
             )
-            assert record.program in {"cursor", "goose", "gemini_cli", "copilot", "security_guardian"}
+            assert record.program in {"cursor", "goose", "gemini_cli", "copilot", "security_guardian", "hermes"}
             assert record.raw_key.startswith(
                 (
                     _CURSOR_PREFIX,
                     _GOOSE_PREFIX,
                     _GEMINI_PREFIX,
                     _COPILOT_PREFIX,
+                    _HERMES_PREFIX,
                     _SKILLS_PREFIX,
                 )
             )
+
+    def test_runtime_family_aliases_require_paid_entitlement_before_generation(self):
+        reg = self._registry()
+        for program in ("cursor", "goose", "gemini-cli", "github-copilot", "security-guardian", "hermes"):
+            with self.assertRaises(InstallKeyPaymentRequiredError):
+                reg.generate_for_paid_customer(
+                    owner_key=_OWNER,
+                    subscription_id=_SUB_ID,
+                    program=program,
+                    payment_status="pending",
+                    entitlements_status="active",
+                    issued_after_payment=True,
+                    checkout_session_id=_CHECKOUT_SESSION_ID,
+                    purchase_reference=_PURCHASE_REFERENCE,
+                )
 
     def test_legacy_generate_install_key_uses_subscription_reference_when_missing(self):
         reg = self._registry()

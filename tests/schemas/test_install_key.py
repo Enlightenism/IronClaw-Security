@@ -137,6 +137,13 @@ def test_install_key_record_valid_minimal_payload():
     assert record.metadata["env"] == "prod"
 
 
+def test_install_key_record_accepts_hermes_program():
+    record = InstallKeyRecord(**_record_payload(program="hermes", masked_key="ic_install_hermes_...d3f4", label="hermes-prod"))
+    assert record.program == "hermes"
+    assert record.masked_key == "ic_install_hermes_...d3f4"
+    assert record.label == "hermes-prod"
+
+
 def test_install_key_record_rejects_unknown_program():
     with pytest.raises(ValidationError, match="program"):
         InstallKeyRecord(**_record_payload(program="gpt4"))

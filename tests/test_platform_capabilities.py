@@ -21,6 +21,7 @@ def test_list_platform_profiles_returns_expected_platforms():
         "gemini-cli",
         "copilot",
         "security-guardian",
+        "hermes",
         "generic-agent",
     }
 
@@ -48,6 +49,17 @@ def test_get_platform_profile_returns_known_profile():
     assert profile is not None
     assert profile.platform == "claude-code"
     assert profile.display_name == "Claude Code"
+    assert any(capability.name == "prompt_interception" for capability in profile.capabilities)
+    assert any(capability.name == "shell_guard" for capability in profile.capabilities)
+
+
+def test_get_platform_profile_returns_hermes_profile():
+    profile = get_platform_profile("hermes")
+
+    assert profile is not None
+    assert profile.platform == "hermes"
+    assert profile.display_name == "Hermes"
+    assert profile.install_mode == "one-command-local"
     assert any(capability.name == "prompt_interception" for capability in profile.capabilities)
     assert any(capability.name == "shell_guard" for capability in profile.capabilities)
 

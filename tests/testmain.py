@@ -53,6 +53,11 @@ def test_create_app_registers_integrations_routes() -> None:
         "/integrations/{integration_id}/lifecycle",
         "/integrations/{integration_id}/readiness",
         "/integrations/{integration_id}/observability",
+        "/integrations/hermes/health",
+        "/integrations/hermes/manifest",
+        "/integrations/cursor/handshake",
+        "/integrations/goose/handshake",
+        "/integrations/agent-skills/handshake",
     }
 
     missing_paths = expected_paths - route_paths
@@ -213,7 +218,7 @@ def test_create_app_event_simulation_routes_match_current_registration_state() -
 
     event_paths = {path for path in route_paths if path.startswith("/events/") or path.startswith("/api/events/")}
 
-    assert event_paths == set(), "event simulation routes are not currently mounted in this app state; if app/main.py was updated to include them, this test should be revised after the router module becomes available during create_app()"
+    assert event_paths == {"/events/simulate", "/api/events/simulate"}, "expected the current event simulation router mount state to include both prefix families with the /simulate endpoint"
 
 
 def test_create_app_event_simulation_routes_do_not_expose_partial_prefix_mismatch() -> None:

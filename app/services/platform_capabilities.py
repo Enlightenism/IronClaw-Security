@@ -195,6 +195,27 @@ def default_platform_profiles() -> list[PlatformProfile]:
             },
         ),
         PlatformProfile(
+            platform="hermes",
+            display_name="Hermes",
+            install_mode="one-command-local",
+            capabilities=[
+                PlatformCapability("prompt_interception", "native", "Hermes prompt payloads can be inspected and filtered before execution."),
+                PlatformCapability("tool_interception", "native", "Hermes tool and workflow dispatches can be intercepted before action."),
+                PlatformCapability("execution_interception", "native", "Hermes workflow plans and high-risk step execution can be reviewed before completion."),
+                PlatformCapability("shell_guard", "native", "Hermes shell and subprocess operations can be blocked or logged by policy."),
+                PlatformCapability("file_guard", "native", "Hermes workspace file reads and writes can be mediated with guard rules."),
+                PlatformCapability("network_guard", "partial", "External network calls are partially controlled through host-side policy enforcement."),
+                PlatformCapability("review_queue", "native", "Risky Hermes actions can be staged for approval or human review."),
+                PlatformCapability("telemetry", "native", "Hermes execution and policy telemetry can be forwarded to the control plane."),
+                PlatformCapability("policy_sync", "native", "Hermes policy bundles can be synchronized into the local runtime environment."),
+                PlatformCapability("audit_export", "native", "Hermes activity and decision trails can be exported to the audit record store."),
+            ],
+            metadata={
+                "adapter": "app.adapters.hermes_adapter",
+                "priority": 8,
+            },
+        ),
+        PlatformProfile(
             platform="generic-agent",
             display_name="Generic Agent Runtime",
             install_mode="api-attachment",
@@ -212,7 +233,7 @@ def default_platform_profiles() -> list[PlatformProfile]:
             ],
             metadata={
                 "adapter": "app.adapters.generic_agent_adapter",
-                "priority": 8,
+                "priority": 9,
             },
         ),
     ]

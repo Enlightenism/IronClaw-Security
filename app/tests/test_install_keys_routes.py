@@ -209,7 +209,7 @@ class TestGetMyKeys:
         assert body["owner_key"] == _OWNER
         assert "timestamp" in body
         programs = {slot["program"] for slot in body["keys"]}
-        assert programs == {"openclaw", "claude_code"}
+        assert programs == {"openclaw", "claude_code", "hermes"}
 
     def test_one_populated_slot_and_one_empty_slot(self, client: TestClient) -> None:
         oc_record = _make_record(key_id=_KEY_ID_OC, program="openclaw", subscription_id=_SUB)
@@ -228,6 +228,8 @@ class TestGetMyKeys:
         assert slots_by_program["openclaw"]["key_id"] == _KEY_ID_OC
         assert slots_by_program["claude_code"]["key_id"] is None
         assert slots_by_program["claude_code"]["active"] is False
+        assert slots_by_program["hermes"]["key_id"] is None
+        assert slots_by_program["hermes"]["active"] is False
 
     def test_owner_with_no_subscription_returns_403_no_active_subscription(self, client: TestClient) -> None:
         install_reg = _make_install_registry(owner_records=[])
@@ -286,7 +288,7 @@ class TestGetMyKeys:
             )
         assert resp.status_code == 200
         body = resp.json()
-        assert len(body["keys"]) == 2
+        assert len(body["keys"]) == 3
 
     def test_missing_owner_key_header_returns_422(self, client: TestClient) -> None:
         resp = client.get("/install-keys/my-keys")

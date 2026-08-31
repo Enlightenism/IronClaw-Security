@@ -461,6 +461,7 @@ def test_dashboard_overview_filters_current_owner_paid_install_keys(client: Test
         "goose",
         "gemini_cli",
         "copilot",
+        "hermes",
         "security_guardian",
     }
     assert len(keys) == len(expected_platforms)

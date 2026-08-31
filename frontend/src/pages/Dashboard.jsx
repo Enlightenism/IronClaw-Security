@@ -8,7 +8,6 @@ import {
   LogOut,
   RefreshCw,
   ScrollText,
-  ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -20,13 +19,45 @@ import api from "@/lib/api";
 
 const ATTACKS_PAGE_SIZE = 25;
 const VALID_PACKAGES = ["pkg5000", "pkg25000", "pkg60000"];
+const DASHBOARD_LOGO_SRC = "/images/logo128pxl.svg";
+const DASHBOARD_KNIGHT_SRC = "/images/Golden%20Knight%204k%202gb.png";
 const INSTALL_KEY_PROGRAMS = [
-  { program: "claude_code", label: "Claude Code", tint: "gold", commandKey: "claude_code_command" },
-  { program: "openclaw", label: "OpenClaw", tint: "platinum", commandKey: "openclaw_command" },
-  { program: "cursor", label: "Cursor", tint: "cyan", commandKey: "cursor_command" },
-  { program: "goose", label: "Goose", tint: "violet", commandKey: "goose_command" },
-  { program: "gemini_cli", label: "Gemini CLI", tint: "emerald", commandKey: "gemini_cli_command" },
-  { program: "copilot", label: "Copilot", tint: "indigo", commandKey: "copilot_command" },
+  {
+    program: "claude_code",
+    label: "Claude Code",
+    tint: "gold",
+    commandKey: "claude_code_command",
+  },
+  {
+    program: "openclaw",
+    label: "OpenClaw",
+    tint: "platinum",
+    commandKey: "openclaw_command",
+  },
+  {
+    program: "cursor",
+    label: "Cursor",
+    tint: "cyan",
+    commandKey: "cursor_command",
+  },
+  {
+    program: "goose",
+    label: "Goose",
+    tint: "violet",
+    commandKey: "goose_command",
+  },
+  {
+    program: "gemini_cli",
+    label: "Gemini CLI",
+    tint: "emerald",
+    commandKey: "gemini_cli_command",
+  },
+  {
+    program: "copilot",
+    label: "Copilot",
+    tint: "indigo",
+    commandKey: "copilot_command",
+  },
   {
     program: "security_guardian",
     label: "Shared Skill Package",
@@ -303,9 +334,10 @@ const Dashboard = () => {
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
-    const mediaQuery = typeof window.matchMedia === "function"
-      ? window.matchMedia("(pointer: coarse)")
-      : null;
+    const mediaQuery =
+      typeof window.matchMedia === "function"
+        ? window.matchMedia("(pointer: coarse)")
+        : null;
     if (mediaQuery && mediaQuery.matches) return undefined;
 
     const handlePointerMove = (event) => {
@@ -571,10 +603,9 @@ const Dashboard = () => {
 
   const installKeyCards = useMemo(() => {
     const slotMap = new Map(
-      (Array.isArray(data?.install_keys) ? data.install_keys : []).map((slot) => [
-        slot?.program,
-        slot,
-      ]),
+      (Array.isArray(data?.install_keys) ? data.install_keys : []).map(
+        (slot) => [slot?.program, slot],
+      ),
     );
 
     return INSTALL_KEY_PROGRAMS.map(({ program, label, tint, commandKey }) => {
@@ -607,7 +638,9 @@ const Dashboard = () => {
   const integrationCards = useMemo(() => {
     const hasUnlockedToken =
       tokens?.status === "ok" ||
-      INSTALL_KEY_PROGRAMS.some(({ commandKey }) => Boolean(tokens?.[commandKey]));
+      INSTALL_KEY_PROGRAMS.some(({ commandKey }) =>
+        Boolean(tokens?.[commandKey]),
+      );
 
     if (!hasUnlockedToken) {
       return [];
@@ -634,7 +667,9 @@ const Dashboard = () => {
       }
     };
 
-    return INSTALL_KEY_PROGRAMS.filter(({ commandKey }) => Boolean(tokens?.[commandKey]))
+    return INSTALL_KEY_PROGRAMS.filter(({ commandKey }) =>
+      Boolean(tokens?.[commandKey]),
+    )
       .map(({ label, tint, program, commandKey }) => ({
         title: label,
         command: tokens?.[commandKey] || "",
@@ -690,7 +725,8 @@ const Dashboard = () => {
             backgroundImage:
               "linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px)",
             backgroundSize: "42px 42px",
-            maskImage: "linear-gradient(180deg, rgba(0,0,0,0.25), rgba(0,0,0,0.8))",
+            maskImage:
+              "linear-gradient(180deg, rgba(0,0,0,0.25), rgba(0,0,0,0.8))",
           }}
         />
       </div>
@@ -703,9 +739,11 @@ const Dashboard = () => {
             className="flex items-center gap-2.5"
             data-testid="dashboard-logo"
           >
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#FFD700]/30 bg-[#C9A84C]/10">
-              <ShieldCheck className="text-[#FFD700]" size={20} />
-            </div>
+            <img
+              src={DASHBOARD_LOGO_SRC}
+              alt="IronClaw-Security"
+              className="brand-logo-image"
+            />
             <span className="font-tech text-lg font-bold tracking-tight">
               IRONCLAW<span className="metal-gold-text">-SECURITY</span>
             </span>
@@ -746,6 +784,14 @@ const Dashboard = () => {
       </nav>
 
       <main className="mx-auto max-w-7xl px-6 py-8">
+        <div className="mb-8 overflow-hidden rounded-[2rem] border border-[#FFD700]/20 bg-[#0a0b0d]/80 p-2 shadow-[0_0_42px_rgba(255,215,0,0.12)]">
+          <img
+            src={DASHBOARD_KNIGHT_SRC}
+            alt="IronClaw-Security knight"
+            className="dashboard-hero-image"
+          />
+        </div>
+
         <div className="mb-8 flex items-end justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
@@ -781,7 +827,8 @@ const Dashboard = () => {
           <div className="space-y-6">
             <div className="grid grid-cols-1 gap-6">
               {installKeyCards.map((card) => {
-                const accent = CARD_TINT_STYLES[card.tint] ?? CARD_TINT_STYLES.gold;
+                const accent =
+                  CARD_TINT_STYLES[card.tint] ?? CARD_TINT_STYLES.gold;
                 return (
                   <div
                     key={card.testid}
