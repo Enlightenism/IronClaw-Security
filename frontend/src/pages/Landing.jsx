@@ -285,7 +285,7 @@ const Landing = () => {
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState("signin");
   const [showParticleField, setShowParticleField] = useState(false);
-  const [showBelowFold, setShowBelowFold] = useState(false);
+  const [showBelowFold, setShowBelowFold] = useState(true);
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -301,16 +301,6 @@ const Landing = () => {
 
     const timeoutId = setTimeout(enableHeroEffects, 300);
     return () => clearTimeout(timeoutId);
-  }, []);
-
-  useEffect(() => {
-    const onFirstScroll = () => {
-      setShowBelowFold(true);
-      window.removeEventListener("scroll", onFirstScroll);
-    };
-
-    window.addEventListener("scroll", onFirstScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onFirstScroll);
   }, []);
 
   const openAuth = (mode) => {

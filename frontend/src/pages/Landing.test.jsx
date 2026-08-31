@@ -219,17 +219,16 @@ describe("Landing", () => {
     });
   });
 
-  it("does not render below-fold sections on first paint", async () => {
+  it("renders below-fold sections on first paint", async () => {
     await renderLanding();
 
-    expect(screen.queryByTestId("credits-section")).not.toBeInTheDocument();
-    expect(
-      screen.queryByTestId("footer-getstarted-btn"),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByTestId("feature-card-0")).not.toBeInTheDocument();
+    expect(screen.getByTestId("credits-section")).toBeInTheDocument();
+    expect(screen.getByTestId("footer-getstarted-btn")).toBeInTheDocument();
+    expect(screen.getByTestId("feature-card-0")).toBeInTheDocument();
+    expect(screen.getByTestId("feature-card-13")).toBeInTheDocument();
   });
 
-  it("reveals below-fold sections after first scroll", async () => {
+  it("keeps below-fold sections visible without requiring scroll", async () => {
     await renderLanding();
 
     await act(async () => {
