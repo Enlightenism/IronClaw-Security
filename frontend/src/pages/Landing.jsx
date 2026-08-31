@@ -462,8 +462,13 @@ const Landing = () => {
             <button
               onClick={() => openAuth("signup")}
               data-testid="hero-signup-btn"
-              className="btn-shimmer flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#C9A84C] to-[#FFD700] px-8 py-3.5 font-semibold text-black transition hover:shadow-[0_0_28px_rgba(255,215,0,0.45)]"
+              className="btn-shimmer inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#C9A84C] to-[#FFD700] px-8 py-3.5 font-semibold text-black transition hover:shadow-[0_0_28px_rgba(255,215,0,0.45)]"
             >
+              <img
+                src={GOLDEN_KNIGHT_LOGO_SRC}
+                alt=""
+                className="action-button-logo"
+              />
               Sign Up <ArrowRight size={18} />
             </button>
           </motion.div>
@@ -588,7 +593,7 @@ const Landing = () => {
               </h2>
             </motion.div>
 
-            <ul className="space-y-5">
+            <ul className="space-y-4">
               {PROTECTED_PLATFORMS.map((platform, index) => (
                 <motion.li
                   key={platform.name}
@@ -597,32 +602,29 @@ const Landing = () => {
                   initial="hidden"
                   whileInView="show"
                   viewport={{ once: true, margin: "-40px" }}
-                  className="list-none rounded-2xl border border-[#FFD700]/20 bg-transparent p-5 text-left shadow-[0_0_0_1px_rgba(255,215,0,0.08)] sm:p-6"
+                  className="list-none py-3 text-left"
                 >
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <h3 className="text-2xl font-semibold tracking-tight text-white">
-                      <span className="metal-gold-text">{platform.name}</span>
-                    </h3>
+                  <div className="mb-2 flex items-center gap-3">
                     <span className="font-tech text-[10px] uppercase tracking-[0.28em] text-[#FFD700]">
                       Protected
                     </span>
+                    <h3 className="text-2xl font-semibold tracking-tight text-white">
+                      <span className="metal-gold-text">{platform.name}</span>
+                    </h3>
                   </div>
 
-                  <div className="space-y-4">
-                    <div className="border-l border-[#FFD700]/30 pl-4">
-                      <div className="mb-2 font-tech text-[10px] uppercase tracking-[0.26em] text-[#BFC1C2]">
+                  <ul className="space-y-3 text-sm leading-relaxed text-[#E5E4E2]">
+                    <li className="border-l border-[#FFD700]/30 pl-4">
+                      <span className="mb-1 block font-tech text-[10px] uppercase tracking-[0.26em] text-[#BFC1C2]">
                         How it works
-                      </div>
-                      <p className="text-sm leading-relaxed text-[#E5E4E2]">
-                        {platform.howItWorks}
-                      </p>
-                    </div>
-
-                    <div className="border-l border-[#FFD700]/30 pl-4">
-                      <div className="mb-2 font-tech text-[10px] uppercase tracking-[0.26em] text-[#BFC1C2]">
+                      </span>
+                      <span>{platform.howItWorks}</span>
+                    </li>
+                    <li className="border-l border-[#FFD700]/30 pl-4">
+                      <span className="mb-1 block font-tech text-[10px] uppercase tracking-[0.26em] text-[#BFC1C2]">
                         Why it&apos;s vulnerable
-                      </div>
-                      <ul className="space-y-2 text-sm leading-relaxed text-[#E5E4E2]">
+                      </span>
+                      <ul className="space-y-2">
                         {platform.vulnerability.map((item) => (
                           <li key={item} className="flex gap-2">
                             <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#FFD700]" />
@@ -630,8 +632,8 @@ const Landing = () => {
                           </li>
                         ))}
                       </ul>
-                    </div>
-                  </div>
+                    </li>
+                  </ul>
                 </motion.li>
               ))}
             </ul>
@@ -714,6 +716,11 @@ const Landing = () => {
                 data-testid="footer-getstarted-btn"
                 className="btn-shimmer mt-8 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#C9A84C] to-[#FFD700] px-10 py-4 text-lg font-semibold text-black transition hover:shadow-[0_0_32px_rgba(255,215,0,0.5)]"
               >
+                <img
+                  src={GOLDEN_KNIGHT_LOGO_SRC}
+                  alt=""
+                  className="action-button-logo"
+                />
                 Get Started <ArrowRight size={20} />
               </button>
             </motion.div>
