@@ -123,21 +123,27 @@ body {
     display: block;
     width: min(100%, 1100px);
     max-height: 440px;
-    object-fit: cover;
-    border-radius: 1.5rem;
-    box-shadow: inset 0 0 0 1px rgba(255, 215, 0, 0.18);
+    object-fit: contain;
+    border-radius: 0;
+    box-shadow: none;
+    filter: drop-shadow(0 0 18px rgba(255, 215, 0, 0.18));
 }
 
 .dashboard-hero-image {
     display: block;
     width: 100%;
-    max-height: 260px;
-    object-fit: cover;
-    border-radius: 1.5rem;
+    max-height: 420px;
+    object-fit: contain;
+    border-radius: 0;
+    filter: drop-shadow(0 0 18px rgba(255, 215, 0, 0.18));
 }
 
-.glow-frame {
-    box-shadow: 0 0 0 1px rgba(255, 215, 0, 0.12), 0 0 42px rgba(255, 215, 0, 0.18);
+.action-button-logo {
+    width: 1rem;
+    height: 1rem;
+    object-fit: contain;
+    display: block;
+    flex-shrink: 0;
 }
 
 /* ---------- Buttons ---------- */

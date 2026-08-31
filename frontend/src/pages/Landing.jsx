@@ -170,6 +170,7 @@ const LiveCounter = ({
 };
 
 const BRAND_LOGO_SRC = "/images/logo128pxl.svg";
+const GOLDEN_KNIGHT_LOGO_SRC = "/images/Golden%20Knight%20Logo128.png";
 const KNIGHT_IMAGE_SRC = "/images/Golden%20Knight%204k%202gb.png";
 
 const LANDING_PROTECTION_ITEMS = [
@@ -345,8 +346,13 @@ const Landing = () => {
           <button
             onClick={() => openAuth("signup")}
             data-testid="nav-signup-btn"
-            className="btn-shimmer rounded-lg bg-gradient-to-r from-[#C9A84C] to-[#FFD700] px-5 py-2 text-sm font-semibold text-black transition hover:shadow-[0_0_22px_rgba(255,215,0,0.4)]"
+            className="btn-shimmer inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-[#C9A84C] to-[#FFD700] px-5 py-2 text-sm font-semibold text-black transition hover:shadow-[0_0_22px_rgba(255,215,0,0.4)]"
           >
+            <img
+              src={GOLDEN_KNIGHT_LOGO_SRC}
+              alt=""
+              className="action-button-logo"
+            />
             Sign Up
           </button>
         </div>
@@ -469,13 +475,11 @@ const Landing = () => {
             custom={5}
             className="mt-12 flex justify-center"
           >
-            <div className="glow-frame rounded-[2rem] border border-[#FFD700]/20 bg-[#0a0b0d]/80 p-2 shadow-[0_0_42px_rgba(255,215,0,0.18)] backdrop-blur-sm">
-              <img
-                src={KNIGHT_IMAGE_SRC}
-                alt="IronClaw-Security knight defender"
-                className="hero-image"
-              />
-            </div>
+            <img
+              src={KNIGHT_IMAGE_SRC}
+              alt="IronClaw-Security knight defender"
+              className="hero-image"
+            />
           </motion.div>
         </div>
       </section>
@@ -545,29 +549,25 @@ const Landing = () => {
               initial="hidden"
               whileInView="show"
               viewport={{ once: true, margin: "-80px" }}
-              className="glass-gold overflow-hidden rounded-3xl p-8 sm:p-10"
+              className="py-4"
             >
-              <div className="mb-5 inline-block rounded-full border border-[#FFD700]/30 bg-[#C9A84C]/10 px-4 py-1 font-tech text-xs uppercase tracking-[0.3em] text-[#FFD700]">
-                Protection From:
-              </div>
-              <h3 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+              <h3 className="mb-6 text-2xl font-semibold tracking-tight sm:text-3xl">
                 <span className="text-gold-gradient">Protection From:</span>
               </h3>
-              <div className="mt-8 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+
+              <ul className="space-y-2">
                 {LANDING_PROTECTION_ITEMS.map((item) => (
-                  <div
+                  <li
                     key={item}
-                    className="flex items-start gap-3 rounded-2xl border border-[#FFD700]/15 bg-black/20 p-3 text-left"
+                    className="flex items-start gap-3 rounded-xl border border-[#FFD700]/10 bg-transparent px-3 py-2 text-left"
                   >
-                    <div className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full border border-[#FFD700]/30 bg-[#C9A84C]/10">
-                      <Check size={14} className="text-[#FFD700]" />
-                    </div>
-                    <p className="font-tech text-[0.72rem] leading-relaxed text-[#f6d66b] md:text-[0.78rem]">
+                    <span className="mt-1.5 inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-[#FFD700]" />
+                    <span className="font-tech text-[0.72rem] leading-relaxed text-[#f6d66b] md:text-[0.78rem]">
                       {item}
-                    </p>
-                  </div>
+                    </span>
+                  </li>
                 ))}
-              </div>
+              </ul>
             </motion.div>
           </section>
 
@@ -588,18 +588,18 @@ const Landing = () => {
               </h2>
             </motion.div>
 
-            <div className="space-y-5">
+            <ul className="space-y-5">
               {PROTECTED_PLATFORMS.map((platform, index) => (
-                <motion.div
+                <motion.li
                   key={platform.name}
                   variants={fadeUp}
                   custom={index}
                   initial="hidden"
                   whileInView="show"
                   viewport={{ once: true, margin: "-40px" }}
-                  className="rounded-3xl border border-[#FFD700]/25 bg-[#0b0d10]/70 p-5 text-left shadow-[0_0_0_1px_rgba(255,215,0,0.12),0_16px_36px_rgba(0,0,0,0.25)] backdrop-blur-sm sm:p-6"
+                  className="list-none rounded-2xl border border-[#FFD700]/20 bg-transparent p-5 text-left shadow-[0_0_0_1px_rgba(255,215,0,0.08)] sm:p-6"
                 >
-                  <div className="mb-4 flex items-center justify-between gap-3">
+                  <div className="mb-3 flex items-center justify-between gap-3">
                     <h3 className="text-2xl font-semibold tracking-tight text-white">
                       <span className="metal-gold-text">{platform.name}</span>
                     </h3>
@@ -608,8 +608,8 @@ const Landing = () => {
                     </span>
                   </div>
 
-                  <div className="grid gap-4 lg:grid-cols-2">
-                    <div className="rounded-2xl border border-[#FFD700]/15 bg-[#101214]/70 p-4">
+                  <div className="space-y-4">
+                    <div className="border-l border-[#FFD700]/30 pl-4">
                       <div className="mb-2 font-tech text-[10px] uppercase tracking-[0.26em] text-[#BFC1C2]">
                         How it works
                       </div>
@@ -618,7 +618,7 @@ const Landing = () => {
                       </p>
                     </div>
 
-                    <div className="rounded-2xl border border-[#FFD700]/15 bg-[#101214]/70 p-4">
+                    <div className="border-l border-[#FFD700]/30 pl-4">
                       <div className="mb-2 font-tech text-[10px] uppercase tracking-[0.26em] text-[#BFC1C2]">
                         Why it&apos;s vulnerable
                       </div>
@@ -632,9 +632,9 @@ const Landing = () => {
                       </ul>
                     </div>
                   </div>
-                </motion.div>
+                </motion.li>
               ))}
-            </div>
+            </ul>
 
             <div className="mt-8 text-center text-sm text-[#BFC1C2]">
               <span className="font-tech text-[10px] uppercase tracking-[0.26em] text-[#FFD700]">
@@ -723,7 +723,7 @@ const Landing = () => {
             <div className="mx-auto flex max-w-7xl flex-col items-center gap-4 px-6 text-center">
               <div className="flex items-center gap-2">
                 <img
-                  src={BRAND_LOGO_SRC}
+                  src={GOLDEN_KNIGHT_LOGO_SRC}
                   alt="IronClaw-Security"
                   className="footer-brand-logo"
                 />

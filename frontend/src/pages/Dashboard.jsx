@@ -5,7 +5,6 @@ import {
   ChevronRight,
   FileSearch,
   Loader2,
-  LogOut,
   RefreshCw,
   ScrollText,
 } from "lucide-react";
@@ -567,6 +566,44 @@ const Dashboard = () => {
     navigate("/");
   }, [logout, navigate]);
 
+  const dashboardFooter = (
+    <footer className="relative z-10 mt-12 border-t border-white/10 py-10">
+      <div className="mx-auto flex max-w-7xl flex-col items-center gap-4 px-6 text-center">
+        <div className="flex items-center gap-2">
+          <img
+            src="/images/Golden%20Knight%20Logo128.png"
+            alt="IronClaw-Security"
+            className="footer-brand-logo"
+          />
+          <span className="font-tech text-sm font-bold tracking-tight">
+            IRONCLAW<span className="metal-gold-text">-SECURITY</span>
+          </span>
+        </div>
+        <div className="flex items-center gap-6 text-xs">
+          <Link
+            to="/privacy"
+            className="text-[#BFC1C2] transition hover:text-[#FFD700]"
+          >
+            Privacy Policy
+          </Link>
+          <span className="text-white/15">|</span>
+          <Link
+            to="/terms"
+            className="text-[#BFC1C2] transition hover:text-[#FFD700]"
+          >
+            Terms of Service
+          </Link>
+        </div>
+        <p className="text-xs text-[#737373]">
+          The enforcement layer serious engineers trust with production AI systems.
+        </p>
+        <p className="font-tech text-xs text-[#737373]" data-testid="powered-by">
+          Powered by &mdash; <span className="metal-gold-text">Universal Rejuvenation Inc.</span> &mdash; <span className="metal-gold-text">The Enlightenism Organization</span>
+        </p>
+      </div>
+    </footer>
+  );
+
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
     fetchDashboard();
@@ -777,14 +814,19 @@ const Dashboard = () => {
               data-testid="signout-btn"
               className="flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2 text-sm text-white/90 transition hover:border-[#EF4444]/50 hover:text-[#EF4444]"
             >
-              <LogOut size={16} /> Sign Out
+              <img
+                src="/images/Golden%20Knight%20Logo128.png"
+                alt=""
+                className="action-button-logo"
+              />
+              Sign Out
             </button>
           </div>
         </div>
       </nav>
 
       <main className="mx-auto max-w-7xl px-6 py-8">
-        <div className="mb-8 overflow-hidden rounded-[2rem] border border-[#FFD700]/20 bg-[#0a0b0d]/80 p-2 shadow-[0_0_42px_rgba(255,215,0,0.12)]">
+        <div className="mb-8">
           <img
             src={DASHBOARD_KNIGHT_SRC}
             alt="IronClaw-Security knight"
@@ -896,6 +938,7 @@ const Dashboard = () => {
           </div>
         </div>
       </main>
+      {dashboardFooter}
     </div>
   );
 };
