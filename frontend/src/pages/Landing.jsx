@@ -590,7 +590,7 @@ const Landing = () => {
                 <span className="text-gold-gradient">Protection From:</span>
               </h3>
 
-              <ul className="space-y-2">
+              <ul className="space-y-3">
                 {LANDING_PROTECTION_ITEMS.map((item) => {
                   const [title, ...rest] = item.split(" – ");
                   const description = rest.join(" – ");
@@ -598,13 +598,17 @@ const Landing = () => {
                   return (
                     <li
                       key={item}
-                      className="flex items-start gap-3 rounded-xl border border-[#FFD700]/10 bg-transparent px-3 py-2 text-left"
+                      className="flex items-start gap-3 rounded-xl border border-[#FFD700]/10 bg-transparent px-3 py-3 text-left"
                     >
-                      <span className="mt-1.5 inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-[#FFD700]" />
-                      <span className="font-tech text-[0.72rem] leading-relaxed md:text-[0.78rem]">
-                        <span className="metal-gold-text font-bold">{title}</span>
+                      <span className="mt-2 inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-[#FFD700] shadow-[0_0_10px_rgba(255,215,0,0.8)]" />
+                      <span className="leading-relaxed">
+                        <span className="block text-base font-black tracking-tight text-gold-gradient sm:text-lg">
+                          {title}
+                        </span>
                         {description ? (
-                          <span className="ml-1 text-white">– {description}</span>
+                          <span className="mt-1 block text-sm text-white sm:text-base">
+                            {description}
+                          </span>
                         ) : null}
                       </span>
                     </li>
