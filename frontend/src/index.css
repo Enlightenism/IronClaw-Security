@@ -233,6 +233,10 @@ body {
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    text-shadow: 0 0 18px rgba(255, 215, 0, 0.2);
+    animation: text-shimmer 4s linear infinite;
 }
 .metal-gold-icon {
     background: linear-gradient(145deg, rgba(255, 246, 194, 0.18), rgba(168, 134, 47, 0.12));

@@ -602,11 +602,11 @@ const Landing = () => {
                     >
                       <span className="mt-2 inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-[#FFD700] shadow-[0_0_10px_rgba(255,215,0,0.8)]" />
                       <span className="leading-relaxed">
-                        <span className="protection-title block text-base sm:text-lg">
+                        <span className="metal-gold-text block text-lg font-black tracking-tight sm:text-xl">
                           {title}
                         </span>
                         {description ? (
-                          <span className="protection-description mt-1 block text-sm sm:text-base">
+                          <span className="mt-1 block text-sm font-medium text-white sm:text-base">
                             {description}
                           </span>
                         ) : null}
