@@ -94,6 +94,25 @@ body {
     animation: text-shimmer 5s linear infinite;
 }
 
+.protection-title {
+    display: inline-block;
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    background: linear-gradient(135deg, #fff6c2 0%, #ffd700 22%, #f5d75b 38%, #c9a84c 56%, #8a6a1d 72%, #ffe57a 100%);
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: 0 0 20px rgba(255, 215, 0, 0.24);
+    animation: text-shimmer 4s linear infinite;
+}
+
+.protection-description {
+    color: #ffffff;
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.08);
+}
+
 /* ---------- Brand & hero art ---------- */
 .brand-logo-image {
     width: 2.5rem;
