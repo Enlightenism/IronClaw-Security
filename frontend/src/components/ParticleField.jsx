@@ -182,7 +182,7 @@ const ParticleField = ({ density = 180 }) => {
       ref={canvasRef}
       data-testid="particle-field"
       className="absolute inset-0 h-full w-full"
-      style={{ pointerEvents: "none" }}
+      style={{ pointerEvents: "none", background: "transparent" }}
     />
   );
 };

@@ -261,6 +261,25 @@ const PROTECTED_PLATFORMS = [
     ],
   },
   {
+    name: "Hermes Agent",
+    howItWorks:
+      "Self-hosted Python agent runtime that orchestrates LLMs through a closed-loop pipeline: reads repo, docs, memory, web/API responses, then plans and executes commands (shell, code, file edits, tool calls) based on those inputs.",
+    vulnerability: [
+      "Indirect prompt injection via context and memory: instructions hidden in documents, websites, emails, or retrieved memory can override intended behavior, influencing tool usage, command execution, or data access decisions.",
+      "CVE-2026-9366 (prompt injection / RCE in prompt builder): remote, unauthenticated attackers can inject content into _scan_context_content in agent/prompt_builder.py, altering model behavior, leaking context data, or manipulating downstream actions.",
+      "CVE-2026-10223 (memory tool injection): attackers with low privileges can inject malicious content into _scan_memory_content in tools/memory_tool.py, affecting confidentiality, integrity, and availability of the agent component.",
+      "Unrestricted code execution (execute_code tool): arbitrary Python code can run on the host with the agent's privileges, bypassing terminal safety and approval systems; enables RCE, secret exfiltration, and system changes.",
+      "Code execution sandbox escape / secret leakage: sandbox injects project root into PYTHONPATH, allowing scripts to import internal modules (config with API keys, security rules, .env paths); output sanitization can be bypassed via base64/hex/reverse encoding to exfiltrate secrets.",
+      "Persistent skill injection (critical audit finding): the agent can create SKILL.md files in ~/.hermes/skills/ that load in future sessions; once written, these act as persistent prompt injection vectors that survive restarts.",
+      "Symlink / path traversal (CVE-2026-7397): a symlink-following flaw in tools/file_tools.py can be abused via prompt injection or malicious skills to achieve persistent execution and file access beyond intended paths.",
+      "Terminal tool passing arbitrary commands to bash -c: the default local backend runs shell commands directly via subprocess with limited gating; dangerous commands can execute even if some approvals are enabled.",
+      "Skill-marketplace supply chain: malicious or compromised skills from the community marketplace can embed unsafe commands, network calls, or data exfiltration disguised as helpers; install keys make these easy to add.",
+      "Memory injection through retrieved context: attacker influences the agent's memory store via shared docs, emails, web pages, or messages; the agent later retrieves and executes those planted instructions without the operator realizing it.",
+      "Multi-provider adapter credential surfaces: adapters for different LLM providers and MCP servers expand the trust boundary; misconfiguration or injection can expose API keys and tokens across providers.",
+      "MCP-server trust boundary: compromised or malicious MCP servers can feed poisoned instructions or tool results into the agent, leading to unsafe actions or data leaks.",
+    ],
+  },
+  {
     name: "Gemini CLI",
     howItWorks:
       "CLI that runs Gemini-based agents with tool access and Agent Skills; skills provide bespoke knowledge and workflows for automation and data tasks.",
@@ -325,8 +344,8 @@ const Landing = () => {
   };
 
   return (
-    <div className="relative isolate min-h-screen overflow-x-hidden bg-[#050607] text-white">
-      <div className="pointer-events-none fixed inset-0 z-0">
+    <div className="relative isolate min-h-screen overflow-x-hidden bg-transparent text-white">
+      <div className="pointer-events-none fixed inset-0 z-0 bg-transparent">
         <Suspense fallback={null}>
           {showParticleField ? (
             <ParticleField density={PARTICLE_FIELD_DENSITY} />
