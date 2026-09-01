@@ -591,17 +591,25 @@ const Landing = () => {
               </h3>
 
               <ul className="space-y-2">
-                {LANDING_PROTECTION_ITEMS.map((item) => (
-                  <li
-                    key={item}
-                    className="flex items-start gap-3 rounded-xl border border-[#FFD700]/10 bg-transparent px-3 py-2 text-left"
-                  >
-                    <span className="mt-1.5 inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-[#FFD700]" />
-                    <span className="font-tech text-[0.72rem] leading-relaxed text-[#f6d66b] md:text-[0.78rem]">
-                      {item}
-                    </span>
-                  </li>
-                ))}
+                {LANDING_PROTECTION_ITEMS.map((item) => {
+                  const [title, ...rest] = item.split(" – ");
+                  const description = rest.join(" – ");
+
+                  return (
+                    <li
+                      key={item}
+                      className="flex items-start gap-3 rounded-xl border border-[#FFD700]/10 bg-transparent px-3 py-2 text-left"
+                    >
+                      <span className="mt-1.5 inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-[#FFD700]" />
+                      <span className="font-tech text-[0.72rem] leading-relaxed md:text-[0.78rem]">
+                        <span className="metal-gold-text font-bold">{title}</span>
+                        {description ? (
+                          <span className="ml-1 text-white">– {description}</span>
+                        ) : null}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             </motion.div>
           </section>
