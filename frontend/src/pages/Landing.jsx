@@ -173,6 +173,8 @@ const BRAND_LOGO_SRC = "/images/logo128pxl.svg";
 const GOLDEN_KNIGHT_LOGO_SRC = "/images/Golden%20Knight%20Logo128.png";
 const KNIGHT_IMAGE_SRC = "/images/Golden%20Knight%204k%202gb.png";
 
+const PARTICLE_FIELD_DENSITY = 180;
+
 const LANDING_PROTECTION_ITEMS = [
   "Direct prompt injection",
   "Indirect prompt injection",
@@ -323,7 +325,15 @@ const Landing = () => {
   };
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#050607] text-white">
+    <div className="relative isolate min-h-screen overflow-x-hidden bg-[#050607] text-white">
+      <div className="pointer-events-none fixed inset-0 z-0">
+        <Suspense fallback={null}>
+          {showParticleField ? (
+            <ParticleField density={PARTICLE_FIELD_DENSITY} />
+          ) : null}
+        </Suspense>
+      </div>
+
       <nav className="relative z-20 mx-auto flex max-w-7xl items-center justify-between px-6 py-6">
         <div className="flex items-center gap-2.5" data-testid="brand-logo">
           <img
@@ -358,10 +368,7 @@ const Landing = () => {
         </div>
       </nav>
 
-      <section className="relative overflow-hidden">
-        <Suspense fallback={null}>
-          {showParticleField ? <ParticleField /> : null}
-        </Suspense>
+      <section className="relative z-10 overflow-hidden bg-transparent">
         <div className="pointer-events-none absolute left-1/4 top-20 h-72 w-72 rounded-full bg-[#38BDF8] opacity-20 blur-[120px] animate-float-glow" />
         <div
           className="pointer-events-none absolute right-1/4 top-40 h-72 w-72 rounded-full bg-[#C9A84C] opacity-20 blur-[120px] animate-float-glow"
@@ -491,7 +498,7 @@ const Landing = () => {
 
       {showBelowFold ? (
         <>
-          <section className="relative z-10 mx-auto max-w-7xl px-6 py-20">
+          <section className="relative z-10 mx-auto max-w-7xl bg-transparent px-6 py-20">
             <motion.div
               variants={fadeUp}
               initial="hidden"
@@ -548,7 +555,7 @@ const Landing = () => {
             </div>
           </section>
 
-          <section className="relative z-10 mx-auto max-w-6xl px-6 py-8">
+          <section className="relative z-10 mx-auto max-w-6xl bg-transparent px-6 py-8">
             <motion.div
               variants={fadeUp}
               initial="hidden"
@@ -576,7 +583,7 @@ const Landing = () => {
             </motion.div>
           </section>
 
-          <section className="relative z-10 mx-auto max-w-6xl px-6 py-20">
+          <section className="relative z-10 mx-auto max-w-6xl bg-transparent px-6 py-20">
             <motion.div
               variants={fadeUp}
               initial="hidden"
@@ -648,7 +655,7 @@ const Landing = () => {
             </div>
           </section>
 
-          <section className="relative z-10 mx-auto max-w-4xl px-6 py-20">
+          <section className="relative z-10 mx-auto max-w-4xl bg-transparent px-6 py-20">
             <motion.div
               variants={fadeUp}
               initial="hidden"
@@ -699,7 +706,7 @@ const Landing = () => {
             </motion.div>
           </section>
 
-          <section className="relative z-10 mx-auto max-w-4xl px-6 pb-24 pt-10 text-center">
+          <section className="relative z-10 mx-auto max-w-4xl bg-transparent px-6 pb-24 pt-10 text-center">
             <motion.div
               variants={fadeUp}
               initial="hidden"
@@ -726,7 +733,7 @@ const Landing = () => {
             </motion.div>
           </section>
 
-          <footer className="relative z-10 border-t border-white/10 py-10">
+          <footer className="relative z-10 border-t border-white/10 bg-transparent py-10">
             <div className="mx-auto flex max-w-7xl flex-col items-center gap-4 px-6 text-center">
               <div className="flex items-center gap-2">
                 <img

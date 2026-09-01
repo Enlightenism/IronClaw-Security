@@ -7,9 +7,10 @@ import { useEffect, useRef } from "react";
  * - Faint constellation lines between nearby stars.
  * - Multiple bright gold lines that reach out and follow the cursor.
  */
-const ParticleField = ({ density = 90 }) => {
+const ParticleField = ({ density = 180 }) => {
   const canvasRef = useRef(null);
   const rafRef = useRef();
+  const attractionStrength = 1.25;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -141,9 +142,9 @@ const ParticleField = ({ density = 90 }) => {
             ctx.moveTo(s.x, s.y);
             ctx.lineTo(mouse.x, mouse.y);
             ctx.stroke();
-            // gentle pull toward cursor for a magnetic feel
-            s.x -= (dx / dist) * 0.25;
-            s.y -= (dy / dist) * 0.25;
+            // faster magnetic pull toward the cursor
+            s.x -= (dx / dist) * attractionStrength;
+            s.y -= (dy / dist) * attractionStrength;
           }
         }
       }
@@ -155,7 +156,8 @@ const ParticleField = ({ density = 90 }) => {
       const rect = canvas.getBoundingClientRect();
       mouse.x = e.clientX - rect.left;
       mouse.y = e.clientY - rect.top;
-      mouse.active = mouse.y >= 0 && mouse.y <= height;
+      mouse.active =
+        mouse.x >= 0 && mouse.x <= width && mouse.y >= 0 && mouse.y <= height;
     };
     const onLeave = () => {
       mouse.active = false;
