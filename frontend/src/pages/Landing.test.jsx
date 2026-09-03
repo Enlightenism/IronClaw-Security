@@ -235,6 +235,43 @@ describe("Landing", () => {
     }
   });
 
+  it("keeps the counters moving forward-only across rerenders and timer ticks", async () => {
+    jest.useFakeTimers();
+    jest.spyOn(Math, "random").mockReturnValue(0.25);
+
+    try {
+      const { rerender } = await renderLanding();
+
+      const threatCounter = screen.getByTestId("threat-counter");
+      const userCounter = screen.getByTestId("user-counter");
+
+      const beforeThreat = Number(threatCounter.textContent.replace(/,/g, ""));
+      const beforeUsers = Number(userCounter.textContent.replace(/,/g, ""));
+
+      rerender(
+        <MemoryRouter>
+          <Landing />
+        </MemoryRouter>,
+      );
+
+      act(() => {
+        jest.advanceTimersByTime(20000);
+      });
+
+      const afterThreat = Number(threatCounter.textContent.replace(/,/g, ""));
+      const afterUsers = Number(userCounter.textContent.replace(/,/g, ""));
+
+      expect(afterThreat).toBeGreaterThanOrEqual(beforeThreat);
+      expect(afterThreat - beforeThreat).toBeGreaterThanOrEqual(2);
+      expect(afterThreat - beforeThreat).toBeLessThanOrEqual(3);
+      expect(afterUsers).toBeGreaterThanOrEqual(beforeUsers);
+      expect(afterUsers - beforeUsers).toBe(1);
+    } finally {
+      jest.restoreAllMocks();
+      jest.useRealTimers();
+    }
+  });
+
   it("opens signin auth modal when signin is clicked and no user exists", async () => {
     await renderLanding({ user: null });
 

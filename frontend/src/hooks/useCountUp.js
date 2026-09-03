@@ -22,35 +22,45 @@ export function useCountUp(end, duration = 1400, deps = [], from = 0) {
 
   const [value, setValue] = useState(prefersReduced ? target : start);
   const frame = useRef();
+  const lastValueRef = useRef(prefersReduced ? target : start);
 
   useEffect(() => {
-    const t = Number(end) || 0;
-    const s = Number(from) || 0;
+    const current = Number(lastValueRef.current) || 0;
+    const boundedTarget = Number.isFinite(target)
+      ? Math.max(target, current)
+      : current;
 
-    // Skip animation entirely when motion is reduced or values are identical.
     if (
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches
     ) {
-      setValue(t);
+      setValue(boundedTarget);
+      lastValueRef.current = boundedTarget;
       return;
     }
 
-    if (t === s) {
-      setValue(t);
+    if (boundedTarget === current) {
+      setValue(current);
+      lastValueRef.current = current;
       return;
     }
 
     let startTime;
+    const animationStart = current;
 
     const step = (ts) => {
       if (!startTime) startTime = ts;
       const progress = Math.min((ts - startTime) / duration, 1);
-      setValue(Math.round(s + (t - s) * easeOutQuad(progress)));
+      const nextValue = Math.round(
+        animationStart +
+          (boundedTarget - animationStart) * easeOutQuad(progress),
+      );
+      setValue(Math.min(nextValue, boundedTarget));
       if (progress < 1) {
         frame.current = requestAnimationFrame(step);
       } else {
-        setValue(t);
+        setValue(boundedTarget);
+        lastValueRef.current = boundedTarget;
       }
     };
 
