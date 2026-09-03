@@ -167,6 +167,38 @@ describe("Landing", () => {
     expect(screen.getByTestId("user-counter")).toHaveTextContent("1,087");
   });
 
+  it("keeps the counters monotonic with the required small increments", async () => {
+    jest.useFakeTimers();
+    jest.spyOn(Math, "random").mockReturnValue(0.25);
+
+    try {
+      await renderLanding();
+
+      const threatCounter = screen.getByTestId("threat-counter");
+      const userCounter = screen.getByTestId("user-counter");
+
+      const beforeThreat = Number(threatCounter.textContent.replace(/,/g, ""));
+      const beforeUsers = Number(userCounter.textContent.replace(/,/g, ""));
+
+      act(() => {
+        jest.advanceTimersByTime(20000);
+      });
+
+      const afterThreat = Number(threatCounter.textContent.replace(/,/g, ""));
+      const afterUsers = Number(userCounter.textContent.replace(/,/g, ""));
+
+      expect(afterThreat).toBeGreaterThanOrEqual(beforeThreat);
+      expect(afterThreat - beforeThreat).toBeGreaterThanOrEqual(2);
+      expect(afterThreat - beforeThreat).toBeLessThanOrEqual(3);
+
+      expect(afterUsers).toBeGreaterThanOrEqual(beforeUsers);
+      expect(afterUsers - beforeUsers).toBe(1);
+    } finally {
+      jest.restoreAllMocks();
+      jest.useRealTimers();
+    }
+  });
+
   it("opens signin auth modal when signin is clicked and no user exists", async () => {
     await renderLanding({ user: null });
 

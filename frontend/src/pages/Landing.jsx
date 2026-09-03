@@ -178,7 +178,7 @@ const LiveCounter = ({
   useEffect(() => {
     const persisted = getPersistedState();
     const nextValue = Math.max(base, persisted.value);
-    setValue((current) => (current === nextValue ? current : nextValue));
+    setValue((current) => (current >= nextValue ? current : nextValue));
   }, [base, getPersistedState]);
 
   useEffect(() => {
@@ -187,7 +187,9 @@ const LiveCounter = ({
       setValue((current) => {
         const delta = typeof step === "function" ? step() : Number(step) || 1;
         const nextValue = Math.max(base, current + delta);
-        syncPersistedState(nextValue);
+        if (nextValue !== current) {
+          syncPersistedState(nextValue);
+        }
         return nextValue;
       });
     };
@@ -213,7 +215,7 @@ const LiveCounter = ({
         ) {
           setValue((current) => {
             const nextValue = Math.max(base, Number(parsed.value));
-            return current === nextValue ? current : nextValue;
+            return current >= nextValue ? current : nextValue;
           });
         }
       } catch {
@@ -507,8 +509,8 @@ const Landing = () => {
               <div className="text-4xl font-bold drop-shadow-[0_0_18px_rgba(56,189,248,0.5)]">
                 <LiveCounter
                   base={5344}
-                  minMs={11000}
-                  maxMs={20000}
+                  minMs={15000}
+                  maxMs={24000}
                   step={() => (Math.random() < 0.5 ? 2 : 3)}
                   color="#38BDF8"
                   testid="threat-counter"
@@ -524,8 +526,8 @@ const Landing = () => {
               <div className="text-4xl font-bold drop-shadow-[0_0_18px_rgba(255,215,0,0.45)]">
                 <LiveCounter
                   base={1087}
-                  minMs={13000}
-                  maxMs={22000}
+                  minMs={17000}
+                  maxMs={26000}
                   step={1}
                   color="#FFD700"
                   testid="user-counter"

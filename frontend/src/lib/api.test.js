@@ -455,35 +455,64 @@ describe("tools.inspect", () => {
 });
 
 describe("policies", () => {
-  it("list() calls api.get('/policies')", () => {
-    mockGet.mockResolvedValueOnce({ data: [] });
+  it("list() calls api.get('/policy/status')", () => {
+    mockGet.mockResolvedValueOnce({ data: {} });
     policies.list();
-    expect(mockGet).toHaveBeenCalledWith("/policies");
+    expect(mockGet).toHaveBeenCalledWith("/policy/status");
   });
 
-  it("get(id) calls api.get('/policies/<id>')", () => {
+  it("get() calls the policy status endpoint", () => {
     mockGet.mockResolvedValueOnce({ data: {} });
     policies.get("pol-001");
-    expect(mockGet).toHaveBeenCalledWith("/policies/pol-001");
+    expect(mockGet).toHaveBeenCalledWith("/policy/status");
   });
 
-  it("create(payload) calls api.post('/policies', payload)", () => {
+  it("create(payload) posts the normalized policy contract to /policy/create", () => {
     mockPost.mockResolvedValueOnce({ data: {} });
-    const payload = { name: "deny-all" };
+    const payload = {
+      name: "deny-all",
+      action: "block",
+      pattern: "suspicious",
+      priority: 12,
+      policy_type: "tool_abuse",
+    };
+
     policies.create(payload);
-    expect(mockPost).toHaveBeenCalledWith("/policies", payload);
+
+    expect(mockPost).toHaveBeenCalledWith(
+      "/policy/create",
+      expect.objectContaining({
+        name: "deny-all",
+        enforcement_mode: "block",
+        rules: [
+          expect.objectContaining({
+            name: "deny-all",
+            pattern: "suspicious",
+            enforcement_mode: "block",
+            categories: ["tool_abuse"],
+          }),
+        ],
+      }),
+    );
   });
 
-  it("update(id, payload) calls api.put('/policies/<id>', payload)", () => {
-    mockPut.mockResolvedValueOnce({ data: {} });
-    const payload = { name: "allow-safe" };
+  it("update(id, payload) calls the policy update endpoint with the backend payload contract", () => {
+    mockPatch.mockResolvedValueOnce({ data: {} });
+    const payload = { name: "allow-safe", action: "allow", pattern: "safe" };
     policies.update("pol-001", payload);
-    expect(mockPut).toHaveBeenCalledWith("/policies/pol-001", payload);
+    expect(mockPatch).toHaveBeenCalledWith(
+      "/policy/update",
+      expect.objectContaining({
+        id: "pol-001",
+        name: "allow-safe",
+        enforcement_mode: "allow",
+      }),
+    );
   });
 
-  it("delete(id) calls api.delete('/policies/<id>')", () => {
+  it("delete(id) resets the policy engine via the supported backend route", () => {
     mockDelete.mockResolvedValueOnce({ data: {} });
     policies.delete("pol-001");
-    expect(mockDelete).toHaveBeenCalledWith("/policies/pol-001");
+    expect(mockDelete).toHaveBeenCalledWith("/policy/reset");
   });
 });
