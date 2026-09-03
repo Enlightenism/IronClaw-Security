@@ -130,6 +130,7 @@ const renderLanding = async (authState = { user: null }) => {
 describe("Landing", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    globalThis.__IC_COUNTERS__ = {};
 
     Object.defineProperty(window, "localStorage", {
       value: {
@@ -196,6 +197,41 @@ describe("Landing", () => {
     } finally {
       jest.restoreAllMocks();
       jest.useRealTimers();
+    }
+  });
+
+  it("ignores stale lower persisted values so the counter never moves backward", async () => {
+    const staleValue = 5000;
+    const staleSnapshot = JSON.stringify({
+      value: staleValue,
+      updatedAt: Date.now(),
+    });
+    const originalGetItem = window.localStorage.getItem;
+    const originalSetItem = window.localStorage.setItem;
+    globalThis.__IC_COUNTERS__ = {};
+
+    window.localStorage.getItem = jest.fn((key) => {
+      if (key === "ic_threats_blocked") {
+        return staleSnapshot;
+      }
+      return null;
+    });
+    window.localStorage.setItem = jest.fn((key, value) => {
+      if (key === "ic_threats_blocked") {
+        const parsed = JSON.parse(value);
+        if (Number(parsed.value) > staleValue) {
+          return originalSetItem.call(window.localStorage, key, value);
+        }
+      }
+      return undefined;
+    });
+
+    try {
+      await renderLanding();
+      expect(screen.getByTestId("threat-counter")).toHaveTextContent("5,344");
+    } finally {
+      window.localStorage.getItem = originalGetItem;
+      window.localStorage.setItem = originalSetItem;
     }
   });
 

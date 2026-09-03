@@ -116,6 +116,17 @@ const LiveCounter = ({
   testid,
   storageKey,
 }) => {
+  const normalizeCounterValue = useCallback(
+    (nextValue) => {
+      const numericValue = Number(nextValue);
+      if (!Number.isFinite(numericValue)) {
+        return base;
+      }
+      return Math.max(base, numericValue);
+    },
+    [base],
+  );
+
   const getPersistedState = useCallback(() => {
     const defaultState = { value: base, updatedAt: Date.now() };
 
@@ -125,7 +136,12 @@ const LiveCounter = ({
 
     const memoryStore = globalThis.__IC_COUNTERS__?.[storageKey];
     if (memoryStore && Number.isFinite(memoryStore.value)) {
-      return memoryStore;
+      return {
+        value: normalizeCounterValue(memoryStore.value),
+        updatedAt: Number.isFinite(memoryStore.updatedAt)
+          ? Number(memoryStore.updatedAt)
+          : Date.now(),
+      };
     }
 
     try {
@@ -144,30 +160,36 @@ const LiveCounter = ({
         ? Number(parsed.updatedAt)
         : Date.now();
 
-      return { value: Math.max(base, value), updatedAt };
+      return { value: normalizeCounterValue(value), updatedAt };
     } catch {
       return defaultState;
     }
-  }, [base, storageKey]);
+  }, [base, normalizeCounterValue, storageKey]);
 
   const syncPersistedState = useCallback(
     (nextValue) => {
-      const snapshot = { value: nextValue, updatedAt: Date.now() };
+      const safeValue = normalizeCounterValue(nextValue);
+      const snapshot = { value: safeValue, updatedAt: Date.now() };
 
       if (typeof window !== "undefined") {
-        globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
-        globalThis.__IC_COUNTERS__[storageKey] = snapshot;
+        const currentMemory = globalThis.__IC_COUNTERS__?.[storageKey];
+        const currentValue = Number(currentMemory?.value);
 
-        try {
-          localStorage.setItem(storageKey, JSON.stringify(snapshot));
-        } catch {
-          // ignore storage errors.
+        if (!Number.isFinite(currentValue) || safeValue >= currentValue) {
+          globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
+          globalThis.__IC_COUNTERS__[storageKey] = snapshot;
+
+          try {
+            localStorage.setItem(storageKey, JSON.stringify(snapshot));
+          } catch {
+            // ignore storage errors.
+          }
         }
       }
 
       return snapshot;
     },
-    [storageKey],
+    [normalizeCounterValue, storageKey],
   );
 
   const [value, setValue] = useState(() => {
@@ -186,17 +208,29 @@ const LiveCounter = ({
     const tick = () => {
       setValue((current) => {
         const delta = typeof step === "function" ? step() : Number(step) || 1;
-        const nextValue = Math.max(base, current + delta);
-        if (nextValue !== current) {
+        const candidateValue = current + delta;
+        const nextValue = normalizeCounterValue(candidateValue);
+
+        if (nextValue > current) {
           syncPersistedState(nextValue);
+          return nextValue;
         }
-        return nextValue;
+
+        return current;
       });
     };
 
     const intervalId = setInterval(tick, intervalMs);
     return () => clearInterval(intervalId);
-  }, [base, maxMs, minMs, step, storageKey, syncPersistedState]);
+  }, [
+    base,
+    maxMs,
+    minMs,
+    normalizeCounterValue,
+    step,
+    storageKey,
+    syncPersistedState,
+  ]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -213,10 +247,8 @@ const LiveCounter = ({
           typeof parsed === "object" &&
           Number.isFinite(parsed.value)
         ) {
-          setValue((current) => {
-            const nextValue = Math.max(base, Number(parsed.value));
-            return current >= nextValue ? current : nextValue;
-          });
+          const nextValue = normalizeCounterValue(parsed.value);
+          setValue((current) => (nextValue > current ? nextValue : current));
         }
       } catch {
         // ignore invalid storage payloads.
@@ -225,7 +257,7 @@ const LiveCounter = ({
 
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
-  }, [base, storageKey]);
+  }, [normalizeCounterValue, storageKey]);
 
   const animated = useCountUp(value, 900, [value], base);
 
@@ -509,8 +541,8 @@ const Landing = () => {
               <div className="text-4xl font-bold drop-shadow-[0_0_18px_rgba(56,189,248,0.5)]">
                 <LiveCounter
                   base={5344}
-                  minMs={15000}
-                  maxMs={24000}
+                  minMs={12000}
+                  maxMs={18000}
                   step={() => (Math.random() < 0.5 ? 2 : 3)}
                   color="#38BDF8"
                   testid="threat-counter"
@@ -526,8 +558,8 @@ const Landing = () => {
               <div className="text-4xl font-bold drop-shadow-[0_0_18px_rgba(255,215,0,0.45)]">
                 <LiveCounter
                   base={1087}
-                  minMs={17000}
-                  maxMs={26000}
+                  minMs={14000}
+                  maxMs={21000}
                   step={1}
                   color="#FFD700"
                   testid="user-counter"
