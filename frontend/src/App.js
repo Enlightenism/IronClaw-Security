@@ -16,12 +16,34 @@ const NotFound = lazy(() => import("@/pages/NotFound"));
 const PrivateRoute = ({ children }) => {
   const { user, session, loading } = useAuth();
 
-  if (loading) return null;
+  if (loading) {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex min-h-screen items-center justify-center bg-[#050607] text-[#BFC1C2]"
+      >
+        <span className="font-tech text-xs uppercase tracking-[0.28em] text-[#FFD700]">
+          Loading
+        </span>
+      </div>
+    );
+  }
 
   return user || session ? children : <Navigate to="/" replace />;
 };
 
-const RouteFallback = () => null;
+const RouteFallback = () => (
+  <div
+    role="status"
+    aria-live="polite"
+    className="flex min-h-screen items-center justify-center bg-[#050607] text-[#BFC1C2]"
+  >
+    <span className="font-tech text-xs uppercase tracking-[0.28em] text-[#FFD700]">
+      Loading
+    </span>
+  </div>
+);
 
 function App() {
   return (

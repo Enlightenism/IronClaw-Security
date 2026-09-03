@@ -180,11 +180,9 @@ describe("AuthModal", () => {
       expect(mockAuthenticate).not.toHaveBeenCalled();
     });
 
-    it("shows success status when email is valid after blur", async () => {
+    it("shows success status immediately while a valid email is being typed", async () => {
       renderModal({ initialMode: "signin" });
-      const input = screen.getByTestId("auth-email-input");
       fillEmail("operator@ironclaw.io");
-      fireEvent.blur(input);
 
       await waitFor(() => {
         expect(screen.getByTestId("auth-email-status")).toHaveTextContent(

@@ -154,9 +154,13 @@ const PromptInspector = () => {
               data-testid="inspector-logo"
               aria-label="Back to Control Room"
             >
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#FFD700]/30 bg-[#C9A84C]/10">
-                <ShieldCheck className="text-[#FFD700]" size={20} />
-              </div>
+              <img
+                src="/images/Golden%20Knight%20Logo128.png"
+                alt="IronClaw-Security"
+                className="brand-logo-image"
+                loading="eager"
+                decoding="async"
+              />
               <span className="font-tech text-lg font-bold tracking-tight">
                 IRONCLAW<span className="metal-gold-text">-SECURITY</span>
               </span>
