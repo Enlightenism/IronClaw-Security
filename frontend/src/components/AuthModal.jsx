@@ -13,7 +13,6 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [emailTouched, setEmailTouched] = useState(false);
   const [emailError, setEmailError] = useState("");
   const [emailStatus, setEmailStatus] = useState("");
   const { authenticate, register } = useAuth();
@@ -39,32 +38,10 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
       setEmail("");
       setPassword("");
       setLoading(false);
-      setEmailTouched(false);
       setEmailError("");
       setEmailStatus("");
     }
   }, [initialMode, open]);
-
-  useEffect(() => {
-    if (!open) return;
-
-    if (!emailTouched) {
-      setEmailError("");
-      setEmailStatus("");
-      return;
-    }
-
-    const nextEmailError = validateEmail(trimmedEmail);
-
-    if (nextEmailError) {
-      setEmailError(nextEmailError);
-      setEmailStatus("");
-      return;
-    }
-
-    setEmailError("");
-    setEmailStatus("Email looks good.");
-  }, [emailTouched, open, trimmedEmail, validateEmail]);
 
   if (!open) return null;
 
@@ -72,8 +49,6 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
     e.preventDefault();
 
     if (loading) return;
-
-    setEmailTouched(true);
 
     const nextEmailError = validateEmail(trimmedEmail);
 
@@ -123,7 +98,6 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
     if (loading) return;
     setMode(nextMode);
     setPassword("");
-    setEmailTouched(false);
     setEmailError("");
     setEmailStatus("");
   };
@@ -188,10 +162,28 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
                 autoComplete="email"
                 value={email}
                 onChange={(e) => {
-                  setEmail(e.target.value);
-                  if (!emailTouched) setEmailTouched(true);
+                  const nextValue = e.target.value;
+                  setEmail(nextValue);
+
+                  const trimmedValue = nextValue.trim();
+
+                  if (!trimmedValue) {
+                    setEmailError("Email is required.");
+                    setEmailStatus("");
+                    return;
+                  }
+
+                  const nextEmailError = validateEmail(trimmedValue);
+
+                  if (nextEmailError) {
+                    setEmailError(nextEmailError);
+                    setEmailStatus("");
+                    return;
+                  }
+
+                  setEmailError("");
+                  setEmailStatus("Email looks good.");
                 }}
-                onBlur={() => setEmailTouched(true)}
                 placeholder="you@company.com"
                 data-testid="auth-email-input"
                 aria-invalid={emailError ? "true" : "false"}

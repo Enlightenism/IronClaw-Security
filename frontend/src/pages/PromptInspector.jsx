@@ -11,6 +11,7 @@ import {
   RotateCcw,
   ChevronDown,
   ChevronUp,
+  ArrowLeft,
 } from "lucide-react";
 import { toast } from "sonner";
 import api from "@/lib/api";
@@ -136,20 +137,31 @@ const PromptInspector = () => {
     <div className="min-h-screen bg-[#050607] text-white">
       {/* ── Nav ── */}
       <nav className="sticky top-0 z-40 border-b border-white/10 bg-[#050607]/80 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-          <button
-            onClick={() => navigate("/dashboard")}
-            className="flex items-center gap-2.5"
-            data-testid="inspector-logo"
-            aria-label="Back to Control Room"
-          >
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#FFD700]/30 bg-[#C9A84C]/10">
-              <ShieldCheck className="text-[#FFD700]" size={20} />
-            </div>
-            <span className="font-tech text-lg font-bold tracking-tight">
-              IRONCLAW<span className="metal-gold-text">-SECURITY</span>
-            </span>
-          </button>
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-6 py-4">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigate("/dashboard")}
+              className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-[#BFC1C2] transition hover:border-[#FFD700]/50 hover:text-white"
+              data-testid="inspector-back-btn"
+              aria-label="Back to dashboard"
+            >
+              <ArrowLeft size={16} />
+              Back
+            </button>
+            <button
+              onClick={() => navigate("/dashboard")}
+              className="flex items-center gap-2.5"
+              data-testid="inspector-logo"
+              aria-label="Back to Control Room"
+            >
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#FFD700]/30 bg-[#C9A84C]/10">
+                <ShieldCheck className="text-[#FFD700]" size={20} />
+              </div>
+              <span className="font-tech text-lg font-bold tracking-tight">
+                IRONCLAW<span className="metal-gold-text">-SECURITY</span>
+              </span>
+            </button>
+          </div>
           <div className="flex items-center gap-4">
             <span className="font-tech hidden text-sm text-[#BFC1C2] sm:block">
               {user?.email}

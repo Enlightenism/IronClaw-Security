@@ -944,18 +944,24 @@ const Dashboard = () => {
                         </span>
                       </div>
 
-                      {card.maskedKey ? (
-                        <div className="space-y-3">
+                      <div className="space-y-3">
+                        {card.maskedKey ? (
                           <div className="text-xs uppercase tracking-[0.2em] text-[#BFC1C2]">
                             Active install key
                           </div>
-                          <div className="flex items-start gap-2">
-                            <textarea
-                              readOnly
-                              value={card.maskedKey}
-                              data-testid={`${card.testid}-value`}
-                              className="min-h-[92px] flex-1 resize-none rounded-xl border border-emerald-400/20 bg-emerald-500/5 px-3 py-2 font-mono text-sm text-emerald-100 outline-none"
-                            />
+                        ) : null}
+                        <div className="flex items-start gap-2">
+                          <textarea
+                            readOnly
+                            value={card.maskedKey || card.placeholderText}
+                            data-testid={`${card.testid}-value`}
+                            className={`min-h-[92px] flex-1 resize-none rounded-xl border px-3 py-2 font-mono text-sm outline-none ${
+                              card.maskedKey
+                                ? "border-emerald-400/20 bg-emerald-500/5 text-emerald-100"
+                                : "border-white/10 bg-white/5 text-[#BFC1C2]"
+                            }`}
+                          />
+                          {card.maskedKey ? (
                             <button
                               type="button"
                               onClick={() =>
@@ -971,13 +977,9 @@ const Dashboard = () => {
                                 <Copy size={16} />
                               )}
                             </button>
-                          </div>
+                          ) : null}
                         </div>
-                      ) : (
-                        <p className="text-sm text-[#BFC1C2]">
-                          {card.placeholderText}
-                        </p>
-                      )}
+                      </div>
                     </div>
                   </div>
                 );

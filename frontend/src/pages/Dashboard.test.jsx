@@ -897,8 +897,11 @@ describe("dashboard structure", () => {
     });
 
     expect(
-      screen.getAllByText("Keys will be generated after purchase").length,
-    ).toBeGreaterThan(0);
+      screen.getByTestId("install-key-card-claude_code-value"),
+    ).toHaveValue("Keys will be generated after purchase");
+    expect(
+      screen.queryByTestId("install-key-card-claude_code-copy"),
+    ).not.toBeInTheDocument();
   });
 
   it("renders a copyable textarea for a generated Hermes install key", async () => {

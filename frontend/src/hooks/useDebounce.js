@@ -11,17 +11,12 @@ import { useEffect, useRef, useState } from "react";
  * - Delay of 0 is valid and passes the value through on the next tick.
  *
  * @param {*}      value - The value to debounce (any type).
- * @param {number} delay - Debounce delay in milliseconds (default 400).
+ * @param {number} delay - Debounce delay in milliseconds. Default is 0 so
+ * input-driven behavior stays instant unless a caller explicitly requests a
+ * delay.
  * @returns {*} The debounced value.
- *
- * @example
- * // Debounce email input before firing an API validation call
- * const debouncedEmail = useDebounce(email, 400);
- * useEffect(() => {
- *   if (debouncedEmail) validateEmailRemotely(debouncedEmail);
- * }, [debouncedEmail]);
  */
-export function useDebounce(value, delay = 400) {
+export function useDebounce(value, delay = 0) {
   const [debouncedValue, setDebouncedValue] = useState(value);
   const timerRef = useRef(null);
 

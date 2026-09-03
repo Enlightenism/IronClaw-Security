@@ -109,8 +109,8 @@ const fadeUp = {
 
 const LiveCounter = ({
   base,
-  minMs = 8000,
-  maxMs = 12000,
+  minMs = 18000,
+  maxMs = 28000,
   step,
   color,
   testid,
@@ -507,9 +507,9 @@ const Landing = () => {
               <div className="text-4xl font-bold drop-shadow-[0_0_18px_rgba(56,189,248,0.5)]">
                 <LiveCounter
                   base={5344}
-                  minMs={8000}
-                  maxMs={12000}
-                  step={2}
+                  minMs={18000}
+                  maxMs={28000}
+                  step={1}
                   color="#38BDF8"
                   testid="threat-counter"
                   storageKey="ic_threats_blocked"
@@ -524,8 +524,8 @@ const Landing = () => {
               <div className="text-4xl font-bold drop-shadow-[0_0_18px_rgba(255,215,0,0.45)]">
                 <LiveCounter
                   base={1087}
-                  minMs={10000}
-                  maxMs={14000}
+                  minMs={22000}
+                  maxMs={32000}
                   step={1}
                   color="#FFD700"
                   testid="user-counter"
