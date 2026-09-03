@@ -123,7 +123,7 @@ const DEFAULT_TOKENS = {
   goose_command: "goose --token goose-456",
   gemini_cli_command: "gemini --token gemini-789",
   copilot_command: "copilot --token copilot-001",
-  security_guardian_command: "ironclaw-skill --token guardian-999",
+  hermes_command: "hermes --token hermes-999",
 };
 
 function makeAttack(index) {
@@ -855,7 +855,7 @@ describe("dashboard structure", () => {
     expect(capturedWalletProps.balance).toBe(9999);
   });
 
-  it("renders all seven install-key platform cards until a paid active key exists", async () => {
+  it("renders the canonical Hermes card and all platform cards until a paid active key exists", async () => {
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard/overview") {
         return Promise.resolve({
@@ -890,14 +890,58 @@ describe("dashboard structure", () => {
       expect(
         screen.getByTestId("install-key-card-copilot"),
       ).toBeInTheDocument();
+      expect(screen.getByTestId("install-key-card-hermes")).toBeInTheDocument();
       expect(
-        screen.getByTestId("install-key-card-security_guardian"),
-      ).toBeInTheDocument();
+        screen.queryByTestId("install-key-card-security_guardian"),
+      ).not.toBeInTheDocument();
     });
 
     expect(
       screen.getAllByText("Keys will be generated after purchase").length,
     ).toBeGreaterThan(0);
+  });
+
+  it("renders a copyable textarea for a generated Hermes install key", async () => {
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard/overview") {
+        return Promise.resolve({
+          data: {
+            ...DEFAULT_DASH,
+            install_keys: [
+              {
+                program: "hermes",
+                status: "active",
+                masked_key: "ic_install_hermes_...abcd",
+                metadata: {},
+              },
+            ],
+          },
+        });
+      }
+      if (url === "/integrations/token") {
+        return Promise.resolve({
+          data: {
+            status: "ok",
+            hermes_command: "hermes --token hermes-999",
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("install-key-card-hermes-value")).toHaveValue(
+        "ic_install_hermes_...abcd",
+      );
+    });
+
+    expect(
+      screen.getByTestId("install-key-card-hermes-copy"),
+    ).toBeInTheDocument();
   });
 
   it("renders the masked paid install key only when a valid active install key exists", async () => {
@@ -952,7 +996,10 @@ describe("dashboard structure", () => {
       expect(screen.getByTestId("goose-card")).toBeInTheDocument();
       expect(screen.getByTestId("gemini_cli-card")).toBeInTheDocument();
       expect(screen.getByTestId("copilot-card")).toBeInTheDocument();
-      expect(screen.getByTestId("security_guardian-card")).toBeInTheDocument();
+      expect(screen.getByTestId("hermes-card")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("security_guardian-card"),
+      ).not.toBeInTheDocument();
     });
   });
 

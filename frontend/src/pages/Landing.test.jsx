@@ -160,6 +160,13 @@ describe("Landing", () => {
     expect(screen.getByTestId("user-counter")).toBeInTheDocument();
   });
 
+  it("starts each landing counter from the canonical baseline values", async () => {
+    await renderLanding();
+
+    expect(screen.getByTestId("threat-counter")).toHaveTextContent("5,344");
+    expect(screen.getByTestId("user-counter")).toHaveTextContent("1,087");
+  });
+
   it("opens signin auth modal when signin is clicked and no user exists", async () => {
     await renderLanding({ user: null });
 

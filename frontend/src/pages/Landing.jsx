@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { motion } from "framer-motion";
 import { useNavigate, Link } from "react-router-dom";
 import {
@@ -109,62 +109,127 @@ const fadeUp = {
 
 const LiveCounter = ({
   base,
-  minMs = 15000,
-  maxMs = 20000,
+  minMs = 8000,
+  maxMs = 12000,
   step,
   color,
   testid,
   storageKey,
 }) => {
-  let stored;
-  try {
-    stored = parseInt(localStorage.getItem(storageKey) || "", 10);
-  } catch {
-    stored = NaN;
-  }
+  const getPersistedState = useCallback(() => {
+    const defaultState = { value: base, updatedAt: Date.now() };
 
-  const initial = Number.isFinite(stored) && stored >= base ? stored : base;
+    if (typeof window === "undefined") {
+      return defaultState;
+    }
 
-  const [value, setValue] = useState(initial);
-  const [live, setLive] = useState(false);
-  const prevRef = useRef(initial);
+    const memoryStore = globalThis.__IC_COUNTERS__?.[storageKey];
+    if (memoryStore && Number.isFinite(memoryStore.value)) {
+      return memoryStore;
+    }
 
-  const mountAnimated = useCountUp(initial, 2000, [], initial);
-  const liveAnimated = useCountUp(value, 600, [value], prevRef.current);
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) {
+        return defaultState;
+      }
+
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") {
+        return defaultState;
+      }
+
+      const value = Number.isFinite(parsed.value) ? Number(parsed.value) : base;
+      const updatedAt = Number.isFinite(parsed.updatedAt)
+        ? Number(parsed.updatedAt)
+        : Date.now();
+
+      return { value: Math.max(base, value), updatedAt };
+    } catch {
+      return defaultState;
+    }
+  }, [base, storageKey]);
+
+  const syncPersistedState = useCallback(
+    (nextValue) => {
+      const snapshot = { value: nextValue, updatedAt: Date.now() };
+
+      if (typeof window !== "undefined") {
+        globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
+        globalThis.__IC_COUNTERS__[storageKey] = snapshot;
+
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(snapshot));
+        } catch {
+          // ignore storage errors.
+        }
+      }
+
+      return snapshot;
+    },
+    [storageKey],
+  );
+
+  const [value, setValue] = useState(() => {
+    const persisted = getPersistedState();
+    return Math.max(base, persisted.value);
+  });
 
   useEffect(() => {
-    const t = setTimeout(() => setLive(true), 2100);
-    return () => clearTimeout(t);
-  }, []);
+    const persisted = getPersistedState();
+    const nextValue = Math.max(base, persisted.value);
+    setValue((current) => (current === nextValue ? current : nextValue));
+  }, [base, getPersistedState]);
 
   useEffect(() => {
-    if (!live) return;
-    let timer;
+    const intervalMs = minMs + Math.random() * (maxMs - minMs);
     const tick = () => {
-      const delay = minMs + Math.random() * (maxMs - minMs);
-      timer = setTimeout(() => {
-        setValue((v) => {
-          const next = v + (typeof step === "function" ? step() : step);
-          prevRef.current = v;
-          try {
-            localStorage.setItem(storageKey, String(next));
-          } catch {
-            // ignore storage errors
-          }
-          return next;
-        });
-        tick();
-      }, delay);
+      setValue((current) => {
+        const delta = typeof step === "function" ? step() : Number(step) || 1;
+        const nextValue = Math.max(base, current + delta);
+        syncPersistedState(nextValue);
+        return nextValue;
+      });
     };
-    tick();
-    return () => clearTimeout(timer);
-  }, [live, minMs, maxMs, step, storageKey]);
 
-  const shown = live ? liveAnimated : mountAnimated;
+    const intervalId = setInterval(tick, intervalMs);
+    return () => clearInterval(intervalId);
+  }, [base, maxMs, minMs, step, storageKey, syncPersistedState]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const handleStorage = (event) => {
+      if (event.key !== storageKey || !event.newValue) {
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(event.newValue);
+        if (
+          parsed &&
+          typeof parsed === "object" &&
+          Number.isFinite(parsed.value)
+        ) {
+          setValue((current) => {
+            const nextValue = Math.max(base, Number(parsed.value));
+            return current === nextValue ? current : nextValue;
+          });
+        }
+      } catch {
+        // ignore invalid storage payloads.
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, [base, storageKey]);
+
+  const animated = useCountUp(value, 900, [value], base);
 
   return (
     <span className="font-tech" style={{ color }} data-testid={testid}>
-      {shown.toLocaleString()}
+      {animated.toLocaleString()}
     </span>
   );
 };
@@ -379,13 +444,8 @@ const Landing = () => {
           <button
             onClick={() => openAuth("signup")}
             data-testid="nav-signup-btn"
-            className="btn-shimmer inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-[#C9A84C] to-[#FFD700] px-5 py-2 text-sm font-semibold text-black transition hover:shadow-[0_0_22px_rgba(255,215,0,0.4)]"
+            className="btn-shimmer inline-flex items-center justify-center rounded-lg bg-gradient-to-r from-[#C9A84C] to-[#FFD700] px-5 py-2 text-sm font-semibold text-black transition hover:shadow-[0_0_22px_rgba(255,215,0,0.4)]"
           >
-            <img
-              src={GOLDEN_KNIGHT_LOGO_SRC}
-              alt=""
-              className="action-button-logo"
-            />
             Sign Up
           </button>
         </div>
@@ -446,10 +506,10 @@ const Landing = () => {
               </div>
               <div className="text-4xl font-bold drop-shadow-[0_0_18px_rgba(56,189,248,0.5)]">
                 <LiveCounter
-                  base={12000}
-                  minMs={15000}
-                  maxMs={20000}
-                  step={() => Math.floor(Math.random() * 7) + 1}
+                  base={5344}
+                  minMs={8000}
+                  maxMs={12000}
+                  step={2}
                   color="#38BDF8"
                   testid="threat-counter"
                   storageKey="ic_threats_blocked"
@@ -463,9 +523,9 @@ const Landing = () => {
               </div>
               <div className="text-4xl font-bold drop-shadow-[0_0_18px_rgba(255,215,0,0.45)]">
                 <LiveCounter
-                  base={1000}
-                  minMs={15000}
-                  maxMs={20000}
+                  base={1087}
+                  minMs={10000}
+                  maxMs={14000}
                   step={1}
                   color="#FFD700"
                   testid="user-counter"
@@ -494,11 +554,6 @@ const Landing = () => {
               data-testid="hero-signup-btn"
               className="btn-shimmer inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#C9A84C] to-[#FFD700] px-8 py-3.5 font-semibold text-black transition hover:shadow-[0_0_28px_rgba(255,215,0,0.45)]"
             >
-              <img
-                src={GOLDEN_KNIGHT_LOGO_SRC}
-                alt=""
-                className="action-button-logo"
-              />
               Sign Up <ArrowRight size={18} />
             </button>
           </motion.div>
@@ -758,19 +813,14 @@ const Landing = () => {
                 data-testid="footer-getstarted-btn"
                 className="btn-shimmer mt-8 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#C9A84C] to-[#FFD700] px-10 py-4 text-lg font-semibold text-black transition hover:shadow-[0_0_32px_rgba(255,215,0,0.5)]"
               >
-                <img
-                  src={GOLDEN_KNIGHT_LOGO_SRC}
-                  alt=""
-                  className="action-button-logo"
-                />
                 Get Started <ArrowRight size={20} />
               </button>
             </motion.div>
           </section>
 
-          <footer className="relative z-10 border-t border-white/10 bg-transparent py-10">
-            <div className="mx-auto flex max-w-7xl flex-col items-center gap-4 px-6 text-center">
-              <div className="flex items-center gap-2">
+          <footer className="relative z-10 border-t border-white/10 bg-transparent py-8 sm:py-10">
+            <div className="mx-auto flex max-w-7xl flex-col items-center gap-3 px-4 text-center sm:px-6">
+              <div className="flex flex-col items-center gap-2 sm:flex-row sm:gap-2">
                 <img
                   src={GOLDEN_KNIGHT_LOGO_SRC}
                   alt="IronClaw-Security"
@@ -780,7 +830,7 @@ const Landing = () => {
                   IRONCLAW<span className="metal-gold-text">-SECURITY</span>
                 </span>
               </div>
-              <div className="flex items-center gap-6 text-xs">
+              <div className="flex flex-col items-center gap-2 text-xs sm:flex-row sm:gap-6">
                 <Link
                   to="/privacy"
                   data-testid="footer-privacy-link"
@@ -788,7 +838,7 @@ const Landing = () => {
                 >
                   Privacy Policy
                 </Link>
-                <span className="text-white/15">|</span>
+                <span className="hidden text-white/15 sm:inline">|</span>
                 <Link
                   to="/terms"
                   data-testid="footer-terms-link"
@@ -797,21 +847,23 @@ const Landing = () => {
                   Terms of Service
                 </Link>
               </div>
-              <p className="text-xs text-[#737373]">
+              <p className="max-w-2xl text-[11px] text-[#737373] sm:text-xs">
                 The enforcement layer serious engineers trust with production AI
                 systems.
               </p>
               <p
-                className="font-tech text-xs text-[#737373]"
+                className="max-w-4xl font-tech text-[10px] leading-relaxed text-[#737373] sm:text-xs"
                 data-testid="powered-by"
               >
-                Powered by &mdash;{" "}
-                <span className="metal-gold-text">
-                  Universal Rejuvenation Inc.
-                </span>{" "}
-                &mdash;{" "}
-                <span className="metal-gold-text">
-                  The Enlightenism Organization
+                <span className="inline-flex flex-wrap items-center justify-center gap-x-1 gap-y-1">
+                  Powered by &mdash;{" "}
+                  <span className="metal-gold-text">
+                    Universal Rejuvenation Inc.
+                  </span>{" "}
+                  &mdash;{" "}
+                  <span className="metal-gold-text">
+                    The Enlightenism Organization
+                  </span>
                 </span>
               </p>
             </div>

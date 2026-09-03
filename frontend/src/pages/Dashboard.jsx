@@ -1,8 +1,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
+  Check,
   ChevronLeft,
   ChevronRight,
+  Copy,
   FileSearch,
   Loader2,
   RefreshCw,
@@ -58,10 +60,10 @@ const INSTALL_KEY_PROGRAMS = [
     commandKey: "copilot_command",
   },
   {
-    program: "security_guardian",
-    label: "Shared Skill Package",
+    program: "hermes",
+    label: "Hermes Agent",
     tint: "amber",
-    commandKey: "security_guardian_command",
+    commandKey: "hermes_command",
   },
 ];
 
@@ -327,6 +329,7 @@ const Dashboard = () => {
   const [purchasingId, setPurchasingId] = useState(null);
   const [pointerGlow, setPointerGlow] = useState({ x: 50, y: 25 });
   const [scrollShift, setScrollShift] = useState(0);
+  const [copiedInstallKey, setCopiedInstallKey] = useState("");
   const polledRef = useRef(false);
 
   const isAuthenticated = Boolean(user || session);
@@ -567,9 +570,9 @@ const Dashboard = () => {
   }, [logout, navigate]);
 
   const dashboardFooter = (
-    <footer className="relative z-10 mt-12 border-t border-white/10 py-10">
-      <div className="mx-auto flex max-w-7xl flex-col items-center gap-4 px-6 text-center">
-        <div className="flex items-center gap-2">
+    <footer className="relative z-10 mt-12 border-t border-white/10 py-8 sm:py-10">
+      <div className="mx-auto flex max-w-7xl flex-col items-center gap-3 px-4 text-center sm:px-6">
+        <div className="flex flex-col items-center gap-2 sm:flex-row sm:gap-2">
           <img
             src="/images/Golden%20Knight%20Logo128.png"
             alt="IronClaw-Security"
@@ -579,14 +582,14 @@ const Dashboard = () => {
             IRONCLAW<span className="metal-gold-text">-SECURITY</span>
           </span>
         </div>
-        <div className="flex items-center gap-6 text-xs">
+        <div className="flex flex-col items-center gap-2 text-xs sm:flex-row sm:gap-6">
           <Link
             to="/privacy"
             className="text-[#BFC1C2] transition hover:text-[#FFD700]"
           >
             Privacy Policy
           </Link>
-          <span className="text-white/15">|</span>
+          <span className="hidden text-white/15 sm:inline">|</span>
           <Link
             to="/terms"
             className="text-[#BFC1C2] transition hover:text-[#FFD700]"
@@ -594,11 +597,22 @@ const Dashboard = () => {
             Terms of Service
           </Link>
         </div>
-        <p className="text-xs text-[#737373]">
-          The enforcement layer serious engineers trust with production AI systems.
+        <p className="max-w-2xl text-[11px] text-[#737373] sm:text-xs">
+          The enforcement layer serious engineers trust with production AI
+          systems.
         </p>
-        <p className="font-tech text-xs text-[#737373]" data-testid="powered-by">
-          Powered by &mdash; <span className="metal-gold-text">Universal Rejuvenation Inc.</span> &mdash; <span className="metal-gold-text">The Enlightenism Organization</span>
+        <p
+          className="max-w-4xl font-tech text-[10px] leading-relaxed text-[#737373] sm:text-xs"
+          data-testid="powered-by"
+        >
+          <span className="inline-flex flex-wrap items-center justify-center gap-x-1 gap-y-1">
+            Powered by &mdash;{" "}
+            <span className="metal-gold-text">Universal Rejuvenation Inc.</span>{" "}
+            &mdash;{" "}
+            <span className="metal-gold-text">
+              The Enlightenism Organization
+            </span>
+          </span>
         </p>
       </div>
     </footer>
@@ -608,6 +622,32 @@ const Dashboard = () => {
     setRefreshing(true);
     fetchDashboard();
   }, [fetchDashboard]);
+
+  const copyInstallKey = useCallback(async (value, keyId) => {
+    if (!value) return;
+
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = value;
+      textarea.setAttribute("readonly", "true");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    }
+
+    setCopiedInstallKey(keyId);
+    toast.success("Install key copied");
+    window.setTimeout(
+      () =>
+        setCopiedInstallKey((current) => (current === keyId ? "" : current)),
+      1800,
+    );
+  }, []);
 
   const walletProps = useMemo(
     () => ({
@@ -697,8 +737,8 @@ const Dashboard = () => {
           return "gemini_cli-card";
         case "copilot":
           return "copilot-card";
-        case "security_guardian":
-          return "security_guardian-card";
+        case "hermes":
+          return "hermes-card";
         default:
           return `${program}-card`;
       }
@@ -905,13 +945,33 @@ const Dashboard = () => {
                       </div>
 
                       {card.maskedKey ? (
-                        <div className="space-y-2">
+                        <div className="space-y-3">
                           <div className="text-xs uppercase tracking-[0.2em] text-[#BFC1C2]">
                             Active install key
                           </div>
-                          <code className="block break-all rounded-xl border border-emerald-400/20 bg-emerald-500/5 px-3 py-2 font-mono text-sm text-emerald-200">
-                            {card.maskedKey}
-                          </code>
+                          <div className="flex items-start gap-2">
+                            <textarea
+                              readOnly
+                              value={card.maskedKey}
+                              data-testid={`${card.testid}-value`}
+                              className="min-h-[92px] flex-1 resize-none rounded-xl border border-emerald-400/20 bg-emerald-500/5 px-3 py-2 font-mono text-sm text-emerald-100 outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                copyInstallKey(card.maskedKey, card.testid)
+                              }
+                              data-testid={`${card.testid}-copy`}
+                              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-400/30 bg-emerald-500/10 text-emerald-200 transition hover:border-emerald-300/60 hover:text-white"
+                              aria-label={`Copy ${card.title} install key`}
+                            >
+                              {copiedInstallKey === card.testid ? (
+                                <Check size={16} />
+                              ) : (
+                                <Copy size={16} />
+                              )}
+                            </button>
+                          </div>
                         </div>
                       ) : (
                         <p className="text-sm text-[#BFC1C2]">

@@ -4,7 +4,6 @@ import { Loader2, X, Mail, Lock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
-import { useDebounce } from "@/hooks/useDebounce";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const AUTH_LOGO_SRC = "/images/Golden%20Knight%20Logo128.png";
@@ -19,7 +18,6 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
   const [emailStatus, setEmailStatus] = useState("");
   const { authenticate, register } = useAuth();
   const navigate = useNavigate();
-  const debouncedEmail = useDebounce(email, 400);
 
   const trimmedEmail = useMemo(() => email.trim(), [email]);
 
@@ -65,14 +63,8 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
     }
 
     setEmailError("");
-
-    if (debouncedEmail.trim() !== trimmedEmail) {
-      setEmailStatus("Validating email...");
-      return;
-    }
-
     setEmailStatus("Email looks good.");
-  }, [debouncedEmail, emailTouched, open, trimmedEmail, validateEmail]);
+  }, [emailTouched, open, trimmedEmail, validateEmail]);
 
   if (!open) return null;
 
