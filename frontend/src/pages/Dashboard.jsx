@@ -24,16 +24,16 @@ const DASHBOARD_LOGO_SRC = "/images/logo128pxl.svg";
 const DASHBOARD_KNIGHT_SRC = "/images/Golden%20Knight%204k%202gb.png";
 const INSTALL_KEY_PROGRAMS = [
   {
-    program: "claude_code",
-    label: "Claude Code",
-    tint: "gold",
-    commandKey: "claude_code_command",
-  },
-  {
     program: "openclaw",
     label: "OpenClaw",
     tint: "platinum",
     commandKey: "openclaw_command",
+  },
+  {
+    program: "claude_code",
+    label: "Claude Code",
+    tint: "gold",
+    commandKey: "claude_code_command",
   },
   {
     program: "cursor",
@@ -55,13 +55,13 @@ const INSTALL_KEY_PROGRAMS = [
   },
   {
     program: "copilot",
-    label: "Copilot",
+    label: "GitHub Copilot",
     tint: "indigo",
     commandKey: "copilot_command",
   },
   {
     program: "hermes",
-    label: "Hermes Agent",
+    label: "Hermes",
     tint: "amber",
     commandKey: "hermes_command",
   },
@@ -333,6 +333,12 @@ const Dashboard = () => {
   const polledRef = useRef(false);
 
   const isAuthenticated = Boolean(user || session);
+
+  useEffect(() => {
+    globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
+    globalThis.__IC_COUNTERS__.__controllers =
+      globalThis.__IC_COUNTERS__.__controllers || new Map();
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;

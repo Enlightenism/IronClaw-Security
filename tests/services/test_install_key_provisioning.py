@@ -261,7 +261,6 @@ def test_provision_for_program_accepts_aliases_for_supported_runtimes() -> None:
         "gemini-cli": "gemini_cli",
         "cursor-agent": "cursor",
         "hermes-agent": "hermes",
-        "security-guardian": "security_guardian",
         "goose-agent": "goose",
     }.items():
         service._install_key_registry.get_keys_for_owner.return_value = []
@@ -290,7 +289,6 @@ def test_provision_for_program_accepts_aliases_for_supported_runtimes() -> None:
         ("goose", "goose-agent", "ic_install_goose_"),
         ("gemini_cli", "gemini-cli", "ic_install_gemini_cli_"),
         ("copilot", "github-copilot", "ic_install_copilot_"),
-        ("security_guardian", "security-guardian", "ic_install_security_guardian_"),
         ("hermes", "hermes-agent", "ic_install_hermes_"),
     ],
 )
@@ -338,6 +336,25 @@ def test_provision_for_program_rejects_hermes_when_payment_not_confirmed() -> No
             entitlements_status="active",
             issued_after_payment=True,
         )
+
+
+def test_provision_for_program_rejects_security_guardian_runtime_issuance() -> None:
+    service = InstallKeyProvisioningService(
+        install_key_registry=MagicMock(),
+        wallet_registry=MagicMock(),
+        billing_registry=MagicMock(has_active_subscription=MagicMock(return_value=True)),
+    )
+
+    for alias in ("security_guardian", "security-guardian", "securityguardian", "skill"):
+        with pytest.raises(ValueError, match="Security Guardian.*connector|runtime install key"):
+            service.provision_for_program(
+                owner_key="buyer@ironclaw.test",
+                subscription_id="sub_123",
+                program=alias,
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+            )
 
 
 def test_provision_for_program_rejects_unknown_program() -> None:
@@ -401,7 +418,7 @@ def test_provision_for_purchase_generates_all_supported_programs() -> None:
         source="purchase",
     )
 
-    expected_programs = {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes", "security_guardian"}
+    expected_programs = {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"}
     assert set(results.keys()) == expected_programs
     for program in expected_programs:
         assert results[program].raw_key.startswith(
@@ -413,10 +430,10 @@ def test_provision_for_purchase_generates_all_supported_programs() -> None:
                 "gemini_cli": "ic_install_gemini_cli_",
                 "copilot": "ic_install_copilot_",
                 "hermes": "ic_install_hermes_",
-                "security_guardian": "ic_install_security_guardian_",
             }[program]
         )
-    assert install_key_registry.generate_for_paid_customer.call_count == 8
+    assert "security_guardian" not in results
+    assert install_key_registry.generate_for_paid_customer.call_count == 7
 
 
 def test_provision_for_purchase_uses_org_owner_resolution_when_auth_ctx_is_org() -> None:
@@ -440,7 +457,6 @@ def test_provision_for_purchase_uses_org_owner_resolution_when_auth_ctx_is_org()
             "gemini_cli",
             "copilot",
             "hermes",
-            "security_guardian",
         )
     ]
 
@@ -474,6 +490,54 @@ def test_provision_for_purchase_requires_owner_or_identity_context() -> None:
 
     with pytest.raises(ValueError, match="Either owner_key or buyer_email/org_id/auth_ctx"):
         service.provision_for_purchase(subscription_id="sub_123")
+
+
+def test_provision_for_purchase_omits_security_guardian_from_runtime_platform_enumeration() -> None:
+    billing_registry = MagicMock()
+    billing_registry.has_active_subscription.return_value = True
+
+    install_key_registry = MagicMock()
+    install_key_registry.generate_for_paid_customer.side_effect = [
+        _make_install_key_record(
+            owner_key="buyer@ironclaw.test",
+            subscription_id="sub_123",
+            program=program,
+            key_id=f"ik_{program}_001",
+            raw_key=f"ic_install_{program}_purchase_secret_{index}",
+        )
+        for index, program in enumerate(
+            (
+                "openclaw",
+                "claude_code",
+                "cursor",
+                "goose",
+                "gemini_cli",
+                "copilot",
+                "hermes",
+            ),
+            start=1,
+        )
+    ]
+
+    wallet_registry = MagicMock()
+    wallet_registry.get_or_create_wallet.return_value = object()
+
+    service = InstallKeyProvisioningService(
+        install_key_registry=install_key_registry,
+        wallet_registry=wallet_registry,
+        billing_registry=billing_registry,
+    )
+
+    results = service.provision_for_purchase(
+        owner_key="buyer@ironclaw.test",
+        subscription_id="sub_123",
+        customer_id="cus_123",
+        source="purchase",
+    )
+
+    assert set(results.keys()) == {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"}
+    assert "security_guardian" not in results
+    assert install_key_registry.generate_for_paid_customer.call_count == 7
 
 
 def test_provision_for_purchase_rejects_generic_system_api_key_owner_fallback() -> None:

@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Final, Literal
 
-InstallKeyProgram = Literal[
+RuntimeInstallKeyProgram = Literal[
     "openclaw",
     "claude_code",
     "cursor",
@@ -12,9 +12,24 @@ InstallKeyProgram = Literal[
     "gemini_cli",
     "copilot",
     "hermes",
-    "security_guardian",
 ]
+InstallKeyProgram = RuntimeInstallKeyProgram | Literal["security_guardian"]
 InstallKeyFormatFamily = InstallKeyProgram
+
+RUNTIME_INSTALL_KEY_PROGRAMS: Final[tuple[RuntimeInstallKeyProgram, ...]] = (
+    "openclaw",
+    "claude_code",
+    "cursor",
+    "goose",
+    "gemini_cli",
+    "copilot",
+    "hermes",
+)
+CONNECTOR_INSTALL_KEY_PROGRAMS: Final[tuple[str, ...]] = ("security_guardian",)
+SUPPORTED_INSTALL_KEY_PROGRAMS: Final[tuple[InstallKeyProgram, ...]] = (
+    *RUNTIME_INSTALL_KEY_PROGRAMS,
+    *CONNECTOR_INSTALL_KEY_PROGRAMS,
+)
 
 _INSTALL_KEY_PREFIX_OPENCLAW: Final[str] = "ic_install_openclaw_"
 _INSTALL_KEY_PREFIX_CLAUDE: Final[str] = "ic_install_claude_code_"
@@ -149,7 +164,7 @@ class InstallKeyFormatRegistry:
             display_name="Security Guardian",
             prefix=_INSTALL_KEY_PREFIX_SECURITY_GUARDIAN,
             aliases=("security_guardian", "security-guardian", "security guardian", "securityguardian", "security_guardian_skill", "security_guardian_skill_", "skill", "skills"),
-            platform_aliases=("security_guardian", "security-guardian", "security guardian", "securityguardian", "security_guardian_skill", "security_guardian_skill_", "skill", "skills"),
+            platform_aliases=(),
         ),
     }
 
@@ -186,8 +201,8 @@ class InstallKeyFormatRegistry:
         return cls._SPEC_BY_PROGRAM[candidate]
 
     @classmethod
-    def list_programs(cls) -> tuple[InstallKeyProgram, ...]:
-        return tuple(cls._SPEC_BY_PROGRAM.keys())
+    def list_programs(cls) -> tuple[RuntimeInstallKeyProgram, ...]:
+        return RUNTIME_INSTALL_KEY_PROGRAMS
 
     @classmethod
     def list_specs(cls) -> tuple[InstallKeyFormatSpec, ...]:
@@ -221,8 +236,11 @@ class InstallKeyFormatRegistry:
     def supported_platforms(cls) -> tuple[str, ...]:
         seen: set[str] = set()
         ordered: list[str] = []
-        for spec in cls._SPEC_BY_PROGRAM.values():
-            for alias in (*spec.platform_aliases, *spec.aliases):
+        for program in cls.list_programs():
+            if program == "security_guardian":
+                continue
+            spec = cls._SPEC_BY_PROGRAM[program]
+            for alias in spec.platform_aliases:
                 key = _normalize_platform_token(alias)
                 if key and key not in seen:
                     seen.add(key)

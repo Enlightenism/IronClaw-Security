@@ -108,6 +108,24 @@ describe("useCountUp", () => {
       advance(600);
       expect(result.current).toBe(0);
     });
+
+    it("tracks the provided shared value without owning the underlying counter source", () => {
+      const { result, rerender } = renderHook(
+        ({ end }) => useCountUp(end, 500, [end], 0),
+        { initialProps: { end: 10 } },
+      );
+
+      expect(result.current).toBe(0);
+
+      rerender({ end: 50 });
+      advance(300);
+
+      expect(result.current).toBeGreaterThan(10);
+      expect(result.current).toBeLessThan(50);
+
+      advance(300);
+      expect(result.current).toBe(50);
+    });
   });
 
   describe("prefers-reduced-motion: reduce", () => {

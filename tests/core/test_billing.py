@@ -188,6 +188,16 @@ def test_resolve_billing_owner_generic_auth_does_not_take_over_billing_owner() -
     assert result == "buyer@ironclaw.test"
 
 
+def test_resolve_billing_owner_rejects_generic_platform_org_scope() -> None:
+    ctx = SimpleNamespace(key_type="org", org_id="system-platform-api-key")
+    result = resolve_billing_owner(ctx, "Buyer@IronClaw.TEST")
+    assert result == "buyer@ironclaw.test"
+
+
+def test_has_active_subscription_rejects_generic_platform_owner_key(registry: BillingRegistry) -> None:
+    assert registry.has_active_subscription("system-platform-api-key") is False
+
+
 def test_resolve_billing_owner_no_key_type_attr_returns_email() -> None:
     ctx = SimpleNamespace()
     result = resolve_billing_owner(ctx, "User@IronClaw.TEST")

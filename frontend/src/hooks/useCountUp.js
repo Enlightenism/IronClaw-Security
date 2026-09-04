@@ -23,12 +23,19 @@ export function useCountUp(end, duration = 1400, deps = [], from = 0) {
   const [value, setValue] = useState(prefersReduced ? target : start);
   const frame = useRef();
   const lastValueRef = useRef(prefersReduced ? target : start);
+  const previousDepsRef = useRef(deps);
 
   useEffect(() => {
+    const depsChanged =
+      deps.length !== previousDepsRef.current.length ||
+      deps.some((dep, index) => dep !== previousDepsRef.current[index]);
+
+    if (depsChanged) {
+      lastValueRef.current = start;
+    }
+
     const current = Number(lastValueRef.current) || 0;
-    const boundedTarget = Number.isFinite(target)
-      ? Math.max(target, current)
-      : current;
+    const boundedTarget = Number.isFinite(target) ? target : current;
 
     if (
       typeof window !== "undefined" &&
@@ -36,12 +43,14 @@ export function useCountUp(end, duration = 1400, deps = [], from = 0) {
     ) {
       setValue(boundedTarget);
       lastValueRef.current = boundedTarget;
+      previousDepsRef.current = deps;
       return;
     }
 
     if (boundedTarget === current) {
       setValue(current);
       lastValueRef.current = current;
+      previousDepsRef.current = deps;
       return;
     }
 
@@ -55,7 +64,13 @@ export function useCountUp(end, duration = 1400, deps = [], from = 0) {
         animationStart +
           (boundedTarget - animationStart) * easeOutQuad(progress),
       );
-      setValue(Math.min(nextValue, boundedTarget));
+
+      if (boundedTarget >= animationStart) {
+        setValue(Math.min(nextValue, boundedTarget));
+      } else {
+        setValue(Math.max(nextValue, boundedTarget));
+      }
+
       if (progress < 1) {
         frame.current = requestAnimationFrame(step);
       } else {
@@ -65,6 +80,7 @@ export function useCountUp(end, duration = 1400, deps = [], from = 0) {
     };
 
     frame.current = requestAnimationFrame(step);
+    previousDepsRef.current = deps;
     return () => cancelAnimationFrame(frame.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [end, duration, from, ...deps]);

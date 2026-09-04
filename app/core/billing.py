@@ -73,6 +73,42 @@ def _normalize_owner_value(owner_key: str | None) -> str:
     return normalized
 
 
+def _looks_like_generic_platform_auth(value: str | None) -> bool:
+    normalized = _normalize_owner_value(value)
+    if not normalized:
+        return False
+    if normalized.startswith("ic_org_"):
+        return False
+    if normalized.startswith("ic_install_"):
+        return False
+    if normalized.startswith("ic_"):
+        return True
+
+    generic_prefixes = (
+        "sk_",
+        "ghp_",
+        "gho_",
+        "github_pat_",
+        "token_",
+        "secret_",
+        "api_",
+        "api-key",
+        "api_key",
+        "platform-api-key",
+        "platform_api_key",
+        "system-api-key",
+        "system_api_key",
+        "internal-platform-api-key",
+        "internal_platform_api_key",
+        "bearer ",
+        "x-api-key",
+    )
+    if normalized.startswith(generic_prefixes):
+        return True
+
+    return ("platform" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized)) or ("system" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized)) or ("api" in normalized and "key" in normalized)
+
+
 def _is_org_owner_context(auth_ctx: Any) -> bool:
     """Return True only when the request is explicitly org-scoped.
 
@@ -84,8 +120,13 @@ def _is_org_owner_context(auth_ctx: Any) -> bool:
     if auth_ctx is None:
         return False
     key_type = str(getattr(auth_ctx, "key_type", "") or "").strip().lower()
+    principal_type = str(getattr(auth_ctx, "principal_type", "") or "").strip().lower()
     org_id = getattr(auth_ctx, "org_id", None)
-    normalized_org_id = str(org_id).strip() if org_id is not None else ""
+    normalized_org_id = _normalize_owner_value(org_id)
+    if _looks_like_generic_platform_auth(normalized_org_id):
+        return False
+    if principal_type in {"platform", "api_key", "system", "service"}:
+        return False
     return key_type in {"org", "org_key"} and bool(normalized_org_id)
 
 
@@ -99,10 +140,15 @@ def resolve_billing_owner(auth_ctx: Any, buyer_email: str) -> str:
     """
     if _is_org_owner_context(auth_ctx):
         org_id = getattr(auth_ctx, "org_id", None)
-        normalized_org_id = str(org_id).strip() if org_id is not None else ""
-        return f"ic_org_{normalized_org_id.strip().lower()}"
+        normalized_org_id = _normalize_owner_value(org_id)
+        return f"ic_org_{normalized_org_id}"
 
-    return _normalize_owner_value(buyer_email)
+    normalized_email = _normalize_owner_value(buyer_email)
+    if normalized_email.startswith("ic_install_"):
+        return ""
+    if _looks_like_generic_platform_auth(normalized_email):
+        return ""
+    return normalized_email
 
 
 PlanCode = Literal["starter-5k", "team-25k", "enterprise-60k"]
@@ -527,7 +573,7 @@ class BillingRegistry:
 
     def _resolve_customer_for_owner_key(self, owner_key: str) -> BillingCustomer | None:
         normalized = _normalize_owner_value(owner_key)
-        if not normalized:
+        if not normalized or _looks_like_generic_platform_auth(normalized):
             return None
 
         for customer in self._customers.values():

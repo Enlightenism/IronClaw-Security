@@ -58,7 +58,8 @@ def test_integration_settings_contains_known_integrations():
     payload = response.json()
 
     names = {item["name"] for item in payload["providers"]}
-    assert {"OpenClaw", "Claude Code", "Cursor", "Goose", "Gemini CLI", "GitHub Copilot", "Hermes", "Security Guardian"} <= names
+    assert {"OpenClaw", "Claude Code", "Cursor", "Goose", "Gemini CLI", "GitHub Copilot", "Hermes"} <= names
+    assert "Security Guardian" not in names
 
 
 def test_integration_settings_uses_canonical_install_key_family_labels():
@@ -70,15 +71,16 @@ def test_integration_settings_uses_canonical_install_key_family_labels():
     payload = response.json()
 
     programs = {item["installkeyprogram"] for item in payload["providers"] if item.get("installkeyprogram")}
-    assert {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes", "security_guardian"} <= programs
+    assert {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"} <= programs
 
     names = {item["name"] for item in payload["providers"]}
     assert "GitHub Copilot" in names
     assert "Hermes" in names
-    assert "Security Guardian" in names
+    assert "Security Guardian" not in names
 
     family_names = {item["installkeyfamily"] for item in payload["settings"] if item.get("installkeyfamily")}
-    assert {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes", "security_guardian"} <= family_names
+    assert {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"} <= family_names
+    assert "security_guardian" not in family_names
 
 
 def test_integration_settings_summary_tracks_canonical_install_key_matrix():

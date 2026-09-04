@@ -462,18 +462,18 @@ def test_dashboard_overview_filters_current_owner_paid_install_keys(client: Test
         "gemini_cli",
         "copilot",
         "hermes",
-        "security_guardian",
     }
     assert len(keys) == len(expected_platforms)
     by_program = {item["program"]: item for item in keys}
     assert expected_platforms.issubset(by_program.keys())
+    assert "security_guardian" not in by_program
     assert by_program["openclaw"]["key_id"] == "ik_current_001"
     assert by_program["openclaw"]["status"] == "active"
     assert by_program["claude_code"]["status"] == "locked"
     assert by_program["claude_code"]["payment_status"] == "unpaid"
     assert by_program["claude_code"]["entitlements_status"] == "not_active"
     assert by_program["claude_code"]["metadata"]["placeholder"] == "Keys will be generated after purchase"
-    assert by_program["security_guardian"]["status"] == "locked"
+    assert by_program["claude_code"]["label"] == "Claude Code"
     assert body["metadata"]["owner_key"] == owner_key
     assert all((item["masked_key"] is None and not item["key_id"]) or item["masked_key"].startswith("ic_install_") for item in keys)
     assert all((not item["key_id"]) or "payment_status" in item for item in keys)

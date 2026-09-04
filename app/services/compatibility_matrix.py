@@ -25,16 +25,7 @@ _RUNTIME_ALIASES: dict[str, tuple[str, ...]] = {
     "goose": ("goose", "goose-agent", "goose_agent", "goose agent", "goose-cli", "goose_cli", "goose cli"),
     "gemini-cli": ("gemini-cli", "gemini_cli", "gemini cli", "gemini"),
     "copilot": ("copilot", "github-copilot", "github_copilot", "github copilot", "githubcopilot"),
-    "security-guardian": (
-        "security-guardian",
-        "security_guardian",
-        "security guardian",
-        "securityguardian",
-        "skill",
-        "skills",
-        "security_guardian_skill",
-        "security_guardian_skill_",
-    ),
+    "security-guardian": ("security-guardian", "security_guardian", "security guardian", "securityguardian", "security_guardian_skill", "security_guardian_skill_", "skill", "skills"),
     "generic-agent": ("generic-agent", "generic_agent", "generic agent"),
 }
 
@@ -132,15 +123,13 @@ _RUNTIME_CONFIG: dict[str, dict[str, Any]] = {
         "min_version": "0.1.0",
         "max_version": "1.9.99",
         "state": "supported",
-        "reason": "The shared security-guardian skills package can be attached to multiple runtime installers while preserving the same install-key family.",
+        "reason": "Security Guardian is a shared install-key and skills package for the supported runtime family set.",
         "metadata": {
-            "priority": 3,
+            "priority": 2,
             "install_key_program": "security_guardian",
             "install_key_prefix": "ic_install_security_guardian_",
             "compatible_runtime_aliases": _RUNTIME_ALIASES["security-guardian"],
-            "compatible_platform_runtimes": ["security-guardian", "security_guardian", "skill", "skills"],
-            "multi_runtime_assignment": True,
-            "install_key_family_shared_across_platforms": True,
+            "compatible_platform_runtimes": ["security-guardian", "security_guardian", "security guardian", "skill", "skills"],
         },
     },
     "generic-agent": {

@@ -9,6 +9,14 @@ from app.services.install_key_format_registry import (
 )
 from app.services.install_key_provisioning import InstallKeyIssued, InstallKeyProvisioningService
 
+_CONNECTOR_PLATFORM_ALIASES: Final[tuple[str, ...]] = (
+    "security_guardian",
+    "security-guardian",
+    "securityguardian",
+    "skill",
+    "skills",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class PlatformInstallKeyRoute:
@@ -95,14 +103,14 @@ class PlatformInstallKeyRouter:
         normalized_platform = self.normalize_platform(platform_name)
         if not normalized_platform:
             raise ValueError("platform_name cannot be blank")
+        if normalized_platform in _CONNECTOR_PLATFORM_ALIASES:
+            raise ValueError("Security Guardian is a shared install-key connector, not a runtime platform.")
 
         format_group = self._format_registry.resolve_for_platform(normalized_platform)
+        if format_group.program == "security_guardian":
+            raise ValueError("Security Guardian is a shared install-key connector, not a runtime platform.")
         group_platforms = tuple(dict.fromkeys(self._format_registry.list_platforms_for_program(format_group.program)))
-        canonical_platform = format_group.platform
-        if normalized_platform in group_platforms:
-            canonical_platform = normalized_platform
-        elif canonical_platform not in group_platforms:
-            canonical_platform = group_platforms[0]
+        canonical_platform = group_platforms[0] if group_platforms else format_group.platform
 
         return PlatformInstallKeyRoute(
             requested_platform=normalized_platform,
@@ -120,6 +128,8 @@ class PlatformInstallKeyRouter:
         if candidate is None:
             raise ValueError("candidate install key is required")
         format_group = self._format_registry.resolve_for_key(candidate)
+        if format_group.program == "security_guardian":
+            raise ValueError("Security Guardian is a shared install-key connector, not a runtime platform.")
         return self.resolve_platform(format_group.platform)
 
     def resolve_group(self, platform_name: str | None) -> PlatformInstallKeyGroup:
@@ -137,8 +147,10 @@ class PlatformInstallKeyRouter:
     def list_groups(self) -> tuple[PlatformInstallKeyGroup, ...]:
         groups: list[PlatformInstallKeyGroup] = []
         for program in self._format_registry.list_programs():
+            if program == "security_guardian":
+                continue
             format_group = self._format_registry.get_format_group(program)
-            platforms = tuple(dict.fromkeys(self._format_registry.list_platforms_for_program(program)))
+            platforms = tuple(platform for platform in dict.fromkeys(self._format_registry.list_platforms_for_program(program)) if platform not in _CONNECTOR_PLATFORM_ALIASES)
             groups.append(
                 PlatformInstallKeyGroup(
                     family=format_group.family,
@@ -153,7 +165,7 @@ class PlatformInstallKeyRouter:
         return tuple(groups)
 
     def list_platforms(self) -> tuple[str, ...]:
-        return self._format_registry.list_platforms()
+        return tuple(platform for platform in self._format_registry.list_platforms() if platform not in _CONNECTOR_PLATFORM_ALIASES)
 
     def is_supported_platform(self, platform_name: str | None) -> bool:
         if platform_name is None:
@@ -192,7 +204,14 @@ class PlatformInstallKeyRouter:
         payment_confirmed: bool | None = None,
     ) -> InstallKeyIssued:
         route = self.resolve_platform(platform_name)
-        effective_metadata: dict[str, Any] = {"platform": route.requested_platform, "program": route.program, "family": route.family}
+        effective_metadata: dict[str, Any] = {
+            "platform": route.requested_platform,
+            "canonical_platform": route.canonical_platform,
+            "program": route.program,
+            "family": route.family,
+            "prefix": route.prefix,
+            "group_platforms": list(route.group_platforms),
+        }
         if metadata:
             effective_metadata.update(metadata)
 

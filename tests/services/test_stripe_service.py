@@ -596,7 +596,7 @@ class TestHandleCheckoutCompleted:
         assert install_keys["openclaw"]["active"] is True
         assert install_keys["claude_code"]["active"] is True
 
-    def test_checkout_completed_issues_all_supported_platform_install_keys(self, svc: StripeService) -> None:
+    def test_checkout_completed_issues_all_supported_runtime_install_keys(self, svc: StripeService) -> None:
         event = _build_checkout_completed_event(unit_credits=5_000, org_id="org-install-keys-all")
         result = svc.handle_webhook_event(event)
         install_keys = result["detail"]["install_key_issuance"]
@@ -608,11 +608,39 @@ class TestHandleCheckoutCompleted:
             "gemini_cli",
             "copilot",
             "hermes",
-            "security_guardian",
         }
         assert set(install_keys) == expected_programs
+        assert "security_guardian" not in install_keys
         assert all(record["owner_key"] == "ic_org_org-install-keys-all" for record in install_keys.values())
         assert all(record["active"] is True for record in install_keys.values())
+
+    def test_issue_paid_install_keys_uses_canonical_provisioning_path_for_runtime_programs_only(self, svc: StripeService, monkeypatch: pytest.MonkeyPatch) -> None:
+        provisioning_service = MagicMock()
+        issued = MagicMock()
+        issued.record = MagicMock(
+            key_id="ik_runtime_1",
+            owner_key="ic_org_org-runtime-route",
+            program="openclaw",
+            active=True,
+            masked_key="ic_install_openclaw_...1234",
+            subscription_id="checkout:cs_runtime_001",
+        )
+        provisioning_service.provision_for_program.return_value = issued
+        monkeypatch.setattr("app.services.stripe_service.provision_install_key_service", lambda *args, **kwargs: provisioning_service)
+
+        result = svc._issue_paid_install_keys_for_checkout(  # noqa: SLF001
+            org_id="org-runtime-route",
+            customer_id=_CUSTOMER_ID,
+            session_id="cs_runtime_001",
+            unit_credits=500,
+            metadata={"payment_status": "paid"},
+        )
+
+        assert set(result) == {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"}
+        assert "security_guardian" not in result
+        assert provisioning_service.provision_for_program.call_count == 7
+        assert all(call.kwargs["owner_key"] == "ic_org_org-runtime-route" for call in provisioning_service.provision_for_program.call_args_list)
+        assert all(call.kwargs["payment_confirmed"] is True for call in provisioning_service.provision_for_program.call_args_list)
 
     def test_issue_paid_install_keys_requires_successful_payment_confirmation(self, svc: StripeService) -> None:
         result = svc._issue_paid_install_keys_for_checkout(  # noqa: SLF001

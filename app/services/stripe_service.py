@@ -13,7 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.core.install_key_formats import InstallKeyFormatRegistry
-from app.core.install_keys import InstallKeyAlreadyExistsError, get_install_key_registry
+from app.services.install_key_provisioning import InstallKeyProvisioningService
 from app.services.secrets_vault import vault
 from app.supabaseclient import (
     BILLING_TIER_5K_PRICE_USD,
@@ -24,6 +24,11 @@ from app.supabaseclient import (
     BILLING_TIER_60K_UNITS,
     TOKENS_PER_UNIT,
 )
+
+
+def provision_install_key_service(*, billing_registry: Any | None = None) -> InstallKeyProvisioningService:
+    return InstallKeyProvisioningService(billing_registry=billing_registry)
+
 
 logger = logging.getLogger(__name__)
 
@@ -940,7 +945,15 @@ class StripeService:
             return {}
 
         owner_key = self._resolve_owner_key_for_org(org_id)
-        registry = get_install_key_registry()
+
+        class _CheckoutEntitlementGuard:
+            def has_active_subscription(self, candidate_owner_key: str) -> bool:
+                normalized = str(candidate_owner_key).strip().lower()
+                return normalized == owner_key.lower()
+
+        provisioning_service = provision_install_key_service(
+            billing_registry=_CheckoutEntitlementGuard(),
+        )
         results: dict[str, dict[str, Any]] = {}
         base_metadata: dict[str, Any] = {
             "source": "stripe.checkout",
@@ -959,39 +972,23 @@ class StripeService:
         supported_programs = tuple(InstallKeyFormatRegistry.list_programs())
 
         for program in supported_programs:
-            existing = next((record for record in registry.get_keys_for_owner(owner_key) if record.program == program and record.active), None)
-            if existing is not None:
-                results[program] = {
-                    "key_id": existing.key_id,
-                    "owner_key": existing.owner_key,
-                    "program": existing.program,
-                    "active": existing.active,
-                    "masked_key": existing.masked_key,
-                    "subscription_id": existing.subscription_id,
-                }
-                continue
-
-            try:
-                record = registry.generate_for_paid_customer(
-                    owner_key=owner_key,
-                    subscription_id=f"checkout:{session_id}",
-                    program=program,
-                    org_id=org_id,
-                    customer_id=customer_id,
-                    payment_status="paid",
-                    entitlements_status="active",
-                    issued_after_payment=True,
-                    purchase_reference=session_id,
-                    checkout_session_id=session_id,
-                    label=f"stripe-checkout:{session_id}",
-                    metadata={**base_metadata, "program": program},
-                )
-            except InstallKeyAlreadyExistsError:
-                fallback = next((record for record in registry.get_keys_for_owner(owner_key) if record.program == program and record.active), None)
-                if fallback is None:
-                    raise
-                record = fallback
-
+            issued = provisioning_service.provision_for_program(
+                owner_key=owner_key,
+                subscription_id=f"checkout:{session_id}",
+                program=program,
+                source="stripe.checkout",
+                label=f"stripe-checkout:{session_id}",
+                metadata={**base_metadata, "program": program},
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+                checkout_session_id=session_id,
+                purchase_reference=session_id,
+                customer_id=customer_id,
+                org_id=org_id,
+                payment_confirmed=True,
+            )
+            record = issued.record
             results[program] = {
                 "key_id": record.key_id,
                 "owner_key": record.owner_key,

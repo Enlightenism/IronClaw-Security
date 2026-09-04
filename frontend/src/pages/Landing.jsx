@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, lazy, Suspense } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { motion } from "framer-motion";
 import { useNavigate, Link } from "react-router-dom";
 import {
@@ -107,6 +107,174 @@ const fadeUp = {
   }),
 };
 
+const getCounterRegistry = () => {
+  if (typeof globalThis === "undefined") {
+    return new Map();
+  }
+
+  globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
+  globalThis.__IC_COUNTERS__.__controllers =
+    globalThis.__IC_COUNTERS__.__controllers || new Map();
+
+  return globalThis.__IC_COUNTERS__.__controllers;
+};
+
+const normalizeCounterValue = (base, nextValue) => {
+  const numericValue = Number(nextValue);
+  if (!Number.isFinite(numericValue)) {
+    return base;
+  }
+  return Math.max(base, numericValue);
+};
+
+const readPersistedCounterState = (storageKey, base) => {
+  const defaultState = { value: base, updatedAt: Date.now() };
+
+  if (typeof window === "undefined") {
+    return defaultState;
+  }
+
+  const memoryStore = globalThis.__IC_COUNTERS__?.[storageKey];
+  if (memoryStore && Number.isFinite(memoryStore.value)) {
+    return {
+      value: normalizeCounterValue(base, memoryStore.value),
+      updatedAt: Number.isFinite(memoryStore.updatedAt)
+        ? Number(memoryStore.updatedAt)
+        : Date.now(),
+    };
+  }
+
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) {
+      return defaultState;
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return defaultState;
+    }
+
+    const value = Number.isFinite(parsed.value) ? Number(parsed.value) : base;
+    const updatedAt = Number.isFinite(parsed.updatedAt)
+      ? Number(parsed.updatedAt)
+      : Date.now();
+
+    return { value: normalizeCounterValue(base, value), updatedAt };
+  } catch {
+    return defaultState;
+  }
+};
+
+const syncPersistedCounterState = (storageKey, base, nextValue) => {
+  const safeValue = normalizeCounterValue(base, nextValue);
+  const snapshot = { value: safeValue, updatedAt: Date.now() };
+
+  if (typeof window !== "undefined") {
+    globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
+    const currentMemory = globalThis.__IC_COUNTERS__[storageKey];
+    const currentValue = Number(currentMemory?.value);
+
+    if (!Number.isFinite(currentValue) || safeValue >= currentValue) {
+      globalThis.__IC_COUNTERS__[storageKey] = snapshot;
+
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(snapshot));
+      } catch {
+        // ignore storage errors.
+      }
+    }
+  }
+
+  return snapshot;
+};
+
+const computeResumedCounterValue = (storageKey, base, minMs, maxMs, step) => {
+  const persisted = readPersistedCounterState(storageKey, base);
+  const intervalMs = minMs + Math.random() * (maxMs - minMs);
+  const elapsedMs = Math.max(0, Date.now() - persisted.updatedAt);
+  const delta = typeof step === "function" ? step() : Number(step) || 1;
+  const elapsedTicks = Math.max(0, Math.floor(elapsedMs / intervalMs));
+  const resumedValue = normalizeCounterValue(
+    base,
+    persisted.value + delta * elapsedTicks,
+  );
+
+  if (resumedValue > persisted.value) {
+    syncPersistedCounterState(storageKey, base, resumedValue);
+    return resumedValue;
+  }
+
+  return persisted.value;
+};
+
+const ensureSharedCounter = ({ base, minMs, maxMs, step, storageKey }) => {
+  const key = storageKey;
+  const registry = getCounterRegistry();
+
+  if (!registry.has(key)) {
+    const listeners = new Set();
+    const controller = {
+      value: computeResumedCounterValue(storageKey, base, minMs, maxMs, step),
+      getValue: () => controller.value,
+      setValue: (nextValue) => {
+        const snapshot = syncPersistedCounterState(storageKey, base, nextValue);
+        controller.value = snapshot.value;
+        listeners.forEach((listener) => listener(controller.value));
+      },
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+
+    const tick = () => {
+      const persisted = readPersistedCounterState(storageKey, base);
+      const delta = typeof step === "function" ? step() : Number(step) || 1;
+      const nextValue = normalizeCounterValue(base, persisted.value + delta);
+      controller.setValue(nextValue);
+    };
+
+    const intervalId = setInterval(
+      tick,
+      minMs + Math.random() * (maxMs - minMs),
+    );
+    controller.intervalId = intervalId;
+
+    if (typeof window !== "undefined") {
+      const handleStorage = (event) => {
+        if (event.key !== storageKey || !event.newValue) {
+          return;
+        }
+
+        try {
+          const parsed = JSON.parse(event.newValue);
+          if (
+            parsed &&
+            typeof parsed === "object" &&
+            Number.isFinite(parsed.value)
+          ) {
+            const nextValue = normalizeCounterValue(base, parsed.value);
+            if (nextValue > controller.value) {
+              controller.value = nextValue;
+              listeners.forEach((listener) => listener(controller.value));
+            }
+          }
+        } catch {
+          // ignore invalid storage payloads.
+        }
+      };
+
+      window.addEventListener("storage", handleStorage);
+      controller.handleStorage = handleStorage;
+    }
+
+    registry.set(key, controller);
+  }
+
+  return registry.get(key);
+};
+
 const LiveCounter = ({
   base,
   minMs = 18000,
@@ -116,148 +284,22 @@ const LiveCounter = ({
   testid,
   storageKey,
 }) => {
-  const normalizeCounterValue = useCallback(
-    (nextValue) => {
-      const numericValue = Number(nextValue);
-      if (!Number.isFinite(numericValue)) {
-        return base;
-      }
-      return Math.max(base, numericValue);
-    },
-    [base],
-  );
-
-  const getPersistedState = useCallback(() => {
-    const defaultState = { value: base, updatedAt: Date.now() };
-
-    if (typeof window === "undefined") {
-      return defaultState;
-    }
-
-    const memoryStore = globalThis.__IC_COUNTERS__?.[storageKey];
-    if (memoryStore && Number.isFinite(memoryStore.value)) {
-      return {
-        value: normalizeCounterValue(memoryStore.value),
-        updatedAt: Number.isFinite(memoryStore.updatedAt)
-          ? Number(memoryStore.updatedAt)
-          : Date.now(),
-      };
-    }
-
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (!raw) {
-        return defaultState;
-      }
-
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object") {
-        return defaultState;
-      }
-
-      const value = Number.isFinite(parsed.value) ? Number(parsed.value) : base;
-      const updatedAt = Number.isFinite(parsed.updatedAt)
-        ? Number(parsed.updatedAt)
-        : Date.now();
-
-      return { value: normalizeCounterValue(value), updatedAt };
-    } catch {
-      return defaultState;
-    }
-  }, [base, normalizeCounterValue, storageKey]);
-
-  const syncPersistedState = useCallback(
-    (nextValue) => {
-      const safeValue = normalizeCounterValue(nextValue);
-      const snapshot = { value: safeValue, updatedAt: Date.now() };
-
-      if (typeof window !== "undefined") {
-        const currentMemory = globalThis.__IC_COUNTERS__?.[storageKey];
-        const currentValue = Number(currentMemory?.value);
-
-        if (!Number.isFinite(currentValue) || safeValue >= currentValue) {
-          globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
-          globalThis.__IC_COUNTERS__[storageKey] = snapshot;
-
-          try {
-            localStorage.setItem(storageKey, JSON.stringify(snapshot));
-          } catch {
-            // ignore storage errors.
-          }
-        }
-      }
-
-      return snapshot;
-    },
-    [normalizeCounterValue, storageKey],
-  );
-
-  const [value, setValue] = useState(() => {
-    const persisted = getPersistedState();
-    return Math.max(base, persisted.value);
-  });
-
-  useEffect(() => {
-    const persisted = getPersistedState();
-    const nextValue = Math.max(base, persisted.value);
-    setValue((current) => (current >= nextValue ? current : nextValue));
-  }, [base, getPersistedState]);
-
-  useEffect(() => {
-    const intervalMs = minMs + Math.random() * (maxMs - minMs);
-    const tick = () => {
-      setValue((current) => {
-        const delta = typeof step === "function" ? step() : Number(step) || 1;
-        const candidateValue = current + delta;
-        const nextValue = normalizeCounterValue(candidateValue);
-
-        if (nextValue > current) {
-          syncPersistedState(nextValue);
-          return nextValue;
-        }
-
-        return current;
-      });
-    };
-
-    const intervalId = setInterval(tick, intervalMs);
-    return () => clearInterval(intervalId);
-  }, [
+  const controller = ensureSharedCounter({
     base,
-    maxMs,
     minMs,
-    normalizeCounterValue,
+    maxMs,
     step,
     storageKey,
-    syncPersistedState,
-  ]);
+  });
+
+  const [value, setValue] = useState(() => controller.getValue());
 
   useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-
-    const handleStorage = (event) => {
-      if (event.key !== storageKey || !event.newValue) {
-        return;
-      }
-
-      try {
-        const parsed = JSON.parse(event.newValue);
-        if (
-          parsed &&
-          typeof parsed === "object" &&
-          Number.isFinite(parsed.value)
-        ) {
-          const nextValue = normalizeCounterValue(parsed.value);
-          setValue((current) => (nextValue > current ? nextValue : current));
-        }
-      } catch {
-        // ignore invalid storage payloads.
-      }
-    };
-
-    window.addEventListener("storage", handleStorage);
-    return () => window.removeEventListener("storage", handleStorage);
-  }, [normalizeCounterValue, storageKey]);
+    const syncValue = () => setValue(controller.getValue());
+    const unsubscribe = controller.subscribe(syncValue);
+    setValue(controller.getValue());
+    return unsubscribe;
+  }, [controller]);
 
   const animated = useCountUp(value, 900, [value], base);
 

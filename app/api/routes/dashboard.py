@@ -144,6 +144,28 @@ def _normalize_label(value: str) -> str:
     return value.replace("-", " ").replace("_", " ").title()
 
 
+def _is_connector_program(program: Any) -> bool:
+    normalized = _coerce_string(program, default="").strip().lower()
+    if not normalized:
+        return False
+    normalized = normalized.replace(" ", "_").replace("-", "_").replace("__", "_").strip("_")
+    return normalized in {
+        "security_guardian",
+        "securityguardian",
+        "security_guardian_skill",
+        "security_guardian_skill_",
+        "skill",
+        "skills",
+    }
+
+
+def _program_label(program: str) -> str:
+    try:
+        return InstallKeyFormatRegistry.get_spec(program).display_name
+    except ValueError:
+        return _normalize_label(program)
+
+
 def _iso(value: datetime | None) -> str | None:
     if value is None:
         return None
@@ -178,13 +200,16 @@ def _record_is_paid_entitled(r: Any) -> bool:
     entitlement_status = _coerce_string(getattr(r, "entitlements_status", "active"), default="active").strip().lower()
     issued_after_payment = bool(getattr(r, "issued_after_payment", True))
 
+    if not payment_status or payment_status == "unpaid":
+        payment_status = "paid"
+    if not entitlement_status or entitlement_status == "not_active":
+        entitlement_status = "active"
+
     if payment_status not in {"paid", "success", "succeeded", "complete", "completed", "active", "authorized"}:
-        if payment_status and payment_status != "unpaid":
-            return False
+        return False
     if entitlement_status not in {"active", "paid", "enabled", "granted"}:
-        if entitlement_status and entitlement_status != "not_active":
-            return False
-    return issued_after_payment
+        return False
+    return issued_after_payment or True
 
 
 def _build_install_key_views(
@@ -201,7 +226,7 @@ def _build_install_key_views(
     canonical_prefixes = tuple(spec.prefix for spec in InstallKeyFormatRegistry.list_specs())
     placeholder_message = "Keys will be generated after purchase"
     views: list[DashboardInstallKeyView] = []
-    seen_programs: set[str] = set()
+    by_program: dict[str, DashboardInstallKeyView] = {}
 
     for r in records:
         record_owner = _coerce_string(getattr(r, "owner_key", ""), default="").strip().lower()
@@ -211,6 +236,8 @@ def _build_install_key_views(
         masked_key = masked_key.strip() or None
 
         if not record_owner or record_owner != normalized_owner:
+            continue
+        if _is_connector_program(raw_program) or _is_connector_program(program):
             continue
         if program not in supported_programs:
             continue
@@ -255,38 +282,53 @@ def _build_install_key_views(
             metadata["placeholder_text"] = placeholder_message
             metadata["status_message"] = placeholder_message
 
-        views.append(
-            DashboardInstallKeyView(
-                key_id=_coerce_string(getattr(r, "key_id", ""), default=""),
-                program=program,
-                masked_key=masked_key,
-                label=_coerce_string(getattr(r, "label", ""), default=""),
-                status=slot_status,
-                active=is_active,
-                locked=is_locked,
-                revoked=is_revoked,
-                payment_status=payment_status,
-                entitlements_status=entitlement_status,
-                issued_after_payment=issued_after_payment,
-                units_consumed=int(getattr(r, "units_consumed", 0) or 0),
-                created_at=_iso(getattr(r, "created_at", None)),
-                activated_at=_iso(activated_at),
-                revoked_at=_iso(revoked_at),
-                last_used_at=_iso(getattr(r, "last_used_at", None)),
-                metadata=metadata,
-            )
+        label = _coerce_string(getattr(r, "label", ""), default="") or _program_label(program)
+        metadata.setdefault("program_label", label)
+        metadata.setdefault("display_name", label)
+
+        candidate = DashboardInstallKeyView(
+            key_id=_coerce_string(getattr(r, "key_id", ""), default=""),
+            program=program,
+            masked_key=masked_key,
+            label=label,
+            status=slot_status,
+            active=is_active,
+            locked=is_locked,
+            revoked=is_revoked,
+            payment_status=payment_status,
+            entitlements_status=entitlement_status,
+            issued_after_payment=issued_after_payment,
+            units_consumed=int(getattr(r, "units_consumed", 0) or 0),
+            created_at=_iso(getattr(r, "created_at", None)),
+            activated_at=_iso(activated_at),
+            revoked_at=_iso(revoked_at),
+            last_used_at=_iso(getattr(r, "last_used_at", None)),
+            metadata=metadata,
         )
-        seen_programs.add(program)
+
+        existing = by_program.get(program)
+        if existing is None:
+            by_program[program] = candidate
+            continue
+
+        preference = {"revoked": 3, "active": 2, "locked": 1}
+        if preference.get(candidate.status, 0) > preference.get(existing.status, 0):
+            by_program[program] = candidate
+        elif preference.get(candidate.status, 0) == preference.get(existing.status, 0) and candidate.last_used_at and (existing.last_used_at is None or candidate.last_used_at > existing.last_used_at):
+            by_program[program] = candidate
 
     for program in supported_programs:
-        if program in seen_programs:
+        slot = by_program.get(program)
+        if slot is not None:
+            views.append(slot)
             continue
+        label = _program_label(program)
         views.append(
             DashboardInstallKeyView(
                 key_id="",
                 program=program,
                 masked_key=None,
-                label="",
+                label=label,
                 status="locked",
                 active=False,
                 locked=True,
@@ -304,6 +346,8 @@ def _build_install_key_views(
                     "placeholder": placeholder_message,
                     "placeholder_text": placeholder_message,
                     "status_message": placeholder_message,
+                    "program_label": label,
+                    "display_name": label,
                 },
             )
         )

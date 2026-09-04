@@ -272,6 +272,35 @@ describe("Landing", () => {
     }
   });
 
+  it("keeps the counters advancing after the landing component unmounts", async () => {
+    jest.useFakeTimers();
+    jest.spyOn(Math, "random").mockReturnValue(0.25);
+
+    try {
+      const { unmount } = await renderLanding();
+      const threatCounter = screen.getByTestId("threat-counter");
+      const beforeThreat = Number(threatCounter.textContent.replace(/,/g, ""));
+
+      unmount();
+
+      act(() => {
+        jest.advanceTimersByTime(25000);
+      });
+
+      const persistedThreat = window.localStorage.setItem.mock.calls.find(
+        ([key]) => key === "ic_threats_blocked",
+      );
+
+      expect(persistedThreat).toBeTruthy();
+      expect(JSON.parse(persistedThreat[1]).value).toBeGreaterThan(
+        beforeThreat,
+      );
+    } finally {
+      jest.restoreAllMocks();
+      jest.useRealTimers();
+    }
+  });
+
   it("opens signin auth modal when signin is clicked and no user exists", async () => {
     await renderLanding({ user: null });
 

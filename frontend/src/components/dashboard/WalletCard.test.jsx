@@ -6,7 +6,14 @@
  */
 
 import React from "react";
-import { render, screen, waitFor, cleanup, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  waitFor,
+  cleanup,
+  act,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import WalletCard from "@/components/dashboard/WalletCard";
 
@@ -383,6 +390,52 @@ describe("Payment method panel — current behavior", () => {
     expect(
       screen.getByTestId("payment-method-row-pm_other"),
     ).toBeInTheDocument();
+  });
+
+  it("hides raw card numbers and other sensitive payment fields in the dashboard UI", async () => {
+    mockPaymentMethodsList.mockResolvedValue({
+      data: {
+        status: "ok",
+        defaultmethodid: "pm_masked",
+        methods: [
+          {
+            methodid: "pm_masked",
+            brand: "Visa",
+            brand_display: "Visa",
+            last4: "4242",
+            expmonth: 12,
+            expyear: 2029,
+            exp_display: "12/29",
+            status: "active",
+            card: {
+              brand: "Visa",
+              last4: "4242",
+              exp_month: 12,
+              exp_year: 2029,
+              number: "4242424242424242",
+              cvc: "123",
+            },
+            customer: "cus_test_123",
+            payment_method_id: "pm_masked",
+            fingerprint: "abc123",
+          },
+        ],
+      },
+    });
+
+    await renderWalletCard({ organizationId: uniqueOrgId() });
+
+    const row = await screen.findByTestId("payment-method-row-pm_masked");
+
+    expect(within(row).getByText(/Visa\s+····4242/i)).toBeInTheDocument();
+    expect(
+      within(row).queryByText(/4242424242424242/i),
+    ).not.toBeInTheDocument();
+    expect(within(row).queryByText(/cus_test_123/i)).not.toBeInTheDocument();
+    expect(within(row).queryByText(/abc123/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/4242424242424242/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/cus_test_123/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/abc123/i)).not.toBeInTheDocument();
   });
 
   it("renders set-default and delete controls for returned methods", async () => {

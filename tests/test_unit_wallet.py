@@ -651,12 +651,14 @@ class TestUnitWalletRegistry:
         assert wallet.total_blocked_attacks == 2
         assert wallet.install_key_usage["key_install_001"].owner_key == "owner-install-metadata"
         assert wallet.install_key_usage["key_install_001"].program == "openclaw"
+        assert wallet.install_key_usage["key_install_001"].metadata["owner_key"] == "owner-install-metadata"
         assert wallet.install_key_usage["key_install_001"].metadata["key_id"] == "key_install_001"
         assert wallet.install_key_usage["key_install_001"].metadata["program"] == "openclaw"
         assert wallet.install_key_usage["key_install_001"].metadata["payment_id"] == "pay_123"
         assert wallet.install_key_usage["key_install_001"].metadata["blocked_attack_count"] == 2
         assert wallet.install_key_usage["key_install_001"].metadata["action_type"] == "prompt"
         assert usage.metadata["source"] == "runtime"
+        assert ledger_entry.metadata["owner_key"] == "owner-install-metadata"
         assert ledger_entry.metadata["key_id"] == "key_install_001"
         assert ledger_entry.metadata["program"] == "openclaw"
         assert ledger_entry.metadata["payment_id"] == "pay_123"

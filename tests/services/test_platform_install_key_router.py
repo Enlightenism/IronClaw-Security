@@ -38,8 +38,6 @@ from app.services.platform_install_key_router import (
         ("hermes", "hermes", "ic_install_hermes_"),
         ("hermes-agent", "hermes", "ic_install_hermes_"),
         ("hermes-cli", "hermes", "ic_install_hermes_"),
-        ("security-guardian", "security_guardian", "ic_install_security_guardian_"),
-        ("securityguardian", "security_guardian", "ic_install_security_guardian_"),
     ],
 )
 def test_resolve_platform_routes_aliases_to_canonical_install_key_program(platform_name: str, expected_program: str, expected_prefix: str) -> None:
@@ -65,7 +63,7 @@ def test_resolve_platform_routes_aliases_to_canonical_install_key_program(platfo
         ("gemini_cli", "ic_install_gemini_cli_secret_123", True),
         ("github-copilot", "ic_install_copilot_secret_123", True),
         ("hermes-agent", "ic_install_hermes_secret_123", True),
-        ("security-guardian", "ic_install_security_guardian_secret_123", True),
+        ("security-guardian", "ic_install_security_guardian_secret_123", False),
         ("openclaw", "ic_install_claude_code_secret_123", False),
         ("claude_code", "ic_install_openclaw_secret_123", False),
         ("hermes", "ic_install_copilot_secret_123", False),
@@ -91,11 +89,11 @@ def test_resolve_group_groups_compatible_platforms_together() -> None:
 def test_list_groups_returns_shared_format_sections() -> None:
     groups = list_platform_install_key_groups()
 
-    assert len(groups) == 8
+    assert len(groups) == 7
     programs = {group.program for group in groups}
-    assert programs == {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes", "security_guardian"}
+    assert programs == {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"}
     assert all(group.platforms for group in groups)
-    assert any(group.program == "security_guardian" and "skill" in group.platforms for group in groups)
+    assert all(group.program != "security_guardian" for group in groups)
     assert any(group.program == "hermes" and "hermes" in group.platforms for group in groups)
 
 
@@ -125,11 +123,6 @@ def test_list_platforms_returns_aliases_and_canonical_names() -> None:
         "hermes-agent": "hermes",
         "hermes_cli": "hermes",
         "hermes-cli": "hermes",
-        "security_guardian": "security_guardian",
-        "security-guardian": "security_guardian",
-        "securityguardian": "security_guardian",
-        "skill": "security_guardian",
-        "skills": "security_guardian",
     }
 
     for alias, expected_program in expected_alias_mapping.items():
@@ -152,8 +145,10 @@ def test_list_platforms_returns_aliases_and_canonical_names() -> None:
     assert "githubcopilot" in platforms
     assert "hermes" in platforms
     assert "hermes_cli" in platforms
-    assert "security_guardian" in platforms
-    assert "skill" in platforms
+    assert "security_guardian" not in platforms
+    assert "security-guardian" not in platforms
+    assert "skill" not in platforms
+    assert "skills" not in platforms
     assert len(set(platforms)) == len(platforms)
 
 
@@ -225,12 +220,16 @@ def test_provision_for_platform_delegates_to_canonical_install_key_service() -> 
     assert kwargs["owner_key"] == "buyer@ironclaw.test"
     assert kwargs["subscription_id"] == "sub_123"
     assert kwargs["metadata"]["platform"] == "ironclaw"
+    assert kwargs["metadata"]["canonical_platform"] == "openclaw"
     assert kwargs["metadata"]["family"] == "openclaw"
+    assert kwargs["metadata"]["prefix"] == "ic_install_openclaw_"
+    assert "openclaw" in kwargs["metadata"]["group_platforms"]
+    assert "ironclaw" in kwargs["metadata"]["group_platforms"]
     assert kwargs["payment_status"] == "paid"
     assert kwargs["entitlements_status"] == "active"
 
 
-@pytest.mark.parametrize("bad_platform", [None, "", "generic", "groq", "not_a_platform"])
+@pytest.mark.parametrize("bad_platform", [None, "", "generic", "groq", "not_a_platform", "security-guardian", "security_guardian", "skill", "skills"])
 def test_unsupported_platforms_are_rejected(bad_platform: str | None) -> None:
     router = PlatformInstallKeyRouter()
     with pytest.raises(ValueError):

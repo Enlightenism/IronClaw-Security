@@ -168,6 +168,44 @@ api.interceptors.response.use(
 
 const withOrgId = (orgId) => `organizationid=${encodeURIComponent(orgId)}`;
 
+const sanitizeCheckoutPayload = (payload = {}) => {
+  const safePayload = { ...payload };
+
+  if (safePayload.card) {
+    delete safePayload.card;
+  }
+
+  if (safePayload.customer) {
+    delete safePayload.customer;
+  }
+
+  if (
+    safePayload.paymentMethod &&
+    typeof safePayload.paymentMethod === "object"
+  ) {
+    const candidate = safePayload.paymentMethod;
+    const savedMethodId =
+      candidate?.id ||
+      candidate?.payment_method_id ||
+      candidate?.paymentMethodId;
+
+    if (savedMethodId) {
+      safePayload.paymentMethodId = savedMethodId;
+    }
+
+    if (candidate?.customer) {
+      safePayload.customerId = candidate.customer;
+    }
+  }
+
+  delete safePayload.paymentMethod;
+  delete safePayload.cardNumber;
+  delete safePayload.pan;
+  delete safePayload.last4_raw;
+
+  return safePayload;
+};
+
 export const health = {
   check: () => api.get("/"),
 };
@@ -189,13 +227,24 @@ export const integrations = {
 };
 
 export const payments = {
-  createCheckout: (payload) => api.post("/billing/checkout/sessions", payload),
+  createCheckout: (payload) =>
+    api.post("/billing/checkout/sessions", sanitizeCheckoutPayload(payload)),
   getStatus: (sessionId) =>
     api.get(`/billing/checkout/sessions/${encodeURIComponent(sessionId)}`),
 };
 
 export const paymentMethods = {
   list: (orgId) => api.get(`/ui/billing/payment-methods?${withOrgId(orgId)}`),
+
+  attach: (paymentMethodId, orgId, options = {}) => {
+    const payload = {
+      paymentMethodId: String(paymentMethodId || "").trim(),
+      setAsDefault: Boolean(options.setAsDefault),
+      ...(orgId ? { organizationid: String(orgId) } : {}),
+    };
+
+    return api.post("/ui/billing/payment-methods", payload);
+  },
 
   setDefault: (methodId, orgId) =>
     api.patch(

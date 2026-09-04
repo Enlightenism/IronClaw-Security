@@ -106,9 +106,7 @@ const normalizePaymentMethod = (method, fallbackDefaultId = "") => {
   );
 
   const expDisplay = getFirstString(method?.exp_display, method?.expdisplay);
-
   const last4 = getFirstString(method?.last4, method?.card?.last4);
-
   const status = getFirstString(method?.status);
   const inferredDefault =
     method?.isdefault === true ||
@@ -116,9 +114,9 @@ const normalizePaymentMethod = (method, fallbackDefaultId = "") => {
     method?.default === true ||
     (methodId && fallbackDefaultId && methodId === fallbackDefaultId);
 
-  return {
-    raw: method,
+  const maskedSnapshot = {
     methodid: methodId,
+    type: getFirstString(method?.type, method?.payment_method_type, "card"),
     brand,
     brandDisplay: brand,
     last4,
@@ -131,6 +129,11 @@ const normalizePaymentMethod = (method, fallbackDefaultId = "") => {
         : ""),
     status,
     isDefault: inferredDefault,
+  };
+
+  return {
+    ...maskedSnapshot,
+    raw: maskedSnapshot,
   };
 };
 

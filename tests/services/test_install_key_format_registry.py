@@ -141,7 +141,9 @@ def test_service_registry_tracks_the_canonical_registry(monkeypatch: pytest.Monk
 
 
 def test_list_programs_cover_the_full_canonical_runtime_set() -> None:
-    assert InstallKeyFormatRegistryService.list_programs() == (
+    programs = InstallKeyFormatRegistryService.list_programs()
+
+    assert programs == (
         "openclaw",
         "claude_code",
         "cursor",
@@ -149,11 +151,16 @@ def test_list_programs_cover_the_full_canonical_runtime_set() -> None:
         "gemini_cli",
         "copilot",
         "hermes",
-        "security_guardian",
     )
+    assert "security_guardian" not in programs
+
+    guardian = resolve_install_key_format_for_key("ic_install_security_guardian_abc123")
+    assert guardian.program == "security_guardian"
+    assert guardian.prefix == "ic_install_security_guardian_"
+    assert guardian.platform == "security_guardian"
 
 
-def test_list_platforms_returns_unique_supported_aliases() -> None:
+def test_list_platforms_returns_unique_supported_runtime_aliases() -> None:
     platforms = list_install_key_platforms()
 
     assert "openclaw" in platforms
@@ -168,8 +175,8 @@ def test_list_platforms_returns_unique_supported_aliases() -> None:
     assert "githubcopilot" in platforms
     assert "hermes" in platforms
     assert "hermes_cli" in platforms
-    assert "security_guardian" in platforms
-    assert "skill" in platforms
+    assert "security_guardian" not in platforms
+    assert "skill" not in platforms
     assert len(set(platforms)) == len(platforms)
 
 
@@ -196,12 +203,12 @@ def test_list_platforms_for_program_uses_full_runtime_grouping() -> None:
     assert len(set(security_group)) == len(security_group)
 
 
-def test_list_format_groups_returns_canonical_registry_entries() -> None:
+def test_list_format_groups_returns_canonical_runtime_registry_entries() -> None:
     groups = list_install_key_format_groups()
 
-    assert len(groups) == 8
+    assert len(groups) == 7
     programs = {group.program for group in groups}
-    assert programs == {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes", "security_guardian"}
+    assert programs == {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"}
 
     by_program = {group.program: group for group in groups}
     assert by_program["openclaw"].prefix == "ic_install_openclaw_"
@@ -211,8 +218,11 @@ def test_list_format_groups_returns_canonical_registry_entries() -> None:
     assert by_program["gemini_cli"].prefix == "ic_install_gemini_cli_"
     assert by_program["copilot"].prefix == "ic_install_copilot_"
     assert by_program["hermes"].prefix == "ic_install_hermes_"
-    assert by_program["security_guardian"].prefix == "ic_install_security_guardian_"
-    assert by_program["security_guardian"].platform == "security_guardian"
+
+    guardian = resolve_install_key_format_for_key("ic_install_security_guardian_abc123")
+    assert guardian.program == "security_guardian"
+    assert guardian.prefix == "ic_install_security_guardian_"
+    assert guardian.platform == "security_guardian"
 
 
 def test_service_factory_returns_singleton_registry() -> None:

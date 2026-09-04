@@ -471,6 +471,38 @@ describe("AuthContext", () => {
     );
   });
 
+  it("preserves the shared counter state across auth state changes and logout", async () => {
+    globalThis.__IC_COUNTERS__ = {
+      ic_threats_blocked: { value: 6543, updatedAt: Date.now() },
+      __controllers: new Map(),
+    };
+
+    renderWithProvider();
+
+    await waitFor(() =>
+      expect(supabase.auth.onAuthStateChange).toHaveBeenCalledTimes(1),
+    );
+
+    await act(async () => {
+      authStateChangeHandler("SIGNED_IN", makeSession());
+    });
+
+    expect(globalThis.__IC_COUNTERS__.ic_threats_blocked.value).toBe(6543);
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("logout"));
+    });
+
+    expect(globalThis.__IC_COUNTERS__.ic_threats_blocked.value).toBe(6543);
+    expect(globalThis.__IC_COUNTERS__.__controllers).toBeInstanceOf(Map);
+
+    await act(async () => {
+      authStateChangeHandler("SIGNED_OUT", null);
+    });
+
+    expect(globalThis.__IC_COUNTERS__.ic_threats_blocked.value).toBe(6543);
+  });
+
   it("throws when useAuth is used outside AuthProvider", () => {
     const OutsideConsumer = () => {
       useAuth();

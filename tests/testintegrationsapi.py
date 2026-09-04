@@ -345,23 +345,19 @@ def test_integration_token_uses_paid_install_keys_not_platform_api_key(client: T
         "gemini-cli",
         "copilot",
         "hermes",
-        "security-guardian",
     ]
-    assert payload["install_metadata"]["security-guardian"]["shared_package"] is True
-    assert payload["install_metadata"]["security-guardian"]["shared_install_key_family"] is True
-    assert "ic_install_openclaw_...abcd" in payload["openclaw_command"]
-    assert "ic_install_claude_code_...efgh" in payload["claude_code_command"]
-    assert "ic_install_cursor_...ijkl" in payload["cursor_command"]
-    assert "ic_install_goose_...mnop" in payload["goose_command"]
-    assert "ic_install_gemini_cli_...qrst" in payload["gemini_cli_command"]
-    assert "ic_install_copilot_...uvwx" in payload["copilot_command"]
-    assert "ic_install_hermes_...abcd" in payload["hermes_command"]
-    assert "ic_install_security_guardian_...yzab" in payload["security_guardian_command"]
-    assert "--platform openclaw" in payload["openclaw_command"]
-    assert "--platform claude-code" in payload["claude_code_command"]
+    assert "security-guardian" not in payload["supported_platforms"]
+    assert "security-guardian" not in payload["install_metadata"]
+    assert payload["openclaw_command"] == ("gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent openclaw --scope user")
+    assert payload["claude_code_command"] == ("gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent claude-code --scope user")
+    assert payload["cursor_command"] == ("gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent cursor --scope user")
+    assert payload["goose_command"] == ("gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent goose --scope user")
+    assert payload["gemini_cli_command"] == ("gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent gemini-cli --scope user")
+    assert payload["copilot_command"] == ("gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent copilot --scope user")
+    assert payload["hermes_command"] == ("hermes skills install https://<YOUR_DOMAIN>/skills/<YOUR_SKILL_SLUG>/SKILL.md --name <YOUR_SKILL_NAME>")
     assert payload["install_metadata"]["cursor"]["program"] == "cursor"
     assert payload["install_metadata"]["hermes"]["program"] == "hermes"
-    assert payload["command_metadata"]["security-guardian"].startswith("npx ironclaw-install --key")
+    assert payload["security_guardian_command"] == ""
 
 
 def test_integration_list_endpoints_expose_canonical_platform_metadata(client: TestClient) -> None:
@@ -378,11 +374,8 @@ def test_integration_list_endpoints_expose_canonical_platform_metadata(client: T
             "gemini-cli",
             "copilot",
             "hermes",
-            "security-guardian",
         ]
-        guardian = next(item for item in payload["items"] if item["integration_id"] == "security-guardian")
-        assert guardian["shared_package"] is True
-        assert guardian["shared_install_key_family"] is True
+        assert all(item["integration_id"] != "security-guardian" for item in payload["items"])
 
 
 def test_api_integrations_token_ignores_generic_platform_auth_even_with_registry_data() -> None:
@@ -438,10 +431,9 @@ def test_api_integrations_token_ignores_generic_platform_auth_even_with_registry
         "gemini-cli",
         "copilot",
         "hermes",
-        "security-guardian",
     ]
-    assert payload["install_metadata"]["security-guardian"]["shared_package"] is True
-    assert payload["install_metadata"]["security-guardian"]["shared_install_key_family"] is True
+    assert "security-guardian" not in payload["supported_platforms"]
+    assert "security-guardian" not in payload["install_metadata"]
     assert payload["install_metadata"]["hermes"]["program"] == "hermes"
     assert "system-platform-api-key" not in str(payload)
 

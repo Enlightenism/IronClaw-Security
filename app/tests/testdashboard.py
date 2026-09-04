@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
+from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.core.install_keys import (
     InstallKeyNotFoundError,
     InstallKeyRecord,
@@ -248,7 +249,7 @@ class TestDashboardOverview:
             _make_record(key_id="ik_goose_1", owner_key=_OWNER, program="goose", masked_key="ic_install_goose_...aaaa"),
             _make_record(key_id="ik_gemini_1", owner_key=_OWNER, program="gemini_cli", masked_key="ic_install_gemini_cli_...bbbb"),
             _make_record(key_id="ik_copilot_1", owner_key=_OWNER, program="copilot", masked_key="ic_install_copilot_...cccc"),
-            _make_record(key_id="ik_guardian_1", owner_key=_OWNER, program="security_guardian", masked_key="ic_install_security_guardian_...dddd"),
+            _make_record(key_id="ik_hermes_1", owner_key=_OWNER, program="hermes", masked_key="ic_install_hermes_...eeee"),
         ]
         wallet = _make_wallet_registry(balance_units=125, total_consumed_units=18, total_blocked_attacks=7)
         reg = _make_registry(records=records)
@@ -260,19 +261,13 @@ class TestDashboardOverview:
         finally:
             app.dependency_overrides.clear()
 
-        payload_programs = {slot["program"] for slot in body["install_keys"]}
-        expected_programs = {
-            "openclaw",
-            "claude_code",
-            "cursor",
-            "goose",
-            "gemini_cli",
-            "copilot",
-            "security_guardian",
-        }
-        assert expected_programs.issubset(payload_programs)
-        assert any(slot["program"] == "security_guardian" and slot["status"] == "active" for slot in body["install_keys"])
+        payload_programs = [slot["program"] for slot in body["install_keys"]]
+        expected_programs = list(InstallKeyFormatRegistry.list_programs())
+        assert payload_programs == expected_programs
+        assert "hermes" in payload_programs
+        assert "security_guardian" not in payload_programs
         assert any(slot["program"] == "cursor" and slot["status"] == "active" for slot in body["install_keys"])
+        assert all(slot["program"] in expected_programs for slot in body["install_keys"])
 
 
 # ---------------------------------------------------------------------------

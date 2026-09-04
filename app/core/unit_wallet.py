@@ -409,6 +409,7 @@ class UnitWallet:
 
         canonical_metadata = {
             **(metadata or {}),
+            "owner_key": self.owner_id,
             "key_id": key_id,
             "program": program,
             "payment_id": payment_id,
@@ -438,6 +439,7 @@ class UnitWallet:
         summary.last_action_at = transaction.created_at
         summary.metadata.update(
             {
+                "owner_key": self.owner_id,
                 "key_id": key_id,
                 "program": program,
                 "payment_id": payment_id,
@@ -912,6 +914,7 @@ class UnitWalletRegistry:
             usage.metadata.update(
                 {
                     **(metadata or {}),
+                    "owner_key": wallet.owner_key,
                     "key_id": key_id,
                     "program": program,
                     "payment_id": payment_id,
@@ -922,6 +925,7 @@ class UnitWalletRegistry:
 
             canonical_metadata = {
                 **(metadata or {}),
+                "owner_key": wallet.owner_key,
                 "key_id": key_id,
                 "program": program,
                 "payment_id": payment_id,

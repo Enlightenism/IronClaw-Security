@@ -140,6 +140,8 @@ class InstallKeyFormatRegistryService:
         ordered: list[str] = []
         seen: set[str] = set()
         for program in cls.list_programs():
+            if program == "security_guardian":
+                continue
             for platform in cls.list_platforms_for_program(program):
                 if platform not in seen:
                     seen.add(platform)

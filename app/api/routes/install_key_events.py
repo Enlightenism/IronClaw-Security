@@ -251,6 +251,7 @@ def _sync_wallet_event(
         usage.last_action_at = timestamp
         usage.metadata.update(
             {
+                "owner_key": owner_key,
                 "key_id": key_id,
                 "program": effective_program,
                 "last_event_type": event_type,

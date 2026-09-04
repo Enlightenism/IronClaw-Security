@@ -11,6 +11,7 @@ from typing import Any, Final, Literal
 
 from app.core.logging import get_logger
 from app.core.supabase import get_supabase_service_client
+from app.core.unit_wallet import get_unit_wallet_registry
 from app.supabaseclient import SupabaseAPIError, SupabaseClientError
 
 _logger: logging.Logger = get_logger("ironclaw.install_keys")
@@ -30,7 +31,10 @@ _INSTALL_KEY_PREFIX_SECURITY_GUARDIAN: Final[str] = "ic_install_security_guardia
 _INSTALL_KEY_SECRET_BYTES: Final[int] = 32
 _T_INSTALL_KEYS: Final[str] = "install_keys"
 
-ProgramCode = Literal[
+# Security Guardian is a shared connector/install-key family that links the
+# runtime platforms to IronClaw security. It is not a standalone runtime
+# platform and must never be treated as one in platform enumeration or UI lists.
+RuntimeProgramCode = Literal[
     "openclaw",
     "claude_code",
     "cursor",
@@ -38,9 +42,11 @@ ProgramCode = Literal[
     "gemini_cli",
     "copilot",
     "hermes",
-    "security_guardian",
 ]
-_VALID_PROGRAMS: frozenset[str] = frozenset(
+ConnectorProgramCode = Literal["security_guardian"]
+ProgramCode = RuntimeProgramCode | ConnectorProgramCode
+
+_RUNTIME_PROGRAMS: Final[frozenset[str]] = frozenset(
     {
         "openclaw",
         "claude_code",
@@ -49,11 +55,12 @@ _VALID_PROGRAMS: frozenset[str] = frozenset(
         "gemini_cli",
         "copilot",
         "hermes",
-        "security_guardian",
     }
 )
+_CONNECTOR_PROGRAMS: Final[frozenset[str]] = frozenset({"security_guardian"})
+_VALID_PROGRAMS: Final[frozenset[str]] = _RUNTIME_PROGRAMS | _CONNECTOR_PROGRAMS
 
-_CANONICAL_PROGRAM_ALIASES: Final[dict[str, ProgramCode]] = {
+_RUNTIME_PROGRAM_ALIASES: Final[dict[str, RuntimeProgramCode]] = {
     "openclaw": "openclaw",
     "open_claw": "openclaw",
     "open_claw_": "openclaw",
@@ -84,6 +91,8 @@ _CANONICAL_PROGRAM_ALIASES: Final[dict[str, ProgramCode]] = {
     "hermes-agent": "hermes",
     "hermes_cli": "hermes",
     "hermes-cli": "hermes",
+}
+_CONNECTOR_PROGRAM_ALIASES: Final[dict[str, ConnectorProgramCode]] = {
     "security_guardian": "security_guardian",
     "security-guardian": "security_guardian",
     "securityguardian": "security_guardian",
@@ -92,7 +101,14 @@ _CANONICAL_PROGRAM_ALIASES: Final[dict[str, ProgramCode]] = {
     "skill": "security_guardian",
     "skills": "security_guardian",
 }
+_CANONICAL_PROGRAM_ALIASES: Final[dict[str, ProgramCode]] = {
+    **_RUNTIME_PROGRAM_ALIASES,
+    **_CONNECTOR_PROGRAM_ALIASES,
+}
 
+# Security Guardian is intentionally retained here as a connector/shared
+# install-key family prefix because it is part of the install-key trust domain,
+# but it is excluded from the runtime platform set and platform enumeration.
 _PREFIX_BY_PROGRAM: Final[dict[ProgramCode, str]] = {
     "openclaw": _INSTALL_KEY_PREFIX_OPENCLAW,
     "claude_code": _INSTALL_KEY_PREFIX_CLAUDE,
@@ -215,6 +231,13 @@ def _normalize_entitlement_status(value: Any) -> str:
 
 def _is_paid_payment_status(value: Any) -> bool:
     return _normalize_payment_status(value) == "paid"
+
+
+def _is_runtime_program(program: ProgramCode | str | Any) -> bool:
+    try:
+        return _normalize_program(program) in _RUNTIME_PROGRAMS
+    except ValueError:
+        return False
 
 
 def _is_active_entitlement_status(value: Any) -> bool:
@@ -530,6 +553,63 @@ class InstallKeyRegistry:
                 reason="missing purchase_reference or checkout_session_id after successful payment completion",
             )
 
+    def _lock_inactive_key(self, record: InstallKeyRecord, *, reason: str) -> InstallKeyRecord:
+        if not record.active:
+            return record
+
+        updated = InstallKeyRecord(
+            key_id=record.key_id,
+            owner_key=record.owner_key,
+            subscription_id=record.subscription_id,
+            program=record.program,
+            raw_key="",
+            raw_key_hash=record.raw_key_hash,
+            masked_key=record.masked_key,
+            label=record.label,
+            active=False,
+            payment_status=record.payment_status,
+            entitlements_status="not_active",
+            issued_after_payment=record.issued_after_payment,
+            org_id=record.org_id,
+            customer_id=record.customer_id,
+            units_consumed=record.units_consumed,
+            created_at=record.created_at,
+            last_used_at=record.last_used_at,
+            revoked_at=_utc_now(),
+            purchase_reference=record.purchase_reference,
+            checkout_session_id=record.checkout_session_id,
+            metadata={**record.metadata, "lock_reason": reason},
+        )
+        self._records_by_id[record.key_id] = updated
+
+        try:
+            client = get_supabase_service_client()
+            client.table(_T_INSTALL_KEYS).update(
+                {
+                    "active": False,
+                    "entitlements_status": "not_active",
+                    "revoked_at": updated.revoked_at.isoformat(),
+                    "metadata": updated.metadata,
+                }
+            ).eq("key_id", record.key_id).execute()
+        except (SupabaseAPIError, SupabaseClientError, Exception):
+            _logger.warning("install_keys: failed to persist lock state for %s (reason=%s)", record.key_id, reason)
+
+        return updated
+
+    def _reconcile_key_state(self, record: InstallKeyRecord) -> InstallKeyRecord:
+        if not record.active:
+            return record
+
+        if record.payment_status != "paid" or record.entitlements_status != "active" or not record.issued_after_payment:
+            return self._lock_inactive_key(record, reason="entitlement_inactive")
+
+        wallet = get_unit_wallet_registry().get_wallet(record.owner_key)
+        if wallet is not None and wallet.balance_units <= 0:
+            return self._lock_inactive_key(record, reason="units_exhausted")
+
+        return record
+
     # ------------------------------------------------------------------
     # generate_for_paid_customer
     # ------------------------------------------------------------------
@@ -557,6 +637,8 @@ class InstallKeyRegistry:
         successful paid entitlement and prevents pre-purchase exposure.
         """
         normalized_program = _normalize_program(program)
+        if normalized_program in _CONNECTOR_PROGRAMS:
+            raise ValueError("Security Guardian is a shared install-key connector and cannot be issued as a runtime install key.")
 
         normalized_owner = _canonical_owner_key(owner_key)
         if not str(subscription_id).strip():
@@ -661,6 +743,8 @@ class InstallKeyRegistry:
         path anymore.
         """
         normalized_program = _normalize_program(program)
+        if normalized_program in _CONNECTOR_PROGRAMS:
+            raise ValueError("Security Guardian is a shared install-key connector and cannot be issued as a runtime install key.")
 
         effective_payment_status = payment_status
         if effective_payment_status is None and metadata is not None:
@@ -710,7 +794,11 @@ class InstallKeyRegistry:
         """Return all install key records (active and revoked) for owner_key."""
         with self._lock:
             self._ensure_loaded()
-            return [r for r in self._records_by_id.values() if r.owner_key == owner_key]
+            reconciled: list[InstallKeyRecord] = []
+            for record in self._records_by_id.values():
+                if record.owner_key == owner_key:
+                    reconciled.append(self._reconcile_key_state(record))
+            return reconciled
 
     # ------------------------------------------------------------------
     # get_key_by_id
@@ -719,7 +807,10 @@ class InstallKeyRegistry:
     def get_key_by_id(self, key_id: str) -> InstallKeyRecord | None:
         with self._lock:
             self._ensure_loaded()
-            return self._records_by_id.get(key_id)
+            record = self._records_by_id.get(key_id)
+            if record is None:
+                return None
+            return self._reconcile_key_state(record)
 
     # ------------------------------------------------------------------
     # authenticate_install_key
@@ -742,7 +833,10 @@ class InstallKeyRegistry:
             if not key_id:
                 return None
             record = self._records_by_id.get(key_id)
-            if record is None or not record.active:
+            if record is None:
+                return None
+            record = self._reconcile_key_state(record)
+            if not record.active:
                 return None
             if not record.raw_key_hash:
                 return None
@@ -854,6 +948,7 @@ class InstallKeyRegistry:
             record = self._records_by_id.get(key_id)
             if record is None:
                 raise InstallKeyNotFoundError(key_id)
+            record = self._reconcile_key_state(record)
             if not record.active:
                 raise InstallKeyUsageError(key_id, "key is inactive and cannot record usage")
             if record.payment_status != "paid" or record.entitlements_status != "active" or not record.issued_after_payment:

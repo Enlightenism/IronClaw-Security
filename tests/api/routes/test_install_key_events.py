@@ -95,6 +95,8 @@ def test_usage_units_debited_updates_wallet_and_install_key_usage(client: TestCl
     assert wallet.balance_units == 93
     assert wallet.total_consumed_units == 7
     assert wallet.install_key_usage[record.key_id].total_consumed_units == 7
+    assert wallet.install_key_usage[record.key_id].owner_key == owner_key
+    assert wallet.install_key_usage[record.key_id].metadata["owner_key"] == owner_key
     assert wallet.install_key_usage[record.key_id].metadata["action_type"] == "prompt"
 
 
@@ -127,6 +129,8 @@ def test_blocked_event_increments_blocked_attack_totals(client: TestClient) -> N
     assert wallet is not None
     assert wallet.total_blocked_attacks == 2
     assert wallet.install_key_usage[record.key_id].total_blocked_attacks == 2
+    assert wallet.install_key_usage[record.key_id].owner_key == owner_key
+    assert wallet.install_key_usage[record.key_id].metadata["owner_key"] == owner_key
     assert wallet.install_key_usage[record.key_id].metadata["action_type"] == "tool_call"
 
 

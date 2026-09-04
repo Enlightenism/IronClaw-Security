@@ -358,6 +358,35 @@ describe("payments.createCheckout", () => {
       payload,
     );
   });
+
+  it("removes raw card values and carries saved Stripe payment metadata without leaking PAN data", () => {
+    mockPost.mockResolvedValueOnce({ data: {} });
+    const payload = {
+      packageId: "pkg5000",
+      organizationId: "org-001",
+      paymentMethod: {
+        id: "pm_saved_123",
+        customer: "cus_123",
+        card: {
+          number: "4242424242424242",
+          last4: "4242",
+          brand: "Visa",
+        },
+      },
+      customer: { id: "cus_123" },
+      card: { number: "4242424242424242", cvc: "123" },
+    };
+
+    payments.createCheckout(payload);
+
+    const [, sentPayload] = mockPost.mock.calls.at(-1);
+    expect(sentPayload.card).toBeUndefined();
+    expect(sentPayload.customer).toBeUndefined();
+    expect(sentPayload.paymentMethod).toBeUndefined();
+    expect(sentPayload.paymentMethodId).toBe("pm_saved_123");
+    expect(sentPayload.customerId).toBe("cus_123");
+    expect(JSON.stringify(sentPayload)).not.toContain("4242424242424242");
+  });
 });
 
 describe("payments.getStatus", () => {

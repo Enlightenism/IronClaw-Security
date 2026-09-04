@@ -529,6 +529,43 @@ def _looks_like_install_key(value: str | None) -> bool:
     return classify_api_key(normalized) == "install"
 
 
+def _looks_like_generic_platform_auth(value: str | None) -> bool:
+    normalized = _clean_optional_string(value)
+    if normalized is None:
+        return False
+
+    if normalized.startswith("ic_install_"):
+        return False
+
+    if normalized.startswith("ic_"):
+        return True
+
+    generic_prefixes = (
+        "sk_",
+        "ghp_",
+        "gho_",
+        "github_pat_",
+        "token_",
+        "secret_",
+        "api_",
+        "api-key",
+        "api_key",
+        "platform-api-key",
+        "platform_api_key",
+        "system-api-key",
+        "system_api_key",
+        "internal-platform-api-key",
+        "internal_platform_api_key",
+        "bearer ",
+        "x-api-key",
+    )
+    if normalized.startswith(generic_prefixes):
+        return True
+
+    lowered = normalized.lower()
+    return ("platform" in lowered and ("key" in lowered or "token" in lowered or "secret" in lowered)) or ("system" in lowered and ("key" in lowered or "token" in lowered or "secret" in lowered)) or ("api" in lowered and "key" in lowered)
+
+
 def _coerce_roles(record: APIKeyRecord | None) -> tuple[str, ...]:
     if record is None:
         return ()
@@ -567,8 +604,11 @@ def _coerce_principal_id(record: APIKeyRecord | None) -> str | None:
         "principal_id",
     ):
         value = _clean_optional_string(getattr(record, attr_name, None))
-        if value is not None:
-            return value
+        if value is None:
+            continue
+        if _looks_like_generic_platform_auth(value):
+            continue
+        return value
 
     return None
 
@@ -598,6 +638,8 @@ def _extract_header_org_candidates(
         value = _clean_optional_string(raw_value)
         if value is None:
             continue
+        if _looks_like_generic_platform_auth(value):
+            continue
 
         if value not in seen_values:
             normalized_values.append((header_name, value))
@@ -623,8 +665,11 @@ def _coerce_org_id_from_record(record: APIKeyRecord | None) -> str | None:
 
     for attr_name in ("org_id", "organization_id", "tenant_id"):
         value = _clean_optional_string(getattr(record, attr_name, None))
-        if value is not None:
-            return value
+        if value is None:
+            continue
+        if _looks_like_generic_platform_auth(value):
+            continue
+        return value
 
     return None
 
@@ -634,8 +679,11 @@ def _coerce_org_id_from_settings(request: Request) -> str | None:
     if settings is not None:
         for attr_name in ("org_id", "organization_id", "default_org_id"):
             value = _clean_optional_string(getattr(settings, attr_name, None))
-            if value is not None:
-                return value
+            if value is None:
+                continue
+            if _looks_like_generic_platform_auth(value):
+                continue
+            return value
 
     return None
 

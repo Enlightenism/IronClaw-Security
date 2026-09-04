@@ -89,6 +89,12 @@ export const AuthProvider = ({ children }) => {
     return Boolean(cachedToken || cachedOrgId);
   });
 
+  useEffect(() => {
+    globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
+    globalThis.__IC_COUNTERS__.__controllers =
+      globalThis.__IC_COUNTERS__.__controllers || new Map();
+  }, []);
+
   const [user, setUser] = useState(null);
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(!cachedAuthApplied);

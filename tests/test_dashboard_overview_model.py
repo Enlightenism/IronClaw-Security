@@ -23,11 +23,14 @@ def test_default_dashboard_overview_includes_platform_families_and_slots() -> No
         "gemini_cli",
         "copilot",
         "hermes",
-        "security_guardian",
     ]
+    assert "security_guardian" not in {slot.program for slot in overview.install_key_slots}
     assert all(slot.status == "locked" for slot in overview.install_key_slots)
     assert all(slot.payment_status == "unpaid" for slot in overview.install_key_slots)
     assert all(slot.metadata.get("placeholder") == "Keys will be generated after purchase" for slot in overview.install_key_slots)
+
+    rejected = build_dashboard_overview({"install_key_slots": [{"program": "security_guardian", "label": "Security Guardian", "status": "locked", "metadata": {}}]})
+    assert all(slot.program != "security_guardian" for slot in rejected.install_key_slots)
 
 
 def test_build_dashboard_overview_rejects_legacy_runtime_labels() -> None:

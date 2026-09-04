@@ -19,7 +19,6 @@ _CANONICAL_PLATFORM_ORDER: tuple[str, ...] = (
     "gemini-cli",
     "copilot",
     "hermes",
-    "security-guardian",
 )
 
 _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
@@ -29,7 +28,7 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "slug": "claude-code",
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "npx ironclaw-install --key {key} --platform claude-code",
+        "command_template": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent claude-code --scope user",
     },
     "openclaw": {
         "program": "openclaw",
@@ -37,7 +36,7 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "slug": "openclaw",
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "npx ironclaw-install --key {key} --platform openclaw",
+        "command_template": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent openclaw --scope user",
     },
     "cursor": {
         "program": "cursor",
@@ -45,7 +44,7 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "slug": "cursor",
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "npx ironclaw-install --key {key} --platform cursor",
+        "command_template": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent cursor --scope user",
     },
     "goose": {
         "program": "goose",
@@ -53,7 +52,7 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "slug": "goose",
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "npx ironclaw-install --key {key} --platform goose",
+        "command_template": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent goose --scope user",
     },
     "gemini-cli": {
         "program": "gemini_cli",
@@ -61,7 +60,7 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "slug": "gemini-cli",
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "npx ironclaw-install --key {key} --platform gemini-cli",
+        "command_template": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent gemini-cli --scope user",
     },
     "copilot": {
         "program": "copilot",
@@ -69,7 +68,7 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "slug": "copilot",
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "npx ironclaw-install --key {key} --platform copilot",
+        "command_template": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent copilot --scope user",
     },
     "hermes": {
         "program": "hermes",
@@ -77,16 +76,7 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "slug": "hermes",
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "npx ironclaw-install --key {key} --platform hermes",
-    },
-    "security-guardian": {
-        "program": "security_guardian",
-        "platform": "security-guardian",
-        "slug": "security-guardian",
-        "shared_package": True,
-        "shared_install_key_family": True,
-        "package_type": "shared-runtime-skill-bundle",
-        "command_template": "npx ironclaw-install --key {key} --platform security-guardian",
+        "command_template": "hermes skills install https://<YOUR_DOMAIN>/skills/<YOUR_SKILL_SLUG>/SKILL.md --name <YOUR_SKILL_NAME>",
     },
 }
 
@@ -343,6 +333,6 @@ async def get_integrations_token(auth: Any = Depends(get_auth_context)) -> dict[
         payload["gemini_cli_command"] = payload["command_metadata"].get("gemini-cli", "")
         payload["copilot_command"] = payload["command_metadata"].get("copilot", "")
         payload["hermes_command"] = payload["command_metadata"].get("hermes", "")
-        payload["security_guardian_command"] = payload["command_metadata"].get("security-guardian", "")
+        payload["security_guardian_command"] = ""
 
     return payload

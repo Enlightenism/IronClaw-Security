@@ -13,6 +13,7 @@ from app.core.install_keys import (
     _mask_key,
     _reset_install_key_registry_for_testing,
 )
+from app.core.unit_wallet import get_unit_wallet_registry
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -293,7 +294,7 @@ class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
 
     def test_multi_platform_aliases_generate_canonical_keys(self):
         reg = self._registry()
-        for program in ("cursor", "goose", "gemini-cli", "github-copilot", "security-guardian", "hermes"):
+        for program in ("cursor", "goose", "gemini-cli", "github-copilot", "hermes"):
             record = reg.generate_for_paid_customer(
                 owner_key=_OWNER,
                 subscription_id=_SUB_ID,
@@ -304,7 +305,7 @@ class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
                 checkout_session_id=_CHECKOUT_SESSION_ID,
                 purchase_reference=_PURCHASE_REFERENCE,
             )
-            assert record.program in {"cursor", "goose", "gemini_cli", "copilot", "security_guardian", "hermes"}
+            assert record.program in {"cursor", "goose", "gemini_cli", "copilot", "hermes"}
             assert record.raw_key.startswith(
                 (
                     _CURSOR_PREFIX,
@@ -312,13 +313,27 @@ class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
                     _GEMINI_PREFIX,
                     _COPILOT_PREFIX,
                     _HERMES_PREFIX,
-                    _SKILLS_PREFIX,
                 )
             )
 
+    def test_security_guardian_connector_is_rejected_from_runtime_key_issuance(self):
+        reg = self._registry()
+        for program in ("security_guardian", "security-guardian", "securityguardian", "skill"):
+            with self.assertRaises(ValueError):
+                reg.generate_for_paid_customer(
+                    owner_key=_OWNER,
+                    subscription_id=_SUB_ID,
+                    program=program,
+                    payment_status="paid",
+                    entitlements_status="active",
+                    issued_after_payment=True,
+                    checkout_session_id=_CHECKOUT_SESSION_ID,
+                    purchase_reference=_PURCHASE_REFERENCE,
+                )
+
     def test_runtime_family_aliases_require_paid_entitlement_before_generation(self):
         reg = self._registry()
-        for program in ("cursor", "goose", "gemini-cli", "github-copilot", "security-guardian", "hermes"):
+        for program in ("cursor", "goose", "gemini-cli", "github-copilot", "hermes"):
             with self.assertRaises(InstallKeyPaymentRequiredError):
                 reg.generate_for_paid_customer(
                     owner_key=_OWNER,
@@ -407,6 +422,15 @@ class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
         r1 = self._generate_paid_key(reg, "openclaw")
         r2 = self._generate_paid_key(reg, "claude_code")
         assert r1.program != r2.program
+
+    def test_key_locks_when_owner_wallet_balance_is_zero(self):
+        reg = self._registry()
+        wallet = get_unit_wallet_registry()
+        wallet.get_or_create_wallet(_OWNER).balance_units = 0
+        record = self._generate_paid_key(reg, "openclaw")
+
+        assert reg.get_key_by_id(record.key_id).active is False
+        assert reg.authenticate_install_key(record.raw_key) is None
 
     def test_invalid_program_raises_value_error(self):
         reg = self._registry()

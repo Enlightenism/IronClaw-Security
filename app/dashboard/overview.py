@@ -120,6 +120,7 @@ class DashboardAlert:
 _PLACEHOLDER_PURCHASE_MESSAGE = "Keys will be generated after purchase"
 
 _DEFAULT_PLATFORM_FAMILIES: tuple[str, ...] = InstallKeyFormatRegistry.list_programs()
+_RUNTIME_ORDER: dict[str, int] = {program: idx for idx, program in enumerate(_DEFAULT_PLATFORM_FAMILIES)}
 
 _PLATFORM_LABELS: dict[str, str] = {
     "openclaw": "OpenClaw",
@@ -129,7 +130,6 @@ _PLATFORM_LABELS: dict[str, str] = {
     "gemini_cli": "Gemini CLI",
     "copilot": "GitHub Copilot",
     "hermes": "Hermes",
-    "security_guardian": "Security Guardian",
 }
 
 
@@ -286,7 +286,15 @@ def _normalize_platform_program(value: Any) -> str:
         "standalone_iron_claw",
         "standalone ironclaw",
     }
-    if normalized in stale_legacy_platforms:
+    connector_platforms = {
+        "security_guardian",
+        "securityguardian",
+        "security_guardian_skill",
+        "security_guardian_skill_",
+        "skill",
+        "skills",
+    }
+    if normalized in stale_legacy_platforms or normalized in connector_platforms:
         return ""
 
     canonical = InstallKeyFormatRegistry.normalize_program(normalized)
@@ -341,6 +349,12 @@ def _default_install_key_slots() -> tuple[DashboardInstallKeySlot, ...]:
         )
         for program in _DEFAULT_PLATFORM_FAMILIES
     )
+
+
+def _sort_runtime_slots(items: tuple[Any, ...], *, program_attr: str) -> tuple[Any, ...]:
+    ordered = [item for item in items if getattr(item, program_attr, "") in _RUNTIME_ORDER]
+    ordered.sort(key=lambda item: _RUNTIME_ORDER.get(getattr(item, program_attr, ""), len(_RUNTIME_ORDER)))
+    return tuple(ordered)
 
 
 def _normalize_platform_family(value: Any) -> DashboardPlatformFamily | None:
@@ -422,12 +436,16 @@ def build_dashboard_overview(
     raw_platform_families = source.get("platform_families")
     if isinstance(raw_platform_families, list):
         platform_families = tuple(item for entry in raw_platform_families if (item := _normalize_platform_family(entry)) is not None)
+        platform_families = tuple(item for item in platform_families if item.family in _RUNTIME_ORDER)
+        platform_families = _sort_runtime_slots(platform_families, program_attr="family")
     else:
         platform_families = current.platform_families or _default_platform_families()
 
     raw_install_key_slots = source.get("install_key_slots")
     if isinstance(raw_install_key_slots, list):
         install_key_slots = tuple(item for entry in raw_install_key_slots if (item := _normalize_install_key_slot(entry)) is not None)
+        install_key_slots = tuple(item for item in install_key_slots if item.program in _RUNTIME_ORDER)
+        install_key_slots = _sort_runtime_slots(install_key_slots, program_attr="program")
     else:
         install_key_slots = current.install_key_slots or _default_install_key_slots()
 
@@ -466,6 +484,7 @@ def build_dashboard_overview(
             )
             for family in platform_families
         )
+        install_key_slots = _sort_runtime_slots(install_key_slots, program_attr="program")
 
     active_incidents = max(0, _coerce_int(source.get("active_incidents"), current.active_incidents))
     pending_reviews = max(0, _coerce_int(source.get("pending_reviews"), current.pending_reviews))

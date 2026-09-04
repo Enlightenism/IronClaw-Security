@@ -383,16 +383,14 @@ class TestDashboardInstallKeySlotLogic:
             body = response.json()
             install_keys = body.get("install_keys", [])
             locked = [k for k in install_keys if k.get("status") == "locked"]
-            assert len(locked) == 9
+            assert len(locked) == 6
             assert {k.get("program") for k in locked} == {
-                "openclaw",
                 "claude_code",
                 "cursor",
                 "goose",
                 "gemini_cli",
                 "copilot",
                 "hermes",
-                "security_guardian",
             }
         finally:
             _clear_registry_overrides()
@@ -454,7 +452,8 @@ class TestDashboardInstallKeySlotLogic:
             body = response.json()
             install_keys = body.get("install_keys", [])
             active = [k for k in install_keys if k.get("status") == "active"]
-            assert len(active) == 3
+            assert len(active) == 1
+            assert {k.get("program") for k in active} == {"openclaw"}
         finally:
             _clear_registry_overrides()
 
@@ -470,7 +469,8 @@ class TestDashboardInstallKeySlotLogic:
             body = response.json()
             install_keys = body.get("install_keys", [])
             revoked = [k for k in install_keys if k.get("status") == "revoked"]
-            assert len(revoked) == 2
+            assert len(revoked) == 1
+            assert {k.get("program") for k in revoked} == {"openclaw"}
         finally:
             _clear_registry_overrides()
 
@@ -492,7 +492,8 @@ class TestDashboardInstallKeySlotLogic:
             body = response.json()
             install_keys = body.get("install_keys", [])
             statuses = {k.get("status") for k in install_keys}
-            assert statuses == {"locked", "active", "revoked"}
+            assert statuses == {"locked", "revoked"}
+            assert any(k.get("program") == "openclaw" and k.get("status") == "revoked" for k in install_keys)
         finally:
             _clear_registry_overrides()
 
@@ -526,7 +527,7 @@ class TestDashboardInstallKeySlotLogic:
             assert response.status_code == 200
             body = response.json()
             install_keys = body.get("install_keys", [])
-            assert len(install_keys) == 8
+            assert len(install_keys) == 7
             assert {item["program"] for item in install_keys} == {
                 "openclaw",
                 "claude_code",
@@ -535,7 +536,6 @@ class TestDashboardInstallKeySlotLogic:
                 "gemini_cli",
                 "copilot",
                 "hermes",
-                "security_guardian",
             }
             assert all(item["status"] == "locked" for item in install_keys)
             assert all(item["masked_key"] is None for item in install_keys)
@@ -552,7 +552,7 @@ class TestDashboardInstallKeySlotLogic:
             provision_install_key_service(),
         )
 
-        assert len(slots) == 8
+        assert len(slots) == 7
         assert {slot.program for slot in slots} == {
             "openclaw",
             "claude_code",
@@ -561,7 +561,6 @@ class TestDashboardInstallKeySlotLogic:
             "gemini_cli",
             "copilot",
             "hermes",
-            "security_guardian",
         }
         assert all(slot.status == "locked" for slot in slots)
         assert all(slot.masked_key is None for slot in slots)

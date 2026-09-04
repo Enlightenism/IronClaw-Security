@@ -196,9 +196,19 @@ def _platform_install_command(program: str | None, install_key: str) -> str:
     except ValueError:
         return ""
 
-    slug = spec.program
-    platform_name = spec.platform_aliases[0] if spec.platform_aliases else slug
-    return f"npx ironclaw-install --key {install_key} --platform {platform_name}"
+    command_map = {
+        "claude_code": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent claude-code --scope user",
+        "openclaw": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent openclaw --scope user",
+        "cursor": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent cursor --scope user",
+        "goose": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent goose --scope user",
+        "gemini_cli": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent gemini-cli --scope user",
+        "copilot": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent copilot --scope user",
+        "hermes": "hermes skills install https://<YOUR_DOMAIN>/skills/<YOUR_SKILL_SLUG>/SKILL.md --name <YOUR_SKILL_NAME>",
+    }
+    command = command_map.get(spec.program)
+    if command is not None:
+        return command
+    return f"npx ironclaw-install --key {install_key} --platform {spec.program}"
 
 
 def _require_paid_install_key(

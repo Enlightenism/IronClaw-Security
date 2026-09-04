@@ -43,6 +43,7 @@ def _is_successful_checkout(payment_status: str | None, entitlements_status: str
 @dataclass(slots=True)
 class SubscriptionRecord:
     subscription_id: str = ""
+    owner_key: str | None = None
     org_id: str = ""
     plan_name: PlanName = "starter"
     customer_id: str = ""
@@ -68,6 +69,10 @@ class SubscriptionRecord:
     price_usd_monthly: int | float = 0
 
     def __post_init__(self) -> None:
+        if self.owner_key is not None:
+            self.owner_key = str(self.owner_key).strip() or None
+        if self.org_id:
+            self.org_id = str(self.org_id).strip().lower()
         if not self.status or self.status == "unpaid" and self.payment_status not in {"paid", "succeeded", "success", "complete", "completed", "active"}:
             self.status = "active" if _is_successful_checkout(self.payment_status, self.entitlements_status) else self.payment_status or "unpaid"
         if self.billing_email is None and self.customer_id:
@@ -84,10 +89,34 @@ class SubscriptionRecord:
             self.overage_units = self.used_units - self.included_units
         if self.price_usd_monthly is None:
             self.price_usd_monthly = 0
+        self.metadata.setdefault("owner_key", self.owner_key)
+        self.metadata.setdefault("org_id", self.org_id)
+        self.metadata.setdefault("subscription_id", self.subscription_id)
+        self.metadata.setdefault("customer_id", self.customer_id)
+        self.metadata.setdefault("plan_name", self.plan_name)
+        self.metadata.setdefault("payment_status", self.payment_status)
+        self.metadata.setdefault("entitlements_status", self.entitlements_status)
+        self.metadata.setdefault("install_key_status", self.install_key_status)
+        self.metadata.setdefault("purchase_complete", self.purchase_complete)
 
     def as_dict(self) -> dict[str, Any]:
+        metadata = dict(self.metadata)
+        metadata.update(
+            {
+                "owner_key": self.owner_key,
+                "org_id": self.org_id,
+                "subscription_id": self.subscription_id,
+                "customer_id": self.customer_id,
+                "plan_name": self.plan_name,
+                "payment_status": self.payment_status,
+                "entitlements_status": self.entitlements_status,
+                "install_key_status": self.install_key_status,
+                "purchase_complete": self.purchase_complete,
+            }
+        )
         return {
             "subscription_id": self.subscription_id,
+            "owner_key": self.owner_key,
             "org_id": self.org_id,
             "plan_name": self.plan_name,
             "customer_id": self.customer_id,
@@ -110,7 +139,7 @@ class SubscriptionRecord:
             "price_usd_monthly": self.price_usd_monthly,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
-            "metadata": dict(self.metadata),
+            "metadata": metadata,
         }
 
 
@@ -170,6 +199,7 @@ class SubscriptionMeterStore:
         self._lock = RLock()
         self._subscriptions: dict[str, SubscriptionRecord] = {}
         self._subscriptions_by_org: dict[str, str] = {}
+        self._subscriptions_by_owner: dict[str, str] = {}
         self._events: list[MeterEventRecord] = []
         self._loaded = False
         self._install_key_registry: InstallKeyRegistry | None = None
@@ -184,6 +214,7 @@ class SubscriptionMeterStore:
             for row in subs_resp.data or []:
                 record = SubscriptionRecord(
                     subscription_id=row["subscription_id"],
+                    owner_key=row.get("owner_key") or (row.get("metadata") or {}).get("owner_key"),
                     org_id=row["org_id"],
                     plan_name=row["plan_name"],
                     customer_id=row["customer_id"],
@@ -200,6 +231,9 @@ class SubscriptionMeterStore:
                     updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else datetime.now(UTC),
                     metadata=row.get("metadata") or {},
                 )
+                if record.owner_key:
+                    record.metadata["owner_key"] = record.owner_key
+                    self._subscriptions_by_owner[record.owner_key] = record.subscription_id
                 self._subscriptions[record.subscription_id] = record
                 self._subscriptions_by_org[record.org_id] = record.subscription_id
         except (SupabaseAPIError, SupabaseClientError, Exception):
@@ -217,6 +251,7 @@ class SubscriptionMeterStore:
         billing_email: str | None = None,
         included_units: int = 0,
         price_usd_monthly: int | float = 0,
+        owner_key: str | None = None,
     ) -> SubscriptionRecord:
         from uuid import uuid4
 
@@ -234,6 +269,7 @@ class SubscriptionMeterStore:
 
             record = SubscriptionRecord(
                 subscription_id=subscription_id,
+                owner_key=str(owner_key).strip() or None,
                 org_id=normalized_org,
                 plan_name=plan_name,
                 customer_id=customer_id,
@@ -244,6 +280,21 @@ class SubscriptionMeterStore:
             )
             record.payment_status = "paid" if record.status in {"active", "trialing", "pro", "free", "enterprise"} else record.payment_status
             record.entitlements_status = "active" if record.status in {"active", "trialing", "pro", "free", "enterprise"} else record.entitlements_status
+            record.metadata.update(
+                {
+                    "owner_key": record.owner_key,
+                    "org_id": record.org_id,
+                    "subscription_id": record.subscription_id,
+                    "customer_id": record.customer_id,
+                    "plan_name": record.plan_name,
+                    "payment_status": record.payment_status,
+                    "entitlements_status": record.entitlements_status,
+                    "install_key_status": record.install_key_status,
+                    "purchase_complete": record.purchase_complete,
+                }
+            )
+            if record.owner_key:
+                self._subscriptions_by_owner[record.owner_key] = subscription_id
             self._subscriptions[subscription_id] = record
             self._subscriptions_by_org[record.org_id] = subscription_id
 
@@ -255,13 +306,16 @@ class SubscriptionMeterStore:
 
             return record
 
-    def list_subscriptions(self, org_id: str | None = None) -> list[SubscriptionRecord]:
+    def list_subscriptions(self, org_id: str | None = None, owner_key: str | None = None) -> list[SubscriptionRecord]:
         with self._lock:
             self._ensure_loaded()
             subs = list(self._subscriptions.values())
             if org_id is not None:
                 org_key = str(org_id).strip().lower()
                 subs = [sub for sub in subs if sub.org_id == org_key]
+            if owner_key is not None:
+                owner_value = str(owner_key).strip()
+                subs = [sub for sub in subs if (sub.owner_key or "") == owner_value]
             return subs
 
     def update_subscription(self, subscription_id: str, **updates: Any) -> SubscriptionRecord | None:
@@ -278,6 +332,10 @@ class SubscriptionMeterStore:
             record.updated_at = datetime.now(UTC)
             if record.status:
                 record.payment_status = record.status if record.status in {"paid", "active", "trialing"} else record.payment_status
+            if "owner_key" in updates:
+                record.owner_key = str(updates["owner_key"]).strip() or None
+                if record.owner_key:
+                    self._subscriptions_by_owner[record.owner_key] = subscription_id
             if "billing_email" in updates:
                 record.billing_email = updates["billing_email"]
             if "included_units" in updates:
@@ -292,6 +350,19 @@ class SubscriptionMeterStore:
                 record.period_end = updates["period_end"]
             if "price_usd_monthly" in updates:
                 record.price_usd_monthly = updates["price_usd_monthly"]
+            record.metadata.update(
+                {
+                    "owner_key": record.owner_key,
+                    "org_id": record.org_id,
+                    "subscription_id": record.subscription_id,
+                    "customer_id": record.customer_id,
+                    "plan_name": record.plan_name,
+                    "payment_status": record.payment_status,
+                    "entitlements_status": record.entitlements_status,
+                    "install_key_status": record.install_key_status,
+                    "purchase_complete": record.purchase_complete,
+                }
+            )
             return record
 
     def record_meter_event(
@@ -337,6 +408,14 @@ class SubscriptionMeterStore:
                 return None
             return self._subscriptions.get(sub_id)
 
+    def get_subscription_by_owner(self, owner_key: str) -> SubscriptionRecord | None:
+        with self._lock:
+            self._ensure_loaded()
+            sub_id = self._subscriptions_by_owner.get(str(owner_key).strip())
+            if sub_id is None:
+                return None
+            return self._subscriptions.get(sub_id)
+
     def sync_checkout_result(
         self,
         subscription_id: str,
@@ -346,6 +425,7 @@ class SubscriptionMeterStore:
         entitlements_status: str | None = "active",
         customer_id: str | None = None,
         org_id: str | None = None,
+        owner_key: str | None = None,
         install_key_id: str | None = None,
         install_key_status: str | None = None,
         unit_balance: int | None = None,
@@ -361,6 +441,11 @@ class SubscriptionMeterStore:
                 record.customer_id = str(customer_id).strip()
             if org_id is not None:
                 record.org_id = str(org_id).strip().lower()
+            if owner_key is not None:
+                normalized_owner = str(owner_key).strip() or None
+                record.owner_key = normalized_owner
+                if normalized_owner:
+                    self._subscriptions_by_owner[normalized_owner] = subscription_id
             if payment_id is not None:
                 record.payment_id = str(payment_id).strip() or None
 
@@ -387,6 +472,19 @@ class SubscriptionMeterStore:
             if unit_balance is not None:
                 record.unit_balance = max(0, int(unit_balance))
 
+            record.metadata.update(
+                {
+                    "owner_key": record.owner_key,
+                    "org_id": record.org_id,
+                    "subscription_id": record.subscription_id,
+                    "customer_id": record.customer_id,
+                    "plan_name": record.plan_name,
+                    "payment_status": record.payment_status,
+                    "entitlements_status": record.entitlements_status,
+                    "install_key_status": record.install_key_status,
+                    "purchase_complete": record.purchase_complete,
+                }
+            )
             record.updated_at = datetime.now(UTC)
 
             try:
@@ -431,6 +529,19 @@ class SubscriptionMeterStore:
             record.install_key_id = str(install_key_id).strip() or None
             record.install_key_status = str(install_key_status).strip() or "active"
             record.purchase_complete = True
+            record.metadata.update(
+                {
+                    "owner_key": record.owner_key,
+                    "org_id": record.org_id,
+                    "subscription_id": record.subscription_id,
+                    "customer_id": record.customer_id,
+                    "plan_name": record.plan_name,
+                    "payment_status": record.payment_status,
+                    "entitlements_status": record.entitlements_status,
+                    "install_key_status": record.install_key_status,
+                    "purchase_complete": record.purchase_complete,
+                }
+            )
             record.updated_at = datetime.now(UTC)
 
             try:
@@ -561,6 +672,20 @@ class SubscriptionMeterStore:
             else:
                 record.install_key_status = "pending"
 
+            record.metadata.update(
+                {
+                    "owner_key": record.owner_key,
+                    "org_id": record.org_id,
+                    "subscription_id": record.subscription_id,
+                    "customer_id": record.customer_id,
+                    "plan_name": record.plan_name,
+                    "payment_status": record.payment_status,
+                    "entitlements_status": record.entitlements_status,
+                    "install_key_status": record.install_key_status,
+                    "purchase_complete": record.purchase_complete,
+                    "program": program,
+                }
+            )
             record.updated_at = datetime.now(UTC)
 
             try:
@@ -645,6 +770,7 @@ class SubscriptionMeterStore:
         with self._lock:
             self._subscriptions.clear()
             self._subscriptions_by_org.clear()
+            self._subscriptions_by_owner.clear()
             self._events.clear()
             self._loaded = True
 

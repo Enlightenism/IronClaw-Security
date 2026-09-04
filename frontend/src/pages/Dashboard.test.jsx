@@ -194,6 +194,20 @@ afterEach(() => {
 // =============================================================================
 
 describe("auth redirect", () => {
+  it("preserves the shared counter registry while dashboard is mounted", async () => {
+    globalThis.__IC_COUNTERS__ = {
+      ic_threats_blocked: { value: 7766, updatedAt: Date.now() },
+      __controllers: new Map([["ic_threats_blocked", { value: 7766 }]]),
+    };
+
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    expect(globalThis.__IC_COUNTERS__.ic_threats_blocked.value).toBe(7766);
+    expect(globalThis.__IC_COUNTERS__.__controllers).toBeInstanceOf(Map);
+  });
+
   it("calls navigate('/') when user and session are null and loading is false", async () => {
     mockAuthState = {
       user: null,
@@ -987,7 +1001,7 @@ describe("dashboard structure", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders all platform integration cards after data loads", async () => {
+  it("renders canonical runtime labels and excludes Security Guardian as a platform", async () => {
     await act(async () => {
       render(<Dashboard />);
     });
@@ -1004,6 +1018,186 @@ describe("dashboard structure", () => {
         screen.queryByTestId("security_guardian-card"),
       ).not.toBeInTheDocument();
     });
+
+    expect(screen.getAllByText("GitHub Copilot").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Hermes").length).toBeGreaterThan(0);
+    expect(screen.queryAllByText("Hermes Agent").length).toBe(0);
+    expect(screen.queryAllByText("Copilot").length).toBe(0);
+  });
+
+  it("renders the canonical runtime order with Hermes in the final card slot", async () => {
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard/overview") {
+        return Promise.resolve({ data: { ...DEFAULT_DASH, install_keys: [] } });
+      }
+      if (url === "/integrations/token") {
+        return Promise.resolve({ data: DEFAULT_TOKENS });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("install-key-card-hermes")).toBeInTheDocument();
+    });
+
+    const runtimeOrder = Array.from(
+      document.querySelectorAll('[data-testid^="install-key-card-"]'),
+    )
+      .map((node) => node.getAttribute("data-testid"))
+      .filter((id) => !id.endsWith("-value") && !id.endsWith("-copy"));
+
+    expect(runtimeOrder).toEqual([
+      "install-key-card-openclaw",
+      "install-key-card-claude_code",
+      "install-key-card-cursor",
+      "install-key-card-goose",
+      "install-key-card-gemini_cli",
+      "install-key-card-copilot",
+      "install-key-card-hermes",
+    ]);
+    expect(
+      screen.queryByTestId("install-key-card-security_guardian"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows masked keys only for active runtime slots and keeps locked slots in placeholder state", async () => {
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard/overview") {
+        return Promise.resolve({
+          data: {
+            ...DEFAULT_DASH,
+            install_keys: [
+              {
+                program: "claude_code",
+                status: "active",
+                masked_key: "ic_install_claude_code_...abcd",
+                metadata: {
+                  placeholder: "Keys will be generated after purchase",
+                },
+              },
+              {
+                program: "goose",
+                status: "locked",
+                masked_key: "",
+                metadata: {
+                  placeholder: "Keys will be generated after purchase",
+                },
+              },
+              {
+                program: "hermes",
+                status: "active",
+                masked_key: "ic_install_hermes_...efgh",
+                metadata: {
+                  placeholder: "Keys will be generated after purchase",
+                },
+              },
+            ],
+          },
+        });
+      }
+      if (url === "/integrations/token") {
+        return Promise.resolve({
+          data: {
+            status: "ok",
+            claude_code_command: "ironclaw --token abc",
+            goose_command: "goose --token goose-456",
+            hermes_command: "hermes --token hermes-999",
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("install-key-card-claude_code-value"),
+      ).toHaveValue("ic_install_claude_code_...abcd");
+      expect(screen.getByTestId("install-key-card-hermes-value")).toHaveValue(
+        "ic_install_hermes_...efgh",
+      );
+      expect(screen.getByTestId("install-key-card-goose-value")).toHaveValue(
+        "Keys will be generated after purchase",
+      );
+    });
+
+    expect(
+      screen.getByTestId("install-key-card-claude_code-copy"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("install-key-card-hermes-copy"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("install-key-card-goose-copy"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the UI consistent across issued, locked, and reactivated runtime states", async () => {
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard/overview") {
+        return Promise.resolve({
+          data: {
+            ...DEFAULT_DASH,
+            install_keys: [
+              {
+                program: "cursor",
+                status: "locked",
+                masked_key: "",
+                metadata: {
+                  placeholder: "Keys will be generated after purchase",
+                },
+              },
+              {
+                program: "copilot",
+                status: "active",
+                masked_key: "ic_install_copilot_...wxyz",
+                metadata: { placeholder: "" },
+              },
+            ],
+          },
+        });
+      }
+      if (url === "/integrations/token") {
+        return Promise.resolve({
+          data: {
+            status: "ok",
+            cursor_command: "cursor --token cursor-123",
+            copilot_command: "copilot --token copilot-001",
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("install-key-card-cursor-value")).toHaveValue(
+        "Keys will be generated after purchase",
+      );
+      expect(screen.getByTestId("install-key-card-copilot-value")).toHaveValue(
+        "ic_install_copilot_...wxyz",
+      );
+    });
+
+    expect(
+      screen.queryByTestId("install-key-card-cursor-copy"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId("install-key-card-copilot-copy"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("install-key-card-security_guardian"),
+    ).not.toBeInTheDocument();
   });
 
   it("passes attack and usage data to SecurityAnalysis", async () => {

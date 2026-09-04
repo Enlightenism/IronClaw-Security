@@ -70,6 +70,24 @@ def test_create_subscription_starts_with_zero_units(store: SubscriptionMeterStor
     assert record.units_consumed == 0
 
 
+def test_create_subscription_preserves_owner_metadata_and_runtime_lifecycle(store: SubscriptionMeterStore) -> None:
+    owner_key = "ic_org_acme"
+    record = store.create_subscription(
+        org_id="org-owner-lifecycle",
+        plan_name="team",
+        customer_id="cus_owner",
+        owner_key=owner_key,
+    )
+    assert record.owner_key == owner_key
+    assert record.metadata["owner_key"] == owner_key
+    assert record.metadata["org_id"] == "org-owner-lifecycle"
+    assert record.metadata["entitlements_status"] == "active"
+    assert record.metadata["payment_status"] == "paid"
+    assert record.metadata["install_key_status"] is None
+    assert store.get_subscription_by_owner(owner_key) is not None
+    assert store.list_subscriptions(owner_key=owner_key)[0].subscription_id == record.subscription_id
+
+
 # ---------------------------------------------------------------------------
 # get_subscription / get_subscription_by_org
 # ---------------------------------------------------------------------------
@@ -271,7 +289,7 @@ def test_provision_install_key_on_purchase_records_all_supported_platforms_for_p
     assert "goose" in payload
     assert "gemini_cli" in payload
     assert "copilot" in payload
-    assert "security_guardian" in payload
+    assert "security_guardian" not in payload
 
     for program, item in payload.items():
         assert item["program"] == program

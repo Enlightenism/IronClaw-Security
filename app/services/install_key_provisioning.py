@@ -13,7 +13,7 @@ from app.core.unit_wallet import get_unit_wallet_registry
 
 _logger: logging.Logger = get_logger("ironclaw.install_key_provisioning")
 
-ProgramCode = Literal[
+RuntimeProgramCode = Literal[
     "openclaw",
     "claude_code",
     "cursor",
@@ -21,9 +21,21 @@ ProgramCode = Literal[
     "gemini_cli",
     "copilot",
     "hermes",
-    "security_guardian",
 ]
-_VALID_PROGRAMS: tuple[ProgramCode, ...] = tuple(InstallKeyFormatRegistry.list_programs())
+ConnectorProgramCode = Literal["security_guardian"]
+ProgramCode = RuntimeProgramCode | ConnectorProgramCode
+
+_SUPPORTED_RUNTIME_PROGRAMS: tuple[RuntimeProgramCode, ...] = (
+    "openclaw",
+    "claude_code",
+    "cursor",
+    "goose",
+    "gemini_cli",
+    "copilot",
+    "hermes",
+)
+_CONNECTOR_PROGRAMS: tuple[ConnectorProgramCode, ...] = ("security_guardian",)
+_VALID_PROGRAMS: tuple[ProgramCode, ...] = _SUPPORTED_RUNTIME_PROGRAMS + _CONNECTOR_PROGRAMS
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +193,8 @@ class InstallKeyProvisioningService:
     ) -> InstallKeyIssued:
         normalized_owner = self.ensure_entitled_owner(owner_key)
         canonical_program = self._normalise_program(program)
+        if canonical_program in _CONNECTOR_PROGRAMS:
+            raise ValueError("Security Guardian is shared install-key connector metadata; it cannot be provisioned as a runtime install key.")
 
         normalized_payment_status = str(payment_status or "").strip().lower()
         normalized_entitlements_status = str(entitlements_status or "").strip().lower()
@@ -364,7 +378,7 @@ class InstallKeyProvisioningService:
             base_metadata.update(metadata)
 
         results: dict[str, InstallKeyIssued] = {}
-        for program in _VALID_PROGRAMS:
+        for program in _SUPPORTED_RUNTIME_PROGRAMS:
             program_metadata = dict(base_metadata)
             program_metadata["program"] = program
             results[program] = self.provision_for_program(

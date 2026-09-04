@@ -63,8 +63,21 @@ const renderAppAtRoute = (
 describe("App", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    globalThis.__IC_COUNTERS__ = {};
     window.history.pushState({}, "", "/");
     mockUseAuth.mockReturnValue({ user: null, session: null, loading: false });
+  });
+
+  it("mounts the shared counter registry at the app shell", async () => {
+    renderAppAtRoute("/");
+
+    await waitFor(() => {
+      expect(globalThis.__IC_COUNTERS__).toBeTruthy();
+      expect(globalThis.__IC_COUNTERS__.__appMounted).toBe(true);
+      expect(globalThis.__IC_COUNTERS__.__controllers).toBeInstanceOf(Map);
+    });
+
+    expect(await screen.findByText("Landing Page")).toBeInTheDocument();
   });
 
   it("renders the landing page on /", async () => {
