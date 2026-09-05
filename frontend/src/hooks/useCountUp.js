@@ -1,89 +1,113 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const easeOutQuad = (t) => t * (2 - t);
 
 /**
- * Animates a numeric value from `from` to `end` over `duration` ms.
- * Respects prefers-reduced-motion: returns `end` immediately when motion is reduced.
- *
- * @param {number} end       - Target value
- * @param {number} duration  - Animation duration in ms (default 1400)
- * @param {Array}  deps      - Extra dependency array entries that retrigger the animation
- * @param {number} from      - Starting value (default 0)
- * @returns {number} Current animated value
+ * Animates a numeric value toward a target without ever moving backward.
+ * The hook is display-only; counter state transitions remain owned by the caller.
  */
 export function useCountUp(end, duration = 1400, deps = [], from = 0) {
-  const target = Number(end) || 0;
-  const start = Number(from) || 0;
+  const target = Number.isFinite(Number(end)) ? Number(end) : 0;
+  const start = Number.isFinite(Number(from)) ? Number(from) : 0;
+  const dependencyKey = useMemo(() => {
+    if (!Array.isArray(deps)) {
+      return "";
+    }
+
+    return deps
+      .map((dep) => {
+        if (dep === null || dep === undefined) {
+          return String(dep);
+        }
+
+        if (typeof dep === "object") {
+          try {
+            return JSON.stringify(dep);
+          } catch {
+            return Object.prototype.toString.call(dep);
+          }
+        }
+
+        return String(dep);
+      })
+      .join("::");
+  }, [deps]);
 
   const prefersReduced =
     typeof window !== "undefined" &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   const [value, setValue] = useState(prefersReduced ? target : start);
-  const frame = useRef();
+  const frame = useRef(null);
   const lastValueRef = useRef(prefersReduced ? target : start);
-  const previousDepsRef = useRef(deps);
+  const previousDepsRef = useRef(dependencyKey);
 
   useEffect(() => {
-    const depsChanged =
-      deps.length !== previousDepsRef.current.length ||
-      deps.some((dep, index) => dep !== previousDepsRef.current[index]);
+    const depKey = dependencyKey;
+    const depsChanged = depKey !== previousDepsRef.current;
+
+    const nextTarget = Number.isFinite(target) ? target : start;
+    const current = Number(lastValueRef.current) || 0;
+    const safeTarget = Math.max(nextTarget, current);
 
     if (depsChanged) {
-      lastValueRef.current = start;
+      lastValueRef.current = current;
     }
-
-    const current = Number(lastValueRef.current) || 0;
-    const boundedTarget = Number.isFinite(target) ? target : current;
 
     if (
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches
     ) {
-      setValue(boundedTarget);
-      lastValueRef.current = boundedTarget;
-      previousDepsRef.current = deps;
-      return;
+      setValue(safeTarget);
+      lastValueRef.current = safeTarget;
+      previousDepsRef.current = depKey;
+      return undefined;
     }
 
-    if (boundedTarget === current) {
+    if (safeTarget === current) {
       setValue(current);
       lastValueRef.current = current;
-      previousDepsRef.current = deps;
-      return;
+      previousDepsRef.current = depKey;
+      return undefined;
     }
 
     let startTime;
     const animationStart = current;
 
     const step = (ts) => {
-      if (!startTime) startTime = ts;
+      if (startTime == null) {
+        startTime = ts;
+      }
+
       const progress = Math.min((ts - startTime) / duration, 1);
       const nextValue = Math.round(
-        animationStart +
-          (boundedTarget - animationStart) * easeOutQuad(progress),
+        animationStart + (safeTarget - animationStart) * easeOutQuad(progress),
+      );
+      const clampedValue = Math.min(
+        Math.max(nextValue, animationStart),
+        safeTarget,
       );
 
-      if (boundedTarget >= animationStart) {
-        setValue(Math.min(nextValue, boundedTarget));
-      } else {
-        setValue(Math.max(nextValue, boundedTarget));
-      }
+      setValue(clampedValue);
 
       if (progress < 1) {
         frame.current = requestAnimationFrame(step);
       } else {
-        setValue(boundedTarget);
-        lastValueRef.current = boundedTarget;
+        setValue(safeTarget);
+        lastValueRef.current = safeTarget;
       }
     };
 
     frame.current = requestAnimationFrame(step);
-    previousDepsRef.current = deps;
-    return () => cancelAnimationFrame(frame.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [end, duration, from, ...deps]);
+    previousDepsRef.current = depKey;
+
+    return () => {
+      if (frame.current != null) {
+        cancelAnimationFrame(frame.current);
+        frame.current = null;
+      }
+    };
+  }, [end, duration, from, target, start, dependencyKey]);
 
   return value;
 }

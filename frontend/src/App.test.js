@@ -68,12 +68,19 @@ describe("App", () => {
     mockUseAuth.mockReturnValue({ user: null, session: null, loading: false });
   });
 
-  it("mounts the shared counter registry at the app shell", async () => {
+  it("initializes the shared counter registry once without replacing an active controller map", async () => {
+    const existingRegistry = new Map([["ic_threats_blocked", { value: 732 }]]);
+    globalThis.__IC_COUNTERS__ = {
+      __controllers: existingRegistry,
+      ic_threats_blocked: { value: 732, updatedAt: Date.now() },
+    };
+
     renderAppAtRoute("/");
 
     await waitFor(() => {
       expect(globalThis.__IC_COUNTERS__).toBeTruthy();
       expect(globalThis.__IC_COUNTERS__.__appMounted).toBe(true);
+      expect(globalThis.__IC_COUNTERS__.__controllers).toBe(existingRegistry);
       expect(globalThis.__IC_COUNTERS__.__controllers).toBeInstanceOf(Map);
     });
 

@@ -161,18 +161,55 @@ describe("Landing", () => {
     expect(screen.getByTestId("user-counter")).toBeInTheDocument();
   });
 
-  it("starts each landing counter from the canonical baseline values", async () => {
-    await renderLanding();
-
-    expect(screen.getByTestId("threat-counter")).toHaveTextContent("5,344");
-    expect(screen.getByTestId("user-counter")).toHaveTextContent("1,087");
-  });
-
-  it("keeps the counters monotonic with the required small increments", async () => {
+  it("uses the canonical baselines and enforces a strict 10-minute cadence", async () => {
     jest.useFakeTimers();
     jest.spyOn(Math, "random").mockReturnValue(0.25);
 
     try {
+      await renderLanding();
+
+      expect(screen.getByTestId("threat-counter")).toHaveTextContent("732");
+      expect(screen.getByTestId("user-counter")).toHaveTextContent("344");
+
+      const threatCounter = screen.getByTestId("threat-counter");
+      const userCounter = screen.getByTestId("user-counter");
+      const beforeThreat = Number(threatCounter.textContent.replace(/,/g, ""));
+      const beforeUsers = Number(userCounter.textContent.replace(/,/g, ""));
+
+      act(() => {
+        jest.advanceTimersByTime(9 * 60 * 1000);
+      });
+
+      expect(Number(threatCounter.textContent.replace(/,/g, ""))).toBe(
+        beforeThreat,
+      );
+      expect(Number(userCounter.textContent.replace(/,/g, ""))).toBe(
+        beforeUsers,
+      );
+
+      act(() => {
+        jest.advanceTimersByTime(60 * 1000);
+      });
+
+      const afterThreat = Number(threatCounter.textContent.replace(/,/g, ""));
+      const afterUsers = Number(userCounter.textContent.replace(/,/g, ""));
+
+      expect(afterThreat - beforeThreat).toBe(2);
+      expect(afterUsers - beforeUsers).toBe(1);
+    } finally {
+      jest.restoreAllMocks();
+      jest.useRealTimers();
+    }
+  });
+
+  it("keeps threat values in the 2-or-3 band and engineer values at exactly 1", async () => {
+    jest.useFakeTimers();
+
+    try {
+      const randomValues = [0.25, 0.75, 0.1, 0.9];
+      const randomSpy = jest.spyOn(Math, "random");
+      randomValues.forEach((value) => randomSpy.mockReturnValueOnce(value));
+
       await renderLanding();
 
       const threatCounter = screen.getByTestId("threat-counter");
@@ -182,60 +219,65 @@ describe("Landing", () => {
       const beforeUsers = Number(userCounter.textContent.replace(/,/g, ""));
 
       act(() => {
-        jest.advanceTimersByTime(20000);
+        jest.advanceTimersByTime(10 * 60 * 1000);
       });
 
-      const afterThreat = Number(threatCounter.textContent.replace(/,/g, ""));
-      const afterUsers = Number(userCounter.textContent.replace(/,/g, ""));
+      const threatDelta =
+        Number(threatCounter.textContent.replace(/,/g, "")) - beforeThreat;
+      const userDelta =
+        Number(userCounter.textContent.replace(/,/g, "")) - beforeUsers;
 
-      expect(afterThreat).toBeGreaterThanOrEqual(beforeThreat);
-      expect(afterThreat - beforeThreat).toBeGreaterThanOrEqual(2);
-      expect(afterThreat - beforeThreat).toBeLessThanOrEqual(3);
+      expect([2, 3]).toContain(threatDelta);
+      expect(userDelta).toBe(1);
 
-      expect(afterUsers).toBeGreaterThanOrEqual(beforeUsers);
-      expect(afterUsers - beforeUsers).toBe(1);
+      act(() => {
+        jest.advanceTimersByTime(10 * 60 * 1000);
+      });
+
+      const nextThreatDelta =
+        Number(threatCounter.textContent.replace(/,/g, "")) -
+        (beforeThreat + threatDelta);
+      const nextUserDelta =
+        Number(userCounter.textContent.replace(/,/g, "")) -
+        (beforeUsers + userDelta);
+
+      expect([2, 3]).toContain(nextThreatDelta);
+      expect(nextUserDelta).toBe(1);
     } finally {
       jest.restoreAllMocks();
       jest.useRealTimers();
     }
   });
 
-  it("ignores stale lower persisted values so the counter never moves backward", async () => {
-    const staleValue = 5000;
-    const staleSnapshot = JSON.stringify({
-      value: staleValue,
-      updatedAt: Date.now(),
-    });
+  it("rejects stale persisted values lower than the valid baseline", async () => {
+    const staleThreat = JSON.stringify({ value: 100, updatedAt: Date.now() });
+    const staleUsers = JSON.stringify({ value: 50, updatedAt: Date.now() });
     const originalGetItem = window.localStorage.getItem;
     const originalSetItem = window.localStorage.setItem;
-    globalThis.__IC_COUNTERS__ = {};
 
     window.localStorage.getItem = jest.fn((key) => {
-      if (key === "ic_threats_blocked") {
-        return staleSnapshot;
-      }
+      if (key === "ic_threats_blocked") return staleThreat;
+      if (key === "ic_engineers_protected") return staleUsers;
       return null;
     });
     window.localStorage.setItem = jest.fn((key, value) => {
-      if (key === "ic_threats_blocked") {
-        const parsed = JSON.parse(value);
-        if (Number(parsed.value) > staleValue) {
-          return originalSetItem.call(window.localStorage, key, value);
-        }
+      if (key === "ic_threats_blocked" || key === "ic_engineers_protected") {
+        return originalSetItem.call(window.localStorage, key, value);
       }
       return undefined;
     });
 
     try {
       await renderLanding();
-      expect(screen.getByTestId("threat-counter")).toHaveTextContent("5,344");
+      expect(screen.getByTestId("threat-counter")).toHaveTextContent("732");
+      expect(screen.getByTestId("user-counter")).toHaveTextContent("344");
     } finally {
       window.localStorage.getItem = originalGetItem;
       window.localStorage.setItem = originalSetItem;
     }
   });
 
-  it("keeps the counters moving forward-only across rerenders and timer ticks", async () => {
+  it("keeps counter movement monotonic-only across rerenders and timer ticks", async () => {
     jest.useFakeTimers();
     jest.spyOn(Math, "random").mockReturnValue(0.25);
 
@@ -255,15 +297,14 @@ describe("Landing", () => {
       );
 
       act(() => {
-        jest.advanceTimersByTime(20000);
+        jest.advanceTimersByTime(10 * 60 * 1000);
       });
 
       const afterThreat = Number(threatCounter.textContent.replace(/,/g, ""));
       const afterUsers = Number(userCounter.textContent.replace(/,/g, ""));
 
       expect(afterThreat).toBeGreaterThanOrEqual(beforeThreat);
-      expect(afterThreat - beforeThreat).toBeGreaterThanOrEqual(2);
-      expect(afterThreat - beforeThreat).toBeLessThanOrEqual(3);
+      expect(afterThreat - beforeThreat).toBe(2);
       expect(afterUsers).toBeGreaterThanOrEqual(beforeUsers);
       expect(afterUsers - beforeUsers).toBe(1);
     } finally {
@@ -284,7 +325,7 @@ describe("Landing", () => {
       unmount();
 
       act(() => {
-        jest.advanceTimersByTime(25000);
+        jest.advanceTimersByTime(10 * 60 * 1000);
       });
 
       const persistedThreat = window.localStorage.setItem.mock.calls.find(

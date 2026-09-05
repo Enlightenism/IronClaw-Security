@@ -23,8 +23,12 @@ const CounterProvider = ({ children }) => {
 
     mountedRef.current = true;
     globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
-    globalThis.__IC_COUNTERS__.__controllers =
-      globalThis.__IC_COUNTERS__.__controllers || new Map();
+    const registry = globalThis.__IC_COUNTERS__.__controllers;
+
+    if (!(registry instanceof Map)) {
+      globalThis.__IC_COUNTERS__.__controllers = new Map();
+    }
+
     globalThis.__IC_COUNTERS__.__appMounted = true;
   }, []);
 

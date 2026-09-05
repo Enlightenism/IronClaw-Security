@@ -56,6 +56,35 @@ const syncAxiosToken = (session) => {
   }
 };
 
+const ensureSharedCounterRegistry = () => {
+  if (typeof globalThis === "undefined") {
+    return null;
+  }
+
+  const store = globalThis.__IC_COUNTERS__ || {};
+  const existingRegistry = store.__controllers;
+
+  if (existingRegistry instanceof Map) {
+    store.__controllers = existingRegistry;
+    globalThis.__IC_COUNTERS__ = store;
+    return existingRegistry;
+  }
+
+  const nextRegistry = new Map();
+
+  if (existingRegistry && typeof existingRegistry === "object") {
+    Object.entries(existingRegistry).forEach(([key, value]) => {
+      if (value !== undefined) {
+        nextRegistry.set(key, value);
+      }
+    });
+  }
+
+  store.__controllers = nextRegistry;
+  globalThis.__IC_COUNTERS__ = store;
+  return nextRegistry;
+};
+
 export const ensureFrontEndHasFreshSession = async () => {
   try {
     const {
@@ -90,9 +119,7 @@ export const AuthProvider = ({ children }) => {
   });
 
   useEffect(() => {
-    globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
-    globalThis.__IC_COUNTERS__.__controllers =
-      globalThis.__IC_COUNTERS__.__controllers || new Map();
+    ensureSharedCounterRegistry();
   }, []);
 
   const [user, setUser] = useState(null);
@@ -104,6 +131,7 @@ export const AuthProvider = ({ children }) => {
 
     const applySession = (nextSession) => {
       if (!isMounted) return;
+      ensureSharedCounterRegistry();
       setSession(nextSession ?? null);
       setUser(nextSession?.user ?? null);
       syncAxiosToken(nextSession ?? null);
@@ -127,6 +155,7 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const authenticate = useCallback(async (email, password) => {
+    ensureSharedCounterRegistry();
     setLoading(true);
 
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -151,6 +180,7 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const register = useCallback(async (email, password) => {
+    ensureSharedCounterRegistry();
     setLoading(true);
 
     const { data, error } = await supabase.auth.signUp({
@@ -175,6 +205,7 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const logout = useCallback(async () => {
+    ensureSharedCounterRegistry();
     setSession(null);
     setUser(null);
     syncAxiosToken(null);
@@ -183,6 +214,8 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const refreshUser = useCallback(async () => {
+    ensureSharedCounterRegistry();
+
     const {
       data: { user: refreshedUser },
     } = await supabase.auth.getUser();

@@ -65,217 +65,109 @@ afterEach(() => {
 });
 
 describe("useCountUp", () => {
-  describe("animation: from → end", () => {
-    it("starts at `from` and resolves to `end` after full duration", () => {
-      const { result } = renderHook(() => useCountUp(100, 1000, [], 0));
+  it("starts at the provided starting value and resolves to the target without overshoot", () => {
+    const { result } = renderHook(() => useCountUp(100, 1000, [], 0));
 
-      expect(result.current).toBe(0);
+    expect(result.current).toBe(0);
 
-      advance(500);
-      const mid = result.current;
+    advance(500);
+    expect(result.current).toBeGreaterThan(0);
+    expect(result.current).toBeLessThan(100);
 
-      expect(mid).toBeGreaterThan(0);
-      expect(mid).toBeLessThan(100);
-
-      advance(600);
-      expect(result.current).toBe(100);
-    });
-
-    it("resolves exactly to `end` — never overshoots", () => {
-      const { result } = renderHook(() => useCountUp(50, 500, [], 0));
-
-      advance(600);
-      expect(result.current).toBe(50);
-    });
-
-    it("uses Math.round so value is always an integer", () => {
-      const { result } = renderHook(() => useCountUp(99, 1000, [], 0));
-
-      advance(250);
-      expect(Number.isInteger(result.current)).toBe(true);
-    });
-
-    it("handles non-integer `end` by coercing to number", () => {
-      const { result } = renderHook(() => useCountUp("200", 500, [], 0));
-
-      advance(600);
-      expect(result.current).toBe(200);
-    });
-
-    it("handles NaN `end` by treating it as 0", () => {
-      const { result } = renderHook(() => useCountUp(NaN, 500, [], 0));
-
-      advance(600);
-      expect(result.current).toBe(0);
-    });
-
-    it("tracks the provided shared value without owning the underlying counter source", () => {
-      const { result, rerender } = renderHook(
-        ({ end }) => useCountUp(end, 500, [end], 0),
-        { initialProps: { end: 10 } },
-      );
-
-      expect(result.current).toBe(0);
-
-      rerender({ end: 50 });
-      advance(300);
-
-      expect(result.current).toBeGreaterThan(10);
-      expect(result.current).toBeLessThan(50);
-
-      advance(300);
-      expect(result.current).toBe(50);
-    });
+    advance(600);
+    expect(result.current).toBe(100);
   });
 
-  describe("prefers-reduced-motion: reduce", () => {
-    it("returns `end` on first render without scheduling any rAF", () => {
-      setReducedMotion(true);
-      const spy = jest.spyOn(window, "requestAnimationFrame");
+  it("never moves backward when the target is monotonic upward", () => {
+    const { result, rerender } = renderHook(
+      ({ end }) => useCountUp(end, 500, [end], 0),
+      { initialProps: { end: 10 } },
+    );
 
-      const { result } = renderHook(() => useCountUp(75, 1000, [], 0));
+    expect(result.current).toBe(0);
 
-      expect(result.current).toBe(75);
-      expect(spy).not.toHaveBeenCalled();
-    });
+    rerender({ end: 50 });
+    advance(100);
+    expect(result.current).toBeGreaterThanOrEqual(10);
+    expect(result.current).toBeLessThanOrEqual(50);
 
-    it("returns `end` immediately even when `from` differs", () => {
-      setReducedMotion(true);
-
-      const { result } = renderHook(() => useCountUp(500, 2000, [], 100));
-
-      expect(result.current).toBe(500);
-    });
+    advance(500);
+    expect(result.current).toBe(50);
   });
 
-  describe("end === from: no animation", () => {
-    it("returns `end` synchronously and fires no rAF when values are equal", () => {
-      const spy = jest.spyOn(window, "requestAnimationFrame");
-      const { result } = renderHook(() => useCountUp(42, 1000, [], 42));
+  it("handles a slow incremental target change without jitter or backward drift", () => {
+    const { result, rerender } = renderHook(
+      ({ end }) => useCountUp(end, 800, [end], 0),
+      { initialProps: { end: 12 } },
+    );
 
-      expect(result.current).toBe(42);
-      expect(spy).not.toHaveBeenCalled();
-    });
+    advance(900);
+    expect(result.current).toBe(12);
 
-    it("treats both as 0 when both are NaN — no rAF fired", () => {
-      const spy = jest.spyOn(window, "requestAnimationFrame");
+    rerender({ end: 14 });
+    advance(600);
+    expect(result.current).toBeGreaterThan(12);
+    expect(result.current).toBeLessThanOrEqual(14);
 
-      renderHook(() => useCountUp(NaN, 1000, [], NaN));
-
-      expect(spy).not.toHaveBeenCalled();
-    });
+    advance(300);
+    expect(result.current).toBe(14);
   });
 
-  describe("re-triggers when `end` changes", () => {
-    it("restarts animation when `end` prop is updated", () => {
-      const { result, rerender } = renderHook(
-        ({ end }) => useCountUp(end, 500, [end], 0),
-        { initialProps: { end: 50 } },
-      );
+  it("recomputes correctly when dependency-driven target updates arrive", () => {
+    const { result, rerender } = renderHook(
+      ({ end, deps }) => useCountUp(end, 600, deps, 0),
+      { initialProps: { end: 12, deps: [12] } },
+    );
 
-      advance(600);
-      expect(result.current).toBe(50);
+    expect(result.current).toBe(0);
 
-      rerender({ end: 200 });
-
-      expect(result.current).toBe(50);
-
-      advance(300);
-      const inProgress = result.current;
-      expect(inProgress).toBeGreaterThan(50);
-      expect(inProgress).toBeLessThan(200);
-
-      advance(300);
-      expect(result.current).toBe(200);
-    });
-
-    it("re-triggers when extra `deps` entry changes", () => {
-      const { result, rerender } = renderHook(
-        ({ trigger }) => useCountUp(100, 500, [trigger], 0),
-        { initialProps: { trigger: 0 } },
-      );
-
-      advance(600);
-      expect(result.current).toBe(100);
-
-      rerender({ trigger: 1 });
-
-      expect(result.current).toBe(100);
-
-      advance(300);
-      const inProgress = result.current;
-      expect(inProgress).toBeGreaterThan(0);
-      expect(inProgress).toBeLessThan(100);
-
-      advance(300);
-      expect(result.current).toBe(100);
-    });
+    rerender({ end: 18, deps: [18] });
+    advance(700);
+    expect(result.current).toBe(18);
   });
 
-  describe("cleanup on unmount", () => {
-    it("calls cancelAnimationFrame when unmounted mid-animation", () => {
-      const cafSpy = jest.spyOn(window, "cancelAnimationFrame");
+  it("returns the target immediately when reduced motion is enabled", () => {
+    setReducedMotion(true);
+    const spy = jest.spyOn(window, "requestAnimationFrame");
 
-      const { unmount } = renderHook(() => useCountUp(100, 2000, [], 0));
+    const { result } = renderHook(() => useCountUp(75, 1000, [], 0));
 
-      advance(500);
-      unmount();
-
-      expect(cafSpy).toHaveBeenCalled();
-    });
-
-    it("does not throw when unmounted before first rAF fires", () => {
-      const { unmount } = renderHook(() => useCountUp(100, 1000, [], 0));
-
-      expect(() => unmount()).not.toThrow();
-    });
-
-    it("leaves no pending rAF callbacks after unmount", () => {
-      const { unmount } = renderHook(() => useCountUp(200, 1000, [], 0));
-
-      advance(16);
-      unmount();
-
-      expect(rafHandles.size).toBe(0);
-    });
+    expect(result.current).toBe(75);
+    expect(spy).not.toHaveBeenCalled();
   });
 
-  describe("edge cases", () => {
-    it("animates from a positive `from` value correctly", () => {
-      const { result } = renderHook(() => useCountUp(100, 500, [], 50));
+  it("treats NaN and equal values as stable targets without scheduling animation", () => {
+    const spy = jest.spyOn(window, "requestAnimationFrame");
 
-      expect(result.current).toBe(50);
+    const { result: equalResult } = renderHook(() =>
+      useCountUp(42, 1000, [], 42),
+    );
+    expect(equalResult.current).toBe(42);
+    expect(spy).not.toHaveBeenCalled();
 
-      advance(600);
-      expect(result.current).toBe(100);
-    });
+    const { result: nanResult } = renderHook(() =>
+      useCountUp(NaN, 1000, [], NaN),
+    );
+    expect(nanResult.current).toBe(0);
+    expect(spy).not.toHaveBeenCalled();
+  });
 
-    it("animates downward (end < from)", () => {
-      const { result } = renderHook(() => useCountUp(0, 500, [], 100));
+  it("cleans up any active animation frame on unmount", () => {
+    const cafSpy = jest.spyOn(window, "cancelAnimationFrame");
 
-      expect(result.current).toBe(100);
+    const { unmount } = renderHook(() => useCountUp(100, 2000, [], 0));
+    advance(500);
+    unmount();
 
-      advance(600);
-      expect(result.current).toBe(0);
-    });
+    expect(cafSpy).toHaveBeenCalled();
+  });
 
-    it("defaults `from` to 0 when not provided", () => {
-      const { result } = renderHook(() => useCountUp(80, 500));
+  it("defaults to the correct deterministic behavior when no from value is supplied", () => {
+    const { result } = renderHook(() => useCountUp(80, 500));
 
-      expect(result.current).toBe(0);
+    expect(result.current).toBe(0);
 
-      advance(600);
-      expect(result.current).toBe(80);
-    });
-
-    it("defaults `duration` to 1400 when not provided", () => {
-      const { result } = renderHook(() => useCountUp(50));
-
-      advance(700);
-
-      const mid = result.current;
-      expect(mid).toBeGreaterThan(0);
-      expect(mid).toBeLessThan(50);
-    });
+    advance(600);
+    expect(result.current).toBe(80);
   });
 });

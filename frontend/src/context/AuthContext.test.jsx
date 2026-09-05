@@ -471,10 +471,12 @@ describe("AuthContext", () => {
     );
   });
 
-  it("preserves the shared counter state across auth state changes and logout", async () => {
+  it("preserves the shared counter registry and value data when auth lifecycle churn occurs", async () => {
     globalThis.__IC_COUNTERS__ = {
       ic_threats_blocked: { value: 6543, updatedAt: Date.now() },
-      __controllers: new Map(),
+      __controllers: {
+        ic_threats_blocked: { value: 6543, updatedAt: Date.now() },
+      },
     };
 
     renderWithProvider();
@@ -483,24 +485,50 @@ describe("AuthContext", () => {
       expect(supabase.auth.onAuthStateChange).toHaveBeenCalledTimes(1),
     );
 
+    expect(globalThis.__IC_COUNTERS__.__controllers).toBeInstanceOf(Map);
+    expect(
+      globalThis.__IC_COUNTERS__.__controllers.get("ic_threats_blocked"),
+    ).toMatchObject({
+      value: 6543,
+    });
+    expect(globalThis.__IC_COUNTERS__.ic_threats_blocked.value).toBe(6543);
+
     await act(async () => {
       authStateChangeHandler("SIGNED_IN", makeSession());
     });
 
-    expect(globalThis.__IC_COUNTERS__.ic_threats_blocked.value).toBe(6543);
+    expect(globalThis.__IC_COUNTERS__).toMatchObject({
+      ic_threats_blocked: { value: 6543 },
+    });
+    expect(globalThis.__IC_COUNTERS__.__controllers).toBeInstanceOf(Map);
+    expect(
+      globalThis.__IC_COUNTERS__.__controllers.get("ic_threats_blocked"),
+    ).toMatchObject({
+      value: 6543,
+    });
 
     await act(async () => {
       fireEvent.click(screen.getByText("logout"));
     });
 
     expect(globalThis.__IC_COUNTERS__.ic_threats_blocked.value).toBe(6543);
-    expect(globalThis.__IC_COUNTERS__.__controllers).toBeInstanceOf(Map);
+    expect(
+      globalThis.__IC_COUNTERS__.__controllers.get("ic_threats_blocked"),
+    ).toMatchObject({
+      value: 6543,
+    });
 
     await act(async () => {
       authStateChangeHandler("SIGNED_OUT", null);
     });
 
     expect(globalThis.__IC_COUNTERS__.ic_threats_blocked.value).toBe(6543);
+    expect(globalThis.__IC_COUNTERS__.__controllers).toBeInstanceOf(Map);
+    expect(
+      globalThis.__IC_COUNTERS__.__controllers.get("ic_threats_blocked"),
+    ).toMatchObject({
+      value: 6543,
+    });
   });
 
   it("throws when useAuth is used outside AuthProvider", () => {

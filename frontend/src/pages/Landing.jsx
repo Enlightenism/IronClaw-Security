@@ -107,6 +107,8 @@ const fadeUp = {
   }),
 };
 
+const COUNTER_TICK_MS = 10 * 60 * 1000;
+
 const getCounterRegistry = () => {
   if (typeof globalThis === "undefined") {
     return new Map();
@@ -117,6 +119,35 @@ const getCounterRegistry = () => {
     globalThis.__IC_COUNTERS__.__controllers || new Map();
 
   return globalThis.__IC_COUNTERS__.__controllers;
+};
+
+const getStoredCounterValue = (storageKey) => {
+  if (typeof window === "undefined") {
+    return Number.NaN;
+  }
+
+  try {
+    const memoryValue = Number(globalThis.__IC_COUNTERS__?.[storageKey]?.value);
+    const raw = localStorage.getItem(storageKey);
+    const parsed = raw ? JSON.parse(raw) : null;
+    const storedValue = Number(parsed?.value);
+
+    if (Number.isFinite(memoryValue) && Number.isFinite(storedValue)) {
+      return Math.max(memoryValue, storedValue);
+    }
+
+    if (Number.isFinite(memoryValue)) {
+      return memoryValue;
+    }
+
+    if (Number.isFinite(storedValue)) {
+      return storedValue;
+    }
+  } catch {
+    // ignore invalid persisted state and fall back to the canonical base.
+  }
+
+  return Number.NaN;
 };
 
 const normalizeCounterValue = (base, nextValue) => {
@@ -135,9 +166,11 @@ const readPersistedCounterState = (storageKey, base) => {
   }
 
   const memoryStore = globalThis.__IC_COUNTERS__?.[storageKey];
-  if (memoryStore && Number.isFinite(memoryStore.value)) {
+  const memoryValue = Number(memoryStore?.value);
+
+  if (Number.isFinite(memoryValue)) {
     return {
-      value: normalizeCounterValue(base, memoryStore.value),
+      value: normalizeCounterValue(base, memoryValue),
       updatedAt: Number.isFinite(memoryStore.updatedAt)
         ? Number(memoryStore.updatedAt)
         : Date.now(),
@@ -172,10 +205,12 @@ const syncPersistedCounterState = (storageKey, base, nextValue) => {
 
   if (typeof window !== "undefined") {
     globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
-    const currentMemory = globalThis.__IC_COUNTERS__[storageKey];
-    const currentValue = Number(currentMemory?.value);
+    const currentKnownValue = getStoredCounterValue(storageKey);
+    const currentValue = Number.isFinite(currentKnownValue)
+      ? currentKnownValue
+      : base;
 
-    if (!Number.isFinite(currentValue) || safeValue >= currentValue) {
+    if (safeValue >= currentValue) {
       globalThis.__IC_COUNTERS__[storageKey] = snapshot;
 
       try {
@@ -189,12 +224,11 @@ const syncPersistedCounterState = (storageKey, base, nextValue) => {
   return snapshot;
 };
 
-const computeResumedCounterValue = (storageKey, base, minMs, maxMs, step) => {
+const computeResumedCounterValue = (storageKey, base, step) => {
   const persisted = readPersistedCounterState(storageKey, base);
-  const intervalMs = minMs + Math.random() * (maxMs - minMs);
   const elapsedMs = Math.max(0, Date.now() - persisted.updatedAt);
+  const elapsedTicks = Math.max(0, Math.floor(elapsedMs / COUNTER_TICK_MS));
   const delta = typeof step === "function" ? step() : Number(step) || 1;
-  const elapsedTicks = Math.max(0, Math.floor(elapsedMs / intervalMs));
   const resumedValue = normalizeCounterValue(
     base,
     persisted.value + delta * elapsedTicks,
@@ -208,17 +242,22 @@ const computeResumedCounterValue = (storageKey, base, minMs, maxMs, step) => {
   return persisted.value;
 };
 
-const ensureSharedCounter = ({ base, minMs, maxMs, step, storageKey }) => {
+const ensureSharedCounter = ({ base, step, storageKey }) => {
   const key = storageKey;
   const registry = getCounterRegistry();
 
   if (!registry.has(key)) {
     const listeners = new Set();
     const controller = {
-      value: computeResumedCounterValue(storageKey, base, minMs, maxMs, step),
+      value: computeResumedCounterValue(storageKey, base, step),
       getValue: () => controller.value,
       setValue: (nextValue) => {
-        const snapshot = syncPersistedCounterState(storageKey, base, nextValue);
+        const safeValue = normalizeCounterValue(base, nextValue);
+        if (safeValue < controller.value) {
+          return;
+        }
+
+        const snapshot = syncPersistedCounterState(storageKey, base, safeValue);
         controller.value = snapshot.value;
         listeners.forEach((listener) => listener(controller.value));
       },
@@ -235,11 +274,7 @@ const ensureSharedCounter = ({ base, minMs, maxMs, step, storageKey }) => {
       controller.setValue(nextValue);
     };
 
-    const intervalId = setInterval(
-      tick,
-      minMs + Math.random() * (maxMs - minMs),
-    );
-    controller.intervalId = intervalId;
+    controller.intervalId = setInterval(tick, COUNTER_TICK_MS);
 
     if (typeof window !== "undefined") {
       const handleStorage = (event) => {
@@ -275,19 +310,9 @@ const ensureSharedCounter = ({ base, minMs, maxMs, step, storageKey }) => {
   return registry.get(key);
 };
 
-const LiveCounter = ({
-  base,
-  minMs = 18000,
-  maxMs = 28000,
-  step,
-  color,
-  testid,
-  storageKey,
-}) => {
+const LiveCounter = ({ base, step, color, testid, storageKey }) => {
   const controller = ensureSharedCounter({
     base,
-    minMs,
-    maxMs,
     step,
     storageKey,
   });
@@ -582,9 +607,7 @@ const Landing = () => {
               </div>
               <div className="text-4xl font-bold drop-shadow-[0_0_18px_rgba(56,189,248,0.5)]">
                 <LiveCounter
-                  base={5344}
-                  minMs={12000}
-                  maxMs={18000}
+                  base={732}
                   step={() => (Math.random() < 0.5 ? 2 : 3)}
                   color="#38BDF8"
                   testid="threat-counter"
@@ -599,9 +622,7 @@ const Landing = () => {
               </div>
               <div className="text-4xl font-bold drop-shadow-[0_0_18px_rgba(255,215,0,0.45)]">
                 <LiveCounter
-                  base={1087}
-                  minMs={14000}
-                  maxMs={21000}
+                  base={344}
                   step={1}
                   color="#FFD700"
                   testid="user-counter"
