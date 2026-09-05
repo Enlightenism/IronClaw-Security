@@ -158,6 +158,26 @@ const normalizeCounterValue = (base, nextValue) => {
   return Math.max(base, numericValue);
 };
 
+const isCounterValueTooStale = (base, value, updatedAt) => {
+  const numericValue = Number(value);
+  const numericUpdatedAt = Number(updatedAt);
+
+  if (!Number.isFinite(numericValue) || !Number.isFinite(numericUpdatedAt)) {
+    return true;
+  }
+
+  if (numericValue < base) {
+    return true;
+  }
+
+  const ageMs = Date.now() - numericUpdatedAt;
+  if (ageMs > 24 * 60 * 60 * 1000) {
+    return true;
+  }
+
+  return false;
+};
+
 const readPersistedCounterState = (storageKey, base) => {
   const defaultState = { value: base, updatedAt: Date.now() };
 
@@ -167,12 +187,17 @@ const readPersistedCounterState = (storageKey, base) => {
 
   const memoryStore = globalThis.__IC_COUNTERS__?.[storageKey];
   const memoryValue = Number(memoryStore?.value);
+  const memoryUpdatedAt = Number(memoryStore?.updatedAt);
 
   if (Number.isFinite(memoryValue)) {
+    if (isCounterValueTooStale(base, memoryValue, memoryUpdatedAt)) {
+      return defaultState;
+    }
+
     return {
       value: normalizeCounterValue(base, memoryValue),
-      updatedAt: Number.isFinite(memoryStore.updatedAt)
-        ? Number(memoryStore.updatedAt)
+      updatedAt: Number.isFinite(memoryUpdatedAt)
+        ? memoryUpdatedAt
         : Date.now(),
     };
   }
@@ -192,6 +217,10 @@ const readPersistedCounterState = (storageKey, base) => {
     const updatedAt = Number.isFinite(parsed.updatedAt)
       ? Number(parsed.updatedAt)
       : Date.now();
+
+    if (isCounterValueTooStale(base, value, updatedAt)) {
+      return defaultState;
+    }
 
     return { value: normalizeCounterValue(base, value), updatedAt };
   } catch {

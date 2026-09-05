@@ -277,6 +277,52 @@ describe("Landing", () => {
     }
   });
 
+  it("resets to the canonical baseline when stale inflated persisted values are found", async () => {
+    const staleHighThreat = JSON.stringify({
+      value: 12500,
+      updatedAt: Date.now() - 25 * 60 * 60 * 1000,
+    });
+    const staleHighUsers = JSON.stringify({
+      value: 5400,
+      updatedAt: Date.now() - 25 * 60 * 60 * 1000,
+    });
+
+    const originalGetItem = window.localStorage.getItem;
+    const originalSetItem = window.localStorage.setItem;
+
+    globalThis.__IC_COUNTERS__ = {
+      ic_threats_blocked: {
+        value: 12500,
+        updatedAt: Date.now() - 25 * 60 * 60 * 1000,
+      },
+      ic_engineers_protected: {
+        value: 5400,
+        updatedAt: Date.now() - 25 * 60 * 60 * 1000,
+      },
+    };
+
+    window.localStorage.getItem = jest.fn((key) => {
+      if (key === "ic_threats_blocked") return staleHighThreat;
+      if (key === "ic_engineers_protected") return staleHighUsers;
+      return null;
+    });
+    window.localStorage.setItem = jest.fn((key, value) => {
+      if (key === "ic_threats_blocked" || key === "ic_engineers_protected") {
+        return originalSetItem.call(window.localStorage, key, value);
+      }
+      return undefined;
+    });
+
+    try {
+      await renderLanding();
+      expect(screen.getByTestId("threat-counter")).toHaveTextContent("732");
+      expect(screen.getByTestId("user-counter")).toHaveTextContent("344");
+    } finally {
+      window.localStorage.getItem = originalGetItem;
+      window.localStorage.setItem = originalSetItem;
+    }
+  });
+
   it("keeps counter movement monotonic-only across rerenders and timer ticks", async () => {
     jest.useFakeTimers();
     jest.spyOn(Math, "random").mockReturnValue(0.25);
