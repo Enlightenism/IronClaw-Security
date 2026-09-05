@@ -75,6 +75,57 @@ def test_catalog_package_id_field_matches_key() -> None:
         assert entry["package_id"] == pkg_id
 
 
+def test_install_key_debit_rejects_generic_platform_owner_key() -> None:
+    registry = UnitWalletRegistry()
+    registry.credit_units(owner_key="buyer@ironclaw.test", units=25)
+
+    with pytest.raises(ValueError, match="owner_key must be a customer or org identity"):
+        registry.debit_units_for_install_key(
+            owner_key="platform_api_key_abc123",
+            key_id="ik_install_real_001",
+            program="openclaw",
+            units=3,
+            blocked_attack_count=1,
+        )
+
+
+def test_install_key_debit_rejects_generic_platform_key_id() -> None:
+    registry = UnitWalletRegistry()
+    registry.credit_units(owner_key="buyer@ironclaw.test", units=25)
+
+    with pytest.raises(ValueError, match="key_id must be an install key identity"):
+        registry.debit_units_for_install_key(
+            owner_key="buyer@ironclaw.test",
+            key_id="api_key_secret_value",
+            program="openclaw",
+            units=3,
+            blocked_attack_count=1,
+        )
+
+
+def test_install_key_usage_summary_tracks_today_and_week_window() -> None:
+    registry = UnitWalletRegistry()
+    registry.credit_units(owner_key="buyer@ironclaw.test", units=50)
+
+    _, usage, _ = registry.debit_units_for_install_key(
+        owner_key="buyer@ironclaw.test",
+        key_id="ik_install_real_001",
+        program="openclaw",
+        units=7,
+        blocked_attack_count=2,
+        metadata={"quarantined_count": 1, "source": "runtime"},
+    )
+
+    assert usage.total_blocked_attacks == 2
+    assert usage.total_quarantined_actions == 1
+    assert usage.units_used_today >= 7
+    assert usage.units_used_this_week >= 7
+    summary = registry.get_key_usage_summary("buyer@ironclaw.test", key_id="ik_install_real_001")
+    assert summary["install_key_usage"]["ik_install_real_001"]["units_used_today"] >= 7
+    assert summary["install_key_usage"]["ik_install_real_001"]["units_used_this_week"] >= 7
+    assert summary["total_quarantined_actions"] == 1
+
+
 # ---------------------------------------------------------------------------
 # Catalog validation guard — RuntimeError (not AssertionError)
 # ---------------------------------------------------------------------------

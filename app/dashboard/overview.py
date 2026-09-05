@@ -193,9 +193,11 @@ class DashboardOverview:
     environment: str = "local"
     status: str = "healthy"
     risk_level: str = "moderate"
+    owner_key: str = ""
     total_requests: int = 0
     guarded_requests: int = 0
     blocked_actions: int = 0
+    blocked_activity_total: int = 0
     quarantined_actions: int = 0
     active_incidents: int = 0
     pending_reviews: int = 0
@@ -204,6 +206,8 @@ class DashboardOverview:
     telemetry_online: bool = True
     review_backlog_present: bool = False
     quarantine_pressure: bool = False
+    wallet_total_units: int = 0
+    runtime_coverage: dict[str, bool] = field(default_factory=dict)
     kpis: tuple[DashboardKPI, ...] = ()
     alerts: tuple[DashboardAlert, ...] = ()
     platform_families: tuple[DashboardPlatformFamily, ...] = ()
@@ -216,9 +220,11 @@ class DashboardOverview:
             "environment": self.environment,
             "status": self.status,
             "risk_level": self.risk_level,
+            "owner_key": self.owner_key,
             "total_requests": self.total_requests,
             "guarded_requests": self.guarded_requests,
             "blocked_actions": self.blocked_actions,
+            "blocked_activity_total": self.blocked_activity_total,
             "quarantined_actions": self.quarantined_actions,
             "active_incidents": self.active_incidents,
             "pending_reviews": self.pending_reviews,
@@ -227,6 +233,8 @@ class DashboardOverview:
             "telemetry_online": self.telemetry_online,
             "review_backlog_present": self.review_backlog_present,
             "quarantine_pressure": self.quarantine_pressure,
+            "wallet_total_units": self.wallet_total_units,
+            "runtime_coverage": dict(self.runtime_coverage),
             "kpis": [item.to_dict() for item in self.kpis],
             "alerts": [item.to_dict() for item in self.alerts],
             "platform_families": [item.to_dict() for item in self.platform_families],
@@ -387,6 +395,10 @@ def _normalize_install_key_slot(value: Any) -> DashboardInstallKeySlot | None:
         return None
 
     metadata = dict(value.get("metadata") or {})
+    if owner_key := _coerce_str(value.get("owner_key")):
+        metadata["owner_key"] = owner_key
+    if key_id := _coerce_str(value.get("key_id")):
+        metadata.setdefault("key_id", key_id)
     status = _coerce_str(value.get("status") or value.get("install_key_status"), "locked") or "locked"
     active = _coerce_bool(value.get("active"), status == "active")
     label = _coerce_str(value.get("label") or value.get("display_name") or _PLATFORM_LABELS.get(program, program.replace("_", " ").title()))
@@ -420,6 +432,11 @@ def build_dashboard_overview(
 ) -> DashboardOverview:
     source = data or {}
     current = baseline or default_dashboard_overview()
+
+    owner_key = _coerce_str(source.get("owner_key"), current.owner_key)
+    wallet_total_units = max(0, _coerce_int(source.get("wallet_total_units"), current.wallet_total_units))
+    blocked_activity_total = max(0, _coerce_int(source.get("blocked_activity_total"), current.blocked_activity_total))
+    runtime_coverage = {str(key): _coerce_bool(value, False) for key, value in dict(source.get("runtime_coverage") or current.runtime_coverage or {}).items()}
 
     raw_kpis = source.get("kpis")
     if isinstance(raw_kpis, list):
@@ -504,9 +521,11 @@ def build_dashboard_overview(
         environment=_coerce_str(source.get("environment"), current.environment) or current.environment,
         status=_coerce_str(source.get("status"), current.status) or current.status,
         risk_level=_coerce_str(source.get("risk_level"), current.risk_level) or current.risk_level,
+        owner_key=owner_key,
         total_requests=max(0, _coerce_int(source.get("total_requests"), current.total_requests)),
         guarded_requests=max(0, _coerce_int(source.get("guarded_requests"), current.guarded_requests)),
         blocked_actions=max(0, _coerce_int(source.get("blocked_actions"), current.blocked_actions)),
+        blocked_activity_total=blocked_activity_total,
         quarantined_actions=quarantined_actions,
         active_incidents=active_incidents,
         pending_reviews=pending_reviews,
@@ -521,6 +540,8 @@ def build_dashboard_overview(
         telemetry_online=_coerce_bool(source.get("telemetry_online"), current.telemetry_online),
         review_backlog_present=review_backlog_present,
         quarantine_pressure=quarantine_pressure,
+        wallet_total_units=wallet_total_units,
+        runtime_coverage=runtime_coverage,
         kpis=kpis,
         alerts=alerts,
         platform_families=platform_families,
@@ -540,7 +561,11 @@ def dashboard_overview_summary(overview: DashboardOverview) -> dict[str, Any]:
         "environment": overview.environment,
         "status": overview.status,
         "risk_level": overview.risk_level,
+        "owner_key": overview.owner_key,
         "telemetry_online": overview.telemetry_online,
+        "wallet_total_units": overview.wallet_total_units,
+        "blocked_activity_total": overview.blocked_activity_total,
+        "runtime_coverage": dict(overview.runtime_coverage),
         "signals": {
             "total_requests": overview.total_requests,
             "guarded_requests": overview.guarded_requests,

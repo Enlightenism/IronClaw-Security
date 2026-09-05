@@ -4,53 +4,131 @@ import { toast } from "sonner";
 
 const CANONICAL_RUNTIME_COMMANDS = {
   "Claude Code":
-    "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent claude-code --scope user",
+    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user",
   OpenClaw:
-    "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent openclaw --scope user",
+    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user",
   Cursor:
-    "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent cursor --scope user",
+    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user",
   Goose:
-    "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent goose --scope user",
+    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user",
   "Gemini CLI":
-    "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent gemini-cli --scope user",
+    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user",
   "GitHub Copilot":
-    "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent copilot --scope user",
+    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user",
   Hermes:
-    "hermes skills install https://<YOUR_DOMAIN>/skills/<YOUR_SKILL_SLUG>/SKILL.md --name <YOUR_SKILL_NAME>",
+    "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security",
+};
+
+const SECURITY_GUARDIAN_ALIASES = new Set([
+  "security guardian",
+  "security_guardian",
+  "security-guardian",
+  "securityguardian",
+  "security guardian skill",
+  "security_guardian_skill",
+  "skill",
+  "skills",
+]);
+
+const RUNTIME_TITLE_ALIASES = {
+  "claude code": "Claude Code",
+  claude_code: "Claude Code",
+  openclaw: "OpenClaw",
+  cursor: "Cursor",
+  goose: "Goose",
+  "gemini cli": "Gemini CLI",
+  gemini_cli: "Gemini CLI",
+  "github copilot": "GitHub Copilot",
+  copilot: "GitHub Copilot",
+  hermes: "Hermes",
+};
+
+const normalizeRuntimeKey = (value) => {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+const resolveCanonicalTitle = (value) => {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const normalized = normalizeRuntimeKey(trimmed);
+  if (!normalized) {
+    return "";
+  }
+
+  if (RUNTIME_TITLE_ALIASES[normalized]) {
+    return RUNTIME_TITLE_ALIASES[normalized];
+  }
+
+  return trimmed;
+};
+
+const isSecurityGuardian = (value) => {
+  const key = normalizeRuntimeKey(value);
+  return Boolean(key) && SECURITY_GUARDIAN_ALIASES.has(key);
+};
+
+const resolveCommand = (title, command) => {
+  const rawCommand = typeof command === "string" ? command.trim() : "";
+  if (
+    rawCommand &&
+    !rawCommand.includes("placeholder") &&
+    !rawCommand.includes("loading")
+  ) {
+    return rawCommand;
+  }
+
+  if (typeof title !== "string") {
+    return "";
+  }
+
+  const canonicalTitle = resolveCanonicalTitle(title);
+  return CANONICAL_RUNTIME_COMMANDS[canonicalTitle] || "";
 };
 
 const IntegrationCard = ({ title, command, tint = "gold", testid }) => {
   const [copied, setCopied] = useState(false);
 
-  const normalizedTitle = typeof title === "string" ? title.trim() : "";
-  const normalizedCommand =
-    typeof command === "string" && command.trim()
-      ? command.trim()
-      : CANONICAL_RUNTIME_COMMANDS[normalizedTitle] || "";
+  const canonicalTitle = resolveCanonicalTitle(title);
 
-  const isRuntimeCard =
-    normalizedTitle &&
-    normalizedTitle !== "Security Guardian" &&
-    normalizedTitle !== "security_guardian";
+  if (!canonicalTitle || isSecurityGuardian(canonicalTitle)) {
+    return null;
+  }
+
+  const normalizedCommand = resolveCommand(canonicalTitle, command);
+
+  if (!normalizedCommand) {
+    return null;
+  }
 
   const surface = tint === "gold" ? "glass-gold" : "glass-platinum";
   const accent = tint === "gold" ? "#FFD700" : "#E5E4E2";
 
   const copy = async () => {
-    const payload = normalizedCommand;
-    if (!payload) {
-      return;
-    }
-
     try {
       if (navigator?.clipboard?.writeText) {
-        await navigator.clipboard.writeText(payload);
+        await navigator.clipboard.writeText(normalizedCommand);
       } else {
         throw new Error("clipboard unavailable");
       }
     } catch {
       const ta = document.createElement("textarea");
-      ta.value = payload;
+      ta.value = normalizedCommand;
       ta.setAttribute("readonly", "");
       ta.style.position = "fixed";
       ta.style.top = "-9999px";
@@ -75,7 +153,7 @@ const IntegrationCard = ({ title, command, tint = "gold", testid }) => {
           className="font-tech text-sm font-semibold uppercase tracking-[0.25em]"
           style={{ color: accent }}
         >
-          {normalizedTitle || "Runtime"}
+          {canonicalTitle}
         </h3>
       </div>
 
@@ -86,13 +164,11 @@ const IntegrationCard = ({ title, command, tint = "gold", testid }) => {
 
       <div className="flex items-stretch gap-2">
         <code className="font-tech flex-1 overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-white/10 bg-black/50 px-4 py-3 text-xs leading-relaxed text-white/90">
-          {normalizedCommand ||
-            (isRuntimeCard ? "loading..." : "Unsupported runtime")}
+          {normalizedCommand}
         </code>
         <button
           type="button"
           onClick={copy}
-          disabled={!normalizedCommand}
           data-testid={`${testid}-copy`}
           className="flex w-12 shrink-0 items-center justify-center rounded-lg border transition disabled:cursor-not-allowed disabled:opacity-50"
           style={{
@@ -100,7 +176,7 @@ const IntegrationCard = ({ title, command, tint = "gold", testid }) => {
             background: `${accent}14`,
             color: accent,
           }}
-          aria-label={`Copy ${normalizedTitle || "runtime"} install command`}
+          aria-label={`Copy ${canonicalTitle} install command`}
         >
           {copied ? <Check size={18} /> : <Copy size={18} />}
         </button>

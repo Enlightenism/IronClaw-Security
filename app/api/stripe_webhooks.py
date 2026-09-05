@@ -253,6 +253,29 @@ def _issue_paid_install_key_orchestration(
     if not _is_successful_payment_status(payment_status):
         return {}
 
+    expected_owner_key = _owner_key_for_org(org_id)
+    if owner_key != expected_owner_key:
+        logger.warning(
+            "stripe_webhooks: install_key_orchestration_skipped event=%s org=%s reason=owner_key_mismatch owner_key=%s expected=%s",
+            event_id,
+            org_id,
+            owner_key,
+            expected_owner_key,
+        )
+        return {}
+
+    if customer_id and hasattr(svc, "resolve_org_from_customer"):
+        mapped_org = svc.resolve_org_from_customer(str(customer_id))
+        if mapped_org and str(mapped_org).strip() != str(org_id).strip():
+            logger.warning(
+                "stripe_webhooks: install_key_orchestration_skipped event=%s org=%s customer_id=%s reason=customer_org_mismatch mapped_org=%s",
+                event_id,
+                org_id,
+                customer_id,
+                mapped_org,
+            )
+            return {}
+
     if not hasattr(svc, "get_active_subscription_for_org"):
         logger.info(
             "stripe_webhooks: install_key_orchestration_skipped event=%s org=%s reason=no_active_subscription_lookup",

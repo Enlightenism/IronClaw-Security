@@ -142,6 +142,42 @@ def _assert_owner_access(
             )
 
 
+def _looks_like_generic_platform_auth_value(value: str | None) -> bool:
+    if value is None:
+        return False
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return False
+    if normalized.startswith("ic_org_") or normalized.startswith("ic_install_"):
+        return False
+    if normalized.startswith("ic_"):
+        return True
+
+    generic_prefixes = (
+        "sk_",
+        "ghp_",
+        "gho_",
+        "github_pat_",
+        "token_",
+        "secret_",
+        "api_",
+        "api-key",
+        "api_key",
+        "platform-api-key",
+        "platform_api_key",
+        "system-api-key",
+        "system_api_key",
+        "internal-platform-api-key",
+        "internal_platform_api_key",
+        "bearer ",
+        "x-api-key",
+    )
+    if normalized.startswith(generic_prefixes):
+        return True
+
+    return ("platform" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized)) or ("system" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized)) or ("api" in normalized and "key" in normalized)
+
+
 def _is_customer_owner_context(auth_ctx: AuthContext | None) -> bool:
     if auth_ctx is None:
         return False
@@ -151,10 +187,26 @@ def _is_customer_owner_context(auth_ctx: AuthContext | None) -> bool:
         return True
     if principal_type in {"personal", "customer", "user", "buyer", "org"}:
         return True
+    if key_type in {"platform", "system", "service", "generic", "api_key"}:
+        return False
+    if principal_type in {"platform", "system", "service", "generic", "api_key"}:
+        return False
     return False
 
 
 def _assert_customer_install_key_context(auth_ctx: AuthContext | None, owner_key: str | None) -> None:
+    if owner_key is not None and _looks_like_generic_platform_auth_value(owner_key):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "status": "forbidden",
+                "reason": "install_key_requires_customer_owner_context",
+                "owner_key": owner_key,
+                "principal_type": str(getattr(auth_ctx, "principal_type", "") or "") if auth_ctx is not None else None,
+                "key_type": str(getattr(auth_ctx, "key_type", "") or "") if auth_ctx is not None else None,
+                "action": "fulfill_install_keys",
+            },
+        )
     if _is_customer_owner_context(auth_ctx):
         return
     raise HTTPException(
@@ -485,6 +537,14 @@ def _provision_install_keys(
     payment_status: str | None,
     entitlement_status: str | None,
 ) -> list[InstallKeyDeliveryView]:
+    if not owner_key or _looks_like_generic_platform_auth_value(owner_key):
+        logger.warning(
+            "install_key_provision_blocked owner_key=%s purchase_id=%s payment_id=%s reason=generic_platform_owner_context",
+            owner_key,
+            purchase_id,
+            payment_id,
+        )
+        return []
     if not _has_confirmed_paid_entitlement(payment_status, entitlement_status):
         return []
 

@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from app.core.auth import get_auth_context
+from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.core.install_keys import get_install_key_registry
 
 router = APIRouter(tags=["integration-routes"])
@@ -21,6 +22,8 @@ _CANONICAL_PLATFORM_ORDER: tuple[str, ...] = (
     "hermes",
 )
 
+_RUNTIME_PROGRAMS: frozenset[str] = frozenset(InstallKeyFormatRegistry.list_programs())
+
 _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
     "claude-code": {
         "program": "claude_code",
@@ -28,7 +31,7 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "slug": "claude-code",
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent claude-code --scope user",
+        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user",
     },
     "openclaw": {
         "program": "openclaw",
@@ -36,7 +39,7 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "slug": "openclaw",
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent openclaw --scope user",
+        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user",
     },
     "cursor": {
         "program": "cursor",
@@ -44,7 +47,7 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "slug": "cursor",
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent cursor --scope user",
+        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user",
     },
     "goose": {
         "program": "goose",
@@ -52,7 +55,7 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "slug": "goose",
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent goose --scope user",
+        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user",
     },
     "gemini-cli": {
         "program": "gemini_cli",
@@ -60,7 +63,7 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "slug": "gemini-cli",
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent gemini-cli --scope user",
+        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user",
     },
     "copilot": {
         "program": "copilot",
@@ -68,7 +71,7 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "slug": "copilot",
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent copilot --scope user",
+        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user",
     },
     "hermes": {
         "program": "hermes",
@@ -76,7 +79,7 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "slug": "hermes",
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "hermes skills install https://<YOUR_DOMAIN>/skills/<YOUR_SKILL_SLUG>/SKILL.md --name <YOUR_SKILL_NAME>",
+        "command_template": "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security",
     },
 }
 
@@ -115,7 +118,12 @@ def _is_valid_install_key_record(record: Any, *, owner_key: str, program: str) -
     if record_owner != owner_key:
         return False
 
-    if str(getattr(record, "program", "")).strip().lower() != program:
+    canonical_program = InstallKeyFormatRegistry.normalize_program(str(getattr(record, "program", "") or "").strip())
+    if canonical_program is None or canonical_program not in _RUNTIME_PROGRAMS:
+        return False
+
+    expected_program = InstallKeyFormatRegistry.normalize_program(program)
+    if expected_program is None or expected_program != canonical_program:
         return False
 
     if not bool(getattr(record, "active", False)):
@@ -143,6 +151,10 @@ def _is_valid_install_key_record(record: Any, *, owner_key: str, program: str) -
 
 def _select_paid_install_key(owner_key: str | None, program: str) -> str:
     if not owner_key:
+        return ""
+
+    normalized_program = InstallKeyFormatRegistry.normalize_program(program)
+    if normalized_program is None or normalized_program not in _RUNTIME_PROGRAMS:
         return ""
 
     registry = get_install_key_registry()
@@ -286,7 +298,7 @@ async def get_integrations_token(auth: Any = Depends(get_auth_context)) -> dict[
     owner_key = _resolve_install_owner(auth)
     install_keys: dict[str, str] = {}
     if owner_key:
-        for program in ("claude_code", "openclaw", "cursor", "goose", "gemini_cli", "copilot", "hermes", "security_guardian"):
+        for program in ("claude_code", "openclaw", "cursor", "goose", "gemini_cli", "copilot", "hermes"):
             masked_key = _select_paid_install_key(owner_key, program)
             if masked_key:
                 install_keys[program] = masked_key

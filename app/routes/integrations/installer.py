@@ -197,13 +197,13 @@ def _platform_install_command(program: str | None, install_key: str) -> str:
         return ""
 
     command_map = {
-        "claude_code": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent claude-code --scope user",
-        "openclaw": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent openclaw --scope user",
-        "cursor": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent cursor --scope user",
-        "goose": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent goose --scope user",
-        "gemini_cli": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent gemini-cli --scope user",
-        "copilot": "gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent copilot --scope user",
-        "hermes": "hermes skills install https://<YOUR_DOMAIN>/skills/<YOUR_SKILL_SLUG>/SKILL.md --name <YOUR_SKILL_NAME>",
+        "claude_code": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user",
+        "openclaw": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user",
+        "cursor": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user",
+        "goose": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user",
+        "gemini_cli": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user",
+        "copilot": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user",
+        "hermes": "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security",
     }
     command = command_map.get(spec.program)
     if command is not None:

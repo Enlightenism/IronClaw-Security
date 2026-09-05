@@ -190,6 +190,50 @@ def _coerce_string(value: Any, *, default: str = "") -> str:
     return str(value)
 
 
+def _looks_like_generic_platform_auth_value(value: Any) -> bool:
+    if value is None:
+        return False
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return False
+    if normalized.startswith("ic_org_") or normalized.startswith("ic_install_"):
+        return False
+    if normalized.startswith("ic_"):
+        return True
+
+    generic_prefixes = (
+        "sk_",
+        "ghp_",
+        "gho_",
+        "github_pat_",
+        "token_",
+        "secret_",
+        "api_",
+        "api-key",
+        "api_key",
+        "platform-api-key",
+        "platform_api_key",
+        "system-api-key",
+        "system_api_key",
+        "internal-platform-api-key",
+        "internal_platform_api_key",
+        "bearer ",
+        "x-api-key",
+    )
+    if normalized.startswith(generic_prefixes):
+        return True
+
+    return ("platform" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized)) or ("system" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized)) or ("api" in normalized and "key" in normalized)
+
+
+def _resolve_dashboard_owner(owner_key: str | None) -> str:
+    if owner_key is not None:
+        candidate = str(owner_key).strip()
+        if candidate and not _looks_like_generic_platform_auth_value(candidate):
+            return candidate.lower()
+    return "demo@ironclaw.local"
+
+
 def _record_is_paid_entitled(r: Any) -> bool:
     if r is None:
         return False
@@ -440,7 +484,9 @@ def get_dashboard_overview(
             bucket["blocked_events_24h"] = int(bucket["blocked_events_24h"]) + 1
 
     _DEMO_OWNER = "demo@ironclaw.local"
-    resolved_owner = owner_key.strip() if owner_key and owner_key.strip() else _DEMO_OWNER
+    resolved_owner = _resolve_dashboard_owner(owner_key)
+    if owner_key is not None and _looks_like_generic_platform_auth_value(owner_key):
+        resolved_owner = _DEMO_OWNER
 
     wallet_kpi = _build_wallet_kpi(wallet_registry, resolved_owner)
 

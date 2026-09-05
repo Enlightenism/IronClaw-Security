@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.auth import require_api_key
+from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.core.install_keys import InstallKeyRegistry, get_install_key_registry
 from app.core.unit_wallet import (
     InstallKeyUsageSource,
@@ -24,6 +25,8 @@ router = APIRouter(
 InstallKeyEventType = Literal[
     "action_blocked",
     "prompt_injection_detected",
+    "quarantine_detected",
+    "quarantine_event",
     "usage_units_debited",
     "install_key_usage_recorded",
     "install_key_activated",
@@ -69,7 +72,11 @@ def _normalize_program(program: str | None) -> str | None:
     normalized = str(program).strip().lower()
     if not normalized:
         return None
-    return normalized if normalized in {"openclaw", "claude_code"} else normalized
+    canonical = InstallKeyFormatRegistry.normalize_program(normalized)
+    if canonical is not None:
+        return canonical
+    normalized = normalized.replace(" ", "_").replace("-", "_").replace("__", "_").strip("_")
+    return normalized if normalized in set(InstallKeyFormatRegistry.list_programs()) else None
 
 
 def _looks_like_generic_platform_auth(value: str | None) -> bool:
@@ -78,6 +85,11 @@ def _looks_like_generic_platform_auth(value: str | None) -> bool:
     normalized = str(value).strip().lower()
     if not normalized:
         return False
+    if normalized.startswith("ic_org_"):
+        return False
+    if normalized.startswith("ic_install_") or normalized.startswith("ic_"):
+        return True
+
     generic_prefixes = (
         "sk_",
         "ghp_",
@@ -97,7 +109,13 @@ def _looks_like_generic_platform_auth(value: str | None) -> bool:
         "bearer ",
         "x-api-key",
     )
-    return normalized.startswith(generic_prefixes) or (("platform" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized)) or ("api" in normalized and "key" in normalized))
+    if normalized.startswith(generic_prefixes):
+        return True
+    if normalized.startswith(("owner_", "customer_", "user_", "org_", "acct_")):
+        return False
+    if "@" in normalized:
+        return False
+    return ("platform" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized)) or ("system" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized)) or ("api" in normalized and "key" in normalized)
 
 
 class InstallKeyEventRequest(BaseModel):
@@ -119,10 +137,10 @@ class InstallKeyEventRequest(BaseModel):
     def _validate_program(cls, value: Any) -> Any:
         if value is None:
             return None
-        normalized = str(value).strip().lower()
-        if normalized and normalized not in {"openclaw", "claude_code"}:
-            raise ValueError("program must be one of: openclaw, claude_code")
-        return normalized or None
+        normalized = _normalize_program(value)
+        if normalized is None:
+            raise ValueError("program must be one of: openclaw, claude_code, cursor, goose, gemini_cli, copilot, hermes")
+        return normalized
 
     @field_validator("occurred_at", mode="before")
     @classmethod
@@ -262,6 +280,8 @@ def _sync_wallet_event(
         if blocked_attack_count > 0 and event_type not in {"usage_units_debited"}:
             usage.total_blocked_attacks += int(blocked_attack_count)
             wallet.total_blocked_attacks += int(blocked_attack_count)
+            if event_type in {"prompt_injection_detected", "quarantine_detected", "quarantine_event"}:
+                usage.total_quarantined_actions += int(blocked_attack_count)
         if units > 0 and event_type not in {"usage_units_debited"}:
             usage.total_consumed_units += int(units)
         wallet.install_key_usage[key_id] = usage
@@ -397,25 +417,32 @@ def _apply_event(
         )
         return True, {"event_type": event_name, "status": "reported"}
 
-    if event_name in {"action_blocked", "prompt_injection_detected"}:
+    if event_name in {"action_blocked", "prompt_injection_detected", "quarantine_detected", "quarantine_event"}:
         if payload.key_id is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"{event_name} requires key_id.",
             )
+        record = _require_key_record(
+            payload=payload,
+            install_key_registry=install_key_registry,
+            owner_key=owner_key,
+            op=event_name,
+        )
+        blocked_count = max(1, int(payload.blocked_attack_count or 1))
         _sync_wallet_event(
             wallet_registry=wallet_registry,
             owner_key=owner_key,
             key_id=payload.key_id,
-            program=program,
+            program=program or record.program,
             event_type=event_name,
             units=0,
-            blocked_attack_count=max(1, int(payload.blocked_attack_count or 1)),
-            action_type=payload.action_type or event_name,
+            blocked_attack_count=blocked_count,
+            action_type=payload.action_type or ("quarantine" if event_name in {"quarantine_detected", "quarantine_event"} else event_name),
             occurred_at=occurred_at,
             metadata={**metadata, "event_type": event_name},
         )
-        return True, {"event_type": event_name, "blocked_attack_count": max(1, int(payload.blocked_attack_count or 1))}
+        return True, {"event_type": event_name, "blocked_attack_count": blocked_count}
 
     if event_name == "install_key_activated":
         _require_key_record(

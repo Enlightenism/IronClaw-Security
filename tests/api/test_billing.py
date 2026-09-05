@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
+import app.api.billing as billing_api
 from app.api.billing import (
     router,
 )
@@ -316,6 +317,23 @@ def test_fulfill_purchase_rejects_generic_platform_api_key_context() -> None:
     body = fulfill.json()
     assert body["detail"]["reason"] == "install_key_requires_customer_owner_context"
     assert body["detail"]["owner_key"] == "customer@example.com"
+    mock_registry.generate_install_key.assert_not_called()
+
+
+def test_provision_install_keys_rejects_generic_platform_owner_context() -> None:
+    mock_registry = MagicMock()
+    mock_registry.get_keys_for_owner.return_value = []
+
+    with patch("app.api.billing.get_install_key_registry", return_value=mock_registry):
+        result = billing_api._provision_install_keys(
+            owner_key="platform-api-key",
+            purchase_id="purchase_generic_platform",
+            payment_id="pay_generic_platform",
+            payment_status="paid",
+            entitlement_status="active",
+        )
+
+    assert result == []
     mock_registry.generate_install_key.assert_not_called()
 
 

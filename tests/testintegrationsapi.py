@@ -348,16 +348,23 @@ def test_integration_token_uses_paid_install_keys_not_platform_api_key(client: T
     ]
     assert "security-guardian" not in payload["supported_platforms"]
     assert "security-guardian" not in payload["install_metadata"]
-    assert payload["openclaw_command"] == ("gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent openclaw --scope user")
-    assert payload["claude_code_command"] == ("gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent claude-code --scope user")
-    assert payload["cursor_command"] == ("gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent cursor --scope user")
-    assert payload["goose_command"] == ("gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent goose --scope user")
-    assert payload["gemini_cli_command"] == ("gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent gemini-cli --scope user")
-    assert payload["copilot_command"] == ("gh skill install <YOUR_GH_OWNER>/<YOUR_GH_REPO> <YOUR_SKILL_NAME> --agent copilot --scope user")
-    assert payload["hermes_command"] == ("hermes skills install https://<YOUR_DOMAIN>/skills/<YOUR_SKILL_SLUG>/SKILL.md --name <YOUR_SKILL_NAME>")
+    assert payload["openclaw_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user"
+    assert payload["claude_code_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user"
+    assert payload["cursor_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user"
+    assert payload["goose_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user"
+    assert payload["gemini_cli_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user"
+    assert payload["copilot_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user"
+    assert payload["hermes_command"] == "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security"
     assert payload["install_metadata"]["cursor"]["program"] == "cursor"
     assert payload["install_metadata"]["hermes"]["program"] == "hermes"
     assert payload["security_guardian_command"] == ""
+    assert payload["command_metadata"]["claude-code"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user"
+    assert payload["command_metadata"]["openclaw"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user"
+    assert payload["command_metadata"]["cursor"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user"
+    assert payload["command_metadata"]["goose"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user"
+    assert payload["command_metadata"]["gemini-cli"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user"
+    assert payload["command_metadata"]["copilot"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user"
+    assert payload["command_metadata"]["hermes"] == "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security"
 
 
 def test_integration_list_endpoints_expose_canonical_platform_metadata(client: TestClient) -> None:
@@ -487,3 +494,57 @@ def test_integration_token_returns_locked_state_when_no_paid_keys_exist(client: 
     assert payload["user_token"] in {None, ""}
     assert payload["openclaw_command"] == ""
     assert payload["claude_code_command"] == ""
+
+
+def test_integration_token_filters_out_non_runtime_and_shared_family_records(client: TestClient) -> None:
+    auth_context = SimpleNamespace(
+        api_key="",
+        principal_id="owner-456",
+        org_id=None,
+        key_type="personal",
+    )
+
+    class _Record:
+        def __init__(self, program: str, masked_key: str) -> None:
+            self.owner_key = "owner-456"
+            self.program = program
+            self.masked_key = masked_key
+            self.active = True
+            self.payment_status = "paid"
+            self.entitlements_status = "active"
+            self.issued_after_payment = True
+
+    registry = SimpleNamespace(
+        get_keys_for_owner=lambda owner_key: [
+            _Record("openclaw", "ic_install_openclaw_...abcd"),
+            _Record("security_guardian", "ic_install_security_guardian_...zzzz"),
+            _Record("claude_code", "ic_install_claude_code_...efgh"),
+            _Record("not_a_runtime", "ic_install_unknown_...wxyz"),
+        ]
+    )
+
+    app = client.app
+    app.dependency_overrides[get_auth_context] = lambda: auth_context
+    try:
+        with patch("app.api.routes.integrations.get_install_key_registry", return_value=registry):
+            response = client.get("/integrations/token")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["openclaw_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user"
+    assert payload["claude_code_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user"
+    assert payload["security_guardian_command"] == ""
+    assert all(platform not in payload["install_metadata"] for platform in ("security-guardian",))
+    assert set(payload["command_metadata"]) == {
+        "claude-code",
+        "openclaw",
+        "cursor",
+        "goose",
+        "gemini-cli",
+        "copilot",
+        "hermes",
+    }
+    assert set(payload["install_metadata"]) == set(payload["command_metadata"])

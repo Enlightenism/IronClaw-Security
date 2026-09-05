@@ -279,8 +279,7 @@ class InstallKeyRecord:
             raise ValueError(f"Invalid program: {self.program!r}. Must be one of {sorted(_VALID_PROGRAMS)}")
         if self.units_consumed < 0:
             raise ValueError("units_consumed cannot be negative")
-        if not self.owner_key or not str(self.owner_key).strip():
-            raise ValueError("owner_key is required")
+        self.owner_key = _canonical_owner_key(self.owner_key)
 
         normalized_payment_status = _normalize_payment_status(self.payment_status)
         normalized_entitlement_status = _normalize_entitlement_status(self.entitlements_status)
@@ -390,7 +389,7 @@ def _record_from_row(row: dict[str, Any], *, raw_key: str = "") -> InstallKeyRec
 
     record = InstallKeyRecord(
         key_id=row["key_id"],
-        owner_key=row["owner_key"],
+        owner_key=row.get("owner_key") or "",
         subscription_id=row.get("subscription_id") or "",
         program=row["program"],
         raw_key=raw_key,
@@ -791,12 +790,13 @@ class InstallKeyRegistry:
     # ------------------------------------------------------------------
 
     def get_keys_for_owner(self, owner_key: str) -> list[InstallKeyRecord]:
-        """Return all install key records (active and revoked) for owner_key."""
+        """Return all install key records (active and revoked) for the canonical owner_key."""
+        normalized_owner = _canonical_owner_key(owner_key)
         with self._lock:
             self._ensure_loaded()
             reconciled: list[InstallKeyRecord] = []
             for record in self._records_by_id.values():
-                if record.owner_key == owner_key:
+                if record.owner_key == normalized_owner:
                     reconciled.append(self._reconcile_key_state(record))
             return reconciled
 

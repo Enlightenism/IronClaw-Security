@@ -119,15 +119,22 @@ def _is_org_owner_context(auth_ctx: Any) -> bool:
     """
     if auth_ctx is None:
         return False
+
     key_type = str(getattr(auth_ctx, "key_type", "") or "").strip().lower()
     principal_type = str(getattr(auth_ctx, "principal_type", "") or "").strip().lower()
     org_id = getattr(auth_ctx, "org_id", None)
     normalized_org_id = _normalize_owner_value(org_id)
+
+    if not normalized_org_id:
+        return False
     if _looks_like_generic_platform_auth(normalized_org_id):
         return False
-    if principal_type in {"platform", "api_key", "system", "service"}:
+    if principal_type in {"platform", "system", "service"}:
         return False
-    return key_type in {"org", "org_key"} and bool(normalized_org_id)
+
+    org_key_context = key_type in {"org", "org_key"}
+    org_principal_context = principal_type in {"org", "org_key", "organization", "tenant"}
+    return org_key_context or org_principal_context
 
 
 def resolve_billing_owner(auth_ctx: Any, buyer_email: str) -> str:

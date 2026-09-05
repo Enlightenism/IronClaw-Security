@@ -134,8 +134,8 @@ def test_skill_config_coerces_canonical_runtime_family_targets() -> None:
         "gemini_cli",
         "copilot",
         "hermes",
-        "security_guardian",
     ]
+    assert "security_guardian" not in DEFAULT_PROVIDER_TARGETS
     assert _coerce_provider_targets("claude,openclaw") == ("claude_code", "openclaw")
     assert _coerce_provider_targets(["gemini-cli", "github-copilot", "security-guardian"]) == (
         "gemini_cli",

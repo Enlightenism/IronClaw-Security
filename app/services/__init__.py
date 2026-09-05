@@ -95,6 +95,7 @@ __all__ = [
     "dispatch_event",
     "deliver_webhook",
     "retry_failed_delivery",
+    "stripe_service",
 ]
 
 
@@ -282,6 +283,11 @@ def __getattr__(name: str) -> Any:
             "dispatch_event": dispatch_event,
             "retry_failed_delivery": retry_failed_delivery,
         }[name]
+
+    if name == "stripe_service":
+        import importlib
+
+        return importlib.import_module(f"{__name__}.stripe_service")
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

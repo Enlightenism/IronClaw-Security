@@ -109,6 +109,14 @@ const MemoWalletCard = memo(WalletCard);
 const MemoSecurityAnalysis = memo(SecurityAnalysis);
 const MemoIntegrationCard = memo(IntegrationCard);
 
+const normalizeProgramKey = (value) => {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim().toLowerCase().replace(/[-_]+/g, "_");
+};
+
 const normalizePackageId = (packageId) => {
   switch (packageId) {
     case "pkg_5000":
@@ -341,29 +349,29 @@ const Dashboard = () => {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") return undefined;
+    if (typeof globalThis === "undefined") return undefined;
     const mediaQuery =
-      typeof window.matchMedia === "function"
-        ? window.matchMedia("(pointer: coarse)")
+      typeof globalThis.matchMedia === "function"
+        ? globalThis.matchMedia("(pointer: coarse)")
         : null;
     if (mediaQuery && mediaQuery.matches) return undefined;
 
     const handlePointerMove = (event) => {
-      const x = (event.clientX / window.innerWidth) * 100;
-      const y = (event.clientY / window.innerHeight) * 100;
+      const x = (event.clientX / globalThis.innerWidth) * 100;
+      const y = (event.clientY / globalThis.innerHeight) * 100;
       setPointerGlow({ x, y });
     };
 
     const handleScroll = () => {
-      setScrollShift(window.scrollY * 0.18);
+      setScrollShift(globalThis.scrollY * 0.18);
     };
 
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("scroll", handleScroll, { passive: true });
+    globalThis.addEventListener("pointermove", handlePointerMove);
+    globalThis.addEventListener("scroll", handleScroll, { passive: true });
 
     return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("scroll", handleScroll);
+      globalThis.removeEventListener("pointermove", handlePointerMove);
+      globalThis.removeEventListener("scroll", handleScroll);
     };
   }, []);
 
@@ -534,11 +542,11 @@ const Dashboard = () => {
 
       try {
         const organizationId = data?.organization_id ?? "org-001";
-        const successUrl = new URL(`${window.location.origin}/dashboard`);
+        const successUrl = new URL(`${globalThis.location.origin}/dashboard`);
         successUrl.searchParams.set("checkout", "success");
         successUrl.searchParams.set("package_id", packageId);
 
-        const cancelUrl = new URL(`${window.location.origin}/dashboard`);
+        const cancelUrl = new URL(`${globalThis.location.origin}/dashboard`);
         cancelUrl.searchParams.set("checkout", "cancel");
         cancelUrl.searchParams.set("package_id", packageId);
 
@@ -557,10 +565,10 @@ const Dashboard = () => {
           throw new Error("Missing checkout URL.");
         }
 
-        if (typeof window.location.assign === "function") {
-          window.location.assign(redirectUrl);
+        if (typeof globalThis.location.assign === "function") {
+          globalThis.location.assign(redirectUrl);
         } else {
-          window.location.href = redirectUrl;
+          globalThis.location.href = redirectUrl;
         }
       } catch (e) {
         toast.error(getErrorMessage(e));
@@ -648,7 +656,7 @@ const Dashboard = () => {
 
     setCopiedInstallKey(keyId);
     toast.success("Install key copied");
-    window.setTimeout(
+    globalThis.setTimeout(
       () =>
         setCopiedInstallKey((current) => (current === keyId ? "" : current)),
       1800,
@@ -684,11 +692,42 @@ const Dashboard = () => {
     [data?.attacks, data?.daily_usage, data?.units_today, data?.units_week],
   );
 
+  const ownerKey = useMemo(() => {
+    const scopedOwner =
+      typeof data?.metadata?.owner_key === "string"
+        ? data.metadata.owner_key
+        : typeof data?.owner_key === "string"
+          ? data.owner_key
+          : "";
+
+    return scopedOwner.trim().toLowerCase();
+  }, [data?.metadata?.owner_key, data?.owner_key]);
+
+  const ownerScopedInstallKeys = useMemo(() => {
+    const slots = Array.isArray(data?.install_keys) ? data.install_keys : [];
+
+    return slots.filter((slot) => {
+      const program = normalizeProgramKey(slot?.program);
+      if (!program || program === "security_guardian") {
+        return false;
+      }
+
+      if (!ownerKey) {
+        return true;
+      }
+
+      const slotOwner =
+        typeof slot?.owner_key === "string" ? slot.owner_key : "";
+      return !slotOwner || slotOwner.trim().toLowerCase() === ownerKey;
+    });
+  }, [data?.install_keys, ownerKey]);
+
   const installKeyCards = useMemo(() => {
     const slotMap = new Map(
-      (Array.isArray(data?.install_keys) ? data.install_keys : []).map(
-        (slot) => [slot?.program, slot],
-      ),
+      ownerScopedInstallKeys.map((slot) => [
+        normalizeProgramKey(slot?.program),
+        slot,
+      ]),
     );
 
     return INSTALL_KEY_PROGRAMS.map(({ program, label, tint, commandKey }) => {
@@ -716,7 +755,7 @@ const Dashboard = () => {
         placeholderText,
       };
     });
-  }, [data?.install_keys]);
+  }, [ownerScopedInstallKeys]);
 
   const integrationCards = useMemo(() => {
     const hasUnlockedToken =
@@ -750,9 +789,22 @@ const Dashboard = () => {
       }
     };
 
-    return INSTALL_KEY_PROGRAMS.filter(({ commandKey }) =>
-      Boolean(tokens?.[commandKey]),
-    )
+    const ownerScopedPrograms = new Set(
+      ownerScopedInstallKeys
+        .map((slot) => normalizeProgramKey(slot?.program))
+        .filter(Boolean),
+    );
+
+    const runtimePrograms = INSTALL_KEY_PROGRAMS.filter(
+      ({ program, commandKey }) => {
+        if (ownerScopedPrograms.size > 0) {
+          return ownerScopedPrograms.has(program);
+        }
+        return Boolean(tokens?.[commandKey]);
+      },
+    );
+
+    return runtimePrograms
       .map(({ label, tint, program, commandKey }) => ({
         title: label,
         command: tokens?.[commandKey] || "",
@@ -760,7 +812,7 @@ const Dashboard = () => {
         testid: toCardTestId(program),
       }))
       .filter((card) => Boolean(card.command));
-  }, [tokens]);
+  }, [ownerScopedInstallKeys, tokens]);
 
   const attackFeedItems = useMemo(() => data?.attacks ?? [], [data?.attacks]);
 

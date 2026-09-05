@@ -165,6 +165,28 @@ def test_invoice_payment_failed_does_not_issue_install_keys() -> None:
     service._issue_paid_install_keys_for_checkout.assert_not_called()
 
 
+def test_install_key_orchestration_rejects_owner_key_mismatch() -> None:
+    service = _make_service()
+    service.resolve_org_from_customer.return_value = "org_123"
+    service.get_active_subscription_for_org.return_value = SimpleNamespace(to_dict=lambda: {"id": "sub_123", "org_id": "org_123", "status": "active"})
+
+    result = stripe_webhooks._issue_paid_install_key_orchestration(
+        svc=service,
+        event_type="checkout.session.completed",
+        event_id="evt_owner_mismatch",
+        session_id="cs_owner_mismatch",
+        org_id="org_123",
+        owner_key="user@example.com",
+        customer_id="cus_123",
+        payment_status="paid",
+        unit_credits=50,
+        metadata={"unit_credits": 50},
+    )
+
+    assert result == {}
+    service._issue_paid_install_keys_for_checkout.assert_not_called()
+
+
 def test_checkout_expired_marks_session_expired() -> None:
     stripe_webhooks.reset_processed_events()
     service = _make_service()

@@ -417,6 +417,37 @@ class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
             self._generate_paid_key(reg, "openclaw")
         assert "openclaw" in str(ctx.exception)
 
+    def test_owner_key_is_canonicalized_for_lookup_and_storage(self):
+        reg = self._registry()
+        record = reg.generate_for_paid_customer(
+            owner_key=" Buyer@IronClaw.Test ",
+            subscription_id=_SUB_ID,
+            program="openclaw",
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=True,
+            checkout_session_id=_CHECKOUT_SESSION_ID,
+            purchase_reference=_PURCHASE_REFERENCE,
+        )
+        assert record.owner_key == "buyer@ironclaw.test"
+        assert len(reg.get_keys_for_owner("BUYER@IRONCLAW.TEST")) == 1
+
+    def test_record_normalizes_owner_key_to_canonical_value(self):
+        record = InstallKeyRecord(
+            key_id="ik_test_owner_normalize",
+            owner_key="  Buyer@IronClaw.Test  ",
+            subscription_id=_SUB_ID,
+            program="openclaw",
+            raw_key=_OPENCLAW_PREFIX + "abc123",
+            raw_key_hash="deadbeef" * 8,
+            masked_key="ic_install...5678",
+            active=True,
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=True,
+        )
+        assert record.owner_key == "buyer@ironclaw.test"
+
     def test_different_programs_same_owner_does_not_raise(self):
         reg = self._registry()
         r1 = self._generate_paid_key(reg, "openclaw")

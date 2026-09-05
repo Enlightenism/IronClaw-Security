@@ -187,6 +187,19 @@ def test_dashboard_overview_returns_expected_sections() -> None:
     assert data["metadata"]["wallet"]["owner_key"] == "demo@ironclaw.local"
 
 
+def test_dashboard_overview_rejects_generic_platform_owner_values() -> None:
+    client = TestClient(_build_test_app(), raise_server_exceptions=False)
+
+    response = client.get(
+        "/dashboard/overview",
+        headers=_headers(),
+        params={"owner_key": "ghp_legacy_system_key"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["metadata"]["owner_key"] == "demo@ironclaw.local"
+
+
 def test_alert_endpoint_create_and_update_flow() -> None:
     client = TestClient(_build_test_app(), raise_server_exceptions=False)
 

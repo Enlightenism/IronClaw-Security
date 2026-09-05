@@ -5,7 +5,6 @@
  * Runner: Jest + @testing-library/react + @testing-library/jest-dom
  */
 
-import React from "react";
 import {
   act,
   cleanup,
@@ -101,7 +100,7 @@ jest.mock("@/components/dashboard/IntegrationCard", () => ({
 }));
 
 // ── Module under test ─────────────────────────────────────────────────────────
-import Dashboard from "@/pages/Dashboard";
+import Dashboard from "./Dashboard";
 
 // ── Default API responses ─────────────────────────────────────────────────────
 const DEFAULT_DASH = {
@@ -156,14 +155,17 @@ function setupDefaultApis() {
 }
 
 function resetWindowLocation() {
-  delete window.location;
-  window.location = {
-    href: "",
-    origin: "http://localhost",
-    assign: jest.fn((url) => {
-      window.location.href = url;
-    }),
-  };
+  Object.defineProperty(globalThis, "location", {
+    value: {
+      href: "",
+      origin: "http://localhost",
+      assign: jest.fn((url) => {
+        globalThis.location.href = url;
+      }),
+    },
+    configurable: true,
+    writable: true,
+  });
 }
 
 // ── Setup / teardown ──────────────────────────────────────────────────────────
@@ -916,6 +918,69 @@ describe("dashboard structure", () => {
     expect(
       screen.queryByTestId("install-key-card-claude_code-copy"),
     ).not.toBeInTheDocument();
+  });
+
+  it("uses the current owner-scoped install_keys to map runtime cards and commands", async () => {
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard/overview") {
+        return Promise.resolve({
+          data: {
+            ...DEFAULT_DASH,
+            owner_key: "org-abc",
+            metadata: { owner_key: "org-abc" },
+            install_keys: [
+              {
+                program: "hermes",
+                owner_key: "org-abc",
+                status: "active",
+                masked_key: "ic_install_hermes_...abcd",
+                metadata: {},
+              },
+              {
+                program: "security_guardian",
+                owner_key: "org-abc",
+                status: "active",
+                masked_key: "ic_install_security_guardian_...shared",
+                metadata: {},
+              },
+              {
+                program: "claude_code",
+                owner_key: "other-owner",
+                status: "active",
+                masked_key: "ic_install_claude_code_...foreign",
+                metadata: {},
+              },
+            ],
+          },
+        });
+      }
+      if (url === "/integrations/token") {
+        return Promise.resolve({
+          data: {
+            status: "ok",
+            hermes_command: "hermes --token hermes-999",
+            claude_code_command: "ironclaw --token abc",
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("hermes-card")).toBeInTheDocument();
+      expect(screen.getAllByText("Hermes").length).toBeGreaterThan(0);
+      expect(
+        screen.queryByTestId("security_guardian-card"),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("claude-code-card")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("openclaw-card")).not.toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId("hermes-card")).toHaveTextContent("Hermes");
   });
 
   it("renders a copyable textarea for a generated Hermes install key", async () => {

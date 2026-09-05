@@ -250,9 +250,9 @@ def test_build_integration_adapters_view_tracks_supported_runtime_cards_and_inst
         "goose",
         "gemini_cli",
         "copilot",
-        "security_guardian",
         "hermes",
     } <= supported_runtime_programs
+    assert "security_guardian" not in supported_runtime_programs
 
     assert any(item["slug"] == "hermes" and item["install_key_program"] == "hermes" for item in payload["items"])
     assert any(item["slug"] == "security-guardian" and item["shared_install_key_family"] for item in payload["items"])
@@ -330,6 +330,6 @@ def test_build_integration_matrix_view_tracks_install_key_registry_and_skill_pac
     assert item["install_key_family"] == "security_guardian"
     assert item["installer_path"] == "local"
     assert item["shared_install_key_family"] is True
-    assert "skill" in item["install_key_aliases"]
+    assert "skill" not in item["install_key_aliases"]
     assert item["metadata"]["install_key_program"] == "security_guardian"
-    assert item["metadata"]["platform_aliases"]
+    assert item["metadata"]["platform_aliases"] == []

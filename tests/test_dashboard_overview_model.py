@@ -179,3 +179,54 @@ def test_dashboard_overview_summary_shares_platform_matrix() -> None:
     assert summary["install_key_slots"][0]["program"] == "copilot"
     assert summary["available_install_key_slots"][0]["program"] == "copilot"
     assert summary["coverage"]["protection_rate"] == 6.0
+
+
+def test_dashboard_overview_maps_owner_and_runtime_coverage() -> None:
+    overview = build_dashboard_overview(
+        {
+            "owner_key": "owner-456",
+            "wallet_total_units": 42,
+            "blocked_activity_total": 7,
+            "runtime_coverage": {"claude_code": True, "cursor": False, "hermes": True},
+            "install_key_slots": [
+                {
+                    "key_id": "ik_001",
+                    "owner_key": "owner-456",
+                    "program": "claude_code",
+                    "label": "Claude Code",
+                    "status": "active",
+                    "active": True,
+                    "masked_key": "ic_install_claude_code_...abcd",
+                    "payment_status": "paid",
+                    "entitlements_status": "active",
+                    "issued_after_payment": True,
+                    "units_consumed": 22,
+                    "metadata": {"platform": "claude-code"},
+                },
+                {
+                    "key_id": "ik_002",
+                    "owner_key": "owner-456",
+                    "program": "security_guardian",
+                    "label": "Security Guardian",
+                    "status": "locked",
+                    "metadata": {"platform": "security_guardian"},
+                },
+            ],
+        }
+    )
+
+    assert overview.owner_key == "owner-456"
+    assert overview.install_key_slots[0].key_id == "ik_001"
+    assert overview.install_key_slots[0].metadata["owner_key"] == "owner-456"
+    assert all(slot.program != "security_guardian" for slot in overview.install_key_slots)
+    assert overview.wallet_total_units == 42
+    assert overview.blocked_activity_total == 7
+    assert overview.runtime_coverage["claude_code"] is True
+    assert overview.runtime_coverage["hermes"] is True
+
+    summary = dashboard_overview_summary(overview)
+    assert summary["owner_key"] == "owner-456"
+    assert summary["wallet_total_units"] == 42
+    assert summary["blocked_activity_total"] == 7
+    assert "security_guardian" not in {slot["program"] for slot in summary["install_key_slots"]}
+    assert summary["runtime_coverage"]["claude_code"] is True

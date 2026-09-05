@@ -38,6 +38,40 @@ def _normalize_owner_key(owner_key: str) -> str:
     return str(owner_key).strip().lower()
 
 
+def _is_generic_platform_credential(value: str | None) -> bool:
+    if value is None:
+        return False
+    candidate = str(value).strip().lower()
+    if not candidate:
+        return False
+    generic_prefixes = (
+        "sk_",
+        "ghp_",
+        "gho_",
+        "github_pat_",
+        "token_",
+        "secret_",
+        "api_",
+        "api-key",
+        "api_key",
+        "platform-api-key",
+        "platform_api_key",
+        "system-api-key",
+        "system_api_key",
+        "internal-platform-api-key",
+        "internal_platform_api_key",
+        "bearer ",
+        "x-api-key",
+    )
+    if candidate.startswith(generic_prefixes):
+        return True
+    if "platform" in candidate and ("key" in candidate or "token" in candidate or "secret" in candidate):
+        return True
+    if "api" in candidate and "key" in candidate:
+        return True
+    return False
+
+
 def is_org_key(owner_key: str) -> bool:
     return _normalize_owner_key(owner_key).startswith(ORG_KEY_PREFIX)
 
@@ -220,8 +254,46 @@ class InstallKeyUsageSource:
     balance_units: int = 0
     total_consumed_units: int = 0
     total_blocked_attacks: int = 0
+    total_quarantined_actions: int = 0
+    units_used_today: int = 0
+    units_used_this_week: int = 0
+    usage_event_count: int = 0
     last_action_at: datetime | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    usage_by_day: dict[str, int] = field(default_factory=dict)
+    usage_by_week: dict[str, int] = field(default_factory=dict)
+
+    def _bucket_day(self, timestamp: datetime) -> str:
+        return timestamp.astimezone(UTC).date().isoformat()
+
+    def _bucket_week(self, timestamp: datetime) -> str:
+        iso_year, iso_week, _ = timestamp.astimezone(UTC).isocalendar()
+        return f"{iso_year}-W{iso_week:02d}"
+
+    def register_usage_event(
+        self,
+        *,
+        units: int,
+        blocked_attack_count: int = 0,
+        quarantined_count: int = 0,
+        occurred_at: datetime | None = None,
+    ) -> None:
+        if units < 0:
+            raise ValueError("units must be non-negative")
+        event_time = occurred_at or datetime.now(UTC)
+        self.total_consumed_units += int(units)
+        self.total_blocked_attacks += int(blocked_attack_count)
+        self.total_quarantined_actions += int(quarantined_count)
+        self.usage_event_count += 1
+        self.last_action_at = event_time
+
+        day_key = self._bucket_day(event_time)
+        self.usage_by_day[day_key] = self.usage_by_day.get(day_key, 0) + int(units)
+        self.units_used_today = self.usage_by_day.get(day_key, 0)
+
+        week_key = self._bucket_week(event_time)
+        self.usage_by_week[week_key] = self.usage_by_week.get(week_key, 0) + int(units)
+        self.units_used_this_week = sum(self.usage_by_week.values())
 
     def as_summary(self) -> dict[str, Any]:
         return {
@@ -231,6 +303,11 @@ class InstallKeyUsageSource:
             "balance_units": self.balance_units,
             "total_consumed_units": self.total_consumed_units,
             "total_blocked_attacks": self.total_blocked_attacks,
+            "total_quarantined_actions": self.total_quarantined_actions,
+            "blocked_or_quarantined_count": self.total_blocked_attacks + self.total_quarantined_actions,
+            "units_used_today": self.units_used_today,
+            "units_used_this_week": self.units_used_this_week,
+            "usage_event_count": self.usage_event_count,
             "last_action_at": self.last_action_at.isoformat() if self.last_action_at else None,
             "metadata": dict(self.metadata),
         }
@@ -304,6 +381,7 @@ class UnitWallet:
                 "wallet_balance_units": self.balance_units,
                 "total_consumed_units": self.total_consumed_units,
                 "total_blocked_attacks": self.total_blocked_attacks,
+                "total_quarantined_actions": sum(item.total_quarantined_actions for item in self.usage_by_key.values()),
                 "install_key_usage": {key_id: usage.as_summary()} if usage is not None else {},
             }
 
@@ -312,6 +390,7 @@ class UnitWallet:
             "wallet_balance_units": self.balance_units,
             "total_consumed_units": self.total_consumed_units,
             "total_blocked_attacks": self.total_blocked_attacks,
+            "total_quarantined_actions": sum(item.total_quarantined_actions for item in self.usage_by_key.values()),
             "install_key_usage": {key: value.as_summary() for key, value in sorted(self.usage_by_key.items())},
         }
 
@@ -406,15 +485,28 @@ class UnitWallet:
             raise ValueError("key_id is required for install-key consumption")
         if not program:
             raise ValueError("program is required for install-key consumption")
+        if _is_generic_platform_credential(self.owner_id):
+            raise ValueError("owner_key must be a customer or org identity, not a generic platform API key")
+        if _is_generic_platform_credential(str(key_id)):
+            raise ValueError("key_id must be an install key identity, not a generic platform API credential")
+
+        payload = dict(metadata or {})
+        explicit_owner = str(payload.get("owner_key") or "").strip().lower()
+        if explicit_owner and explicit_owner != self.owner_id:
+            raise ValueError("metadata owner_key does not match the wallet owner_key for install-key usage")
+        explicit_key = str(payload.get("key_id") or "").strip()
+        if explicit_key and explicit_key != str(key_id):
+            raise ValueError("metadata key_id does not match the install key being debited")
 
         canonical_metadata = {
-            **(metadata or {}),
+            **payload,
             "owner_key": self.owner_id,
             "key_id": key_id,
             "program": program,
             "payment_id": payment_id,
             "action_type": action_type,
             "blocked_attack_count": int(blocked_attack_count),
+            "quarantined_count": int(payload.get("quarantined_count", payload.get("quarantined_attack_count", 0))),
         }
 
         transaction = self.consume_units(
@@ -432,20 +524,18 @@ class UnitWallet:
                 program=program,
             ),
         )
+        if summary.owner_key != self.owner_id:
+            raise ValueError("install-key usage for a different owner_key is not allowed on this wallet")
         summary.program = program
         summary.balance_units = max(self.balance_units, 0)
-        summary.total_consumed_units += int(transaction.units)
-        summary.total_blocked_attacks += int(blocked_attack_count)
-        summary.last_action_at = transaction.created_at
-        summary.metadata.update(
-            {
-                "owner_key": self.owner_id,
-                "key_id": key_id,
-                "program": program,
-                "payment_id": payment_id,
-                "action_type": action_type,
-                "blocked_attack_count": int(blocked_attack_count),
-            }
+        summary.metadata.update(canonical_metadata)
+
+        quarantined_count = int(canonical_metadata.get("quarantined_count", canonical_metadata.get("quarantined_attack_count", 0)))
+        summary.register_usage_event(
+            units=int(transaction.units),
+            blocked_attack_count=int(blocked_attack_count),
+            quarantined_count=quarantined_count,
+            occurred_at=transaction.created_at,
         )
 
         self.total_blocked_attacks += int(blocked_attack_count)
@@ -880,7 +970,19 @@ class UnitWalletRegistry:
             raise ValueError("key_id is required")
         if not program:
             raise ValueError("program is required")
+        if _is_generic_platform_credential(owner_key):
+            raise ValueError("owner_key must be a customer or org identity, not a generic platform API key")
+        if _is_generic_platform_credential(str(key_id)):
+            raise ValueError("key_id must be an install key identity, not a generic platform API credential")
         safe_units = max(0, int(units))
+
+        payload = dict(metadata or {})
+        explicit_owner = str(payload.get("owner_key") or "").strip().lower()
+        if explicit_owner and explicit_owner != _normalize_owner_key(owner_key):
+            raise ValueError("metadata owner_key does not match the wallet owner_key for install-key usage")
+        explicit_key = str(payload.get("key_id") or "").strip()
+        if explicit_key and explicit_key != str(key_id):
+            raise ValueError("metadata key_id does not match the install key being debited")
 
         wallet = self.get_or_create_wallet(owner_key=owner_key)
 
@@ -906,31 +1008,40 @@ class UnitWalletRegistry:
                     program=program,
                 ),
             )
+            if usage.owner_key != wallet.owner_key:
+                raise ValueError("install-key usage for a different owner_key is not allowed on this wallet")
             usage.program = program
             usage.balance_units = max(wallet.balance_units, 0)
-            usage.total_consumed_units += safe_units
-            usage.total_blocked_attacks += int(blocked_attack_count)
-            usage.last_action_at = wallet.updated_at
             usage.metadata.update(
                 {
-                    **(metadata or {}),
+                    **payload,
                     "owner_key": wallet.owner_key,
                     "key_id": key_id,
                     "program": program,
                     "payment_id": payment_id,
                     "action_type": action_type,
                     "blocked_attack_count": int(blocked_attack_count),
+                    "quarantined_count": int(payload.get("quarantined_count", payload.get("quarantined_attack_count", 0))),
                 }
             )
 
+            quarantined_count = int(payload.get("quarantined_count", payload.get("quarantined_attack_count", 0)))
+            usage.register_usage_event(
+                units=safe_units,
+                blocked_attack_count=int(blocked_attack_count),
+                quarantined_count=quarantined_count,
+                occurred_at=wallet.updated_at,
+            )
+
             canonical_metadata = {
-                **(metadata or {}),
+                **payload,
                 "owner_key": wallet.owner_key,
                 "key_id": key_id,
                 "program": program,
                 "payment_id": payment_id,
                 "action_type": action_type,
                 "blocked_attack_count": int(blocked_attack_count),
+                "quarantined_count": quarantined_count,
             }
 
             entry = InstallKeyUsageLedgerEntry(
@@ -1028,11 +1139,13 @@ class UnitWalletRegistry:
     ) -> dict[str, Any]:
         wallet = self.get_wallet(owner_key)
         if wallet is None:
+            owner = _normalize_owner_key(owner_key)
             return {
-                "owner_key": owner_key.strip().lower(),
+                "owner_key": owner,
                 "wallet_balance_units": 0,
                 "total_consumed_units": 0,
                 "total_blocked_attacks": 0,
+                "total_quarantined_actions": 0,
                 "install_key_usage": {},
             }
 
@@ -1043,6 +1156,7 @@ class UnitWalletRegistry:
                 "wallet_balance_units": wallet.balance_units,
                 "total_consumed_units": wallet.total_consumed_units,
                 "total_blocked_attacks": wallet.total_blocked_attacks,
+                "total_quarantined_actions": sum(item.total_quarantined_actions for item in wallet.install_key_usage.values()),
                 "install_key_usage": {key_id: usage.as_summary()} if usage is not None else {},
             }
 
@@ -1051,6 +1165,7 @@ class UnitWalletRegistry:
             "wallet_balance_units": wallet.balance_units,
             "total_consumed_units": wallet.total_consumed_units,
             "total_blocked_attacks": wallet.total_blocked_attacks,
+            "total_quarantined_actions": sum(item.total_quarantined_actions for item in wallet.install_key_usage.values()),
             "install_key_usage": {key: value.as_summary() for key, value in sorted(wallet.install_key_usage.items())},
         }
 
