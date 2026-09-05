@@ -271,72 +271,110 @@ const computeResumedCounterValue = (storageKey, base, step) => {
   return persisted.value;
 };
 
+const resetSharedCounterController = (storageKey, base, step) => {
+  const registry = getCounterRegistry();
+  const existingController = registry.get(storageKey);
+
+  if (existingController?.intervalId) {
+    clearInterval(existingController.intervalId);
+  }
+
+  if (
+    existingController?.handleStorage &&
+    typeof window !== "undefined"
+  ) {
+    window.removeEventListener("storage", existingController.handleStorage);
+  }
+
+  registry.delete(storageKey);
+
+  if (typeof globalThis !== "undefined") {
+    delete globalThis.__IC_COUNTERS__?.[storageKey];
+  }
+
+  return ensureSharedCounter({ base, step, storageKey });
+};
+
 const ensureSharedCounter = ({ base, step, storageKey }) => {
   const key = storageKey;
   const registry = getCounterRegistry();
+  const controller = registry.get(key);
 
-  if (!registry.has(key)) {
-    const listeners = new Set();
-    const controller = {
-      value: computeResumedCounterValue(storageKey, base, step),
-      getValue: () => controller.value,
-      setValue: (nextValue) => {
-        const safeValue = normalizeCounterValue(base, nextValue);
-        if (safeValue < controller.value) {
-          return;
-        }
+  if (controller) {
+    const currentValue = Number(controller.getValue?.());
+    const memoryStore = globalThis.__IC_COUNTERS__?.[key];
+    const memoryUpdatedAt = Number(memoryStore?.updatedAt);
 
-        const snapshot = syncPersistedCounterState(storageKey, base, safeValue);
-        controller.value = snapshot.value;
-        listeners.forEach((listener) => listener(controller.value));
-      },
-      subscribe: (listener) => {
-        listeners.add(listener);
-        return () => listeners.delete(listener);
-      },
-    };
-
-    const tick = () => {
-      const persisted = readPersistedCounterState(storageKey, base);
-      const delta = typeof step === "function" ? step() : Number(step) || 1;
-      const nextValue = normalizeCounterValue(base, persisted.value + delta);
-      controller.setValue(nextValue);
-    };
-
-    controller.intervalId = setInterval(tick, COUNTER_TICK_MS);
-
-    if (typeof window !== "undefined") {
-      const handleStorage = (event) => {
-        if (event.key !== storageKey || !event.newValue) {
-          return;
-        }
-
-        try {
-          const parsed = JSON.parse(event.newValue);
-          if (
-            parsed &&
-            typeof parsed === "object" &&
-            Number.isFinite(parsed.value)
-          ) {
-            const nextValue = normalizeCounterValue(base, parsed.value);
-            if (nextValue > controller.value) {
-              controller.value = nextValue;
-              listeners.forEach((listener) => listener(controller.value));
-            }
-          }
-        } catch {
-          // ignore invalid storage payloads.
-        }
-      };
-
-      window.addEventListener("storage", handleStorage);
-      controller.handleStorage = handleStorage;
+    if (
+      !Number.isFinite(currentValue) ||
+      currentValue < base ||
+      isCounterValueTooStale(base, currentValue, memoryUpdatedAt)
+    ) {
+      return resetSharedCounterController(key, base, step);
     }
 
-    registry.set(key, controller);
+    return controller;
   }
 
-  return registry.get(key);
+  const listeners = new Set();
+  const nextController = {
+    value: computeResumedCounterValue(storageKey, base, step),
+    getValue: () => nextController.value,
+    setValue: (nextValue) => {
+      const safeValue = normalizeCounterValue(base, nextValue);
+      if (safeValue < nextController.value) {
+        return;
+      }
+
+      const snapshot = syncPersistedCounterState(storageKey, base, safeValue);
+      nextController.value = snapshot.value;
+      listeners.forEach((listener) => listener(nextController.value));
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+
+  const tick = () => {
+    const persisted = readPersistedCounterState(storageKey, base);
+    const delta = typeof step === "function" ? step() : Number(step) || 1;
+    const nextValue = normalizeCounterValue(base, persisted.value + delta);
+    nextController.setValue(nextValue);
+  };
+
+  nextController.intervalId = setInterval(tick, COUNTER_TICK_MS);
+
+  if (typeof window !== "undefined") {
+    const handleStorage = (event) => {
+      if (event.key !== storageKey || !event.newValue) {
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(event.newValue);
+        if (
+          parsed &&
+          typeof parsed === "object" &&
+          Number.isFinite(parsed.value)
+        ) {
+          const nextValue = normalizeCounterValue(base, parsed.value);
+          if (nextValue > nextController.value) {
+            nextController.value = nextValue;
+            listeners.forEach((listener) => listener(nextController.value));
+          }
+        }
+      } catch {
+        // ignore invalid storage payloads.
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+    nextController.handleStorage = handleStorage;
+  }
+
+  registry.set(key, nextController);
+  return nextController;
 };
 
 const LiveCounter = ({ base, step, color, testid, storageKey }) => {

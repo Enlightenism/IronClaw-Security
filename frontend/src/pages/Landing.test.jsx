@@ -291,6 +291,10 @@ describe("Landing", () => {
     const originalSetItem = window.localStorage.setItem;
 
     globalThis.__IC_COUNTERS__ = {
+      __controllers: new Map([
+        ["ic_threats_blocked", { getValue: () => 12500 }],
+        ["ic_engineers_protected", { getValue: () => 5400 }],
+      ]),
       ic_threats_blocked: {
         value: 12500,
         updatedAt: Date.now() - 25 * 60 * 60 * 1000,
@@ -321,6 +325,32 @@ describe("Landing", () => {
       window.localStorage.getItem = originalGetItem;
       window.localStorage.setItem = originalSetItem;
     }
+  });
+
+  it("rebuilds stale shared controllers instead of reusing the global override", async () => {
+    const staleThreatValue = 12000;
+    const staleUserValue = 5200;
+    const staleUpdatedAt = Date.now() - 25 * 60 * 60 * 1000;
+
+    globalThis.__IC_COUNTERS__ = {
+      __controllers: new Map([
+        ["ic_threats_blocked", { getValue: () => staleThreatValue }],
+        ["ic_engineers_protected", { getValue: () => staleUserValue }],
+      ]),
+      ic_threats_blocked: {
+        value: staleThreatValue,
+        updatedAt: staleUpdatedAt,
+      },
+      ic_engineers_protected: {
+        value: staleUserValue,
+        updatedAt: staleUpdatedAt,
+      },
+    };
+
+    await renderLanding();
+
+    expect(screen.getByTestId("threat-counter")).toHaveTextContent("732");
+    expect(screen.getByTestId("user-counter")).toHaveTextContent("344");
   });
 
   it("keeps counter movement monotonic-only across rerenders and timer ticks", async () => {
