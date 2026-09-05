@@ -127,22 +127,34 @@ const getStoredCounterValue = (storageKey) => {
   }
 
   try {
-    const memoryValue = Number(globalThis.__IC_COUNTERS__?.[storageKey]?.value);
+    const memoryStore = globalThis.__IC_COUNTERS__?.[storageKey];
+    const memoryValue = Number(memoryStore?.value);
+    const memoryUpdatedAt = Number(memoryStore?.updatedAt);
     const raw = localStorage.getItem(storageKey);
     const parsed = raw ? JSON.parse(raw) : null;
     const storedValue = Number(parsed?.value);
+    const storedUpdatedAt = Number(parsed?.updatedAt);
 
-    if (Number.isFinite(memoryValue) && Number.isFinite(storedValue)) {
-      return Math.max(memoryValue, storedValue);
+    const validValues = [
+      { value: memoryValue, updatedAt: memoryUpdatedAt },
+      { value: storedValue, updatedAt: storedUpdatedAt },
+    ].filter(({ value, updatedAt }) => {
+      if (!Number.isFinite(value)) {
+        return false;
+      }
+
+      if (value < 0 || !Number.isFinite(updatedAt)) {
+        return false;
+      }
+
+      return Date.now() - updatedAt <= 24 * 60 * 60 * 1000;
+    });
+
+    if (validValues.length === 0) {
+      return Number.NaN;
     }
 
-    if (Number.isFinite(memoryValue)) {
-      return memoryValue;
-    }
-
-    if (Number.isFinite(storedValue)) {
-      return storedValue;
-    }
+    return Math.max(...validValues.map(({ value }) => value));
   } catch {
     // ignore invalid persisted state and fall back to the canonical base.
   }
@@ -155,7 +167,7 @@ const normalizeCounterValue = (base, nextValue) => {
   if (!Number.isFinite(numericValue)) {
     return base;
   }
-  return Math.max(base, numericValue);
+  return numericValue >= base ? numericValue : base;
 };
 
 const isCounterValueTooStale = (base, value, updatedAt) => {
@@ -239,11 +251,18 @@ const syncPersistedCounterState = (storageKey, base, nextValue) => {
       ? currentKnownValue
       : base;
 
-    if (safeValue >= currentValue) {
+    if (safeValue >= base && safeValue >= currentValue) {
       globalThis.__IC_COUNTERS__[storageKey] = snapshot;
 
       try {
         localStorage.setItem(storageKey, JSON.stringify(snapshot));
+      } catch {
+        // ignore storage errors.
+      }
+    } else if (safeValue <= base) {
+      globalThis.__IC_COUNTERS__[storageKey] = { value: base, updatedAt: Date.now() };
+      try {
+        localStorage.setItem(storageKey, JSON.stringify({ value: base, updatedAt: Date.now() }));
       } catch {
         // ignore storage errors.
       }
