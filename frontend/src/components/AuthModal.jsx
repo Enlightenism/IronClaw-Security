@@ -8,6 +8,13 @@ import { toast } from "sonner";
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const AUTH_LOGO_SRC = "/images/Golden%20Knight%20Logo128.png";
 
+const prefersReducedMotion = () => {
+  if (typeof window === "undefined" || !window.matchMedia) {
+    return false;
+  }
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+};
+
 const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
   const [mode, setMode] = useState(initialMode);
   const [email, setEmail] = useState("");
@@ -102,6 +109,9 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
     setEmailStatus("");
   };
 
+  const shouldReduceMotion = prefersReducedMotion();
+  const backdropBlurEnabled = !shouldReduceMotion;
+
   return (
     <AnimatePresence>
       <motion.div
@@ -112,14 +122,21 @@ const AuthModal = ({ open, onClose, initialMode = "signin" }) => {
         data-testid="auth-modal"
       >
         <div
-          className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+          data-testid="auth-modal-backdrop"
+          data-backdrop-blur={backdropBlurEnabled ? "on" : "off"}
+          className={`absolute inset-0 bg-black/70 ${
+            backdropBlurEnabled ? "backdrop-blur-sm" : ""
+          }`}
           onClick={loading ? undefined : onClose}
         />
         <motion.div
           initial={{ scale: 0.94, y: 20, opacity: 0 }}
           animate={{ scale: 1, y: 0, opacity: 1 }}
           exit={{ scale: 0.94, opacity: 0 }}
-          transition={{ type: "spring", stiffness: 260, damping: 24 }}
+          transition={{
+            duration: 0.18,
+            ease: [0.22, 1, 0.36, 1],
+          }}
           className="glass relative z-10 w-full max-w-md rounded-2xl p-8"
         >
           <button

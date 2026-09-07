@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect, lazy, Suspense, useRef } from "react";
 import { motion } from "framer-motion";
 import { useNavigate, Link } from "react-router-dom";
 import {
@@ -98,12 +98,18 @@ const LAYERS = [
   },
 ];
 
+const HERO_EASE = [0.22, 1, 0.36, 1];
+
 const fadeUp = {
   hidden: { opacity: 0, y: 28 },
   show: (i = 0) => ({
     opacity: 1,
     y: 0,
-    transition: { duration: 0.6, delay: i * 0.05, ease: [0.22, 1, 0.36, 1] },
+    transition: {
+      duration: 0.6,
+      delay: i * 0.05,
+      ease: HERO_EASE,
+    },
   }),
 };
 
@@ -494,12 +500,17 @@ const ensureSharedCounter = ({ base, step, storageKey }) => {
 };
 
 const LiveCounter = ({ base, step, color, testid, storageKey }) => {
-  const controller = ensureSharedCounter({
-    base,
-    step,
-    storageKey,
-  });
+  const controllerRef = useRef(null);
 
+  if (!controllerRef.current) {
+    controllerRef.current = ensureSharedCounter({
+      base,
+      step,
+      storageKey,
+    });
+  }
+
+  const controller = controllerRef.current;
   const [value, setValue] = useState(() => controller.getValue());
 
   useEffect(() => {
@@ -663,6 +674,7 @@ const Landing = () => {
   const [showBelowFold, setShowBelowFold] = useState(true);
   const { user } = useAuth();
   const navigate = useNavigate();
+  const particleFieldPaused = authOpen || !showParticleField;
 
   useEffect(() => {
     const enableHeroEffects = () => setShowParticleField(true);
@@ -691,9 +703,27 @@ const Landing = () => {
   };
 
   const onCardMove = (e) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    e.currentTarget.style.setProperty("--mx", `${e.clientX - r.left}px`);
-    e.currentTarget.style.setProperty("--my", `${e.clientY - r.top}px`);
+    const target = e.currentTarget;
+    const nextX = e.clientX;
+    const nextY = e.clientY;
+
+    if (target.__icGlowFrame) {
+      return;
+    }
+
+    const paintGlow = () => {
+      const r = target.getBoundingClientRect();
+      target.style.setProperty("--mx", `${nextX - r.left}px`);
+      target.style.setProperty("--my", `${nextY - r.top}px`);
+      target.__icGlowFrame = null;
+    };
+
+    if (typeof window !== "undefined" && "requestAnimationFrame" in window) {
+      target.__icGlowFrame = window.requestAnimationFrame(paintGlow);
+      return;
+    }
+
+    paintGlow();
   };
 
   return (
@@ -701,7 +731,10 @@ const Landing = () => {
       <div className="pointer-events-none fixed inset-0 z-0 bg-transparent">
         <Suspense fallback={null}>
           {showParticleField ? (
-            <ParticleField density={PARTICLE_FIELD_DENSITY} />
+            <ParticleField
+              density={PARTICLE_FIELD_DENSITY}
+              paused={particleFieldPaused}
+            />
           ) : null}
         </Suspense>
       </div>

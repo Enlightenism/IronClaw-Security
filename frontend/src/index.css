@@ -57,31 +57,42 @@ svg {
 /* ---------- Surfaces ---------- */
 .glass {
     background: rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.1);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
 }
 .glass-gold {
     background: rgba(201, 168, 76, 0.06);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 215, 0, 0.22);
     box-shadow: 0 8px 32px rgba(201, 168, 76, 0.12);
 }
 .glass-platinum {
     background: rgba(229, 228, 226, 0.06);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     border: 1px solid rgba(229, 228, 226, 0.22);
     box-shadow: 0 8px 32px rgba(229, 228, 226, 0.12);
 }
 .glass-blue {
     background: rgba(56, 189, 248, 0.06);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     border: 1px solid rgba(56, 189, 248, 0.22);
     box-shadow: 0 8px 32px rgba(56, 189, 248, 0.12);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .glass,
+    .glass-gold,
+    .glass-platinum,
+    .glass-blue,
+    .feature-card {
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+    }
 }
 
 /* ---------- Text treatments ---------- */
@@ -182,7 +193,7 @@ svg {
     content: "";
     position: absolute;
     top: 0;
-    left: -150%;
+    left: 0;
     width: 60%;
     height: 100%;
     background: linear-gradient(
@@ -191,7 +202,8 @@ svg {
         rgba(255, 255, 255, 0.45),
         transparent
     );
-    transform: skewX(-20deg);
+    transform: skewX(-20deg) translateX(-180%);
+    will-change: transform;
 }
 .btn-shimmer:hover::after {
     animation: btn-sheen 0.9s ease;
@@ -255,8 +267,8 @@ svg {
     position: relative;
     overflow: hidden;
     background: rgba(255, 255, 255, 0.06);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.14);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1),
@@ -274,6 +286,7 @@ svg {
     );
     transition: opacity 0.4s ease;
     pointer-events: none;
+    will-change: opacity;
 }
 .feature-card:hover {
     transform: translateY(-6px) scale(1.01);
@@ -336,10 +349,10 @@ svg {
 }
 @keyframes btn-sheen {
     0% {
-        left: -150%;
+        transform: skewX(-20deg) translateX(-180%);
     }
     100% {
-        left: 150%;
+        transform: skewX(-20deg) translateX(180%);
     }
 }
 @keyframes shimmer {

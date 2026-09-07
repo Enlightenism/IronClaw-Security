@@ -70,7 +70,12 @@ jest.mock("@/components/AuthModal", () => {
 });
 
 jest.mock("@/components/ParticleField", () => {
-  const MockParticleField = () => <div data-testid="particle-field" />;
+  const MockParticleField = (props) => (
+    <div
+      data-testid="particle-field"
+      data-paused={props.paused ? "true" : "false"}
+    />
+  );
 
   MockParticleField.displayName = "MockParticleField";
 
@@ -148,6 +153,13 @@ describe("Landing", () => {
     });
 
     window.cancelIdleCallback = jest.fn();
+    window.requestAnimationFrame = jest.fn((callback) => {
+      const id = Math.random() * 10000;
+      window.__queuedRaf = window.__queuedRaf || [];
+      window.__queuedRaf.push(callback);
+      return id;
+    });
+    window.cancelAnimationFrame = jest.fn();
   });
 
   it("renders hero content on first paint", async () => {
@@ -572,6 +584,63 @@ describe("Landing", () => {
       expect(window.requestIdleCallback).toHaveBeenCalled();
       expect(screen.getByTestId("particle-field")).toBeInTheDocument();
     });
+  });
+
+  it("pauses the background particle field while the auth modal is open", async () => {
+    await renderLanding({ user: null });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("particle-field")).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId("particle-field")).toHaveAttribute(
+      "data-paused",
+      "false",
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("hero-signin-btn"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("auth-modal")).toHaveAttribute(
+        "data-open",
+        "true",
+      );
+      expect(screen.getByTestId("particle-field")).toHaveAttribute(
+        "data-paused",
+        "true",
+      );
+    });
+  });
+
+  it("throttles feature-card hover glow updates to animation frames", async () => {
+    await renderLanding();
+
+    const featureCard = screen.getByTestId("feature-card-0");
+    featureCard.getBoundingClientRect = jest.fn(() => ({
+      left: 20,
+      top: 30,
+      width: 200,
+      height: 180,
+    }));
+
+    fireEvent.mouseMove(featureCard, {
+      clientX: 100,
+      clientY: 140,
+    });
+    fireEvent.mouseMove(featureCard, {
+      clientX: 125,
+      clientY: 165,
+    });
+
+    expect(window.requestAnimationFrame).toHaveBeenCalledTimes(1);
+
+    const queuedFrame = window.__queuedRaf[0];
+    queuedFrame();
+
+    expect(featureCard.style.getPropertyValue("--mx")).toBe("80px");
+    expect(featureCard.style.getPropertyValue("--my")).toBe("110px");
   });
 
   it("renders below-fold sections on first paint", async () => {

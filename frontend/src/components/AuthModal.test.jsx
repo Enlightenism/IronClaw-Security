@@ -104,6 +104,29 @@ describe("AuthModal", () => {
       renderModal({ open: false });
       expect(screen.queryByTestId("auth-modal")).not.toBeInTheDocument();
     });
+
+    it("disables backdrop blur when reduced motion is active", () => {
+      const originalMatchMedia = window.matchMedia;
+      window.matchMedia = jest.fn().mockImplementation((query) => ({
+        matches: query === "(prefers-reduced-motion: reduce)",
+        media: query,
+        addListener: jest.fn(),
+        removeListener: jest.fn(),
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+        dispatchEvent: jest.fn(),
+      }));
+
+      try {
+        renderModal({ open: true });
+        expect(screen.getByTestId("auth-modal-backdrop")).toHaveAttribute(
+          "data-backdrop-blur",
+          "off",
+        );
+      } finally {
+        window.matchMedia = originalMatchMedia;
+      }
+    });
   });
 
   describe("initial mode", () => {
