@@ -121,7 +121,46 @@ const getCounterRegistry = () => {
   return globalThis.__IC_COUNTERS__.__controllers;
 };
 
-const getStoredCounterValue = (storageKey) => {
+const canonicalCounterSnapshot = (base) => ({
+  value: base,
+  updatedAt: Date.now(),
+});
+
+const isCounterSnapshotFresh = (base, value, updatedAt) => {
+  const numericValue = Number(value);
+  const numericUpdatedAt = Number(updatedAt);
+
+  if (!Number.isFinite(numericValue) || !Number.isFinite(numericUpdatedAt)) {
+    return false;
+  }
+
+  if (numericValue < base || numericValue < 0) {
+    return false;
+  }
+
+  return Date.now() - numericUpdatedAt <= 24 * 60 * 60 * 1000;
+};
+
+const resetCounterState = (storageKey, base) => {
+  const snapshot = canonicalCounterSnapshot(base);
+
+  if (typeof globalThis !== "undefined") {
+    globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
+    globalThis.__IC_COUNTERS__[storageKey] = snapshot;
+  }
+
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(snapshot));
+    } catch {
+      // ignore storage errors.
+    }
+  }
+
+  return snapshot;
+};
+
+const getStoredCounterValue = (storageKey, base = 0) => {
   if (typeof window === "undefined") {
     return Number.NaN;
   }
@@ -138,17 +177,9 @@ const getStoredCounterValue = (storageKey) => {
     const validValues = [
       { value: memoryValue, updatedAt: memoryUpdatedAt },
       { value: storedValue, updatedAt: storedUpdatedAt },
-    ].filter(({ value, updatedAt }) => {
-      if (!Number.isFinite(value)) {
-        return false;
-      }
-
-      if (value < 0 || !Number.isFinite(updatedAt)) {
-        return false;
-      }
-
-      return Date.now() - updatedAt <= 24 * 60 * 60 * 1000;
-    });
+    ].filter(({ value, updatedAt }) =>
+      isCounterSnapshotFresh(base, value, updatedAt),
+    );
 
     if (validValues.length === 0) {
       return Number.NaN;
@@ -191,7 +222,7 @@ const isCounterValueTooStale = (base, value, updatedAt) => {
 };
 
 const readPersistedCounterState = (storageKey, base) => {
-  const defaultState = { value: base, updatedAt: Date.now() };
+  const defaultState = canonicalCounterSnapshot(base);
 
   if (typeof window === "undefined") {
     return defaultState;
@@ -203,7 +234,7 @@ const readPersistedCounterState = (storageKey, base) => {
 
   if (Number.isFinite(memoryValue)) {
     if (isCounterValueTooStale(base, memoryValue, memoryUpdatedAt)) {
-      return defaultState;
+      return resetCounterState(storageKey, base);
     }
 
     return {
@@ -222,7 +253,7 @@ const readPersistedCounterState = (storageKey, base) => {
 
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") {
-      return defaultState;
+      return resetCounterState(storageKey, base);
     }
 
     const value = Number.isFinite(parsed.value) ? Number(parsed.value) : base;
@@ -231,12 +262,12 @@ const readPersistedCounterState = (storageKey, base) => {
       : Date.now();
 
     if (isCounterValueTooStale(base, value, updatedAt)) {
-      return defaultState;
+      return resetCounterState(storageKey, base);
     }
 
     return { value: normalizeCounterValue(base, value), updatedAt };
   } catch {
-    return defaultState;
+    return resetCounterState(storageKey, base);
   }
 };
 
@@ -246,10 +277,20 @@ const syncPersistedCounterState = (storageKey, base, nextValue) => {
 
   if (typeof window !== "undefined") {
     globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
-    const currentKnownValue = getStoredCounterValue(storageKey);
+    const currentKnownValue = getStoredCounterValue(storageKey, base);
     const currentValue = Number.isFinite(currentKnownValue)
       ? currentKnownValue
       : base;
+
+    const isMemoryStateStale = !isCounterSnapshotFresh(
+      base,
+      globalThis.__IC_COUNTERS__?.[storageKey]?.value,
+      globalThis.__IC_COUNTERS__?.[storageKey]?.updatedAt,
+    );
+
+    if (isMemoryStateStale || currentValue < base) {
+      return resetCounterState(storageKey, base);
+    }
 
     if (safeValue >= base && safeValue >= currentValue) {
       globalThis.__IC_COUNTERS__[storageKey] = snapshot;
@@ -260,12 +301,7 @@ const syncPersistedCounterState = (storageKey, base, nextValue) => {
         // ignore storage errors.
       }
     } else if (safeValue <= base) {
-      globalThis.__IC_COUNTERS__[storageKey] = { value: base, updatedAt: Date.now() };
-      try {
-        localStorage.setItem(storageKey, JSON.stringify({ value: base, updatedAt: Date.now() }));
-      } catch {
-        // ignore storage errors.
-      }
+      return resetCounterState(storageKey, base);
     }
   }
 
@@ -298,10 +334,7 @@ const resetSharedCounterController = (storageKey, base, step) => {
     clearInterval(existingController.intervalId);
   }
 
-  if (
-    existingController?.handleStorage &&
-    typeof window !== "undefined"
-  ) {
+  if (existingController?.handleStorage && typeof window !== "undefined") {
     window.removeEventListener("storage", existingController.handleStorage);
   }
 
@@ -311,6 +344,7 @@ const resetSharedCounterController = (storageKey, base, step) => {
     delete globalThis.__IC_COUNTERS__?.[storageKey];
   }
 
+  resetCounterState(storageKey, base);
   return ensureSharedCounter({ base, step, storageKey });
 };
 
@@ -327,7 +361,7 @@ const ensureSharedCounter = ({ base, step, storageKey }) => {
     if (
       !Number.isFinite(currentValue) ||
       currentValue < base ||
-      isCounterValueTooStale(base, currentValue, memoryUpdatedAt)
+      !isCounterSnapshotFresh(base, currentValue, memoryUpdatedAt)
     ) {
       return resetSharedCounterController(key, base, step);
     }

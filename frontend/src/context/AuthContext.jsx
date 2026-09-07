@@ -63,21 +63,34 @@ const ensureSharedCounterRegistry = () => {
 
   const store = globalThis.__IC_COUNTERS__ || {};
   const existingRegistry = store.__controllers;
-
-  if (existingRegistry instanceof Map) {
-    store.__controllers = existingRegistry;
-    globalThis.__IC_COUNTERS__ = store;
-    return existingRegistry;
-  }
-
   const nextRegistry = new Map();
 
-  if (existingRegistry && typeof existingRegistry === "object") {
+  if (existingRegistry instanceof Map) {
+    for (const [key, value] of existingRegistry.entries()) {
+      if (key && value !== undefined) {
+        nextRegistry.set(key, value);
+      }
+    }
+  } else if (existingRegistry && typeof existingRegistry === "object") {
     Object.entries(existingRegistry).forEach(([key, value]) => {
-      if (value !== undefined) {
+      if (key && value !== undefined) {
         nextRegistry.set(key, value);
       }
     });
+  }
+
+  Object.keys(store).forEach((key) => {
+    if (key === "__controllers" || key === "__appMounted") {
+      return;
+    }
+
+    if (!nextRegistry.has(key)) {
+      delete store[key];
+    }
+  });
+
+  for (const [key, value] of nextRegistry.entries()) {
+    store[key] = value;
   }
 
   store.__controllers = nextRegistry;

@@ -2,6 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const easeOutQuad = (t) => t * (2 - t);
 
+const clampMonotonicTarget = (current, nextTarget) => {
+  if (!Number.isFinite(nextTarget)) {
+    return current;
+  }
+
+  return Math.max(current, nextTarget);
+};
+
 /**
  * Animates a numeric value toward a target without ever moving backward.
  * The hook is display-only; counter state transitions remain owned by the caller.
@@ -48,7 +56,7 @@ export function useCountUp(end, duration = 1400, deps = [], from = 0) {
 
     const nextTarget = Number.isFinite(target) ? target : start;
     const current = Number(lastValueRef.current) || 0;
-    const safeTarget = Math.max(nextTarget, current);
+    const safeTarget = clampMonotonicTarget(current, nextTarget);
 
     if (depsChanged) {
       lastValueRef.current = current;
@@ -64,7 +72,7 @@ export function useCountUp(end, duration = 1400, deps = [], from = 0) {
       return undefined;
     }
 
-    if (safeTarget === current) {
+    if (nextTarget < current || safeTarget === current) {
       setValue(current);
       lastValueRef.current = current;
       previousDepsRef.current = depKey;

@@ -271,6 +271,8 @@ describe("Landing", () => {
       await renderLanding();
       expect(screen.getByTestId("threat-counter")).toHaveTextContent("732");
       expect(screen.getByTestId("user-counter")).toHaveTextContent("344");
+      expect(globalThis.__IC_COUNTERS__.ic_threats_blocked.value).toBe(732);
+      expect(globalThis.__IC_COUNTERS__.ic_engineers_protected.value).toBe(344);
     } finally {
       window.localStorage.getItem = originalGetItem;
       window.localStorage.setItem = originalSetItem;
@@ -321,6 +323,16 @@ describe("Landing", () => {
       await renderLanding();
       expect(screen.getByTestId("threat-counter")).toHaveTextContent("732");
       expect(screen.getByTestId("user-counter")).toHaveTextContent("344");
+      expect(globalThis.__IC_COUNTERS__.ic_threats_blocked.value).toBe(732);
+      expect(globalThis.__IC_COUNTERS__.ic_engineers_protected.value).toBe(344);
+      expect(window.localStorage.setItem).toHaveBeenCalledWith(
+        "ic_threats_blocked",
+        expect.stringContaining('"value":732'),
+      );
+      expect(window.localStorage.setItem).toHaveBeenCalledWith(
+        "ic_engineers_protected",
+        expect.stringContaining('"value":344'),
+      );
     } finally {
       window.localStorage.getItem = originalGetItem;
       window.localStorage.setItem = originalSetItem;
@@ -404,9 +416,11 @@ describe("Landing", () => {
         jest.advanceTimersByTime(10 * 60 * 1000);
       });
 
-      const persistedThreat = window.localStorage.setItem.mock.calls.find(
-        ([key]) => key === "ic_threats_blocked",
-      );
+      const persistedThreatCalls =
+        window.localStorage.setItem.mock.calls.filter(
+          ([key]) => key === "ic_threats_blocked",
+        );
+      const persistedThreat = persistedThreatCalls.at(-1);
 
       expect(persistedThreat).toBeTruthy();
       expect(JSON.parse(persistedThreat[1]).value).toBeGreaterThan(

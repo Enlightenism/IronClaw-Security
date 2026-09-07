@@ -196,9 +196,10 @@ afterEach(() => {
 // =============================================================================
 
 describe("auth redirect", () => {
-  it("preserves the shared counter registry while dashboard is mounted", async () => {
+  it("preserves valid shared counter values and removes stale top-level entries while dashboard is mounted", async () => {
     globalThis.__IC_COUNTERS__ = {
       ic_threats_blocked: { value: 7766, updatedAt: Date.now() },
+      ic_engineers_protected: { value: 999, updatedAt: Date.now() },
       __controllers: new Map([["ic_threats_blocked", { value: 7766 }]]),
     };
 
@@ -206,8 +207,14 @@ describe("auth redirect", () => {
       render(<Dashboard />);
     });
 
-    expect(globalThis.__IC_COUNTERS__.ic_threats_blocked.value).toBe(7766);
+    expect(globalThis.__IC_COUNTERS__.ic_threats_blocked).toMatchObject({
+      value: 7766,
+    });
+    expect(globalThis.__IC_COUNTERS__.ic_engineers_protected).toBeUndefined();
     expect(globalThis.__IC_COUNTERS__.__controllers).toBeInstanceOf(Map);
+    expect(
+      globalThis.__IC_COUNTERS__.__controllers.get("ic_threats_blocked"),
+    ).toMatchObject({ value: 7766 });
   });
 
   it("calls navigate('/') when user and session are null and loading is false", async () => {

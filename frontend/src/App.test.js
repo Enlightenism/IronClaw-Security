@@ -87,6 +87,27 @@ describe("App", () => {
     expect(await screen.findByText("Landing Page")).toBeInTheDocument();
   });
 
+  it("rehydrates stale object registries into a Map without dropping controller entries", async () => {
+    globalThis.__IC_COUNTERS__ = {
+      __controllers: {
+        ic_threats_blocked: { value: 732, updatedAt: Date.now() },
+        ic_engineers_protected: { value: 344, updatedAt: Date.now() },
+      },
+    };
+
+    renderAppAtRoute("/");
+
+    await waitFor(() => {
+      expect(globalThis.__IC_COUNTERS__.__controllers).toBeInstanceOf(Map);
+      expect(
+        globalThis.__IC_COUNTERS__.__controllers.has("ic_threats_blocked"),
+      ).toBe(true);
+      expect(
+        globalThis.__IC_COUNTERS__.__controllers.has("ic_engineers_protected"),
+      ).toBe(true);
+    });
+  });
+
   it("renders the landing page on /", async () => {
     renderAppAtRoute("/");
 

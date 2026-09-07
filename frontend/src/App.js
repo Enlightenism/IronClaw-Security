@@ -22,13 +22,24 @@ const CounterProvider = ({ children }) => {
     }
 
     mountedRef.current = true;
-    globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
-    const registry = globalThis.__IC_COUNTERS__.__controllers;
+    const store = globalThis.__IC_COUNTERS__ || {};
+    const existingRegistry = store.__controllers;
 
-    if (!(registry instanceof Map)) {
-      globalThis.__IC_COUNTERS__.__controllers = new Map();
+    if (existingRegistry instanceof Map) {
+      store.__controllers = existingRegistry;
+    } else if (existingRegistry && typeof existingRegistry === "object") {
+      const nextRegistry = new Map();
+      Object.entries(existingRegistry).forEach(([key, value]) => {
+        if (value !== undefined) {
+          nextRegistry.set(key, value);
+        }
+      });
+      store.__controllers = nextRegistry;
+    } else {
+      store.__controllers = new Map();
     }
 
+    globalThis.__IC_COUNTERS__ = store;
     globalThis.__IC_COUNTERS__.__appMounted = true;
   }, []);
 

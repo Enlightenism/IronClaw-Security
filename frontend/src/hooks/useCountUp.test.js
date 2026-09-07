@@ -126,6 +126,19 @@ describe("useCountUp", () => {
     expect(result.current).toBe(18);
   });
 
+  it("holds the current display value when a stale lower target arrives", () => {
+    const { result, rerender } = renderHook(
+      ({ end }) => useCountUp(end, 500, [end], 0),
+      { initialProps: { end: 100 } },
+    );
+
+    advance(600);
+    expect(result.current).toBe(100);
+
+    rerender({ end: 72 });
+    expect(result.current).toBe(100);
+  });
+
   it("returns the target immediately when reduced motion is enabled", () => {
     setReducedMotion(true);
     const spy = jest.spyOn(window, "requestAnimationFrame");
