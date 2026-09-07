@@ -113,6 +113,23 @@ describe("useCountUp", () => {
     expect(result.current).toBe(14);
   });
 
+  it("ignores stale lower targets after the display has already advanced", () => {
+    const { result, rerender } = renderHook(
+      ({ end }) => useCountUp(end, 600, [end], 0),
+      { initialProps: { end: 120 } },
+    );
+
+    advance(700);
+    expect(result.current).toBe(120);
+
+    rerender({ end: 90 });
+    expect(result.current).toBe(120);
+
+    advance(200);
+    expect(result.current).toBeGreaterThanOrEqual(120);
+    expect(result.current).toBeLessThanOrEqual(120);
+  });
+
   it("recomputes correctly when dependency-driven target updates arrive", () => {
     const { result, rerender } = renderHook(
       ({ end, deps }) => useCountUp(end, 600, deps, 0),

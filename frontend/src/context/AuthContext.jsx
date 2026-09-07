@@ -92,17 +92,23 @@ const ensureSharedCounterRegistry = () => {
       return;
     }
 
-    const isTrackedRegistryEntry = nextRegistry.has(key);
     const currentValue = store[key];
 
-    if (!isTrackedRegistryEntry) {
-      delete store[key];
+    if (isCounterSnapshot(currentValue)) {
+      if (!nextRegistry.has(key)) {
+        nextRegistry.set(key, {
+          getValue: () => Number(currentValue.value),
+          subscribe: () => () => undefined,
+        });
+      }
       return;
     }
 
-    if (!isCounterSnapshot(currentValue)) {
-      delete store[key];
+    if (nextRegistry.has(key)) {
+      nextRegistry.delete(key);
     }
+
+    delete store[key];
   });
 
   store.__controllers = nextRegistry;

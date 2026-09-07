@@ -347,19 +347,27 @@ const Dashboard = () => {
       return undefined;
     }
 
+    const isCounterSnapshot = (value) =>
+      Boolean(
+        value &&
+        typeof value === "object" &&
+        Number.isFinite(Number(value.value)) &&
+        Number.isFinite(Number(value.updatedAt)),
+      );
+
     const store = globalThis.__IC_COUNTERS__ || {};
     const existingRegistry = store.__controllers;
     const nextRegistry = new Map();
 
     if (existingRegistry instanceof Map) {
       for (const [key, value] of existingRegistry.entries()) {
-        if (key && value !== undefined) {
+        if (key && isCounterSnapshot(value)) {
           nextRegistry.set(key, value);
         }
       }
     } else if (existingRegistry && typeof existingRegistry === "object") {
       Object.entries(existingRegistry).forEach(([key, value]) => {
-        if (key && value !== undefined) {
+        if (key && isCounterSnapshot(value)) {
           nextRegistry.set(key, value);
         }
       });
@@ -370,23 +378,16 @@ const Dashboard = () => {
         return;
       }
 
-      if (!nextRegistry.has(key) && key !== "__appMounted") {
+      const currentValue = store[key];
+      if (!isCounterSnapshot(currentValue)) {
         delete store[key];
+        return;
+      }
+
+      if (!nextRegistry.has(key)) {
+        nextRegistry.set(key, currentValue);
       }
     });
-
-    for (const [key, value] of nextRegistry.entries()) {
-      const currentValue = store[key];
-      const isCurrentSnapshot =
-        currentValue &&
-        typeof currentValue === "object" &&
-        Number.isFinite(Number(currentValue.value)) &&
-        Number.isFinite(Number(currentValue.updatedAt));
-
-      if (!isCurrentSnapshot) {
-        store[key] = value;
-      }
-    }
 
     store.__controllers = nextRegistry;
     globalThis.__IC_COUNTERS__ = store;

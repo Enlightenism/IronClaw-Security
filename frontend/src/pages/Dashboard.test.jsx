@@ -226,6 +226,31 @@ describe("auth redirect", () => {
     ).toMatchObject({ value: 732 });
   });
 
+  it("preserves valid shared counter values when the dashboard registry is incomplete during mount", async () => {
+    globalThis.__IC_COUNTERS__ = {
+      ic_threats_blocked: { value: 980, updatedAt: Date.now() },
+      ic_engineers_protected: { value: 460, updatedAt: Date.now() },
+      __controllers: {
+        ic_engineers_protected: { value: 344, updatedAt: Date.now() },
+      },
+    };
+
+    await act(async () => {
+      render(<Dashboard />);
+    });
+
+    expect(globalThis.__IC_COUNTERS__.ic_threats_blocked).toMatchObject({
+      value: 980,
+    });
+    expect(globalThis.__IC_COUNTERS__.ic_engineers_protected).toMatchObject({
+      value: 460,
+    });
+    expect(globalThis.__IC_COUNTERS__.__controllers).toBeInstanceOf(Map);
+    expect(
+      globalThis.__IC_COUNTERS__.__controllers.get("ic_threats_blocked"),
+    ).toMatchObject({ value: 980 });
+  });
+
   it("calls navigate('/') when user and session are null and loading is false", async () => {
     mockAuthState = {
       user: null,

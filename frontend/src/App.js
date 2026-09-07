@@ -24,10 +24,14 @@ const CounterProvider = ({ children }) => {
     mountedRef.current = true;
     const store = globalThis.__IC_COUNTERS__ || {};
     const existingRegistry = store.__controllers;
-    let nextRegistry = new Map();
+    const nextRegistry = new Map();
 
     if (existingRegistry instanceof Map) {
-      nextRegistry = existingRegistry;
+      for (const [key, value] of existingRegistry.entries()) {
+        if (key && value !== undefined) {
+          nextRegistry.set(key, value);
+        }
+      }
     } else if (existingRegistry && typeof existingRegistry === "object") {
       Object.entries(existingRegistry).forEach(([key, value]) => {
         if (key && value !== undefined) {
@@ -36,13 +40,19 @@ const CounterProvider = ({ children }) => {
       });
     }
 
-    Object.keys(store).forEach((key) => {
+    Object.entries(store).forEach(([key, value]) => {
       if (key === "__controllers" || key === "__appMounted") {
         return;
       }
 
-      if (!nextRegistry.has(key)) {
-        delete store[key];
+      if (
+        value &&
+        typeof value === "object" &&
+        Number.isFinite(Number(value.value)) &&
+        Number.isFinite(Number(value.updatedAt)) &&
+        !nextRegistry.has(key)
+      ) {
+        nextRegistry.set(key, value);
       }
     });
 

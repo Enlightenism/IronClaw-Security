@@ -141,26 +141,7 @@ const isCounterSnapshotFresh = (base, value, updatedAt) => {
   return Date.now() - numericUpdatedAt <= 24 * 60 * 60 * 1000;
 };
 
-const resetCounterState = (storageKey, base) => {
-  const snapshot = canonicalCounterSnapshot(base);
-
-  if (typeof globalThis !== "undefined") {
-    globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
-    globalThis.__IC_COUNTERS__[storageKey] = snapshot;
-  }
-
-  if (typeof window !== "undefined") {
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(snapshot));
-    } catch {
-      // ignore storage errors.
-    }
-  }
-
-  return snapshot;
-};
-
-const getStoredCounterValue = (storageKey, base = 0) => {
+const _getStoredCounterValue = (storageKey, base = 0) => {
   if (typeof window === "undefined") {
     return Number.NaN;
   }
@@ -240,80 +221,89 @@ const readPersistedCounterState = (storageKey, base) => {
     return defaultState;
   }
 
+  const candidates = [];
   const memoryStore = globalThis.__IC_COUNTERS__?.[storageKey];
   const memoryValue = Number(memoryStore?.value);
   const memoryUpdatedAt = Number(memoryStore?.updatedAt);
 
-  if (Number.isFinite(memoryValue)) {
-    if (isCounterValueTooStale(base, memoryValue, memoryUpdatedAt)) {
-      return resetCounterState(storageKey, base);
-    }
-
-    return {
-      value: normalizeCounterValue(base, memoryValue),
-      updatedAt: Number.isFinite(memoryUpdatedAt)
-        ? memoryUpdatedAt
-        : Date.now(),
-    };
+  if (Number.isFinite(memoryValue) && Number.isFinite(memoryUpdatedAt)) {
+    candidates.push({ value: memoryValue, updatedAt: memoryUpdatedAt });
   }
 
   try {
     const raw = localStorage.getItem(storageKey);
-    if (!raw) {
-      return defaultState;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        const value = Number(parsed.value);
+        const updatedAt = Number(parsed.updatedAt);
+
+        if (Number.isFinite(value) && Number.isFinite(updatedAt)) {
+          candidates.push({ value, updatedAt });
+        }
+      }
     }
-
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") {
-      return resetCounterState(storageKey, base);
-    }
-
-    const value = Number.isFinite(parsed.value) ? Number(parsed.value) : base;
-    const updatedAt = Number.isFinite(parsed.updatedAt)
-      ? Number(parsed.updatedAt)
-      : Date.now();
-
-    if (isCounterValueTooStale(base, value, updatedAt)) {
-      return resetCounterState(storageKey, base);
-    }
-
-    return { value: normalizeCounterValue(base, value), updatedAt };
   } catch {
-    return resetCounterState(storageKey, base);
+    // ignore invalid persisted state and fall back to the latest valid value.
   }
+
+  const freshCandidates = candidates.filter(
+    ({ value, updatedAt }) => !isCounterValueTooStale(base, value, updatedAt),
+  );
+
+  if (freshCandidates.length === 0) {
+    return defaultState;
+  }
+
+  freshCandidates.sort(
+    (left, right) =>
+      Number(right.value) - Number(left.value) ||
+      Number(right.updatedAt) - Number(left.updatedAt),
+  );
+
+  const bestCandidate = freshCandidates[0];
+  return {
+    value: normalizeCounterValue(base, bestCandidate.value),
+    updatedAt: bestCandidate.updatedAt,
+  };
 };
 
 const syncPersistedCounterState = (storageKey, base, nextValue) => {
+  const existingState = readPersistedCounterState(storageKey, base);
+  const currentValue = Number(existingState.value);
   const safeValue = normalizeCounterValue(base, nextValue);
-  const snapshot = { value: safeValue, updatedAt: Date.now() };
+  const effectiveValue = Math.max(base, safeValue, currentValue);
+  const snapshot = { value: effectiveValue, updatedAt: Date.now() };
 
   if (typeof window !== "undefined") {
     globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
-    const currentKnownValue = getStoredCounterValue(storageKey, base);
-    const currentValue = Number.isFinite(currentKnownValue)
-      ? currentKnownValue
-      : base;
-
-    const isMemoryStateStale = !isCounterSnapshotFresh(
+    const memoryValue = Number(globalThis.__IC_COUNTERS__?.[storageKey]?.value);
+    const persistedValue = Number.isFinite(currentValue) ? currentValue : base;
+    const lastKnownValue = Number.isFinite(memoryValue)
+      ? memoryValue
+      : persistedValue;
+    const finalValue = Math.max(
       base,
-      globalThis.__IC_COUNTERS__?.[storageKey]?.value,
-      globalThis.__IC_COUNTERS__?.[storageKey]?.updatedAt,
+      safeValue,
+      lastKnownValue,
+      persistedValue,
     );
 
-    if (isMemoryStateStale || currentValue < base) {
-      return resetCounterState(storageKey, base);
-    }
+    globalThis.__IC_COUNTERS__[storageKey] = {
+      value: finalValue,
+      updatedAt: Date.now(),
+    };
 
-    if (safeValue >= base && safeValue >= currentValue) {
-      globalThis.__IC_COUNTERS__[storageKey] = snapshot;
-
-      try {
-        localStorage.setItem(storageKey, JSON.stringify(snapshot));
-      } catch {
-        // ignore storage errors.
-      }
-    } else if (safeValue <= base) {
-      return resetCounterState(storageKey, base);
+    try {
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          value: finalValue,
+          updatedAt: Date.now(),
+        }),
+      );
+    } catch {
+      // ignore storage errors.
     }
   }
 
@@ -352,11 +342,17 @@ const resetSharedCounterController = (storageKey, base, step) => {
 
   registry.delete(storageKey);
 
+  const persistedState = readPersistedCounterState(storageKey, base);
+  const nextBaseValue = normalizeCounterValue(base, persistedState.value);
+
   if (typeof globalThis !== "undefined") {
-    delete globalThis.__IC_COUNTERS__?.[storageKey];
+    globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
+    globalThis.__IC_COUNTERS__[storageKey] = {
+      value: nextBaseValue,
+      updatedAt: Date.now(),
+    };
   }
 
-  resetCounterState(storageKey, base);
   return ensureSharedCounter({ base, step, storageKey });
 };
 
@@ -385,17 +381,32 @@ const ensureSharedCounter = ({ base, step, storageKey }) => {
     const memoryStore = globalThis.__IC_COUNTERS__?.[key];
     const memoryValue = Number(memoryStore?.value);
     const memoryUpdatedAt = Number(memoryStore?.updatedAt);
+    const persistedState = readPersistedCounterState(key, base);
+    const highestValidValue = Math.max(
+      base,
+      Number.isFinite(currentValue) ? currentValue : base,
+      Number.isFinite(memoryValue) ? memoryValue : base,
+      Number.isFinite(persistedState.value) ? persistedState.value : base,
+    );
 
     if (
       !Number.isFinite(currentValue) ||
       currentValue < base ||
-      (!Number.isFinite(memoryUpdatedAt) && !Number.isFinite(memoryValue)) ||
       (Number.isFinite(memoryUpdatedAt) &&
-        !isCounterSnapshotFresh(base, memoryValue, memoryUpdatedAt))
+        !isCounterSnapshotFresh(base, memoryValue, memoryUpdatedAt) &&
+        highestValidValue <= base)
     ) {
       return resetSharedCounterController(key, base, step);
     }
 
+    validController.value = highestValidValue;
+    if (typeof globalThis !== "undefined") {
+      globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
+      globalThis.__IC_COUNTERS__[key] = {
+        value: highestValidValue,
+        updatedAt: Date.now(),
+      };
+    }
     return validController;
   }
 
@@ -425,6 +436,28 @@ const ensureSharedCounter = ({ base, step, storageKey }) => {
     const nextValue = normalizeCounterValue(base, persisted.value + delta);
     nextController.setValue(nextValue);
   };
+
+  if (typeof globalThis !== "undefined") {
+    globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
+    globalThis.__IC_COUNTERS__[key] = {
+      value: nextController.value,
+      updatedAt: Date.now(),
+    };
+  }
+
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem(
+        key,
+        JSON.stringify({
+          value: nextController.value,
+          updatedAt: Date.now(),
+        }),
+      );
+    } catch {
+      // ignore storage errors.
+    }
+  }
 
   nextController.intervalId = setInterval(tick, COUNTER_TICK_MS);
 

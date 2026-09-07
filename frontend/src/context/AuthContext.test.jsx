@@ -471,7 +471,7 @@ describe("AuthContext", () => {
     );
   });
 
-  it("rebuilds the shared counter registry and drops stale auth-churn entries without resetting live counters", async () => {
+  it("rebuilds the shared counter registry and preserves valid counters during auth churn", async () => {
     globalThis.__IC_COUNTERS__ = {
       ic_threats_blocked: { value: 6543, updatedAt: Date.now() },
       ic_engineers_protected: { value: 987, updatedAt: Date.now() },
@@ -501,7 +501,9 @@ describe("AuthContext", () => {
     expect(globalThis.__IC_COUNTERS__.ic_threats_blocked).toMatchObject({
       value: 6543,
     });
-    expect(globalThis.__IC_COUNTERS__.ic_engineers_protected).toBeUndefined();
+    expect(globalThis.__IC_COUNTERS__.ic_engineers_protected).toMatchObject({
+      value: 987,
+    });
 
     await act(async () => {
       authStateChangeHandler("SIGNED_IN", makeSession());
@@ -516,6 +518,9 @@ describe("AuthContext", () => {
     expect(globalThis.__IC_COUNTERS__.ic_threats_blocked).toMatchObject({
       value: 6543,
     });
+    expect(globalThis.__IC_COUNTERS__.ic_engineers_protected).toMatchObject({
+      value: 987,
+    });
 
     await act(async () => {
       fireEvent.click(screen.getByText("logout"));
@@ -524,7 +529,9 @@ describe("AuthContext", () => {
     expect(globalThis.__IC_COUNTERS__.ic_threats_blocked).toMatchObject({
       value: 6543,
     });
-    expect(globalThis.__IC_COUNTERS__.ic_engineers_protected).toBeUndefined();
+    expect(globalThis.__IC_COUNTERS__.ic_engineers_protected).toMatchObject({
+      value: 987,
+    });
     expect(globalThis.__IC_COUNTERS__.__controllers).toBeInstanceOf(Map);
 
     await act(async () => {
@@ -534,7 +541,9 @@ describe("AuthContext", () => {
     expect(globalThis.__IC_COUNTERS__.ic_threats_blocked).toMatchObject({
       value: 6543,
     });
-    expect(globalThis.__IC_COUNTERS__.ic_engineers_protected).toBeUndefined();
+    expect(globalThis.__IC_COUNTERS__.ic_engineers_protected).toMatchObject({
+      value: 987,
+    });
     expect(globalThis.__IC_COUNTERS__.__controllers).toBeInstanceOf(Map);
   });
 

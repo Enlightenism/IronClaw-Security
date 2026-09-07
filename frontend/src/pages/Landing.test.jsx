@@ -296,6 +296,40 @@ describe("Landing", () => {
     expect(screen.getByTestId("user-counter")).toHaveTextContent("460");
   });
 
+  it("does not revert to the canonical baseline when the live value is still higher", async () => {
+    globalThis.__IC_COUNTERS__ = {
+      __controllers: new Map([
+        [
+          "ic_threats_blocked",
+          { getValue: () => 980, subscribe: () => () => undefined },
+        ],
+        [
+          "ic_engineers_protected",
+          { getValue: () => 460, subscribe: () => () => undefined },
+        ],
+      ]),
+      ic_threats_blocked: { value: 980, updatedAt: Date.now() },
+      ic_engineers_protected: { value: 460, updatedAt: Date.now() },
+    };
+
+    window.localStorage.getItem = jest.fn((key) => {
+      if (key === "ic_threats_blocked") {
+        return JSON.stringify({ value: 732, updatedAt: Date.now() });
+      }
+      if (key === "ic_engineers_protected") {
+        return JSON.stringify({ value: 344, updatedAt: Date.now() });
+      }
+      return null;
+    });
+
+    await renderLanding();
+
+    expect(screen.getByTestId("threat-counter")).toHaveTextContent("980");
+    expect(screen.getByTestId("user-counter")).toHaveTextContent("460");
+    expect(globalThis.__IC_COUNTERS__.ic_threats_blocked.value).toBe(980);
+    expect(globalThis.__IC_COUNTERS__.ic_engineers_protected.value).toBe(460);
+  });
+
   it("rejects stale persisted values lower than the valid baseline", async () => {
     const staleThreat = JSON.stringify({ value: 100, updatedAt: Date.now() });
     const staleUsers = JSON.stringify({ value: 50, updatedAt: Date.now() });

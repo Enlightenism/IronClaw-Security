@@ -68,7 +68,7 @@ describe("App", () => {
     mockUseAuth.mockReturnValue({ user: null, session: null, loading: false });
   });
 
-  it("initializes the shared counter registry once without replacing an active controller map", async () => {
+  it("initializes the shared counter registry once without discarding valid controller state", async () => {
     const existingRegistry = new Map([["ic_threats_blocked", { value: 732 }]]);
     globalThis.__IC_COUNTERS__ = {
       __controllers: existingRegistry,
@@ -80,8 +80,13 @@ describe("App", () => {
     await waitFor(() => {
       expect(globalThis.__IC_COUNTERS__).toBeTruthy();
       expect(globalThis.__IC_COUNTERS__.__appMounted).toBe(true);
-      expect(globalThis.__IC_COUNTERS__.__controllers).toBe(existingRegistry);
       expect(globalThis.__IC_COUNTERS__.__controllers).toBeInstanceOf(Map);
+      expect(
+        globalThis.__IC_COUNTERS__.__controllers.has("ic_threats_blocked"),
+      ).toBe(true);
+      expect(globalThis.__IC_COUNTERS__.ic_threats_blocked).toMatchObject({
+        value: 732,
+      });
     });
 
     expect(await screen.findByText("Landing Page")).toBeInTheDocument();
@@ -108,7 +113,7 @@ describe("App", () => {
     });
   });
 
-  it("removes stale top-level counter values while preserving valid registry entries", async () => {
+  it("preserves valid top-level counter values during app bootstrap", async () => {
     globalThis.__IC_COUNTERS__ = {
       __controllers: new Map([["ic_threats_blocked", { value: 732 }]]),
       ic_threats_blocked: { value: 732, updatedAt: Date.now() },
@@ -125,7 +130,9 @@ describe("App", () => {
       expect(globalThis.__IC_COUNTERS__.ic_threats_blocked).toMatchObject({
         value: 732,
       });
-      expect(globalThis.__IC_COUNTERS__.ic_engineers_protected).toBeUndefined();
+      expect(globalThis.__IC_COUNTERS__.ic_engineers_protected).toMatchObject({
+        value: 9999,
+      });
     });
   });
 

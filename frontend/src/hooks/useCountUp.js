@@ -54,8 +54,10 @@ export function useCountUp(end, duration = 1400, deps = [], from = 0) {
     const depKey = dependencyKey;
     const depsChanged = depKey !== previousDepsRef.current;
 
+    const current = Number.isFinite(lastValueRef.current)
+      ? lastValueRef.current
+      : start;
     const nextTarget = Number.isFinite(target) ? target : start;
-    const current = Number(lastValueRef.current) || 0;
     const safeTarget = clampMonotonicTarget(current, nextTarget);
 
     if (depsChanged) {
@@ -79,6 +81,11 @@ export function useCountUp(end, duration = 1400, deps = [], from = 0) {
       return undefined;
     }
 
+    if (frame.current != null) {
+      cancelAnimationFrame(frame.current);
+      frame.current = null;
+    }
+
     let startTime;
     const animationStart = current;
 
@@ -97,6 +104,7 @@ export function useCountUp(end, duration = 1400, deps = [], from = 0) {
       );
 
       setValue(clampedValue);
+      lastValueRef.current = clampedValue;
 
       if (progress < 1) {
         frame.current = requestAnimationFrame(step);
@@ -115,7 +123,7 @@ export function useCountUp(end, duration = 1400, deps = [], from = 0) {
         frame.current = null;
       }
     };
-  }, [end, duration, from, target, start, dependencyKey]);
+  }, [end, duration, from, target, start, dependencyKey, prefersReduced]);
 
   return value;
 }
