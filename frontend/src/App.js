@@ -24,23 +24,31 @@ const CounterProvider = ({ children }) => {
     mountedRef.current = true;
     const store = globalThis.__IC_COUNTERS__ || {};
     const existingRegistry = store.__controllers;
+    let nextRegistry = new Map();
 
     if (existingRegistry instanceof Map) {
-      store.__controllers = existingRegistry;
+      nextRegistry = existingRegistry;
     } else if (existingRegistry && typeof existingRegistry === "object") {
-      const nextRegistry = new Map();
       Object.entries(existingRegistry).forEach(([key, value]) => {
-        if (value !== undefined) {
+        if (key && value !== undefined) {
           nextRegistry.set(key, value);
         }
       });
-      store.__controllers = nextRegistry;
-    } else {
-      store.__controllers = new Map();
     }
 
+    Object.keys(store).forEach((key) => {
+      if (key === "__controllers" || key === "__appMounted") {
+        return;
+      }
+
+      if (!nextRegistry.has(key)) {
+        delete store[key];
+      }
+    });
+
+    store.__controllers = nextRegistry;
+    store.__appMounted = true;
     globalThis.__IC_COUNTERS__ = store;
-    globalThis.__IC_COUNTERS__.__appMounted = true;
   }, []);
 
   return children;

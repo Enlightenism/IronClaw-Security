@@ -471,13 +471,19 @@ describe("AuthContext", () => {
     );
   });
 
-  it("rebuilds the shared counter registry and drops stale auth-churn entries", async () => {
+  it("rebuilds the shared counter registry and drops stale auth-churn entries without resetting live counters", async () => {
     globalThis.__IC_COUNTERS__ = {
       ic_threats_blocked: { value: 6543, updatedAt: Date.now() },
       ic_engineers_protected: { value: 987, updatedAt: Date.now() },
-      __controllers: {
-        ic_threats_blocked: { value: 6543, updatedAt: Date.now() },
-      },
+      __controllers: new Map([
+        [
+          "ic_threats_blocked",
+          {
+            getValue: () => 6543,
+            subscribe: () => () => undefined,
+          },
+        ],
+      ]),
     };
 
     renderWithProvider();
@@ -490,7 +496,7 @@ describe("AuthContext", () => {
     expect(
       globalThis.__IC_COUNTERS__.__controllers.get("ic_threats_blocked"),
     ).toMatchObject({
-      value: 6543,
+      getValue: expect.any(Function),
     });
     expect(globalThis.__IC_COUNTERS__.ic_threats_blocked).toMatchObject({
       value: 6543,
@@ -505,7 +511,7 @@ describe("AuthContext", () => {
     expect(
       globalThis.__IC_COUNTERS__.__controllers.get("ic_threats_blocked"),
     ).toMatchObject({
-      value: 6543,
+      getValue: expect.any(Function),
     });
     expect(globalThis.__IC_COUNTERS__.ic_threats_blocked).toMatchObject({
       value: 6543,
@@ -530,6 +536,46 @@ describe("AuthContext", () => {
     });
     expect(globalThis.__IC_COUNTERS__.ic_engineers_protected).toBeUndefined();
     expect(globalThis.__IC_COUNTERS__.__controllers).toBeInstanceOf(Map);
+  });
+
+  it("does not reset live counters to the original baseline during auth churn", async () => {
+    globalThis.__IC_COUNTERS__ = {
+      __controllers: new Map([
+        [
+          "ic_threats_blocked",
+          {
+            getValue: () => 980,
+            subscribe: () => () => undefined,
+          },
+        ],
+        [
+          "ic_engineers_protected",
+          {
+            getValue: () => 460,
+            subscribe: () => () => undefined,
+          },
+        ],
+      ]),
+      ic_threats_blocked: { value: 980, updatedAt: Date.now() },
+      ic_engineers_protected: { value: 460, updatedAt: Date.now() },
+    };
+
+    renderWithProvider();
+
+    await waitFor(() =>
+      expect(supabase.auth.onAuthStateChange).toHaveBeenCalledTimes(1),
+    );
+
+    await act(async () => {
+      authStateChangeHandler("SIGNED_IN", makeSession());
+    });
+
+    expect(globalThis.__IC_COUNTERS__.ic_threats_blocked.value).toBe(980);
+    expect(globalThis.__IC_COUNTERS__.ic_engineers_protected.value).toBe(460);
+    expect(globalThis.__IC_COUNTERS__.ic_threats_blocked.value).not.toBe(732);
+    expect(globalThis.__IC_COUNTERS__.ic_engineers_protected.value).not.toBe(
+      344,
+    );
   });
 
   it("throws when useAuth is used outside AuthProvider", () => {

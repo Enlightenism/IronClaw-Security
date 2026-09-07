@@ -108,6 +108,27 @@ describe("App", () => {
     });
   });
 
+  it("removes stale top-level counter values while preserving valid registry entries", async () => {
+    globalThis.__IC_COUNTERS__ = {
+      __controllers: new Map([["ic_threats_blocked", { value: 732 }]]),
+      ic_threats_blocked: { value: 732, updatedAt: Date.now() },
+      ic_engineers_protected: { value: 9999, updatedAt: Date.now() },
+    };
+
+    renderAppAtRoute("/");
+
+    await waitFor(() => {
+      expect(globalThis.__IC_COUNTERS__.__controllers).toBeInstanceOf(Map);
+      expect(
+        globalThis.__IC_COUNTERS__.__controllers.has("ic_threats_blocked"),
+      ).toBe(true);
+      expect(globalThis.__IC_COUNTERS__.ic_threats_blocked).toMatchObject({
+        value: 732,
+      });
+      expect(globalThis.__IC_COUNTERS__.ic_engineers_protected).toBeUndefined();
+    });
+  });
+
   it("renders the landing page on /", async () => {
     renderAppAtRoute("/");
 

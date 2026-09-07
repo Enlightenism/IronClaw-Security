@@ -196,11 +196,14 @@ afterEach(() => {
 // =============================================================================
 
 describe("auth redirect", () => {
-  it("preserves valid shared counter values and removes stale top-level entries while dashboard is mounted", async () => {
+  it("sanitizes stale top-level registry entries without rewriting live counter progression during dashboard mount", async () => {
     globalThis.__IC_COUNTERS__ = {
-      ic_threats_blocked: { value: 7766, updatedAt: Date.now() },
-      ic_engineers_protected: { value: 999, updatedAt: Date.now() },
-      __controllers: new Map([["ic_threats_blocked", { value: 7766 }]]),
+      ic_threats_blocked: { value: 980, updatedAt: Date.now() },
+      ic_engineers_protected: { value: 460, updatedAt: Date.now() },
+      __controllers: {
+        ic_threats_blocked: { value: 732, updatedAt: Date.now() },
+        ic_engineers_protected: { value: 344, updatedAt: Date.now() },
+      },
     };
 
     await act(async () => {
@@ -208,13 +211,19 @@ describe("auth redirect", () => {
     });
 
     expect(globalThis.__IC_COUNTERS__.ic_threats_blocked).toMatchObject({
-      value: 7766,
+      value: 980,
     });
-    expect(globalThis.__IC_COUNTERS__.ic_engineers_protected).toBeUndefined();
+    expect(globalThis.__IC_COUNTERS__.ic_engineers_protected).toMatchObject({
+      value: 460,
+    });
+    expect(globalThis.__IC_COUNTERS__.ic_threats_blocked.value).not.toBe(732);
+    expect(globalThis.__IC_COUNTERS__.ic_engineers_protected.value).not.toBe(
+      344,
+    );
     expect(globalThis.__IC_COUNTERS__.__controllers).toBeInstanceOf(Map);
     expect(
       globalThis.__IC_COUNTERS__.__controllers.get("ic_threats_blocked"),
-    ).toMatchObject({ value: 7766 });
+    ).toMatchObject({ value: 732 });
   });
 
   it("calls navigate('/') when user and session are null and loading is false", async () => {

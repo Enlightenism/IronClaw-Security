@@ -343,6 +343,10 @@ const Dashboard = () => {
   const isAuthenticated = Boolean(user || session);
 
   useEffect(() => {
+    if (typeof globalThis === "undefined") {
+      return undefined;
+    }
+
     const store = globalThis.__IC_COUNTERS__ || {};
     const existingRegistry = store.__controllers;
     const nextRegistry = new Map();
@@ -366,17 +370,28 @@ const Dashboard = () => {
         return;
       }
 
-      if (!nextRegistry.has(key)) {
+      if (!nextRegistry.has(key) && key !== "__appMounted") {
         delete store[key];
       }
     });
 
     for (const [key, value] of nextRegistry.entries()) {
-      store[key] = value;
+      const currentValue = store[key];
+      const isCurrentSnapshot =
+        currentValue &&
+        typeof currentValue === "object" &&
+        Number.isFinite(Number(currentValue.value)) &&
+        Number.isFinite(Number(currentValue.updatedAt));
+
+      if (!isCurrentSnapshot) {
+        store[key] = value;
+      }
     }
 
     store.__controllers = nextRegistry;
     globalThis.__IC_COUNTERS__ = store;
+
+    return undefined;
   }, []);
 
   useEffect(() => {

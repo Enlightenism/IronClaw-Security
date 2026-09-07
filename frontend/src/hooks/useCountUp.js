@@ -11,8 +11,8 @@ const clampMonotonicTarget = (current, nextTarget) => {
 };
 
 /**
- * Animates a numeric value toward a target without ever moving backward.
- * The hook is display-only; counter state transitions remain owned by the caller.
+ * Animates only the visible number toward a live target.
+ * This hook is display-only and never owns or resets canonical counter state.
  */
 export function useCountUp(end, duration = 1400, deps = [], from = 0) {
   const target = Number.isFinite(Number(end)) ? Number(end) : 0;
@@ -72,7 +72,7 @@ export function useCountUp(end, duration = 1400, deps = [], from = 0) {
       return undefined;
     }
 
-    if (nextTarget < current || safeTarget === current) {
+    if (safeTarget <= current) {
       setValue(current);
       lastValueRef.current = current;
       previousDepsRef.current = depKey;

@@ -56,6 +56,14 @@ const syncAxiosToken = (session) => {
   }
 };
 
+const isCounterSnapshot = (value) =>
+  Boolean(
+    value &&
+    typeof value === "object" &&
+    Number.isFinite(Number(value.value)) &&
+    Number.isFinite(Number(value.updatedAt)),
+  );
+
 const ensureSharedCounterRegistry = () => {
   if (typeof globalThis === "undefined") {
     return null;
@@ -84,14 +92,18 @@ const ensureSharedCounterRegistry = () => {
       return;
     }
 
-    if (!nextRegistry.has(key)) {
+    const isTrackedRegistryEntry = nextRegistry.has(key);
+    const currentValue = store[key];
+
+    if (!isTrackedRegistryEntry) {
+      delete store[key];
+      return;
+    }
+
+    if (!isCounterSnapshot(currentValue)) {
       delete store[key];
     }
   });
-
-  for (const [key, value] of nextRegistry.entries()) {
-    store[key] = value;
-  }
 
   store.__controllers = nextRegistry;
   globalThis.__IC_COUNTERS__ = store;

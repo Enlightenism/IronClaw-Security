@@ -166,26 +166,38 @@ const getStoredCounterValue = (storageKey, base = 0) => {
   }
 
   try {
+    const candidates = [];
     const memoryStore = globalThis.__IC_COUNTERS__?.[storageKey];
     const memoryValue = Number(memoryStore?.value);
     const memoryUpdatedAt = Number(memoryStore?.updatedAt);
-    const raw = localStorage.getItem(storageKey);
-    const parsed = raw ? JSON.parse(raw) : null;
-    const storedValue = Number(parsed?.value);
-    const storedUpdatedAt = Number(parsed?.updatedAt);
 
-    const validValues = [
-      { value: memoryValue, updatedAt: memoryUpdatedAt },
-      { value: storedValue, updatedAt: storedUpdatedAt },
-    ].filter(({ value, updatedAt }) =>
+    if (Number.isFinite(memoryValue) && Number.isFinite(memoryUpdatedAt)) {
+      candidates.push({ value: memoryValue, updatedAt: memoryUpdatedAt });
+    }
+
+    const raw = localStorage.getItem(storageKey);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        const storedValue = Number(parsed.value);
+        const storedUpdatedAt = Number(parsed.updatedAt);
+
+        if (Number.isFinite(storedValue) && Number.isFinite(storedUpdatedAt)) {
+          candidates.push({ value: storedValue, updatedAt: storedUpdatedAt });
+        }
+      }
+    }
+
+    const validCandidates = candidates.filter(({ value, updatedAt }) =>
       isCounterSnapshotFresh(base, value, updatedAt),
     );
 
-    if (validValues.length === 0) {
+    if (validCandidates.length === 0) {
       return Number.NaN;
     }
 
-    return Math.max(...validValues.map(({ value }) => value));
+    validCandidates.sort((left, right) => right.updatedAt - left.updatedAt);
+    return validCandidates[0].value;
   } catch {
     // ignore invalid persisted state and fall back to the canonical base.
   }
@@ -348,25 +360,43 @@ const resetSharedCounterController = (storageKey, base, step) => {
   return ensureSharedCounter({ base, step, storageKey });
 };
 
+const isUsableCounterController = (candidate) =>
+  Boolean(
+    candidate &&
+    typeof candidate === "object" &&
+    typeof candidate.getValue === "function" &&
+    typeof candidate.subscribe === "function",
+  );
+
 const ensureSharedCounter = ({ base, step, storageKey }) => {
   const key = storageKey;
   const registry = getCounterRegistry();
   const controller = registry.get(key);
 
-  if (controller) {
-    const currentValue = Number(controller.getValue?.());
+  if (controller && !isUsableCounterController(controller)) {
+    registry.delete(key);
+    delete globalThis.__IC_COUNTERS__?.[key];
+  }
+
+  const validController = registry.get(key);
+
+  if (validController) {
+    const currentValue = Number(validController.getValue?.());
     const memoryStore = globalThis.__IC_COUNTERS__?.[key];
+    const memoryValue = Number(memoryStore?.value);
     const memoryUpdatedAt = Number(memoryStore?.updatedAt);
 
     if (
       !Number.isFinite(currentValue) ||
       currentValue < base ||
-      !isCounterSnapshotFresh(base, currentValue, memoryUpdatedAt)
+      (!Number.isFinite(memoryUpdatedAt) && !Number.isFinite(memoryValue)) ||
+      (Number.isFinite(memoryUpdatedAt) &&
+        !isCounterSnapshotFresh(base, memoryValue, memoryUpdatedAt))
     ) {
       return resetSharedCounterController(key, base, step);
     }
 
-    return controller;
+    return validController;
   }
 
   const listeners = new Set();
