@@ -20,7 +20,7 @@ every user, every device, from every AI-native attack vector possible.
 
 ---
 
-## Why IronClaw exists
+## Why IronClaw-Security exists
 
 AI agents are now executing real actions: writing files, calling APIs, running
 shell commands, fetching remote content, and returning results directly into
@@ -29,28 +29,100 @@ the infrastructure level.
 
 The threats are real and active:
 
-- **Prompt injection** — adversarial instructions hidden inside agent-returned
-  content designed to hijack the model's next action, exfiltrate data, or
-  override system policy.
-- **Indirect prompt injection** — malicious payloads embedded in fetched web
-  content, documents, or tool responses that the agent processes and then
-  executes without user awareness.
-- **Unsafe tool execution** — agent-initiated tool calls that write to disk,
-  execute shell commands, or make outbound network requests with no enforcement
-  boundary.
-- **Data exfiltration via agent output** — sensitive data encoded into agent
-  responses and routed out through tool calls or returned content before any
-  human reviews it.
-- **Trust collapse** — agents operating on stale, compromised, or
-  adversarially-poisoned context that causes cascading unsafe decisions across a
-  session.
-- **Malicious file returns** — agent-returned files containing embedded
-  payloads, macro execution triggers, or archive bombs routed directly into the
-  user environment.
-- **Command injection** — shell command strings constructed from agent output
-  and executed without sanitization or policy enforcement.
+- **Direct prompt injection** — attacker-supplied instructions are typed
+  directly into a chat flow and trick the model into ignoring policy, bypassing
+  safety, or disclosing secrets.
+- **Indirect prompt injection** — malicious instructions are embedded in web
+  pages, docs, tickets, emails, tool results, or repository content that the
+  agent reads as normal context.
+- **Hidden instructions** — malicious text is hidden in white-on-white content,
+  HTML comments, tiny fonts, base64, or obfuscated markup that still reaches the
+  model as trusted context.
+- **Jailbreak attacks** — specially crafted prompts coerce the model into
+  ignoring its safety rules or developer constraints.
+- **Policy violations** — an injected instruction causes the agent to bypass
+  permitted workflows, access restricted data, or call disallowed tools.
+- **Tool poisoning** — a compromised tool or data source feeds false results to
+  the agent, causing unsafe actions and bad operational decisions.
+- **Data exfiltration** — sensitive data is encoded into responses, logs,
+  requests, or tool parameters and sent to attacker-controlled destinations.
+- **Sensitive information disclosure** — the agent reveals credentials, PII,
+  internal docs, config values, or tokens in normal output paths.
+- **Training data poisoning** — malicious data injected into training or tuning
+  workflows creates persistent backdoors or biased behavior.
+- **Model backdoors** — hidden triggers or poisoned model state cause the system
+  to behave maliciously only under attacker-specified conditions.
+- **Evasion attacks** — inputs are reformulated to bypass heuristics or filters
+  while still causing the agent to misbehave.
+- **Abuse attacks** — the agent is used for spam, scam generation, harassment,
+  or coercive workflows that the operator did not intend.
+- **Privacy attacks** — model queries are used to infer or extract private user,
+  customer, or training-data information.
+- **Membership inference** — attackers test model behavior to determine whether
+  a record or sample was likely used in training.
+- **Model inversion** — partial reconstruction of training data from model
+  responses or outputs.
+- **Model extraction** — heavy querying is used to replicate proprietary model
+  behavior or approximate model logic.
+- **Property inference** — attackers infer high-level properties of training
+  data or operational context from repeated outputs.
+- **Insecure output handling** — generated content is treated as trusted and is
+  executed, rendered, or dispatched without validation.
+- **System prompt leakage** — the agent reveals internal instructions or hidden
+  operational context that can improve future attacks.
+- **Excessive agency** — an agent is given too much power, so one successful
+  injection creates a major security incident across the environment.
+- **Insecure plugin design** — tools, plugins, or skills call arbitrary URLs,
+  run unsafe code, or fail to validate inputs properly.
+- **Supply chain vulnerabilities** — malicious or compromised dependencies,
+  plugins, skills, or packages silently add vulnerabilities or exfiltration
+  paths.
+- **Model denial of service** — large, costly, or recursive prompts overwhelm
+  the model or degrade its safe decision process.
+- **Unbounded consumption** — prompts or loops keep consuming compute, memory,
+  or network bandwidth until the system is destabilized or billed out.
+- **Hallucination manipulation** — the model is led into confidently false
+  conclusions that the agent then acts on as if they were true.
+- **Social engineering attacks** — the agent generates convincing phishing,
+  impersonation, or scam content that tricks human operators.
+- **Malicious agent skills** — skills or workflow definitions appear harmless
+  but contain hidden instructions, data theft logic, or dangerous command
+  chains.
+- **Malicious MCP tools** — untrusted MCP servers or tool adapters send poisoned
+  context or unsafe actions into the agent loop.
+- **Remote code execution (RCE)** — injected instructions cause the agent to run
+  arbitrary code or unsafe commands on the local machine.
+- **Server-side request forgery (SSRF)** — the model is tricked into reaching
+  internal or sensitive services over the network.
+- **Cross-site scripting (XSS)** — untrusted model output is rendered in a web
+  app without sanitization.
+- **Cross-site request forgery (CSRF)** — actions are triggered on behalf of a
+  logged-in user without proper validation.
+- **SQL injection** — untrusted input reaches a database layer through the agent
+  workflow and manipulates queries.
+- **Command injection** — user- or tool-derived content is concatenated into a
+  shell command without sanitization.
+- **Malware installation** — the agent downloads or executes a malicious payload
+  after being manipulated by bad instructions.
+- **Ransomware deployment** — a successful command-execution or file-access
+  chain encrypts or damages critical systems.
+- **Silent data exfiltration via tool parameters** — secrets are sent through
+  query strings, headers, request bodies, or logging endpoints as normal tool
+  traffic.
+- **Markdown injection / rendering attacks** — malicious content triggers data
+  leaks or code execution when rendered in a browser or mail client.
+- **Memory poisoning** — unsafe instructions are seeded into the model's memory
+  or session context and later retrieved as trusted guidance.
+- **Skill persistence attacks** — malicious skills install themselves into the
+  runtime so they continue to exist across sessions and updates.
+- **Context window flooding** — large amounts of adversarial content push out
+  safety instructions and increase the chance that malicious instructions are
+  obeyed.
 
-IronClaw intercepts all of it. Before it lands.
+IronClaw intercepts the entire surface area before those instructions can reach
+execution. It validates what enters, isolates what is risky, scores what is
+malicious, applies policy, and enforces a final verdict before any action is
+allowed to proceed.
 
 ---
 
@@ -58,7 +130,8 @@ IronClaw intercepts all of it. Before it lands.
 
 One locked, shipping mission:
 
-- **One-command install** into Claude Code and OpenClaw.
+- **One-command install** into Claude Code, OpenClaw, Cursor, Hermes, Copilot,
+  Goose and Gemini CLI
 - **Intercept every inbound agent return** before it reaches the user workflow.
 - **Sandbox-isolate** every artifact for evaluation.
 - **AI brain + policy engine** evaluate every artifact with LLM-assisted
@@ -96,9 +169,6 @@ IronClaw's prompt injection defense operates at multiple layers simultaneously:
 - **Sandbox isolation** means even content that passes initial checks is never
   released directly — it is evaluated inside a controlled runtime boundary
   first.
-
-No other local-first AI security system applies all five layers to every single
-inbound artifact.
 
 ### Full protection scope in v1
 
@@ -157,172 +227,207 @@ has no hardcoded safe defaults that can be silently misconfigured.
 
 ## Platform integrations in v1
 
-| Platform       | Adapter                                 | Status         |
-| -------------- | --------------------------------------- | -------------- |
-| Claude Code    | `app/adapters/claude_code_adapter.py`   | ✅ V1 shipping |
-| OpenClaw       | `app/adapters/openclaw_adapter.py`      | ✅ V1 shipping |
-| Groq LLM brain | `app/services/groq_security_brain.py`   | ✅ V1 shipping |
-| Generic agent  | `app/adapters/generic_agent_adapter.py` | ✅ V1 shipping |
+| Platform / runtime         | Support path                                                                | Status                     |
+| -------------------------- | --------------------------------------------------------------------------- | -------------------------- |
+| Claude Code                | `app/adapters/claude_code_adapter.py`, `app/api/routes/integrations.py`     | ✅ Active                  |
+| OpenClaw                   | `app/adapters/openclaw_adapter.py`, `app/api/routes/integrations.py`        | ✅ Active                  |
+| Cursor                     | `app/api/routes/integrations.py`, `ironclaw_installer.py`, `cli/install.py` | ✅ Active                  |
+| Goose                      | `app/api/routes/integrations.py`, `ironclaw_installer.py`, `cli/install.py` | ✅ Active                  |
+| Gemini CLI                 | `app/api/routes/integrations.py`, `ironclaw_installer.py`, `cli/install.py` | ✅ Active                  |
+| GitHub Copilot             | `app/api/routes/integrations.py`, `ironclaw_installer.py`, `cli/install.py` | ✅ Active                  |
+| Hermes Agent               | `app/adapters/hermes_adapter.py`, `app/api/routes/integrations.py`          | ✅ Active                  |
+| Security Guardian          | `ironclaw_installer.py`, `app/api/routes/integrations.py`                   | ✅ Shared protection layer |
+| MCP tool integration layer | `app/adapters/mcp_tool_adapter.py`, `app/services/integration_registry.py`  | ✅ Active support layer    |
 
-V2 target: every major AI runtime, every major agent framework, every major
-MCP-style toolchain.
+The system treats every supported runtime as a trust boundary that must be
+protected. The integrations are part of the security model, not just optional
+add-ons.
 
----
-
-## V2 — Full-spectrum AI security for every user and every device
-
-V2 is the expansion from one focused interceptor into a full-spectrum AI
-security platform.
-
-The V2 mission: **protect every user, on every device, from every AI-native
-attack vector possible.**
-
-V2 target capabilities:
-
-- **Universal agent interceptor** — protection layer for every major AI
-  platform, not just Claude Code and OpenClaw.
-- **Device-level enforcement** — local agent running on-device, enforcing policy
-  before any AI output reaches the OS, filesystem, or user applications.
-- **Real-time threat intelligence feed** — live threat signatures, injection
-  pattern updates, and adversarial payload databases updated continuously.
-- **Cross-session trust tracking** — behavioral baseline monitoring that detects
-  when an agent's behavior pattern drifts into adversarial territory across
-  sessions.
-- **Multi-model brain** — OpenAI, Anthropic, and Groq reasoning layers working
-  in parallel consensus for zero-miss detection on the most dangerous payloads.
-- **Organization-wide policy management** — centralized policy bundles signed,
-  versioned, and deployed across all devices and all agent integrations from a
-  single control plane.
-- **Audit and compliance export** — full telemetry, incident reports, and
-  verdict history exportable for SOC2, ISO 27001, and enterprise compliance
-  workflows.
-- **Zero-trust agent execution** — every agent action treated as untrusted by
-  default, every tool call verified, every execution plan approved before it
-  runs.
+V2 target: every major AI runtime, every major agent framework, and every major
+MCP / toolchain integration that executes untrusted content in a privileged
+context.
 
 ---
 
-## Current product shape
+## Current security shape
 
-Core v1 files:
+IronClaw-Security is a full runtime protection stack, not a single feature or a
+single app. It combines enforcement, reasoning, orchestration, quarantine,
+telemetry, review control, and agent-platform integrations into one coherent
+security control plane for AI-native tooling.
 
-- `app/main.py` — main FastAPI app entrypoint and router mounting.
-- `ironclaw_installer.py` — install/bootstrap entrypoint.
-- `service.py` — local service lifecycle entrypoint.
-- `scripts/ironclaw_service_windows.ps1` — Windows service wrapper/start path.
-- `ironclaw_skill/config.py` — skill/config resolution for integration wiring.
-- `ironclaw_skill/context.py` — integration context resolution.
-- `app/adapters/claude_code_adapter.py` — Claude Code adapter.
-- `app/adapters/openclaw_adapter.py` — OpenClaw adapter.
-- `app/runtime/filereturnguard.py` — file-return interception and control.
-- `app/runtime/toolcallguard.py` — guarded tool-call evaluation.
-- `app/runtime/sandboxrouter.py` — sandbox routing.
-- `app/runtime/commandsupervisor.py` — command supervision.
-- `app/runtime/networkguard.py` — network boundary checks.
-- `cli_brain.py` — AI brain CLI entry layer (`ironclaw-brain` script entry
-  point).
+### 1. Core runtime and control plane
+
+- `app/main.py` — application bootstrap and route assembly.
+- `app/service.py` — runtime lifecycle and control-plane service entrypoint.
+- `app/bootstrap.py` — startup orchestration and environment bootstrapping.
+- `app/facade.py` — orchestration façade for centralized runtime operations.
+- `app/config.py` — system configuration and runtime defaults.
+- `app/dependencies.py` — dependency injection and initialization wiring.
+- `app/guard_router.py` — central guard enforcement routing layer.
+- `app/verify.py` — install and runtime verification flows.
+- `app/api/` — product API modules and integration endpoints.
+- `app/routers/` — route surface for the control plane.
+- `app/clients/` — application and runtime integration clients.
+- `app/providers/` — provider registry and platform abstraction layer.
+- `app/repositories/` — persistence and repository interfaces.
+- `app/schemas/` — typed API, policy, and verdict models.
+- `app/security/` — control-plane security primitives and hardening logic.
+- `app/orchestrator/` — centralized runtime orchestration.
+- `app/system/` — diagnostics, health, and service lifecycle monitoring.
+- `app/worker/` — background enforcement and async execution tasks.
+
+### 2. Enforcement, sandbox, and execution control
+
+- `app/runtime/` — runtime guard, coordination, sandboxing, and execution
+  control.
+- `app/runtime/filereturnguard.py` — file-return interception and release
+  gating.
+- `app/runtime/toolcallguard.py` — tool-call policy evaluation and execution
+  gating.
+- `app/runtime/sandboxrouter.py` — sandbox routing and isolated execution flow.
+- `app/runtime/commandsupervisor.py` — command supervision and enforcement.
+- `app/runtime/networkguard.py` — outbound network analysis and boundary
+  control.
+- `app/runtime/status.py` — runtime state and health reporting.
+- `app/runtime/` additional guard utilities and runtime-control orchestrators.
+
+### 3. Integration layer and install surface
+
+- `app/adapters/` — concrete runtime integration layer.
+- `app/adapters/base.py` — base adapter contract.
+- `app/adapters/claude_code_adapter.py` — Claude Code integration.
+- `app/adapters/openclaw_adapter.py` — OpenClaw integration.
+- `app/adapters/hermes_adapter.py` — Hermes runtime integration.
+- `app/adapters/mcp_tool_adapter.py` — MCP tool integration boundary.
+- `app/adapters/cape_adapter.py` — CAPE-related adapter interface.
+- `app/adapters/llamafirewall_adapter.py` — LlamaFirewall adapter.
+- `app/adapters/malwi_adapter.py` — Malwi adapter.
+- `app/adapters/rebuff_adapter.py` — Rebuff adapter.
+- `app/adapters/secret_scanner_adapter.py` — secret-scanning adapter.
+- `app/adapters/sandboxruntimeadapter.py` — sandbox runtime adapter.
+- `app/api/routes/integrations.py` — canonical supported-platform registry and
+  install metadata.
+- `ironclaw_installer.py` — platform install and runtime protection bootstrap.
+- `cli/install.py` — install flow for protected runtimes.
+- `cli/update.py` — update path for installed runtime protections.
+- `cli/uninstall.py` — clean removal of runtime protections.
+- `cli/verify.py` — validation of installed security state.
+- `cli/package.py` — packaging and distribution support.
+
+### 4. Threat intelligence, policy, and verdicting
+
+- `app/services/` — service layer for evaluation, policy, decisioning, and
+  response.
 - `app/services/groq_security_brain.py` — Groq-backed security reasoning.
-- `app/services/policy.py` — policy evaluation layer.
-- `app/services/verdict_enforcer.py` — final verdict execution.
-- `app/services/runtime_ingress.py` — canonical inbound runtime intake.
-- `app/models/runtime_artifact.py` — normalized runtime artifact contract.
-- `app/models/runtime_verdict.py` — normalized verdict contract.
+- `app/services/policy.py` — policy evaluation and rule enforcement.
+- `app/services/verdict_enforcer.py` — final allow / warn / quarantine / block
+  enforcement.
+- `app/services/securityorchestrator.py` — unified orchestration and control
+  flow.
+- `app/services/threat_detection_engine.py` — correlation, scoring, and
+  multi-step attack analysis.
+- `app/services/secret_service.py` — secret discovery and redaction workflows.
+- `app/services/scan_to_guard_adapter.py` — detection-to-enforcement translation
+  layer.
+- `app/services/integration_registry.py` — runtime integration mapping and
+  compatibility registry.
+- `app/services/integrationinstaller.py` — integration install logic and runtime
+  setup support.
+- `app/services/integration_verifier.py` — verification of protection health.
+- `app/models/` — canonical runtime artifact and verdict contracts.
+- `app/models/runtime_artifact.py` — normalized artifact model for inbound
+  evaluation.
+- `app/models/runtime_verdict.py` — normalized verdict model for policy
+  outcomes.
 
----
+### 5. Review, quarantine, and evidence handling
 
-## Public install path
+- `app/review/` and `app/reviews/` — operator review and decisioning workflows.
+- `app/quarantine/` — quarantine handling and isolated artifact control.
+- `app/incidents/` — incident lifecycle tracking and response handling.
+- `app/audit/` — audit trail capture for decisions, actions, and policy
+  outcomes.
+- `app/services/auditlogservice.py` and `app/services/audit_store.py` — audit
+  event storage.
+- `app/services/quarantinestore.py` and `app/services/quarantine_store.py` —
+  quarantine persistence.
+- `app/services/alertstore.py` and `app/services/alert_store.py` — evidence and
+  alert retention.
+- `app/services/incidentstore.py` and `app/services/incident_store.py` —
+  incident persistence.
 
-Install the released package from the external package index:
+### 6. Operator experience and dashboard
 
-```powershell
-python -m pip install ironclaw-security
-```
+- `frontend/` — React operator surface and security dashboard.
+- `frontend/src/App.jsx` and `frontend/src/App.js` — application routing and
+  shell.
+- `frontend/src/pages/` — landing, dashboard, auth, review, and incident
+  surfaces.
+- `frontend/src/components/` — reusable security widgets and dashboard panels.
+- `frontend/src/lib/api.js` — live client API contract for the supported runtime
+  surface.
+- `frontend/src/context/` — auth and operator-state context providers.
+- `frontend/src/pages/Landing.jsx` — threat model and system narrative for the
+  product story.
 
-Then install the shared Security Guardian bundle and the runtime targets you
-want protected:
+### 7. Skills, packaging, and developer workflow
 
-```powershell
-ironclaw install --provider-target security_guardian --provider-target openclaw --provider-target claude_code
-```
+- `ironclaw_skill/` — skill runtime, integration, and platform adaptation layer.
+- `ironclaw_skill/config.py` — skill config resolution and integration wiring.
+- `ironclaw_skill/context.py` — integration context resolution and payload
+  handling.
+- `ironclaw_skill/contracts.py` — runtime contracts and payload model
+  definitions.
+- `ironclaw_skill/router.py` — skill endpoints and platform adaptation routes.
+- `ironclaw_skill/middleware.py` — skill middleware and request handling.
+- `cli_brain.py` — local brain decision and validation flow.
+- `pyproject.toml` — package metadata, dependencies, and script entrypoints.
 
-This is the public, user-facing install flow. The Security Guardian package is a
-shared cross-runtime security bundle, not a single-agent or one-off package.
-
-## Local setup
-
-Copy the environment template and fill in your values before starting:
-
-```powershell
-cp .env.example .env
-```
-
-Install dependencies for local development and source work (editable install —
-do not run `pip install -r requirements.txt` directly):
-
-```powershell
-pip install -e ".[dev]"
-```
-
-The editable install (`-e`) wires all CLI entry points and package imports from
-source. Running `pip install -r requirements.txt` instead will produce a stale
-install that does not register the CLI scripts and will break `ironclaw`,
-`ironclaw-brain`, and related entry points.
-
----
-
-## Run locally
-
-```powershell
-python -m uvicorn app.main:app --reload
-```
-
-Default binding: `http://127.0.0.1:8000`
-
-To override the port set `APP_PORT` in `.env` and pass it explicitly:
-
-```powershell
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8011 --reload
-```
-
----
-
-## Basic local checks
-
-Open:
-
-- [http://127.0.0.1:8000/](http://127.0.0.1:8000/)
-- [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)
-- [http://127.0.0.1:8000/mission](http://127.0.0.1:8000/mission)
-
----
-
-## Test
-
-```powershell
-python -m pytest -q
-```
-
-Collection check only (no execution):
-
-```powershell
-python -m pytest --co -q
-```
+This is the real security shape of the project: a hardened AI runtime control
+plane designed to sit in front of agent behavior, review every action, isolate
+risk, and enforce a final verdict before unsafe execution can occur.
 
 ---
 
 ## CLI entry points
 
-After `pip install -e ".[dev]"` the following scripts are available:
+The CLI surface is centered on the real operating flow: install protection,
+validate the environment, and manage the runtime security layer.
 
-| Command               | Module                   | Purpose                                          |
-| --------------------- | ------------------------ | ------------------------------------------------ |
-| `ironclaw`            | `app.cli.main:main`      | Integration management CLI                       |
-| `ironclaw-brain`      | `cli_brain:main`         | Brain scan CLI — scan text via `/brain/decision` |
-| `ironclaw-skill`      | `ironclawskill.cli:main` | Skill package CLI                                |
-| `ironclaw-smoketest`  | `smoketestclient:main`   | Smoke test client                                |
-| `ironclaw-testclient` | `testclient:main`        | Full test client                                 |
+### Operator-facing commands
 
-Brain CLI quick usage:
+| Command              | Purpose                                                                    |
+| -------------------- | -------------------------------------------------------------------------- |
+| `ironclaw`           | Main management CLI for install, update, uninstall, and platform setup.    |
+| `ironclaw install`   | Install the protection layer on a supported AI or runtime target.          |
+| `ironclaw verify`    | Validate the installed security state and confirm the guardrail is active. |
+| `ironclaw update`    | Refresh the installed protection and platform integration state.           |
+| `ironclaw uninstall` | Remove IronClaw protection cleanly from a target runtime.                  |
+
+### Internal engineering and validation commands
+
+These tools exist for local engineering work, validation, and advanced security
+analysis, but they are not the normal operator workflow:
+
+| Command               | Purpose                                                           |
+| --------------------- | ----------------------------------------------------------------- |
+| `ironclaw-brain`      | Local security-brain runner for decision and scanning validation. |
+| `ironclaw-skill`      | Skill packaging and integration helper used in local development. |
+| `ironclaw-smoketest`  | Smoke-test client for runtime validation and platform checks.     |
+| `ironclaw-testclient` | Local verification client for security and guard-control testing. |
+
+Example workflow for the shipped system:
+
+```powershell
+ironclaw install --provider-target security_guardian --provider-target openclaw --provider-target claude_code
+ironclaw verify
+ironclaw update
+ironclaw uninstall --provider-target claude_code
+```
+
+For deeper local validation and security workflow work, the internal tools
+remain available:
 
 ```powershell
 python -m cli_brain --text "drop table users;" --mode enforce --json
@@ -331,183 +436,12 @@ python -m cli_brain --file payload.txt --mode strict --session-id my-session
 
 ---
 
-## Configuration reference
+## Final principle
 
-Copy `.env.example` to `.env`. All keys listed below. Keys marked **REQUIRED**
-will cause a silent failure or hard error if absent when the feature they gate
-is active.
+IronClaw-Security is built around one truth: every AI action is a trust
+boundary, and every trust boundary must be granted, observed, and enforced
+before it can become operationally dangerous.
 
-### Application identity
-
-| Key           | Default             | Notes                                                |
-| ------------- | ------------------- | ---------------------------------------------------- |
-| `APP_NAME`    | `IronClaw-Security` | Shown in logs and API responses                      |
-| `APP_VERSION` | `0.1.0`             | Semantic version of the running build                |
-| `ENVIRONMENT` | `development`       | `development` \| `test` \| `staging` \| `production` |
-| `DEBUG`       | `false`             | Never `true` in production                           |
-| `RELOAD`      | `false`             | Uvicorn hot-reload — development only                |
-| `API_PREFIX`  | _(empty)_           | Optional URL prefix for all routes, e.g. `/api/v1`   |
-
-### Server binding
-
-| Key                 | Default                        | Notes                                                                                                                                                                                                                |
-| ------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `APP_HOST`          | `127.0.0.1`                    | Bind address                                                                                                                                                                                                         |
-| `APP_PORT`          | `8000`                         | Bind port                                                                                                                                                                                                            |
-| `APP_BASE_URL`      | `http://127.0.0.1:8000`        | Base URL used in generated links                                                                                                                                                                                     |
-| `ENGINE_BASE_URL`   | `http://{APP_HOST}:{APP_PORT}` | Target URL for the IronClaw engine — consumed by `service.py` and `IronClawClient` callers. Defaults to `http://127.0.0.1:8000`. Override when the engine runs on a different host or port than the default binding. |
-| `IRONCLAW_ENV`      | `development`                  | Legacy alias — kept for backward compatibility                                                                                                                                                                       |
-| `IRONCLAW_BASE_URL` | `http://127.0.0.1:8000`        | Legacy alias — kept for backward compatibility                                                                                                                                                                       |
-
-### Logging
-
-| Key                          | Default | Notes                                                   |
-| ---------------------------- | ------- | ------------------------------------------------------- |
-| `LOG_LEVEL`                  | `INFO`  | `DEBUG` \| `INFO` \| `WARNING` \| `ERROR` \| `CRITICAL` |
-| `STRUCTURED_LOGGING_ENABLED` | `true`  | Set `false` for human-readable local output             |
-
-### Policy and verdict defaults
-
-| Key                     | Default        | Notes                                                            |
-| ----------------------- | -------------- | ---------------------------------------------------------------- |
-| `DEFAULT_SCAN_VERDICT`  | `allow`        | Verdict when no rule matches: `allow` \| `block` \| `quarantine` |
-| `DEFAULT_REVIEW_STATUS` | `not_required` | `not_required` \| `pending` \| `approved` \| `rejected`          |
-
-### Risk thresholds
-
-All values are integers 0–100. Constraint: `RISK_THRESHOLD_ALLOW_MAX` <
-`RISK_THRESHOLD_QUARANTINE_MIN` ≤ `RISK_THRESHOLD_BLOCK_MIN`. Violating this
-ordering produces undefined verdict behavior.
-
-| Key                             | Default | Meaning                                  |
-| ------------------------------- | ------- | ---------------------------------------- |
-| `RISK_THRESHOLD_ALLOW_MAX`      | `29`    | Scores at or below this are auto-allowed |
-| `RISK_THRESHOLD_QUARANTINE_MIN` | `30`    | Scores at or above this are quarantined  |
-| `RISK_THRESHOLD_BLOCK_MIN`      | `70`    | Scores at or above this are hard-blocked |
-
-### Scan feature flags
-
-| Key                           | Default |
-| ----------------------------- | ------- |
-| `ENABLE_TEXT_SCANNING`        | `true`  |
-| `ENABLE_URL_SCANNING`         | `true`  |
-| `ENABLE_GITHUB_REPO_SCANNING` | `true`  |
-| `ENABLE_ARCHIVE_SCANNING`     | `true`  |
-
-### Guard and execution control flags
-
-| Key                            | Default |
-| ------------------------------ | ------- |
-| `ENABLE_GUARD_ACTIONS`         | `true`  |
-| `ENABLE_GUARD_ACTION_POLICY`   | `true`  |
-| `ENABLE_GUARD_ACTION_DECISION` | `true`  |
-| `ENABLE_QUARANTINE_REVIEW`     | `true`  |
-
-### Input size limits
-
-| Key                       | Default  | Unit       |
-| ------------------------- | -------- | ---------- |
-| `MAX_TEXT_CHARS`          | `100000` | characters |
-| `MAX_URL_LENGTH`          | `2048`   | characters |
-| `MAX_ARCHIVE_NAME_LENGTH` | `512`    | characters |
-| `MAX_REPO_URL_LENGTH`     | `2048`   | characters |
-
-### Authentication
-
-> **Conditional requirement:** When `AUTH_REQUIRED=true`, at least one key slot
-> below must be set or all protected routes will reject every request with 401.
-
-| Key                         | Default   | Notes                                                                       |
-| --------------------------- | --------- | --------------------------------------------------------------------------- |
-| `AUTH_REQUIRED`             | `true`    | Set `true` in staging and production                                        |
-| `API_KEY`                   | _(empty)_ | General-purpose key for standard callers                                    |
-| `ADMIN_API_KEY`             | _(empty)_ | Elevated key for admin operations                                           |
-| `PLATFORM_API_KEY`          | _(empty)_ | Key for trusted platform integrations                                       |
-| `INTERNAL_PLATFORM_API_KEY` | _(empty)_ | Internal service-to-service key — highest trust level                       |
-| `IRONCLAW_API_KEY`          | _(empty)_ | Primary IronClaw identity key — aliases all key slots above if none are set |
-
-### Groq — LLM-assisted analysis
-
-> **Conditional requirement:** `GROQ_API_KEY` is **REQUIRED** when
-> `GROQ_ENABLED=true`. The brain service will fail at inference time if the key
-> is absent and Groq is enabled. Obtain a key at
-> [https://console.groq.com](https://console.groq.com).
-
-| Key                    | Default          | Notes                                 |
-| ---------------------- | ---------------- | ------------------------------------- |
-| `GROQ_ENABLED`         | `true`           | Enable Groq-powered analysis passes   |
-| `GROQ_API_KEY`         | _(empty)_        | **REQUIRED when `GROQ_ENABLED=true`** |
-| `GROQ_MODEL`           | `llama3-8b-8192` | Groq model identifier                 |
-| `GROQ_TIMEOUT_SECONDS` | `120.0`          | Per-request timeout in seconds        |
-
-### OpenAI
-
-| Key              | Default   | Notes                          |
-| ---------------- | --------- | ------------------------------ |
-| `OPENAI_API_KEY` | _(empty)_ | Optional — future / plugin use |
-
-### Supabase — persistence layer
-
-> All three Supabase keys are **REQUIRED** for full operation. Routes that write
-> to or read from the persistence layer will error at runtime if these are
-> absent.
-
-| Key                         | Notes                                                               |
-| --------------------------- | ------------------------------------------------------------------- |
-| `SUPABASE_URL`              | Project URL from Supabase dashboard → Settings → API                |
-| `SUPABASE_SERVICE_ROLE_KEY` | Service role key — bypasses RLS. **Keep secret, server-side only.** |
-| `SUPABASE_ANON_KEY`         | Anon / public key for client-side or read-only operations           |
-
-### File storage paths
-
-| Key              | Default             |
-| ---------------- | ------------------- |
-| `REPORTS_DIR`    | `./data/reports`    |
-| `UPLOADS_DIR`    | `./data/uploads`    |
-| `QUARANTINE_DIR` | `./data/quarantine` |
-| `BACKUP_DIR`     | `./data/backups`    |
-
----
-
-## Windows service path
-
-For the local machine protection flow, the main Windows-oriented service files
-are:
-
-- `ironclaw_installer.py`
-- `service.py`
-- `scripts/ironclaw_service_windows.ps1`
-
-These are part of the one-command install and persistent local protection path.
-
----
-
-## Minimal API surface for v1
-
-The app is shaped around a small, hardened runtime surface — not a sprawling
-public platform API.
-
-V1 focus areas:
-
-- System health and status routes.
-- Claude Code and OpenClaw integration bootstrap routes.
-- Guard and action execution routes.
-- Sandbox verification flow.
-- Policy evaluation routes.
-- Incident and quarantine routes required to support protected decisions.
-
-If a route does not directly support install, integration, interception, sandbox
-verification, verdicting, or minimal protected status visibility, it is not part
-of the core v1 shipping path.
-
----
-
-## Notes
-
-- Keep the public story centered on the locked v1 mission and what it can do for
-  all users and companies
-- Keep route documentation aligned with the actual mounted routers in
-  `app/main.py`.
-- Do not document broad legacy surfaces as if they are part of the release path.
-- Prefer narrow, testable, shipping-safe contracts while IronClaw-Security v1 is
-  being completed.
+The product story is not a setup guide and not a broad configuration appendix.
+It is a security architecture for real-world AI workloads: intercept, assess,
+contain, and decide before unsafe behavior reaches users, systems, or data.
