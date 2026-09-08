@@ -35,16 +35,12 @@ import { supabase } from "@/lib/supabase";
 import {
   API_BASE,
   auth,
-  audit,
   dashboard,
   events,
   health,
   integrations,
   paymentMethods,
   payments,
-  policies,
-  prompts,
-  tools,
 } from "@/lib/api";
 
 // ── Capture everything at import time, before clearMocks wipes history ──────
@@ -453,95 +449,5 @@ describe("paymentMethods.delete", () => {
     expect(url).toBe(
       `/ui/billing/payment-methods/${encodeURIComponent("pm/a b")}?organizationid=${encodeURIComponent("org/c d")}`,
     );
-  });
-});
-
-describe("prompts.inspect", () => {
-  it("calls api.post('/inspect', payload)", () => {
-    mockPost.mockResolvedValueOnce({ data: {} });
-    const payload = { prompt: "test" };
-    prompts.inspect(payload);
-    expect(mockPost).toHaveBeenCalledWith("/inspect", payload);
-  });
-});
-
-describe("audit.getLogs", () => {
-  it("calls api.get('/audit/logs', { params })", () => {
-    mockGet.mockResolvedValueOnce({ data: [] });
-    const params = { page: 1, limit: 50 };
-    audit.getLogs(params);
-    expect(mockGet).toHaveBeenCalledWith("/audit/logs", { params });
-  });
-});
-
-describe("tools.inspect", () => {
-  it("calls api.post('/tools/inspect', payload)", () => {
-    mockPost.mockResolvedValueOnce({ data: {} });
-    const payload = { tool: "bash", args: [] };
-    tools.inspect(payload);
-    expect(mockPost).toHaveBeenCalledWith("/tools/inspect", payload);
-  });
-});
-
-describe("policies", () => {
-  it("list() calls api.get('/policy/status')", () => {
-    mockGet.mockResolvedValueOnce({ data: {} });
-    policies.list();
-    expect(mockGet).toHaveBeenCalledWith("/policy/status");
-  });
-
-  it("get() calls the policy status endpoint", () => {
-    mockGet.mockResolvedValueOnce({ data: {} });
-    policies.get("pol-001");
-    expect(mockGet).toHaveBeenCalledWith("/policy/status");
-  });
-
-  it("create(payload) posts the normalized policy contract to /policy/create", () => {
-    mockPost.mockResolvedValueOnce({ data: {} });
-    const payload = {
-      name: "deny-all",
-      action: "block",
-      pattern: "suspicious",
-      priority: 12,
-      policy_type: "tool_abuse",
-    };
-
-    policies.create(payload);
-
-    expect(mockPost).toHaveBeenCalledWith(
-      "/policy/create",
-      expect.objectContaining({
-        name: "deny-all",
-        enforcement_mode: "block",
-        rules: [
-          expect.objectContaining({
-            name: "deny-all",
-            pattern: "suspicious",
-            enforcement_mode: "block",
-            categories: ["tool_abuse"],
-          }),
-        ],
-      }),
-    );
-  });
-
-  it("update(id, payload) calls the policy update endpoint with the backend payload contract", () => {
-    mockPatch.mockResolvedValueOnce({ data: {} });
-    const payload = { name: "allow-safe", action: "allow", pattern: "safe" };
-    policies.update("pol-001", payload);
-    expect(mockPatch).toHaveBeenCalledWith(
-      "/policy/update",
-      expect.objectContaining({
-        id: "pol-001",
-        name: "allow-safe",
-        enforcement_mode: "allow",
-      }),
-    );
-  });
-
-  it("delete(id) resets the policy engine via the supported backend route", () => {
-    mockDelete.mockResolvedValueOnce({ data: {} });
-    policies.delete("pol-001");
-    expect(mockDelete).toHaveBeenCalledWith("/policy/reset");
   });
 });

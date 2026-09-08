@@ -1,4 +1,4 @@
-/**
+﻿/**
  * frontend/src/pages/Dashboard.test.jsx
  *
  * Test harness for Dashboard.jsx
@@ -15,7 +15,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// ── react-router-dom mock ─────────────────────────────────────────────────────
+// â”€â”€ react-router-dom mock â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const mockNavigate = jest.fn();
 const mockLocation = { search: "" };
 
@@ -29,7 +29,7 @@ jest.mock("react-router-dom", () => ({
   ),
 }));
 
-// ── AuthContext mock ──────────────────────────────────────────────────────────
+// â”€â”€ AuthContext mock â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const mockLogout = jest.fn();
 let mockAuthState = {
   user: { email: "test@ironclaw.io" },
@@ -42,7 +42,7 @@ jest.mock("@/context/AuthContext", () => ({
   useAuth: () => mockAuthState,
 }));
 
-// ── api mock ──────────────────────────────────────────────────────────────────
+// â”€â”€ api mock â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const mockApiGet = jest.fn();
 const mockApiPost = jest.fn();
 
@@ -54,7 +54,7 @@ jest.mock("@/lib/api", () => ({
   },
 }));
 
-// ── sonner mock ───────────────────────────────────────────────────────────────
+// â”€â”€ sonner mock â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const mockToastSuccess = jest.fn();
 const mockToastError = jest.fn();
 const mockToastLoading = jest.fn();
@@ -69,7 +69,7 @@ jest.mock("sonner", () => ({
   },
 }));
 
-// ── WalletCard mock — captures props ─────────────────────────────────────────
+// â”€â”€ WalletCard mock â€” captures props â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let capturedWalletProps = null;
 
 jest.mock("@/components/dashboard/WalletCard", () => ({
@@ -80,7 +80,7 @@ jest.mock("@/components/dashboard/WalletCard", () => ({
   },
 }));
 
-// ── SecurityAnalysis stub — captures props ───────────────────────────────────
+// â”€â”€ SecurityAnalysis stub â€” captures props â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let capturedSecurityProps = null;
 
 jest.mock("@/components/dashboard/SecurityAnalysis", () => ({
@@ -91,7 +91,7 @@ jest.mock("@/components/dashboard/SecurityAnalysis", () => ({
   },
 }));
 
-// ── IntegrationCard stub ─────────────────────────────────────────────────────
+// â”€â”€ IntegrationCard stub â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 jest.mock("@/components/dashboard/IntegrationCard", () => ({
   __esModule: true,
   default: ({ title, testid }) => (
@@ -99,10 +99,10 @@ jest.mock("@/components/dashboard/IntegrationCard", () => ({
   ),
 }));
 
-// ── Module under test ─────────────────────────────────────────────────────────
+// â”€â”€ Module under test â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 import Dashboard from "./Dashboard";
 
-// ── Default API responses ─────────────────────────────────────────────────────
+// â”€â”€ Default API responses â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const DEFAULT_DASH = {
   wallet_units: 100,
   organization_id: "org-abc",
@@ -168,7 +168,14 @@ function resetWindowLocation() {
   });
 }
 
-// ── Setup / teardown ──────────────────────────────────────────────────────────
+async function renderDashboard() {
+  await act(async () => {
+    render(<Dashboard />);
+    await Promise.resolve();
+  });
+}
+
+// â”€â”€ Setup / teardown â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 beforeEach(() => {
   jest.clearAllMocks();
   cleanup();
@@ -191,6 +198,31 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
+describe("dashboard navigation", () => {
+  it("does not render inspector or policy links in the top nav", async () => {
+    await renderDashboard();
+
+    expect(screen.queryByTestId("nav-inspector-link")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("nav-policies-link")).not.toBeInTheDocument();
+    expect(screen.queryByText("Inspector")).not.toBeInTheDocument();
+    expect(screen.queryByText("Policies")).not.toBeInTheDocument();
+  });
+
+  it("does not emit React act warnings while dashboard data resolves", async () => {
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+    await renderDashboard();
+
+    expect(
+      errorSpy.mock.calls.some(([message]) =>
+        String(message).includes("not wrapped in act"),
+      ),
+    ).toBe(false);
+
+    errorSpy.mockRestore();
+  });
+});
+
 // =============================================================================
 // Auth redirect
 // =============================================================================
@@ -206,9 +238,7 @@ describe("auth redirect", () => {
       },
     };
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     expect(globalThis.__IC_COUNTERS__.ic_threats_blocked).toMatchObject({
       value: 980,
@@ -235,9 +265,7 @@ describe("auth redirect", () => {
       },
     };
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     expect(globalThis.__IC_COUNTERS__.ic_threats_blocked).toMatchObject({
       value: 980,
@@ -259,17 +287,13 @@ describe("auth redirect", () => {
       logout: mockLogout,
     };
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     expect(mockNavigate).toHaveBeenCalledWith("/");
   });
 
   it("does NOT call navigate('/') when user is present", async () => {
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     const redirectCalls = mockNavigate.mock.calls.filter(
       (c) => c[0] === "/" && c.length === 1,
@@ -285,9 +309,7 @@ describe("auth redirect", () => {
       logout: mockLogout,
     };
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     const redirectCalls = mockNavigate.mock.calls.filter(
       (c) => c[0] === "/" && c.length === 1,
@@ -309,9 +331,7 @@ describe("loading spinner", () => {
       logout: mockLogout,
     };
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     expect(document.querySelector(".animate-spin")).toBeInTheDocument();
     expect(screen.queryByTestId("wallet-card")).not.toBeInTheDocument();
@@ -320,18 +340,14 @@ describe("loading spinner", () => {
   it("renders spinner when loadingData is true and data is null", async () => {
     mockApiGet.mockReturnValue(new Promise(() => {}));
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     expect(document.querySelector(".animate-spin")).toBeInTheDocument();
     expect(screen.queryByTestId("wallet-card")).not.toBeInTheDocument();
   });
 
   it("renders dashboard content once data resolves", async () => {
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(screen.getByTestId("wallet-card")).toBeInTheDocument();
@@ -357,9 +373,7 @@ describe("WalletCard organizationId prop", () => {
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(capturedWalletProps).not.toBeNull();
@@ -381,9 +395,7 @@ describe("WalletCard organizationId prop", () => {
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(capturedWalletProps).not.toBeNull();
@@ -405,9 +417,7 @@ describe("WalletCard organizationId prop", () => {
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(capturedWalletProps).not.toBeNull();
@@ -440,9 +450,7 @@ describe("session_id payment polling", () => {
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     expect(mockToastLoading).toHaveBeenCalledWith(
       expect.stringContaining("Verifying"),
@@ -469,9 +477,7 @@ describe("session_id payment polling", () => {
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(mockToastSuccess).toHaveBeenCalledWith(
@@ -498,9 +504,7 @@ describe("session_id payment polling", () => {
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(mockToastDismiss).toHaveBeenCalledWith("pay");
@@ -509,14 +513,12 @@ describe("session_id payment polling", () => {
 });
 
 // =============================================================================
-// handlePurchase — invalid package guard
+// handlePurchase â€” invalid package guard
 // =============================================================================
 
-describe("handlePurchase — invalid package", () => {
+describe("handlePurchase â€” invalid package", () => {
   it("calls toast.error for an unknown package ID", async () => {
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(capturedWalletProps).not.toBeNull();
@@ -532,9 +534,7 @@ describe("handlePurchase — invalid package", () => {
   });
 
   it("does NOT call api.post for an unknown package ID", async () => {
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(capturedWalletProps).not.toBeNull();
@@ -551,10 +551,10 @@ describe("handlePurchase — invalid package", () => {
 });
 
 // =============================================================================
-// handlePurchase — valid package
+// handlePurchase â€” valid package
 // =============================================================================
 
-describe("handlePurchase — valid package", () => {
+describe("handlePurchase â€” valid package", () => {
   it("calls api.post /billing/checkout/sessions with the current request shape used by Dashboard", async () => {
     mockApiPost.mockImplementation((url) => {
       if (url === "/billing/checkout/sessions") {
@@ -568,9 +568,7 @@ describe("handlePurchase — valid package", () => {
       return Promise.resolve({ data: {} });
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(capturedWalletProps).not.toBeNull();
@@ -605,9 +603,7 @@ describe("handlePurchase — valid package", () => {
       return Promise.resolve({ data: {} });
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(capturedWalletProps).not.toBeNull();
@@ -636,9 +632,7 @@ describe("handlePurchase — valid package", () => {
       return Promise.resolve({ data: {} });
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(capturedWalletProps).not.toBeNull();
@@ -670,9 +664,7 @@ describe("handlePurchase — valid package", () => {
       return Promise.resolve({ data: {} });
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(capturedWalletProps).not.toBeNull();
@@ -718,9 +710,7 @@ describe("handlePurchase — valid package", () => {
         return Promise.resolve({ data: {} });
       });
 
-      await act(async () => {
-        render(<Dashboard />);
-      });
+      await renderDashboard();
 
       await waitFor(() => {
         expect(capturedWalletProps).not.toBeNull();
@@ -747,9 +737,7 @@ describe("handlePurchase — valid package", () => {
       return Promise.resolve({ data: {} });
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(capturedWalletProps).not.toBeNull();
@@ -777,9 +765,7 @@ describe("handlePurchase — valid package", () => {
       return Promise.resolve({ data: {} });
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(capturedWalletProps).not.toBeNull();
@@ -805,9 +791,7 @@ describe("sign out", () => {
   it("calls logout() when Sign Out is clicked", async () => {
     const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(screen.getByTestId("signout-btn")).toBeInTheDocument();
@@ -828,9 +812,7 @@ describe("sign out", () => {
         }),
     );
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(screen.getByTestId("signout-btn")).toBeInTheDocument();
@@ -857,9 +839,7 @@ describe("sign out", () => {
 
 describe("dashboard structure", () => {
   it("renders WalletCard after data loads", async () => {
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(screen.getByTestId("wallet-card")).toBeInTheDocument();
@@ -867,9 +847,7 @@ describe("dashboard structure", () => {
   });
 
   it("renders SecurityAnalysis after data loads", async () => {
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(screen.getByTestId("security-analysis")).toBeInTheDocument();
@@ -877,9 +855,7 @@ describe("dashboard structure", () => {
   });
 
   it("renders user email in nav", async () => {
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(screen.getByTestId("user-email")).toHaveTextContent(
@@ -901,9 +877,7 @@ describe("dashboard structure", () => {
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(capturedWalletProps).not.toBeNull();
@@ -928,9 +902,7 @@ describe("dashboard structure", () => {
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(
@@ -1007,9 +979,7 @@ describe("dashboard structure", () => {
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(screen.getByTestId("hermes-card")).toBeInTheDocument();
@@ -1052,9 +1022,7 @@ describe("dashboard structure", () => {
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(screen.getByTestId("install-key-card-hermes-value")).toHaveValue(
@@ -1092,9 +1060,7 @@ describe("dashboard structure", () => {
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(
@@ -1108,9 +1074,7 @@ describe("dashboard structure", () => {
   });
 
   it("renders canonical runtime labels and excludes Security Guardian as a platform", async () => {
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
@@ -1142,9 +1106,7 @@ describe("dashboard structure", () => {
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(screen.getByTestId("install-key-card-hermes")).toBeInTheDocument();
@@ -1218,9 +1180,7 @@ describe("dashboard structure", () => {
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(
@@ -1282,9 +1242,7 @@ describe("dashboard structure", () => {
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(screen.getByTestId("install-key-card-cursor-value")).toHaveValue(
@@ -1331,9 +1289,7 @@ describe("dashboard structure", () => {
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(capturedSecurityProps).not.toBeNull();
@@ -1352,9 +1308,7 @@ describe("dashboard structure", () => {
 
 describe("attack feed pagination", () => {
   it("renders empty state when no attacks are available", async () => {
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(screen.getByTestId("attack-feed")).toBeInTheDocument();
@@ -1384,9 +1338,7 @@ describe("attack feed pagination", () => {
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(screen.getAllByTestId("attack-feed-item")).toHaveLength(25);
@@ -1421,9 +1373,7 @@ describe("attack feed pagination", () => {
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(screen.getByTestId("attack-feed-next")).toBeInTheDocument();
@@ -1464,9 +1414,7 @@ describe("attack feed pagination", () => {
       return Promise.reject(new Error(`Unexpected GET ${url}`));
     });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(screen.getByTestId("attack-feed-prev")).toBeDisabled();
@@ -1500,9 +1448,7 @@ describe("attack feed pagination", () => {
       })
       .mockResolvedValueOnce({ data: DEFAULT_TOKENS });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(screen.getByTestId("attack-feed-next")).toBeInTheDocument();
@@ -1538,9 +1484,7 @@ describe("refresh behavior", () => {
   it("re-fetches dashboard data when Refresh is clicked", async () => {
     const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
 
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await waitFor(() => {
       expect(screen.getByTestId("refresh-btn")).toBeInTheDocument();
@@ -1561,9 +1505,7 @@ describe("refresh behavior", () => {
   });
 
   it("starts the live polling interval and posts to /events/simulate", async () => {
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     await act(async () => {
       jest.advanceTimersByTime(20000);
@@ -1581,9 +1523,7 @@ describe("refresh behavior", () => {
   });
 
   it("starts the refresh interval and re-fetches /dashboard after 5 minutes", async () => {
-    await act(async () => {
-      render(<Dashboard />);
-    });
+    await renderDashboard();
 
     const dashboardCallsBefore = mockApiGet.mock.calls.filter(
       ([url]) => url === "/dashboard/overview",

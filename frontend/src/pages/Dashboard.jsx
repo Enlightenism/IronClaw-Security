@@ -5,10 +5,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Copy,
-  FileSearch,
   Loader2,
   RefreshCw,
-  ScrollText,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -932,21 +930,6 @@ const Dashboard = () => {
           </button>
 
           <div className="flex items-center gap-3">
-            <Link
-              to="/inspector"
-              data-testid="nav-inspector-link"
-              className="hidden items-center gap-1.5 rounded-lg border border-white/15 px-4 py-2 text-sm text-[#BFC1C2] transition hover:border-[#38BDF8]/50 hover:text-[#38BDF8] sm:flex"
-            >
-              <FileSearch size={15} /> Inspector
-            </Link>
-            <Link
-              to="/policies"
-              data-testid="nav-policies-link"
-              className="hidden items-center gap-1.5 rounded-lg border border-white/15 px-4 py-2 text-sm text-[#BFC1C2] transition hover:border-[#FFD700]/50 hover:text-[#FFD700] sm:flex"
-            >
-              <ScrollText size={15} /> Policies
-            </Link>
-
             <span
               className="font-tech hidden text-sm text-[#BFC1C2] sm:block"
               data-testid="user-email"

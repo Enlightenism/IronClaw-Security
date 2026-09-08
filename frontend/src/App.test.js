@@ -26,16 +26,6 @@ jest.mock("@/pages/Dashboard", () => ({
   default: () => <div>Dashboard Page</div>,
 }));
 
-jest.mock("@/pages/PromptInspector", () => ({
-  __esModule: true,
-  default: () => <div>Prompt Inspector Page</div>,
-}));
-
-jest.mock("@/pages/PolicyManager", () => ({
-  __esModule: true,
-  default: () => <div>Policy Manager Page</div>,
-}));
-
 jest.mock("@/pages/Privacy", () => ({
   __esModule: true,
   default: () => <div>Privacy Page</div>,
@@ -188,28 +178,6 @@ describe("App", () => {
     });
 
     expect(container).toBeInTheDocument();
-  });
-
-  it("renders the prompt inspector page for an authenticated user", async () => {
-    renderAppAtRoute("/inspector", {
-      user: { id: "user-1" },
-      session: null,
-      loading: false,
-    });
-
-    expect(
-      await screen.findByText("Prompt Inspector Page"),
-    ).toBeInTheDocument();
-  });
-
-  it("renders the policy manager page for an authenticated user", async () => {
-    renderAppAtRoute("/policies", {
-      user: { id: "user-1" },
-      session: null,
-      loading: false,
-    });
-
-    expect(await screen.findByText("Policy Manager Page")).toBeInTheDocument();
   });
 
   it("renders the privacy page on /privacy", async () => {

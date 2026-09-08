@@ -7,8 +7,6 @@ import { useAuth } from "@/context/AuthContext";
 
 const Landing = lazy(() => import("@/pages/Landing"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
-const PromptInspector = lazy(() => import("@/pages/PromptInspector"));
-const PolicyManager = lazy(() => import("@/pages/PolicyManager"));
 const Privacy = lazy(() => import("@/pages/Privacy"));
 const Terms = lazy(() => import("@/pages/Terms"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
@@ -115,22 +113,6 @@ function App() {
                   element={
                     <PrivateRoute>
                       <Dashboard />
-                    </PrivateRoute>
-                  }
-                />
-                <Route
-                  path="/inspector"
-                  element={
-                    <PrivateRoute>
-                      <PromptInspector />
-                    </PrivateRoute>
-                  }
-                />
-                <Route
-                  path="/policies"
-                  element={
-                    <PrivateRoute>
-                      <PolicyManager />
                     </PrivateRoute>
                   }
                 />

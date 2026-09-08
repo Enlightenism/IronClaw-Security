@@ -267,70 +267,8 @@ export const paymentMethods = {
     ),
 };
 
-export const prompts = {
-  inspect: (payload) => api.post("/inspect", payload),
-};
-
 export const audit = {
   getLogs: (params) => api.get("/audit/logs", { params }),
-};
-
-const normalizePolicyRequest = (payload = {}) => {
-  const action = payload.action || "block";
-  const policyType = payload.policy_type || "custom";
-
-  return {
-    name: payload.name || "Custom policy",
-    version: payload.version || "1.0.0",
-    rules: [
-      {
-        rule_id:
-          payload.rule_id ||
-          `rule-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-        name: payload.name || "Custom policy rule",
-        description: payload.description || "",
-        scope: "global_",
-        severity: "medium",
-        enforcement_mode: action,
-        pattern: payload.pattern || "",
-        categories: [policyType],
-        enabled: payload.enabled ?? true,
-        tags: [],
-        metadata: {
-          policy_type: policyType,
-          priority: payload.priority ?? 50,
-        },
-      },
-    ],
-    heuristic_threshold: payload.heuristic_threshold ?? 50,
-    unicode_normalization_enabled:
-      payload.unicode_normalization_enabled ?? true,
-    enforcement_mode: action,
-    scope: payload.scope || "global_",
-    metadata: {
-      description: payload.description || "",
-      policy_type: policyType,
-      priority: payload.priority ?? 50,
-    },
-  };
-};
-
-export const policies = {
-  list: () => api.get("/policy/status"),
-  get: () => api.get("/policy/status"),
-  create: (payload) =>
-    api.post("/policy/create", normalizePolicyRequest(payload)),
-  update: (id, payload) =>
-    api.patch(`/policy/update`, {
-      ...normalizePolicyRequest(payload),
-      id,
-    }),
-  delete: (id) => {
-    if (id) {
-      return api.delete("/policy/reset");
-    }
-    return api.delete("/policy/reset");
-  },
 };
 
 export const tools = {
