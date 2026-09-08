@@ -1,3 +1,4 @@
+<img width="2000" height="2000" alt="Golden Knight 4k 2gb" src="https://github.com/user-attachments/assets/436aa4e8-1276-48e7-8763-fb67205c42e9" />
 # IronClaw-Security
 
 > **The enforcement layer that makes powerful AI usable, observable, and safe at
@@ -20,7 +21,8 @@ every user, every device, from every AI-native attack vector possible.
 
 ---
 
-## Why IronClaw-Security exists
+## Why IronClaw-Security exists <img width="128" height="128" alt="logo128pxl shield" src="https://github.com/user-attachments/assets/ce18fd1c-81ed-4313-a47f-1f8252683deb" />
+
 
 AI agents are now executing real actions: writing files, calling APIs, running
 shell commands, fetching remote content, and returning results directly into
@@ -126,7 +128,8 @@ allowed to proceed.
 
 ---
 
-## V1 mission
+## V1 mission <img width="128" height="128" alt="logo128pxl shield" src="https://github.com/user-attachments/assets/a889204a-0f66-440e-98a8-5256f55d3021" />
+
 
 One locked, shipping mission:
 
@@ -188,7 +191,8 @@ IronClaw's prompt injection defense operates at multiple layers simultaneously:
 
 ---
 
-## Core v1 enforcement flow
+## Core v1 enforcement flow <img width="128" height="128" alt="logo128pxl shield" src="https://github.com/user-attachments/assets/ee8313cc-734d-4edd-a0a9-a8027712d14e" />
+
 
 Agent output │ ▼ ┌─────────────────────────────────┐ │ IronClaw Ingress
 Interceptor │ ← Intercepts before user workflow
@@ -225,7 +229,8 @@ has no hardcoded safe defaults that can be silently misconfigured.
 
 ---
 
-## Platform integrations in v1
+## Platform integrations in v1 <img width="128" height="128" alt="Golden Knight Logo128" src="https://github.com/user-attachments/assets/c43ab18f-e9e1-4149-b33f-e3c67be4d424" />
+
 
 | Platform / runtime         | Support path                                                                | Status                     |
 | -------------------------- | --------------------------------------------------------------------------- | -------------------------- |
