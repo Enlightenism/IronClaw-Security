@@ -8,6 +8,7 @@ from threading import Lock
 from typing import Any, Final, Literal, TypedDict
 from uuid import uuid4
 
+from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.persistencebootstrap import (
     StoreType,
     build_store,
@@ -86,9 +87,21 @@ def _looks_like_generic_platform_auth(value: str | None) -> bool:
 
     generic_prefixes = (
         "sk_",
+        "pk_",
+        "rk_",
         "ghp_",
         "gho_",
+        "ghu_",
+        "ghs_",
+        "ghr_",
+        "ghl_",
         "github_pat_",
+        "pat_",
+        "personal_access_token",
+        "xoxb-",
+        "xoxp-",
+        "xoxa-",
+        "xoxr-",
         "token_",
         "secret_",
         "api_",
@@ -840,7 +853,7 @@ class BillingRegistry:
 
         registry = self._get_install_key_registry()
         result: dict[str, Any] = {}
-        for program in ("openclaw", "claude_code", "hermes"):
+        for program in InstallKeyFormatRegistry.list_programs():
             record = registry.generate_install_key(
                 normalized_owner,
                 subscription_id,

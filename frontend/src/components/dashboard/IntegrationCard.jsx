@@ -3,19 +3,19 @@ import { Copy, Check, Terminal } from "lucide-react";
 import { toast } from "sonner";
 
 const CANONICAL_RUNTIME_COMMANDS = {
-  "Claude Code":
+  claude_code:
     "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user",
-  OpenClaw:
+  openclaw:
     "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user",
-  Cursor:
+  cursor:
     "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user",
-  Goose:
+  goose:
     "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user",
-  "Gemini CLI":
+  gemini_cli:
     "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user",
-  "GitHub Copilot":
+  copilot:
     "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user",
-  Hermes:
+  hermes:
     "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security",
 };
 
@@ -78,35 +78,121 @@ const resolveCanonicalTitle = (value) => {
   return trimmed;
 };
 
+const resolveCanonicalRuntimeKey = (value) => {
+  const title = resolveCanonicalTitle(value);
+  if (!title) {
+    return "";
+  }
+
+  const normalized = normalizeRuntimeKey(title);
+  const keyMap = {
+    "claude code": "claude_code",
+    openclaw: "openclaw",
+    cursor: "cursor",
+    goose: "goose",
+    "gemini cli": "gemini_cli",
+    "github copilot": "copilot",
+    hermes: "hermes",
+  };
+
+  return keyMap[normalized] || "";
+};
+
 const isSecurityGuardian = (value) => {
   const key = normalizeRuntimeKey(value);
   return Boolean(key) && SECURITY_GUARDIAN_ALIASES.has(key);
 };
 
-const resolveCommand = (title, command) => {
-  const rawCommand = typeof command === "string" ? command.trim() : "";
-  if (
-    rawCommand &&
-    !rawCommand.includes("placeholder") &&
-    !rawCommand.includes("loading")
-  ) {
-    return rawCommand;
+const looksLikeTokenCommand = (value) => {
+  if (typeof value !== "string") {
+    return false;
   }
 
-  if (typeof title !== "string") {
+  const candidate = value.trim();
+  if (!candidate) {
+    return false;
+  }
+
+  return (
+    candidate.includes("--token") ||
+    candidate.includes("token ") ||
+    candidate.includes("api-key") ||
+    candidate.includes("api key") ||
+    candidate.includes("gh auth") ||
+    candidate.includes("placeholder") ||
+    candidate.includes("loading")
+  );
+};
+
+const commandMatchesRuntime = (command, runtimeKey) => {
+  if (!runtimeKey || typeof command !== "string") {
+    return false;
+  }
+
+  const candidate = command.trim();
+  if (!candidate || looksLikeTokenCommand(candidate)) {
+    return false;
+  }
+
+  switch (runtimeKey) {
+    case "claude_code":
+      return (
+        candidate.includes("--agent claude-code") ||
+        candidate.includes("claude-code")
+      );
+    case "openclaw":
+      return (
+        candidate.includes("--agent openclaw") || candidate.includes("openclaw")
+      );
+    case "cursor":
+      return (
+        candidate.includes("--agent cursor") || candidate.includes("cursor")
+      );
+    case "goose":
+      return candidate.includes("--agent goose") || candidate.includes("goose");
+    case "gemini_cli":
+      return (
+        candidate.includes("--agent gemini-cli") ||
+        candidate.includes("gemini-cli")
+      );
+    case "copilot":
+      return (
+        candidate.includes("--agent copilot") || candidate.includes("copilot")
+      );
+    case "hermes":
+      return (
+        candidate.includes("hermes skills install") ||
+        (candidate.includes("ironclaw-security") &&
+          candidate.includes("hermes"))
+      );
+    default:
+      return false;
+  }
+};
+
+const resolveCommand = (title, command) => {
+  const runtimeKey = resolveCanonicalRuntimeKey(title);
+  if (!runtimeKey) {
     return "";
   }
 
-  const canonicalTitle = resolveCanonicalTitle(title);
-  return CANONICAL_RUNTIME_COMMANDS[canonicalTitle] || "";
+  const canonicalCommand = CANONICAL_RUNTIME_COMMANDS[runtimeKey] || "";
+  const rawCommand = typeof command === "string" ? command.trim() : "";
+
+  if (rawCommand && commandMatchesRuntime(rawCommand, runtimeKey)) {
+    return rawCommand;
+  }
+
+  return canonicalCommand;
 };
 
 const IntegrationCard = ({ title, command, tint = "gold", testid }) => {
   const [copied, setCopied] = useState(false);
 
   const canonicalTitle = resolveCanonicalTitle(title);
+  const runtimeKey = resolveCanonicalRuntimeKey(canonicalTitle);
 
-  if (!canonicalTitle || isSecurityGuardian(canonicalTitle)) {
+  if (!canonicalTitle || isSecurityGuardian(canonicalTitle) || !runtimeKey) {
     return null;
   }
 

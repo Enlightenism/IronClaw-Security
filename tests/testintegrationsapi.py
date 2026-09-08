@@ -217,6 +217,32 @@ def test_integration_install_route_rejects_generic_and_mismatched_keys(installer
         assert "paid install key" in response.json()["detail"].lower()
 
 
+def test_integration_install_route_rejects_raw_key_that_does_not_match_requested_platform_family(installer_client: TestClient) -> None:
+    class _Record:
+        key_id = "ik_paid_cursor_123"
+        owner_key = "owner-456"
+        program = "cursor"
+        active = True
+        payment_status = "paid"
+        entitlements_status = "active"
+        issued_after_payment = True
+
+    with patch("app.routes.integrations.installer.get_install_key_registry") as mock_registry:
+        mock_registry.return_value.authenticate_install_key.return_value = _Record()
+        response = installer_client.post(
+            "/integrations/integration-cursor/install",
+            json={
+                "initiated_by": "tester",
+                "platform": "cursor",
+                "install_key": "ic_install_claude_code_validkey",
+                "owner_key": "owner-456",
+            },
+        )
+
+    assert response.status_code == 403, response.text
+    assert "paid install key" in response.json()["detail"].lower()
+
+
 def test_integration_install_route_accepts_valid_paid_install_key(installer_client: TestClient) -> None:
     class _Record:
         key_id = "ik_paid_123"

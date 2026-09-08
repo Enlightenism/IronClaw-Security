@@ -751,32 +751,70 @@ const Dashboard = () => {
   const ownerScopedInstallKeys = useMemo(() => {
     const slots = Array.isArray(data?.install_keys) ? data.install_keys : [];
 
-    return slots.filter((slot) => {
-      const program = normalizeProgramKey(slot?.program);
-      if (!program || program === "security_guardian") {
-        return false;
-      }
+    return slots
+      .filter((slot) => {
+        const program = normalizeProgramKey(slot?.program);
+        if (!program || program === "security_guardian") {
+          return false;
+        }
 
-      if (!ownerKey) {
-        return true;
-      }
+        if (!ownerKey) {
+          return true;
+        }
 
-      const slotOwner =
-        typeof slot?.owner_key === "string" ? slot.owner_key : "";
-      return !slotOwner || slotOwner.trim().toLowerCase() === ownerKey;
-    });
+        const slotOwner =
+          typeof slot?.owner_key === "string" ? slot.owner_key : "";
+        return !slotOwner || slotOwner.trim().toLowerCase() === ownerKey;
+      })
+      .sort((left, right) => {
+        const leftProgram = normalizeProgramKey(left?.program);
+        const rightProgram = normalizeProgramKey(right?.program);
+        const leftIndex = INSTALL_KEY_PROGRAMS.findIndex(
+          ({ program }) => program === leftProgram,
+        );
+        const rightIndex = INSTALL_KEY_PROGRAMS.findIndex(
+          ({ program }) => program === rightProgram,
+        );
+
+        if (leftIndex === -1 && rightIndex === -1) return 0;
+        if (leftIndex === -1) return 1;
+        if (rightIndex === -1) return -1;
+        return leftIndex - rightIndex;
+      });
   }, [data?.install_keys, ownerKey]);
 
   const installKeyCards = useMemo(() => {
-    const slotMap = new Map(
-      ownerScopedInstallKeys.map((slot) => [
-        normalizeProgramKey(slot?.program),
-        slot,
-      ]),
-    );
+    const selectedByProgram = new Map();
+
+    for (const slot of ownerScopedInstallKeys) {
+      const program = normalizeProgramKey(slot?.program);
+      if (!program || program === "security_guardian") {
+        continue;
+      }
+
+      const existing = selectedByProgram.get(program);
+      if (!existing) {
+        selectedByProgram.set(program, slot);
+        continue;
+      }
+
+      const currentStatus = String(existing?.status ?? "locked").toLowerCase();
+      const nextStatus = String(slot?.status ?? "locked").toLowerCase();
+      const statusRank = { active: 3, locked: 2, revoked: 1 };
+
+      const shouldReplace =
+        statusRank[nextStatus] > statusRank[currentStatus] ||
+        (statusRank[nextStatus] === statusRank[currentStatus] &&
+          String(slot?.masked_key ?? "").length >
+            String(existing?.masked_key ?? "").length);
+
+      if (shouldReplace) {
+        selectedByProgram.set(program, slot);
+      }
+    }
 
     return INSTALL_KEY_PROGRAMS.map(({ program, label, tint, commandKey }) => {
-      const slot = slotMap.get(program) ?? {
+      const slot = selectedByProgram.get(program) ?? {
         program,
         status: "locked",
         masked_key: "",

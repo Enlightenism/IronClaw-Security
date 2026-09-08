@@ -111,22 +111,24 @@ class InstallKeyDashboardSyncService:
         issued_after_payment = bool(self._row_value(record, "issued_after_payment", False))
         active = bool(self._row_value(record, "active", False))
 
-        if active and payment_status not in {"paid", "success", "succeeded", "complete", "completed", "active", "authorized"}:
-            payment_status = "paid"
-        if active and entitlements_status not in {"active", "paid", "enabled", "granted"}:
-            entitlements_status = "active"
+        if not active or not issued_after_payment:
+            return None
+        if payment_status not in {"paid", "success", "succeeded", "complete", "completed", "active", "authorized"}:
+            return None
+        if entitlements_status not in {"active", "paid", "enabled", "granted"}:
+            return None
 
         return {
             "key_id": key_id,
             "owner_key": normalized_owner,
             "program": program,
             "label": self._PROGRAM_LABELS.get(program, program.replace("_", " ").title()),
-            "status": "active" if active else ("revoked" if self._row_value(record, "revoked_at") else "locked"),
-            "active": active,
+            "status": "active",
+            "active": True,
             "masked_key": masked_key,
-            "payment_status": payment_status,
-            "entitlements_status": entitlements_status,
-            "issued_after_payment": issued_after_payment,
+            "payment_status": "paid",
+            "entitlements_status": "active",
+            "issued_after_payment": True,
             "units_consumed": int(self._row_value(record, "units_consumed") or 0),
             "metadata": dict(self._row_value(record, "metadata") or {}),
         }
@@ -184,32 +186,12 @@ class InstallKeyDashboardSyncService:
                 program = normalized_usage["program"]
                 if program == "security_guardian" or program not in runtime_coverage:
                     continue
-                if key_id in {slot["key_id"] for slot in slots_by_program.values() if slot.get("key_id")}:
-                    slot = next((item for item in slots_by_program.values() if item.get("key_id") == key_id), None)
-                    if slot is not None:
-                        slot["units_consumed"] = max(slot.get("units_consumed", 0), normalized_usage["total_consumed_units"])
-                        slot["metadata"].setdefault("usage_summary", normalized_usage)
-                        continue
-                slot = slots_by_program.setdefault(
-                    program,
-                    {
-                        "key_id": key_id,
-                        "owner_key": normalized_owner,
-                        "program": program,
-                        "label": self._PROGRAM_LABELS.get(program, program.replace("_", " ").title()),
-                        "status": "active",
-                        "active": True,
-                        "masked_key": None,
-                        "payment_status": "paid",
-                        "entitlements_status": "active",
-                        "issued_after_payment": True,
-                        "units_consumed": normalized_usage["total_consumed_units"],
-                        "metadata": {"usage_summary": normalized_usage},
-                    },
-                )
+                slot = next((item for item in slots_by_program.values() if item.get("key_id") == key_id), None)
+                if slot is None:
+                    continue
                 slot["units_consumed"] = max(slot.get("units_consumed", 0), normalized_usage["total_consumed_units"])
+                slot["metadata"].setdefault("usage_summary", normalized_usage)
                 slot["metadata"]["usage_summary"] = normalized_usage
-                runtime_coverage[program] = bool(slot.get("active", True))
 
         install_key_slots = []
         for program in self._RUNTIME_PROGRAMS:

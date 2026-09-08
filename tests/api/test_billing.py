@@ -337,6 +337,52 @@ def test_provision_install_keys_rejects_generic_platform_owner_context() -> None
     mock_registry.generate_install_key.assert_not_called()
 
 
+def test_provision_install_keys_generates_all_supported_runtime_programs() -> None:
+    mock_registry = MagicMock()
+    mock_registry.get_keys_for_owner.return_value = []
+
+    runtime_programs = (
+        "openclaw",
+        "claude_code",
+        "cursor",
+        "goose",
+        "gemini_cli",
+        "copilot",
+        "hermes",
+    )
+    mock_registry.generate_install_key.side_effect = [
+        InstallKeyRecord(
+            key_id=f"ik_{program}_001",
+            owner_key="paid@example.com",
+            subscription_id="purchase_full_runtime",
+            program=program,
+            raw_key=f"ic_install_{program}_purchase_secret_1",
+            raw_key_hash=f"hash_{program}",
+            masked_key=f"ic_install_{program}_...1",
+            label="paid-provisioned",
+            active=True,
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=True,
+            metadata={"purchase_id": "purchase_full_runtime", "auto_provisioned": True},
+        )
+        for program in runtime_programs
+    ]
+
+    with patch("app.api.billing.get_install_key_registry", return_value=mock_registry):
+        result = billing_api._provision_install_keys(
+            owner_key="paid@example.com",
+            purchase_id="purchase_full_runtime",
+            payment_id="pay_full_runtime",
+            payment_status="paid",
+            entitlement_status="active",
+        )
+
+    assert {item.program for item in result} == set(runtime_programs)
+    assert len(result) == len(runtime_programs)
+    assert mock_registry.generate_install_key.call_count == len(runtime_programs)
+
+
 def test_wallet_debit_requires_units_or_tokens() -> None:
     with _client_for(_PERSONAL_AUTH) as c:
         response = c.post(

@@ -109,3 +109,78 @@ def test_dashboard_sync_ignores_non_runtime_connector_entries() -> None:
     assert summary["runtime_coverage"]["cursor"] is True
     assert "security_guardian" not in summary["runtime_coverage"]
     assert all(slot["program"] != "security_guardian" for slot in summary["install_key_slots"])
+
+
+def test_dashboard_sync_only_keeps_current_paid_runtime_keys() -> None:
+    service = InstallKeyDashboardSyncService()
+    owner_key = "owner_dash_003"
+
+    summary = service.build_dashboard_summary(
+        owner_key=owner_key,
+        install_keys=[
+            _record(
+                key_id="ik_openclaw_unpaid",
+                owner_key=owner_key,
+                program="openclaw",
+                active=False,
+                payment_status="unpaid",
+                entitlements_status="not_active",
+                issued_after_payment=False,
+            ),
+            _record(
+                key_id="ik_cursor_paid",
+                owner_key=owner_key,
+                program="cursor",
+                active=True,
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+            ),
+            _record(
+                key_id="ik_copilot_foreign",
+                owner_key="ghp_foreigntoken",
+                program="copilot",
+                active=True,
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+            ),
+        ],
+        wallet_summary={
+            "owner_key": owner_key,
+            "balance_units": 200,
+            "total_consumed_units": 30,
+            "total_blocked_attacks": 5,
+            "install_key_usage": {
+                "ik_openclaw_unpaid": {
+                    "key_id": "ik_openclaw_unpaid",
+                    "owner_key": owner_key,
+                    "program": "openclaw",
+                    "total_consumed_units": 10,
+                    "total_blocked_attacks": 1,
+                    "metadata": {"action_type": "prompt"},
+                },
+                "ik_cursor_paid": {
+                    "key_id": "ik_cursor_paid",
+                    "owner_key": owner_key,
+                    "program": "cursor",
+                    "total_consumed_units": 20,
+                    "total_blocked_attacks": 3,
+                    "metadata": {"action_type": "tool_call"},
+                },
+                "ik_copilot_foreign": {
+                    "key_id": "ik_copilot_foreign",
+                    "owner_key": "ghp_foreigntoken",
+                    "program": "copilot",
+                    "total_consumed_units": 99,
+                    "total_blocked_attacks": 2,
+                    "metadata": {"action_type": "prompt"},
+                },
+            },
+        },
+    )
+
+    assert {slot["program"] for slot in summary["install_key_slots"]} == {"cursor"}
+    assert summary["runtime_coverage"]["cursor"] is True
+    assert "openclaw" not in {slot["program"] for slot in summary["install_key_slots"]}
+    assert "copilot" not in {slot["program"] for slot in summary["install_key_slots"]}

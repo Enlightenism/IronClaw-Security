@@ -294,6 +294,14 @@ class TestGetMyKeys:
         resp = client.get("/install-keys/my-keys")
         assert resp.status_code == 422
 
+    def test_generic_owner_key_header_is_rejected(self, client: TestClient) -> None:
+        resp = client.get(
+            "/install-keys/my-keys",
+            headers={"X-Owner-Key": "ghp_platform_token_value"},
+        )
+        assert resp.status_code == 401
+        assert "canonical customer or org identity" in resp.json()["detail"].lower()
+
     def test_empty_owner_key_header_returns_422(self, client: TestClient) -> None:
         resp = client.get("/install-keys/my-keys", headers={"X-Owner-Key": ""})
         assert resp.status_code == 422
@@ -498,6 +506,22 @@ class TestRecordUsage:
             units=3,
             program="openclaw",
         )
+
+    def test_program_scope_must_match_record_when_header_is_supplied(self, client: TestClient) -> None:
+        record = _make_record(active=True, program="openclaw")
+        install_reg = _make_install_registry(by_id_record=record)
+        wallet_reg = _make_wallet_registry(debit_result=_make_wallet(balance_units=995))
+        with (
+            patch(_INSTALL_REGISTRY_TARGET, return_value=install_reg),
+            patch(_WALLET_REGISTRY_TARGET, return_value=wallet_reg),
+        ):
+            resp = client.post(
+                "/install-keys/record-usage",
+                json={"key_id": _KEY_ID_OC, "units": 1},
+                headers={"X-Owner-Key": _OWNER, "X-Program": "claude_code"},
+            )
+        assert resp.status_code == 403
+        assert "program" in resp.json()["detail"].lower()
 
     def test_insufficient_units_returns_402(self, client: TestClient) -> None:
         from app.core.unit_wallet import InsufficientUnitsError

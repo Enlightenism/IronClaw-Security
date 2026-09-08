@@ -7,9 +7,11 @@ from unittest.mock import MagicMock
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 
+from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.core.install_keys import (
     InstallKeyNotFoundError,
     InstallKeyUsageError,
+    _assert_valid_owner_identity,
     get_install_key_registry,
 )
 from app.core.unit_wallet import InsufficientUnitsError, get_unit_wallet_registry
@@ -45,7 +47,31 @@ def _resolve_owner_key(x_owner_key: str = Header(alias="X-Owner-Key", min_length
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="X-Owner-Key header is required.",
         )
-    return stripped
+
+    try:
+        return _assert_valid_owner_identity(stripped)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+        ) from exc
+
+
+def _resolve_program_scope(
+    x_program: str | None = Header(default=None, alias="X-Program", min_length=1, max_length=64),
+) -> str | None:
+    if x_program is None:
+        return None
+    stripped = str(x_program).strip()
+    if not stripped:
+        return None
+    normalized = InstallKeyFormatRegistry.normalize_program(stripped)
+    if normalized is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="X-Program header must be one of: openclaw, claude_code, cursor, goose, gemini_cli, copilot, hermes.",
+        )
+    return normalized
 
 
 def _resolve_install_key(
@@ -97,14 +123,36 @@ def _record_has_paid_entitlement(record: Any) -> bool:
     return issued_after_payment
 
 
-def _assert_paid_entitlement(record: Any, owner_key: str | None) -> None:
+def _assert_paid_entitlement(record: Any, owner_key: str | None, *, program: str | None = None) -> None:
     if owner_key is not None:
         expected_owner = _normalize_owner_key(owner_key)
+        try:
+            expected_owner = _assert_valid_owner_identity(expected_owner)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=str(exc),
+            ) from exc
+
         record_owner = _normalize_owner_key(getattr(record, "owner_key", ""))
         if expected_owner and record_owner and record_owner != expected_owner:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="You do not have permission to access this install key.",
+                detail=f"Install key {getattr(record, 'key_id', 'unknown')!r} does not belong to the supplied owner_key: expected {expected_owner!r}, got {record_owner!r}.",
+            )
+
+    if program is not None:
+        requested_program = InstallKeyFormatRegistry.normalize_program(program)
+        if requested_program is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Unsupported program for install key scope: {program!r}.",
+            )
+        record_program = InstallKeyFormatRegistry.normalize_program(str(getattr(record, "program", "") or ""))
+        if record_program is None or record_program != requested_program:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Install key {getattr(record, 'key_id', 'unknown')!r} is not scoped to program {requested_program!r}.",
             )
 
     if not _record_has_paid_entitlement(record):
@@ -368,6 +416,7 @@ def get_my_keys(
 def activate_install_key(
     payload: ActivateRequest,
     owner_key: str | None = Header(default=None, alias="X-Owner-Key"),
+    program: str | None = Depends(_resolve_program_scope),
 ) -> ActivateResponse:
     install_registry = get_install_key_registry()
     record = install_registry.authenticate_install_key(payload.raw_key)
@@ -378,20 +427,7 @@ def activate_install_key(
             detail="Invalid or inactive install key.",
         )
 
-    if owner_key is not None:
-        expected_owner = _normalize_owner_key(owner_key)
-        record_owner = _normalize_owner_key(getattr(record, "owner_key", ""))
-        if expected_owner and record_owner and record_owner != expected_owner:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Install key {getattr(record, 'key_id', 'unknown')!r} does not belong to the supplied owner_key: expected {expected_owner!r}, got {record_owner!r}.",
-            )
-
-    if not _record_has_paid_entitlement(record):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="install_key_not_active_for_paid_entitlement",
-        )
+    _assert_paid_entitlement(record, owner_key, program=program)
 
     wallet_registry = get_unit_wallet_registry()
     wallet = wallet_registry.get_wallet(record.owner_key)
@@ -426,6 +462,7 @@ def activate_install_key(
 def record_usage(
     payload: RecordUsageRequest,
     owner_key: str | None = Header(default=None, alias="X-Owner-Key"),
+    program: str | None = Depends(_resolve_program_scope),
 ) -> RecordUsageResponse:
     install_registry = get_install_key_registry()
     record = install_registry.get_key_by_id(payload.key_id)
@@ -436,7 +473,7 @@ def record_usage(
             detail=f"Install key not found: {payload.key_id!r}",
         )
     if owner_key is not None:
-        _assert_paid_entitlement(record, owner_key)
+        _assert_paid_entitlement(record, owner_key, program=program)
     elif not _record_has_paid_entitlement(record):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -498,6 +535,7 @@ def record_usage(
 def revoke_install_key(
     key_id: str = Path(min_length=1, max_length=128),
     owner_key: str = Depends(_resolve_owner_key),
+    program: str | None = Depends(_resolve_program_scope),
 ) -> RevokeResponse:
     install_registry = get_install_key_registry()
     record = install_registry.get_key_by_id(key_id)
@@ -507,7 +545,7 @@ def revoke_install_key(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Install key not found: {key_id!r}",
         )
-    _assert_paid_entitlement(record, owner_key)
+    _assert_paid_entitlement(record, owner_key, program=program)
 
     try:
         updated = install_registry.revoke_key(key_id)
@@ -541,6 +579,7 @@ def get_key_usage(
     key_id: str = Path(min_length=1, max_length=128),
     limit: int = Query(default=50, ge=1, le=500),
     owner_key: str = Depends(_resolve_owner_key),
+    program: str | None = Depends(_resolve_program_scope),
 ) -> KeyUsageResponse:
     install_registry = get_install_key_registry()
     record = install_registry.get_key_by_id(key_id)
@@ -550,7 +589,7 @@ def get_key_usage(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Install key not found: {key_id!r}",
         )
-    _assert_paid_entitlement(record, owner_key)
+    _assert_paid_entitlement(record, owner_key, program=program)
 
     wallet_registry = get_unit_wallet_registry()
     wallet = wallet_registry.get_wallet(record.owner_key)

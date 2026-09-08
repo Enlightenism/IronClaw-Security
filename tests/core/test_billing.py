@@ -188,6 +188,24 @@ def test_resolve_billing_owner_generic_auth_does_not_take_over_billing_owner() -
     assert result == "buyer@ironclaw.test"
 
 
+@pytest.mark.parametrize(
+    "bad_value",
+    [
+        "ghu_secret123",
+        "ghs_secret123",
+        "pat_abc123",
+        "xoxb-abc123",
+        "xoxp-abc123",
+        "pk_live_123",
+        "rk_prod_123",
+        "system-platform-api-key",
+    ],
+)
+def test_resolve_billing_owner_rejects_additional_generic_platform_auth_tokens(bad_value: str) -> None:
+    result = resolve_billing_owner(SimpleNamespace(key_type="personal", org_id=None), bad_value)
+    assert result == ""
+
+
 def test_resolve_billing_owner_rejects_generic_platform_org_scope() -> None:
     ctx = SimpleNamespace(key_type="org", org_id="system-platform-api-key")
     result = resolve_billing_owner(ctx, "Buyer@IronClaw.TEST")

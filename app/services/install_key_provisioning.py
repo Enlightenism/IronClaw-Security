@@ -99,12 +99,60 @@ class InstallKeyProvisioningService:
         self._billing_registry = billing_registry or get_billing_registry()
 
     @staticmethod
-    def _normalize_owner_key(owner_key: str) -> str:
+    def _looks_like_generic_platform_auth(value: str | Any) -> bool:
+        normalized = str(value).strip().lower()
+        if not normalized:
+            return False
+        if normalized.startswith("ic_org_"):
+            return False
+        if normalized.startswith("ic_"):
+            return True
+
+        generic_prefixes = (
+            "sk_",
+            "pk_",
+            "rk_",
+            "ghp_",
+            "gho_",
+            "ghu_",
+            "ghs_",
+            "ghr_",
+            "ghl_",
+            "github_pat_",
+            "pat_",
+            "personal_access_token",
+            "xoxb-",
+            "xoxp-",
+            "xoxa-",
+            "xoxr-",
+            "token_",
+            "secret_",
+            "api_",
+            "api-key",
+            "api_key",
+            "platform-api-key",
+            "platform_api_key",
+            "system-api-key",
+            "system_api_key",
+            "internal-platform-api-key",
+            "internal_platform_api_key",
+            "bearer ",
+            "x-api-key",
+        )
+        if normalized.startswith(generic_prefixes):
+            return True
+
+        return ("platform" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized)) or ("system" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized)) or ("api" in normalized and "key" in normalized)
+
+    @classmethod
+    def _normalize_owner_key(cls, owner_key: str) -> str:
         if owner_key is None:
             raise ValueError("owner_key is required")
         normalized = str(owner_key).strip().lower()
         if not normalized:
             raise ValueError("owner_key cannot be blank")
+        if cls._looks_like_generic_platform_auth(normalized):
+            raise ValueError("System API keys and generic auth tokens are not valid install-key owners.")
         return normalized
 
     @staticmethod
@@ -145,10 +193,16 @@ class InstallKeyProvisioningService:
                 return self._normalize_owner_key(resolved)
 
         if org_id:
-            return self._normalize_owner_key(f"ic_org_{str(org_id).strip()}")
+            normalized_org_id = str(org_id).strip()
+            if self._looks_like_generic_platform_auth(normalized_org_id):
+                raise ValueError("System API keys and generic auth tokens are not valid install-key owners.")
+            return self._normalize_owner_key(f"ic_org_{normalized_org_id}")
 
         if buyer_email:
-            return self._normalize_owner_key(buyer_email)
+            normalized_email = str(buyer_email).strip()
+            if self._looks_like_generic_platform_auth(normalized_email):
+                raise ValueError("System API keys and generic auth tokens are not valid install-key owners.")
+            return self._normalize_owner_key(normalized_email)
 
         raise ValueError("Could not resolve purchaser identity: provide auth_ctx, buyer_email, or org_id")
 

@@ -15,6 +15,7 @@ from pydantic_core import PydanticCustomError
 
 from app.core.auth import AuthContext, require_auth_context
 from app.core.billing import resolve_billing_owner
+from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.core.install_keys import InstallKeyAlreadyExistsError, get_install_key_registry
 from app.core.unit_wallet import (
     TOKEN_CHUNK_SIZE,
@@ -552,7 +553,7 @@ def _provision_install_keys(
     results: list[InstallKeyDeliveryView] = []
     normalized_entitlement = _normalize_entitlement_status(entitlement_status)
 
-    for program in ("openclaw", "claude_code", "hermes"):
+    for program in InstallKeyFormatRegistry.list_programs():
         try:
             record = ik_registry.generate_install_key(
                 owner_key=owner_key,

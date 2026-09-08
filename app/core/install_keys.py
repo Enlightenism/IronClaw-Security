@@ -147,6 +147,74 @@ def _canonical_owner_key(owner_key: str | Any) -> str:
     return normalized
 
 
+def _looks_like_generic_platform_auth(value: str | Any) -> bool:
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return False
+    if normalized.startswith("ic_org_") or normalized.startswith("ic_install_"):
+        return False
+    if normalized.startswith("owner_") or normalized.startswith("customer_") or normalized.startswith("user_") or normalized.startswith("org_") or normalized.startswith("acct_"):
+        return False
+    if normalized.startswith("ic_"):
+        return True
+
+    generic_prefixes = (
+        "sk_",
+        "pk_",
+        "rk_",
+        "ghp_",
+        "gho_",
+        "ghu_",
+        "ghs_",
+        "ghr_",
+        "ghl_",
+        "github_pat_",
+        "pat_",
+        "personal_access_token",
+        "xoxb-",
+        "xoxp-",
+        "xoxa-",
+        "xoxr-",
+        "token_",
+        "secret_",
+        "api_",
+        "api-key",
+        "api_key",
+        "platform-api-key",
+        "platform_api_key",
+        "system-api-key",
+        "system_api_key",
+        "internal-platform-api-key",
+        "internal_platform_api_key",
+        "bearer ",
+        "x-api-key",
+    )
+    if normalized.startswith(generic_prefixes):
+        return True
+
+    return ("platform" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized)) or ("system" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized)) or ("api" in normalized and "key" in normalized)
+
+
+def _assert_valid_owner_identity(owner_key: str | Any, *, org_id: str | Any | None = None, customer_id: str | Any | None = None) -> str:
+    normalized_owner = _canonical_owner_key(owner_key)
+    if _looks_like_generic_platform_auth(normalized_owner):
+        raise ValueError("owner_key must be a canonical customer or org identity, not a generic platform auth value.")
+
+    if org_id is not None:
+        normalized_org_id = str(org_id).strip().lower()
+        if not normalized_org_id:
+            raise ValueError("org_id cannot be blank when provided")
+        if normalized_owner.startswith("ic_org_") and normalized_owner != f"ic_org_{normalized_org_id}":
+            raise ValueError(f"owner_key {normalized_owner!r} does not match org_id {normalized_org_id!r}")
+
+    if customer_id is not None:
+        normalized_customer_id = str(customer_id).strip()
+        if not normalized_customer_id:
+            raise ValueError("customer_id cannot be blank when provided")
+
+    return normalized_owner
+
+
 def _normalize_program(program: str | Any) -> ProgramCode:
     candidate = str(program).strip().lower() if program is not None else ""
     if not candidate:
@@ -279,7 +347,17 @@ class InstallKeyRecord:
             raise ValueError(f"Invalid program: {self.program!r}. Must be one of {sorted(_VALID_PROGRAMS)}")
         if self.units_consumed < 0:
             raise ValueError("units_consumed cannot be negative")
-        self.owner_key = _canonical_owner_key(self.owner_key)
+
+        if self.raw_key:
+            expected_prefix = _PREFIX_BY_PROGRAM.get(self.program, "")
+            if expected_prefix and not self.raw_key.startswith(expected_prefix):
+                raise ValueError(f"raw_key prefix does not match program {self.program!r}; expected {expected_prefix!r} but got {self.raw_key[: len(expected_prefix)]!r}.")
+
+        self.owner_key = _assert_valid_owner_identity(self.owner_key, org_id=self.org_id, customer_id=self.customer_id)
+        if self.org_id is not None and self.owner_key.startswith("ic_org_"):
+            expected_org_owner = f"ic_org_{str(self.org_id).strip().lower()}"
+            if self.owner_key != expected_org_owner:
+                raise ValueError(f"owner_key {self.owner_key!r} does not match org_id {str(self.org_id).strip().lower()!r}")
 
         normalized_payment_status = _normalize_payment_status(self.payment_status)
         normalized_entitlement_status = _normalize_entitlement_status(self.entitlements_status)
@@ -386,6 +464,10 @@ def _record_from_row(row: dict[str, Any], *, raw_key: str = "") -> InstallKeyRec
     raw_key_hash_value = row.get("raw_key_hash") or ""
     if raw_key and not raw_key_hash_value:
         raw_key_hash_value = _hash_key(raw_key)
+
+    owner_key = row.get("owner_key")
+    if owner_key is not None:
+        _assert_valid_owner_identity(owner_key, org_id=row.get("org_id"), customer_id=row.get("customer_id"))
 
     record = InstallKeyRecord(
         key_id=row["key_id"],
@@ -639,7 +721,7 @@ class InstallKeyRegistry:
         if normalized_program in _CONNECTOR_PROGRAMS:
             raise ValueError("Security Guardian is a shared install-key connector and cannot be issued as a runtime install key.")
 
-        normalized_owner = _canonical_owner_key(owner_key)
+        normalized_owner = _assert_valid_owner_identity(owner_key, org_id=org_id, customer_id=customer_id)
         if not str(subscription_id).strip():
             raise ValueError("subscription_id is required for paid issuance")
 

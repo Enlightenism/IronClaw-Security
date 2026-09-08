@@ -248,3 +248,12 @@ def test_invalid_platform_key_checks_fail_cleanly(platform_name: str | None, can
     router = PlatformInstallKeyRouter()
 
     assert router.is_valid_platform_key(platform_name, candidate) is False
+
+
+def test_validate_platform_key_rejects_wrong_runtime_family_before_use() -> None:
+    router = PlatformInstallKeyRouter()
+
+    with pytest.raises(ValueError, match="does not match|wrong runtime family"):
+        router.validate_platform_key("cursor", "ic_install_claude_code_secret_123")
+
+    assert router.is_valid_platform_key("cursor", "ic_install_claude_code_secret_123") is False

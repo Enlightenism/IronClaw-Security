@@ -994,6 +994,65 @@ describe("dashboard structure", () => {
     expect(screen.getByTestId("hermes-card")).toHaveTextContent("Hermes");
   });
 
+  it("prefers the current owner's active runtime key over stale duplicate entries", async () => {
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard/overview") {
+        return Promise.resolve({
+          data: {
+            ...DEFAULT_DASH,
+            owner_key: "org-abc",
+            metadata: { owner_key: "org-abc" },
+            install_keys: [
+              {
+                program: "claude_code",
+                owner_key: "other-owner",
+                status: "active",
+                masked_key: "ic_install_claude_code_...foreign",
+                metadata: {},
+              },
+              {
+                program: "claude_code",
+                owner_key: "org-abc",
+                status: "locked",
+                masked_key: "",
+                metadata: {
+                  placeholder: "Keys will be generated after purchase",
+                },
+              },
+              {
+                program: "claude_code",
+                owner_key: "org-abc",
+                status: "active",
+                masked_key: "ic_install_claude_code_...current",
+                metadata: {},
+              },
+            ],
+          },
+        });
+      }
+      if (url === "/integrations/token") {
+        return Promise.resolve({
+          data: {
+            status: "ok",
+            claude_code_command: "ironclaw --token abc",
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    await renderDashboard();
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("install-key-card-claude_code-value"),
+      ).toHaveValue("ic_install_claude_code_...current");
+      expect(
+        screen.getByTestId("install-key-card-claude_code-copy"),
+      ).toBeInTheDocument();
+    });
+  });
+
   it("renders a copyable textarea for a generated Hermes install key", async () => {
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard/overview") {

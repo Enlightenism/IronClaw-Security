@@ -142,16 +142,58 @@ class TestInstallKeyRecordPostInit(unittest.TestCase):
     """InstallKeyRecord.__post_init__ validation."""
 
     def _valid_record(self, **overrides) -> InstallKeyRecord:
+        program = overrides.get("program", "openclaw")
+        normalized_program = program.replace(" ", "_").replace("-", "_").lower()
+        if normalized_program == "open_claw":
+            normalized_program = "openclaw"
+        if normalized_program == "cursor_agent":
+            normalized_program = "cursor"
+        if normalized_program == "goose_agent":
+            normalized_program = "goose"
+        if normalized_program == "gemini_cli":
+            normalized_program = "gemini_cli"
+        if normalized_program == "github_copilot":
+            normalized_program = "copilot"
+        if normalized_program == "security_guardian":
+            normalized_program = "security_guardian"
+        if normalized_program == "hermes_agent":
+            normalized_program = "hermes"
+
+        prefix_map = {
+            "openclaw": _OPENCLAW_PREFIX,
+            "claude_code": _CLAUDE_PREFIX,
+            "cursor": _CURSOR_PREFIX,
+            "goose": _GOOSE_PREFIX,
+            "gemini_cli": _GEMINI_PREFIX,
+            "copilot": _COPILOT_PREFIX,
+            "hermes": _HERMES_PREFIX,
+            "security_guardian": _SKILLS_PREFIX,
+        }
+
         defaults = dict(
             key_id="ik_test001",
             owner_key=_OWNER,
             subscription_id=_SUB_ID,
             program="openclaw",
-            raw_key=_OPENCLAW_PREFIX + "abc123",
+            raw_key=(prefix_map.get(normalized_program, _OPENCLAW_PREFIX) + "abc123"),
             raw_key_hash="deadbeef" * 8,
             masked_key="ic_install...5678",
         )
         defaults.update(overrides)
+        if "program" in overrides:
+            program_value = overrides["program"]
+            canonical = program_value.replace(" ", "_").replace("-", "_").lower()
+            if canonical == "open_claw":
+                canonical = "openclaw"
+            if canonical == "cursor_agent":
+                canonical = "cursor"
+            if canonical == "goose_agent":
+                canonical = "goose"
+            if canonical == "github_copilot":
+                canonical = "copilot"
+            if canonical == "hermes_agent":
+                canonical = "hermes"
+            defaults["raw_key"] = prefix_map.get(canonical, _OPENCLAW_PREFIX) + "abc123"
         return InstallKeyRecord(**defaults)
 
     def test_valid_openclaw_program_does_not_raise(self):
@@ -432,6 +474,52 @@ class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
         assert record.owner_key == "buyer@ironclaw.test"
         assert len(reg.get_keys_for_owner("BUYER@IRONCLAW.TEST")) == 1
 
+    def test_generate_for_paid_customer_rejects_generic_platform_auth_owner(self):
+        reg = self._registry()
+        for bad_owner in ("ghp_secret123", "ghu_secret123", "github_pat_abc123", "sk_live_abc123", "xoxb-abc123", "platform_api_key", "system_api_key"):
+            with self.assertRaises(ValueError):
+                reg.generate_for_paid_customer(
+                    owner_key=bad_owner,
+                    subscription_id=_SUB_ID,
+                    program="openclaw",
+                    payment_status="paid",
+                    entitlements_status="active",
+                    issued_after_payment=True,
+                    checkout_session_id=_CHECKOUT_SESSION_ID,
+                    purchase_reference=_PURCHASE_REFERENCE,
+                )
+
+    def test_raw_key_prefix_must_match_program(self):
+        with self.assertRaises(ValueError):
+            InstallKeyRecord(
+                key_id="ik_program_prefix_mismatch",
+                owner_key=_OWNER,
+                subscription_id=_SUB_ID,
+                program="cursor",
+                raw_key=_OPENCLAW_PREFIX + "abc123",
+                raw_key_hash="deadbeef" * 8,
+                masked_key="ic_install...5678",
+                active=True,
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+            )
+
+    def test_generate_for_paid_customer_requires_org_owner_to_match_org_id(self):
+        reg = self._registry()
+        with self.assertRaises(ValueError):
+            reg.generate_for_paid_customer(
+                owner_key="ic_org_org_42",
+                subscription_id=_SUB_ID,
+                program="openclaw",
+                org_id="org_99",
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+                checkout_session_id=_CHECKOUT_SESSION_ID,
+                purchase_reference=_PURCHASE_REFERENCE,
+            )
+
     def test_record_normalizes_owner_key_to_canonical_value(self):
         record = InstallKeyRecord(
             key_id="ik_test_owner_normalize",
@@ -447,6 +535,39 @@ class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
             issued_after_payment=True,
         )
         assert record.owner_key == "buyer@ironclaw.test"
+
+    def test_active_record_rejects_generic_platform_auth_owner(self):
+        with self.assertRaises(ValueError):
+            InstallKeyRecord(
+                key_id="ik_generic_owner",
+                owner_key="ghp_secret123",
+                subscription_id=_SUB_ID,
+                program="openclaw",
+                raw_key=_OPENCLAW_PREFIX + "abc123",
+                raw_key_hash="deadbeef" * 8,
+                masked_key="ic_install...5678",
+                active=True,
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+            )
+
+    def test_org_scoped_owner_matches_org_id(self):
+        with self.assertRaises(ValueError):
+            InstallKeyRecord(
+                key_id="ik_org_mismatch",
+                owner_key="ic_org_org_42",
+                org_id="org_99",
+                subscription_id=_SUB_ID,
+                program="openclaw",
+                raw_key=_OPENCLAW_PREFIX + "abc123",
+                raw_key_hash="deadbeef" * 8,
+                masked_key="ic_install...5678",
+                active=True,
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+            )
 
     def test_different_programs_same_owner_does_not_raise(self):
         reg = self._registry()

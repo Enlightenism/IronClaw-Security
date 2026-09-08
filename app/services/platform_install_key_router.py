@@ -42,11 +42,28 @@ class PlatformInstallKeyRoute:
         normalized = InstallKeyFormatRegistryService.normalize_platform(platform_name)
         return normalized in self.group_platforms
 
-    def is_valid_for_key(self, candidate: str | None) -> bool:
+    def validate_key(self, candidate: str | None) -> PlatformInstallKeyRoute:
         if candidate is None:
-            return False
+            raise ValueError("candidate install key is required")
         normalized = str(candidate).strip()
-        return bool(normalized) and normalized.startswith(self.prefix)
+        if not normalized:
+            raise ValueError("candidate install key is required")
+        if not normalized.startswith(self.prefix):
+            raise ValueError(f"Install key {candidate!r} does not match the canonical {self.program} family prefix {self.prefix!r}.")
+        try:
+            parsed_format = InstallKeyFormatRegistryService.resolve_for_key(normalized)
+        except ValueError as exc:
+            raise ValueError(f"Install key {candidate!r} is not a supported install key for the {self.program} runtime family.") from exc
+        if parsed_format.program != self.program:
+            raise ValueError(f"Install key {candidate!r} belongs to the {parsed_format.program} family, not the requested {self.program} runtime family.")
+        return self
+
+    def is_valid_for_key(self, candidate: str | None) -> bool:
+        try:
+            self.validate_key(candidate)
+            return True
+        except ValueError:
+            return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,12 +193,17 @@ class PlatformInstallKeyRouter:
         except ValueError:
             return False
 
+    def validate_platform_key(self, platform_name: str | None, candidate: str | None) -> PlatformInstallKeyRoute:
+        if platform_name is None:
+            raise ValueError("platform_name is required")
+        route = self.resolve_platform(platform_name)
+        route.validate_key(candidate)
+        return route
+
     def is_valid_platform_key(self, platform_name: str | None, candidate: str | None) -> bool:
-        if platform_name is None or candidate is None:
-            return False
         try:
-            route = self.resolve_platform(platform_name)
-            return route.is_valid_for_key(candidate)
+            self.validate_platform_key(platform_name, candidate)
+            return True
         except ValueError:
             return False
 

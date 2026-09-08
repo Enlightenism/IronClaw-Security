@@ -249,6 +249,35 @@ def test_provision_for_program_rejects_unpaid_existing_or_invalid_entitlement_st
         )
 
 
+def test_provision_for_program_rejects_generic_platform_auth_owner_tokens() -> None:
+    service = InstallKeyProvisioningService(
+        install_key_registry=MagicMock(),
+        wallet_registry=MagicMock(),
+        billing_registry=MagicMock(has_active_subscription=MagicMock(return_value=True)),
+    )
+
+    with pytest.raises(ValueError, match="not valid install-key owners"):
+        service.provision_for_program(
+            owner_key="ghu_secret123",
+            subscription_id="sub_123",
+            program="openclaw",
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=True,
+        )
+
+
+def test_resolve_owner_key_rejects_generic_buyer_email_tokens() -> None:
+    service = InstallKeyProvisioningService(
+        install_key_registry=MagicMock(),
+        wallet_registry=MagicMock(),
+        billing_registry=MagicMock(has_active_subscription=MagicMock(return_value=True)),
+    )
+
+    with pytest.raises(ValueError, match="not valid install-key owners"):
+        service.resolve_owner_key(auth_ctx=None, buyer_email="xoxb-abc123")
+
+
 def test_provision_for_program_accepts_aliases_for_supported_runtimes() -> None:
     service = InstallKeyProvisioningService(
         install_key_registry=MagicMock(),

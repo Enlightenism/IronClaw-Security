@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from app.core.install_key_formats import get_install_key_format_registry
 from app.core.install_keys import get_install_key_registry
 from app.services.integrationinstaller import get_integration_installer
+from app.services.platform_install_key_router import get_platform_install_key_router
 
 router = APIRouter(prefix="/integrations", tags=["integration-installer"])
 
@@ -232,6 +233,25 @@ def _require_paid_install_key(
 
     candidate = str(install_key).strip()
     expected_program = _infer_expected_program(integration_id, platform=platform)
+    normalized_owner = str(owner_key).strip().lower()
+    standardized_platform = platform or integration_id or ""
+
+    if standardized_platform:
+        try:
+            router = get_platform_install_key_router()
+            route = router.validate_platform_key(standardized_platform, candidate)
+            expected_program = route.program if expected_program is None else expected_program
+            if route.program != expected_program and expected_program is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="A valid paid install key is required; install key unavailable until payment is complete",
+                )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="A valid paid install key is required; install key unavailable until payment is complete",
+            ) from exc
+
     registry = get_install_key_format_registry()
     valid_prefixes = tuple(spec.prefix for spec in registry.list_specs()) if expected_program is None else (registry.get_spec(expected_program).prefix,)
 
@@ -252,9 +272,8 @@ def _require_paid_install_key(
             detail="A valid paid install key is required; install key unavailable until payment is complete",
         )
 
-    normalized_owner = str(owner_key).strip().lower()
-    registry = get_install_key_registry()
-    record = registry.authenticate_install_key(candidate)
+    key_registry = get_install_key_registry()
+    record = key_registry.authenticate_install_key(candidate)
 
     if record is None or not getattr(record, "active", True):
         raise HTTPException(
