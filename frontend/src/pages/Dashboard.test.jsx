@@ -116,13 +116,20 @@ const DEFAULT_DASH = {
 
 const DEFAULT_TOKENS = {
   status: "ok",
-  claude_code_command: "ironclaw --token abc",
-  openclaw_command: "openclaw --token xyz",
-  cursor_command: "cursor --token cursor-123",
-  goose_command: "goose --token goose-456",
-  gemini_cli_command: "gemini --token gemini-789",
-  copilot_command: "copilot --token copilot-001",
-  hermes_command: "hermes --token hermes-999",
+  claude_code_command:
+    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_...abcd",
+  openclaw_command:
+    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user --key ic_install_openclaw_...abcd",
+  cursor_command:
+    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user --key ic_install_cursor_...ijkl",
+  goose_command:
+    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user --key ic_install_goose_...mnop",
+  gemini_cli_command:
+    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user --key ic_install_gemini_cli_...qrst",
+  copilot_command:
+    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user --key ic_install_copilot_...uvwx",
+  hermes_command:
+    "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ic_install_hermes_...abcd",
 };
 
 function makeAttack(index) {
@@ -933,6 +940,45 @@ describe("dashboard structure", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("hides keyless runtime commands even when a valid install key exists", async () => {
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard/overview") {
+        return Promise.resolve({
+          data: {
+            ...DEFAULT_DASH,
+            install_keys: [
+              {
+                program: "claude_code",
+                status: "active",
+                masked_key: "ic_install_claude_code_...abcd",
+                metadata: {},
+              },
+            ],
+          },
+        });
+      }
+      if (url === "/integrations/token") {
+        return Promise.resolve({
+          data: {
+            status: "ok",
+            claude_code_command:
+              "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user",
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    await renderDashboard();
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("install-key-card-claude_code-value"),
+      ).toHaveValue("ic_install_claude_code_...abcd");
+      expect(screen.queryByTestId("claude-code-card")).not.toBeInTheDocument();
+    });
+  });
+
   it("uses the current owner-scoped install_keys to map runtime cards and commands", async () => {
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard/overview") {
@@ -971,8 +1017,10 @@ describe("dashboard structure", () => {
         return Promise.resolve({
           data: {
             status: "ok",
-            hermes_command: "hermes --token hermes-999",
-            claude_code_command: "ironclaw --token abc",
+            hermes_command:
+              "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ic_install_hermes_...abcd",
+            claude_code_command:
+              "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_...foreign",
           },
         });
       }
@@ -1034,7 +1082,8 @@ describe("dashboard structure", () => {
         return Promise.resolve({
           data: {
             status: "ok",
-            claude_code_command: "ironclaw --token abc",
+            claude_code_command:
+              "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_...current",
           },
         });
       }
@@ -1074,7 +1123,8 @@ describe("dashboard structure", () => {
         return Promise.resolve({
           data: {
             status: "ok",
-            hermes_command: "hermes --token hermes-999",
+            hermes_command:
+              "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ic_install_hermes_...abcd",
           },
         });
       }
@@ -1113,7 +1163,11 @@ describe("dashboard structure", () => {
       }
       if (url === "/integrations/token") {
         return Promise.resolve({
-          data: { status: "ok", claude_code_command: "ironclaw --token abc" },
+          data: {
+            status: "ok",
+            claude_code_command:
+              "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_...abcd",
+          },
         });
       }
       return Promise.reject(new Error(`Unexpected GET ${url}`));
@@ -1230,9 +1284,12 @@ describe("dashboard structure", () => {
         return Promise.resolve({
           data: {
             status: "ok",
-            claude_code_command: "ironclaw --token abc",
-            goose_command: "goose --token goose-456",
-            hermes_command: "hermes --token hermes-999",
+            claude_code_command:
+              "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_...abcd",
+            goose_command:
+              "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user --key ic_install_goose_...mnop",
+            hermes_command:
+              "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ic_install_hermes_...efgh",
           },
         });
       }
@@ -1293,8 +1350,10 @@ describe("dashboard structure", () => {
         return Promise.resolve({
           data: {
             status: "ok",
-            cursor_command: "cursor --token cursor-123",
-            copilot_command: "copilot --token copilot-001",
+            cursor_command:
+              "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user --key ic_install_cursor_...ijkl",
+            copilot_command:
+              "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user --key ic_install_copilot_...uvwx",
           },
         });
       }

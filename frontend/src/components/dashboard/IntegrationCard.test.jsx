@@ -17,49 +17,49 @@ const RUNTIME_CARDS = [
     title: "Claude Code",
     metadataKey: "claude_code",
     command:
-      "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user",
+      "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_...abcd",
     testid: "claude-code-card",
   },
   {
     title: "OpenClaw",
     metadataKey: "openclaw",
     command:
-      "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user",
+      "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user --key ic_install_openclaw_...abcd",
     testid: "openclaw-card",
   },
   {
     title: "Goose",
     metadataKey: "goose",
     command:
-      "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user",
+      "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user --key ic_install_goose_...mnop",
     testid: "goose-card",
   },
   {
     title: "Gemini CLI",
     metadataKey: "gemini_cli",
     command:
-      "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user",
+      "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user --key ic_install_gemini_cli_...qrst",
     testid: "gemini_cli-card",
   },
   {
     title: "Cursor",
     metadataKey: "cursor",
     command:
-      "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user",
+      "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user --key ic_install_cursor_...ijkl",
     testid: "cursor-card",
   },
   {
     title: "GitHub Copilot",
     metadataKey: "copilot",
     command:
-      "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user",
+      "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user --key ic_install_copilot_...uvwx",
     testid: "copilot-card",
   },
   {
     title: "Hermes",
     metadataKey: "hermes",
     command:
-      "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security",
+      "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ic_install_hermes_...abcd",
     testid: "hermes-card",
   },
 ];
@@ -109,37 +109,37 @@ describe("IntegrationCard", () => {
         expect.objectContaining({
           title: "Claude Code",
           command:
-            "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user",
+            "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_...abcd",
         }),
         expect.objectContaining({
           title: "OpenClaw",
           command:
-            "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user",
+            "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user --key ic_install_openclaw_...abcd",
         }),
         expect.objectContaining({
           title: "Cursor",
           command:
-            "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user",
+            "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user --key ic_install_cursor_...ijkl",
         }),
         expect.objectContaining({
           title: "Goose",
           command:
-            "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user",
+            "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user --key ic_install_goose_...mnop",
         }),
         expect.objectContaining({
           title: "Gemini CLI",
           command:
-            "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user",
+            "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user --key ic_install_gemini_cli_...qrst",
         }),
         expect.objectContaining({
           title: "GitHub Copilot",
           command:
-            "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user",
+            "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user --key ic_install_copilot_...uvwx",
         }),
         expect.objectContaining({
           title: "Hermes",
           command:
-            "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security",
+            "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ic_install_hermes_...abcd",
         }),
       ]),
     );
@@ -182,7 +182,7 @@ describe("IntegrationCard", () => {
     render(
       <IntegrationCard
         title="claude_code"
-        command="placeholder command"
+        command="gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_...abcd"
         tint="gold"
         testid="claude-code-card-placeholder-fallback"
       />,
@@ -191,8 +191,21 @@ describe("IntegrationCard", () => {
     expect(
       screen.getByTestId("claude-code-card-placeholder-fallback"),
     ).toHaveTextContent(
-      "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user",
+      "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_...abcd",
     );
+  });
+
+  it("ignores keyless fallback commands and does not render a copyable install command without --key", () => {
+    const { container } = render(
+      <IntegrationCard
+        title="Claude Code"
+        command="gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user"
+        tint="gold"
+        testid="claude-code-card"
+      />,
+    );
+
+    expect(container.firstChild).toBeNull();
   });
 
   it("copies the runtime command when the copy button is clicked", async () => {

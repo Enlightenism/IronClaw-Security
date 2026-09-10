@@ -115,6 +115,19 @@ const normalizeProgramKey = (value) => {
   return value.trim().toLowerCase().replace(/[-_]+/g, "_");
 };
 
+const hasEmbeddedInstallCommand = (value) => {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const candidate = value.trim();
+  if (!candidate) {
+    return false;
+  }
+
+  return /--key\s+ic_install_[A-Za-z0-9_./~:-]+/i.test(candidate);
+};
+
 const normalizePackageId = (packageId) => {
   switch (packageId) {
     case "pkg_5000":
@@ -842,9 +855,9 @@ const Dashboard = () => {
 
   const integrationCards = useMemo(() => {
     const hasUnlockedToken =
-      tokens?.status === "ok" ||
+      tokens?.status === "ok" &&
       INSTALL_KEY_PROGRAMS.some(({ commandKey }) =>
-        Boolean(tokens?.[commandKey]),
+        hasEmbeddedInstallCommand(tokens?.[commandKey]),
       );
 
     if (!hasUnlockedToken) {
@@ -883,7 +896,7 @@ const Dashboard = () => {
         if (ownerScopedPrograms.size > 0) {
           return ownerScopedPrograms.has(program);
         }
-        return Boolean(tokens?.[commandKey]);
+        return hasEmbeddedInstallCommand(tokens?.[commandKey]);
       },
     );
 

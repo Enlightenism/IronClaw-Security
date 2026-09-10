@@ -198,17 +198,17 @@ def _platform_install_command(program: str | None, install_key: str) -> str:
         return ""
 
     command_map = {
-        "claude_code": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user",
-        "openclaw": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user",
-        "cursor": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user",
-        "goose": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user",
-        "gemini_cli": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user",
-        "copilot": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user",
-        "hermes": "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security",
+        "claude_code": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key {key}",
+        "openclaw": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user --key {key}",
+        "cursor": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user --key {key}",
+        "goose": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user --key {key}",
+        "gemini_cli": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user --key {key}",
+        "copilot": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user --key {key}",
+        "hermes": "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key {key}",
     }
     command = command_map.get(spec.program)
     if command is not None:
-        return command
+        return command.format(key=install_key) if install_key else ""
     return f"npx ironclaw-install --key {install_key} --platform {spec.program}"
 
 

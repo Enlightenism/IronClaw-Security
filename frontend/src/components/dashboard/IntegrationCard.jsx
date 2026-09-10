@@ -2,23 +2,15 @@ import { useState } from "react";
 import { Copy, Check, Terminal } from "lucide-react";
 import { toast } from "sonner";
 
-const CANONICAL_RUNTIME_COMMANDS = {
-  claude_code:
-    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user",
-  openclaw:
-    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user",
-  cursor:
-    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user",
-  goose:
-    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user",
-  gemini_cli:
-    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user",
-  copilot:
-    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user",
-  hermes:
-    "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security",
+const INSTALL_KEY_PREFIXES = {
+  claude_code: "ic_install_claude_code_",
+  openclaw: "ic_install_openclaw_",
+  cursor: "ic_install_cursor_",
+  goose: "ic_install_goose_",
+  gemini_cli: "ic_install_gemini_cli_",
+  copilot: "ic_install_copilot_",
+  hermes: "ic_install_hermes_",
 };
-
 const SECURITY_GUARDIAN_ALIASES = new Set([
   "security guardian",
   "security_guardian",
@@ -124,6 +116,27 @@ const looksLikeTokenCommand = (value) => {
   );
 };
 
+const hasEmbeddedInstallKey = (command, runtimeKey) => {
+  if (!runtimeKey || typeof command !== "string") {
+    return false;
+  }
+
+  const candidate = command.trim();
+  if (!candidate) {
+    return false;
+  }
+
+  const prefix = INSTALL_KEY_PREFIXES[runtimeKey];
+  if (!prefix) {
+    return false;
+  }
+
+  return new RegExp(
+    `--key\\s+${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` + "[^\\s]+",
+    "i",
+  ).test(candidate);
+};
+
 const commandMatchesRuntime = (command, runtimeKey) => {
   if (!runtimeKey || typeof command !== "string") {
     return false;
@@ -131,6 +144,10 @@ const commandMatchesRuntime = (command, runtimeKey) => {
 
   const candidate = command.trim();
   if (!candidate || looksLikeTokenCommand(candidate)) {
+    return false;
+  }
+
+  if (!hasEmbeddedInstallKey(candidate, runtimeKey)) {
     return false;
   }
 
@@ -176,14 +193,13 @@ const resolveCommand = (title, command) => {
     return "";
   }
 
-  const canonicalCommand = CANONICAL_RUNTIME_COMMANDS[runtimeKey] || "";
   const rawCommand = typeof command === "string" ? command.trim() : "";
 
   if (rawCommand && commandMatchesRuntime(rawCommand, runtimeKey)) {
     return rawCommand;
   }
 
-  return canonicalCommand;
+  return "";
 };
 
 const IntegrationCard = ({ title, command, tint = "gold", testid }) => {

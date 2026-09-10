@@ -374,23 +374,23 @@ def test_integration_token_uses_paid_install_keys_not_platform_api_key(client: T
     ]
     assert "security-guardian" not in payload["supported_platforms"]
     assert "security-guardian" not in payload["install_metadata"]
-    assert payload["openclaw_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user"
-    assert payload["claude_code_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user"
-    assert payload["cursor_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user"
-    assert payload["goose_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user"
-    assert payload["gemini_cli_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user"
-    assert payload["copilot_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user"
-    assert payload["hermes_command"] == "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security"
+    assert payload["openclaw_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user --key ic_install_openclaw_...abcd"
+    assert payload["claude_code_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_...efgh"
+    assert payload["cursor_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user --key ic_install_cursor_...ijkl"
+    assert payload["goose_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user --key ic_install_goose_...mnop"
+    assert payload["gemini_cli_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user --key ic_install_gemini_cli_...qrst"
+    assert payload["copilot_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user --key ic_install_copilot_...uvwx"
+    assert payload["hermes_command"] == "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ic_install_hermes_...abcd"
     assert payload["install_metadata"]["cursor"]["program"] == "cursor"
     assert payload["install_metadata"]["hermes"]["program"] == "hermes"
     assert payload["security_guardian_command"] == ""
-    assert payload["command_metadata"]["claude-code"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user"
-    assert payload["command_metadata"]["openclaw"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user"
-    assert payload["command_metadata"]["cursor"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user"
-    assert payload["command_metadata"]["goose"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user"
-    assert payload["command_metadata"]["gemini-cli"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user"
-    assert payload["command_metadata"]["copilot"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user"
-    assert payload["command_metadata"]["hermes"] == "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security"
+    assert payload["command_metadata"]["claude-code"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_...efgh"
+    assert payload["command_metadata"]["openclaw"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user --key ic_install_openclaw_...abcd"
+    assert payload["command_metadata"]["cursor"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user --key ic_install_cursor_...ijkl"
+    assert payload["command_metadata"]["goose"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user --key ic_install_goose_...mnop"
+    assert payload["command_metadata"]["gemini-cli"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user --key ic_install_gemini_cli_...qrst"
+    assert payload["command_metadata"]["copilot"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user --key ic_install_copilot_...uvwx"
+    assert payload["command_metadata"]["hermes"] == "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ic_install_hermes_...abcd"
 
 
 def test_integration_list_endpoints_expose_canonical_platform_metadata(client: TestClient) -> None:
@@ -560,8 +560,8 @@ def test_integration_token_filters_out_non_runtime_and_shared_family_records(cli
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["status"] == "ok"
-    assert payload["openclaw_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user"
-    assert payload["claude_code_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user"
+    assert payload["openclaw_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user --key ic_install_openclaw_...abcd"
+    assert payload["claude_code_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_...efgh"
     assert payload["security_guardian_command"] == ""
     assert all(platform not in payload["install_metadata"] for platform in ("security-guardian",))
     assert set(payload["command_metadata"]) == {

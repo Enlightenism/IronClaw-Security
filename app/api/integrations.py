@@ -347,7 +347,7 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "slug": "claude-code",
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user",
+        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key {key}",
     },
     "openclaw": {
         "program": "openclaw",
@@ -355,7 +355,7 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "slug": "openclaw",
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user",
+        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user --key {key}",
     },
     "cursor": {
         "program": "cursor",
@@ -363,7 +363,7 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "slug": "cursor",
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user",
+        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user --key {key}",
     },
     "goose": {
         "program": "goose",
@@ -371,7 +371,7 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "slug": "goose",
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user",
+        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user --key {key}",
     },
     "gemini-cli": {
         "program": "gemini_cli",
@@ -379,7 +379,7 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "slug": "gemini-cli",
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user",
+        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user --key {key}",
     },
     "copilot": {
         "program": "copilot",
@@ -387,7 +387,7 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "slug": "copilot",
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user",
+        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user --key {key}",
     },
     "hermes": {
         "program": "hermes",
@@ -395,7 +395,7 @@ _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
         "slug": "hermes",
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security",
+        "command_template": "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key {key}",
     },
 }
 

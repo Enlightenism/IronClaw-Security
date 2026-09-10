@@ -122,6 +122,22 @@ class TestDashboard:
         d = r.json()
         token = d["user_token"]
         assert token == signup_user["user"]["user_token"]
+        supported_platforms = d.get("supported_platforms", [])
+        assert supported_platforms
+        assert "security-guardian" not in supported_platforms
+        assert "security-guardian" not in d.get("install_metadata", {})
+
+        for platform in supported_platforms:
+            command_field = f"{platform.replace('-', '_')}_command"
+            command = d.get(command_field, "")
+            install_key = str(d.get("install_metadata", {}).get(platform, {}).get("install_key") or "").strip()
+
+            assert command, f"missing command for {platform}"
+            assert "--key" in command, f"missing --key flag for {platform}"
+            assert install_key, f"missing install_key metadata for {platform}"
+            assert install_key in command, f"command for {platform} does not embed the install key"
+            assert platform.lower() in command.lower(), f"platform marker missing for {platform}"
+
         assert token in d["claude_code_command"]
         assert token in d["openclaw_command"]
         assert "claude-code" in d["claude_code_command"]

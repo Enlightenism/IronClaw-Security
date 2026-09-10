@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
+from app.routes.integrations.installer import _platform_install_command
 from app.services.integration_installer import (
     build_install_plan,
     install_integration,
@@ -27,6 +28,11 @@ def _fake_paid_install_key(owner_key: str = "owner-123", program: str = "opencla
             self.issued_after_payment = True
 
     return _FakeKeyRecord()
+
+
+def test_platform_install_command_embeds_install_key() -> None:
+    assert _platform_install_command("claude_code", "ic_install_claude_code_abc123") == ("gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_abc123")
+    assert _platform_install_command("hermes", "ic_install_hermes_abc123") == ("hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ic_install_hermes_abc123")
 
 
 def test_install_integration_dry_run_does_not_change_status():
