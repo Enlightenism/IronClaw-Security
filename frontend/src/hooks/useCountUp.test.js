@@ -78,6 +78,19 @@ describe("useCountUp", () => {
     expect(result.current).toBe(100);
   });
 
+  it("re-aligns to the canonical live value instead of restarting from a stale positive base on rerender", () => {
+    const { result, rerender } = renderHook(
+      ({ end, from }) => useCountUp(end, 900, [end], from),
+      { initialProps: { end: 732, from: 732 } },
+    );
+
+    expect(result.current).toBe(732);
+
+    rerender({ end: 980, from: 732 });
+
+    expect(result.current).toBe(980);
+  });
+
   it("never moves backward when the target is monotonic upward", () => {
     const { result, rerender } = renderHook(
       ({ end }) => useCountUp(end, 500, [end], 0),

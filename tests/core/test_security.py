@@ -269,28 +269,27 @@ def test_get_exposed_headers_uses_configured_values() -> None:
     assert get_exposed_headers(settings) == ["X-Request-ID", "X-Trace-ID"]
 
 
-def test_get_allowed_hosts_uses_effective_trusted_hosts() -> None:
+def test_get_allowed_hosts_uses_canonical_host_families_for_same_site_urls() -> None:
     settings = Settings(
         TRUSTED_HOSTS="moving-forward.ca,[www.moving-forward.ca](https://www.moving-forward.ca),moving-forward.ca",
     )
     assert get_allowed_hosts(settings) == [
         "moving-forward.ca",
-        "www.moving-forward.ca",
     ]
 
 
-def test_get_allowed_hosts_derives_from_allowed_origins_and_base_urls() -> None:
+def test_get_allowed_hosts_derives_canonical_hosts_from_allowed_origins_and_base_urls() -> None:
     settings = Settings(
         TRUSTED_HOSTS="",
-        ALLOWED_ORIGINS="https://moving-forward.ca,https://www.moving-forward.ca",
-        APP_BASE_URL="https://api.moving-forward.ca",
-        ENGINE_BASE_URL="https://engine.moving-forward.ca",
+        ALLOWED_ORIGINS="https://moving-forward.ca,https://www.moving-forward.ca,https://ironclaw-security.pages.dev",
+        APP_BASE_URL="http://localhost:3000",
+        ENGINE_BASE_URL="http://127.0.0.1:5173",
     )
     assert get_allowed_hosts(settings) == [
         "moving-forward.ca",
-        "www.moving-forward.ca",
-        "api.moving-forward.ca",
-        "engine.moving-forward.ca",
+        "ironclaw-security.pages.dev",
+        "localhost",
+        "127.0.0.1",
     ]
 
 

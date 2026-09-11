@@ -574,6 +574,54 @@ class TestCheckoutSessionRoutes:
             metadata={"source": "test", "package_id": "pkg5000", "org_id": ORG_ID},
         )
 
+    @pytest.mark.parametrize(
+        ("success_url", "cancel_url"),
+        [
+            ("https://moving-forward.ca/billing/success", "https://moving-forward.ca/billing/cancel"),
+            ("https://www.moving-forward.ca/billing/success", "https://www.moving-forward.ca/billing/cancel"),
+            ("https://ironclaw-security.pages.dev/billing/success", "https://ironclaw-security.pages.dev/billing/cancel"),
+            ("http://localhost:3000/billing/success", "http://localhost:3000/billing/cancel"),
+            ("http://127.0.0.1:5173/billing/success", "http://127.0.0.1:5173/billing/cancel"),
+        ],
+    )
+    def test_create_checkout_session_accepts_canonical_domain_variants(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+        success_url: str,
+        cancel_url: str,
+    ) -> None:
+        mock_svc.create_checkout_session.return_value = _obj_with_to_dict(
+            session_id=SESSION_ID,
+            checkout_url="https://checkout.stripe.com/c/pay/canonical",
+            org_id=ORG_ID,
+            mode=StripeCheckoutMode.PAYMENT.value,
+            price_id="price_direct_123",
+            quantity=1,
+            unit_credits=42,
+            expires_at=None,
+            metadata={"flow": "canonical", "org_id": ORG_ID},
+            created_at="2026-06-28T00:00:00Z",
+            schema_version="1.0",
+        )
+
+        resp = client.post(
+            _billing_path("/checkout/sessions"),
+            json={
+                "priceId": "price_direct_123",
+                "unitCredits": 42,
+                "quantity": 1,
+                "successUrl": success_url,
+                "cancelUrl": cancel_url,
+                "metadata": {"flow": "canonical"},
+            },
+            headers=_auth_headers(),
+        )
+
+        assert resp.status_code == 201
+        assert mock_svc.create_checkout_session.call_args.kwargs["success_url"] == success_url
+        assert mock_svc.create_checkout_session.call_args.kwargs["cancel_url"] == cancel_url
+
     def test_create_checkout_session_with_direct_price_id_requires_unit_credits(self, client: TestClient) -> None:
         resp = client.post(
             _billing_path("/checkout/sessions"),

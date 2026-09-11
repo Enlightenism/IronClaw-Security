@@ -113,6 +113,29 @@ describe("ParticleField", () => {
     );
   });
 
+  it("registers pointer-based interaction handlers for touch and mouse input", () => {
+    const addEventListenerSpy = jest.spyOn(window, "addEventListener");
+
+    render(<ParticleField density={50} />);
+
+    expect(addEventListenerSpy).toHaveBeenCalledWith(
+      "pointermove",
+      expect.any(Function),
+    );
+    expect(addEventListenerSpy).toHaveBeenCalledWith(
+      "pointerdown",
+      expect.any(Function),
+    );
+    expect(addEventListenerSpy).toHaveBeenCalledWith(
+      "pointerup",
+      expect.any(Function),
+    );
+    expect(addEventListenerSpy).toHaveBeenCalledWith(
+      "pointercancel",
+      expect.any(Function),
+    );
+  });
+
   it("checks for reduced motion before running expensive visual passes", () => {
     window.matchMedia.mockImplementation((query) => ({
       matches: query === "(prefers-reduced-motion: reduce)",

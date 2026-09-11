@@ -68,13 +68,15 @@ PACKAGE_UNIT_CREDITS: dict[str, int] = {
 VALID_CHECKOUT_MODES: frozenset[str] = frozenset(m.value for m in StripeCheckoutMode)
 VALID_PACKAGE_IDS: frozenset[str] = frozenset(PACKAGE_PRICE_ENV_MAP.keys())
 
-# Base allowed redirect hosts (kept as conservative default).
-# Additional allowed hosts will be derived from settings at runtime (see _allowed_redirect_hosts()).
+# Keep redirect validation aligned with the same canonical domain family used by settings.
+# This prevents the billing flow from behaving like different apps depending on whether the
+# user lands on the bare domain, the www alias, or a local dev origin.
 ALLOWED_REDIRECT_HOSTS: frozenset[str] = frozenset(
     {
         "moving-forward.ca",
-        "www.moving-forward.ca",
-        "ironclaw-security.onrender.com",
+        "ironclaw-security.pages.dev",
+        "localhost",
+        "127.0.0.1",
     }
 )
 
@@ -108,31 +110,59 @@ def _is_valid_http_url(value: str) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
-def _normalized_host_name(value: str) -> str:
+def _canonical_redirect_host(value: str) -> str:
+    if not isinstance(value, str):
+        value = str(value)
+
+    cleaned = value.strip().lower()
+    if not cleaned:
+        return ""
+
     try:
-        parsed = urlparse(value)
+        parsed = urlparse(cleaned)
     except Exception:
         return ""
-    return (parsed.netloc or "").strip().lower()
+
+    host = (parsed.netloc or parsed.path or "").strip()
+    if not host:
+        return ""
+
+    if host.startswith("[") and "]" in host:
+        host = host.strip("[]")
+
+    if ":" in host and host.rsplit(":", 1)[1].isdigit():
+        host = host.rsplit(":", 1)[0]
+
+    return host.removeprefix("www.")
+
+
+def _normalized_host_name(value: str) -> str:
+    return _canonical_redirect_host(value)
 
 
 def _allowed_redirect_hosts() -> frozenset[str]:
-    """Return the set of allowed redirect hosts including configured defaults and derived app host(s)."""
+    """Return the canonical redirect hosts used by the active app configuration."""
     hosts = set(ALLOWED_REDIRECT_HOSTS)
     try:
         settings = get_settings()
-        # normalized_app_base_url returns a normalized origin (e.g. "https://example.com")
+        for host in getattr(settings, "effective_allowed_redirect_hosts", []):
+            canonical = _canonical_redirect_host(host)
+            if canonical:
+                hosts.add(canonical)
+
+        for origin in getattr(settings, "effective_allowed_origins", []):
+            canonical = _canonical_redirect_host(origin)
+            if canonical:
+                hosts.add(canonical)
+
         app_base = getattr(settings, "normalized_app_base_url", "")
-        if app_base:
-            host = _normalized_host_name(app_base)
-            if host:
-                hosts.add(host)
-        # Also include engine/app host if present (safe to include common local dev hosts)
+        app_host = _canonical_redirect_host(app_base)
+        if app_host:
+            hosts.add(app_host)
+
         if not settings.is_production:
-            hosts.add("localhost")
-            hosts.add("127.0.0.1")
+            hosts.update({"localhost", "127.0.0.1"})
     except Exception:
-        # In case settings are not available, fall back to the static set.
         pass
     return frozenset(hosts)
 

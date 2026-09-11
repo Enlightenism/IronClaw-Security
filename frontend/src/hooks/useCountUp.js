@@ -45,9 +45,19 @@ export function useCountUp(end, duration = 1400, deps = [], from = 0) {
     typeof window !== "undefined" &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  const [value, setValue] = useState(prefersReduced ? target : start);
+  const [value, setValue] = useState(() => {
+    if (prefersReduced) {
+      return target;
+    }
+
+    if (start > 0 && target > start) {
+      return target;
+    }
+
+    return start;
+  });
   const frame = useRef(null);
-  const lastValueRef = useRef(prefersReduced ? target : start);
+  const lastValueRef = useRef(prefersReduced ? target : value);
   const previousDepsRef = useRef(dependencyKey);
 
   useEffect(() => {
@@ -77,6 +87,13 @@ export function useCountUp(end, duration = 1400, deps = [], from = 0) {
     if (safeTarget <= current) {
       setValue(current);
       lastValueRef.current = current;
+      previousDepsRef.current = depKey;
+      return undefined;
+    }
+
+    if (start > 0 && safeTarget > start && current <= start) {
+      setValue(safeTarget);
+      lastValueRef.current = safeTarget;
       previousDepsRef.current = depKey;
       return undefined;
     }

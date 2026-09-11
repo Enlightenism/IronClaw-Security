@@ -136,9 +136,9 @@ def _clean_host_token(value: str) -> str:
     if ":" in cleaned and not cleaned.startswith("["):
         host, _, port = cleaned.partition(":")
         if port.isdigit():
-            return host
+            cleaned = host
 
-    return cleaned
+    return cleaned.removeprefix("www.")
 
 
 def _coerce_csv_list(

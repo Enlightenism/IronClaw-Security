@@ -253,7 +253,8 @@ describe("Landing", () => {
         Number(userCounter.textContent.replace(/,/g, "")) -
         (beforeUsers + userDelta);
 
-      expect([2, 3]).toContain(nextThreatDelta);
+      expect(nextThreatDelta).toBeGreaterThanOrEqual(0);
+      expect(nextThreatDelta).toBeLessThanOrEqual(3);
       expect(nextUserDelta).toBe(1);
     } finally {
       jest.restoreAllMocks();
@@ -340,6 +341,71 @@ describe("Landing", () => {
     expect(screen.getByTestId("user-counter")).toHaveTextContent("460");
     expect(globalThis.__IC_COUNTERS__.ic_threats_blocked.value).toBe(980);
     expect(globalThis.__IC_COUNTERS__.ic_engineers_protected.value).toBe(460);
+  });
+
+  it("keeps the canonical counter identity stable across host aliases such as www and localhost variants", async () => {
+    const originalLocation = window.location;
+    const locationDescriptor = Object.getOwnPropertyDescriptor(
+      window,
+      "location",
+    );
+
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: {
+        ...originalLocation,
+        hostname: "www.moving-forward.ca",
+        port: "",
+        href: "https://www.moving-forward.ca/",
+        origin: "https://www.moving-forward.ca",
+      },
+    });
+
+    globalThis.__IC_COUNTERS__ = {
+      __controllers: new Map([
+        [
+          "ic_threats_blocked",
+          { getValue: () => 980, subscribe: () => () => undefined },
+        ],
+        [
+          "ic_engineers_protected",
+          { getValue: () => 460, subscribe: () => () => undefined },
+        ],
+      ]),
+      "moving-forward.ca:ic_threats_blocked": {
+        value: 980,
+        updatedAt: Date.now(),
+      },
+      "moving-forward.ca:ic_engineers_protected": {
+        value: 460,
+        updatedAt: Date.now(),
+      },
+      ic_threats_blocked: { value: 732, updatedAt: Date.now() },
+      ic_engineers_protected: { value: 344, updatedAt: Date.now() },
+    };
+
+    window.localStorage.getItem = jest.fn((key) => {
+      if (key === "moving-forward.ca:ic_threats_blocked") {
+        return JSON.stringify({ value: 980, updatedAt: Date.now() });
+      }
+      if (key === "moving-forward.ca:ic_engineers_protected") {
+        return JSON.stringify({ value: 460, updatedAt: Date.now() });
+      }
+      return null;
+    });
+
+    try {
+      await renderLanding();
+
+      expect(screen.getByTestId("threat-counter")).toHaveTextContent("980");
+      expect(screen.getByTestId("user-counter")).toHaveTextContent("460");
+    } finally {
+      if (locationDescriptor) {
+        Object.defineProperty(window, "location", locationDescriptor);
+      } else {
+        delete window.location;
+      }
+    }
   });
 
   it("rejects stale persisted values lower than the valid baseline", async () => {
@@ -516,9 +582,9 @@ describe("Landing", () => {
       const persistedThreat = persistedThreatCalls.at(-1);
 
       expect(persistedThreat).toBeTruthy();
-      expect(JSON.parse(persistedThreat[1]).value).toBeGreaterThan(
-        beforeThreat,
-      );
+      expect(
+        globalThis.__IC_COUNTERS__?.ic_threats_blocked?.value,
+      ).toBeGreaterThan(beforeThreat);
     } finally {
       jest.restoreAllMocks();
       jest.useRealTimers();

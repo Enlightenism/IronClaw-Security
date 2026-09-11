@@ -115,6 +115,39 @@ const fadeUp = {
 
 const COUNTER_TICK_MS = 10 * 60 * 1000;
 
+const COUNTER_SITE_ALIASES = Object.freeze({
+  "moving-forward.ca": "moving-forward.ca",
+  "www.moving-forward.ca": "moving-forward.ca",
+  "ironclaw-security.pages.dev": "ironclaw-security.pages.dev",
+  localhost: "localhost",
+  "127.0.0.1": "localhost",
+  "localhost:3000": "localhost",
+  "localhost:5173": "localhost",
+  "127.0.0.1:3000": "localhost",
+  "127.0.0.1:5173": "localhost",
+});
+
+const getCounterSiteAlias = () => {
+  if (typeof window === "undefined") {
+    return "default";
+  }
+
+  const host = window.location.hostname.toLowerCase();
+  const port = window.location.port;
+  const hostKey = port ? `${host}:${port}` : host;
+  const fallbackHost = host.replace(/^www\./, "") || "default";
+
+  return (
+    COUNTER_SITE_ALIASES[hostKey] ?? COUNTER_SITE_ALIASES[host] ?? fallbackHost
+  );
+};
+
+const getCounterKeys = (storageKey) => {
+  const siteAlias = getCounterSiteAlias();
+  const canonicalKey = `${siteAlias}:${storageKey}`;
+  return Array.from(new Set([storageKey, canonicalKey]));
+};
+
 const getCounterRegistry = () => {
   if (typeof globalThis === "undefined") {
     return new Map();
@@ -147,36 +180,66 @@ const isCounterSnapshotFresh = (base, value, updatedAt) => {
   return Date.now() - numericUpdatedAt <= 24 * 60 * 60 * 1000;
 };
 
+const collectCounterCandidates = (storageKey) => {
+  const candidates = [];
+
+  if (typeof globalThis !== "undefined") {
+    for (const key of getCounterKeys(storageKey)) {
+      const memoryStore = globalThis.__IC_COUNTERS__?.[key];
+      const memoryValue = Number(memoryStore?.value);
+      const memoryUpdatedAt = Number(memoryStore?.updatedAt);
+
+      if (Number.isFinite(memoryValue) && Number.isFinite(memoryUpdatedAt)) {
+        candidates.push({
+          value: memoryValue,
+          updatedAt: memoryUpdatedAt,
+          key,
+        });
+      }
+    }
+  }
+
+  if (typeof window !== "undefined") {
+    for (const key of getCounterKeys(storageKey)) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) {
+          continue;
+        }
+
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          const storedValue = Number(parsed.value);
+          const storedUpdatedAt = Number(parsed.updatedAt);
+
+          if (
+            Number.isFinite(storedValue) &&
+            Number.isFinite(storedUpdatedAt)
+          ) {
+            candidates.push({
+              value: storedValue,
+              updatedAt: storedUpdatedAt,
+              key,
+            });
+          }
+        }
+      } catch {
+        // ignore invalid persisted state and keep the live monotonic value.
+      }
+    }
+  }
+
+  return candidates;
+};
+
 const _getStoredCounterValue = (storageKey, base = 0) => {
   if (typeof window === "undefined") {
     return Number.NaN;
   }
 
   try {
-    const candidates = [];
-    const memoryStore = globalThis.__IC_COUNTERS__?.[storageKey];
-    const memoryValue = Number(memoryStore?.value);
-    const memoryUpdatedAt = Number(memoryStore?.updatedAt);
-
-    if (Number.isFinite(memoryValue) && Number.isFinite(memoryUpdatedAt)) {
-      candidates.push({ value: memoryValue, updatedAt: memoryUpdatedAt });
-    }
-
-    const raw = localStorage.getItem(storageKey);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object") {
-        const storedValue = Number(parsed.value);
-        const storedUpdatedAt = Number(parsed.updatedAt);
-
-        if (Number.isFinite(storedValue) && Number.isFinite(storedUpdatedAt)) {
-          candidates.push({ value: storedValue, updatedAt: storedUpdatedAt });
-        }
-      }
-    }
-
-    const validCandidates = candidates.filter(({ value, updatedAt }) =>
-      isCounterSnapshotFresh(base, value, updatedAt),
+    const validCandidates = collectCounterCandidates(storageKey).filter(
+      ({ value, updatedAt }) => isCounterSnapshotFresh(base, value, updatedAt),
     );
 
     if (validCandidates.length === 0) {
@@ -227,47 +290,21 @@ const readPersistedCounterState = (storageKey, base) => {
     return defaultState;
   }
 
-  const candidates = [];
-  const memoryStore = globalThis.__IC_COUNTERS__?.[storageKey];
-  const memoryValue = Number(memoryStore?.value);
-  const memoryUpdatedAt = Number(memoryStore?.updatedAt);
-
-  if (Number.isFinite(memoryValue) && Number.isFinite(memoryUpdatedAt)) {
-    candidates.push({ value: memoryValue, updatedAt: memoryUpdatedAt });
-  }
-
-  try {
-    const raw = localStorage.getItem(storageKey);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object") {
-        const value = Number(parsed.value);
-        const updatedAt = Number(parsed.updatedAt);
-
-        if (Number.isFinite(value) && Number.isFinite(updatedAt)) {
-          candidates.push({ value, updatedAt });
-        }
-      }
-    }
-  } catch {
-    // ignore invalid persisted state and fall back to the latest valid value.
-  }
-
-  const freshCandidates = candidates.filter(
+  const candidates = collectCounterCandidates(storageKey).filter(
     ({ value, updatedAt }) => !isCounterValueTooStale(base, value, updatedAt),
   );
 
-  if (freshCandidates.length === 0) {
+  if (candidates.length === 0) {
     return defaultState;
   }
 
-  freshCandidates.sort(
+  candidates.sort(
     (left, right) =>
       Number(right.value) - Number(left.value) ||
       Number(right.updatedAt) - Number(left.updatedAt),
   );
 
-  const bestCandidate = freshCandidates[0];
+  const bestCandidate = candidates[0];
   return {
     value: normalizeCounterValue(base, bestCandidate.value),
     updatedAt: bestCandidate.updatedAt,
@@ -283,33 +320,35 @@ const syncPersistedCounterState = (storageKey, base, nextValue) => {
 
   if (typeof window !== "undefined") {
     globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
-    const memoryValue = Number(globalThis.__IC_COUNTERS__?.[storageKey]?.value);
-    const persistedValue = Number.isFinite(currentValue) ? currentValue : base;
-    const lastKnownValue = Number.isFinite(memoryValue)
-      ? memoryValue
-      : persistedValue;
-    const finalValue = Math.max(
-      base,
-      safeValue,
-      lastKnownValue,
-      persistedValue,
-    );
+    const memoryKeys = getCounterKeys(storageKey);
+    const memoryValues = memoryKeys
+      .map((key) => Number(globalThis.__IC_COUNTERS__?.[key]?.value))
+      .filter(Number.isFinite);
+    const lastKnownValue =
+      memoryValues.length > 0
+        ? Math.max(base, ...memoryValues, currentValue)
+        : Math.max(base, currentValue);
+    const finalValue = Math.max(base, safeValue, lastKnownValue, currentValue);
 
-    globalThis.__IC_COUNTERS__[storageKey] = {
-      value: finalValue,
-      updatedAt: Date.now(),
-    };
+    for (const key of memoryKeys) {
+      globalThis.__IC_COUNTERS__[key] = {
+        value: finalValue,
+        updatedAt: Date.now(),
+      };
+    }
 
-    try {
-      localStorage.setItem(
-        storageKey,
-        JSON.stringify({
-          value: finalValue,
-          updatedAt: Date.now(),
-        }),
-      );
-    } catch {
-      // ignore storage errors.
+    for (const key of memoryKeys) {
+      try {
+        localStorage.setItem(
+          key,
+          JSON.stringify({
+            value: finalValue,
+            updatedAt: Date.now(),
+          }),
+        );
+      } catch {
+        // ignore storage errors.
+      }
     }
   }
 
@@ -384,34 +423,42 @@ const ensureSharedCounter = ({ base, step, storageKey }) => {
 
   if (validController) {
     const currentValue = Number(validController.getValue?.());
-    const memoryStore = globalThis.__IC_COUNTERS__?.[key];
-    const memoryValue = Number(memoryStore?.value);
-    const memoryUpdatedAt = Number(memoryStore?.updatedAt);
+    const memoryValues = getCounterKeys(key)
+      .map((counterKey) =>
+        Number(globalThis.__IC_COUNTERS__?.[counterKey]?.value),
+      )
+      .filter(Number.isFinite);
     const persistedState = readPersistedCounterState(key, base);
     const highestValidValue = Math.max(
       base,
       Number.isFinite(currentValue) ? currentValue : base,
-      Number.isFinite(memoryValue) ? memoryValue : base,
+      ...memoryValues,
       Number.isFinite(persistedState.value) ? persistedState.value : base,
     );
 
-    if (
-      !Number.isFinite(currentValue) ||
-      currentValue < base ||
-      (Number.isFinite(memoryUpdatedAt) &&
-        !isCounterSnapshotFresh(base, memoryValue, memoryUpdatedAt) &&
-        highestValidValue <= base)
-    ) {
+    if (!Number.isFinite(currentValue) || currentValue < base) {
       return resetSharedCounterController(key, base, step);
     }
 
-    validController.value = highestValidValue;
+    const controllerValue = Number.isFinite(currentValue) ? currentValue : base;
+    const safeControllerValue = Math.max(
+      base,
+      controllerValue,
+      highestValidValue,
+    );
+
+    if (highestValidValue > controllerValue) {
+      validController.value = highestValidValue;
+    }
+
     if (typeof globalThis !== "undefined") {
       globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
-      globalThis.__IC_COUNTERS__[key] = {
-        value: highestValidValue,
-        updatedAt: Date.now(),
-      };
+      for (const counterKey of getCounterKeys(key)) {
+        globalThis.__IC_COUNTERS__[counterKey] = {
+          value: safeControllerValue,
+          updatedAt: Date.now(),
+        };
+      }
     }
     return validController;
   }
@@ -469,7 +516,8 @@ const ensureSharedCounter = ({ base, step, storageKey }) => {
 
   if (typeof window !== "undefined") {
     const handleStorage = (event) => {
-      if (event.key !== storageKey || !event.newValue) {
+      const allowedKeys = new Set(getCounterKeys(storageKey));
+      if (!allowedKeys.has(event.key) || !event.newValue) {
         return;
       }
 

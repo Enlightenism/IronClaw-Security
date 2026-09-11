@@ -19,7 +19,7 @@ const ParticleField = ({ density = 180, paused = false }) => {
     let stars = [];
     let t = 0;
     let isPaused = document.hidden || paused;
-    const mouse = { x: -9999, y: -9999, active: false };
+    const pointer = { x: -9999, y: -9999, active: false };
     const frameInterval = 1000 / 30;
     const palette = [
       "255, 215, 0",
@@ -160,29 +160,68 @@ const ParticleField = ({ density = 180, paused = false }) => {
       }
     };
 
+    const getPointerPoint = (event) => {
+      const source = event?.touches?.[0] ?? event?.changedTouches?.[0] ?? event;
+
+      if (
+        !source ||
+        typeof source.clientX !== "number" ||
+        typeof source.clientY !== "number"
+      ) {
+        return null;
+      }
+
+      return {
+        x: source.clientX,
+        y: source.clientY,
+      };
+    };
+
+    const updatePointerPosition = (event) => {
+      const point = getPointerPoint(event);
+      if (!point) {
+        return;
+      }
+
+      const rect = canvas.getBoundingClientRect();
+      const nextX = point.x - rect.left;
+      const nextY = point.y - rect.top;
+
+      pointer.x = nextX;
+      pointer.y = nextY;
+      pointer.active =
+        nextX >= 0 && nextX <= width && nextY >= 0 && nextY <= height;
+    };
+
+    const clearPointer = () => {
+      pointer.x = -9999;
+      pointer.y = -9999;
+      pointer.active = false;
+    };
+
     const renderPointerAttraction = () => {
-      if (prefersReducedMotion() || !mouse.active || stars.length === 0) {
+      if (prefersReducedMotion() || !pointer.active || stars.length === 0) {
         return;
       }
 
       const halo = ctx.createRadialGradient(
-        mouse.x,
-        mouse.y,
+        pointer.x,
+        pointer.y,
         0,
-        mouse.x,
-        mouse.y,
+        pointer.x,
+        pointer.y,
         90,
       );
       halo.addColorStop(0, "rgba(255,215,0,0.10)");
       halo.addColorStop(1, "rgba(255,215,0,0)");
       ctx.fillStyle = halo;
       ctx.beginPath();
-      ctx.arc(mouse.x, mouse.y, 90, 0, Math.PI * 2);
+      ctx.arc(pointer.x, pointer.y, 90, 0, Math.PI * 2);
       ctx.fill();
 
       for (const star of stars) {
-        const dx = star.x - mouse.x;
-        const dy = star.y - mouse.y;
+        const dx = star.x - pointer.x;
+        const dy = star.y - pointer.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
         if (distance < 230 && distance > 0) {
@@ -191,7 +230,7 @@ const ParticleField = ({ density = 180, paused = false }) => {
           ctx.strokeStyle = `rgba(255, 215, 0, ${alpha})`;
           ctx.lineWidth = 0.9;
           ctx.moveTo(star.x, star.y);
-          ctx.lineTo(mouse.x, mouse.y);
+          ctx.lineTo(pointer.x, pointer.y);
           ctx.stroke();
 
           star.x -= (dx / distance) * attractionStrength;
@@ -279,25 +318,36 @@ const ParticleField = ({ density = 180, paused = false }) => {
       rafRef.current = window.requestAnimationFrame(tick);
     };
 
-    const onMove = (event) => {
-      const rect = canvas.getBoundingClientRect();
-      mouse.x = event.clientX - rect.left;
-      mouse.y = event.clientY - rect.top;
-      mouse.active =
-        mouse.x >= 0 && mouse.x <= width && mouse.y >= 0 && mouse.y <= height;
+    const onPointerMove = (event) => {
+      if (paused || document.hidden) {
+        return;
+      }
+
+      updatePointerPosition(event);
     };
 
-    const onLeave = () => {
-      mouse.active = false;
+    const onPointerDown = (event) => {
+      if (paused || document.hidden) {
+        return;
+      }
+
+      updatePointerPosition(event);
+    };
+
+    const onPointerLeave = () => {
+      clearPointer();
     };
 
     const handleVisibilityChange = () => {
       isPaused = document.hidden || paused;
       if (isPaused) {
+        clearPointer();
         stopLoop();
         return;
       }
 
+      resize();
+      renderFrame();
       startLoop();
     };
 
@@ -307,16 +357,23 @@ const ParticleField = ({ density = 180, paused = false }) => {
       startLoop();
     }
     window.addEventListener("resize", resize);
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseout", onLeave);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("pointerup", onPointerLeave);
+    window.addEventListener("pointercancel", onPointerLeave);
+    canvas.addEventListener("pointerleave", onPointerLeave);
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       isPaused = true;
+      clearPointer();
       stopLoop();
       window.removeEventListener("resize", resize);
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseout", onLeave);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointerup", onPointerLeave);
+      window.removeEventListener("pointercancel", onPointerLeave);
+      canvas.removeEventListener("pointerleave", onPointerLeave);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [density, paused]);

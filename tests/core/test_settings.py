@@ -841,7 +841,7 @@ class TestCORSDefaults:
         _set_required_secrets(monkeypatch)
         monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
         s = get_settings()
-        assert s.allowed_origins == "http://localhost"
+        assert s.allowed_origins == ("https://moving-forward.ca,https://www.moving-forward.ca,https://ironclaw-security.pages.dev,http://localhost,http://localhost:3000,http://localhost:5173,http://127.0.0.1,http://127.0.0.1:3000,http://127.0.0.1:5173")
         assert isinstance(s.allowed_origins, str)
 
     def test_allowed_origins_override(self, monkeypatch):

@@ -10,6 +10,33 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _logger = logging.getLogger(__name__)
 
+_CANONICAL_PRODUCTION_ORIGINS = [
+    "https://moving-forward.ca",
+    "https://www.moving-forward.ca",
+    "https://ironclaw-security.pages.dev",
+]
+_CANONICAL_LOCAL_ORIGINS = [
+    "http://localhost",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+]
+_CANONICAL_ALLOWED_ORIGINS = [
+    *_CANONICAL_PRODUCTION_ORIGINS,
+    *_CANONICAL_LOCAL_ORIGINS,
+]
+_CANONICAL_TRUSTED_HOSTS = [
+    "moving-forward.ca",
+    "www.moving-forward.ca",
+    "ironclaw-security.pages.dev",
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0",
+    "testserver",
+]
+
 
 def _require_env(name: str) -> str:
     value = _normalize_string(os.getenv(name))
@@ -106,9 +133,9 @@ def _normalize_host(value: str) -> str:
     if ":" in host and not host.startswith("["):
         hostname, _, port = host.partition(":")
         if port.isdigit():
-            return hostname
+            host = hostname
 
-    return host
+    return host.removeprefix("www.")
 
 
 def _host_from_url(value: str) -> str:
@@ -304,8 +331,14 @@ class Settings(BaseSettings):
     # Legacy fallback env var: CORS_ORIGINS.
     # Keep both fields so env injection and compatibility logic remain intact.
     # ------------------------------------------------------------------
-    allowed_origins: str = Field(default="http://localhost", alias="ALLOWED_ORIGINS")
-    cors_origins: str = Field(default="", alias="CORS_ORIGINS")
+    allowed_origins: str = Field(
+        default=",".join(_CANONICAL_ALLOWED_ORIGINS),
+        alias="ALLOWED_ORIGINS",
+    )
+    cors_origins: str = Field(
+        default=",".join(_CANONICAL_ALLOWED_ORIGINS),
+        alias="CORS_ORIGINS",
+    )
     cors_allowed_methods: str = Field(default="", alias="CORS_ALLOWED_METHODS")
     cors_allowed_headers: str = Field(default="", alias="CORS_ALLOWED_HEADERS")
     cors_expose_headers: str = Field(default="", alias="CORS_EXPOSE_HEADERS")
@@ -317,7 +350,10 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Trusted hosts / response hardening
     # ------------------------------------------------------------------
-    trusted_hosts: str = Field(default="*", alias="TRUSTED_HOSTS")
+    trusted_hosts: str = Field(
+        default=",".join(_CANONICAL_TRUSTED_HOSTS),
+        alias="TRUSTED_HOSTS",
+    )
     enable_hsts: bool = Field(default=True, alias="ENABLE_HSTS")
     content_security_policy: str = Field(default="", alias="CONTENT_SECURITY_POLICY")
 
