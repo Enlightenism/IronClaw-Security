@@ -256,6 +256,8 @@ def test_purchase_valid_package_returns_201_with_pending_shape(client: TestClien
     assert purchase["tokens_per_unit"] == TOKEN_CHUNK_SIZE
     assert purchase["buyer_email"] == "buyer@ironclaw.test"
     assert purchase["purchase_id"].startswith("purch_")
+    assert purchase["metadata"]["owner_key"] == "buyer@ironclaw.test"
+    assert purchase["metadata"]["buyer_email"] == "buyer@ironclaw.test"
     assert purchase["openclaw_install_key"] is None
     assert purchase["claude_code_install_key"] is None
     assert purchase["metadata"]["payment_required"] is True
@@ -353,6 +355,61 @@ def test_purchase_empty_package_id_returns_422(client: TestClient) -> None:
         },
     )
     assert resp.status_code == 422
+
+
+def test_checkout_session_completed_webhook_fulfills_pending_purchase_and_credits_wallet(client: TestClient) -> None:
+    owner = "webhook-buyer@ironclaw.test"
+    create_resp = client.post(
+        _PURCHASE_PATH,
+        json={
+            "package_id": "pkg_5000",
+            "buyer_name": "Webhook Buyer",
+            "buyer_email": owner,
+            "metadata": {},
+        },
+    )
+    assert create_resp.status_code == 201
+    purchase_id = create_resp.json()["purchase"]["purchase_id"]
+    checkout_session_id = "cs_webhook_fulfill_123"
+
+    resp = client.post(
+        "/billing/webhook",
+        json={
+            "id": "evt_webhook_001",
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": checkout_session_id,
+                    "customer": "cus_webhook_123",
+                    "payment_status": "paid",
+                    "amount_total": 2000,
+                    "currency": "usd",
+                    "mode": "payment",
+                    "customer_details": {"email": owner},
+                    "metadata": {
+                        "owner_key": owner,
+                        "purchase_id": purchase_id,
+                        "buyer_email": owner,
+                        "package_id": "pkg_5000",
+                        "checkout_session_id": checkout_session_id,
+                    },
+                }
+            },
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "fulfilled"
+    assert body["purchase_id"] == purchase_id
+    assert body["wallet"]["owner_key"] == owner
+    assert body["wallet"]["balance_units"] == 5_000
+    assert body["metadata"]["payment_status"] == "paid"
+    assert body["metadata"]["fulfillment_status"] == "fulfilled"
+
+    wallet_resp = client.get(f"/billing/wallet/{owner}")
+    assert wallet_resp.status_code == 200
+    assert wallet_resp.json()["wallet"]["balance_units"] == 5_000
 
 
 # ---------------------------------------------------------------------------

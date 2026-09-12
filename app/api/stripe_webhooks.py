@@ -227,6 +227,37 @@ def _resolve_event_context(event_data: dict[str, Any], org_id: str | None, svc: 
     }
 
 
+def _find_matching_purchase_for_checkout(
+    *,
+    session_id: str | None,
+    owner_key: str | None,
+    customer_id: str | None,
+    metadata: dict[str, Any],
+) -> Any | None:
+    """Resolve the durable purchase record for a completions event when it exists."""
+    try:
+        from app.api.routes.billing import _find_matching_purchase
+    except Exception:
+        return None
+
+    purchase_id = str(metadata.get("purchase_id") or "").strip() or None
+    buyer_email = str(metadata.get("buyer_email") or "").strip().lower() or None
+    lookup_session_id = str(session_id or "").strip() or None
+    lookup_org = str(owner_key or "").strip().lower() or None
+    lookup_customer = str(customer_id or "").strip() or None
+
+    if not lookup_session_id and not purchase_id and not lookup_org and not buyer_email and not lookup_customer:
+        return None
+
+    return _find_matching_purchase(
+        session_id=lookup_session_id,
+        owner_key=lookup_org,
+        buyer_email=buyer_email,
+        customer_id=lookup_customer,
+        purchase_id=purchase_id,
+    )
+
+
 def _safe_int(value: Any, default: int = 0) -> int:
     try:
         return int(value)
@@ -728,9 +759,8 @@ def _handle_checkout_session_completed(
     svc: Any,
 ) -> bool:
     """
-    checkout.session.completed
-    Validate the successful payment state and then trigger the install-key
-    entitlement pipeline before returning the processed ack.
+    checkout.session.completed must follow the durable billing purchase state
+    machine so completed sessions are not fulfilled twice.
     """
     context = _resolve_event_context(event_data, org_id, svc)
     session_id = context["session_id"] or event_id
@@ -746,6 +776,24 @@ def _handle_checkout_session_completed(
             session_id,
         )
         return False
+
+    durable_purchase = _find_matching_purchase_for_checkout(
+        session_id=session_id,
+        owner_key=context.get("owner_key"),
+        customer_id=context.get("customer_id"),
+        metadata=metadata,
+    )
+    if durable_purchase is not None:
+        purchase_metadata = getattr(durable_purchase, "metadata", {}) or {}
+        purchase_payment_status = str(purchase_metadata.get("payment_status") or "").strip().lower()
+        purchase_fulfillment_status = str(purchase_metadata.get("fulfillment_status") or "").strip().lower()
+        if purchase_payment_status == "paid" and purchase_fulfillment_status == "fulfilled":
+            logger.info(
+                "stripe_webhooks: checkout.session.completed duplicate fulfillment suppressed — session=%s purchase_id=%s",
+                session_id,
+                getattr(durable_purchase, "purchase_id", None),
+            )
+            return True
 
     if context.get("org_id"):
         if context.get("customer_id"):

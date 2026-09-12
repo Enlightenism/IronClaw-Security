@@ -150,6 +150,19 @@ def _is_org_owner_context(auth_ctx: Any) -> bool:
     return org_key_context or org_principal_context
 
 
+def _is_real_billing_owner(value: str | None) -> bool:
+    normalized = _normalize_owner_value(value)
+    if not normalized:
+        return False
+    if normalized.startswith("ic_org_"):
+        return True
+    if normalized.startswith("ic_install_"):
+        return False
+    if _looks_like_generic_platform_auth(normalized):
+        return False
+    return not normalized.startswith("ic_")
+
+
 def resolve_billing_owner(auth_ctx: Any, buyer_email: str) -> str:
     """Return the canonical wallet owner key for a billing operation.
 
@@ -158,15 +171,15 @@ def resolve_billing_owner(auth_ctx: Any, buyer_email: str) -> str:
     canonical email address, ensuring install-key generation follows the
     subscription owner path rather than a generic system or API identity.
     """
+    normalized_email = _normalize_owner_value(buyer_email)
     if _is_org_owner_context(auth_ctx):
         org_id = getattr(auth_ctx, "org_id", None)
         normalized_org_id = _normalize_owner_value(org_id)
+        if not normalized_org_id or not _is_real_billing_owner(normalized_org_id):
+            return normalized_email if _is_real_billing_owner(normalized_email) else ""
         return f"ic_org_{normalized_org_id}"
 
-    normalized_email = _normalize_owner_value(buyer_email)
-    if normalized_email.startswith("ic_install_"):
-        return ""
-    if _looks_like_generic_platform_auth(normalized_email):
+    if not _is_real_billing_owner(normalized_email):
         return ""
     return normalized_email
 
@@ -593,7 +606,7 @@ class BillingRegistry:
 
     def _resolve_customer_for_owner_key(self, owner_key: str) -> BillingCustomer | None:
         normalized = _normalize_owner_value(owner_key)
-        if not normalized or _looks_like_generic_platform_auth(normalized):
+        if not normalized or not _is_real_billing_owner(normalized):
             return None
 
         for customer in self._customers.values():

@@ -10,7 +10,29 @@ import subprocess
 import sys
 from typing import Any
 
+from app.core.install_key_formats import InstallKeyFormatRegistry
+from app.core.install_keys import get_install_key_registry
+
 _ALLOWED_CHANNELS = {"stable", "preview", "dev"}
+_GENERIC_INSTALL_KEY_PREFIXES = (
+    "sk_",
+    "ghp_",
+    "gho_",
+    "github_pat_",
+    "token_",
+    "secret_",
+    "api_",
+    "api-key",
+    "api_key",
+    "platform-api-key",
+    "platform_api_key",
+    "internal-platform-api-key",
+    "internal_platform_api_key",
+    "system-api-key",
+    "system_api_key",
+    "bearer ",
+    "x-api-key",
+)
 
 
 @dataclass(slots=True)
@@ -97,6 +119,127 @@ def _venv_pip(root: Path) -> Path:
 
 def _requirements_path(root: Path) -> Path:
     return root / "requirements.txt"
+
+
+def _normalize_runtime_program(value: str | None) -> str | None:
+    if value is None:
+        return None
+    program = InstallKeyFormatRegistry.normalize_program(str(value).strip())
+    if program is not None:
+        return program
+    normalized = str(value).strip().lower().replace("-", "_")
+    return InstallKeyFormatRegistry.normalize_program(normalized)
+
+
+def _looks_like_generic_install_key(candidate: str | None) -> bool:
+    if candidate is None:
+        return False
+    normalized = str(candidate).strip().lower()
+    if not normalized:
+        return False
+    if any(normalized.startswith(prefix) for prefix in _GENERIC_INSTALL_KEY_PREFIXES):
+        return True
+    if "platform" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized):
+        return True
+    if "system" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized):
+        return True
+    if "api" in normalized and "key" in normalized:
+        return True
+    return False
+
+
+def _read_config_install_key(config_path: Path) -> str | None:
+    if not config_path.exists():
+        return None
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+
+    for key_name in (
+        "install_key",
+        "installKey",
+        "install_key_value",
+        "installKeyValue",
+        "raw_install_key",
+        "rawInstallKey",
+        "paid_install_key",
+        "paidInstallKey",
+    ):
+        value = payload.get(key_name)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    nested = payload.get("install_keys")
+    if isinstance(nested, dict):
+        for program in InstallKeyFormatRegistry.list_programs():
+            value = nested.get(program)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def _is_verified_install_key(candidate: str | None, *, program: str | None = None, owner_key: str | None = None) -> bool:
+    if not isinstance(candidate, str):
+        return False
+    value = candidate.strip()
+    if not value:
+        return False
+    if value.startswith("ic_org_") or _looks_like_generic_install_key(value):
+        return False
+
+    runtime_program = _normalize_runtime_program(program)
+    if runtime_program is None:
+        return False
+
+    spec = InstallKeyFormatRegistry.get_spec(runtime_program)
+    if value.startswith("ic_") and not value.startswith(spec.prefix):
+        return False
+    if not value.startswith(spec.prefix):
+        return False
+
+    registry = get_install_key_registry()
+    record = registry.authenticate_install_key(value)
+    if record is None:
+        return False
+    if not getattr(record, "active", False):
+        return False
+    if getattr(record, "payment_status", "") != "paid":
+        return False
+    if getattr(record, "entitlements_status", "") != "active":
+        return False
+    if not getattr(record, "issued_after_payment", False):
+        return False
+    if runtime_program != _normalize_runtime_program(getattr(record, "program", None)):
+        return False
+    normalized_owner = (owner_key or "").strip().lower()
+    if normalized_owner and (getattr(record, "owner_key", "") or "").strip().lower() != normalized_owner:
+        return False
+    return True
+
+
+def _resolve_install_key_for_update(
+    config_path: Path,
+    *,
+    program: str | None = None,
+    owner_key: str | None = None,
+    proposed_install_key: str | None = None,
+) -> str | None:
+    existing_key = _read_config_install_key(config_path)
+    candidate = str(proposed_install_key).strip() if proposed_install_key is not None else ""
+
+    if candidate and _is_verified_install_key(candidate, program=program, owner_key=owner_key):
+        return candidate
+
+    if existing_key and _is_verified_install_key(existing_key, program=program, owner_key=owner_key):
+        return existing_key
+
+    if candidate and not _is_verified_install_key(candidate, program=program, owner_key=owner_key):
+        return existing_key if existing_key and _is_verified_install_key(existing_key, program=program, owner_key=owner_key) else None
+
+    return existing_key if existing_key and _is_verified_install_key(existing_key, program=program, owner_key=owner_key) else None
 
 
 def _build_steps(root: Path, channel: str) -> list[UpdateStep]:

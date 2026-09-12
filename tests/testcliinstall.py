@@ -57,7 +57,7 @@ def test_example_skill_config_uses_canonical_multi_platform_targets(install_modu
         "goose",
         "gemini_cli",
         "copilot",
-        "security_guardian",
+        "hermes",
     ]
 
     assert payload["ironclaw"]["provider_targets"] == expected
@@ -97,7 +97,7 @@ def test_build_install_config_defaults(install_module: Any, tmp_path: Path) -> N
         "goose",
         "gemini_cli",
         "copilot",
-        "security_guardian",
+        "hermes",
     ]
 
 
@@ -139,12 +139,124 @@ def test_build_install_config_normalizes_provider_targets(
             "--provider-target",
             "claude",
             "--provider-target",
-            "security-guardian",
+            "copilot",
         ],
     )
 
     config = install_module.build_install_config(args)
-    assert config.provider_targets == ("claude_code", "openclaw", "security_guardian")
+    assert config.provider_targets == ("claude_code", "openclaw", "copilot")
+
+    bad_parser = install_module.build_parser()
+    bad_args = bad_parser.parse_args(
+        [
+            "--project-root",
+            str(tmp_path),
+            "--config-dir",
+            str(tmp_path / ".ironclaw-user"),
+            "--provider-target",
+            "security-guardian",
+        ],
+    )
+    with pytest.raises(install_module.IronClawInstallerError, match="Unsupported provider target"):
+        install_module.build_install_config(bad_args)
+
+
+def test_install_key_injection_uses_canonical_runtime_names_and_commands(
+    install_module: Any,
+    tmp_path: Path,
+) -> None:
+    parser = install_module.build_parser()
+    args = parser.parse_args(
+        [
+            "--project-root",
+            str(tmp_path),
+            "--config-dir",
+            str(tmp_path / ".ironclaw-user"),
+            "--install-key",
+            "claude_code=ic_install_claude_code_abc123",
+            "--install-key",
+            "openclaw=ic_install_openclaw_def456",
+            "--install-key",
+            "hermes=ic_install_hermes_ghi789",
+        ],
+    )
+
+    config = install_module.build_install_config(args)
+    assert config.install_keys == {
+        "claude_code": "ic_install_claude_code_abc123",
+        "openclaw": "ic_install_openclaw_def456",
+        "hermes": "ic_install_hermes_ghi789",
+    }
+    assert config.provider_targets == install_module.DEFAULT_PROVIDER_TARGETS
+    assert install_module.build_install_key_commands(config.install_keys)["claude_code"] == ("gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_abc123")
+    assert install_module.build_install_key_commands(config.install_keys)["hermes"] == ("hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ic_install_hermes_ghi789")
+
+    with pytest.raises(install_module.IronClawInstallerError, match="install key"):
+        install_module._validate_install_key_for_runtime("openclaw", "sk_live_abc123")
+
+    with pytest.raises(install_module.IronClawInstallerError, match="install key"):
+        install_module._validate_install_key_for_runtime("openclaw", "")
+
+
+@pytest.mark.parametrize(
+    ("runtime_program", "install_key", "expected_command"),
+    [
+        ("openclaw", "ic_install_openclaw_abc123", "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user --key ic_install_openclaw_abc123"),
+        ("claude_code", "ic_install_claude_code_abc123", "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_abc123"),
+        ("cursor", "ic_install_cursor_abc123", "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user --key ic_install_cursor_abc123"),
+        ("goose", "ic_install_goose_abc123", "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user --key ic_install_goose_abc123"),
+        ("gemini_cli", "ic_install_gemini_cli_abc123", "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user --key ic_install_gemini_cli_abc123"),
+        ("copilot", "ic_install_copilot_abc123", "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user --key ic_install_copilot_abc123"),
+        ("hermes", "ic_install_hermes_abc123", "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ic_install_hermes_abc123"),
+    ],
+)
+def test_build_install_key_commands_emit_canonical_commands_for_every_supported_runtime(
+    install_module: Any,
+    runtime_program: str,
+    install_key: str,
+    expected_command: str,
+) -> None:
+    commands = install_module.build_install_key_commands({runtime_program: install_key})
+
+    assert commands[runtime_program] == expected_command
+    assert install_key.startswith(install_module.InstallKeyFormatRegistry.get_spec(runtime_program).prefix)
+    assert expected_command.count(install_key) == 1
+    assert "placeholder" not in expected_command.lower()
+    assert "fake" not in expected_command.lower()
+    assert "..." not in expected_command
+    assert "***" not in expected_command
+
+
+@pytest.mark.parametrize(
+    ("runtime_program", "install_key"),
+    [
+        ("openclaw", ""),
+        ("openclaw", "placeholder"),
+        ("openclaw", "********"),
+        ("openclaw", "ic_install_openclaw_***"),
+        ("openclaw", "ic_install_openclaw_placeholder"),
+        ("openclaw", "ic_install_openclaw_stale_key"),
+        ("claude_code", "sk_live_abc123"),
+        ("cursor", "ghp_abc123"),
+        ("goose", "token_abc123"),
+        ("gemini_cli", "ic_org_12345"),
+        ("copilot", "ic_install_copilot_...abcd"),
+        ("hermes", "ic_install_hermes_***"),
+    ],
+)
+def test_install_key_validation_rejects_blank_placeholder_masked_and_fake_values(
+    install_module: Any,
+    runtime_program: str,
+    install_key: str,
+) -> None:
+    with pytest.raises(install_module.IronClawInstallerError, match="valid paid install key|install key"):
+        install_module._validate_install_key_for_runtime(runtime_program, install_key)
+
+    with pytest.raises(install_module.IronClawInstallerError, match="valid paid install key|install key"):
+        install_module.build_install_key_commands({runtime_program: install_key})
+
+    with pytest.raises(install_module.IronClawInstallerError, match="valid paid install key|install key"):
+        install_module._build_platform_install_command(runtime_program, install_key)
 
 
 def test_run_install_writes_expected_files(
@@ -173,7 +285,7 @@ def test_run_install_writes_expected_files(
             "--provider-target",
             "openclaw",
             "--provider-target",
-            "security-guardian",
+            "hermes",
         ],
     )
     config = install_module.build_install_config(args)
@@ -198,20 +310,21 @@ def test_run_install_writes_expected_files(
     assert runtime_payload["install_mode"] == "local-bootstrap"
     assert runtime_payload["skill_mode"] is True
     assert runtime_payload["base_url"] == install_module.DEFAULT_BASE_URL
-    assert runtime_payload["provider_targets"] == ["claude_code", "openclaw", "security_guardian"]
+    assert runtime_payload["provider_targets"] == ["claude_code", "openclaw", "hermes"]
     assert runtime_payload["features"]["shared_skill_package"] is True
-    assert runtime_payload["features"]["security_guardian_integration"] is True
     assert runtime_payload["features"]["claude_integration"] is True
     assert runtime_payload["features"]["openclaw_integration"] is True
+    assert runtime_payload["features"]["hermes_integration"] is True
+    assert runtime_payload["install_keys"] == {}
 
     skill_payload = json.loads(result.skill_config_file.read_text(encoding="utf-8"))
     assert skill_payload["enabled"] is True
-    assert skill_payload["provider_targets"] == ["claude_code", "openclaw", "security_guardian"]
+    assert skill_payload["provider_targets"] == ["claude_code", "openclaw", "hermes"]
     assert skill_payload["default_policy_mode"] == "review"
 
     env_contents = result.env_file.read_text(encoding="utf-8")
     assert "IRONCLAW_BASE_URL=http://127.0.0.1:8000" in env_contents
-    assert "IRONCLAW_PROVIDER_TARGETS=claude_code,openclaw,security_guardian" in env_contents
+    assert "IRONCLAW_PROVIDER_TARGETS=claude_code,openclaw,hermes" in env_contents
     assert "API_SECRET=" in env_contents
     assert "JWT_SECRET=" in env_contents
     assert "SECRET_KEY=" in env_contents

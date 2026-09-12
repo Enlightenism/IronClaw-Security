@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import logging
 import re
+from threading import Lock
 from typing import Any
 import uuid
 
@@ -11,12 +12,15 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.core.auth import AuthContext, get_auth_context, require_auth_context
 from app.core.billing import resolve_billing_owner
+from app.core.install_key_formats import InstallKeyFormatRegistry
+from app.core.install_keys import InstallKeyAlreadyExistsError, get_install_key_registry
 from app.core.unit_wallet import (
     ORG_KEY_PREFIX,
     TOKEN_CHUNK_SIZE,
     get_unit_wallet_registry,
     units_required_for_tokens,
 )
+from app.persistencebootstrap import build_store
 
 logger = logging.getLogger(__name__)
 
@@ -247,8 +251,104 @@ class InsufficientUnitsErrorResponse(BaseModel):
 _PURCHASES: list[BillingPackagePurchaseView] = []
 
 
+class _DurablePurchaseRepository:
+    def __init__(self, store: Any | None = None) -> None:
+        self._lock = Lock()
+        self._table = "billing_purchases"
+        self._store = store or build_store(mode="memory", allow_fallback=True)
+
+    def _normalize_purchase(self, purchase: BillingPackagePurchaseView | dict[str, Any]) -> dict[str, Any]:
+        if isinstance(purchase, BillingPackagePurchaseView):
+            payload = purchase.model_dump(mode="json")
+        else:
+            payload = dict(purchase)
+        payload.setdefault("metadata", {})
+        return payload
+
+    def upsert(self, purchase: BillingPackagePurchaseView | dict[str, Any]) -> dict[str, Any]:
+        payload = self._normalize_purchase(purchase)
+        purchase_id = str(payload.get("purchase_id") or "").strip()
+        if not purchase_id:
+            return payload
+        with self._lock:
+            try:
+                rows = self._store.select(self._table, filters={"purchase_id": purchase_id})
+                if rows:
+                    self._store.update(self._table, payload, {"purchase_id": purchase_id})
+                else:
+                    self._store.insert(self._table, payload)
+            except Exception:
+                logger.exception("billing: failed to persist purchase %s to durable storage", purchase_id)
+        return payload
+
+    def list_recent(self, limit: int = 50) -> list[BillingPackagePurchaseView]:
+        safe_limit = max(1, min(int(limit), _PURCHASES_MAX_SIZE))
+        records: list[BillingPackagePurchaseView] = []
+        try:
+            rows = self._store.select(self._table)
+            for row in rows:
+                try:
+                    records.append(BillingPackagePurchaseView(**row))
+                except Exception:
+                    continue
+        except Exception:
+            logger.exception("billing: durable purchase list failed; falling back to in-memory state")
+            records = []
+        if records:
+            return list(reversed(records))[:safe_limit]
+        return list(reversed(_PURCHASES))[:safe_limit]
+
+    def find_for_checkout(
+        self,
+        *,
+        session_id: str | None = None,
+        owner_key: str | None = None,
+        buyer_email: str | None = None,
+        customer_id: str | None = None,
+        purchase_id: str | None = None,
+    ) -> BillingPackagePurchaseView | None:
+        session_value = str(session_id or "").strip()
+        owner_value = str(owner_key or "").strip().lower()
+        buyer_value = str(buyer_email or "").strip().lower()
+        customer_value = str(customer_id or "").strip()
+        purchase_value = str(purchase_id or "").strip()
+        combined: list[BillingPackagePurchaseView] = []
+        for purchase in reversed(_PURCHASES):
+            combined.append(purchase)
+        try:
+            for row in self._store.select(self._table):
+                try:
+                    combined.append(BillingPackagePurchaseView(**row))
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        seen: set[str] = set()
+        for purchase in combined:
+            purchase_key = str(purchase.purchase_id).strip()
+            if purchase_key and purchase_key in seen:
+                continue
+            seen.add(purchase_key)
+            if purchase_value and purchase.purchase_id == purchase_value:
+                return purchase
+            metadata = purchase.metadata or {}
+            if session_value and (metadata.get("checkout_session_id") == session_value or purchase.purchase_id == session_value):
+                return purchase
+            if owner_value and purchase.owner_key.lower() == owner_value:
+                return purchase
+            if buyer_value and purchase.buyer_email.lower() == buyer_value:
+                return purchase
+            if customer_value and str(metadata.get("customer_id") or "").strip() == customer_value:
+                return purchase
+        return None
+
+
+_PURCHASE_REPOSITORY = _DurablePurchaseRepository()
+
+
 def _append_purchase(purchase: BillingPackagePurchaseView) -> None:
     _PURCHASES.append(purchase)
+    _PURCHASE_REPOSITORY.upsert(purchase)
     if len(_PURCHASES) > _PURCHASES_MAX_SIZE:
         del _PURCHASES[: len(_PURCHASES) - _PURCHASES_MAX_SIZE]
 
@@ -259,6 +359,93 @@ def _utc_now_iso() -> str:
 
 def _new_purchase_id() -> str:
     return f"purch_{uuid.uuid4().hex[:16]}"
+
+
+def _parse_checkout_status(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _install_key_records_for_owner(owner_key: str) -> list[Any]:
+    try:
+        return get_install_key_registry().get_keys_for_owner(owner_key)
+    except Exception:
+        logger.exception("billing: failed to load install keys for owner_key=%s", owner_key)
+        return []
+
+
+def _provision_paid_install_keys(
+    *,
+    owner_key: str,
+    purchase_id: str,
+    session_id: str | None,
+    payment_id: str | None,
+    buyer_email: str,
+) -> dict[str, str]:
+    issued: dict[str, str] = {}
+    registry = get_install_key_registry()
+    for program in InstallKeyFormatRegistry.list_programs():
+        try:
+            record = registry.generate_install_key(
+                owner_key=owner_key,
+                subscription_id=purchase_id,
+                program=program,
+                label=f"paid-provisioned on purchase {purchase_id}",
+                metadata={
+                    "purchase_id": purchase_id,
+                    "checkout_session_id": session_id,
+                    "payment_id": payment_id,
+                    "payment_status": "paid",
+                    "entitlements_status": "active",
+                    "issued_after_payment": True,
+                    "auto_provisioned": True,
+                    "buyer_email": buyer_email,
+                },
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+                purchase_reference=purchase_id,
+                checkout_session_id=session_id,
+            )
+        except InstallKeyAlreadyExistsError:
+            existing = next((item for item in registry.get_keys_for_owner(owner_key) if item.program == program and (item.active or str(item.payment_status).lower() == "paid")), None)
+            if existing is None:
+                continue
+            record = existing
+        except Exception:
+            logger.exception(
+                "billing: install key issuance failed for owner=%s program=%s purchase_id=%s",
+                owner_key,
+                program,
+                purchase_id,
+            )
+            continue
+
+        if str(getattr(record, "payment_status", "")).strip().lower() != "paid":
+            continue
+        if not bool(getattr(record, "issued_after_payment", False)):
+            continue
+        masked_key = getattr(record, "masked_key", None)
+        if not masked_key:
+            continue
+        issued[program] = str(masked_key)
+    return issued
+
+
+def _find_matching_purchase(
+    *,
+    session_id: str | None = None,
+    owner_key: str | None = None,
+    buyer_email: str | None = None,
+    customer_id: str | None = None,
+    purchase_id: str | None = None,
+) -> BillingPackagePurchaseView | None:
+    return _PURCHASE_REPOSITORY.find_for_checkout(
+        session_id=session_id,
+        owner_key=owner_key,
+        buyer_email=buyer_email,
+        customer_id=customer_id,
+        purchase_id=purchase_id,
+    )
 
 
 def _package_to_view(pkg_id: str, pkg: dict[str, Any]) -> BillingPackageView:
@@ -483,6 +670,137 @@ def purchase_package(
     )
 
 
+@router.post(
+    "/webhook",
+    status_code=status.HTTP_200_OK,
+    summary="Process a Stripe checkout completion webhook for a pending purchase",
+)
+def handle_checkout_session_completed_webhook(payload: dict[str, Any]) -> dict[str, Any]:
+    event_type = str((payload or {}).get("type") or (payload or {}).get("event_type") or "").strip().lower()
+    if event_type != "checkout.session.completed":
+        return {
+            "status": "ignored",
+            "event_type": event_type,
+            "reason": "unsupported_event_type",
+        }
+
+    event_data = ((payload or {}).get("data") or {}).get("object") or (payload or {}).get("object") or {}
+    session_id = str(event_data.get("id") or (payload or {}).get("id") or "").strip()
+    if not session_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "invalid_payload", "reason": "missing_checkout_session_id"},
+        )
+
+    payment_status = _parse_checkout_status(event_data.get("payment_status") or event_data.get("status"))
+    if payment_status not in {"paid", "succeeded", "success", "complete", "completed"}:
+        return {
+            "status": "ignored",
+            "event_type": event_type,
+            "session_id": session_id,
+            "payment_status": payment_status,
+            "reason": "payment_not_confirmed",
+        }
+
+    metadata = dict(event_data.get("metadata") or {})
+    purchase_id = str(metadata.get("purchase_id") or "").strip()
+    buyer_email = str((event_data.get("customer_details") or {}).get("email") or metadata.get("buyer_email") or "").strip().lower()
+    owner_key = str(metadata.get("owner_key") or buyer_email or "").strip().lower()
+    customer_id = str(event_data.get("customer") or metadata.get("customer_id") or "").strip()
+
+    purchase = _find_matching_purchase(
+        session_id=session_id,
+        owner_key=owner_key or None,
+        buyer_email=buyer_email or None,
+        customer_id=customer_id or None,
+        purchase_id=purchase_id or None,
+    )
+    if purchase is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "status": "purchase_not_found",
+                "reason": "no_pending_purchase_for_checkout_session",
+                "session_id": session_id,
+            },
+        )
+
+    if purchase.metadata.get("payment_status") == "paid" and purchase.metadata.get("fulfillment_status") == "fulfilled":
+        wallet = get_unit_wallet_registry().get_or_create_wallet(purchase.owner_key)
+        return {
+            "status": "fulfilled",
+            "purchase_id": purchase.purchase_id,
+            "session_id": session_id,
+            "wallet": _wallet_to_view(wallet),
+            "metadata": purchase.metadata,
+        }
+
+    pkg = PACKAGE_CATALOG.get(purchase.package_id)
+    granted_units = int(purchase.granted_units or (pkg["included_units"] if pkg else 0))
+    if granted_units <= 0 and pkg is not None:
+        granted_units = int(pkg["included_units"])
+
+    wallet = get_unit_wallet_registry().get_or_create_wallet(purchase.owner_key)
+    updated_wallet = get_unit_wallet_registry().credit_units(
+        owner_key=purchase.owner_key,
+        units=granted_units,
+        metadata={
+            "source": "checkout.session.completed",
+            "purchase_id": purchase.purchase_id,
+            "checkout_session_id": session_id,
+            "package_id": purchase.package_id,
+            "event_type": event_type,
+            "customer_id": customer_id,
+            "payment_status": "paid",
+            "fulfillment_status": "fulfilled",
+        },
+    )
+
+    purchase.granted_units = granted_units
+    purchase.metadata["payment_status"] = "paid"
+    purchase.metadata["fulfillment_status"] = "fulfilled"
+    purchase.metadata["install_keys_provisioned"] = False
+    purchase.metadata["units_credited"] = True
+    purchase.metadata["checkout_session_id"] = session_id
+    purchase.metadata["customer_id"] = customer_id
+    purchase.metadata["owner_key"] = purchase.owner_key
+    purchase.metadata["buyer_email"] = purchase.buyer_email
+    purchase.metadata["package_id"] = purchase.package_id
+
+    triggered = _provision_paid_install_keys(
+        owner_key=purchase.owner_key,
+        purchase_id=purchase.purchase_id,
+        session_id=session_id,
+        payment_id=str(metadata.get("payment_id") or purchase.purchase_id),
+        buyer_email=purchase.buyer_email,
+    )
+
+    if triggered:
+        purchase.metadata["install_keys_provisioned"] = True
+        purchase.openclaw_install_key = triggered.get("openclaw")
+        purchase.claude_code_install_key = triggered.get("claude_code")
+        purchase.metadata["issued_programs"] = sorted(triggered)
+
+    _PURCHASE_REPOSITORY.upsert(purchase)
+    return {
+        "status": "fulfilled",
+        "purchase_id": purchase.purchase_id,
+        "session_id": session_id,
+        "purchase": purchase.model_dump(mode="json"),
+        "wallet": _wallet_to_view(updated_wallet),
+        "metadata": purchase.metadata,
+    }
+
+
+@router.post(
+    "/webhook/stripe",
+    status_code=status.HTTP_200_OK,
+    summary="Legacy Stripe webhook alias",
+)
+def handle_checkout_session_completed_webhook_legacy(payload: dict[str, Any]) -> dict[str, Any]:
+    return handle_checkout_session_completed_webhook(payload)
+
+
 @router.get(
     "/purchases",
     summary="List recent in-process purchase records",
@@ -490,7 +808,7 @@ def purchase_package(
 def list_purchases(
     limit: int = Query(default=50, ge=1, le=_PURCHASES_MAX_SIZE),
 ) -> dict[str, Any]:
-    records = _PURCHASES[-limit:]
+    records = _PURCHASE_REPOSITORY.list_recent(limit)
     return {
         "status": "ok",
         "service": "IronClaw-Security",

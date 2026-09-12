@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -13,6 +14,7 @@ from app.core.install_keys import (
     _mask_key,
     _reset_install_key_registry_for_testing,
 )
+from app.core.settings import get_settings
 from app.core.unit_wallet import get_unit_wallet_registry
 
 # ---------------------------------------------------------------------------
@@ -269,12 +271,45 @@ class TestInstallKeyRecordPostInit(unittest.TestCase):
 class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
     def setUp(self):
         _reset_install_key_registry_for_testing()
+        get_settings.cache_clear()
+        self._previous_persistence_mode = os.environ.get("IRONCLAW_PERSISTENCE_MODE")
+        self._previous_supabase_url = os.environ.get("SUPABASE_URL")
+        self._previous_supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        self._previous_supabase_anon = os.environ.get("SUPABASE_ANON_KEY")
+        os.environ["IRONCLAW_PERSISTENCE_MODE"] = "supabase"
+        os.environ["SUPABASE_URL"] = "https://example.supabase.co"
+        os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "service-role-test-key"
+        os.environ["SUPABASE_KEY"] = "service-role-test-key"
+        os.environ["SUPABASE_ANON_KEY"] = "anon-test-key"
+        get_settings.cache_clear()
         self._stub = _make_supabase_stub()
         self._patcher = patch(_PATCH_TARGET, return_value=self._stub)
+        self._fallback_patcher = patch("app.core.install_keys._should_use_memory_fallback", return_value=False)
         self._patcher.start()
+        self._fallback_patcher.start()
 
     def tearDown(self):
+        self._fallback_patcher.stop()
         self._patcher.stop()
+        if self._previous_persistence_mode is None:
+            os.environ.pop("IRONCLAW_PERSISTENCE_MODE", None)
+        else:
+            os.environ["IRONCLAW_PERSISTENCE_MODE"] = self._previous_persistence_mode
+        if self._previous_supabase_url is None:
+            os.environ.pop("SUPABASE_URL", None)
+        else:
+            os.environ["SUPABASE_URL"] = self._previous_supabase_url
+        if self._previous_supabase_key is None:
+            os.environ.pop("SUPABASE_SERVICE_ROLE_KEY", None)
+            os.environ.pop("SUPABASE_KEY", None)
+        else:
+            os.environ["SUPABASE_SERVICE_ROLE_KEY"] = self._previous_supabase_key
+            os.environ["SUPABASE_KEY"] = self._previous_supabase_key
+        if self._previous_supabase_anon is None:
+            os.environ.pop("SUPABASE_ANON_KEY", None)
+        else:
+            os.environ["SUPABASE_ANON_KEY"] = self._previous_supabase_anon
+        get_settings.cache_clear()
         _reset_install_key_registry_for_testing()
 
     def _registry(self) -> InstallKeyRegistry:
@@ -388,17 +423,19 @@ class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
                     purchase_reference=_PURCHASE_REFERENCE,
                 )
 
-    def test_legacy_generate_install_key_uses_subscription_reference_when_missing(self):
+    def test_legacy_generate_install_key_requires_real_payment_reference(self):
         reg = self._registry()
-        record = reg.generate_install_key(
-            owner_key=_OWNER,
-            subscription_id=_SUB_ID,
-            program="openclaw",
-        )
-        assert record.purchase_reference == _SUB_ID
-        assert record.checkout_session_id == _SUB_ID
-        assert record.payment_status == "paid"
-        assert record.entitlements_status == "active"
+        with self.assertRaises(InstallKeyPaymentRequiredError):
+            reg.generate_install_key(
+                owner_key=_OWNER,
+                subscription_id=_SUB_ID,
+                program="openclaw",
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+                purchase_reference=None,
+                checkout_session_id=None,
+            )
 
     def test_legacy_generate_install_key_rejects_unpaid_status(self):
         reg = self._registry()
@@ -443,6 +480,50 @@ class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
                 checkout_session_id="cs_dup_001",
                 purchase_reference="purchase_dup_001",
                 org_id="Org_42",
+            )
+
+    def test_duplicate_paid_key_detection_refreshes_stale_registry_cache(self):
+        reg = self._registry()
+        existing = reg.generate_for_paid_customer(
+            owner_key=_OWNER,
+            subscription_id=_SUB_ID,
+            program="openclaw",
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=True,
+            checkout_session_id=_CHECKOUT_SESSION_ID,
+            purchase_reference=_PURCHASE_REFERENCE,
+        )
+        reg._records_by_id.clear()
+        reg._key_id_by_hash.clear()
+        self._stub.table.return_value.select.return_value.execute.return_value.data = [existing.to_db_row()]
+
+        with self.assertRaises(InstallKeyAlreadyExistsError):
+            reg.generate_for_paid_customer(
+                owner_key=_OWNER,
+                subscription_id="sub-duplicate",
+                program="openclaw",
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+                checkout_session_id="cs_dup_001",
+                purchase_reference="purchase_dup_001",
+            )
+
+    def test_generate_for_paid_customer_raises_on_supabase_insert_failure(self):
+        reg = self._registry()
+        self._stub.table.return_value.insert.return_value.execute.side_effect = RuntimeError("db insert failed")
+
+        with self.assertRaises(RuntimeError):
+            reg.generate_for_paid_customer(
+                owner_key=_OWNER,
+                subscription_id=_SUB_ID,
+                program="openclaw",
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+                checkout_session_id=_CHECKOUT_SESSION_ID,
+                purchase_reference=_PURCHASE_REFERENCE,
             )
 
     def test_duplicate_error_contains_owner_key(self):
@@ -643,12 +724,45 @@ class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
 class TestAuthenticateInstallKey(unittest.TestCase):
     def setUp(self):
         _reset_install_key_registry_for_testing()
+        get_settings.cache_clear()
+        self._previous_persistence_mode = os.environ.get("IRONCLAW_PERSISTENCE_MODE")
+        self._previous_supabase_url = os.environ.get("SUPABASE_URL")
+        self._previous_supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        self._previous_supabase_anon = os.environ.get("SUPABASE_ANON_KEY")
+        os.environ["IRONCLAW_PERSISTENCE_MODE"] = "supabase"
+        os.environ["SUPABASE_URL"] = "https://example.supabase.co"
+        os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "service-role-test-key"
+        os.environ["SUPABASE_KEY"] = "service-role-test-key"
+        os.environ["SUPABASE_ANON_KEY"] = "anon-test-key"
+        get_settings.cache_clear()
         self._stub = _make_supabase_stub()
         self._patcher = patch(_PATCH_TARGET, return_value=self._stub)
+        self._fallback_patcher = patch("app.core.install_keys._should_use_memory_fallback", return_value=False)
         self._patcher.start()
+        self._fallback_patcher.start()
 
     def tearDown(self):
+        self._fallback_patcher.stop()
         self._patcher.stop()
+        if self._previous_persistence_mode is None:
+            os.environ.pop("IRONCLAW_PERSISTENCE_MODE", None)
+        else:
+            os.environ["IRONCLAW_PERSISTENCE_MODE"] = self._previous_persistence_mode
+        if self._previous_supabase_url is None:
+            os.environ.pop("SUPABASE_URL", None)
+        else:
+            os.environ["SUPABASE_URL"] = self._previous_supabase_url
+        if self._previous_supabase_key is None:
+            os.environ.pop("SUPABASE_SERVICE_ROLE_KEY", None)
+            os.environ.pop("SUPABASE_KEY", None)
+        else:
+            os.environ["SUPABASE_SERVICE_ROLE_KEY"] = self._previous_supabase_key
+            os.environ["SUPABASE_KEY"] = self._previous_supabase_key
+        if self._previous_supabase_anon is None:
+            os.environ.pop("SUPABASE_ANON_KEY", None)
+        else:
+            os.environ["SUPABASE_ANON_KEY"] = self._previous_supabase_anon
+        get_settings.cache_clear()
         _reset_install_key_registry_for_testing()
 
     def _registry_with_key(self, program="openclaw", active=True):
@@ -724,12 +838,45 @@ class TestAuthenticateInstallKey(unittest.TestCase):
 class TestRevokeKey(unittest.TestCase):
     def setUp(self):
         _reset_install_key_registry_for_testing()
+        get_settings.cache_clear()
+        self._previous_persistence_mode = os.environ.get("IRONCLAW_PERSISTENCE_MODE")
+        self._previous_supabase_url = os.environ.get("SUPABASE_URL")
+        self._previous_supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        self._previous_supabase_anon = os.environ.get("SUPABASE_ANON_KEY")
+        os.environ["IRONCLAW_PERSISTENCE_MODE"] = "supabase"
+        os.environ["SUPABASE_URL"] = "https://example.supabase.co"
+        os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "service-role-test-key"
+        os.environ["SUPABASE_KEY"] = "service-role-test-key"
+        os.environ["SUPABASE_ANON_KEY"] = "anon-test-key"
+        get_settings.cache_clear()
         self._stub = _make_supabase_stub()
         self._patcher = patch(_PATCH_TARGET, return_value=self._stub)
+        self._fallback_patcher = patch("app.core.install_keys._should_use_memory_fallback", return_value=False)
         self._patcher.start()
+        self._fallback_patcher.start()
 
     def tearDown(self):
+        self._fallback_patcher.stop()
         self._patcher.stop()
+        if self._previous_persistence_mode is None:
+            os.environ.pop("IRONCLAW_PERSISTENCE_MODE", None)
+        else:
+            os.environ["IRONCLAW_PERSISTENCE_MODE"] = self._previous_persistence_mode
+        if self._previous_supabase_url is None:
+            os.environ.pop("SUPABASE_URL", None)
+        else:
+            os.environ["SUPABASE_URL"] = self._previous_supabase_url
+        if self._previous_supabase_key is None:
+            os.environ.pop("SUPABASE_SERVICE_ROLE_KEY", None)
+            os.environ.pop("SUPABASE_KEY", None)
+        else:
+            os.environ["SUPABASE_SERVICE_ROLE_KEY"] = self._previous_supabase_key
+            os.environ["SUPABASE_KEY"] = self._previous_supabase_key
+        if self._previous_supabase_anon is None:
+            os.environ.pop("SUPABASE_ANON_KEY", None)
+        else:
+            os.environ["SUPABASE_ANON_KEY"] = self._previous_supabase_anon
+        get_settings.cache_clear()
         _reset_install_key_registry_for_testing()
 
     def _registry_with_key(self, program="openclaw"):
@@ -812,12 +959,45 @@ class TestRevokeKey(unittest.TestCase):
 class TestRecordKeyUsage(unittest.TestCase):
     def setUp(self):
         _reset_install_key_registry_for_testing()
+        get_settings.cache_clear()
+        self._previous_persistence_mode = os.environ.get("IRONCLAW_PERSISTENCE_MODE")
+        self._previous_supabase_url = os.environ.get("SUPABASE_URL")
+        self._previous_supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        self._previous_supabase_anon = os.environ.get("SUPABASE_ANON_KEY")
+        os.environ["IRONCLAW_PERSISTENCE_MODE"] = "supabase"
+        os.environ["SUPABASE_URL"] = "https://example.supabase.co"
+        os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "service-role-test-key"
+        os.environ["SUPABASE_KEY"] = "service-role-test-key"
+        os.environ["SUPABASE_ANON_KEY"] = "anon-test-key"
+        get_settings.cache_clear()
         self._stub = _make_supabase_stub()
         self._patcher = patch(_PATCH_TARGET, return_value=self._stub)
+        self._fallback_patcher = patch("app.core.install_keys._should_use_memory_fallback", return_value=False)
         self._patcher.start()
+        self._fallback_patcher.start()
 
     def tearDown(self):
+        self._fallback_patcher.stop()
         self._patcher.stop()
+        if self._previous_persistence_mode is None:
+            os.environ.pop("IRONCLAW_PERSISTENCE_MODE", None)
+        else:
+            os.environ["IRONCLAW_PERSISTENCE_MODE"] = self._previous_persistence_mode
+        if self._previous_supabase_url is None:
+            os.environ.pop("SUPABASE_URL", None)
+        else:
+            os.environ["SUPABASE_URL"] = self._previous_supabase_url
+        if self._previous_supabase_key is None:
+            os.environ.pop("SUPABASE_SERVICE_ROLE_KEY", None)
+            os.environ.pop("SUPABASE_KEY", None)
+        else:
+            os.environ["SUPABASE_SERVICE_ROLE_KEY"] = self._previous_supabase_key
+            os.environ["SUPABASE_KEY"] = self._previous_supabase_key
+        if self._previous_supabase_anon is None:
+            os.environ.pop("SUPABASE_ANON_KEY", None)
+        else:
+            os.environ["SUPABASE_ANON_KEY"] = self._previous_supabase_anon
+        get_settings.cache_clear()
         _reset_install_key_registry_for_testing()
 
     def _registry_with_key(self, program="openclaw", active=True):

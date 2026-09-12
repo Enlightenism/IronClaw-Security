@@ -587,6 +587,68 @@ class TestHandleCheckoutCompleted:
         svc.handle_webhook_event(event)
         assert svc.get_unit_balance(_ORG).balance == 5_000
 
+    def test_checkout_completed_success_credits_wallet_and_issues_paid_install_keys(self, svc: StripeService, monkeypatch: pytest.MonkeyPatch) -> None:
+        def fake_provision(*args: Any, **kwargs: Any) -> MagicMock:
+            record = MagicMock()
+            record.key_id = f"ik_{kwargs['program']}_001"
+            record.owner_key = kwargs["owner_key"]
+            record.program = kwargs["program"]
+            record.active = True
+            record.masked_key = f"ic_install_{kwargs['program']}...1234"
+            record.subscription_id = kwargs["subscription_id"]
+            issued = MagicMock()
+            issued.record = record
+            return issued
+
+        monkeypatch.setattr(
+            "app.services.stripe_service.provision_install_key_service",
+            lambda *args, **kwargs: MagicMock(provision_for_program=fake_provision),
+        )
+
+        event = _build_checkout_completed_event(unit_credits=5_000, org_id="org-install-keys-success")
+        result = svc.handle_webhook_event(event)
+
+        assert result["action"] == "processed"
+        assert svc.get_unit_balance("org-install-keys-success").balance == 5_000
+        install_keys = result["detail"]["install_key_issuance"]
+        assert install_keys["openclaw"]["owner_key"] == "ic_org_org-install-keys-success"
+        assert install_keys["claude_code"]["owner_key"] == "ic_org_org-install-keys-success"
+        assert install_keys["openclaw"]["active"] is True
+        assert install_keys["claude_code"]["active"] is True
+
+    def test_checkout_completed_partial_failure_does_not_leave_paid_active_key_issued(self, svc: StripeService, monkeypatch: pytest.MonkeyPatch) -> None:
+        def fake_fail(*args: Any, **kwargs: Any) -> MagicMock:
+            raise RuntimeError("persistence write-order failure")
+
+        monkeypatch.setattr(
+            "app.services.stripe_service.provision_install_key_service",
+            lambda *args, **kwargs: MagicMock(provision_for_program=fake_fail),
+        )
+
+        event = _build_checkout_completed_event(unit_credits=5_000, org_id="org-install-keys-partial-fail")
+        result = svc.handle_webhook_event(event)
+
+        assert result["action"] == "processed"
+        assert "install_key_issuance" not in result["detail"]
+        assert svc.get_unit_balance("org-install-keys-partial-fail").balance == 5_000
+
+    def test_checkout_completed_replay_after_partial_success_does_not_double_credit_units(self, svc: StripeService, monkeypatch: pytest.MonkeyPatch) -> None:
+        def fake_fail(*args: Any, **kwargs: Any) -> MagicMock:
+            raise RuntimeError("persistence write-order failure")
+
+        monkeypatch.setattr(
+            "app.services.stripe_service.provision_install_key_service",
+            lambda *args, **kwargs: MagicMock(provision_for_program=fake_fail),
+        )
+
+        event = _build_checkout_completed_event(unit_credits=2_000, org_id="org-replay-no-double-credit")
+        first = svc.handle_webhook_event(event)
+        second = svc.handle_webhook_event(event)
+
+        assert first["action"] == "processed"
+        assert second["action"] == "duplicate"
+        assert svc.get_unit_balance("org-replay-no-double-credit").balance == 2_000
+
     def test_checkout_completed_issues_paid_install_keys_for_org_owner(self, svc: StripeService) -> None:
         event = _build_checkout_completed_event(unit_credits=5_000, org_id="org-install-keys")
         result = svc.handle_webhook_event(event)

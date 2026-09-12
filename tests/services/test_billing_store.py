@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 import os
 
 os.environ.setdefault("IRONCLAW_PERSISTENCE_MODE", "memory")
@@ -12,6 +13,7 @@ os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
 import pytest
 
+import app.api.routes.billing as billing_routes
 from app.services.billing_store import (
     SubscriptionMeterStore,
     get_billing_store,
@@ -19,6 +21,50 @@ from app.services.billing_store import (
     reset_billing_store,
     reset_subscription_meter_store,
 )
+
+
+@pytest.fixture()
+def durable_purchase_fixture() -> Iterator[None]:
+    billing_routes._PURCHASES.clear()
+    yield
+    billing_routes._PURCHASES.clear()
+
+
+def _make_pending_purchase(
+    *,
+    owner_key: str,
+    purchase_id: str,
+    checkout_session_id: str,
+    package_id: str = "pkg_5000",
+) -> billing_routes.BillingPackagePurchaseView:
+    pkg = billing_routes.PACKAGE_CATALOG[package_id]
+    return billing_routes.BillingPackagePurchaseView(
+        purchase_id=purchase_id,
+        package_id=package_id,
+        package_name=str(pkg["name"]),
+        buyer_name="Durable Buyer",
+        buyer_email=owner_key,
+        owner_key=owner_key,
+        price_usd=float(pkg["price_usd"]),
+        granted_units=0,
+        token_coverage=int(pkg["included_units"]) * billing_routes.TOKEN_CHUNK_SIZE,
+        tokens_per_unit=billing_routes.TOKEN_CHUNK_SIZE,
+        created_at=billing_routes._utc_now_iso(),
+        payment_id=None,
+        payment_status="pending",
+        entitlement_status="not_active",
+        metadata={
+            "owner_key": owner_key,
+            "buyer_email": owner_key,
+            "package_id": package_id,
+            "payment_required": True,
+            "payment_status": "pending",
+            "fulfillment_status": "pending",
+            "install_keys_provisioned": False,
+            "units_credited": False,
+            "checkout_session_id": checkout_session_id,
+        },
+    )
 
 
 @pytest.fixture()
@@ -351,6 +397,117 @@ def test_meter_event_record_as_dict_contains_expected_keys(store: SubscriptionMe
     assert d["event_id"] == event.event_id
     assert d["subscription_id"] == record.subscription_id
     assert isinstance(d["recorded_at"], str)
+
+
+def test_durable_purchase_record_is_pending_and_lookupable_by_identity_fields(durable_purchase_fixture) -> None:
+    owner_key = "pending-lookup@ironclaw.test"
+    purchase_id = "purch_lookup_001"
+    session_id = "cs_lookup_001"
+    purchase = _make_pending_purchase(owner_key=owner_key, purchase_id=purchase_id, checkout_session_id=session_id)
+    billing_routes._append_purchase(purchase)
+
+    by_purchase_id = billing_routes._find_matching_purchase(purchase_id=purchase_id)
+    by_session_id = billing_routes._find_matching_purchase(session_id=session_id)
+    by_owner = billing_routes._find_matching_purchase(owner_key=owner_key)
+
+    assert by_purchase_id is not None
+    assert by_session_id is not None
+    assert by_owner is not None
+    assert by_purchase_id.purchase_id == purchase_id
+    assert by_session_id.purchase_id == purchase_id
+    assert by_owner.owner_key == owner_key
+    assert by_purchase_id.metadata["payment_status"] == "pending"
+    assert by_purchase_id.metadata["fulfillment_status"] == "pending"
+
+
+def test_durable_purchase_transitions_from_pending_to_fulfilled_on_checkout_completion(durable_purchase_fixture) -> None:
+    owner_key = "fulfilled-lookup@ironclaw.test"
+    purchase_id = "purch_fulfill_001"
+    session_id = "cs_fulfill_001"
+    purchase = _make_pending_purchase(owner_key=owner_key, purchase_id=purchase_id, checkout_session_id=session_id)
+    billing_routes._append_purchase(purchase)
+
+    response = billing_routes.handle_checkout_session_completed_webhook(
+        {
+            "id": "evt_fulfill_001",
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": session_id,
+                    "customer": "cus_fulfill_001",
+                    "payment_status": "paid",
+                    "amount_total": 2000,
+                    "currency": "usd",
+                    "mode": "payment",
+                    "customer_details": {"email": owner_key},
+                    "metadata": {
+                        "owner_key": owner_key,
+                        "purchase_id": purchase_id,
+                        "buyer_email": owner_key,
+                        "package_id": "pkg_5000",
+                        "checkout_session_id": session_id,
+                    },
+                }
+            },
+        }
+    )
+
+    assert response["status"] == "fulfilled"
+    stored = billing_routes._find_matching_purchase(purchase_id=purchase_id)
+    assert stored is not None
+    assert stored.metadata["payment_status"] == "paid"
+    assert stored.metadata["fulfillment_status"] == "fulfilled"
+    assert stored.metadata["checkout_session_id"] == session_id
+    assert stored.granted_units == 5_000
+    assert stored.metadata["units_credited"] is True
+
+
+def test_durable_purchase_failure_rolls_back_stale_paid_state(durable_purchase_fixture, monkeypatch) -> None:
+    owner_key = "rollback-owner@ironclaw.test"
+    purchase_id = "purch_rollback_001"
+    session_id = "cs_rollback_001"
+    purchase = _make_pending_purchase(owner_key=owner_key, purchase_id=purchase_id, checkout_session_id=session_id)
+    billing_routes._append_purchase(purchase)
+
+    registry = billing_routes.get_unit_wallet_registry()
+
+    def _explode_credit_units(*args, **kwargs):
+        raise RuntimeError("wallet credit failed")
+
+    monkeypatch.setattr(registry, "credit_units", _explode_credit_units)
+
+    with pytest.raises(RuntimeError, match="wallet credit failed"):
+        billing_routes.handle_checkout_session_completed_webhook(
+            {
+                "id": "evt_rollback_001",
+                "type": "checkout.session.completed",
+                "data": {
+                    "object": {
+                        "id": session_id,
+                        "customer": "cus_rollback_001",
+                        "payment_status": "paid",
+                        "amount_total": 2000,
+                        "currency": "usd",
+                        "mode": "payment",
+                        "customer_details": {"email": owner_key},
+                        "metadata": {
+                            "owner_key": owner_key,
+                            "purchase_id": purchase_id,
+                            "buyer_email": owner_key,
+                            "package_id": "pkg_5000",
+                            "checkout_session_id": session_id,
+                        },
+                    }
+                },
+            }
+        )
+
+    stored = billing_routes._find_matching_purchase(purchase_id=purchase_id)
+    assert stored is not None
+    assert stored.metadata["payment_status"] == "pending"
+    assert stored.metadata["fulfillment_status"] == "pending"
+    assert stored.metadata.get("checkout_session_id") == session_id
+    assert stored.metadata.get("units_credited") is False
 
 
 # ---------------------------------------------------------------------------

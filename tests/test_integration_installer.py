@@ -155,6 +155,25 @@ def test_install_integration_rejects_generic_system_keys_before_registry_lookup(
         mock_registry.return_value.authenticate_install_key.assert_not_called()
 
 
+def test_install_integration_requires_owner_for_paid_runtime_install():
+    registry = initialize_integration_registry()
+
+    with patch("app.services.integration_installer.get_install_key_registry") as mock_registry:
+        mock_registry.return_value.authenticate_install_key.return_value = _fake_paid_install_key(owner_key="owner-456")
+        result = install_integration(
+            registry,
+            "integration-openclaw",
+            requested_by="tester",
+            install_key="ic_install_openclaw_validkey",
+            owner_key="",
+        )
+
+    assert result.installed is False
+    assert result.status_after == "blocked"
+    assert any(step.name == "validate-paid-install-key" and step.state == "failed" for step in result.steps)
+    mock_registry.return_value.authenticate_install_key.assert_not_called()
+
+
 def test_install_integration_rejects_revoked_or_inactive_paid_key():
     registry = initialize_integration_registry()
 

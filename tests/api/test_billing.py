@@ -3,18 +3,6 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-import pytest
-
-import app.api.billing as billing_api
-from app.api.billing import (
-    router,
-)
-from app.core.auth import AuthContext, require_auth_context
-from app.core.install_keys import InstallKeyRecord
-from app.core.unit_wallet import TOKEN_CHUNK_SIZE, UNIT_PACKAGE_CATALOG, get_unit_wallet_registry
-
 os.environ.setdefault("IRONCLAW_PERSISTENCE_MODE", "memory")
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("IRONCLAW_API_KEY", "test-api-key")
@@ -24,6 +12,19 @@ os.environ.setdefault("SUPABASE_URL", "")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
 os.environ.setdefault("SUPABASE_KEY", "")
 os.environ.setdefault("SUPABASE_ANON_KEY", "")
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+import pytest
+
+import app.api.billing as billing_api
+from app.api.billing import (
+    router,
+)
+import app.api.routes.billing as canonical_billing
+from app.core.auth import AuthContext, require_auth_context
+from app.core.install_keys import InstallKeyRecord
+from app.core.unit_wallet import TOKEN_CHUNK_SIZE, UNIT_PACKAGE_CATALOG, get_unit_wallet_registry
 
 _APP = FastAPI()
 _APP.include_router(router)
@@ -116,9 +117,102 @@ def test_purchase_billing_package_creates_pending_purchase_without_crediting_wal
     assert purchase["install_key_id"] is None
     assert purchase["masked_key"] is None
     assert purchase["program"] is None
+    assert purchase["metadata"]["payment_required"] is True
+    assert purchase["metadata"]["payment_status"] == "pending"
+    assert purchase["metadata"]["fulfillment_status"] == "pending"
+    assert purchase["metadata"]["install_keys_provisioned"] is False
+    assert purchase["metadata"]["units_credited"] is False
     wallet = payload["wallet"]
     assert wallet["owner_key"] == "alice@example.com"
     assert wallet["balance_units"] == 0
+
+    durable_record = next((item for item in canonical_billing._PURCHASES if item.purchase_id == purchase["purchase_id"]), None)
+    assert durable_record is not None
+    assert durable_record.metadata["payment_required"] is True
+    assert durable_record.metadata["payment_status"] == "pending"
+    assert durable_record.metadata["owner_key"] == "alice@example.com"
+
+
+def test_pending_purchase_fulfills_into_paid_wallet_and_active_install_entitlement() -> None:
+    with _client_for(_PERSONAL_AUTH) as c:
+        create = c.post(
+            "/billing/packages/purchase",
+            json={
+                "package_id": "pkg_5000",
+                "buyer_name": "Funding Buyer",
+                "buyer_email": "funding@example.com",
+                "metadata": {"source": "e2e"},
+            },
+        )
+        purchase_id = create.json()["purchase"]["purchase_id"]
+
+        assert create.status_code == 201
+        assert create.json()["wallet"]["balance_units"] == 0
+
+        runtime_programs = ("openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes")
+        mock_registry = MagicMock()
+        mock_registry.get_keys_for_owner.return_value = []
+        mock_registry.generate_install_key.side_effect = [
+            InstallKeyRecord(
+                key_id=f"ik_{program}_001",
+                owner_key="funding@example.com",
+                subscription_id=purchase_id,
+                program=program,
+                raw_key=f"ic_install_{program}_1A2B3C4D5E6F7G8H9J",
+                raw_key_hash=f"hash_{program}",
+                masked_key=f"ic_install_{program}_...9J",
+                label="paid-provisioned",
+                active=True,
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+                metadata={"purchase_id": purchase_id, "auto_provisioned": True},
+            )
+            for program in runtime_programs
+        ]
+
+        with patch("app.api.billing.get_install_key_registry", return_value=mock_registry):
+            fulfill = c.post(
+                f"/billing/packages/{purchase_id}/fulfill",
+                params={"payment_id": "pay_987", "payment_status": "paid", "entitlement_status": "active"},
+            )
+
+    assert fulfill.status_code == 200
+    body = fulfill.json()
+    purchase = body["purchase"]
+    assert purchase["payment_status"] == "paid"
+    assert purchase["entitlement_status"] == "active"
+    assert purchase["install_key_id"] == "ik_hermes_001"
+    assert purchase["masked_key"] == "ic_install_hermes_...9J"
+    assert purchase["program"] == "hermes"
+    assert purchase["openclaw_install_key"] == "ic_install_openclaw_...9J"
+    assert purchase["hermes_install_key"] == "ic_install_hermes_...9J"
+    assert purchase["usage_summary"]["program"] == "hermes"
+    assert purchase["usage_summary"]["entitlement_status"] == "active"
+    assert purchase["metadata"]["install_keys_provisioned"] is True
+    assert body["wallet"]["owner_key"] == "funding@example.com"
+    assert body["wallet"]["balance_units"] == 5000
+
+
+def test_legacy_billing_surface_uses_canonical_purchase_store() -> None:
+    with _client_for(_PERSONAL_AUTH) as c:
+        response = c.post(
+            "/billing/packages/purchase",
+            json={
+                "package_id": "pkg_5000",
+                "buyer_name": "Canonical Buyer",
+                "buyer_email": "canonical@example.com",
+                "metadata": {"source": "compatibility"},
+            },
+        )
+
+    assert response.status_code == 201
+    purchase_id = response.json()["purchase"]["purchase_id"]
+    canonical_purchase = next((item for item in canonical_billing._PURCHASES if item.purchase_id == purchase_id), None)
+    assert canonical_purchase is not None
+    assert canonical_purchase.owner_key == "canonical@example.com"
+    assert canonical_purchase.metadata["source"] == "compatibility"
+    assert canonical_purchase.granted_units == 0
 
 
 def test_purchase_rejects_visible_system_owner_key() -> None:

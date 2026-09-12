@@ -16,7 +16,7 @@ provider_targets = [
     "goose",
     "gemini_cli",
     "copilot",
-    "security_guardian",
+    "hermes",
 ]
 
 [service]

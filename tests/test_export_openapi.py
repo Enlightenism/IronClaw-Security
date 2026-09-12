@@ -219,6 +219,16 @@ class TestSerializeSchema:
         parsed_keys = list(json.loads(result).keys())
         assert parsed_keys == sorted(parsed_keys)
 
+
+def test_requirements_file_pins_stripe_and_jwt_security_dependencies() -> None:
+    requirements_path = Path(__file__).resolve().parents[1] / "requirements.txt"
+    requirements_text = requirements_path.read_text(encoding="utf-8")
+
+    pinned = {line.strip().lower() for line in requirements_text.splitlines() if line.strip() and not line.strip().startswith("#")}
+
+    assert "stripe==9.4.0" in pinned
+    assert "pyjwt==2.10.1" in pinned
+
     def test_uses_two_space_indent(self):
         schema = {"openapi": "3.1.0", "info": {}, "paths": {}}
         result = serialize_schema(schema)

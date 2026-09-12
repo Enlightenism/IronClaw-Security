@@ -5,12 +5,13 @@ from datetime import UTC, datetime
 import hashlib
 import hmac
 import logging
+import os
 import secrets
 from threading import RLock
 from typing import Any, Final, Literal
 
 from app.core.logging import get_logger
-from app.core.supabase import get_supabase_service_client
+from app.core.supabase import get_supabase_service_client, is_supabase_configured
 from app.core.unit_wallet import get_unit_wallet_registry
 from app.supabaseclient import SupabaseAPIError, SupabaseClientError
 
@@ -539,7 +540,40 @@ class InstallKeyUsageError(InstallKeyError):
 
 
 def _is_current_paid_entitlement(record: InstallKeyRecord) -> bool:
-    return bool(record.active or (record.payment_status == "paid" and record.entitlements_status == "active" and record.issued_after_payment))
+    if record.revoked_at is not None or not record.active:
+        return False
+    if record.payment_status != "paid":
+        return False
+    if record.entitlements_status != "active":
+        return False
+    if not record.issued_after_payment:
+        return False
+    return True
+
+
+def _is_durable_write_result(result: Any) -> bool:
+    return result is not None
+
+
+def _should_use_memory_fallback() -> bool:
+    mode = os.environ.get("IRONCLAW_PERSISTENCE_MODE", "").strip().lower()
+    if mode == "memory":
+        return True
+    try:
+        return not is_supabase_configured()
+    except Exception:
+        return True
+
+
+def _persist_install_key_update(*, key_id: str, action: str, callback: Any) -> None:
+    if _should_use_memory_fallback():
+        _logger.info("install_keys: %s for %s skipped because persistence is running in memory-only mode", action, key_id)
+        return
+
+    try:
+        callback()
+    except (SupabaseAPIError, SupabaseClientError, Exception):
+        _logger.warning("install_keys: failed to persist %s for %s", action, key_id)
 
 
 # ---------------------------------------------------------------------------
@@ -564,28 +598,90 @@ class InstallKeyRegistry:
         self._records_by_id: dict[str, InstallKeyRecord] = {}
         self._key_id_by_hash: dict[str, str] = {}
         self._loaded = False
+        self._last_sync_at: datetime | None = None
+        self._last_write_at: datetime | None = None
 
     # ------------------------------------------------------------------
     # Internal load
     # ------------------------------------------------------------------
 
+    def _load_rows_from_supabase(self) -> list[dict[str, Any]]:
+        if _should_use_memory_fallback():
+            return []
+        client = get_supabase_service_client()
+        resp = client.table(_T_INSTALL_KEYS).select("*").execute()
+        rows = resp.data or []
+        if isinstance(rows, dict):
+            rows = [rows]
+        return [dict(row) for row in rows]
+
+    def _rebuild_registry_from_rows(self, rows: list[dict[str, Any]]) -> None:
+        rebuilt_by_id: dict[str, InstallKeyRecord] = {}
+        rebuilt_hash_index: dict[str, str] = {}
+        for row in rows:
+            record = _record_from_row(row)
+            rebuilt_by_id[record.key_id] = record
+            if record.raw_key_hash:
+                rebuilt_hash_index[record.raw_key_hash] = record.key_id
+        self._records_by_id = rebuilt_by_id
+        self._key_id_by_hash = rebuilt_hash_index
+        self._loaded = True
+        self._last_sync_at = _utc_now()
+
+    def _refresh_from_supabase(self, *, force: bool = False) -> None:
+        now = _utc_now()
+
+        if self._records_by_id and self._last_write_at is not None:
+            freshness_window = (now - self._last_write_at).total_seconds()
+            if freshness_window < 5.0 and not force:
+                self._loaded = True
+                self._last_sync_at = now
+                return
+
+        try:
+            rows = self._load_rows_from_supabase()
+        except (SupabaseAPIError, SupabaseClientError, Exception):
+            _logger.exception("install_keys: failed to refresh from Supabase; keeping in-memory cache until a clean reload is possible")
+            self._loaded = bool(self._records_by_id)
+            self._last_sync_at = now if self._loaded else None
+            return
+
+        snapshot = tuple(sorted((str(row.get("key_id") or "")) for row in rows))
+        cached_snapshot = tuple(sorted(self._records_by_id))
+
+        if not self._loaded or force:
+            if not rows and not self._records_by_id:
+                self._rebuild_registry_from_rows([])
+                return
+            if not rows and self._records_by_id:
+                self._loaded = True
+                self._last_sync_at = now
+                return
+            self._rebuild_registry_from_rows(rows)
+            return
+
+        if len(rows) != len(self._records_by_id) or snapshot != cached_snapshot:
+            self._rebuild_registry_from_rows(rows)
+            return
+
+        for row in rows:
+            record = _record_from_row(row)
+            cached = self._records_by_id.get(record.key_id)
+            if cached is None:
+                self._rebuild_registry_from_rows(rows)
+                return
+            if cached.active != record.active or cached.payment_status != record.payment_status or cached.entitlements_status != record.entitlements_status or cached.revoked_at != record.revoked_at:
+                self._rebuild_registry_from_rows(rows)
+                return
+
+        self._loaded = True
+        self._last_sync_at = now
+
     def _ensure_loaded(self) -> None:
         if self._loaded:
+            self._refresh_from_supabase(force=False)
             return
-        try:
-            client = get_supabase_service_client()
-            resp = client.table(_T_INSTALL_KEYS).select("*").execute()
-            rows = resp.data or []
-            if isinstance(rows, dict):
-                rows = [rows]
-            for row in rows:
-                record = _record_from_row(row)
-                self._records_by_id[record.key_id] = record
-                if record.raw_key_hash:
-                    self._key_id_by_hash[record.raw_key_hash] = record.key_id
-        except (SupabaseAPIError, SupabaseClientError, Exception):
-            _logger.exception("install_keys: failed to load from Supabase; continuing with empty state")
-        self._loaded = True
+        self._refresh_from_supabase(force=True)
 
     # ------------------------------------------------------------------
     # Internal entitlement validation
@@ -601,6 +697,7 @@ class InstallKeyRegistry:
         issued_after_payment: bool,
         checkout_session_id: str | None = None,
         purchase_reference: str | None = None,
+        subscription_id: str | None = None,
     ) -> None:
         normalized_payment_status = _normalize_payment_status(payment_status)
         normalized_entitlement_status = _normalize_entitlement_status(entitlements_status)
@@ -663,7 +760,7 @@ class InstallKeyRegistry:
         )
         self._records_by_id[record.key_id] = updated
 
-        try:
+        def _persist_lock_state() -> None:
             client = get_supabase_service_client()
             client.table(_T_INSTALL_KEYS).update(
                 {
@@ -673,8 +770,8 @@ class InstallKeyRegistry:
                     "metadata": updated.metadata,
                 }
             ).eq("key_id", record.key_id).execute()
-        except (SupabaseAPIError, SupabaseClientError, Exception):
-            _logger.warning("install_keys: failed to persist lock state for %s (reason=%s)", record.key_id, reason)
+
+        _persist_install_key_update(key_id=record.key_id, action="lock_state", callback=_persist_lock_state)
 
         return updated
 
@@ -735,6 +832,7 @@ class InstallKeyRegistry:
             issued_after_payment=issued_after_payment,
             checkout_session_id=checkout_session_id,
             purchase_reference=purchase_reference,
+            subscription_id=subscription_id,
         )
 
         with self._lock:
@@ -773,14 +871,30 @@ class InstallKeyRegistry:
                 metadata=dict(metadata or {}),
             )
 
-            try:
-                client = get_supabase_service_client()
-                client.table(_T_INSTALL_KEYS).insert(record.to_db_row()).execute()
-            except (SupabaseAPIError, SupabaseClientError, Exception):
-                _logger.exception("install_keys: failed to persist new key %s", key_id)
+            if not _should_use_memory_fallback():
+                try:
+                    client = get_supabase_service_client()
+                    insert_result = client.table(_T_INSTALL_KEYS).insert(record.to_db_row()).execute()
+                    if not _is_durable_write_result(insert_result):
+                        raise RuntimeError(f"Supabase insert returned no durable result for key {key_id!r}")
+                except (SupabaseAPIError, SupabaseClientError, RuntimeError, Exception):
+                    _logger.exception("install_keys: failed to persist new key %s", key_id)
+                    raise
 
             self._records_by_id[key_id] = record
             self._key_id_by_hash[raw_key_hash] = key_id
+            self._loaded = True
+            self._last_write_at = _utc_now()
+            self._last_sync_at = self._last_write_at
+
+            active_duplicate = next(
+                (existing for existing in self._records_by_id.values() if existing.key_id != key_id and existing.owner_key == normalized_owner and existing.program == normalized_program and _is_current_paid_entitlement(existing)),
+                None,
+            )
+            if active_duplicate is not None:
+                self._records_by_id.pop(key_id, None)
+                self._key_id_by_hash.pop(raw_key_hash, None)
+                raise InstallKeyAlreadyExistsError(normalized_owner, normalized_program)
 
             _logger.info(
                 "install_key_generated",
@@ -843,14 +957,6 @@ class InstallKeyRegistry:
             purchase_reference = metadata.get("purchase_reference")
         if checkout_session_id is None and metadata is not None:
             checkout_session_id = metadata.get("checkout_session_id")
-
-        if purchase_reference is None and checkout_session_id is None:
-            # Legacy callers may only pass a subscription_id and still represent a
-            # paid, entitlement-backed issuance. Bind the synthetic purchase
-            # reference to that subscription so the canonical payment gate remains
-            # satisfied without exposing a raw install key or bypassing the rule.
-            purchase_reference = str(subscription_id).strip() or None
-            checkout_session_id = str(subscription_id).strip() or None
 
         return self.generate_for_paid_customer(
             owner_key=owner_key,
@@ -917,10 +1023,14 @@ class InstallKeyRegistry:
             record = self._records_by_id.get(key_id)
             if record is None:
                 return None
+            if record.revoked_at is not None:
+                return None
             record = self._reconcile_key_state(record)
             if not record.active:
                 return None
             if not record.raw_key_hash:
+                return None
+            if record.revoked_at is not None:
                 return None
             if record.payment_status != "paid" or record.entitlements_status != "active" or not record.issued_after_payment:
                 return None
@@ -954,11 +1064,11 @@ class InstallKeyRegistry:
             )
             self._records_by_id[key_id] = updated
 
-            try:
+            def _persist_last_used() -> None:
                 client = get_supabase_service_client()
                 client.table(_T_INSTALL_KEYS).update({"last_used_at": now.isoformat()}).eq("key_id", key_id).execute()
-            except (SupabaseAPIError, SupabaseClientError, Exception):
-                _logger.warning("install_keys: failed to persist last_used_at for %s", key_id)
+
+            _persist_install_key_update(key_id=key_id, action="last_used_at", callback=_persist_last_used)
 
             return updated
 
@@ -1003,11 +1113,11 @@ class InstallKeyRegistry:
             )
             self._records_by_id[key_id] = updated
 
-            try:
+            def _persist_revocation() -> None:
                 client = get_supabase_service_client()
                 client.table(_T_INSTALL_KEYS).update({"active": False, "entitlements_status": "revoked", "revoked_at": now.isoformat()}).eq("key_id", key_id).execute()
-            except (SupabaseAPIError, SupabaseClientError, Exception):
-                _logger.exception("install_keys: failed to persist revocation for %s", key_id)
+
+            _persist_install_key_update(key_id=key_id, action="revocation", callback=_persist_revocation)
 
             _logger.info("install_key_revoked", extra={"key_id": key_id, "owner_key": record.owner_key})
             return updated
@@ -1030,9 +1140,13 @@ class InstallKeyRegistry:
             record = self._records_by_id.get(key_id)
             if record is None:
                 raise InstallKeyNotFoundError(key_id)
+            if record.revoked_at is not None:
+                raise InstallKeyUsageError(key_id, "key has been revoked and cannot record usage")
             record = self._reconcile_key_state(record)
             if not record.active:
                 raise InstallKeyUsageError(key_id, "key is inactive and cannot record usage")
+            if record.revoked_at is not None:
+                raise InstallKeyUsageError(key_id, "key has been revoked and cannot record usage")
             if record.payment_status != "paid" or record.entitlements_status != "active" or not record.issued_after_payment:
                 raise InstallKeyUsageError(key_id, "key is not backed by a valid paid entitlement")
 
@@ -1064,7 +1178,7 @@ class InstallKeyRegistry:
             )
             self._records_by_id[key_id] = updated
 
-            try:
+            def _persist_usage() -> None:
                 client = get_supabase_service_client()
                 client.table(_T_INSTALL_KEYS).update(
                     {
@@ -1072,8 +1186,8 @@ class InstallKeyRegistry:
                         "last_used_at": now.isoformat(),
                     }
                 ).eq("key_id", key_id).execute()
-            except (SupabaseAPIError, SupabaseClientError, Exception):
-                _logger.exception("install_keys: failed to persist usage for %s", key_id)
+
+            _persist_install_key_update(key_id=key_id, action="usage", callback=_persist_usage)
 
             _logger.info(
                 "install_key_usage_recorded",

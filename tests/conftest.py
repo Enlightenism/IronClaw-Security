@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 import pytest
 
+import app.api.stripe_webhooks as stripe_webhooks
 from app.core.auth import AuthContext, require_auth_context
 from app.core.billing import _reset_billing_registry_for_testing
 import app.core.install_keys as _install_keys_module
@@ -57,6 +58,21 @@ def _seed_test_environment() -> None:
 
 _seed_test_environment()
 
+
+def _reset_runtime_singletons() -> None:
+    reset_supabase_client()
+    stripe_webhooks.reset_processed_events()
+    _install_keys_module._reset_install_key_registry_for_testing()
+
+    wallet = UnitWalletRegistry()
+    wallet._repo = _unit_wallet_module.MemoryUnitWalletRepository()
+    _unit_wallet_module._unit_wallet_registry = wallet
+
+    _app.dependency_overrides.clear()
+    get_settings.cache_clear()
+    _app.state.settings = get_settings()
+
+
 # ---------------------------------------------------------------------------
 # Shared auth context used by all override fixtures
 # ---------------------------------------------------------------------------
@@ -89,6 +105,13 @@ def _clear_auth_override() -> None:
 
 
 @pytest.fixture(scope="function", autouse=True)
+def isolate_in_memory_runtime_state() -> Generator[None, None, None]:
+    _reset_runtime_singletons()
+    yield
+    _reset_runtime_singletons()
+
+
+@pytest.fixture(scope="function", autouse=True)
 def _reset_supabase_singleton() -> Generator[None, None, None]:
     reset_supabase_client()
     yield
@@ -108,9 +131,12 @@ def _refresh_app_settings() -> Generator[None, None, None]:
 @pytest.fixture(scope="function", autouse=True)
 def _reset_unit_wallet_registry() -> Generator[None, None, None]:
     fresh = UnitWalletRegistry()
+    fresh._repo = _unit_wallet_module.MemoryUnitWalletRepository()
     _unit_wallet_module._unit_wallet_registry = fresh
     yield
-    _unit_wallet_module._unit_wallet_registry = UnitWalletRegistry()
+    fresh2 = UnitWalletRegistry()
+    fresh2._repo = _unit_wallet_module.MemoryUnitWalletRepository()
+    _unit_wallet_module._unit_wallet_registry = fresh2
 
 
 @pytest.fixture(scope="function", autouse=True)

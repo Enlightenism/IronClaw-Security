@@ -411,6 +411,57 @@ def test_integration_list_endpoints_expose_canonical_platform_metadata(client: T
         assert all(item["integration_id"] != "security-guardian" for item in payload["items"])
 
 
+def test_api_integrations_token_matches_canonical_route_output() -> None:
+    auth_context = SimpleNamespace(
+        api_key="",
+        principal_id="owner-456",
+        org_id=None,
+        key_type="personal",
+    )
+    registry = SimpleNamespace(
+        get_keys_for_owner=lambda owner_key: [
+            SimpleNamespace(
+                owner_key="owner-456",
+                program="openclaw",
+                active=True,
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+                masked_key="ic_install_openclaw_...abcd",
+            ),
+            SimpleNamespace(
+                owner_key="owner-456",
+                program="claude_code",
+                active=True,
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+                masked_key="ic_install_claude_code_...efgh",
+            ),
+        ]
+    )
+
+    api_app = FastAPI()
+    api_app.include_router(api_integrations_router)
+    canonical_app = FastAPI()
+    canonical_app.include_router(integrations_router)
+
+    api_app.dependency_overrides[get_auth_context] = lambda: auth_context
+    canonical_app.dependency_overrides[get_auth_context] = lambda: auth_context
+    try:
+        with patch("app.api.routes.integrations.get_install_key_registry", return_value=registry):
+            with TestClient(api_app) as api_client, TestClient(canonical_app) as canonical_client:
+                response = api_client.get("/integrations/token")
+                canonical_response = canonical_client.get("/integrations/token")
+    finally:
+        api_app.dependency_overrides.clear()
+        canonical_app.dependency_overrides.clear()
+
+    assert response.status_code == 200, response.text
+    assert canonical_response.status_code == 200, canonical_response.text
+    assert response.json() == canonical_response.json()
+
+
 def test_api_integrations_token_ignores_generic_platform_auth_even_with_registry_data() -> None:
     api_app = FastAPI()
     api_app.include_router(api_integrations_router)

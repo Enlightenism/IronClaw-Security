@@ -29,6 +29,8 @@ def test_hermes_end_to_end_paid_flow_and_contract() -> None:
         subscription_id=subscription_id,
         program="hermes",
         label="Hermes End-to-End",
+        purchase_reference="ref_hermes_paid_flow",
+        checkout_session_id="cs_hermes_paid_flow",
     )
     assert record.program == "hermes"
     assert record.raw_key.startswith("ic_install_hermes_")
@@ -126,6 +128,8 @@ def test_hermes_install_key_paid_gate_rejects_unpaid_state() -> None:
         subscription_id="sub_hermes_unpaid_gate",
         program="hermes",
         label="Hermes Gate",
+        purchase_reference="ref_hermes_unpaid_gate",
+        checkout_session_id="cs_hermes_unpaid_gate",
     )
     record.payment_status = "unpaid"
     record.entitlements_status = "not_active"

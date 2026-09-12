@@ -1073,6 +1073,105 @@ class UnitWalletRegistry:
         self._repo.append_ledger_entry(ledger_entry)
         return wallet, usage, entry
 
+    def record_install_key_event(
+        self,
+        owner_key: str,
+        *,
+        key_id: str | None,
+        program: str | None,
+        event_type: str,
+        units: int = 0,
+        blocked_attack_count: int = 0,
+        action_type: str | None = None,
+        occurred_at: datetime | str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        wallet = self.get_or_create_wallet(owner_key)
+        effective_program = (program or "openclaw").strip() or "openclaw"
+
+        if isinstance(occurred_at, datetime):
+            timestamp = occurred_at.astimezone(UTC) if occurred_at.tzinfo is not None else occurred_at.replace(tzinfo=UTC)
+        elif isinstance(occurred_at, str):
+            candidate = occurred_at.strip()
+            if candidate.endswith("Z"):
+                candidate = candidate[:-1] + "+00:00"
+            timestamp = datetime.fromisoformat(candidate)
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=UTC)
+            timestamp = timestamp.astimezone(UTC)
+        else:
+            timestamp = datetime.now(UTC)
+
+        entry: RegistryUnitLedgerEntry | None = None
+        with self._lock:
+            if key_id:
+                usage = wallet.install_key_usage.setdefault(
+                    key_id,
+                    InstallKeyUsageSource(
+                        key_id=key_id,
+                        owner_key=wallet.owner_key,
+                        program=effective_program,
+                    ),
+                )
+                usage.program = effective_program
+                usage.balance_units = max(wallet.balance_units, 0)
+                usage.last_action_at = timestamp
+                usage.metadata.update(
+                    {
+                        "owner_key": wallet.owner_key,
+                        "key_id": key_id,
+                        "program": effective_program,
+                        "last_event_type": event_type,
+                        "last_event_at": timestamp.isoformat().replace("+00:00", "Z"),
+                        "action_type": action_type or usage.metadata.get("action_type") or "telemetry",
+                    }
+                )
+                if blocked_attack_count > 0 and event_type not in {"usage_units_debited"}:
+                    usage.total_blocked_attacks += int(blocked_attack_count)
+                    wallet.total_blocked_attacks += int(blocked_attack_count)
+                    if event_type in {"prompt_injection_detected", "quarantine_detected", "quarantine_event"}:
+                        usage.total_quarantined_actions += int(blocked_attack_count)
+                if units > 0 and event_type not in {"usage_units_debited"}:
+                    usage.total_consumed_units += int(units)
+                wallet.install_key_usage[key_id] = usage
+
+            wallet.updated_at = timestamp
+            wallet.metadata.setdefault("dashboard_sync", {})
+            wallet.metadata["dashboard_sync"][event_type] = {
+                "occurred_at": timestamp.isoformat().replace("+00:00", "Z"),
+                "key_id": key_id,
+                "owner_key": wallet.owner_key,
+                "program": effective_program,
+                "units": int(units),
+                "blocked_attack_count": int(blocked_attack_count),
+                "metadata": dict(metadata or {}),
+            }
+
+            if key_id:
+                entry = RegistryUnitLedgerEntry(
+                    entry_id=f"ledger_{event_type}_{key_id}_{int(timestamp.timestamp() * 1000)}",
+                    wallet_id=wallet.wallet_id,
+                    owner_key=wallet.owner_key,
+                    entry_type="install_key_event",
+                    units=int(units),
+                    balance_after=wallet.balance_units,
+                    created_at=timestamp,
+                    metadata={
+                        "event_type": event_type,
+                        "key_id": key_id,
+                        "program": effective_program,
+                        "owner_key": wallet.owner_key,
+                        "action_type": action_type,
+                        "blocked_attack_count": int(blocked_attack_count),
+                        **dict(metadata or {}),
+                    },
+                )
+
+        self._repo.upsert_wallet(wallet)
+        if entry is not None:
+            self._repo.append_ledger_entry(entry)
+        return True
+
     def refund_units(
         self,
         owner_key: str,

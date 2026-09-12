@@ -214,7 +214,7 @@ def _infer_expected_program(record: IntegrationRecord) -> str | None:
 
 
 def _validate_paid_install_key_for_installation(*, record: IntegrationRecord, install_key: str | None, owner_key: str | None) -> tuple[bool, dict[str, Any], str | None]:
-    if not install_key:
+    if not install_key or not str(install_key).strip():
         return (
             False,
             {"install_key_required": True, "install_key_valid": False, "reason": "install key unavailable until payment is complete"},
@@ -227,6 +227,19 @@ def _validate_paid_install_key_for_installation(*, record: IntegrationRecord, in
             False,
             {"install_key_required": True, "install_key_valid": False, "reason": "install key unavailable until payment is complete"},
             "install key unavailable until payment is complete",
+        )
+
+    normalized_owner = str(owner_key).strip().lower() if owner_key else None
+    if not normalized_owner:
+        return (
+            False,
+            {
+                "install_key_required": True,
+                "install_key_valid": False,
+                "reason": "install key owner is required before installation can proceed",
+                "expected_program": _infer_expected_program(record),
+            },
+            "install key owner is required before installation can proceed",
         )
 
     expected_program = _infer_expected_program(record)

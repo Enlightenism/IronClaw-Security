@@ -22,6 +22,7 @@ from app.core.billing import (
     _reset_billing_registry_for_testing,
     resolve_billing_owner,
 )
+from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.persistencebootstrap import build_store
 
 # ---------------------------------------------------------------------------
@@ -448,19 +449,69 @@ def test_provision_install_keys_raises_value_error_when_no_active_subscription(
         )
 
 
-def test_provision_install_keys_calls_generate_for_supported_programs(
+def test_has_active_subscription_requires_active_paid_subscription_state(
+    registry: BillingRegistry,
+) -> None:
+    customer = registry.create_customer(
+        email="pending@ironclaw.dev",
+        display_name="Pending User",
+        plan="starter-5k",
+    )
+    registry.create_subscription(
+        customer_id=customer.customer_id,
+        plan="starter-5k",
+        status="pending",
+    )
+    assert registry.has_active_subscription("pending@ironclaw.dev") is False
+
+
+def test_provision_install_keys_calls_each_supported_runtime_program(
     registry_with_active_customer: tuple[BillingRegistry, str, str],
 ) -> None:
     reg, cid, sid = registry_with_active_customer
     stub: _StubInstallKeyRegistry = reg._install_key_registry  # type: ignore[assignment]
+
     result = reg.provision_install_keys_on_purchase(
         customer_id=cid,
         subscription_id=sid,
         owner_key="active@ironclaw.dev",
     )
-    programs_called = {c["program"] for c in stub.calls}
-    assert {"openclaw", "claude_code", "hermes"}.issubset(programs_called)
-    assert {"openclaw", "claude_code", "hermes"}.issubset(result)
+
+    expected_programs = tuple(InstallKeyFormatRegistry.list_programs())
+    assert len(stub.calls) == len(expected_programs)
+    assert set(result) == set(expected_programs)
+    assert {call["program"] for call in stub.calls} == set(expected_programs)
+    for call in stub.calls:
+        assert call["owner_key"] == "active@ironclaw.dev"
+        assert call["subscription_id"] == sid
+        assert call["metadata"]["customer_id"] == cid
+        assert call["metadata"]["provisioned_by"] == "billing"
+
+
+def test_provision_install_keys_raises_before_paid_active_state_is_reached(
+    registry: BillingRegistry,
+) -> None:
+    customer = registry.create_customer(
+        email="notpaid@ironclaw.dev",
+        display_name="Not Paid User",
+        plan="starter-5k",
+    )
+    sub = registry.create_subscription(
+        customer_id=customer.customer_id,
+        plan="starter-5k",
+        status="active",
+    )
+    registry.record_usage(customer_id=customer.customer_id, units=sub.unit_limit)
+    stub: _StubInstallKeyRegistry = registry._install_key_registry  # type: ignore[assignment]
+
+    with pytest.raises(ValueError, match="no active subscription"):
+        registry.provision_install_keys_on_purchase(
+            customer_id=customer.customer_id,
+            subscription_id=sub.subscription_id,
+            owner_key="notpaid@ironclaw.dev",
+        )
+
+    assert stub.calls == []
 
 
 def test_provision_install_keys_passes_correct_owner_key(

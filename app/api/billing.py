@@ -1,18 +1,25 @@
+"""Compatibility layer for the legacy billing surface.
+
+All durable purchase state, payment fulfillment, and install-key provisioning live in
+app.api.routes.billing. This module preserves the historical import surface for older
+callers while delegating actual billing behavior to the canonical implementation.
+"""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from importlib import import_module
 import logging
 import math
 import re
-import threading
 from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator, model_validator
-from pydantic_core import PydanticCustomError
+from pydantic import BaseModel, Field, field_validator
 
+import app.api.routes.billing as canonical_billing
 from app.core.auth import AuthContext, require_auth_context
 from app.core.billing import resolve_billing_owner
 from app.core.install_key_formats import InstallKeyFormatRegistry
@@ -27,6 +34,192 @@ from app.core.unit_wallet import (
 
 logger = logging.getLogger(__name__)
 
+
+class BillingPackageView(BaseModel):
+    package_id: str
+    name: str
+    price_usd: float
+    included_units: int
+    display_label: str
+    description: str
+    token_coverage: int = 0
+    tokens_per_unit: int = TOKEN_CHUNK_SIZE
+
+
+class ProtectionValueView(BaseModel):
+    title: str
+    detail: str
+
+
+class UnitPolicyView(BaseModel):
+    unit_definition: str
+    token_chunk_size: int
+    delivery_model: str
+    buyer_positioning: str
+    protection_layers: list[ProtectionValueView] = Field(default_factory=list)
+    market_context: list[str] = Field(default_factory=list)
+
+
+class BillingPackagePurchaseRequest(BaseModel):
+    package_id: str = Field(min_length=1, max_length=120)
+    buyer_name: str = Field(min_length=1, max_length=120)
+    buyer_email: str = Field(min_length=3, max_length=254)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("buyer_email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        value = v.strip()
+        if value.startswith("ic_org_"):
+            return value
+        normalized = value.lower()
+        if not _EMAIL_RE.match(normalized):
+            raise ValueError("Invalid email address")
+        return normalized
+
+
+class BillingPackagePurchaseView(BaseModel):
+    purchase_id: str
+    package_id: str
+    package_name: str
+    buyer_name: str
+    buyer_email: str
+    owner_key: str
+    price_usd: float
+    granted_units: int
+    token_coverage: int
+    tokens_per_unit: int
+    created_at: str
+    payment_id: str | None = None
+    payment_status: str = "pending"
+    entitlement_status: str = "not_active"
+    install_key_id: str | None = None
+    masked_key: str | None = None
+    program: str | None = None
+    usage_summary: dict[str, Any] = Field(default_factory=dict)
+    openclaw_install_key: str | None = None
+    claude_code_install_key: str | None = None
+    hermes_install_key: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WalletBalanceView(BaseModel):
+    wallet_id: str
+    owner_key: str
+    balance_units: int
+    total_purchased_units: int
+    total_consumed_units: int
+    total_refunded_units: int
+    updated_at: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WalletLedgerEntryView(BaseModel):
+    entry_id: str
+    wallet_id: str
+    owner_key: str
+    entry_type: str
+    units: int
+    balance_after: int
+    created_at: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class InstallKeyDeliveryView(BaseModel):
+    install_key_id: str
+    masked_key: str
+    owner_key: str
+    program: str
+    payment_id: str | None = None
+    entitlement_status: str = "active"
+    usage_summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class BillingPackagesResponse(BaseModel):
+    status: str
+    service: str
+    timestamp: str
+    packages: list[BillingPackageView] = Field(default_factory=list)
+    unit_policy: UnitPolicyView
+
+
+class BillingPackagePurchaseResponse(BaseModel):
+    status: str
+    service: str
+    timestamp: str
+    purchase: BillingPackagePurchaseView
+    wallet: WalletBalanceView
+
+
+class BillingWalletBalanceResponse(BaseModel):
+    status: str
+    service: str
+    timestamp: str
+    wallet: WalletBalanceView
+
+
+class WalletGetResponse(BaseModel):
+    status: str
+    wallet: WalletBalanceView
+
+
+class LedgerResponse(BaseModel):
+    status: str
+    service: str
+    timestamp: str
+    owner_key: str | None = None
+    limit: int
+    entries: list[WalletLedgerEntryView] = Field(default_factory=list)
+
+
+class BillingLedgerResponse(LedgerResponse):
+    pass
+
+
+class WalletDebitRequest(BaseModel):
+    units: int | None = Field(default=None, ge=1)
+    token_count: int | None = Field(default=None, ge=1)
+    reason: str = Field(default="api_debit", min_length=1, max_length=120)
+    reference_id: str | None = Field(default=None, max_length=255)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WalletDebitResponse(BaseModel):
+    status: str
+    service: str
+    timestamp: str
+    owner_key: str
+    units_debited: int
+    token_count: int | None
+    wallet: WalletBalanceView
+
+
+class WalletRefundRequest(BaseModel):
+    units: int = Field(ge=1)
+    reason: str = Field(default="api_refund", min_length=1, max_length=120)
+    reference_id: str | None = Field(default=None, max_length=255)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WalletRefundResponse(BaseModel):
+    status: str
+    service: str
+    timestamp: str
+    owner_key: str
+    units_refunded: int
+    wallet: WalletBalanceView
+
+
+class InsufficientUnitsErrorResponse(BaseModel):
+    status: str
+    error: str
+    owner_key: str
+    have: int
+    need: int
+    tokens_per_unit: int
+    timestamp: str
+
+
 _EMAIL_RE = re.compile(r"[^@]+@[^@]+\.[^@]+")
 _PURCHASES_MAX = 10_000
 _RESERVED_OWNER_KEYS = {
@@ -38,17 +231,11 @@ _RESERVED_OWNER_KEYS = {
     "system",
 }
 
-
 router = APIRouter(
     prefix="/billing",
     tags=["billing"],
     dependencies=[Depends(require_auth_context)],
 )
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _utc_now_iso() -> str:
@@ -256,183 +443,44 @@ def _usage_summary_for_key(
     }
 
 
-# ---------------------------------------------------------------------------
-# Schemas — packages
-# ---------------------------------------------------------------------------
+def _sync_canonical_billing_state() -> None:
+    canonical_billing = import_module("app.api.routes.billing")
+    canonical_billing.resolve_billing_owner = resolve_billing_owner
+    canonical_billing.get_install_key_registry = get_install_key_registry
+    canonical_billing.get_unit_wallet_registry = get_unit_wallet_registry
+    canonical_billing.InstallKeyFormatRegistry = InstallKeyFormatRegistry
+    canonical_billing.InstallKeyAlreadyExistsError = InstallKeyAlreadyExistsError
+    return canonical_billing
 
 
-class ProtectionValueView(BaseModel):
-    title: str
-    detail: str
-
-
-class UnitPolicyView(BaseModel):
-    unit_definition: str
-    delivery_model: str
-    buyer_positioning: str
-    token_chunk_size: int
-    protection_layers: list[ProtectionValueView] = Field(default_factory=list)
-    market_context: list[str] = Field(default_factory=list)
-
-
-class BillingPackageView(BaseModel):
-    package_id: str
-    name: str
-    price_usd: float
-    included_units: int
-    token_coverage: int
-    tokens_per_unit: int
-    description: str
-
-
-class BillingPackagesResponse(BaseModel):
-    status: str
-    service: str
-    timestamp: str
-    packages: list[BillingPackageView] = Field(default_factory=list)
-    unit_policy: UnitPolicyView
-
-
-# ---------------------------------------------------------------------------
-# Schemas — purchase
-# ---------------------------------------------------------------------------
-
-
-class InstallKeyDeliveryView(BaseModel):
-    install_key_id: str | None = None
-    masked_key: str | None = None
-    owner_key: str | None = None
-    program: str | None = None
-    payment_id: str | None = None
-    entitlement_status: str = "not_active"
-    usage_summary: dict[str, Any] = Field(default_factory=dict)
-
-
-class BillingPackagePurchaseRequest(BaseModel):
-    package_id: str = Field(min_length=1, max_length=120)
-    buyer_name: str = Field(min_length=1, max_length=120)
-    buyer_email: str = Field(min_length=3, max_length=255)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-    @field_validator("buyer_email")
-    @classmethod
-    def _validate_email(cls, v: str) -> str:
-        if not _EMAIL_RE.match(v.strip()):
-            raise ValueError("buyer_email must be a valid email address")
-        return v.strip().lower()
-
-
-class BillingPackagePurchaseView(BaseModel):
-    purchase_id: str
-    package_id: str
-    package_name: str
-    buyer_name: str
-    buyer_email: str
-    owner_key: str
-    price_usd: float
-    granted_units: int
-    token_coverage: int
-    tokens_per_unit: int
-    created_at: str
-    payment_id: str | None = None
-    payment_status: str = "pending"
-    entitlement_status: str = "not_active"
-    install_key_id: str | None = None
-    masked_key: str | None = None
-    program: str | None = None
-    usage_summary: dict[str, Any] = Field(default_factory=dict)
-    openclaw_install_key: str | None = None
-    claude_code_install_key: str | None = None
-    hermes_install_key: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class BillingPackagePurchaseResponse(BaseModel):
-    status: str
-    service: str
-    timestamp: str
-    purchase: BillingPackagePurchaseView
-    wallet: dict[str, Any]
-
-
-# ---------------------------------------------------------------------------
-# Schemas — debit
-# ---------------------------------------------------------------------------
-
-
-class WalletDebitRequest(BaseModel):
-    units: int | None = Field(default=None, ge=1)
-    token_count: int | None = Field(default=None, ge=1)
-    reason: str | None = Field(default=None, max_length=255)
-
-    @model_validator(mode="after")
-    def _require_one(self) -> WalletDebitRequest:
-        if self.units is None and self.token_count is None:
-            raise PydanticCustomError(
-                "missing",
-                "Provide either 'units' or 'token_count'.",
-            )
-        return self
-
-
-class WalletDebitResponse(BaseModel):
-    status: str
-    owner_key: str
-    units_debited: int
-    token_count: int | None = None
-    wallet: dict[str, Any]
-
-
-# ---------------------------------------------------------------------------
-# Schemas — refund
-# ---------------------------------------------------------------------------
-
-
-class WalletRefundRequest(BaseModel):
-    units: int = Field(ge=1)
-    reason: str | None = Field(default=None, max_length=255)
-
-
-class WalletRefundResponse(BaseModel):
-    status: str
-    owner_key: str
-    units_refunded: int
-    wallet: dict[str, Any]
-
-
-# ---------------------------------------------------------------------------
-# Schemas — wallet get
-# ---------------------------------------------------------------------------
-
-
-class WalletGetResponse(BaseModel):
-    status: str
-    wallet: dict[str, Any]
-
-
-# ---------------------------------------------------------------------------
-# Schemas — ledger
-# ---------------------------------------------------------------------------
-
-
-class LedgerResponse(BaseModel):
-    status: str
-    owner_key: str | None
-    limit: int
-    entries: list[dict[str, Any]] = Field(default_factory=list)
-
-
-# ---------------------------------------------------------------------------
-# Internal state
-# ---------------------------------------------------------------------------
-
-_PURCHASES: list[BillingPackagePurchaseView] = []
-_PURCHASES_LOCK: threading.Lock = threading.Lock()
-
-
-# ---------------------------------------------------------------------------
-# Package catalog helpers
-# ---------------------------------------------------------------------------
+def _compat_purchase_view(purchase: Any) -> BillingPackagePurchaseView:
+    metadata = getattr(purchase, "metadata", {}) or {}
+    payment_status = str(metadata.get("payment_status") or getattr(purchase, "payment_status", "pending") or "pending")
+    entitlement_status = str(metadata.get("entitlement_status") or getattr(purchase, "entitlement_status", "not_active") or "not_active")
+    return BillingPackagePurchaseView(
+        purchase_id=str(purchase.purchase_id),
+        package_id=str(purchase.package_id),
+        package_name=str(getattr(purchase, "package_name", "")),
+        buyer_name=str(getattr(purchase, "buyer_name", "")),
+        buyer_email=str(getattr(purchase, "buyer_email", "")),
+        owner_key=str(getattr(purchase, "owner_key", "")),
+        price_usd=float(getattr(purchase, "price_usd", 0.0)),
+        granted_units=int(getattr(purchase, "granted_units", metadata.get("granted_units", 0))),
+        token_coverage=int(getattr(purchase, "token_coverage", metadata.get("token_coverage", 0))),
+        tokens_per_unit=int(getattr(purchase, "tokens_per_unit", TOKEN_CHUNK_SIZE)),
+        created_at=str(getattr(purchase, "created_at", metadata.get("created_at", _utc_now_iso()))),
+        payment_id=getattr(purchase, "payment_id", metadata.get("payment_id")),
+        payment_status=payment_status,
+        entitlement_status=entitlement_status,
+        install_key_id=getattr(purchase, "install_key_id", metadata.get("install_key_id")),
+        masked_key=getattr(purchase, "masked_key", metadata.get("masked_key")),
+        program=getattr(purchase, "program", metadata.get("program")),
+        usage_summary=getattr(purchase, "usage_summary", metadata.get("usage_summary", {})) or {},
+        openclaw_install_key=getattr(purchase, "openclaw_install_key", metadata.get("openclaw_install_key")),
+        claude_code_install_key=getattr(purchase, "claude_code_install_key", metadata.get("claude_code_install_key")),
+        hermes_install_key=getattr(purchase, "hermes_install_key", metadata.get("hermes_install_key")),
+        metadata=dict(metadata),
+    )
 
 
 def _package_to_view(pkg: dict[str, Any]) -> BillingPackageView:
@@ -482,11 +530,6 @@ def _build_unit_policy() -> UnitPolicyView:
             "IronClaw protection units are designed to add security coverage around every stage where hostile content can enter or spread.",
         ],
     )
-
-
-# ---------------------------------------------------------------------------
-# Install key issuance gating
-# ---------------------------------------------------------------------------
 
 
 def _attach_install_key_delivery(
@@ -549,13 +592,13 @@ def _provision_install_keys(
     if not _has_confirmed_paid_entitlement(payment_status, entitlement_status):
         return []
 
-    ik_registry = get_install_key_registry()
+    registry = get_install_key_registry()
     results: list[InstallKeyDeliveryView] = []
     normalized_entitlement = _normalize_entitlement_status(entitlement_status)
 
     for program in InstallKeyFormatRegistry.list_programs():
         try:
-            record = ik_registry.generate_install_key(
+            record = registry.generate_install_key(
                 owner_key=owner_key,
                 subscription_id=purchase_id,
                 program=program,
@@ -571,12 +614,23 @@ def _provision_install_keys(
             )
         except InstallKeyAlreadyExistsError:
             existing = next(
-                (item for item in ik_registry.get_keys_for_owner(owner_key) if item.program == program and (item.active or item.payment_status == "paid")),
+                (item for item in registry.get_keys_for_owner(owner_key) if item.program == program and (item.active or item.payment_status == "paid")),
                 None,
             )
             if existing is None:
                 continue
             record = existing
+        except StopIteration:
+            logger.info(
+                "install_key_provision_exhausted",
+                extra={
+                    "owner_key": owner_key,
+                    "program": program,
+                    "purchase_id": purchase_id,
+                    "payment_id": payment_id,
+                },
+            )
+            return results
         except Exception:
             logger.exception(
                 "install_key_provision_failed",
@@ -618,24 +672,12 @@ def _provision_install_keys(
     return results
 
 
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
-
-
 @router.get(
     "/packages",
     response_model=BillingPackagesResponse,
 )
 def list_billing_packages() -> BillingPackagesResponse:
-    packages = [_package_to_view(pkg) for pkg in UNIT_PACKAGE_CATALOG.values()]
-    return BillingPackagesResponse(
-        status="ok",
-        service="IronClaw-Security",
-        timestamp=_utc_now_iso(),
-        packages=packages,
-        unit_policy=_build_unit_policy(),
-    )
+    return canonical_billing.get_packages()
 
 
 @router.post(
@@ -647,59 +689,16 @@ def purchase_billing_package(
     payload: BillingPackagePurchaseRequest,
     auth_ctx: AuthContext = Depends(require_auth_context),
 ) -> BillingPackagePurchaseResponse:
-    package_id, package = _require_known_package(payload.package_id)
-    unit_amount = int(package["unit_amount"])
-
     owner_key = _safe_owner_key(auth_ctx, payload.buyer_email)
-    purchase_id = _new_purchase_id()
-
-    registry = get_unit_wallet_registry()
-    wallet = registry.get_or_create_wallet(owner_key)
-
-    purchase = BillingPackagePurchaseView(
-        purchase_id=purchase_id,
-        package_id=package_id,
-        package_name=str(package["name"]),
-        buyer_name=payload.buyer_name.strip(),
-        buyer_email=payload.buyer_email,
-        owner_key=owner_key,
-        price_usd=float(package["price_usd"]),
-        granted_units=0,
-        token_coverage=unit_amount * TOKEN_CHUNK_SIZE,
-        tokens_per_unit=TOKEN_CHUNK_SIZE,
-        created_at=_utc_now_iso(),
-        payment_status="pending",
-        entitlement_status="not_active",
-        install_key_id=None,
-        masked_key=None,
-        program=None,
-        usage_summary={},
-        openclaw_install_key=None,
-        claude_code_install_key=None,
-        hermes_install_key=None,
-        metadata={
-            **payload.metadata,
-            "package_id": package_id,
-            "buyer_name": payload.buyer_name.strip(),
-            "buyer_email": payload.buyer_email,
-            "owner_key": owner_key,
-            "payment_required": True,
-            "payment_status": "pending",
-            "fulfillment_status": "pending",
-            "install_keys_provisioned": False,
-            "units_credited": False,
-        },
-    )
-
-    with _PURCHASES_LOCK:
-        if len(_PURCHASES) >= _PURCHASES_MAX:
-            _PURCHASES.pop(0)
-        _PURCHASES.append(purchase)
-
+    canonical_module = _sync_canonical_billing_state()
+    response = canonical_module.purchase_package(payload, auth_ctx)
+    purchase = _compat_purchase_view(response.purchase)
+    purchase.owner_key = owner_key
+    wallet = get_unit_wallet_registry().get_or_create_wallet(purchase.owner_key)
     return BillingPackagePurchaseResponse(
-        status="ok",
-        service="IronClaw-Security",
-        timestamp=_utc_now_iso(),
+        status=response.status,
+        service=response.service,
+        timestamp=response.timestamp,
         purchase=purchase,
         wallet=_wallet_view(wallet),
     )
@@ -716,113 +715,133 @@ def fulfill_billing_purchase(
     entitlement_status: str | None = None,
     auth_ctx: AuthContext = Depends(require_auth_context),
 ) -> BillingPackagePurchaseResponse:
-    purchase = next((item for item in _PURCHASES if item.purchase_id == purchase_id), None)
+    canonical_module = _sync_canonical_billing_state()
+    purchase = next((item for item in canonical_module._PURCHASES if item.purchase_id == purchase_id), None)
     if purchase is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Purchase not found: {purchase_id!r}",
         )
 
-    _assert_customer_install_key_context(auth_ctx, purchase.owner_key)
+    legacy_purchase = _compat_purchase_view(purchase)
+    _assert_customer_install_key_context(auth_ctx, legacy_purchase.owner_key)
 
-    normalized_owner = (purchase.owner_key or "").strip().lower()
+    normalized_owner = (legacy_purchase.owner_key or "").strip().lower()
     if normalized_owner and normalized_owner in _RESERVED_OWNER_KEYS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "status": "invalid_owner_key",
                 "reason": "purchase_checkout_must_not_resolve_to_visible_system_key",
-                "owner_key": purchase.owner_key,
+                "owner_key": legacy_purchase.owner_key,
             },
         )
 
     normalized_payment_status = str(payment_status or "").strip().lower() or "pending"
     normalized_entitlement = _normalize_entitlement_status(entitlement_status)
     registry = get_unit_wallet_registry()
-    wallet = registry.get_or_create_wallet(purchase.owner_key)
+    wallet = registry.get_or_create_wallet(legacy_purchase.owner_key)
 
     if not _has_confirmed_paid_entitlement(normalized_payment_status, normalized_entitlement):
-        purchase.payment_status = normalized_payment_status if normalized_payment_status != "" else "pending"
-        purchase.entitlement_status = normalized_entitlement
-        purchase.payment_id = payment_id
-        purchase.install_key_id = None
-        purchase.masked_key = None
-        purchase.program = None
-        purchase.usage_summary = {}
-        purchase.openclaw_install_key = None
-        purchase.claude_code_install_key = None
-        purchase.hermes_install_key = None
-        purchase.metadata["payment_status"] = purchase.payment_status
+        purchase.metadata["payment_status"] = normalized_payment_status
+        purchase.metadata["entitlement_status"] = normalized_entitlement
+        purchase.metadata["payment_id"] = payment_id
         purchase.metadata["fulfillment_status"] = "pending"
         purchase.metadata["install_keys_provisioned"] = False
         return BillingPackagePurchaseResponse(
             status="ok",
             service="IronClaw-Security",
             timestamp=_utc_now_iso(),
-            purchase=purchase,
+            purchase=_compat_purchase_view(purchase),
             wallet=_wallet_view(wallet),
         )
 
-    if purchase.payment_status == "paid" and purchase.entitlement_status == "active" and purchase.metadata.get("install_keys_provisioned") is True:
+    existing_status = str(purchase.metadata.get("payment_status") or "").strip().lower()
+    existing_entitlement = str(purchase.metadata.get("entitlement_status") or "").strip().lower()
+    if existing_status == "paid" and existing_entitlement == "active" and purchase.metadata.get("install_keys_provisioned") is True:
         return BillingPackagePurchaseResponse(
             status="ok",
             service="IronClaw-Security",
             timestamp=_utc_now_iso(),
-            purchase=purchase,
+            purchase=_compat_purchase_view(purchase),
             wallet=_wallet_view(wallet),
         )
 
     package_id, package = _require_known_package(purchase.package_id)
     granted_units = int(package["unit_amount"])
-    purchase.payment_id = payment_id or f"pay_{uuid4().hex[:16]}"
-    purchase.payment_status = normalized_payment_status
-    purchase.entitlement_status = normalized_entitlement
+    purchase.metadata["payment_id"] = payment_id or f"pay_{uuid4().hex[:16]}"
+    purchase.metadata["payment_status"] = normalized_payment_status
+    purchase.metadata["entitlement_status"] = normalized_entitlement
     purchase.granted_units = granted_units
 
     wallet = registry.credit_units(
-        owner_key=purchase.owner_key,
+        owner_key=legacy_purchase.owner_key,
         units=granted_units,
         metadata={
             "purchase_id": purchase.purchase_id,
             "package_id": package_id,
-            "payment_id": purchase.payment_id,
+            "payment_id": purchase.metadata["payment_id"],
             "source": "fulfillment",
         },
     )
 
-    for item in _provision_install_keys(
-        owner_key=purchase.owner_key,
+    issued_records = _provision_install_keys(
+        owner_key=legacy_purchase.owner_key,
         purchase_id=purchase.purchase_id,
-        payment_id=purchase.payment_id,
-        payment_status=purchase.payment_status,
-        entitlement_status=purchase.entitlement_status,
-    ):
+        payment_id=purchase.metadata["payment_id"],
+        payment_status=purchase.metadata["payment_status"],
+        entitlement_status=purchase.metadata["entitlement_status"],
+    )
+    final_record: InstallKeyDeliveryView | None = None
+    for item in issued_records:
         if item.program == "openclaw":
-            purchase.openclaw_install_key = item.masked_key
+            purchase.metadata["openclaw_install_key"] = item.masked_key
         elif item.program == "claude_code":
-            purchase.claude_code_install_key = item.masked_key
+            purchase.metadata["claude_code_install_key"] = item.masked_key
         elif item.program == "hermes":
-            purchase.hermes_install_key = item.masked_key
+            purchase.metadata["hermes_install_key"] = item.masked_key
+        final_record = item
 
-        purchase.install_key_id = item.install_key_id
-        purchase.masked_key = item.masked_key
-        purchase.program = item.program
-        purchase.payment_id = item.payment_id
-        purchase.entitlement_status = item.entitlement_status
-        purchase.usage_summary = item.usage_summary
+    purchase.metadata["granted_units"] = granted_units
+    response_purchase = _compat_purchase_view(purchase)
+
+    if final_record is not None:
+        response_purchase.payment_status = "paid"
+        response_purchase.entitlement_status = final_record.entitlement_status
+        response_purchase.install_key_id = final_record.install_key_id
+        response_purchase.masked_key = final_record.masked_key
+        response_purchase.program = final_record.program
+        response_purchase.payment_id = final_record.payment_id
+        response_purchase.usage_summary = final_record.usage_summary
+        response_purchase.openclaw_install_key = purchase.metadata.get("openclaw_install_key")
+        response_purchase.claude_code_install_key = purchase.metadata.get("claude_code_install_key")
+        response_purchase.hermes_install_key = purchase.metadata.get("hermes_install_key")
+        purchase.metadata["payment_id"] = final_record.payment_id
+        purchase.metadata["install_key_id"] = final_record.install_key_id
+        purchase.metadata["masked_key"] = final_record.masked_key
+        purchase.metadata["program"] = final_record.program
         purchase.metadata["install_keys_provisioned"] = True
         purchase.metadata["payment_status"] = "paid"
+        purchase.metadata["entitlement_status"] = final_record.entitlement_status
         purchase.metadata["fulfillment_status"] = "fulfilled"
-
-    if purchase.install_key_id is None:
+        purchase.metadata["usage_summary"] = final_record.usage_summary
+    else:
+        response_purchase.payment_status = str(purchase.metadata.get("payment_status") or "pending")
+        response_purchase.entitlement_status = str(purchase.metadata.get("entitlement_status") or "not_active")
+        response_purchase.install_key_id = purchase.metadata.get("install_key_id")
+        response_purchase.masked_key = purchase.metadata.get("masked_key")
+        response_purchase.program = purchase.metadata.get("program")
+        response_purchase.payment_id = purchase.metadata.get("payment_id")
+        response_purchase.usage_summary = purchase.metadata.get("usage_summary") or {}
         purchase.metadata["install_keys_provisioned"] = False
         purchase.metadata["fulfillment_status"] = "fulfilled_without_key"
 
+    response_purchase.metadata = dict(purchase.metadata)
     return BillingPackagePurchaseResponse(
         status="ok",
         service="IronClaw-Security",
         timestamp=_utc_now_iso(),
-        purchase=purchase,
+        purchase=response_purchase,
         wallet=_wallet_view(wallet),
     )
 
@@ -834,6 +853,16 @@ def debit_wallet(
     auth_ctx: AuthContext = Depends(require_auth_context),
 ) -> Any:
     _assert_owner_access(auth_ctx, owner_key, action="debit")
+
+    if payload.units is None and payload.token_count is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "status": "validation_error",
+                "reason": "Provide either 'units' or 'token_count'.",
+                "owner_key": owner_key,
+            },
+        )
 
     registry = get_unit_wallet_registry()
     try:
@@ -850,24 +879,27 @@ def debit_wallet(
             )
             return WalletDebitResponse(
                 status="ok",
+                service="IronClaw-Security",
+                timestamp=_utc_now_iso(),
                 owner_key=owner_key,
                 units_debited=units_debited,
                 token_count=payload.token_count,
                 wallet=_wallet_view(wallet),
             )
-        else:
-            wallet = registry.debit_units(
-                owner_key=owner_key,
-                units=payload.units,  # type: ignore[arg-type]
-                metadata={"reason": payload.reason},
-            )
-            return WalletDebitResponse(
-                status="ok",
-                owner_key=owner_key,
-                units_debited=payload.units,  # type: ignore[arg-type]
-                token_count=None,
-                wallet=_wallet_view(wallet),
-            )
+        wallet = registry.debit_units(
+            owner_key=owner_key,
+            units=int(payload.units),
+            metadata={"reason": payload.reason},
+        )
+        return WalletDebitResponse(
+            status="ok",
+            service="IronClaw-Security",
+            timestamp=_utc_now_iso(),
+            owner_key=owner_key,
+            units_debited=int(payload.units),
+            token_count=None,
+            wallet=_wallet_view(wallet),
+        )
     except InsufficientUnitsError as exc:
         return JSONResponse(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
@@ -898,6 +930,8 @@ def refund_wallet(
     )
     return WalletRefundResponse(
         status="ok",
+        service="IronClaw-Security",
+        timestamp=_utc_now_iso(),
         owner_key=owner_key,
         units_refunded=payload.units,
         wallet=_wallet_view(wallet),
@@ -983,6 +1017,8 @@ def get_ledger(
     ]
     return LedgerResponse(
         status="ok",
+        service="IronClaw-Security",
+        timestamp=_utc_now_iso(),
         owner_key=owner_key,
         limit=limit,
         entries=serialized,

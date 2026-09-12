@@ -54,6 +54,10 @@ def test_openapi_includes_core_paths():
         "/guard/execute",
         "/policy/status",
         "/policy/guard-bundle",
+        "/billing/purchase",
+        "/billing/webhook",
+        "/api/billing/webhooks/stripe",
+        "/install-key-events/ingest",
     }
 
     missing = expected_paths - set(paths.keys())

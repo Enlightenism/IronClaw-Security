@@ -11,14 +11,17 @@ import app.core.install_keys as install_keys_module
 from app.core.install_keys import InstallKeyRecord, InstallKeyRegistry, get_install_key_registry
 import app.core.unit_wallet as unit_wallet_module
 from app.core.unit_wallet import UnitWalletRegistry, get_unit_wallet_registry
+from app.main import app as main_app
 
 
 @pytest.fixture(autouse=True)
 def reset_registries() -> Generator[None, None, None]:
+    main_app.dependency_overrides.clear()
     install_keys_module._install_key_registry = InstallKeyRegistry()
     install_keys_module._install_key_registry._loaded = True
     unit_wallet_module._unit_wallet_registry = UnitWalletRegistry()
     yield
+    main_app.dependency_overrides.clear()
     install_keys_module._install_key_registry = InstallKeyRegistry()
     install_keys_module._install_key_registry._loaded = True
     unit_wallet_module._unit_wallet_registry = UnitWalletRegistry()

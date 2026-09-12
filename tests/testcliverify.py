@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import importlib
+import json
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+
+import cli.verify as verify_cli
 
 MODULE_CANDIDATES = (
     "app.cli.verify",
@@ -128,3 +133,40 @@ def test_cliverify_main_noninteractive_execution_is_process_safe(
         result = exc.code
 
     assert result is None or isinstance(result, int)
+
+
+def test_cli_verify_rejects_unverified_runtime_install_key(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "provider_targets": ["claude_code"],
+                "install_keys": {
+                    "claude_code": "ic_install_claude_code_abc123",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_authenticate(candidate: str):
+        if candidate == "ic_install_claude_code_abc123":
+            return SimpleNamespace(
+                active=True,
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+                program="claude_code",
+                owner_key="owner@example.com",
+                revoked_at=None,
+            )
+        return None
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(verify_cli, "get_install_key_registry", lambda: SimpleNamespace(authenticate_install_key=fake_authenticate))
+    try:
+        report = verify_cli.build_verify_report(tmp_path, dry_run=True)
+    finally:
+        monkeypatch.undo()
+
+    assert any(check.name == "install-key-runtime-claude_code" and check.ok for check in report.checks)

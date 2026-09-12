@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import json
 import os
 from pathlib import Path
@@ -22,6 +22,43 @@ DEFAULT_BACKUP_TARGET: Final[str] = "primary"
 DEFAULT_RESTORE_TARGET: Final[str] = "primary"
 DEFAULT_RETENTION_DAYS: Final[int] = 30
 DEFAULT_PROVIDER_TARGETS: Final[tuple[str, ...]] = tuple(InstallKeyFormatRegistry.list_programs())
+_CANONICAL_RUNTIME_TARGETS: Final[tuple[str, ...]] = (
+    "openclaw",
+    "claude_code",
+    "cursor",
+    "goose",
+    "gemini_cli",
+    "copilot",
+    "hermes",
+)
+_GENERIC_INSTALL_KEY_PREFIXES: Final[tuple[str, ...]] = (
+    "sk_",
+    "ghp_",
+    "gho_",
+    "github_pat_",
+    "token_",
+    "secret_",
+    "api_",
+    "api-key",
+    "api_key",
+    "platform-api-key",
+    "platform_api_key",
+    "internal-platform-api-key",
+    "internal_platform_api_key",
+    "system-api-key",
+    "system_api_key",
+    "bearer ",
+    "x-api-key",
+)
+_CANONICAL_INSTALL_COMMANDS: Final[dict[str, str]] = {
+    "claude_code": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key {key}",
+    "openclaw": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user --key {key}",
+    "cursor": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user --key {key}",
+    "goose": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user --key {key}",
+    "gemini_cli": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user --key {key}",
+    "copilot": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user --key {key}",
+    "hermes": "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key {key}",
+}
 _SUBPROCESS_TIMEOUT: Final[int] = 300
 
 
@@ -44,6 +81,7 @@ class InstallConfig:
     write_env_file: bool
     overwrite: bool
     provider_targets: tuple[str, ...]
+    install_keys: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -52,6 +90,7 @@ class InstallConfig:
         payload["config_file"] = str(self.config_file)
         payload["env_file"] = str(self.env_file)
         payload["provider_targets"] = list(self.provider_targets)
+        payload["install_keys"] = dict(self.install_keys)
         return payload
 
 
@@ -125,7 +164,7 @@ def _normalize_provider_targets(values: tuple[str, ...] | list[str] | None) -> t
         if not item:
             continue
         canonical = InstallKeyFormatRegistry.normalize_program(item) or normalize_install_key_program(item)
-        if canonical is None:
+        if canonical is None or canonical in {"security_guardian"}:
             raise IronClawInstallerError(f"Unsupported provider target: {value!r}")
         if canonical not in seen:
             normalized.append(canonical)
@@ -175,6 +214,117 @@ def _write_text_file(path: Path, content: str, *, overwrite: bool) -> tuple[bool
     return True, existed_before
 
 
+def _canonical_program_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+    program = InstallKeyFormatRegistry.normalize_program(value)
+    if program is not None:
+        return program
+    normalized = str(value).strip().lower().replace("-", "_")
+    return normalize_install_key_program(normalized)
+
+
+def _is_placeholder_or_masked_install_key(candidate: str) -> bool:
+    value = str(candidate).strip()
+    if not value:
+        return True
+    lowered = value.lower()
+    placeholder_tokens = (
+        "placeholder",
+        "fake",
+        "faker",
+        "stale",
+        "dummy",
+        "example",
+        "demo",
+        "test",
+        "mask",
+        "masked",
+        "none",
+        "null",
+        "undefined",
+        "missing",
+        "not_set",
+        "your_key",
+    )
+    if lowered in placeholder_tokens:
+        return True
+    if any(token in lowered for token in placeholder_tokens):
+        return True
+    if "..." in value or "***" in value or "*" in value and len(value) <= 24:
+        return True
+    return False
+
+
+def _validate_install_key_for_runtime(program: str | None, install_key: str | None) -> str:
+    runtime_program = _canonical_program_name(program)
+    if runtime_program is None or runtime_program not in _CANONICAL_RUNTIME_TARGETS:
+        raise IronClawInstallerError(f"Unsupported runtime target for install-key injection: {program!r}")
+
+    candidate = str(install_key).strip() if install_key is not None else ""
+    if not candidate:
+        raise IronClawInstallerError(f"A valid paid install key is required for {runtime_program}; blank values are rejected.")
+
+    if _is_placeholder_or_masked_install_key(candidate):
+        raise IronClawInstallerError(f"A valid paid install key is required for {runtime_program}; placeholder, masked, or stale values are rejected.")
+
+    lower = candidate.lower()
+    if any(lower.startswith(prefix) for prefix in _GENERIC_INSTALL_KEY_PREFIXES):
+        raise IronClawInstallerError(f"A valid paid install key is required for {runtime_program}; generic platform auth values are rejected.")
+    if candidate.startswith("ic_org_"):
+        raise IronClawInstallerError(f"A valid paid install key is required for {runtime_program}; organization keys are not runtime install keys.")
+
+    expected_prefix = InstallKeyFormatRegistry.get_spec(runtime_program).prefix
+    if candidate.startswith("ic_") and not candidate.startswith(expected_prefix):
+        raise IronClawInstallerError(f"A valid paid install key is required for {runtime_program}; key prefix mismatch for canonical runtime family.")
+    if not candidate.startswith(expected_prefix):
+        raise IronClawInstallerError(f"A valid paid install key is required for {runtime_program}; expected prefix {expected_prefix!r}.")
+
+    return candidate
+
+
+def _build_platform_install_command(program: str | None, install_key: str | None) -> str:
+    runtime_program = _canonical_program_name(program)
+    if runtime_program is None or runtime_program not in _CANONICAL_RUNTIME_TARGETS:
+        raise IronClawInstallerError(f"Unsupported runtime target for install-key injection: {program!r}")
+
+    validated_key = _validate_install_key_for_runtime(runtime_program, install_key)
+    template = _CANONICAL_INSTALL_COMMANDS[runtime_program]
+    return template.format(key=validated_key)
+
+
+def build_install_key_commands(install_keys: dict[str, str] | None) -> dict[str, str]:
+    payload: dict[str, str] = {}
+    for program in _CANONICAL_RUNTIME_TARGETS:
+        if not install_keys:
+            break
+        raw_value = install_keys.get(program)
+        if raw_value is None:
+            continue
+        validated = _validate_install_key_for_runtime(program, raw_value)
+        payload[program] = _CANONICAL_INSTALL_COMMANDS[program].format(key=validated)
+    return payload
+
+
+def _normalize_install_key_map(values: list[str] | tuple[str, ...] | None) -> dict[str, str]:
+    if not values:
+        return {}
+
+    normalized: dict[str, str] = {}
+    for item in values:
+        text = str(item).strip()
+        if not text:
+            continue
+        if "=" not in text:
+            raise IronClawInstallerError("Install keys must be provided as PROGRAM=VALUE entries; blank or malformed values are rejected.")
+        program_text, key_text = text.split("=", 1)
+        runtime_program = _canonical_program_name(program_text)
+        if runtime_program is None or runtime_program not in _CANONICAL_RUNTIME_TARGETS:
+            raise IronClawInstallerError(f"Unsupported runtime target for install-key injection: {program_text!r}")
+        normalized[runtime_program] = _validate_install_key_for_runtime(runtime_program, key_text)
+    return dict(sorted(normalized.items(), key=lambda pair: _CANONICAL_RUNTIME_TARGETS.index(pair[0])))
+
+
 def _build_runtime_config(config: InstallConfig) -> dict[str, Any]:
     provider_set = set(config.provider_targets)
     features = {
@@ -184,15 +334,17 @@ def _build_runtime_config(config: InstallConfig) -> dict[str, Any]:
         "restore": True,
         "guarded_execution": True,
         "skill_integration": True,
-        "shared_skill_package": "security_guardian" in provider_set,
+        "shared_skill_package": bool(provider_set),
         "claude_integration": "claude_code" in provider_set,
         "openclaw_integration": "openclaw" in provider_set,
         "cursor_integration": "cursor" in provider_set,
         "goose_integration": "goose" in provider_set,
         "gemini_cli_integration": "gemini_cli" in provider_set,
         "copilot_integration": "copilot" in provider_set,
-        "security_guardian_integration": "security_guardian" in provider_set,
+        "hermes_integration": "hermes" in provider_set,
+        "embedded_install_keys": bool(config.install_keys),
     }
+    runtime_commands = build_install_key_commands(config.install_keys)
     return {
         "schema_version": 1,
         "product": "IronClaw-Security",
@@ -203,6 +355,8 @@ def _build_runtime_config(config: InstallConfig) -> dict[str, Any]:
         "restore_target": config.restore_target,
         "retention_days": config.retention_days,
         "provider_targets": list(config.provider_targets),
+        "install_keys": dict(config.install_keys),
+        "runtime_commands": runtime_commands,
         "paths": {
             "project_root": str(config.project_root),
             "env_file": str(config.env_file),
@@ -212,7 +366,7 @@ def _build_runtime_config(config: InstallConfig) -> dict[str, Any]:
 
 
 def _build_env_contents(config: InstallConfig) -> str:
-    shared_skill_package = "security_guardian" in set(config.provider_targets)
+    shared_skill_package = bool(config.provider_targets)
     values = {
         "ENVIRONMENT": "production",
         "IRONCLAW_BASE_URL": config.base_url,
@@ -226,7 +380,6 @@ def _build_env_contents(config: InstallConfig) -> str:
         "IRONCLAW_BACKUP_CHECKSUM": "true",
         "IRONCLAW_PROVIDER_TARGETS": ",".join(config.provider_targets),
         "IRONCLAW_SHARED_SKILL_PACKAGE": "true" if shared_skill_package else "false",
-        "IRONCLAW_SECURITY_GUARDIAN_INTEGRATION": "true" if shared_skill_package else "false",
         "SECRET_KEY": _strong_secret(),
         "JWT_SECRET": _strong_secret(),
         "API_SECRET": _strong_secret(),
@@ -475,7 +628,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--provider-target",
         action="append",
         default=[],
-        help="Provider target to enable, repeatable, e.g. --provider-target claude_code --provider-target openclaw --provider-target security_guardian",
+        help="Provider target to enable, repeatable, e.g. --provider-target claude_code --provider-target openclaw --provider-target hermes",
+    )
+    parser.add_argument(
+        "--install-key",
+        action="append",
+        default=[],
+        help="Canonical install key to inject for a runtime target, e.g. --install-key openclaw=ic_install_openclaw_...",
     )
     parser.add_argument(
         "--no-vscode",
@@ -512,6 +671,8 @@ def build_install_config(args: argparse.Namespace) -> InstallConfig:
     if args.retention_days <= 0:
         raise IronClawInstallerError("--retention-days must be greater than 0")
 
+    install_keys = _normalize_install_key_map(getattr(args, "install_key", None) or [])
+
     return InstallConfig(
         project_root=project_root,
         config_dir=config_dir,
@@ -534,6 +695,7 @@ def build_install_config(args: argparse.Namespace) -> InstallConfig:
         write_env_file=not args.no_env,
         overwrite=bool(args.overwrite),
         provider_targets=_normalize_provider_targets(args.provider_target),
+        install_keys=install_keys,
     )
 
 

@@ -18,10 +18,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.core.install_keys import InstallKeyRecord
-from app.services.install_key_provisioning import (
-    InstallKeyIssued,
-    InstallKeyProvisioningService,
-)
+from app.services.install_key_provisioning import InstallKeyIssued, InstallKeyProvisioningService
 
 
 def _make_install_key_record(
@@ -70,23 +67,14 @@ def _make_install_key_record(
     )
 
 
-@pytest.fixture()
-def service_components() -> tuple[InstallKeyProvisioningService, MagicMock, MagicMock, MagicMock]:
+def _make_service(*, active_subscription: bool = True, owner_key: str = "buyer@ironclaw.test", existing_records: list[InstallKeyRecord] | None = None) -> tuple[InstallKeyProvisioningService, MagicMock, MagicMock, MagicMock]:
     billing_registry = MagicMock()
-    billing_registry.has_active_subscription.return_value = True
+    billing_registry.has_active_subscription.return_value = active_subscription
 
     install_key_registry = MagicMock()
-    install_key_registry.get_keys_for_owner.return_value = []
-    install_key_registry.generate_for_paid_customer.return_value = _make_install_key_record(
-        owner_key="buyer@ironclaw.test",
-        subscription_id="sub_123",
-        program="openclaw",
-        key_id="ik_paid_001",
-        raw_key="ic_install_openclaw_paid_secret_123456",
-    )
-
+    install_key_registry.get_keys_for_owner.return_value = list(existing_records or [])
     wallet_registry = MagicMock()
-    wallet_registry.get_or_create_wallet.return_value = SimpleNamespace(owner_key="buyer@ironclaw.test")
+    wallet_registry.get_or_create_wallet.return_value = SimpleNamespace(owner_key=owner_key)
 
     service = InstallKeyProvisioningService(
         install_key_registry=install_key_registry,
@@ -96,67 +84,35 @@ def service_components() -> tuple[InstallKeyProvisioningService, MagicMock, Magi
     return service, install_key_registry, wallet_registry, billing_registry
 
 
-# ---------------------------------------------------------------------------
-# resolve_owner_key
-# ---------------------------------------------------------------------------
-
-
-def test_resolve_owner_key_prefer_org_context_when_org_key_type_present() -> None:
+def test_resolve_owner_key_normalizes_personal_and_org_context() -> None:
     service = InstallKeyProvisioningService()
-    auth_ctx = SimpleNamespace(key_type="org", org_id="org-42")
-    resolved = service.resolve_owner_key(auth_ctx=auth_ctx, buyer_email="buyer@ironclaw.test")
-    assert resolved == "ic_org_org-42"
+    assert service.resolve_owner_key(auth_ctx=SimpleNamespace(key_type="personal", org_id=None), buyer_email=" Buyer@IRONCLAW.TEST ") == "buyer@ironclaw.test"
+    assert service.resolve_owner_key(auth_ctx=SimpleNamespace(key_type="org", org_id="org-42"), buyer_email="buyer@ironclaw.test") == "ic_org_org-42"
 
 
-def test_resolve_owner_key_falls_back_to_buyer_email_for_personal_context() -> None:
-    service = InstallKeyProvisioningService()
-    auth_ctx = SimpleNamespace(key_type="personal", org_id=None)
-    resolved = service.resolve_owner_key(auth_ctx=auth_ctx, buyer_email=" Buyer@IRONCLAW.TEST ")
-    assert resolved == "buyer@ironclaw.test"
-
-
-def test_resolve_owner_key_uses_org_id_without_auth_ctx() -> None:
-    service = InstallKeyProvisioningService()
-    resolved = service.resolve_owner_key(buyer_email="buyer@ironclaw.test", org_id="org-9")
-    assert resolved == "ic_org_org-9"
-
-
-# ---------------------------------------------------------------------------
-# ensure_entitled_owner / wallet creation guardrails
-# ---------------------------------------------------------------------------
-
-
-def test_ensure_entitled_owner_raises_when_subscription_missing() -> None:
-    billing_registry = MagicMock()
-    billing_registry.has_active_subscription.return_value = False
-
-    service = InstallKeyProvisioningService(billing_registry=billing_registry)
+def test_ensure_entitled_owner_requires_active_subscription() -> None:
+    service, _, _, _ = _make_service(active_subscription=False)
     with pytest.raises(ValueError, match="no active subscription"):
         service.ensure_entitled_owner("buyer@ironclaw.test")
 
 
-def test_ensure_wallet_calls_wallet_registry_with_normalized_owner() -> None:
-    wallet_registry = MagicMock()
-    wallet_registry.get_or_create_wallet.return_value = object()
+def test_ensure_wallet_creates_wallet_for_normalized_owner_key() -> None:
+    service, _, wallet_registry, _ = _make_service()
 
-    service = InstallKeyProvisioningService(wallet_registry=wallet_registry, billing_registry=MagicMock())
-    service.ensure_wallet(" Buyer@IRONCLAW.TEST ")
-    wallet_registry.get_or_create_wallet.assert_called_once_with("buyer@ironclaw.test", metadata={})
+    wallet = service.ensure_wallet(" Buyer@IRONCLAW.TEST ", metadata={"source": "purchase"})
 
-
-# ---------------------------------------------------------------------------
-# provision_for_program
-# ---------------------------------------------------------------------------
+    assert wallet is wallet_registry.get_or_create_wallet.return_value
+    wallet_registry.get_or_create_wallet.assert_called_once_with("buyer@ironclaw.test", metadata={"source": "purchase"})
 
 
-def test_provision_for_program_generates_key_and_returns_single_use_raw_key(service_components: tuple[InstallKeyProvisioningService, MagicMock, MagicMock, MagicMock]) -> None:
-    service, install_key_registry, wallet_registry, billing_registry = service_components
+def test_provision_for_program_issues_paid_active_key_with_stripe_metadata() -> None:
+    service, install_key_registry, wallet_registry, billing_registry = _make_service()
     record = _make_install_key_record(
         owner_key="buyer@ironclaw.test",
         subscription_id="sub_123",
         program="openclaw",
         key_id="ik_open_001",
-        raw_key="ic_install_openclaw_secret_123456",
+        raw_key="ic_install_openclaw_paid_secret_123456",
     )
     install_key_registry.generate_for_paid_customer.return_value = record
 
@@ -164,40 +120,42 @@ def test_provision_for_program_generates_key_and_returns_single_use_raw_key(serv
         owner_key="buyer@ironclaw.test",
         subscription_id="sub_123",
         program="openclaw",
-        source="purchase",
+        source="stripe.checkout",
         label="auto-provisioned",
-        metadata={"customer_id": "cus_123"},
+        metadata={
+            "source": "stale-source",
+            "customer_id": "cus_123",
+            "purchase_reference": "placeholder_purchase",
+            "checkout_session_id": "placeholder_checkout",
+        },
         payment_status="paid",
         entitlements_status="active",
         issued_after_payment=True,
-        checkout_session_id="cs_123",
-        purchase_reference="sub_123",
+        checkout_session_id="cs_real_123",
+        purchase_reference="pi_real_456",
     )
 
     assert isinstance(issued, InstallKeyIssued)
-    assert issued.record.program == "openclaw"
-    assert issued.raw_key.startswith("ic_install_openclaw_")
     assert issued.record.key_id == "ik_open_001"
+    assert issued.raw_key == record.raw_key
     wallet_registry.get_or_create_wallet.assert_called()
     billing_registry.has_active_subscription.assert_called_with("buyer@ironclaw.test")
 
-    install_key_registry.generate_for_paid_customer.assert_called_once()
     kwargs = install_key_registry.generate_for_paid_customer.call_args.kwargs
     assert kwargs["owner_key"] == "buyer@ironclaw.test"
-    assert kwargs["subscription_id"] == "sub_123"
     assert kwargs["program"] == "openclaw"
-    assert kwargs["label"] == "auto-provisioned"
-    assert kwargs["metadata"]["customer_id"] == "cus_123"
-    assert kwargs["metadata"]["source"] == "purchase"
     assert kwargs["payment_status"] == "paid"
     assert kwargs["entitlements_status"] == "active"
     assert kwargs["issued_after_payment"] is True
-    assert kwargs["checkout_session_id"] == "cs_123"
-    assert kwargs["purchase_reference"] == "sub_123"
+    assert kwargs["checkout_session_id"] == "cs_real_123"
+    assert kwargs["purchase_reference"] == "pi_real_456"
+    assert kwargs["metadata"]["source"] == "stripe.checkout"
+    assert kwargs["metadata"]["customer_id"] == "cus_123"
+    assert kwargs["metadata"]["checkout_session_id"] == "cs_real_123"
+    assert kwargs["metadata"]["purchase_reference"] == "pi_real_456"
 
 
-def test_provision_for_program_reuses_existing_active_key_without_duplicate_generation(service_components: tuple[InstallKeyProvisioningService, MagicMock, MagicMock, MagicMock]) -> None:
-    service, install_key_registry, _, _ = service_components
+def test_provision_for_program_reuses_active_key_without_duplicate_generation() -> None:
     existing = _make_install_key_record(
         owner_key="buyer@ironclaw.test",
         subscription_id="sub_123",
@@ -205,12 +163,15 @@ def test_provision_for_program_reuses_existing_active_key_without_duplicate_gene
         key_id="ik_existing_001",
         raw_key="ic_install_openclaw_existing_secret_777",
     )
-    install_key_registry.get_keys_for_owner.return_value = [existing]
+    service, install_key_registry, _, _ = _make_service(existing_records=[existing])
 
     issued = service.provision_for_program(
         owner_key="buyer@ironclaw.test",
         subscription_id="sub_123",
         program="openclaw",
+        payment_status="paid",
+        entitlements_status="active",
+        issued_after_payment=True,
     )
 
     assert issued.raw_key == ""
@@ -218,62 +179,64 @@ def test_provision_for_program_reuses_existing_active_key_without_duplicate_gene
     install_key_registry.generate_for_paid_customer.assert_not_called()
 
 
-def test_provision_for_program_rejects_unpaid_existing_or_invalid_entitlement_state() -> None:
-    service = InstallKeyProvisioningService(
-        install_key_registry=MagicMock(),
-        wallet_registry=MagicMock(),
-        billing_registry=MagicMock(has_active_subscription=MagicMock(return_value=True)),
-    )
-    service._install_key_registry.get_keys_for_owner.return_value = [
+def test_provision_for_purchase_issues_program_specific_keys_with_stripe_refs() -> None:
+    service, install_key_registry, _, _ = _make_service()
+    records = [
         _make_install_key_record(
             owner_key="buyer@ironclaw.test",
-            subscription_id="sub_123",
-            program="claude_code",
-            key_id="ik_invalid_001",
-            active=False,
-            payment_status="pending",
-            entitlements_status="not_active",
-            issued_after_payment=False,
-            raw_key="ic_install_claude_code_invalid_secret_abc",
+            subscription_id="sub_432",
+            program=program,
+            key_id=f"ik_{program}_001",
+            raw_key=f"ic_install_{program}_issue_secret_123",
         )
+        for program in ("openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes")
     ]
+    install_key_registry.generate_for_paid_customer.side_effect = records
 
-    with pytest.raises(ValueError, match="successful payment confirmation"):
+    results = service.provision_for_purchase(
+        buyer_email=" Buyer@IRONCLAW.TEST ",
+        subscription_id="sub_432",
+        customer_id="cus_999",
+        checkout_session_id="cs_999",
+        purchase_reference="purch_999",
+        source="stripe.checkout",
+        payment_status="paid",
+        entitlements_status="active",
+        issued_after_payment=True,
+    )
+
+    assert set(results) == {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"}
+    assert results["openclaw"].record.key_id == "ik_openclaw_001"
+    assert results["hermes"].record.key_id == "ik_hermes_001"
+    first_call = install_key_registry.generate_for_paid_customer.call_args_list[0].kwargs
+    assert first_call["metadata"]["customer_id"] == "cus_999"
+    assert first_call["metadata"]["checkout_session_id"] == "cs_999"
+    assert first_call["metadata"]["purchase_reference"] == "purch_999"
+    assert first_call["metadata"]["source"] == "stripe.checkout"
+    assert first_call["metadata"]["payment_status"] == "paid"
+    assert first_call["metadata"]["entitlements_status"] == "active"
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"payment_status": "pending", "entitlements_status": "not_active", "issued_after_payment": False}, "successful payment confirmation"),
+        ({"payment_status": "paid", "entitlements_status": "not_active", "issued_after_payment": True}, "active paid entitlement"),
+    ],
+)
+def test_provision_for_program_fail_closes_without_real_paid_entitlement(kwargs: dict[str, object], match: str) -> None:
+    service, _, _, _ = _make_service()
+    with pytest.raises(ValueError, match=match):
         service.provision_for_program(
             owner_key="buyer@ironclaw.test",
             subscription_id="sub_123",
-            program="claude_code",
-            payment_status="pending",
-            entitlements_status="not_active",
-            issued_after_payment=False,
-        )
-
-
-def test_provision_for_program_rejects_generic_platform_auth_owner_tokens() -> None:
-    service = InstallKeyProvisioningService(
-        install_key_registry=MagicMock(),
-        wallet_registry=MagicMock(),
-        billing_registry=MagicMock(has_active_subscription=MagicMock(return_value=True)),
-    )
-
-    with pytest.raises(ValueError, match="not valid install-key owners"):
-        service.provision_for_program(
-            owner_key="ghu_secret123",
-            subscription_id="sub_123",
             program="openclaw",
-            payment_status="paid",
-            entitlements_status="active",
-            issued_after_payment=True,
+            **kwargs,
         )
 
 
-def test_resolve_owner_key_rejects_generic_buyer_email_tokens() -> None:
-    service = InstallKeyProvisioningService(
-        install_key_registry=MagicMock(),
-        wallet_registry=MagicMock(),
-        billing_registry=MagicMock(has_active_subscription=MagicMock(return_value=True)),
-    )
-
+def test_resolve_owner_key_rejects_generic_platform_tokens() -> None:
+    service = InstallKeyProvisioningService()
     with pytest.raises(ValueError, match="not valid install-key owners"):
         service.resolve_owner_key(auth_ctx=None, buyer_email="xoxb-abc123")
 

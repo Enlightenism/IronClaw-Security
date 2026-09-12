@@ -342,6 +342,7 @@ def _include_optional_protected_routers(app: FastAPI) -> None:
         _include_optional_router(app, module_path, dependencies=dependencies)
 
     _include_optional_router(app, "app.api.routes.billing")
+    _include_optional_router(app, "app.api.routes.install_key_events")
     _include_optional_router(app, "app.api.routes.dashboard")
     _include_optional_router(app, "app.api.integrations")
 

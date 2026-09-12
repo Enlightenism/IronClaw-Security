@@ -5,6 +5,8 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from app.api.routes.billing import router as billing_router
+from app.api.routes.install_key_events import router as install_key_events_router
 from app.api.routes.unit_ledger import router as unit_ledger_router
 from app.api.routes.unit_wallet import router as unit_wallet_router
 from app.services import action_decision as action_decision_svc
@@ -14,6 +16,10 @@ from app.services import history as history_svc
 from app.services import scanner as scanner_svc
 
 router = APIRouter()
+router.include_router(unit_wallet_router)
+router.include_router(unit_ledger_router)
+router.include_router(billing_router)
+router.include_router(install_key_events_router)
 
 Verdict = Literal["allow", "warn", "quarantine", "block"]
 

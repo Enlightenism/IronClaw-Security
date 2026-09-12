@@ -113,6 +113,9 @@ verify_jwt = true
 
 # ironclaw-webhook-dispatch
 # Fan-out webhook delivery to registered tenant subscriptions.
+# SECURITY: this endpoint is part of the internal payment/install-key lifecycle
+# trust boundary and MUST remain JWT-protected; never allow public or mixed-trust
+# access because it can fan out purchase fulfillment events after Stripe payment.
 # Called server-side by webhook_service.py after every verdict.
 # JWT required — only callable with service-role Bearer token.
 [functions.ironclaw-webhook-dispatch]

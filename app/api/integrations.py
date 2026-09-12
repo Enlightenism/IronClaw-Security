@@ -9,8 +9,13 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from app.api.routes.integrations import (
+    _CANONICAL_PLATFORM_ORDER,
+)
+from app.api.routes.integrations import (
+    get_integrations_token as _get_canonical_integrations_token,
+)
 from app.core.auth import get_auth_context
-from app.core.install_keys import get_install_key_registry
 from app.services.integration_installer import get_integration_installer
 from app.services.integration_registry import get_integration_registry
 from app.services.integration_verifier import get_integration_verifier
@@ -181,6 +186,7 @@ class IntegrationObservabilityResponse(BaseModel):
 
 
 class IntegrationTokenResponse(BaseModel):
+    status: str = "locked"
     user_token: str
     claude_code_command: str = ""
     openclaw_command: str = ""
@@ -330,154 +336,9 @@ def _require_record(integration_id: str) -> Any:
     return record
 
 
-_CANONICAL_PLATFORM_ORDER: tuple[str, ...] = (
-    "claude-code",
-    "openclaw",
-    "cursor",
-    "goose",
-    "gemini-cli",
-    "copilot",
-    "hermes",
-)
-
-_SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
-    "claude-code": {
-        "program": "claude_code",
-        "platform": "claude-code",
-        "slug": "claude-code",
-        "shared_package": False,
-        "shared_install_key_family": False,
-        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key {key}",
-    },
-    "openclaw": {
-        "program": "openclaw",
-        "platform": "openclaw",
-        "slug": "openclaw",
-        "shared_package": False,
-        "shared_install_key_family": False,
-        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user --key {key}",
-    },
-    "cursor": {
-        "program": "cursor",
-        "platform": "cursor",
-        "slug": "cursor",
-        "shared_package": False,
-        "shared_install_key_family": False,
-        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user --key {key}",
-    },
-    "goose": {
-        "program": "goose",
-        "platform": "goose",
-        "slug": "goose",
-        "shared_package": False,
-        "shared_install_key_family": False,
-        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user --key {key}",
-    },
-    "gemini-cli": {
-        "program": "gemini_cli",
-        "platform": "gemini-cli",
-        "slug": "gemini-cli",
-        "shared_package": False,
-        "shared_install_key_family": False,
-        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user --key {key}",
-    },
-    "copilot": {
-        "program": "copilot",
-        "platform": "copilot",
-        "slug": "copilot",
-        "shared_package": False,
-        "shared_install_key_family": False,
-        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user --key {key}",
-    },
-    "hermes": {
-        "program": "hermes",
-        "platform": "hermes",
-        "slug": "hermes",
-        "shared_package": False,
-        "shared_install_key_family": False,
-        "command_template": "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key {key}",
-    },
-}
-
-
-def _looks_like_generic_platform_auth(value: str | None) -> bool:
-    if value is None:
-        return False
-    normalized = str(value).strip().lower()
-    if not normalized:
-        return False
-    generic_prefixes = (
-        "sk_",
-        "ghp_",
-        "gho_",
-        "github_pat_",
-        "token_",
-        "secret_",
-        "api_",
-        "api-key",
-        "api_key",
-        "platform-api-key",
-        "platform_api_key",
-        "system-api-key",
-        "system_api_key",
-        "internal-platform-api-key",
-        "internal_platform_api_key",
-        "bearer ",
-        "x-api-key",
-    )
-    if normalized.startswith(generic_prefixes):
-        return True
-    if normalized.startswith("ic_") and not normalized.startswith("ic_org_"):
-        return True
-    return ("platform" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized)) or ("system" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized)) or ("api" in normalized and "key" in normalized)
-
-
-def _collect_paid_install_metadata(owner_key: str | None) -> tuple[dict[str, str], dict[str, dict[str, Any]], list[str]]:
-    install_keys: dict[str, str] = {}
-    registry = get_install_key_registry()
-
-    if owner_key:
-        for record in registry.get_keys_for_owner(owner_key):
-            record_owner = str(getattr(record, "owner_key", "") or "").strip().lower()
-            if record_owner != owner_key:
-                continue
-            if not getattr(record, "active", False):
-                continue
-            if str(getattr(record, "payment_status", "")).strip().lower() != "paid":
-                continue
-            if str(getattr(record, "entitlements_status", "")).strip().lower() != "active":
-                continue
-            if not bool(getattr(record, "issued_after_payment", False)):
-                continue
-            program = str(getattr(record, "program", "")).strip().lower()
-            if not program:
-                continue
-            masked = str(getattr(record, "masked_key", "") or "").strip()
-            if masked:
-                install_keys[program] = masked
-
-    command_metadata: dict[str, str] = {}
-    install_metadata: dict[str, dict[str, Any]] = {}
-    supported_platforms: list[str] = list(_CANONICAL_PLATFORM_ORDER)
-
-    for platform_slug in _CANONICAL_PLATFORM_ORDER:
-        metadata = _SUPPORTED_PLATFORM_INSTALLS[platform_slug]
-        program = metadata["program"]
-        key = install_keys.get(program, "")
-        command = metadata["command_template"].format(key=key) if key else ""
-        command_metadata[platform_slug] = command
-        install_metadata[platform_slug] = {
-            "platform": metadata["platform"],
-            "slug": metadata["slug"],
-            "program": program,
-            "install_key": key,
-            "command": command,
-            "shared_package": metadata.get("shared_package", False),
-            "shared_install_key_family": metadata.get("shared_install_key_family", False),
-            "package_type": metadata.get("package_type", "runtime-install"),
-        }
-
-    return command_metadata, install_metadata, supported_platforms
+# The canonical install-key command generation lives in app.api.routes.integrations.
+# This module keeps the broader registry API, but delegates token generation to that
+# canonical implementation so platform names and command templates cannot drift.
 
 
 def _decode_jwt_unsafe(token: str) -> tuple[dict[str, Any] | None, str | None]:
@@ -614,65 +475,22 @@ def get_verifier(integration_id: str) -> dict[str, Any]:
 
 
 @router.get("/token", response_model=IntegrationTokenResponse)
-def get_integrations_token(auth: Any = Depends(get_auth_context)) -> IntegrationTokenResponse:
-    auth_api_key = str(getattr(auth, "api_key", "") or "").strip()
-    if auth_api_key and _looks_like_generic_platform_auth(auth_api_key):
-        empty_command_metadata = {platform_slug: "" for platform_slug in _CANONICAL_PLATFORM_ORDER}
-        empty_install_metadata = {
-            platform_slug: {
-                "platform": metadata["platform"],
-                "slug": metadata["slug"],
-                "program": metadata["program"],
-                "install_key": "",
-                "command": "",
-                "shared_package": metadata.get("shared_package", False),
-                "shared_install_key_family": metadata.get("shared_install_key_family", False),
-                "package_type": metadata.get("package_type", "runtime-install"),
-            }
-            for platform_slug, metadata in _SUPPORTED_PLATFORM_INSTALLS.items()
-        }
-        return IntegrationTokenResponse(
-            user_token="",
-            claude_code_command="",
-            openclaw_command="",
-            cursor_command="",
-            goose_command="",
-            gemini_cli_command="",
-            copilot_command="",
-            hermes_command="",
-            security_guardian_command="",
-            supported_platforms=list(_CANONICAL_PLATFORM_ORDER),
-            command_metadata=empty_command_metadata,
-            install_metadata=empty_install_metadata,
-        )
-
-    owner_key = str(getattr(auth, "principal_id", "") or "").strip().lower()
-    if not owner_key or _looks_like_generic_platform_auth(owner_key):
-        owner_key = str(getattr(auth, "org_id", "") or "").strip().lower()
-    if owner_key and owner_key.startswith("ic_org_"):
-        owner_key = owner_key
-    elif owner_key and owner_key.startswith("ic_"):
-        owner_key = None
-    elif owner_key and _looks_like_generic_platform_auth(owner_key):
-        owner_key = None
-    else:
-        owner_key = owner_key or None
-
-    command_metadata, install_metadata, supported_platforms = _collect_paid_install_metadata(owner_key)
-
+async def get_integrations_token(auth: Any = Depends(get_auth_context)) -> IntegrationTokenResponse:
+    payload = await _get_canonical_integrations_token(auth)
     return IntegrationTokenResponse(
-        user_token="",
-        claude_code_command=command_metadata.get("claude-code", ""),
-        openclaw_command=command_metadata.get("openclaw", ""),
-        cursor_command=command_metadata.get("cursor", ""),
-        goose_command=command_metadata.get("goose", ""),
-        gemini_cli_command=command_metadata.get("gemini-cli", ""),
-        copilot_command=command_metadata.get("copilot", ""),
-        hermes_command=command_metadata.get("hermes", ""),
-        security_guardian_command=command_metadata.get("security-guardian", ""),
-        supported_platforms=supported_platforms,
-        command_metadata=command_metadata,
-        install_metadata=install_metadata,
+        status=str(payload.get("status", "locked")),
+        user_token=str(payload.get("user_token", "")),
+        claude_code_command=str(payload.get("claude_code_command", "")),
+        openclaw_command=str(payload.get("openclaw_command", "")),
+        cursor_command=str(payload.get("cursor_command", "")),
+        goose_command=str(payload.get("goose_command", "")),
+        gemini_cli_command=str(payload.get("gemini_cli_command", "")),
+        copilot_command=str(payload.get("copilot_command", "")),
+        hermes_command=str(payload.get("hermes_command", "")),
+        security_guardian_command=str(payload.get("security_guardian_command", "")),
+        supported_platforms=list(payload.get("supported_platforms", list(_CANONICAL_PLATFORM_ORDER))),
+        command_metadata={str(k): str(v) for k, v in (payload.get("command_metadata") or {}).items()},
+        install_metadata={str(k): dict(v) for k, v in (payload.get("install_metadata") or {}).items()},
     )
 
 

@@ -122,6 +122,27 @@ def test_checkout_session_completed_pending_payment_is_skipped() -> None:
     service.credit_units.assert_not_called()
 
 
+def test_checkout_session_completed_skips_when_purchase_already_fulfilled() -> None:
+    stripe_webhooks.reset_processed_events()
+    service = _make_service()
+    fulfilled_purchase = SimpleNamespace(
+        purchase_id="purch_fulfilled_123",
+        metadata={
+            "payment_status": "paid",
+            "fulfillment_status": "fulfilled",
+            "checkout_session_id": "cs_123",
+        },
+    )
+
+    with patch("app.api.stripe_webhooks.get_stripe_service", return_value=service), patch("app.api.stripe_webhooks._verify_stripe_signature"), patch("app.api.stripe_webhooks._find_matching_purchase_for_checkout", return_value=fulfilled_purchase):
+        response = _post_event(_event_payload(event_type="checkout.session.completed"))
+
+    assert response.status_code == 200
+    assert response.json()["processed"] is True
+    service.credit_units.assert_not_called()
+    service._issue_paid_install_keys_for_checkout.assert_not_called()
+
+
 def test_invoice_paid_success_triggers_entitlement_orchestration() -> None:
     stripe_webhooks.reset_processed_events()
     service = _make_service()
@@ -212,6 +233,42 @@ def test_duplicate_event_is_suppressed() -> None:
     assert second.status_code == 200
     assert second.json()["skipped"] is True
     assert second.json()["skip_reason"] == "Duplicate event — already processed."
+
+
+def test_duplicate_event_state_is_cleared_between_cases() -> None:
+    stripe_webhooks.reset_processed_events()
+    service = _make_service()
+
+    with patch("app.api.stripe_webhooks.get_stripe_service", return_value=service), patch("app.api.stripe_webhooks._verify_stripe_signature"):
+        first = _post_event(_event_payload(event_type="checkout.session.completed", event_id="evt_reset_1"))
+
+    assert first.status_code == 200
+    assert first.json()["processed"] is True
+
+    stripe_webhooks.reset_processed_events()
+
+    with patch("app.api.stripe_webhooks.get_stripe_service", return_value=service), patch("app.api.stripe_webhooks._verify_stripe_signature"):
+        second = _post_event(_event_payload(event_type="checkout.session.completed", event_id="evt_reset_1"))
+
+    assert second.status_code == 200
+    assert second.json()["processed"] is True
+
+
+def test_checkout_completed_persistence_failure_is_not_replayed_or_reissued() -> None:
+    stripe_webhooks.reset_processed_events()
+    service = _make_service()
+    service.credit_units.side_effect = RuntimeError("durable persistence failed")
+
+    with patch("app.api.stripe_webhooks.get_stripe_service", return_value=service), patch("app.api.stripe_webhooks._verify_stripe_signature"):
+        response = _post_event(_event_payload(event_type="checkout.session.completed", event_id="evt_persist_fail_1"))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["processed"] is False
+    assert body["skipped"] is True
+    assert "Handler raised an internal error" in body["skip_reason"]
+    service.credit_units.assert_called_once()
+    service._issue_paid_install_keys_for_checkout.assert_not_called()
 
 
 def test_invalid_json_returns_400() -> None:

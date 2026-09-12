@@ -43,6 +43,29 @@ _OWNER = "buyer@ironclaw.test"
 _SUB_ID = "purch_test00000000001"
 
 
+def _issue_paid_key(
+    registry: InstallKeyRegistry,
+    *,
+    owner_key: str = _OWNER,
+    subscription_id: str = _SUB_ID,
+    program: str = "openclaw",
+    **kwargs: object,
+) -> InstallKeyRecord:
+    purchase_reference = str(kwargs.pop("purchase_reference", f"ref_{program}_{subscription_id[-8:]}") or f"ref_{program}_{subscription_id[-8:]}")
+    checkout_session_id = str(kwargs.pop("checkout_session_id", f"cs_{program}_{subscription_id[-8:]}") or f"cs_{program}_{subscription_id[-8:]}")
+    return registry.generate_install_key(
+        owner_key=owner_key,
+        subscription_id=subscription_id,
+        program=program,
+        payment_status="paid",
+        entitlements_status="active",
+        issued_after_payment=True,
+        purchase_reference=purchase_reference,
+        checkout_session_id=checkout_session_id,
+        **kwargs,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Auth context factories
 # ---------------------------------------------------------------------------
@@ -162,11 +185,7 @@ def client():
 
 class TestInstallKeyRegistryGenerate:
     def test_generate_returns_record_with_raw_key(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(
-            owner_key=_OWNER,
-            subscription_id=_SUB_ID,
-            program="openclaw",
-        )
+        record = _issue_paid_key(registry, program="openclaw")
         assert isinstance(record, InstallKeyRecord)
         assert record.raw_key.startswith("ic_install_openclaw_")
         assert record.active is True
@@ -174,49 +193,29 @@ class TestInstallKeyRegistryGenerate:
         assert record.program == "openclaw"
 
     def test_generate_claude_key_has_correct_prefix(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(
-            owner_key=_OWNER,
-            subscription_id=_SUB_ID,
-            program="claude_code",
-        )
+        record = _issue_paid_key(registry, program="claude_code")
         assert record.raw_key.startswith("ic_install_claude_code_")
 
     def test_masked_key_does_not_expose_full_secret(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(
-            owner_key=_OWNER,
-            subscription_id=_SUB_ID,
-            program="openclaw",
-        )
+        record = _issue_paid_key(registry, program="openclaw")
         assert record.masked_key != record.raw_key
         assert "..." in record.masked_key
 
     def test_raw_key_hash_matches_key(self, registry: InstallKeyRegistry) -> None:
         import hashlib
 
-        record = registry.generate_install_key(
-            owner_key=_OWNER,
-            subscription_id=_SUB_ID,
-            program="openclaw",
-        )
+        record = _issue_paid_key(registry, program="openclaw")
         expected_hash = hashlib.sha256(record.raw_key.encode()).hexdigest()
         assert record.raw_key_hash == expected_hash
 
     def test_duplicate_active_key_raises_already_exists(self, registry: InstallKeyRegistry) -> None:
-        registry.generate_install_key(
-            owner_key=_OWNER,
-            subscription_id=_SUB_ID,
-            program="openclaw",
-        )
+        _issue_paid_key(registry, program="openclaw")
         with pytest.raises(InstallKeyAlreadyExistsError):
-            registry.generate_install_key(
-                owner_key=_OWNER,
-                subscription_id=_SUB_ID,
-                program="openclaw",
-            )
+            _issue_paid_key(registry, program="openclaw")
 
     def test_two_programs_allowed_for_same_owner(self, registry: InstallKeyRegistry) -> None:
-        r1 = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
-        r2 = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="claude_code")
+        r1 = _issue_paid_key(registry, program="openclaw")
+        r2 = _issue_paid_key(registry, program="claude_code")
         assert r1.key_id != r2.key_id
         assert r1.program == "openclaw"
         assert r2.program == "claude_code"
@@ -227,12 +226,17 @@ class TestInstallKeyRegistryGenerate:
                 owner_key=_OWNER,
                 subscription_id=_SUB_ID,
                 program="invalid_program",  # type: ignore[arg-type]
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+                purchase_reference="ref_invalid_001",
+                checkout_session_id="cs_invalid_001",
             )
 
 
 class TestInstallKeyRegistryAuthenticate:
     def test_authenticate_valid_key_returns_record(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
         authenticated = registry.authenticate_install_key(record.raw_key)
         assert authenticated is not None
         assert authenticated.key_id == record.key_id
@@ -242,13 +246,13 @@ class TestInstallKeyRegistryAuthenticate:
         assert result is None
 
     def test_authenticate_revoked_key_returns_none(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
         registry.revoke_key(record.key_id)
         result = registry.authenticate_install_key(record.raw_key)
         assert result is None
 
     def test_authenticate_updates_last_used_at(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
         assert record.last_used_at is None
         authenticated = registry.authenticate_install_key(record.raw_key)
         assert authenticated is not None
@@ -257,7 +261,7 @@ class TestInstallKeyRegistryAuthenticate:
 
 class TestInstallKeyRegistryRevoke:
     def test_revoke_deactivates_key(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
         updated = registry.revoke_key(record.key_id)
         assert updated.active is False
 
@@ -266,53 +270,52 @@ class TestInstallKeyRegistryRevoke:
             registry.revoke_key("ik_doesnotexist")
 
     def test_revoke_idempotent(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
         registry.revoke_key(record.key_id)
-        # Second revoke should not raise
         updated = registry.revoke_key(record.key_id)
         assert updated.active is False
 
     def test_revoked_key_fails_authenticate(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
         raw = record.raw_key
         registry.revoke_key(record.key_id)
         assert registry.authenticate_install_key(raw) is None
 
     def test_revoked_key_fails_record_usage(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
         registry.revoke_key(record.key_id)
         with pytest.raises(InstallKeyUsageError):
             registry.record_key_usage(record.key_id, units=1)
 
     def test_revoked_key_can_be_regenerated_for_same_owner(self, registry: InstallKeyRegistry) -> None:
         """After revoking the active key, a new one can be generated (no duplicate active)."""
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
         registry.revoke_key(record.key_id)
-        new_record = registry.generate_install_key(owner_key=_OWNER, subscription_id="purch_test00000000002", program="openclaw")
+        new_record = _issue_paid_key(registry, owner_key=_OWNER, subscription_id="purch_test00000000002", program="openclaw")
         assert new_record.active is True
         assert new_record.key_id != record.key_id
 
 
 class TestInstallKeyRegistryRecordUsage:
     def test_record_usage_increments_units_consumed(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
         assert record.units_consumed == 0
         updated = registry.record_key_usage(record.key_id, units=10)
         assert updated.units_consumed == 10
 
     def test_record_usage_accumulates(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
         registry.record_key_usage(record.key_id, units=5)
         updated = registry.record_key_usage(record.key_id, units=3)
         assert updated.units_consumed == 8
 
     def test_record_usage_zero_units_raises_usage_error(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
         with pytest.raises(InstallKeyUsageError):
             registry.record_key_usage(record.key_id, units=0)
 
     def test_record_usage_negative_units_raises_usage_error(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
         with pytest.raises(InstallKeyUsageError):
             registry.record_key_usage(record.key_id, units=-5)
 
@@ -321,21 +324,21 @@ class TestInstallKeyRegistryRecordUsage:
             registry.record_key_usage("ik_ghost00000000000", units=1)
 
     def test_record_usage_inactive_key_raises_usage_error(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
         registry.revoke_key(record.key_id)
         with pytest.raises(InstallKeyUsageError):
             registry.record_key_usage(record.key_id, units=1)
 
     def test_record_usage_updates_last_used_at(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
         updated = registry.record_key_usage(record.key_id, units=1)
         assert updated.last_used_at is not None
 
 
 class TestInstallKeyRegistryGetKeys:
     def test_get_keys_for_owner_returns_both_programs(self, registry: InstallKeyRegistry) -> None:
-        registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
-        registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="claude_code")
+        _issue_paid_key(registry, program="openclaw")
+        _issue_paid_key(registry, program="claude_code")
         keys = registry.get_keys_for_owner(_OWNER)
         assert len(keys) == 2
         programs = {k.program for k in keys}
@@ -346,7 +349,7 @@ class TestInstallKeyRegistryGetKeys:
         assert keys == []
 
     def test_masked_keys_correct_in_owner_listing(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
         keys = registry.get_keys_for_owner(_OWNER)
         assert len(keys) == 1
         listed = keys[0]
@@ -354,8 +357,8 @@ class TestInstallKeyRegistryGetKeys:
         assert listed.raw_key == "" or listed.raw_key == record.raw_key
 
     def test_units_per_program_tracked_separately(self, registry: InstallKeyRegistry) -> None:
-        r1 = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
-        r2 = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="claude_code")
+        r1 = _issue_paid_key(registry, program="openclaw")
+        r2 = _issue_paid_key(registry, program="claude_code")
         registry.record_key_usage(r1.key_id, units=7)
         registry.record_key_usage(r2.key_id, units=3)
 
@@ -410,7 +413,7 @@ class TestInstallKeyRegistryPaidEntitlementContract:
             )
 
     def test_public_dict_exposes_only_masked_key(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
 
         payload = record.public_dict()
         assert payload["masked_key"] == record.masked_key
@@ -419,7 +422,7 @@ class TestInstallKeyRegistryPaidEntitlementContract:
         assert "..." in payload["masked_key"]
 
     def test_authenticate_rejects_non_paid_or_revoked_key(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
         assert registry.authenticate_install_key(record.raw_key) is not None
 
         registry.revoke_key(record.key_id)
@@ -445,29 +448,28 @@ class TestInstallKeyRegistryPaidEntitlementContract:
 
 class TestRevokedKeyBlocked:
     def test_revoked_key_authenticate_returns_none(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
         registry.revoke_key(record.key_id)
         assert registry.authenticate_install_key(record.raw_key) is None
 
     def test_revoked_key_record_usage_raises_usage_error(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
         registry.revoke_key(record.key_id)
         with pytest.raises(InstallKeyUsageError):
             registry.record_key_usage(record.key_id, units=1)
 
     def test_revoked_key_not_in_active_listing(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
         registry.revoke_key(record.key_id)
         keys = registry.get_keys_for_owner(_OWNER)
         active_keys = [k for k in keys if k.active]
         assert all(k.key_id != record.key_id for k in active_keys)
 
     def test_revoked_then_new_key_is_active_and_usable(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
         registry.revoke_key(record.key_id)
-        new_record = registry.generate_install_key(owner_key=_OWNER, subscription_id="purch_test00000000002", program="openclaw")
+        new_record = _issue_paid_key(registry, owner_key=_OWNER, subscription_id="purch_test00000000002", program="openclaw")
         assert new_record.active is True
-        # Record usage on new key should succeed
         updated = registry.record_key_usage(new_record.key_id, units=5)
         assert updated.units_consumed == 5
 
@@ -479,18 +481,17 @@ class TestRevokedKeyBlocked:
 
 class TestMyKeysMaskedAndUnits:
     def test_my_keys_returns_masked_not_raw(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        record = _issue_paid_key(registry, program="openclaw")
         keys = registry.get_keys_for_owner(_OWNER)
         assert len(keys) == 1
         listed = keys[0]
-        # public_dict must never expose raw_key
         public = listed.public_dict()
         assert "raw_key" not in public
         assert public["masked_key"] == record.masked_key
 
     def test_my_keys_shows_correct_units_per_program(self, registry: InstallKeyRegistry) -> None:
-        r_oc = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
-        r_cc = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="claude_code")
+        r_oc = _issue_paid_key(registry, program="openclaw")
+        r_cc = _issue_paid_key(registry, program="claude_code")
         registry.record_key_usage(r_oc.key_id, units=12)
         registry.record_key_usage(r_cc.key_id, units=4)
 
@@ -503,19 +504,19 @@ class TestMyKeysMaskedAndUnits:
         assert keys == []
 
     def test_my_keys_program_field_correct(self, registry: InstallKeyRegistry) -> None:
-        registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
+        _issue_paid_key(registry, program="openclaw")
         keys = registry.get_keys_for_owner(_OWNER)
         assert keys[0].program == "openclaw"
 
     def test_masked_key_format_preserved_in_public_dict(self, registry: InstallKeyRegistry) -> None:
-        record = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="claude_code")
+        record = _issue_paid_key(registry, program="claude_code")
         public = record.public_dict()
         assert "..." in public["masked_key"]
         assert public["masked_key"].startswith("ic_install_claude_code_")
 
     def test_summary_counts_active_and_revoked(self, registry: InstallKeyRegistry) -> None:
-        r1 = registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="openclaw")
-        registry.generate_install_key(owner_key=_OWNER, subscription_id=_SUB_ID, program="claude_code")
+        r1 = _issue_paid_key(registry, program="openclaw")
+        _issue_paid_key(registry, program="claude_code")
         registry.revoke_key(r1.key_id)
         summary = registry.summary()
         assert summary["total"] == 2

@@ -188,6 +188,12 @@ def test_resolve_billing_owner_generic_auth_does_not_take_over_billing_owner() -
     assert result == "buyer@ironclaw.test"
 
 
+def test_resolve_billing_owner_rejects_generic_platform_org_identity() -> None:
+    ctx = SimpleNamespace(key_type="org", org_id="platform-api-key", principal_type="organization")
+    result = resolve_billing_owner(ctx, "Buyer@IronClaw.TEST")
+    assert result == "buyer@ironclaw.test"
+
+
 @pytest.mark.parametrize(
     "bad_value",
     [

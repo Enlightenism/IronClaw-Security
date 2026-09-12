@@ -66,6 +66,179 @@ create table if not exists public.persistence_failover_events (
         check (status in ('detected', 'in_progress', 'completed', 'failed', 'rolled_back'))
 );
 
+-- ─── Billing / install-key durable state ──────────────────────────────────────
+
+create table if not exists public.billing_purchases (
+    id uuid primary key default gen_random_uuid(),
+    purchase_id text not null unique,
+    owner_key text not null,
+    customer_id text,
+    buyer_email text,
+    package_id text not null default '',
+    checkout_session_id text,
+    stripe_payment_intent_id text,
+    amount_total numeric(12,2) not null default 0,
+    currency text not null default 'usd',
+    payment_status text not null default 'pending',
+    fulfillment_status text not null default 'pending',
+    granted_units integer not null default 0,
+    units_credited boolean not null default false,
+    install_keys_provisioned boolean not null default false,
+    raw_metadata jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default timezone('utc', now()),
+    updated_at timestamptz not null default timezone('utc', now()),
+    fulfilled_at timestamptz,
+    expires_at timestamptz,
+    constraint billing_purchases_payment_status_check
+        check (payment_status in ('pending', 'paid', 'failed', 'refunded', 'cancelled')),
+    constraint billing_purchases_fulfillment_status_check
+        check (fulfillment_status in ('pending', 'fulfilled', 'failed', 'retrying')),
+    constraint billing_purchases_amount_total_check
+        check (amount_total >= 0),
+    constraint billing_purchases_granted_units_check
+        check (granted_units >= 0),
+    constraint billing_purchases_owner_key_not_empty_check
+        check (char_length(trim(owner_key)) > 0),
+    constraint billing_purchases_checkout_session_id_not_empty_check
+        check (checkout_session_id is null or char_length(trim(checkout_session_id)) > 0),
+    constraint billing_purchases_currency_check
+        check (char_length(trim(currency)) > 0)
+);
+
+create table if not exists public.install_key_records (
+    id uuid primary key default gen_random_uuid(),
+    key_id text not null unique,
+    purchase_id text references public.billing_purchases(purchase_id) on delete set null,
+    owner_key text not null,
+    customer_id text,
+    program text not null,
+    checkout_session_id text,
+    raw_key_hash text not null default '',
+    masked_key text not null default '',
+    label text not null default '',
+    active boolean not null default false,
+    payment_status text not null default 'unpaid',
+    entitlements_status text not null default 'not_active',
+    issued_after_payment boolean not null default false,
+    created_at timestamptz not null default timezone('utc', now()),
+    updated_at timestamptz not null default timezone('utc', now()),
+    last_used_at timestamptz,
+    revoked_at timestamptz,
+    metadata jsonb not null default '{}'::jsonb,
+    constraint install_key_records_payment_status_check
+        check (payment_status in ('unpaid', 'paid', 'failed', 'refunded', 'cancelled')),
+    constraint install_key_records_entitlements_status_check
+        check (entitlements_status in ('not_active', 'active', 'revoked', 'expired')),
+    constraint install_key_records_owner_key_not_empty_check
+        check (char_length(trim(owner_key)) > 0),
+    constraint install_key_records_program_not_empty_check
+        check (char_length(trim(program)) > 0),
+    constraint install_key_records_key_hash_not_empty_check
+        check (raw_key_hash = '' or char_length(trim(raw_key_hash)) > 0)
+);
+
+create table if not exists public.install_key_issuance_history (
+    id uuid primary key default gen_random_uuid(),
+    key_id text not null references public.install_key_records(key_id) on delete cascade,
+    purchase_id text references public.billing_purchases(purchase_id) on delete set null,
+    owner_key text not null,
+    customer_id text,
+    program text not null,
+    event_type text not null default 'issued',
+    status text not null default 'issued',
+    issued_at timestamptz not null default timezone('utc', now()),
+    updated_at timestamptz not null default timezone('utc', now()),
+    metadata jsonb not null default '{}'::jsonb,
+    constraint install_key_issuance_history_event_type_check
+        check (event_type in ('issued', 'reissued', 'revoked', 'replaced', 'expired')),
+    constraint install_key_issuance_history_status_check
+        check (status in ('issued', 'active', 'revoked', 'failed')),
+    constraint install_key_issuance_history_owner_key_not_empty_check
+        check (char_length(trim(owner_key)) > 0),
+    constraint install_key_issuance_history_program_not_empty_check
+        check (char_length(trim(program)) > 0)
+);
+
+create table if not exists public.event_idempotency_ledger (
+    id uuid primary key default gen_random_uuid(),
+    event_id text not null unique,
+    source text not null default 'stripe',
+    event_type text not null default '',
+    purchase_id text,
+    checkout_session_id text,
+    owner_key text,
+    customer_id text,
+    payload_hash text not null default '',
+    processed_at timestamptz not null default timezone('utc', now()),
+    updated_at timestamptz not null default timezone('utc', now()),
+    metadata jsonb not null default '{}'::jsonb,
+    constraint event_idempotency_ledger_source_check
+        check (source in ('stripe', 'internal', 'webhook')),
+    constraint event_idempotency_ledger_event_type_not_empty_check
+        check (char_length(trim(event_type)) > 0),
+    constraint event_idempotency_ledger_processed_at_not_null_check
+        check (processed_at is not null)
+);
+
+create trigger set_billing_purchases_updated_at
+    before update on public.billing_purchases
+    for each row execute function public.set_updated_at();
+
+create trigger set_install_key_records_updated_at
+    before update on public.install_key_records
+    for each row execute function public.set_updated_at();
+
+create trigger set_install_key_issuance_history_updated_at
+    before update on public.install_key_issuance_history
+    for each row execute function public.set_updated_at();
+
+create trigger set_event_idempotency_ledger_updated_at
+    before update on public.event_idempotency_ledger
+    for each row execute function public.set_updated_at();
+
+create index if not exists idx_billing_purchases_owner_created_at
+    on public.billing_purchases (owner_key, created_at desc);
+
+create index if not exists idx_billing_purchases_checkout_session_lookup
+    on public.billing_purchases (checkout_session_id)
+    where checkout_session_id is not null;
+
+create unique index if not exists idx_billing_purchases_paid_checkout_session_unique
+    on public.billing_purchases (checkout_session_id)
+    where checkout_session_id is not null and payment_status = 'paid';
+
+create index if not exists idx_billing_purchases_payment_status_created_at
+    on public.billing_purchases (payment_status, created_at desc);
+
+create index if not exists idx_install_key_records_owner_program
+    on public.install_key_records (owner_key, program, created_at desc);
+
+create index if not exists idx_install_key_records_checkout_session
+    on public.install_key_records (checkout_session_id)
+    where checkout_session_id is not null;
+
+create unique index if not exists idx_install_key_records_active_owner_program_unique
+    on public.install_key_records (owner_key, program)
+    where active = true;
+
+create unique index if not exists idx_install_key_records_raw_key_hash_unique
+    on public.install_key_records (raw_key_hash)
+    where raw_key_hash is not null and raw_key_hash <> '';
+
+create index if not exists idx_install_key_issuance_history_purchase_issued_at
+    on public.install_key_issuance_history (purchase_id, issued_at desc);
+
+create index if not exists idx_install_key_issuance_history_key_id
+    on public.install_key_issuance_history (key_id, issued_at desc);
+
+create index if not exists idx_event_idempotency_ledger_checkout_session
+    on public.event_idempotency_ledger (checkout_session_id)
+    where checkout_session_id is not null;
+
+create index if not exists idx_event_idempotency_ledger_purchase_id
+    on public.event_idempotency_ledger (purchase_id)
+    where purchase_id is not null;
+
 -- ─── Backup / restore ─────────────────────────────────────────────────────────
 
 create table if not exists public.backup_policies (

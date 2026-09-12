@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -62,6 +63,7 @@ _ALL_EXPECTED_TABLES: frozenset[str] = frozenset(
 
 _ENV_PATCH_TARGET = "app.persistencebootstrap._supabase_env_present"
 _FACTORY_PATCH_TARGET = "app.persistencebootstrap._build_supabase_store"
+_MIGRATION_PATH = Path(__file__).resolve().parents[2] / "supabase" / "migrations" / "001initialpersistenceschema.sql"
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +93,89 @@ def _make_mock_supabase_store() -> MagicMock:
 
 def _memory_store() -> InMemoryPersistenceStore:
     return InMemoryPersistenceStore()
+
+
+class TestSupabaseMigrationForBillingDurability:
+    def test_billing_and_install_key_tables_are_present(self) -> None:
+        sql = _MIGRATION_PATH.read_text(encoding="utf-8")
+        required = [
+            "create table if not exists public.billing_purchases",
+            "create table if not exists public.install_key_records",
+            "create table if not exists public.install_key_issuance_history",
+            "create table if not exists public.event_idempotency_ledger",
+        ]
+        for statement in required:
+            assert statement in sql
+
+    def test_unique_indexes_guard_duplicate_paid_purchases_and_active_keys(self) -> None:
+        sql = _MIGRATION_PATH.read_text(encoding="utf-8")
+        required = [
+            "idx_billing_purchases_paid_checkout_session_unique",
+            "idx_install_key_records_active_owner_program_unique",
+            "idx_install_key_records_raw_key_hash_unique",
+            "event_id",
+            "checkout_session_id",
+            "owner_key",
+        ]
+        for needle in required:
+            assert needle in sql
+
+    def test_003_index_migration_adds_reconciliation_uniqueness(self) -> None:
+        sql = (Path(__file__).resolve().parents[2] / "supabase" / "migrations" / "003indexesandconstraints.sql").read_text(encoding="utf-8")
+        required = [
+            "idx_billing_purchases_purchase_id_reconciliation_unique",
+            "idx_billing_purchases_checkout_session_reconciliation_unique",
+            "idx_billing_purchases_owner_package_reconciliation_unique",
+            "idx_install_key_records_key_id_reconciliation_unique",
+            "idx_install_key_records_active_owner_program_reconciliation_unique",
+            "idx_event_idempotency_ledger_event_id_reconciliation_unique",
+            "idx_event_idempotency_ledger_event_fingerprint_unique",
+            "idx_billing_purchases_payment_status_created_at",
+            "idx_install_key_records_payment_status_created_at",
+        ]
+        for needle in required:
+            assert needle in sql
+
+    def test_004_internal_migration_adds_billing_and_install_key_lifecycle_tables(self) -> None:
+        sql = (Path(__file__).resolve().parents[2] / "supabase" / "migrations" / "004ironclawinternaltables.sql").read_text(encoding="utf-8")
+        required = [
+            "CREATE TABLE IF NOT EXISTS ironclaw_billing_purchases",
+            "CREATE TABLE IF NOT EXISTS ironclaw_install_key_state",
+            "CREATE TABLE IF NOT EXISTS ironclaw_install_key_history",
+            "CREATE TABLE IF NOT EXISTS ironclaw_event_idempotency",
+            "trg_ironclaw_billing_purchases_updated_at",
+            "trg_ironclaw_install_key_state_updated_at",
+            "trg_ironclaw_event_idempotency_updated_at",
+        ]
+        for needle in required:
+            assert needle in sql
+
+    def test_009_webhook_migration_hardens_stripe_idempotency_and_append_only_logs(self) -> None:
+        sql = (Path(__file__).resolve().parents[2] / "supabase" / "migrations" / "009_webhooks.sql").read_text(encoding="utf-8")
+        required = [
+            "CREATE TABLE IF NOT EXISTS public.stripe_webhook_events",
+            "stripe_event_id",
+            "purchase_id",
+            "checkout_session_id",
+            "idx_webhook_delivery_log_stripe_event_unique",
+            "idx_stripe_webhook_events_checkout_session_completed_unique",
+            "idx_stripe_webhook_events_purchase_state_unique",
+            "prevent_webhook_delivery_log_mutation",
+            "prevent_stripe_webhook_events_mutation",
+        ]
+        for needle in required:
+            assert needle in sql
+
+    def test_supabase_config_restricts_webhook_dispatch_to_jwt_service_access(self) -> None:
+        config = (Path(__file__).resolve().parents[2] / "supabase" / "config.toml").read_text(encoding="utf-8")
+        required = [
+            "[functions.ironclaw-webhook-dispatch]",
+            "verify_jwt = true",
+            "service-role Bearer token",
+            "MUST remain JWT-protected",
+        ]
+        for needle in required:
+            assert needle in config
 
 
 # ===========================================================================

@@ -7,7 +7,14 @@ from typing import Any
 from fastapi.testclient import TestClient
 import pytest
 
+import app.api.stripe_webhooks as stripe_webhooks
+import app.core.install_keys as install_keys_module
+import app.core.unit_wallet as unit_wallet_module
+from app.supabaseclient import reset_supabase_client
+
 # Patch env BEFORE any app import so get_settings() cache warms with test-safe values.
+# Keep the suite in fail-closed memory mode so tests cannot accidentally reach
+# a real Supabase deployment or retain stale singleton state between cases.
 _TEST_ENV_DEFAULTS: dict[str, str] = {
     "IRONCLAW_PERSISTENCE_MODE": "memory",
     "ENVIRONMENT": "test",
@@ -50,6 +57,20 @@ get_settings.cache_clear()
 _settings = get_settings()
 
 from app.main import app  # noqa: E402
+
+
+def _reset_runtime_singletons() -> None:
+    reset_supabase_client()
+    stripe_webhooks.reset_processed_events()
+    install_keys_module._reset_install_key_registry_for_testing()
+
+    wallet = unit_wallet_module.UnitWalletRegistry()
+    wallet._repo = unit_wallet_module.MemoryUnitWalletRepository()
+    unit_wallet_module._unit_wallet_registry = wallet
+
+    app.dependency_overrides.clear()
+    get_settings.cache_clear()
+    app.state.settings = get_settings()
 
 
 def _patch_app_state(application: Any) -> None:
@@ -107,6 +128,14 @@ def sanitize_test_environment(request: pytest.FixtureRequest) -> Iterator[None]:
     finally:
         _restore_environment(original)
         _refresh_settings()
+
+
+@pytest.fixture(scope="function", autouse=True)
+def isolate_in_memory_runtime_state() -> Iterator[None]:
+    """Ensure payment/install-key/wallet in-memory state is reset between tests."""
+    _reset_runtime_singletons()
+    yield
+    _reset_runtime_singletons()
 
 
 @pytest.fixture(scope="function")

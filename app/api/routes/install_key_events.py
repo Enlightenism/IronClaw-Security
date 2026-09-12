@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+import os
+from pathlib import Path
+import sqlite3
+import tempfile
+from threading import Lock
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -10,8 +15,6 @@ from app.core.auth import require_api_key
 from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.core.install_keys import InstallKeyRegistry, get_install_key_registry
 from app.core.unit_wallet import (
-    InstallKeyUsageSource,
-    RegistryUnitLedgerEntry,
     UnitWalletRegistry,
     get_unit_wallet_registry,
 )
@@ -171,11 +174,115 @@ class InstallKeyEventResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-_processed_event_ids: set[str] = set()
+_IDEMPOTENCY_TTL_SECONDS = int(os.environ.get("IRONCLAW_INSTALL_KEY_EVENT_TTL_SECONDS", "86400"))
+_IDEMPOTENCY_DB_PATH = Path(
+    os.environ.get(
+        "IRONCLAW_INSTALL_KEY_EVENT_IDEMPOTENCY_DB",
+        str(Path(tempfile.gettempdir()) / "ironclaw_install_key_event_idempotency.sqlite3"),
+    )
+)
+
+
+def _is_test_environment() -> bool:
+    return "PYTEST_CURRENT_TEST" in os.environ or os.environ.get("PYTEST_VERSION") is not None
+
+
+class _InMemoryEventIdempotencyStore:
+    def __init__(self, *, ttl_seconds: int = _IDEMPOTENCY_TTL_SECONDS, max_entries: int = 5000) -> None:
+        self._ttl_seconds = max(1, int(ttl_seconds))
+        self._max_entries = max(1, int(max_entries))
+        self._entries: dict[str, float] = {}
+        self._lock = Lock()
+
+    def has_event(self, event_id: str) -> bool:
+        now = datetime.now(UTC).timestamp()
+        with self._lock:
+            self._prune_locked(now)
+            expires_at = self._entries.get(event_id)
+            return expires_at is not None and expires_at > now
+
+    def record_event(self, event_id: str) -> None:
+        now = datetime.now(UTC).timestamp()
+        expires_at = now + self._ttl_seconds
+        with self._lock:
+            self._entries[event_id] = expires_at
+            self._prune_locked(now)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entries.clear()
+
+    def _prune_locked(self, now: float) -> None:
+        expired = [event_id for event_id, expires_at in self._entries.items() if expires_at <= now]
+        for event_id in expired:
+            self._entries.pop(event_id, None)
+        while len(self._entries) > self._max_entries:
+            oldest_event_id = next(iter(self._entries))
+            self._entries.pop(oldest_event_id, None)
+
+
+class _SqliteEventIdempotencyStore:
+    def __init__(self, *, db_path: Path, ttl_seconds: int = _IDEMPOTENCY_TTL_SECONDS) -> None:
+        self._db_path = Path(db_path)
+        self._ttl_seconds = max(1, int(ttl_seconds))
+        self._lock = Lock()
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._initialize()
+
+    def _initialize(self) -> None:
+        with sqlite3.connect(self._db_path) as connection:
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("CREATE TABLE IF NOT EXISTS install_key_event_idempotency (event_id TEXT PRIMARY KEY, expires_at TEXT NOT NULL)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_install_key_event_idempotency_expires_at ON install_key_event_idempotency (expires_at)")
+
+    def has_event(self, event_id: str) -> bool:
+        now = datetime.now(UTC)
+        with self._lock:
+            try:
+                with sqlite3.connect(self._db_path) as connection:
+                    row = connection.execute(
+                        "SELECT 1 FROM install_key_event_idempotency WHERE event_id = ? AND expires_at > ?",
+                        (event_id, now.isoformat()),
+                    ).fetchone()
+                    return row is not None
+            except sqlite3.Error:
+                return _FALLBACK_EVENT_IDEMPOTENCY.has_event(event_id)
+
+    def record_event(self, event_id: str) -> None:
+        expires_at = (datetime.now(UTC) + timedelta(seconds=self._ttl_seconds)).isoformat()
+        with self._lock:
+            try:
+                with sqlite3.connect(self._db_path) as connection:
+                    connection.execute(
+                        "INSERT INTO install_key_event_idempotency (event_id, expires_at) VALUES (?, ?) ON CONFLICT(event_id) DO UPDATE SET expires_at = excluded.expires_at",
+                        (event_id, expires_at),
+                    )
+                    connection.execute(
+                        "DELETE FROM install_key_event_idempotency WHERE expires_at <= ?",
+                        (datetime.now(UTC).isoformat(),),
+                    )
+            except sqlite3.Error:
+                _FALLBACK_EVENT_IDEMPOTENCY.record_event(event_id)
+
+    def clear(self) -> None:
+        with self._lock:
+            try:
+                with sqlite3.connect(self._db_path) as connection:
+                    connection.execute("DELETE FROM install_key_event_idempotency")
+            except sqlite3.Error:
+                _FALLBACK_EVENT_IDEMPOTENCY.clear()
+
+
+_FALLBACK_EVENT_IDEMPOTENCY = _InMemoryEventIdempotencyStore()
+_EVENT_IDEMPOTENCY_STORE = _InMemoryEventIdempotencyStore() if _is_test_environment() else _SqliteEventIdempotencyStore(db_path=_IDEMPOTENCY_DB_PATH)
+
+
+def _event_seen(event_id: str) -> bool:
+    return _EVENT_IDEMPOTENCY_STORE.has_event(event_id)
 
 
 def _event_store_record(event_id: str) -> None:
-    _processed_event_ids.add(event_id)
+    _EVENT_IDEMPOTENCY_STORE.record_event(event_id)
 
 
 def _ensure_key_context(
@@ -251,78 +358,17 @@ def _sync_wallet_event(
     occurred_at: str,
     metadata: dict[str, Any],
 ) -> bool:
-    wallet = wallet_registry.get_or_create_wallet(owner_key)
-    effective_program = program or "openclaw"
-    timestamp = _parse_datetime(occurred_at)
-
-    if key_id:
-        usage = wallet.install_key_usage.setdefault(
-            key_id,
-            InstallKeyUsageSource(
-                key_id=key_id,
-                owner_key=wallet.owner_key,
-                program=effective_program,
-            ),
-        )
-        usage.program = effective_program
-        usage.balance_units = max(wallet.balance_units, 0)
-        usage.last_action_at = timestamp
-        usage.metadata.update(
-            {
-                "owner_key": owner_key,
-                "key_id": key_id,
-                "program": effective_program,
-                "last_event_type": event_type,
-                "last_event_at": occurred_at,
-                "action_type": action_type or usage.metadata.get("action_type") or "telemetry",
-            }
-        )
-        if blocked_attack_count > 0 and event_type not in {"usage_units_debited"}:
-            usage.total_blocked_attacks += int(blocked_attack_count)
-            wallet.total_blocked_attacks += int(blocked_attack_count)
-            if event_type in {"prompt_injection_detected", "quarantine_detected", "quarantine_event"}:
-                usage.total_quarantined_actions += int(blocked_attack_count)
-        if units > 0 and event_type not in {"usage_units_debited"}:
-            usage.total_consumed_units += int(units)
-        wallet.install_key_usage[key_id] = usage
-
-    wallet.updated_at = timestamp
-    wallet.metadata.setdefault("dashboard_sync", {})
-    wallet.metadata["dashboard_sync"][event_type] = {
-        "occurred_at": occurred_at,
-        "key_id": key_id,
-        "owner_key": owner_key,
-        "program": effective_program,
-        "units": units,
-        "blocked_attack_count": blocked_attack_count,
-        "metadata": dict(metadata),
-    }
-    wallet_registry._repo.upsert_wallet(wallet)
-
-    if key_id:
-        ledger_entry = RegistryUnitLedgerEntry(
-            entry_id=f"ledger_{event_type}_{key_id}_{int(timestamp.timestamp() * 1000)}",
-            wallet_id=wallet.wallet_id,
-            owner_key=wallet.owner_key,
-            entry_type="install_key_event",
-            units=units,
-            balance_after=wallet.balance_units,
-            created_at=timestamp,
-            metadata={
-                "event_type": event_type,
-                "key_id": key_id,
-                "program": effective_program,
-                "owner_key": owner_key,
-                "action_type": action_type,
-                "blocked_attack_count": blocked_attack_count,
-                **dict(metadata),
-            },
-        )
-        try:
-            wallet_registry._repo.append_ledger_entry(ledger_entry)
-        except AttributeError:
-            pass
-    return True
+    return wallet_registry.record_install_key_event(
+        owner_key,
+        key_id=key_id,
+        program=program,
+        event_type=event_type,
+        units=units,
+        blocked_attack_count=blocked_attack_count,
+        action_type=action_type,
+        occurred_at=occurred_at,
+        metadata=metadata,
+    )
 
 
 def _apply_event(
@@ -511,7 +557,7 @@ def ingest_install_key_event(
     install_key_registry: InstallKeyRegistry = Depends(get_install_key_registry),
     wallet_registry: UnitWalletRegistry = Depends(get_unit_wallet_registry),
 ) -> InstallKeyEventResponse:
-    if payload.event_id in _processed_event_ids:
+    if _event_seen(payload.event_id):
         return InstallKeyEventResponse(
             event_id=payload.event_id,
             event_type=payload.event_type,
@@ -525,7 +571,7 @@ def ingest_install_key_event(
             metadata={"status": "duplicate", "source": "install-key-events"},
         )
 
-    _, _ = _apply_event(
+    wallet_updated, _ = _apply_event(
         payload=payload,
         install_key_registry=install_key_registry,
         wallet_registry=wallet_registry,
@@ -540,7 +586,7 @@ def ingest_install_key_event(
         owner_key=owner_key,
         program=program,
         processed=True,
-        wallet_updated=True,
+        wallet_updated=bool(wallet_updated),
         dashboard_synced=True,
         recorded_at=_coerce_iso(payload.occurred_at, default=_utc_now_iso()),
         metadata={"source": "install-key-events", "status": "applied"},

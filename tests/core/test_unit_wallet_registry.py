@@ -103,6 +103,27 @@ def test_install_key_debit_rejects_generic_platform_key_id() -> None:
         )
 
 
+def test_successful_payment_credit_is_metadata_gated_and_recorded_in_ledger() -> None:
+    registry = UnitWalletRegistry()
+    wallet = registry.credit_units(
+        "buyer@ironclaw.test",
+        50,
+        metadata={
+            "payment_status": "paid",
+            "checkout_session_id": "cs_paid_001",
+            "source": "checkout.session.completed",
+        },
+    )
+
+    assert wallet.balance_units == 50
+    entries = registry.list_ledger_entries(owner_key="buyer@ironclaw.test")
+    credit_entry = entries[-1]
+    assert credit_entry.entry_type == "credit"
+    assert credit_entry.metadata["payment_status"] == "paid"
+    assert credit_entry.metadata["checkout_session_id"] == "cs_paid_001"
+    assert credit_entry.balance_after == 50
+
+
 def test_install_key_usage_summary_tracks_today_and_week_window() -> None:
     registry = UnitWalletRegistry()
     registry.credit_units(owner_key="buyer@ironclaw.test", units=50)
@@ -393,6 +414,32 @@ def test_credit_units_creates_credit_ledger_entry(registry: UnitWalletRegistry) 
     assert len(entries) >= 1
     assert entries[-1].entry_type == "credit"
     assert entries[-1].units == 500
+
+
+def test_install_key_debit_reduces_balance_and_tracks_usage_consistently(registry: UnitWalletRegistry) -> None:
+    registry.credit_units("alice@ironclaw.test", 30)
+
+    wallet, usage, entry = registry.debit_units_for_install_key(
+        owner_key="alice@ironclaw.test",
+        key_id="ik_install_real_001",
+        program="openclaw",
+        units=7,
+        blocked_attack_count=2,
+        metadata={
+            "payment_status": "paid",
+            "quarantined_count": 1,
+            "source": "runtime",
+        },
+    )
+
+    assert wallet.balance_units == 23
+    assert usage.total_blocked_attacks == 2
+    assert usage.total_quarantined_actions == 1
+    assert entry.units == 7
+    assert entry.balance_after == 23
+    summary = registry.get_key_usage_summary("alice@ironclaw.test", key_id="ik_install_real_001")
+    assert summary["install_key_usage"]["ik_install_real_001"]["units_used_today"] >= 7
+    assert summary["install_key_usage"]["ik_install_real_001"]["units_used_this_week"] >= 7
 
 
 # ---------------------------------------------------------------------------

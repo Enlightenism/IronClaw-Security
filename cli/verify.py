@@ -11,6 +11,29 @@ import socket
 import sys
 from typing import Any
 
+from app.core.install_key_formats import InstallKeyFormatRegistry
+from app.core.install_keys import get_install_key_registry
+
+_GENERIC_INSTALL_KEY_PREFIXES = (
+    "sk_",
+    "ghp_",
+    "gho_",
+    "github_pat_",
+    "token_",
+    "secret_",
+    "api_",
+    "api-key",
+    "api_key",
+    "platform-api-key",
+    "platform_api_key",
+    "internal-platform-api-key",
+    "internal_platform_api_key",
+    "system-api-key",
+    "system_api_key",
+    "bearer ",
+    "x-api-key",
+)
+
 
 @dataclass(slots=True)
 class VerifyCheck:
@@ -48,6 +71,171 @@ def _default_config_path(root: Path) -> Path:
 
 def _env_name() -> str:
     return os.getenv("IRONCLAW_ENV", "local")
+
+
+def _normalize_runtime_program(value: str | None) -> str | None:
+    if value is None:
+        return None
+    program = InstallKeyFormatRegistry.normalize_program(str(value).strip())
+    if program is not None:
+        return program
+    normalized = str(value).strip().lower().replace("-", "_")
+    return InstallKeyFormatRegistry.normalize_program(normalized)
+
+
+def _looks_like_generic_install_key(candidate: str | None) -> bool:
+    if candidate is None:
+        return False
+    normalized = str(candidate).strip().lower()
+    if not normalized:
+        return False
+    if any(normalized.startswith(prefix) for prefix in _GENERIC_INSTALL_KEY_PREFIXES):
+        return True
+    if "platform" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized):
+        return True
+    if "system" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized):
+        return True
+    if "api" in normalized and "key" in normalized:
+        return True
+    return False
+
+
+def _read_config_install_keys(config_path: Path) -> dict[str, str]:
+    if not config_path.exists():
+        return {}
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+
+    keys: dict[str, str] = {}
+    nested = payload.get("install_keys")
+    if isinstance(nested, dict):
+        for program_name, candidate in nested.items():
+            if isinstance(candidate, str) and candidate.strip():
+                normalized_program = _normalize_runtime_program(program_name)
+                if normalized_program is None:
+                    normalized_program = InstallKeyFormatRegistry.parse_program_from_key(candidate)
+                if normalized_program is not None:
+                    keys[normalized_program] = candidate.strip()
+
+    for key_name in (
+        "install_key",
+        "installKey",
+        "install_key_value",
+        "installKeyValue",
+        "raw_install_key",
+        "rawInstallKey",
+        "paid_install_key",
+        "paidInstallKey",
+    ):
+        candidate = payload.get(key_name)
+        if isinstance(candidate, str) and candidate.strip():
+            program = InstallKeyFormatRegistry.parse_program_from_key(candidate)
+            if program is not None:
+                keys[program] = candidate.strip()
+
+    return dict(sorted(keys.items(), key=lambda item: InstallKeyFormatRegistry.list_programs().index(item[0]) if item[0] in InstallKeyFormatRegistry.list_programs() else len(InstallKeyFormatRegistry.list_programs())))
+
+
+def _is_verified_install_key(candidate: str | None, *, program: str | None = None, owner_key: str | None = None) -> bool:
+    if not isinstance(candidate, str):
+        return False
+    value = candidate.strip()
+    if not value:
+        return False
+    if value.startswith("ic_org_") or _looks_like_generic_install_key(value):
+        return False
+
+    runtime_program = _normalize_runtime_program(program) or InstallKeyFormatRegistry.parse_program_from_key(value)
+    if runtime_program is None:
+        return False
+
+    spec = InstallKeyFormatRegistry.get_spec(runtime_program)
+    if value.startswith("ic_") and not value.startswith(spec.prefix):
+        return False
+    if not value.startswith(spec.prefix):
+        return False
+
+    registry = get_install_key_registry()
+    record = registry.authenticate_install_key(value)
+    if record is None:
+        return False
+    if not getattr(record, "active", False):
+        return False
+    if str(getattr(record, "payment_status", "")).strip().lower() != "paid":
+        return False
+    if str(getattr(record, "entitlements_status", "")).strip().lower() != "active":
+        return False
+    if not getattr(record, "issued_after_payment", False):
+        return False
+    if runtime_program != _normalize_runtime_program(getattr(record, "program", None)):
+        return False
+    normalized_owner = (owner_key or "").strip().lower()
+    if normalized_owner and (getattr(record, "owner_key", "") or "").strip().lower() != normalized_owner:
+        return False
+    return True
+
+
+def _install_key_verification_checks(config_path: Path) -> list[VerifyCheck]:
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+    except Exception:
+        payload = {}
+
+    installed_keys = _read_config_install_keys(config_path)
+    provider_targets = payload.get("provider_targets", []) if isinstance(payload, dict) else []
+    expected_programs: list[str] = []
+    if isinstance(provider_targets, list):
+        for target in provider_targets:
+            program = _normalize_runtime_program(target)
+            if program is not None:
+                expected_programs.append(program)
+    if not expected_programs:
+        expected_programs = list(installed_keys)
+
+    if not installed_keys and not expected_programs:
+        return [
+            VerifyCheck(
+                name="install-key-runtime",
+                ok=False,
+                detail="No live install key was embedded in the local configuration.",
+                recommendation="Install or repurchase a valid paid runtime install key before running verification.",
+            )
+        ]
+
+    checks: list[VerifyCheck] = []
+    seen: set[str] = set()
+    for program in expected_programs:
+        seen.add(program)
+        candidate = installed_keys.get(program)
+        ok = _is_verified_install_key(candidate, program=program)
+        detail = f"Runtime {program} key is present and verified as active and paid." if ok else f"Runtime {program} key is missing, stale, mismatched, revoked, or not backed by a paid entitlement."
+        recommendation = None if ok else f"Reinstall or repurchase a valid paid install key for {program} and rerun verification."
+        checks.append(
+            VerifyCheck(
+                name=f"install-key-runtime-{program}",
+                ok=ok,
+                detail=detail,
+                recommendation=recommendation,
+            )
+        )
+
+    for program, candidate in installed_keys.items():
+        if program not in seen:
+            ok = _is_verified_install_key(candidate, program=program)
+            checks.append(
+                VerifyCheck(
+                    name=f"install-key-runtime-{program}",
+                    ok=ok,
+                    detail=(f"Runtime {program} key is present and verified as active and paid." if ok else f"Runtime {program} key is stale, mismatched, revoked, or not backed by a paid entitlement."),
+                    recommendation=None if ok else f"Replace the invalid key for {program} with a valid paid install key.",
+                )
+            )
+
+    return checks
 
 
 def _venv_python(root: Path) -> Path:
@@ -293,6 +481,9 @@ def build_verify_report(
         _api_key_env_check(),
         _hostname_check(),
     ]
+
+    if config_path.exists():
+        checks.extend(_install_key_verification_checks(config_path))
 
     next_steps = [
         "Run the install command if configuration, dependencies, or directories are missing.",

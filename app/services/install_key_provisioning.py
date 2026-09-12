@@ -327,9 +327,13 @@ class InstallKeyProvisioningService:
         }
         if metadata:
             effective_metadata.update(metadata)
+        effective_metadata["source"] = source
+        effective_metadata["wallet_owner"] = normalized_owner
         effective_metadata["payment_status"] = "paid"
         effective_metadata["entitlements_status"] = "active"
         effective_metadata["issued_after_payment"] = True
+        effective_metadata["purchase_reference"] = effective_purchase_reference
+        effective_metadata["checkout_session_id"] = effective_checkout_session_id
 
         record = self._install_key_registry.generate_for_paid_customer(
             owner_key=normalized_owner,
@@ -430,6 +434,13 @@ class InstallKeyProvisioningService:
         }
         if metadata:
             base_metadata.update(metadata)
+        base_metadata["source"] = source
+        base_metadata["owner_key"] = normalized_owner
+        base_metadata["payment_status"] = payment_status or "paid"
+        base_metadata["entitlements_status"] = entitlements_status or "active"
+        base_metadata["issued_after_payment"] = bool(issued_after_payment)
+        base_metadata["checkout_session_id"] = checkout_session_id or purchase_reference or base_metadata.get("checkout_session_id") or subscription_id
+        base_metadata["purchase_reference"] = purchase_reference or checkout_session_id or base_metadata.get("purchase_reference") or subscription_id
 
         results: dict[str, InstallKeyIssued] = {}
         for program in _SUPPORTED_RUNTIME_PROGRAMS:

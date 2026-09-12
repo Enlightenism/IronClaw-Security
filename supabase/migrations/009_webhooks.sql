@@ -58,18 +58,22 @@ CREATE TABLE IF NOT EXISTS public.webhook_subscriptions (
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS public.webhook_delivery_log (
-    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    subscription_id UUID        NOT NULL
-                        REFERENCES public.webhook_subscriptions(id)
-                        ON DELETE CASCADE,
-    event_type      TEXT        NOT NULL,
-    payload         JSONB       NOT NULL DEFAULT '{}'::JSONB,
-    status          TEXT        NOT NULL DEFAULT 'pending',
-    response_code   INTEGER,
-    attempts        INTEGER     NOT NULL DEFAULT 0,
-    delivered_at    TIMESTAMPTZ,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', NOW()),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', NOW()),
+    id                 UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    subscription_id    UUID        NOT NULL
+                         REFERENCES public.webhook_subscriptions(id)
+                         ON DELETE CASCADE,
+    stripe_event_id    TEXT,
+    purchase_id        TEXT,
+    checkout_session_id TEXT,
+    event_type         TEXT        NOT NULL,
+    payload            JSONB       NOT NULL DEFAULT '{}'::JSONB,
+    payload_hash       TEXT        NOT NULL DEFAULT '',
+    status             TEXT        NOT NULL DEFAULT 'pending',
+    response_code      INTEGER,
+    attempts           INTEGER     NOT NULL DEFAULT 0,
+    delivered_at       TIMESTAMPTZ,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', NOW()),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', NOW()),
     CONSTRAINT webhook_delivery_log_status_check
         CHECK (status IN (
             'pending',
@@ -85,11 +89,60 @@ CREATE TABLE IF NOT EXISTS public.webhook_delivery_log (
         CHECK (response_code IS NULL OR (response_code >= 100 AND response_code <= 599)),
     CONSTRAINT webhook_delivery_log_event_type_not_empty_check
         CHECK (char_length(trim(event_type)) > 0),
+    CONSTRAINT webhook_delivery_log_payload_hash_not_empty_check
+        CHECK (char_length(trim(payload_hash)) > 0),
     CONSTRAINT webhook_delivery_log_delivered_at_consistency_check
         CHECK (
             (status = 'delivered' AND delivered_at IS NOT NULL)
             OR status != 'delivered'
-        )
+        ),
+    CONSTRAINT webhook_delivery_log_checkout_session_not_empty_check
+        CHECK (checkout_session_id IS NULL OR char_length(trim(checkout_session_id)) > 0),
+    CONSTRAINT webhook_delivery_log_purchase_id_not_empty_check
+        CHECK (purchase_id IS NULL OR char_length(trim(purchase_id)) > 0),
+    CONSTRAINT webhook_delivery_log_stripe_event_id_not_empty_check
+        CHECK (stripe_event_id IS NULL OR char_length(trim(stripe_event_id)) > 0)
+);
+
+-- ---------------------------------------------------------------------------
+-- Stripe event ledger for durable idempotency and replay protection.
+-- This table is deliberately narrow: it captures the event_id, payload hash,
+-- and reconciliation keys needed to stop a duplicate Stripe delivery from
+-- re-triggering fulfillment logic after a restart or replay.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.stripe_webhook_events (
+    id                 UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    stripe_event_id    TEXT        NOT NULL UNIQUE,
+    event_type         TEXT        NOT NULL,
+    provider           TEXT        NOT NULL DEFAULT 'stripe',
+    checkout_session_id TEXT,
+    purchase_id        TEXT,
+    customer_id        TEXT,
+    owner_key          TEXT,
+    payload_hash       TEXT        NOT NULL,
+    payload            JSONB       NOT NULL DEFAULT '{}'::JSONB,
+    status             TEXT        NOT NULL DEFAULT 'received',
+    processed_at       TIMESTAMPTZ,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', NOW()),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', NOW()),
+    metadata           JSONB       NOT NULL DEFAULT '{}'::JSONB,
+    CONSTRAINT stripe_webhook_events_event_type_not_empty_check
+        CHECK (char_length(trim(event_type)) > 0),
+    CONSTRAINT stripe_webhook_events_provider_check
+        CHECK (provider = 'stripe'),
+    CONSTRAINT stripe_webhook_events_status_check
+        CHECK (status IN ('received', 'accepted', 'processed', 'duplicate', 'failed', 'rejected')),
+    CONSTRAINT stripe_webhook_events_payload_hash_not_empty_check
+        CHECK (char_length(trim(payload_hash)) > 0),
+    CONSTRAINT stripe_webhook_events_checkout_session_not_empty_check
+        CHECK (checkout_session_id IS NULL OR char_length(trim(checkout_session_id)) > 0),
+    CONSTRAINT stripe_webhook_events_purchase_id_not_empty_check
+        CHECK (purchase_id IS NULL OR char_length(trim(purchase_id)) > 0),
+    CONSTRAINT stripe_webhook_events_customer_id_not_empty_check
+        CHECK (customer_id IS NULL OR char_length(trim(customer_id)) > 0),
+    CONSTRAINT stripe_webhook_events_owner_key_not_empty_check
+        CHECK (owner_key IS NULL OR char_length(trim(owner_key)) > 0)
 );
 
 -- ---------------------------------------------------------------------------
@@ -135,6 +188,37 @@ CREATE INDEX IF NOT EXISTS idx_webhook_delivery_log_sub_status
 CREATE INDEX IF NOT EXISTS idx_webhook_delivery_log_created_at
     ON public.webhook_delivery_log (created_at DESC);
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_delivery_log_stripe_event_unique
+    ON public.webhook_delivery_log (stripe_event_id)
+    WHERE stripe_event_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_delivery_log_reconciliation_unique
+    ON public.webhook_delivery_log (subscription_id, stripe_event_id, event_type)
+    WHERE stripe_event_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_webhook_delivery_log_checkout_session
+    ON public.webhook_delivery_log (checkout_session_id, event_type, status, created_at DESC)
+    WHERE checkout_session_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_webhook_delivery_log_purchase_state
+    ON public.webhook_delivery_log (purchase_id, event_type, status, created_at DESC)
+    WHERE purchase_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_stripe_webhook_events_checkout_session_completed_unique
+    ON public.stripe_webhook_events (checkout_session_id)
+    WHERE event_type = 'checkout.session.completed' AND checkout_session_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_stripe_webhook_events_purchase_state_unique
+    ON public.stripe_webhook_events (purchase_id)
+    WHERE purchase_id IS NOT NULL AND event_type IN ('checkout.session.completed', 'purchase.fulfilled');
+
+CREATE INDEX IF NOT EXISTS idx_stripe_webhook_events_event_type_status
+    ON public.stripe_webhook_events (event_type, status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_stripe_webhook_events_checkout_session
+    ON public.stripe_webhook_events (checkout_session_id, event_type, created_at DESC)
+    WHERE checkout_session_id IS NOT NULL;
+
 -- ---------------------------------------------------------------------------
 -- updated_at triggers
 -- Uses public.set_updated_at() from 001 as canonical function.
@@ -147,6 +231,31 @@ CREATE TRIGGER set_webhook_subscriptions_updated_at
 CREATE TRIGGER set_webhook_delivery_log_updated_at
     BEFORE UPDATE ON public.webhook_delivery_log
     FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+CREATE TRIGGER set_stripe_webhook_events_updated_at
+    BEFORE UPDATE ON public.stripe_webhook_events
+    FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- ---------------------------------------------------------------------------
+-- Append-only protections: never allow silent overwrite or replay mutation.
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.prevent_webhook_append_only_mutation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'append-only webhook record mutation is forbidden for table %', TG_TABLE_NAME;
+END;
+$$;
+
+CREATE TRIGGER prevent_webhook_delivery_log_mutation
+    BEFORE UPDATE OR DELETE ON public.webhook_delivery_log
+    FOR EACH ROW EXECUTE FUNCTION public.prevent_webhook_append_only_mutation();
+
+CREATE TRIGGER prevent_stripe_webhook_events_mutation
+    BEFORE UPDATE OR DELETE ON public.stripe_webhook_events
+    FOR EACH ROW EXECUTE FUNCTION public.prevent_webhook_append_only_mutation();
 
 -- ---------------------------------------------------------------------------
 -- Migration record

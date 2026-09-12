@@ -205,6 +205,63 @@ create index if not exists idx_runtime_incidents_open_severity
     on public.runtime_incidents (severity, opened_at desc)
     where status in ('open', 'investigating', 'contained');
 
+-- ─── Billing / install-key reconciliation ─────────────────────────────────────
+
+create unique index if not exists idx_billing_purchases_purchase_id_reconciliation_unique
+    on public.billing_purchases (purchase_id);
+
+create unique index if not exists idx_billing_purchases_checkout_session_reconciliation_unique
+    on public.billing_purchases (checkout_session_id)
+    where checkout_session_id is not null and payment_status = 'paid';
+
+create unique index if not exists idx_billing_purchases_owner_package_reconciliation_unique
+    on public.billing_purchases (owner_key, package_id)
+    where owner_key is not null and package_id is not null and payment_status = 'paid';
+
+create index if not exists idx_billing_purchases_payment_status_created_at
+    on public.billing_purchases (payment_status, created_at desc);
+
+create index if not exists idx_billing_purchases_fulfillment_status_created_at
+    on public.billing_purchases (fulfillment_status, created_at desc);
+
+create index if not exists idx_billing_purchases_owner_key_created_at
+    on public.billing_purchases (owner_key, created_at desc);
+
+create index if not exists idx_billing_purchases_package_created_at
+    on public.billing_purchases (package_id, created_at desc);
+
+create unique index if not exists idx_install_key_records_key_id_reconciliation_unique
+    on public.install_key_records (key_id);
+
+create unique index if not exists idx_install_key_records_active_owner_program_reconciliation_unique
+    on public.install_key_records (owner_key, program)
+    where active = true and owner_key is not null and program is not null;
+
+create index if not exists idx_install_key_records_payment_status_created_at
+    on public.install_key_records (payment_status, created_at desc);
+
+create index if not exists idx_install_key_records_entitlements_status_created_at
+    on public.install_key_records (entitlements_status, created_at desc);
+
+create index if not exists idx_install_key_records_owner_program_created_at
+    on public.install_key_records (owner_key, program, created_at desc);
+
+create index if not exists idx_install_key_issuance_history_purchase_created_at
+    on public.install_key_issuance_history (purchase_id, issued_at desc);
+
+create index if not exists idx_install_key_issuance_history_owner_program_status
+    on public.install_key_issuance_history (owner_key, program, status, issued_at desc);
+
+create unique index if not exists idx_event_idempotency_ledger_event_id_reconciliation_unique
+    on public.event_idempotency_ledger (event_id);
+
+create unique index if not exists idx_event_idempotency_ledger_event_fingerprint_unique
+    on public.event_idempotency_ledger (source, event_type, payload_hash)
+    where payload_hash is not null and payload_hash <> '';
+
+create index if not exists idx_event_idempotency_ledger_processed_at
+    on public.event_idempotency_ledger (processed_at desc);
+
 -- ─── Constraints ─────────────────────────────────────────────────────────────
 
 alter table public.review_queue_items

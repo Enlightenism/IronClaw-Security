@@ -19,9 +19,26 @@ const MAX_RETRIES = 3;
 const RETRY_BACKOFF_MS = [500, 1500, 3000];
 
 interface DispatchRequest {
+  id?: string;
+  event_id?: string;
   event_type: string;
   payload: Record<string, unknown>;
   tenant_id?: string;
+  checkout_session_id?: string;
+  purchase_id?: string;
+  customer_id?: string;
+  owner_key?: string;
+}
+
+interface StripeWebhookEventRow {
+  id: string;
+  stripe_event_id: string;
+  event_type: string;
+  checkout_session_id?: string | null;
+  purchase_id?: string | null;
+  customer_id?: string | null;
+  owner_key?: string | null;
+  status: string;
 }
 
 interface WebhookSubscription {
@@ -47,6 +64,23 @@ function jsonResponse(body: unknown, status: number): Response {
 
 function errorResponse(message: string, status: number): Response {
   return jsonResponse({ ok: false, error: message }, status);
+}
+
+function stableJsonStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableJsonStringify(entry)).join(",")}]`;
+  }
+  return `{${Object.keys(value as Record<string, unknown>)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJsonStringify((value as Record<string, unknown>)[key])}`)
+    .join(",")}}`;
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function hmacSha256Hex(secret: string, message: string): Promise<string> {
@@ -176,13 +210,21 @@ async function writeDeliveryLog(
   eventType: string,
   payload: Record<string, unknown>,
   result: DeliveryResult,
+  eventId: string | null,
+  checkoutSessionId: string | null,
+  purchaseId: string | null,
 ): Promise<void> {
   const now = new Date().toISOString();
+  const payloadHash = await sha256Hex(stableJsonStringify(payload));
   const { error } = await supabase.from("webhook_delivery_log").insert({
     id: deliveryId,
     subscription_id: subscriptionId,
+    stripe_event_id: eventId ?? null,
+    purchase_id: purchaseId ?? null,
+    checkout_session_id: checkoutSessionId ?? null,
     event_type: eventType,
     payload,
+    payload_hash: payloadHash,
     status: result.status,
     response_code: result.response_code ?? null,
     attempts: result.attempts,
@@ -197,6 +239,136 @@ async function writeDeliveryLog(
       error.message,
     );
   }
+}
+
+function extractStripeEventMetadata(payload: Record<string, unknown>, eventType: string, body: DispatchRequest): {
+  event_id: string | null;
+  checkout_session_id: string | null;
+  purchase_id: string | null;
+  customer_id: string | null;
+  owner_key: string | null;
+} {
+  const object = (payload as Record<string, unknown> | undefined)?.data && typeof (payload as Record<string, unknown>).data === "object"
+    ? ((payload as Record<string, unknown>).data as Record<string, unknown>).object as Record<string, unknown> | undefined
+    : payload;
+  const objectPayload = (object && typeof object === "object") ? object : {};
+  const metadata = (objectPayload.metadata && typeof objectPayload.metadata === "object")
+    ? (objectPayload.metadata as Record<string, unknown>)
+    : {};
+
+  const eventId = body.id ?? body.event_id ?? (typeof payload.id === "string" ? payload.id : null);
+  const checkoutSessionId =
+    (typeof body.checkout_session_id === "string" && body.checkout_session_id.trim() !== "")
+      ? body.checkout_session_id.trim()
+      : (typeof objectPayload.id === "string" && eventType === "checkout.session.completed")
+        ? objectPayload.id
+        : (typeof (objectPayload as Record<string, unknown>).checkout_session_id === "string"
+            ? ((objectPayload as Record<string, unknown>).checkout_session_id as string)
+            : null);
+  const purchaseId =
+    (typeof body.purchase_id === "string" && body.purchase_id.trim() !== "")
+      ? body.purchase_id.trim()
+      : (typeof metadata.purchase_id === "string" && metadata.purchase_id.trim() !== "")
+        ? metadata.purchase_id.trim()
+        : null;
+  const customerId =
+    (typeof body.customer_id === "string" && body.customer_id.trim() !== "")
+      ? body.customer_id.trim()
+      : (typeof objectPayload.customer === "string" && objectPayload.customer.trim() !== "")
+        ? objectPayload.customer as string
+        : (typeof metadata.customer_id === "string" && metadata.customer_id.trim() !== "")
+          ? metadata.customer_id as string
+          : null;
+  const ownerKey =
+    (typeof body.owner_key === "string" && body.owner_key.trim() !== "")
+      ? body.owner_key.trim()
+      : (typeof metadata.owner_key === "string" && metadata.owner_key.trim() !== "")
+        ? metadata.owner_key.trim()
+        : null;
+
+  return {
+    event_id: eventId ?? null,
+    checkout_session_id: checkoutSessionId ?? null,
+    purchase_id: purchaseId ?? null,
+    customer_id: customerId ?? null,
+    owner_key: ownerKey ?? null,
+  };
+}
+
+async function registerStripeEventLedger(
+  supabase: SupabaseClient,
+  eventType: string,
+  payload: Record<string, unknown>,
+  body: DispatchRequest,
+): Promise<{ duplicate: boolean; event_id: string | null; checkout_session_id: string | null; purchase_id: string | null; customer_id: string | null; owner_key: string | null; }> {
+  const metadata = extractStripeEventMetadata(payload, eventType, body);
+  const payloadHash = await sha256Hex(stableJsonStringify(payload));
+  const eventId = metadata.event_id ?? payloadHash;
+
+  const { data: existingRows, error: selectError } = await supabase
+    .from("stripe_webhook_events")
+    .select("id, stripe_event_id, status, event_type, checkout_session_id, purchase_id")
+    .eq("stripe_event_id", eventId)
+    .limit(1);
+
+  if (selectError) {
+    throw new Error(`Failed to read durable Stripe event ledger: ${selectError.message}`);
+  }
+  if (existingRows && existingRows.length > 0) {
+    return {
+      duplicate: true,
+      event_id: eventId,
+      checkout_session_id: metadata.checkout_session_id,
+      purchase_id: metadata.purchase_id,
+      customer_id: metadata.customer_id,
+      owner_key: metadata.owner_key,
+    };
+  }
+
+  const { error: insertError } = await supabase.from("stripe_webhook_events").insert({
+    stripe_event_id: eventId,
+    event_type: eventType,
+    provider: "stripe",
+    checkout_session_id: metadata.checkout_session_id,
+    purchase_id: metadata.purchase_id,
+    customer_id: metadata.customer_id,
+    owner_key: metadata.owner_key,
+    payload_hash: payloadHash,
+    payload,
+    status: "received",
+    processed_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    metadata: {
+      source: "ironclaw-webhook-dispatch",
+      tenant_id: body.tenant_id ?? null,
+      request_id: crypto.randomUUID(),
+    },
+  });
+
+  if (insertError) {
+    const msg = insertError.message || "";
+    if (/duplicate|unique/i.test(msg)) {
+      return {
+        duplicate: true,
+        event_id: eventId,
+        checkout_session_id: metadata.checkout_session_id,
+        purchase_id: metadata.purchase_id,
+        customer_id: metadata.customer_id,
+        owner_key: metadata.owner_key,
+      };
+    }
+    throw new Error(`Failed to write durable Stripe event ledger: ${insertError.message}`);
+  }
+
+  return {
+    duplicate: false,
+    event_id: eventId,
+    checkout_session_id: metadata.checkout_session_id,
+    purchase_id: metadata.purchase_id,
+    customer_id: metadata.customer_id,
+    owner_key: metadata.owner_key,
+  };
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -231,6 +403,27 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false },
   });
+
+  let ledgerResult: { duplicate: boolean; event_id: string | null; checkout_session_id: string | null; purchase_id: string | null; customer_id: string | null; owner_key: string | null; };
+  try {
+    ledgerResult = await registerStripeEventLedger(supabase, event_type, payload, body);
+  } catch (ledgerError) {
+    const message = ledgerError instanceof Error ? ledgerError.message : String(ledgerError);
+    console.error("ironclaw-webhook-dispatch: durable event ledger write failed", message);
+    return errorResponse("Failed to persist durable webhook ledger", 500);
+  }
+
+  if (ledgerResult.duplicate) {
+    return jsonResponse({
+      ok: true,
+      duplicate: true,
+      event_id: ledgerResult.event_id,
+      checkout_session_id: ledgerResult.checkout_session_id,
+      purchase_id: ledgerResult.purchase_id,
+      dispatched: 0,
+      results: [],
+    }, 200);
+  }
 
   let query = supabase
     .from("webhook_subscriptions")
@@ -271,6 +464,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
         event_type,
         payload,
         result,
+        ledgerResult.event_id,
+        ledgerResult.checkout_session_id,
+        ledgerResult.purchase_id,
       );
       return result;
     }),
