@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 import app.api.actionusage as actionusage_module
-import app.core.unit_wallet as unit_wallet_module
 from app.api.actionusage import router
+import app.core.unit_wallet as unit_wallet_module
 from app.services.actionexecuteservice import ActionExecuteService
 from app.services.usagemetering import UsageMeteringService
 
