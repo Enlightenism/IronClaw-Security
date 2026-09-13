@@ -170,3 +170,42 @@ def test_cli_verify_rejects_unverified_runtime_install_key(tmp_path: Path) -> No
         monkeypatch.undo()
 
     assert any(check.name == "install-key-runtime-claude_code" and check.ok for check in report.checks)
+
+
+def test_cli_verify_accepts_alias_runtime_names_and_rejects_generic_key_values(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "provider_targets": ["claude-code"],
+                "install_keys": {
+                    "claude-code": "ic_install_claude_code_abc123",
+                    "fallback": "ghp_exampletoken",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_authenticate(candidate: str):
+        if candidate == "ic_install_claude_code_abc123":
+            return SimpleNamespace(
+                active=True,
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+                program="claude_code",
+                owner_key="owner@example.com",
+                revoked_at=None,
+            )
+        return None
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(verify_cli, "get_install_key_registry", lambda: SimpleNamespace(authenticate_install_key=fake_authenticate))
+    try:
+        report = verify_cli.build_verify_report(tmp_path, dry_run=True)
+    finally:
+        monkeypatch.undo()
+
+    assert any(check.name == "install-key-runtime-claude_code" and check.ok for check in report.checks)
+    assert not any(check.name == "install-key-runtime-claude_code" and "missing" in check.detail.lower() for check in report.checks)

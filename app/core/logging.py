@@ -82,7 +82,16 @@ def _extract_extra_fields(record: logging.LogRecord) -> dict[str, Any]:
 
 def configure_logging(settings: Settings) -> None:
     root_logger = logging.getLogger()
-    root_logger.handlers.clear()
+    for handler in list(root_logger.handlers):
+        try:
+            handler.flush()
+        except Exception:
+            pass
+        try:
+            handler.close()
+        except Exception:
+            pass
+        root_logger.removeHandler(handler)
 
     handler = logging.StreamHandler(sys.stdout)
     handler.addFilter(RequestContextFilter())
@@ -102,7 +111,16 @@ def configure_logging(settings: Settings) -> None:
 
     for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access", "fastapi"):
         logger = logging.getLogger(logger_name)
-        logger.handlers.clear()
+        for child_handler in list(logger.handlers):
+            try:
+                child_handler.flush()
+            except Exception:
+                pass
+            try:
+                child_handler.close()
+            except Exception:
+                pass
+            logger.removeHandler(child_handler)
         logger.propagate = True
         logger.setLevel(settings.log_level)
 

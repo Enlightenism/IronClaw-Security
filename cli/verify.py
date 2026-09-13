@@ -73,14 +73,21 @@ def _env_name() -> str:
     return os.getenv("IRONCLAW_ENV", "local")
 
 
-def _normalize_runtime_program(value: str | None) -> str | None:
+def _canonical_runtime_program(value: str | None) -> str | None:
     if value is None:
         return None
-    program = InstallKeyFormatRegistry.normalize_program(str(value).strip())
+    text = str(value).strip()
+    if not text:
+        return None
+    program = InstallKeyFormatRegistry.normalize_program(text)
     if program is not None:
         return program
-    normalized = str(value).strip().lower().replace("-", "_")
-    return InstallKeyFormatRegistry.normalize_program(normalized)
+    normalized = text.lower().replace("-", "_")
+    return InstallKeyFormatRegistry.normalize_program(normalized) or InstallKeyFormatRegistry.parse_program_from_key(text)
+
+
+def _normalize_runtime_program(value: str | None) -> str | None:
+    return _canonical_runtime_program(value)
 
 
 def _looks_like_generic_install_key(candidate: str | None) -> bool:
@@ -114,12 +121,13 @@ def _read_config_install_keys(config_path: Path) -> dict[str, str]:
     nested = payload.get("install_keys")
     if isinstance(nested, dict):
         for program_name, candidate in nested.items():
-            if isinstance(candidate, str) and candidate.strip():
-                normalized_program = _normalize_runtime_program(program_name)
-                if normalized_program is None:
-                    normalized_program = InstallKeyFormatRegistry.parse_program_from_key(candidate)
-                if normalized_program is not None:
-                    keys[normalized_program] = candidate.strip()
+            if not isinstance(candidate, str) or not candidate.strip():
+                continue
+            if candidate.startswith("ic_org_") or _looks_like_generic_install_key(candidate):
+                continue
+            normalized_program = _canonical_runtime_program(program_name) or InstallKeyFormatRegistry.parse_program_from_key(candidate)
+            if normalized_program is not None:
+                keys[normalized_program] = candidate.strip()
 
     for key_name in (
         "install_key",
@@ -132,12 +140,16 @@ def _read_config_install_keys(config_path: Path) -> dict[str, str]:
         "paidInstallKey",
     ):
         candidate = payload.get(key_name)
-        if isinstance(candidate, str) and candidate.strip():
-            program = InstallKeyFormatRegistry.parse_program_from_key(candidate)
-            if program is not None:
-                keys[program] = candidate.strip()
+        if not isinstance(candidate, str) or not candidate.strip():
+            continue
+        if candidate.startswith("ic_org_") or _looks_like_generic_install_key(candidate):
+            continue
+        program = _canonical_runtime_program(candidate)
+        if program is not None:
+            keys[program] = candidate.strip()
 
-    return dict(sorted(keys.items(), key=lambda item: InstallKeyFormatRegistry.list_programs().index(item[0]) if item[0] in InstallKeyFormatRegistry.list_programs() else len(InstallKeyFormatRegistry.list_programs())))
+    ordered = InstallKeyFormatRegistry.list_programs()
+    return dict(sorted(keys.items(), key=lambda item: ordered.index(item[0]) if item[0] in ordered else len(ordered)))
 
 
 def _is_verified_install_key(candidate: str | None, *, program: str | None = None, owner_key: str | None = None) -> bool:
@@ -149,7 +161,7 @@ def _is_verified_install_key(candidate: str | None, *, program: str | None = Non
     if value.startswith("ic_org_") or _looks_like_generic_install_key(value):
         return False
 
-    runtime_program = _normalize_runtime_program(program) or InstallKeyFormatRegistry.parse_program_from_key(value)
+    runtime_program = _canonical_runtime_program(program) or _canonical_runtime_program(value)
     if runtime_program is None:
         return False
 
@@ -171,7 +183,7 @@ def _is_verified_install_key(candidate: str | None, *, program: str | None = Non
         return False
     if not getattr(record, "issued_after_payment", False):
         return False
-    if runtime_program != _normalize_runtime_program(getattr(record, "program", None)):
+    if runtime_program != _canonical_runtime_program(getattr(record, "program", None)):
         return False
     normalized_owner = (owner_key or "").strip().lower()
     if normalized_owner and (getattr(record, "owner_key", "") or "").strip().lower() != normalized_owner:

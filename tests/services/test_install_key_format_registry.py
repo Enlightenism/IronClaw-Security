@@ -236,6 +236,24 @@ def test_service_factory_returns_singleton_registry() -> None:
     assert first.list_programs() == second.list_programs()
 
 
+def test_install_key_registry_exposes_canonical_command_metadata_and_supported_platforms() -> None:
+    spec = InstallKeyFormatRegistry.get_spec("claude_code")
+
+    assert spec.canonical_slug == "claude-code"
+    assert "--agent {platform}" in spec.command_template
+    assert spec.format_command("ic_install_claude_code_abc123") == ("gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_abc123")
+    assert InstallKeyFormatRegistry.supported_platforms() == (
+        "openclaw",
+        "claude_code",
+        "cursor",
+        "goose",
+        "gemini_cli",
+        "copilot",
+        "hermes",
+    )
+    assert InstallKeyFormatRegistry.list_platforms() == InstallKeyFormatRegistry.supported_platforms()
+
+
 @pytest.mark.parametrize(
     "bad_platform",
     [

@@ -17,7 +17,7 @@ from app.persistencebootstrap import (
 
 _log = logging.getLogger(__name__)
 
-_EXPECTED_TABLE_COUNT = 19
+_EXPECTED_TABLE_COUNT = len(get_registered_tables())
 
 
 class InMemoryHistoryService:

@@ -4,14 +4,28 @@ import httpx
 import pytest
 import respx
 
+import ironclaw_sdk
 from ironclaw_sdk.client import IronclawClient
 from ironclaw_sdk.exceptions import (
     IronclawAPIError,
     IronclawAuthError,
+    IronclawInstallKeyInvalidError,
+    IronclawInstallKeyOwnershipError,
+    IronclawPaymentFailedError,
+    IronclawPaymentPendingError,
     IronclawRetryExhausted,
     IronclawTimeoutError,
+    IronclawUnsupportedInstallPlatformError,
 )
-from ironclaw_sdk.models import ScanRequest, ScanResponse
+from ironclaw_sdk.models import (
+    BillingPackagePurchaseRequest,
+    BillingPackagePurchaseResponse,
+    BillingPackagePurchaseView,
+    InstallKeySlotView,
+    InstallKeysResponse,
+    ScanRequest,
+    ScanResponse,
+)
 
 _BASE = "http://testserver"
 _KEY = "ironclaw-test-key-00000000"
@@ -132,6 +146,26 @@ class TestRetryBehavior:
             client.scan(_make_request())
         assert route.call_count == 1
 
+    @respx.mock
+    def test_pending_purchase_response_does_not_retry(self):
+        route = respx.post(f"{_BASE}/billing/purchase").mock(return_value=httpx.Response(500, json={"detail": "Purchase is pending payment fulfillment."}))
+        client = _make_client()
+        with pytest.raises(IronclawAPIError):
+            client.purchase_package(
+                package_id="pkg_5000",
+                buyer_name="Ada",
+                buyer_email="ada@example.com",
+            )
+        assert route.call_count == 1
+
+    @respx.mock
+    def test_invalid_install_key_response_does_not_retry(self):
+        route = respx.get(f"{_BASE}/install-keys/my-keys").mock(return_value=httpx.Response(403, json={"detail": "Install key 'ic_install_openclaw_abc' is inactive or not available for paid entitlement."}))
+        client = _make_client()
+        with pytest.raises(IronclawAuthError):
+            client.get_my_install_keys(owner_key="ada@example.com")
+        assert route.call_count == 1
+
 
 @pytest.mark.sdk
 class TestTimeoutHandling:
@@ -177,6 +211,40 @@ class TestScanResponseBinding:
 
 
 @pytest.mark.sdk
+class TestCustomBillingAndInstallKeyErrors:
+    def test_billing_and_install_key_error_classes_are_distinct_and_exported(self):
+        assert issubclass(IronclawPaymentPendingError, IronclawAPIError)
+        assert issubclass(IronclawPaymentFailedError, IronclawAPIError)
+        assert issubclass(IronclawInstallKeyInvalidError, IronclawAPIError)
+        assert issubclass(IronclawInstallKeyOwnershipError, IronclawAuthError)
+        assert issubclass(IronclawUnsupportedInstallPlatformError, IronclawAPIError)
+
+        assert "Purchase is pending payment fulfillment." in str(IronclawPaymentPendingError())
+        assert "failed or was cancelled" in str(IronclawPaymentFailedError())
+        assert "invalid or inactive" in str(IronclawInstallKeyInvalidError())
+        assert "does not match the authenticated owner" in str(IronclawInstallKeyOwnershipError())
+        assert "Unsupported install platform" in str(IronclawUnsupportedInstallPlatformError("unknown"))
+
+    def test_root_package_exports_full_billing_and_install_key_contract(self):
+        exported = ironclaw_sdk
+        assert exported.BillingPackagePurchaseRequest is not None
+        assert exported.BillingPackagePurchaseResponse is not None
+        assert exported.BillingPackagePurchaseView is not None
+        assert exported.OwnerKeyBinding is not None
+        assert exported.InstallKeyProgram is not None
+        assert exported.PaymentStatus is not None
+        assert exported.EntitlementStatus is not None
+        assert exported.InstallKeySlotView is not None
+        assert exported.InstallKeyRecordView is not None
+        assert exported.InstallKeysResponse is not None
+        assert exported.WalletBalanceView is not None
+        assert exported.IronclawClient is not None
+
+    def test_sdk_version_tracks_contract_change(self):
+        assert ironclaw_sdk.__version__ == "1.1.0"
+
+
+@pytest.mark.sdk
 class TestBaseUrlOverride:
     @respx.mock
     def test_base_url_override_respected(self):
@@ -192,3 +260,151 @@ class TestBaseUrlOverride:
         client = _make_client(base_url=f"{_BASE}/")
         client.scan(_make_request())
         assert route.called
+
+
+@pytest.mark.sdk
+class TestBillingAndInstallKeyContracts:
+    @respx.mock
+    def test_purchase_package_returns_pending_purchase_before_payment_fulfillment(self):
+        payload = {
+            "status": "ok",
+            "service": "IronClaw-Security",
+            "timestamp": "2026-05-22T00:00:00Z",
+            "purchase": {
+                "purchase_id": "purch_123",
+                "package_id": "pkg_5000",
+                "package_name": "Starter",
+                "buyer_name": "Ada",
+                "buyer_email": "ada@example.com",
+                "owner_key": "ada@example.com",
+                "price_usd": 20.0,
+                "granted_units": 0,
+                "token_coverage": 5000,
+                "tokens_per_unit": 1000,
+                "created_at": "2026-05-22T00:00:00Z",
+                "metadata": {
+                    "payment_status": "pending",
+                    "fulfillment_status": "pending",
+                    "install_keys_provisioned": False,
+                    "units_credited": False,
+                },
+            },
+            "wallet": {
+                "wallet_id": "wallet_123",
+                "owner_key": "ada@example.com",
+                "balance_units": 0,
+                "total_purchased_units": 0,
+                "total_consumed_units": 0,
+                "total_refunded_units": 0,
+                "updated_at": "2026-05-22T00:00:00Z",
+                "metadata": {},
+            },
+        }
+        respx.post(f"{_BASE}/billing/purchase").mock(return_value=httpx.Response(201, json=payload))
+        client = _make_client()
+
+        result = client.purchase_package(
+            package_id="pkg_5000",
+            buyer_name="Ada",
+            buyer_email="ada@example.com",
+        )
+
+        assert isinstance(result, BillingPackagePurchaseResponse)
+        assert isinstance(result.purchase, BillingPackagePurchaseView)
+        assert result.purchase.purchase_id == "purch_123"
+        assert result.purchase.metadata["payment_status"] == "pending"
+        assert result.purchase.metadata["fulfillment_status"] == "pending"
+        assert result.purchase.openclaw_install_key is None
+
+    @respx.mock
+    def test_get_purchase_status_tracks_fulfillment_after_successful_payment(self):
+        payload = {
+            "status": "ok",
+            "service": "IronClaw-Security",
+            "timestamp": "2026-05-22T00:00:00Z",
+            "count": 1,
+            "purchases": [
+                {
+                    "purchase_id": "purch_123",
+                    "package_id": "pkg_5000",
+                    "package_name": "Starter",
+                    "buyer_name": "Ada",
+                    "buyer_email": "ada@example.com",
+                    "owner_key": "ada@example.com",
+                    "price_usd": 20.0,
+                    "granted_units": 5000,
+                    "token_coverage": 5000,
+                    "tokens_per_unit": 1000,
+                    "created_at": "2026-05-22T00:00:00Z",
+                    "payment_id": "pi_123",
+                    "payment_status": "paid",
+                    "entitlement_status": "active",
+                    "metadata": {
+                        "payment_status": "paid",
+                        "fulfillment_status": "fulfilled",
+                        "install_keys_provisioned": True,
+                        "units_credited": True,
+                    },
+                }
+            ],
+        }
+        respx.get(f"{_BASE}/billing/purchases").mock(return_value=httpx.Response(200, json=payload))
+        client = _make_client()
+
+        result = client.get_purchase_status(purchase_id="purch_123")
+
+        assert isinstance(result, BillingPackagePurchaseView)
+        assert result.purchase_id == "purch_123"
+        assert result.metadata["payment_status"] == "paid"
+        assert result.metadata["fulfillment_status"] == "fulfilled"
+
+    @respx.mock
+    def test_get_my_install_keys_returns_paid_slots_only(self):
+        payload = {
+            "status": "ok",
+            "service": "IronClaw-Security",
+            "timestamp": "2026-05-22T00:00:00Z",
+            "owner_key": "ada@example.com",
+            "has_active_entitlement": True,
+            "keys": [
+                {
+                    "key_id": "ik_001",
+                    "program": "openclaw",
+                    "masked_key": "ic_install_openclaw_abcd",
+                    "label": "OpenClaw",
+                    "status": "active",
+                    "active": True,
+                    "payment_status": "paid",
+                    "entitlements_status": "active",
+                    "issued_after_payment": True,
+                    "units_used": 12,
+                    "units_remaining": 120,
+                    "blocked_attacks": 4,
+                    "created_at": "2026-05-22T00:00:00Z",
+                    "last_used_at": "2026-05-22T00:00:00Z",
+                    "metadata": {"purchase_id": "purch_123"},
+                    "usage_summary": {"total_consumed_units": 12},
+                }
+            ],
+        }
+        respx.get(f"{_BASE}/install-keys/my-keys").mock(return_value=httpx.Response(200, json=payload))
+        client = _make_client()
+
+        result = client.get_my_install_keys(owner_key="ada@example.com")
+
+        assert isinstance(result, InstallKeysResponse)
+        assert result.owner_key == "ada@example.com"
+        assert result.has_active_entitlement is True
+        assert len(result.keys) == 1
+        assert isinstance(result.keys[0], InstallKeySlotView)
+        assert result.keys[0].payment_status == "paid"
+        assert result.keys[0].program == "openclaw"
+
+    @respx.mock
+    def test_purchase_request_model_rejects_invalid_billing_payload(self):
+        with pytest.raises(ValueError):
+            BillingPackagePurchaseRequest(
+                package_id="",
+                buyer_name="Ada",
+                buyer_email="ada@example.com",
+            )

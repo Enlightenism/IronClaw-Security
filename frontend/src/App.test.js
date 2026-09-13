@@ -58,8 +58,16 @@ describe("App", () => {
     mockUseAuth.mockReturnValue({ user: null, session: null, loading: false });
   });
 
-  it("initializes the shared counter registry once without discarding valid controller state", async () => {
-    const existingRegistry = new Map([["ic_threats_blocked", { value: 732 }]]);
+  it("preserves valid controller state while bootstrapping the shared counter registry", async () => {
+    const existingRegistry = new Map([
+      [
+        "ic_threats_blocked",
+        {
+          getValue: () => 732,
+          subscribe: () => () => undefined,
+        },
+      ],
+    ]);
     globalThis.__IC_COUNTERS__ = {
       __controllers: existingRegistry,
       ic_threats_blocked: { value: 732, updatedAt: Date.now() },
@@ -74,6 +82,11 @@ describe("App", () => {
       expect(
         globalThis.__IC_COUNTERS__.__controllers.has("ic_threats_blocked"),
       ).toBe(true);
+      expect(
+        globalThis.__IC_COUNTERS__.__controllers
+          .get("ic_threats_blocked")
+          .getValue(),
+      ).toBe(732);
       expect(globalThis.__IC_COUNTERS__.ic_threats_blocked).toMatchObject({
         value: 732,
       });

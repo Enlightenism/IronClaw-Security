@@ -744,21 +744,21 @@ def install_integration_route(
     installer = get_integration_installer()
     result = installer.install_integration(
         record.integration_id,
-        requestedby=payload.requested_by or "system",
+        requested_by=payload.requested_by or "system",
     )
     if result is None:
         raise HTTPException(status_code=404, detail="integration not found")
 
     return IntegrationInstallResponse(
-        integration_id=result.integrationid,
+        integration_id=result.integration_id,
         platform=_record_slug(record),
         status=result.status,
         installed=result.installed,
-        installed_at=result.installedat,
-        requested_by=result.requestedby,
+        installed_at=result.installed_at,
+        requested_by=result.requested_by,
         steps=[
             IntegrationInstallStepResponse(
-                step_id=step.stepid,
+                step_id=step.step_id,
                 label=step.label,
                 completed=step.completed,
                 detail=step.detail,

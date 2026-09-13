@@ -11,6 +11,37 @@ const Privacy = lazy(() => import("@/pages/Privacy"));
 const Terms = lazy(() => import("@/pages/Terms"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 
+const isCounterSnapshot = (value) =>
+  Boolean(
+    value &&
+    typeof value === "object" &&
+    Number.isFinite(Number(value.value)) &&
+    Number.isFinite(Number(value.updatedAt)),
+  );
+
+const isCounterController = (value) =>
+  Boolean(
+    value &&
+    typeof value === "object" &&
+    typeof value.getValue === "function" &&
+    typeof value.subscribe === "function",
+  );
+
+const normalizeCounterEntry = (value) => {
+  if (isCounterController(value)) {
+    return value;
+  }
+
+  if (isCounterSnapshot(value)) {
+    return {
+      getValue: () => Number(value.value),
+      subscribe: () => () => undefined,
+    };
+  }
+
+  return null;
+};
+
 const CounterProvider = ({ children }) => {
   const mountedRef = useRef(false);
 
@@ -26,14 +57,16 @@ const CounterProvider = ({ children }) => {
 
     if (existingRegistry instanceof Map) {
       for (const [key, value] of existingRegistry.entries()) {
-        if (key && value !== undefined) {
-          nextRegistry.set(key, value);
+        const normalized = normalizeCounterEntry(value);
+        if (key && normalized) {
+          nextRegistry.set(key, normalized);
         }
       }
     } else if (existingRegistry && typeof existingRegistry === "object") {
       Object.entries(existingRegistry).forEach(([key, value]) => {
-        if (key && value !== undefined) {
-          nextRegistry.set(key, value);
+        const normalized = normalizeCounterEntry(value);
+        if (key && normalized) {
+          nextRegistry.set(key, normalized);
         }
       });
     }
@@ -43,14 +76,13 @@ const CounterProvider = ({ children }) => {
         return;
       }
 
-      if (
-        value &&
-        typeof value === "object" &&
-        Number.isFinite(Number(value.value)) &&
-        Number.isFinite(Number(value.updatedAt)) &&
-        !nextRegistry.has(key)
-      ) {
-        nextRegistry.set(key, value);
+      const normalized = normalizeCounterEntry(value);
+      if (normalized && !nextRegistry.has(key)) {
+        nextRegistry.set(key, normalized);
+      }
+
+      if (key && !normalized && isCounterSnapshot(value)) {
+        delete store[key];
       }
     });
 

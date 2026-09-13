@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import hashlib
+import json
 import logging
+import os
 import re
 from threading import Lock
 from typing import Any
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field, field_validator
 
 from app.core.auth import AuthContext, get_auth_context, require_auth_context
@@ -145,8 +148,16 @@ class BillingPackagePurchaseView(BaseModel):
     token_coverage: int
     tokens_per_unit: int
     created_at: str
+    payment_id: str | None = None
+    payment_status: str = "pending"
+    entitlement_status: str = "not_active"
+    install_key_id: str | None = None
+    masked_key: str | None = None
+    program: str | None = None
+    usage_summary: dict[str, Any] = Field(default_factory=dict)
     openclaw_install_key: str | None = None
     claude_code_install_key: str | None = None
+    hermes_install_key: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -251,6 +262,95 @@ class InsufficientUnitsErrorResponse(BaseModel):
 _PURCHASES: list[BillingPackagePurchaseView] = []
 
 
+def _compute_payload_hash(payload: Any) -> str:
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _event_idempotency_store() -> Any:
+    return build_store(mode=os.getenv("IRONCLAW_PERSISTENCE_MODE", "auto"), allow_fallback=True)
+
+
+def _read_event_ledger_record(*, session_id: str | None = None, payload_hash: str | None = None, purchase_id: str | None = None) -> dict[str, Any] | None:
+    store = _event_idempotency_store()
+    for table in ("event_idempotency_ledger", "ironclaw_event_idempotency"):
+        try:
+            rows = store.select(table)
+            for row in rows:
+                if session_id and str(row.get("checkout_session_id") or "").strip() == session_id:
+                    return row
+                if payload_hash and str(row.get("payload_hash") or "").strip() == payload_hash:
+                    return row
+                if purchase_id and str(row.get("purchase_id") or "").strip() == purchase_id:
+                    return row
+        except Exception:
+            logger.exception("billing: failed to read event ledger table=%s", table)
+    return None
+
+
+def _write_event_ledger_record(*, event_id: str, event_type: str, session_id: str | None, purchase_id: str | None, payload_hash: str) -> dict[str, Any]:
+    store = _event_idempotency_store()
+    record = {
+        "event_id": event_id,
+        "event_type": event_type,
+        "source": "billing_checkout_session_completed",
+        "checkout_session_id": session_id,
+        "purchase_id": purchase_id,
+        "payload_hash": payload_hash,
+        "created_at": _utc_now_iso(),
+        "processed_at": _utc_now_iso(),
+        "status": "processed",
+    }
+    for table in ("event_idempotency_ledger", "ironclaw_event_idempotency"):
+        try:
+            rows = store.select(table)
+            existing = None
+            for row in rows:
+                if session_id and str(row.get("checkout_session_id") or "").strip() == session_id:
+                    existing = row
+                    break
+                if payload_hash and str(row.get("payload_hash") or "").strip() == payload_hash:
+                    existing = row
+                    break
+            if existing is not None:
+                store.update(table, record, filters={"event_id": str(existing.get("event_id") or event_id)})
+            else:
+                store.insert(table, record)
+            return record
+        except Exception:
+            logger.exception("billing: failed to write event ledger table=%s", table)
+    return record
+
+
+def _verify_stripe_signature(payload: bytes, signature: str | None) -> dict[str, Any]:
+    secret = (os.getenv("STRIPE_WEBHOOK_SECRET") or "").strip()
+    if not secret:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "invalid_payload", "reason": "stripe_webhook_secret_missing"},
+        )
+    if not signature:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "invalid_payload", "reason": "missing_stripe_signature"},
+        )
+    try:
+        import stripe  # type: ignore
+    except Exception as exc:  # pragma: no cover - dependency guard
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"status": "server_error", "reason": "stripe_sdk_unavailable"},
+        ) from exc
+    try:
+        event = stripe.Webhook.construct_event(payload=payload, sig_header=signature, secret=secret)
+    except Exception as exc:  # stripe.error.SignatureVerificationError
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "invalid_payload", "reason": "stripe_signature_invalid"},
+        ) from exc
+    return dict(event)
+
+
 class _DurablePurchaseRepository:
     def __init__(self, store: Any | None = None) -> None:
         self._lock = Lock()
@@ -269,16 +369,17 @@ class _DurablePurchaseRepository:
         payload = self._normalize_purchase(purchase)
         purchase_id = str(payload.get("purchase_id") or "").strip()
         if not purchase_id:
-            return payload
+            raise ValueError("purchase_id is required for durable purchase write")
         with self._lock:
             try:
                 rows = self._store.select(self._table, filters={"purchase_id": purchase_id})
                 if rows:
-                    self._store.update(self._table, payload, {"purchase_id": purchase_id})
+                    self._store.update(self._table, payload, filters={"purchase_id": purchase_id})
                 else:
                     self._store.insert(self._table, payload)
             except Exception:
                 logger.exception("billing: failed to persist purchase %s to durable storage", purchase_id)
+                raise RuntimeError(f"billing: durable purchase persistence failed for {purchase_id}") from None
         return payload
 
     def list_recent(self, limit: int = 50) -> list[BillingPackagePurchaseView]:
@@ -348,7 +449,12 @@ _PURCHASE_REPOSITORY = _DurablePurchaseRepository()
 
 def _append_purchase(purchase: BillingPackagePurchaseView) -> None:
     _PURCHASES.append(purchase)
-    _PURCHASE_REPOSITORY.upsert(purchase)
+    try:
+        _PURCHASE_REPOSITORY.upsert(purchase)
+    except Exception:
+        if purchase in _PURCHASES:
+            _PURCHASES.remove(purchase)
+        raise
     if len(_PURCHASES) > _PURCHASES_MAX_SIZE:
         del _PURCHASES[: len(_PURCHASES) - _PURCHASES_MAX_SIZE]
 
@@ -655,11 +761,29 @@ def purchase_package(
         token_coverage=int(pkg["included_units"]) * TOKEN_CHUNK_SIZE,
         tokens_per_unit=TOKEN_CHUNK_SIZE,
         created_at=created_at,
+        payment_id=None,
+        payment_status="pending",
+        entitlement_status="not_active",
+        install_key_id=None,
+        masked_key=None,
+        program=None,
+        usage_summary={},
         openclaw_install_key=None,
         claude_code_install_key=None,
+        hermes_install_key=None,
         metadata=purchase_metadata,
     )
-    _append_purchase(purchase)
+    try:
+        _append_purchase(purchase)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "status": "purchase_persistence_failed",
+                "reason": "durable_purchase_storage_unavailable",
+                "purchase_id": purchase_id,
+            },
+        ) from exc
 
     return BillingPackagePurchaseResponse(
         status="ok",
@@ -670,12 +794,15 @@ def purchase_package(
     )
 
 
-@router.post(
-    "/webhook",
-    status_code=status.HTTP_200_OK,
-    summary="Process a Stripe checkout completion webhook for a pending purchase",
-)
-def handle_checkout_session_completed_webhook(payload: dict[str, Any]) -> dict[str, Any]:
+def _process_checkout_session_completed_webhook(
+    payload: dict[str, Any],
+    *,
+    raw_webhook: bytes | None = None,
+    stripe_signature: str | None = None,
+) -> dict[str, Any]:
+    if raw_webhook is not None:
+        _verify_stripe_signature(raw_webhook, stripe_signature)
+
     event_type = str((payload or {}).get("type") or (payload or {}).get("event_type") or "").strip().lower()
     if event_type != "checkout.session.completed":
         return {
@@ -707,6 +834,20 @@ def handle_checkout_session_completed_webhook(payload: dict[str, Any]) -> dict[s
     buyer_email = str((event_data.get("customer_details") or {}).get("email") or metadata.get("buyer_email") or "").strip().lower()
     owner_key = str(metadata.get("owner_key") or buyer_email or "").strip().lower()
     customer_id = str(event_data.get("customer") or metadata.get("customer_id") or "").strip()
+    payload_hash = _compute_payload_hash(payload)
+
+    existing_event = _read_event_ledger_record(session_id=session_id, payload_hash=payload_hash, purchase_id=purchase_id or None)
+    if existing_event is not None:
+        wallet = get_unit_wallet_registry().get_or_create_wallet(owner_key or buyer_email or purchase_id)
+        return {
+            "status": "duplicate",
+            "event_id": str(payload.get("id") or event_data.get("id") or session_id),
+            "purchase_id": purchase_id,
+            "session_id": session_id,
+            "payload_hash": payload_hash,
+            "wallet": _wallet_to_view(wallet),
+            "reason": "event_already_processed",
+        }
 
     purchase = _find_matching_purchase(
         session_id=session_id,
@@ -725,13 +866,22 @@ def handle_checkout_session_completed_webhook(payload: dict[str, Any]) -> dict[s
             },
         )
 
-    if purchase.metadata.get("payment_status") == "paid" and purchase.metadata.get("fulfillment_status") == "fulfilled":
+    already_credited = bool(purchase.metadata.get("units_credited")) or bool(purchase.metadata.get("wallet_credited"))
+    if already_credited:
         wallet = get_unit_wallet_registry().get_or_create_wallet(purchase.owner_key)
+        _write_event_ledger_record(
+            event_id=str(payload.get("id") or event_data.get("id") or session_id),
+            event_type=event_type,
+            session_id=session_id,
+            purchase_id=purchase.purchase_id,
+            payload_hash=payload_hash,
+        )
         return {
-            "status": "fulfilled",
+            "status": "duplicate",
             "purchase_id": purchase.purchase_id,
             "session_id": session_id,
             "wallet": _wallet_to_view(wallet),
+            "reason": "purchase_already_credited",
             "metadata": purchase.metadata,
         }
 
@@ -741,26 +891,51 @@ def handle_checkout_session_completed_webhook(payload: dict[str, Any]) -> dict[s
         granted_units = int(pkg["included_units"])
 
     wallet = get_unit_wallet_registry().get_or_create_wallet(purchase.owner_key)
-    updated_wallet = get_unit_wallet_registry().credit_units(
-        owner_key=purchase.owner_key,
-        units=granted_units,
-        metadata={
-            "source": "checkout.session.completed",
-            "purchase_id": purchase.purchase_id,
-            "checkout_session_id": session_id,
-            "package_id": purchase.package_id,
-            "event_type": event_type,
-            "customer_id": customer_id,
-            "payment_status": "paid",
-            "fulfillment_status": "fulfilled",
-        },
-    )
+    try:
+        updated_wallet = get_unit_wallet_registry().credit_units(
+            owner_key=purchase.owner_key,
+            units=granted_units,
+            metadata={
+                "source": "checkout.session.completed",
+                "purchase_id": purchase.purchase_id,
+                "checkout_session_id": session_id,
+                "package_id": purchase.package_id,
+                "event_type": event_type,
+                "customer_id": customer_id,
+                "payment_status": "paid",
+                "fulfillment_status": "fulfilled",
+                "payload_hash": payload_hash,
+            },
+        )
+    except Exception:
+        purchase.payment_status = "pending"
+        purchase.entitlement_status = "not_active"
+        purchase.metadata["payment_status"] = "pending"
+        purchase.metadata["fulfillment_status"] = "pending"
+        purchase.metadata["install_keys_provisioned"] = False
+        purchase.metadata["units_credited"] = False
+        purchase.metadata["wallet_credited"] = False
+        purchase.metadata["checkout_session_id"] = session_id
+        purchase.metadata["customer_id"] = customer_id
+        purchase.metadata["owner_key"] = purchase.owner_key
+        purchase.metadata["buyer_email"] = purchase.buyer_email
+        purchase.metadata["package_id"] = purchase.package_id
+        try:
+            _PURCHASE_REPOSITORY.upsert(purchase)
+        except Exception:
+            logger.exception("billing: failed to rollback purchase state after wallet credit failure for purchase_id=%s", purchase.purchase_id)
+        raise
 
     purchase.granted_units = granted_units
+    purchase.payment_id = str(metadata.get("payment_id") or purchase.purchase_id)
+    purchase.payment_status = "paid"
+    purchase.entitlement_status = "active"
     purchase.metadata["payment_status"] = "paid"
     purchase.metadata["fulfillment_status"] = "fulfilled"
     purchase.metadata["install_keys_provisioned"] = False
     purchase.metadata["units_credited"] = True
+    purchase.metadata["wallet_credited"] = True
+    purchase.metadata["credit_event_hash"] = payload_hash
     purchase.metadata["checkout_session_id"] = session_id
     purchase.metadata["customer_id"] = customer_id
     purchase.metadata["owner_key"] = purchase.owner_key
@@ -777,11 +952,40 @@ def handle_checkout_session_completed_webhook(payload: dict[str, Any]) -> dict[s
 
     if triggered:
         purchase.metadata["install_keys_provisioned"] = True
+        purchase.install_key_id = next(iter(triggered.values()), None)
+        purchase.masked_key = purchase.install_key_id
+        purchase.program = next(iter(sorted(triggered)), None)
+        purchase.usage_summary = {
+            "program": purchase.program,
+            "entitlement_status": "active",
+            "payment_status": "paid",
+            "install_keys_provisioned": True,
+        }
         purchase.openclaw_install_key = triggered.get("openclaw")
         purchase.claude_code_install_key = triggered.get("claude_code")
+        purchase.hermes_install_key = triggered.get("hermes")
         purchase.metadata["issued_programs"] = sorted(triggered)
 
-    _PURCHASE_REPOSITORY.upsert(purchase)
+    try:
+        _PURCHASE_REPOSITORY.upsert(purchase)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "status": "purchase_persistence_failed",
+                "reason": "durable_purchase_storage_unavailable",
+                "purchase_id": purchase.purchase_id,
+                "session_id": session_id,
+            },
+        ) from exc
+
+    _write_event_ledger_record(
+        event_id=str(payload.get("id") or event_data.get("id") or session_id),
+        event_type=event_type,
+        session_id=session_id,
+        purchase_id=purchase.purchase_id,
+        payload_hash=payload_hash,
+    )
     return {
         "status": "fulfilled",
         "purchase_id": purchase.purchase_id,
@@ -792,13 +996,50 @@ def handle_checkout_session_completed_webhook(payload: dict[str, Any]) -> dict[s
     }
 
 
+def handle_checkout_session_completed_webhook(payload: dict[str, Any]) -> dict[str, Any]:
+    """Synchronous compatibility wrapper for direct use in tests and legacy callers."""
+    return _process_checkout_session_completed_webhook(payload)
+
+
+@router.post(
+    "/webhook",
+    status_code=status.HTTP_200_OK,
+    summary="Process a Stripe checkout completion webhook for a pending purchase",
+)
+async def _handle_checkout_session_completed_webhook_route(
+    request: Request,
+    stripe_signature: str | None = Header(default=None, alias="stripe-signature"),
+) -> dict[str, Any]:
+    raw_webhook = await request.body()
+    if not raw_webhook:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "invalid_payload", "reason": "missing_event_payload"},
+        )
+
+    try:
+        payload = json.loads(raw_webhook.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "invalid_payload", "reason": "event_payload_not_json"},
+        ) from None
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"status": "invalid_payload", "reason": "event_payload_must_be_object"},
+        )
+
+    return _process_checkout_session_completed_webhook(payload, raw_webhook=raw_webhook, stripe_signature=stripe_signature)
+
+
 @router.post(
     "/webhook/stripe",
     status_code=status.HTTP_200_OK,
     summary="Legacy Stripe webhook alias",
 )
 def handle_checkout_session_completed_webhook_legacy(payload: dict[str, Any]) -> dict[str, Any]:
-    return handle_checkout_session_completed_webhook(payload)
+    return _process_checkout_session_completed_webhook(payload)
 
 
 @router.get(

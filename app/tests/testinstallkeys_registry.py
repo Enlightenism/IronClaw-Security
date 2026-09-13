@@ -132,9 +132,17 @@ class TestGenerateInstallKeyHappyPath:
     def test_insert_is_called_on_supabase(self) -> None:
         client = _empty_client()
         registry = _fresh_registry(client)
-        with patch(_MOCK_TARGET, return_value=client):
+        with patch("app.core.install_keys._should_use_memory_fallback", return_value=False), patch(_MOCK_TARGET, return_value=client):
             registry.generate_install_key(_OWNER, _SUB, "openclaw")
-        client.table.assert_called_with("install_keys")
+        assert any(call.args == ("install_keys",) for call in client.table.call_args_list)
+
+    def test_replay_for_same_session_is_blocked_before_issuance(self) -> None:
+        client = _empty_client()
+        registry = _fresh_registry(client)
+        with patch(_MOCK_TARGET, return_value=client):
+            registry.generate_install_key(_OWNER, _SUB, "openclaw", purchase_reference="purch_123", checkout_session_id="cs_123")
+            with pytest.raises(InstallKeyAlreadyExistsError):
+                registry.generate_install_key(_OWNER, _SUB, "openclaw", purchase_reference="purch_123", checkout_session_id="cs_123")
 
     def test_two_different_programs_same_owner_both_succeed(self) -> None:
         client = _empty_client()
@@ -275,9 +283,18 @@ class TestRevokeKey:
 
         client = _empty_client()
         registry = _fresh_registry(client)
-        client.table.return_value.update.side_effect = _capture_update
 
-        with patch(_MOCK_TARGET, return_value=client):
+        def _table_side_effect(name):
+            chain = MagicMock()
+            chain.update.side_effect = _capture_update
+            chain.insert.side_effect = lambda payload: MagicMock(data=[])
+            chain.eq.return_value = chain
+            chain.execute.return_value = MagicMock(data=[])
+            return chain
+
+        client.table.side_effect = _table_side_effect
+
+        with patch("app.core.install_keys._should_use_memory_fallback", return_value=False), patch(_MOCK_TARGET, return_value=client):
             generated = registry.generate_install_key(_OWNER, _SUB, "openclaw")
             registry.revoke_key(generated.key_id)
 

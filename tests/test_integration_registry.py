@@ -104,6 +104,23 @@ def test_initialize_integration_registry_populates_items():
     assert registry.updated_at
 
 
+def test_default_integrations_expose_canonical_install_key_lifecycle_metadata():
+    registry = initialize_integration_registry()
+    record = get_integration(registry, "integration-claude-code")
+
+    assert record is not None
+    assert record.install_key_program == "claude_code"
+    assert record.install_key_family == "claude_code"
+    assert record.metadata["install_key_program"] == "claude_code"
+    assert record.metadata["runtime"] == "claude_code"
+    assert record.metadata["one_command_install"] is True
+
+    custom = _make_record(platform="claude-code")
+    register_integration(registry, custom)
+    assert custom.install_key_program == "claude_code"
+    assert custom.install_key_family == "claude_code"
+
+
 def test_register_and_get_integration_round_trip():
     registry = initialize_integration_registry()
     record = _make_record()

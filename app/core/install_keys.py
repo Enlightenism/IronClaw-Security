@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import hashlib
 import hmac
+import json
 import logging
 import os
 import secrets
@@ -31,6 +32,9 @@ _INSTALL_KEY_PREFIX_HERMES: Final[str] = "ic_install_hermes_"
 _INSTALL_KEY_PREFIX_SECURITY_GUARDIAN: Final[str] = "ic_install_security_guardian_"
 _INSTALL_KEY_SECRET_BYTES: Final[int] = 32
 _T_INSTALL_KEYS: Final[str] = "install_keys"
+_T_INSTALL_KEY_STATE: Final[str] = "ironclaw_install_key_state"
+_T_INSTALL_KEY_HISTORY: Final[str] = "ironclaw_install_key_history"
+_T_EVENT_IDEMPOTENCY: Final[str] = "ironclaw_event_idempotency"
 
 # Security Guardian is a shared connector/install-key family that links the
 # runtime platforms to IronClaw security. It is not a standalone runtime
@@ -152,7 +156,9 @@ def _looks_like_generic_platform_auth(value: str | Any) -> bool:
     normalized = str(value).strip().lower()
     if not normalized:
         return False
-    if normalized.startswith("ic_org_") or normalized.startswith("ic_install_"):
+    if normalized.startswith("ic_install_"):
+        return True
+    if normalized.startswith("ic_org_"):
         return False
     if normalized.startswith("owner_") or normalized.startswith("customer_") or normalized.startswith("user_") or normalized.startswith("org_") or normalized.startswith("acct_"):
         return False
@@ -198,6 +204,8 @@ def _looks_like_generic_platform_auth(value: str | Any) -> bool:
 
 def _assert_valid_owner_identity(owner_key: str | Any, *, org_id: str | Any | None = None, customer_id: str | Any | None = None) -> str:
     normalized_owner = _canonical_owner_key(owner_key)
+    if normalized_owner.startswith("ic_install_"):
+        raise ValueError("owner_key must be a canonical customer or org identity, not an install-key value.")
     if _looks_like_generic_platform_auth(normalized_owner):
         raise ValueError("owner_key must be a canonical customer or org identity, not a generic platform auth value.")
 
@@ -576,6 +584,140 @@ def _persist_install_key_update(*, key_id: str, action: str, callback: Any) -> N
         _logger.warning("install_keys: failed to persist %s for %s", action, key_id)
 
 
+def _canonical_install_key_event_id(*, owner_key: str, program: ProgramCode, purchase_reference: str | None, checkout_session_id: str | None) -> str:
+    seed_parts = [
+        str(owner_key).strip().lower(),
+        str(program).strip().lower(),
+        str(purchase_reference or "").strip(),
+        str(checkout_session_id or "").strip(),
+    ]
+    return hashlib.sha256("|".join(seed_parts).encode("utf-8")).hexdigest()
+
+
+def _canonical_install_key_issue_payload(*, owner_key: str, program: ProgramCode, purchase_reference: str | None, checkout_session_id: str | None, subscription_id: str | None, customer_id: str | None) -> dict[str, Any]:
+    return {
+        "event_type": "install_key_issued",
+        "owner_key": str(owner_key).strip().lower(),
+        "program": str(program).strip().lower(),
+        "purchase_reference": str(purchase_reference or "").strip() or None,
+        "checkout_session_id": str(checkout_session_id or "").strip() or None,
+        "subscription_id": str(subscription_id or "").strip() or None,
+        "customer_id": str(customer_id or "").strip() or None,
+    }
+
+
+def _read_event_ledger_record(*, event_id: str | None = None, purchase_reference: str | None = None, checkout_session_id: str | None = None, owner_key: str | None = None, program: ProgramCode | str | None = None) -> dict[str, Any] | None:
+    if _should_use_memory_fallback():
+        return None
+    try:
+        client = get_supabase_service_client()
+        resp = client.table(_T_EVENT_IDEMPOTENCY).select("*").execute()
+        rows = resp.data or []
+        if isinstance(rows, dict):
+            rows = [rows]
+        for row in rows:
+            row = dict(row)
+            if event_id and str(row.get("event_id") or "").strip() == event_id:
+                return row
+            if purchase_reference and str(row.get("purchase_id") or row.get("purchase_reference") or "").strip() == str(purchase_reference).strip():
+                return row
+            if checkout_session_id and str(row.get("checkout_session_id") or "").strip() == str(checkout_session_id).strip():
+                return row
+            if owner_key and str(row.get("owner_key") or "").strip().lower() == str(owner_key).strip().lower():
+                metadata = row.get("metadata") or {}
+                if program and str(metadata.get("program") or "").strip().lower() == str(program).strip().lower():
+                    return row
+        return None
+    except (SupabaseAPIError, SupabaseClientError, Exception):
+        _logger.exception("install_keys: failed to read event ledger")
+        return None
+
+
+def _write_event_ledger_record(*, event_id: str, event_type: str, purchase_reference: str | None, checkout_session_id: str | None, owner_key: str | None, customer_id: str | None, program: ProgramCode | str | None, payload: dict[str, Any]) -> dict[str, Any]:
+    if _should_use_memory_fallback():
+        return {"event_id": event_id, "status": "memory_fallback"}
+    payload_hash = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")).hexdigest()
+    record = {
+        "event_id": event_id,
+        "source": "install_key",
+        "event_type": event_type,
+        "purchase_id": str(purchase_reference or "").strip() or None,
+        "checkout_session_id": str(checkout_session_id or "").strip() or None,
+        "owner_key": str(owner_key or "").strip().lower() or None,
+        "customer_id": str(customer_id or "").strip() or None,
+        "payload_hash": payload_hash,
+        "processed_at": _utc_now_iso(),
+        "metadata": {
+            "program": str(program or "").strip().lower() if program is not None else None,
+            **payload,
+        },
+    }
+    try:
+        client = get_supabase_service_client()
+        client.table(_T_EVENT_IDEMPOTENCY).upsert(record, on_conflict="event_id", returning="representation").execute()
+        return record
+    except (SupabaseAPIError, SupabaseClientError, Exception):
+        _logger.exception("install_keys: failed to write event ledger for event %s", event_id)
+        return record
+
+
+def _persist_install_key_state_record(record: InstallKeyRecord) -> None:
+    state_row = {
+        "key_id": record.key_id,
+        "purchase_id": str(record.purchase_reference or record.subscription_id or "").strip() or None,
+        "owner_key": record.owner_key,
+        "customer_id": record.customer_id,
+        "program": record.program,
+        "checkout_session_id": record.checkout_session_id,
+        "raw_key_hash": record.raw_key_hash,
+        "masked_key": record.masked_key,
+        "status": "active" if record.active else "revoked" if record.revoked_at is not None else "issued",
+        "active": record.active,
+        "issued_after_payment": record.issued_after_payment,
+        "created_at": record.created_at.isoformat(),
+        "updated_at": _utc_now_iso(),
+        "revoked_at": record.revoked_at.isoformat() if record.revoked_at else None,
+        "metadata": {
+            **record.metadata,
+            "purchase_reference": record.purchase_reference,
+            "checkout_session_id": record.checkout_session_id,
+            "raw_key_hash": record.raw_key_hash,
+        },
+    }
+
+    def _write_state() -> None:
+        client = get_supabase_service_client()
+        client.table(_T_INSTALL_KEY_STATE).upsert(state_row, on_conflict="key_id", returning="representation").execute()
+
+    _persist_install_key_update(key_id=record.key_id, action="state_write", callback=_write_state)
+
+
+def _persist_install_key_history_record(*, record: InstallKeyRecord, event_type: str, status: str, reason: str, metadata: dict[str, Any] | None = None) -> None:
+    row = {
+        "history_id": f"hist_{secrets.token_hex(12)}",
+        "key_id": record.key_id,
+        "purchase_id": str(record.purchase_reference or record.subscription_id or "").strip() or None,
+        "event_type": event_type,
+        "status": status,
+        "actor_type": "system",
+        "reason": reason,
+        "metadata": {
+            "owner_key": record.owner_key,
+            "program": record.program,
+            "checkout_session_id": record.checkout_session_id,
+            **(metadata or {}),
+        },
+        "created_at": _utc_now_iso(),
+        "updated_at": _utc_now_iso(),
+    }
+
+    def _write_history() -> None:
+        client = get_supabase_service_client()
+        client.table(_T_INSTALL_KEY_HISTORY).insert(row).execute()
+
+    _persist_install_key_update(key_id=record.key_id, action="history_write", callback=_write_history)
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -723,13 +865,68 @@ class InstallKeyRegistry:
                 reason=(f"entitlements_status is not active; the customer does not have a valid paid entitlement. entitlements_status={normalized_entitlement_status!r}"),
             )
 
-        subscription_reference = purchase_reference or checkout_session_id
-        if not subscription_reference:
-            raise InstallKeyPaymentRequiredError(
-                owner_key,
-                program,
-                reason="missing purchase_reference or checkout_session_id after successful payment completion",
-            )
+    def _has_replay_issue_for_purchase(
+        self,
+        *,
+        owner_key: str,
+        program: ProgramCode,
+        purchase_reference: str | None,
+        checkout_session_id: str | None,
+        subscription_id: str | None,
+    ) -> bool:
+        if purchase_reference is None and checkout_session_id is None:
+            return False
+
+        payload = _canonical_install_key_issue_payload(
+            owner_key=owner_key,
+            program=program,
+            purchase_reference=purchase_reference,
+            checkout_session_id=checkout_session_id,
+            subscription_id=subscription_id,
+            customer_id=None,
+        )
+        event_id = _canonical_install_key_event_id(
+            owner_key=owner_key,
+            program=program,
+            purchase_reference=purchase_reference,
+            checkout_session_id=checkout_session_id,
+        )
+        existing = _read_event_ledger_record(
+            event_id=event_id,
+            purchase_reference=purchase_reference,
+            checkout_session_id=checkout_session_id,
+            owner_key=owner_key,
+            program=program,
+        )
+        if existing is not None:
+            return True
+
+        if purchase_reference is not None:
+            for record in self._records_by_id.values():
+                if str(record.purchase_reference or "").strip() == str(purchase_reference).strip() and record.program == program and record.owner_key == owner_key:
+                    return True
+
+        if checkout_session_id is not None:
+            for record in self._records_by_id.values():
+                if str(record.checkout_session_id or "").strip() == str(checkout_session_id).strip() and record.program == program and record.owner_key == owner_key:
+                    return True
+
+        event_payload = {
+            "source": "install_key",
+            "event_type": "install_key_issued",
+            **payload,
+        }
+        _write_event_ledger_record(
+            event_id=event_id,
+            event_type="install_key_issued",
+            purchase_reference=purchase_reference,
+            checkout_session_id=checkout_session_id,
+            owner_key=owner_key,
+            customer_id=None,
+            program=program,
+            payload=event_payload,
+        )
+        return False
 
     def _lock_inactive_key(self, record: InstallKeyRecord, *, reason: str) -> InstallKeyRecord:
         if not record.active:
@@ -842,6 +1039,15 @@ class InstallKeyRegistry:
                 if rec.owner_key == normalized_owner and rec.program == normalized_program and _is_current_paid_entitlement(rec):
                     raise InstallKeyAlreadyExistsError(normalized_owner, normalized_program)
 
+            if self._has_replay_issue_for_purchase(
+                owner_key=normalized_owner,
+                program=normalized_program,
+                purchase_reference=purchase_reference,
+                checkout_session_id=checkout_session_id,
+                subscription_id=subscription_id,
+            ):
+                raise InstallKeyAlreadyExistsError(normalized_owner, normalized_program)
+
             raw_key = _generate_raw_key(normalized_program)
             raw_key_hash = _hash_key(raw_key)
             key_id = _new_key_id()
@@ -877,6 +1083,82 @@ class InstallKeyRegistry:
                     insert_result = client.table(_T_INSTALL_KEYS).insert(record.to_db_row()).execute()
                     if not _is_durable_write_result(insert_result):
                         raise RuntimeError(f"Supabase insert returned no durable result for key {key_id!r}")
+                    state_result = (
+                        client.table(_T_INSTALL_KEY_STATE)
+                        .upsert(
+                            {
+                                "key_id": record.key_id,
+                                "purchase_id": str(purchase_reference or subscription_id or "").strip() or None,
+                                "owner_key": record.owner_key,
+                                "customer_id": customer_id.strip() if isinstance(customer_id, str) and customer_id.strip() else None,
+                                "program": record.program,
+                                "checkout_session_id": checkout_session_id.strip() if isinstance(checkout_session_id, str) and checkout_session_id.strip() else None,
+                                "raw_key_hash": record.raw_key_hash,
+                                "masked_key": record.masked_key,
+                                "status": "active",
+                                "active": True,
+                                "issued_after_payment": True,
+                                "created_at": record.created_at.isoformat(),
+                                "updated_at": _utc_now_iso(),
+                                "metadata": {
+                                    "owner_key": record.owner_key,
+                                    "program": record.program,
+                                    "purchase_reference": purchase_reference,
+                                    "checkout_session_id": checkout_session_id,
+                                    "source": "install_key_registry",
+                                },
+                            },
+                            on_conflict="key_id",
+                            returning="representation",
+                        )
+                        .execute()
+                    )
+                    if not _is_durable_write_result(state_result):
+                        raise RuntimeError(f"Supabase state insert returned no durable result for key {key_id!r}")
+                    history_row = {
+                        "history_id": f"hist_{secrets.token_hex(12)}",
+                        "key_id": key_id,
+                        "purchase_id": str(purchase_reference or subscription_id or "").strip() or None,
+                        "event_type": "issued",
+                        "status": "active",
+                        "actor_type": "system",
+                        "reason": "paid_checkout_completion",
+                        "metadata": {
+                            "owner_key": record.owner_key,
+                            "program": record.program,
+                            "checkout_session_id": checkout_session_id,
+                            "purchase_reference": purchase_reference,
+                        },
+                        "created_at": _utc_now_iso(),
+                        "updated_at": _utc_now_iso(),
+                    }
+                    history_result = client.table(_T_INSTALL_KEY_HISTORY).insert(history_row).execute()
+                    if not _is_durable_write_result(history_result):
+                        raise RuntimeError(f"Supabase history insert returned no durable result for key {key_id!r}")
+                    issue_event = _canonical_install_key_issue_payload(
+                        owner_key=normalized_owner,
+                        program=normalized_program,
+                        purchase_reference=purchase_reference,
+                        checkout_session_id=checkout_session_id,
+                        subscription_id=subscription_id,
+                        customer_id=customer_id,
+                    )
+                    issue_event_id = _canonical_install_key_event_id(
+                        owner_key=normalized_owner,
+                        program=normalized_program,
+                        purchase_reference=purchase_reference,
+                        checkout_session_id=checkout_session_id,
+                    )
+                    _write_event_ledger_record(
+                        event_id=issue_event_id,
+                        event_type="install_key_issued",
+                        purchase_reference=purchase_reference,
+                        checkout_session_id=checkout_session_id,
+                        owner_key=normalized_owner,
+                        customer_id=customer_id,
+                        program=normalized_program,
+                        payload={"event_type": "install_key_issued", **issue_event},
+                    )
                 except (SupabaseAPIError, SupabaseClientError, RuntimeError, Exception):
                     _logger.exception("install_keys: failed to persist new key %s", key_id)
                     raise
@@ -957,6 +1239,13 @@ class InstallKeyRegistry:
             purchase_reference = metadata.get("purchase_reference")
         if checkout_session_id is None and metadata is not None:
             checkout_session_id = metadata.get("checkout_session_id")
+
+        if purchase_reference is None and checkout_session_id is None:
+            raise InstallKeyPaymentRequiredError(
+                owner_key,
+                normalized_program,
+                reason="legacy install-key generation requires a real purchase_reference or checkout_session_id from a completed paid checkout.",
+            )
 
         return self.generate_for_paid_customer(
             owner_key=owner_key,
@@ -1116,6 +1405,28 @@ class InstallKeyRegistry:
             def _persist_revocation() -> None:
                 client = get_supabase_service_client()
                 client.table(_T_INSTALL_KEYS).update({"active": False, "entitlements_status": "revoked", "revoked_at": now.isoformat()}).eq("key_id", key_id).execute()
+                client.table(_T_INSTALL_KEY_STATE).update(
+                    {
+                        "active": False,
+                        "status": "revoked",
+                        "revoked_at": now.isoformat(),
+                        "updated_at": _utc_now_iso(),
+                    }
+                ).eq("key_id", key_id).execute()
+                client.table(_T_INSTALL_KEY_HISTORY).insert(
+                    {
+                        "history_id": f"hist_{secrets.token_hex(12)}",
+                        "key_id": key_id,
+                        "purchase_id": str(record.purchase_reference or record.subscription_id or "").strip() or None,
+                        "event_type": "revoked",
+                        "status": "revoked",
+                        "actor_type": "system",
+                        "reason": "install_key_revoked",
+                        "metadata": {"owner_key": record.owner_key, "program": record.program},
+                        "created_at": _utc_now_iso(),
+                        "updated_at": _utc_now_iso(),
+                    }
+                ).execute()
 
             _persist_install_key_update(key_id=key_id, action="revocation", callback=_persist_revocation)
 

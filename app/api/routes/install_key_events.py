@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
+import hashlib
 import os
-from pathlib import Path
-import sqlite3
-import tempfile
 from threading import Lock
 from typing import Any, Literal
 
@@ -18,6 +16,7 @@ from app.core.unit_wallet import (
     UnitWalletRegistry,
     get_unit_wallet_registry,
 )
+from app.persistencebootstrap import get_persistence_store
 
 router = APIRouter(
     prefix="/install-key-events",
@@ -175,12 +174,6 @@ class InstallKeyEventResponse(BaseModel):
 
 
 _IDEMPOTENCY_TTL_SECONDS = int(os.environ.get("IRONCLAW_INSTALL_KEY_EVENT_TTL_SECONDS", "86400"))
-_IDEMPOTENCY_DB_PATH = Path(
-    os.environ.get(
-        "IRONCLAW_INSTALL_KEY_EVENT_IDEMPOTENCY_DB",
-        str(Path(tempfile.gettempdir()) / "ironclaw_install_key_event_idempotency.sqlite3"),
-    )
-)
 
 
 def _is_test_environment() -> bool:
@@ -221,60 +214,69 @@ class _InMemoryEventIdempotencyStore:
             self._entries.pop(oldest_event_id, None)
 
 
-class _SqliteEventIdempotencyStore:
-    def __init__(self, *, db_path: Path, ttl_seconds: int = _IDEMPOTENCY_TTL_SECONDS) -> None:
-        self._db_path = Path(db_path)
+class _DurableEventIdempotencyStore:
+    def __init__(self, *, ttl_seconds: int = _IDEMPOTENCY_TTL_SECONDS) -> None:
         self._ttl_seconds = max(1, int(ttl_seconds))
         self._lock = Lock()
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._initialize()
 
-    def _initialize(self) -> None:
-        with sqlite3.connect(self._db_path) as connection:
-            connection.execute("PRAGMA journal_mode=WAL")
-            connection.execute("CREATE TABLE IF NOT EXISTS install_key_event_idempotency (event_id TEXT PRIMARY KEY, expires_at TEXT NOT NULL)")
-            connection.execute("CREATE INDEX IF NOT EXISTS idx_install_key_event_idempotency_expires_at ON install_key_event_idempotency (expires_at)")
+    def _canonical_tables(self) -> tuple[str, ...]:
+        return ("ironclaw_event_idempotency", "event_idempotency_ledger")
+
+    def _record_payload(self, event_id: str) -> dict[str, Any]:
+        now = _utc_now_iso()
+        payload_hash = hashlib.sha256(event_id.encode("utf-8")).hexdigest()
+        return {
+            "event_id": event_id,
+            "source": "install_key_events",
+            "event_type": "install_key_event",
+            "payload_hash": payload_hash,
+            "processed_at": now,
+            "created_at": now,
+            "expires_at": now,
+            "status": "processed",
+            "metadata": {"route": "install-key-events", "ttl_seconds": self._ttl_seconds},
+        }
 
     def has_event(self, event_id: str) -> bool:
-        now = datetime.now(UTC)
         with self._lock:
-            try:
-                with sqlite3.connect(self._db_path) as connection:
-                    row = connection.execute(
-                        "SELECT 1 FROM install_key_event_idempotency WHERE event_id = ? AND expires_at > ?",
-                        (event_id, now.isoformat()),
-                    ).fetchone()
-                    return row is not None
-            except sqlite3.Error:
-                return _FALLBACK_EVENT_IDEMPOTENCY.has_event(event_id)
+            store = get_persistence_store(mode=os.getenv("IRONCLAW_PERSISTENCE_MODE", "auto"), allow_fallback=True)
+            for table in self._canonical_tables():
+                try:
+                    rows = store.select(table)
+                    for row in rows:
+                        if str(row.get("event_id") or "").strip() == str(event_id).strip():
+                            return True
+                except Exception:
+                    continue
+            return False
 
     def record_event(self, event_id: str) -> None:
-        expires_at = (datetime.now(UTC) + timedelta(seconds=self._ttl_seconds)).isoformat()
         with self._lock:
-            try:
-                with sqlite3.connect(self._db_path) as connection:
-                    connection.execute(
-                        "INSERT INTO install_key_event_idempotency (event_id, expires_at) VALUES (?, ?) ON CONFLICT(event_id) DO UPDATE SET expires_at = excluded.expires_at",
-                        (event_id, expires_at),
-                    )
-                    connection.execute(
-                        "DELETE FROM install_key_event_idempotency WHERE expires_at <= ?",
-                        (datetime.now(UTC).isoformat(),),
-                    )
-            except sqlite3.Error:
-                _FALLBACK_EVENT_IDEMPOTENCY.record_event(event_id)
+            store = get_persistence_store(mode=os.getenv("IRONCLAW_PERSISTENCE_MODE", "auto"), allow_fallback=True)
+            payload = self._record_payload(event_id)
+            for table in self._canonical_tables():
+                try:
+                    rows = store.select(table)
+                    if any(str(row.get("event_id") or "").strip() == str(event_id).strip() for row in rows):
+                        return
+                    store.insert(table, payload)
+                    return
+                except Exception:
+                    continue
+            _FALLBACK_EVENT_IDEMPOTENCY.record_event(event_id)
 
     def clear(self) -> None:
         with self._lock:
-            try:
-                with sqlite3.connect(self._db_path) as connection:
-                    connection.execute("DELETE FROM install_key_event_idempotency")
-            except sqlite3.Error:
-                _FALLBACK_EVENT_IDEMPOTENCY.clear()
+            store = get_persistence_store(mode=os.getenv("IRONCLAW_PERSISTENCE_MODE", "auto"), allow_fallback=True)
+            for table in self._canonical_tables():
+                try:
+                    store.delete(table)
+                except Exception:
+                    continue
 
 
 _FALLBACK_EVENT_IDEMPOTENCY = _InMemoryEventIdempotencyStore()
-_EVENT_IDEMPOTENCY_STORE = _InMemoryEventIdempotencyStore() if _is_test_environment() else _SqliteEventIdempotencyStore(db_path=_IDEMPOTENCY_DB_PATH)
+_EVENT_IDEMPOTENCY_STORE = _DurableEventIdempotencyStore() if not _is_test_environment() else _InMemoryEventIdempotencyStore()
 
 
 def _event_seen(event_id: str) -> bool:

@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
+import app.api.routes.install_key_events as install_key_events_module
 from app.api.routes.install_key_events import router
 import app.core.install_keys as install_keys_module
 from app.core.install_keys import InstallKeyRecord, InstallKeyRegistry, get_install_key_registry
@@ -60,6 +61,31 @@ def _make_paid_key(
         label="production",
         metadata={"source": "test"},
     )
+
+
+def test_durable_idempotency_store_checks_shared_event_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = {"table": None, "event_id": None}
+
+    class _FakeStore:
+        def select(self, table: str, *args: object, **kwargs: object) -> list[dict[str, object]]:
+            if table == "ironclaw_event_idempotency":
+                seen["table"] = table
+                return [{"event_id": "evt_shared_ledger_001"}]
+            if table == "event_idempotency_ledger":
+                seen["table"] = table
+                return []
+            return []
+
+        def insert(self, table: str, payload: dict[str, object], **kwargs: object) -> list[dict[str, object]]:
+            seen["table"] = table
+            seen["event_id"] = payload.get("event_id")
+            return [dict(payload)]
+
+    monkeypatch.setattr(install_key_events_module, "_EVENT_IDEMPOTENCY_STORE", install_key_events_module._DurableEventIdempotencyStore())
+    monkeypatch.setattr(install_key_events_module, "get_persistence_store", lambda *args, **kwargs: _FakeStore())
+
+    assert install_key_events_module._event_seen("evt_shared_ledger_001") is True
+    assert seen["table"] == "ironclaw_event_idempotency"
 
 
 def test_usage_units_debited_updates_wallet_and_install_key_usage(client: TestClient) -> None:

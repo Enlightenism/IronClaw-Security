@@ -1,4 +1,4 @@
-import { render, cleanup } from "@testing-library/react";
+import { render, cleanup, screen } from "@testing-library/react";
 import ParticleField from "./ParticleField";
 
 describe("ParticleField", () => {
@@ -35,6 +35,14 @@ describe("ParticleField", () => {
       configurable: true,
     });
 
+    Object.defineProperty(window, "visualViewport", {
+      value: {
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+      },
+      configurable: true,
+    });
+
     Object.defineProperty(document, "hidden", {
       value: false,
       configurable: true,
@@ -46,6 +54,16 @@ describe("ParticleField", () => {
     });
 
     Object.defineProperty(HTMLCanvasElement.prototype, "offsetHeight", {
+      configurable: true,
+      get: () => 540,
+    });
+
+    Object.defineProperty(HTMLCanvasElement.prototype, "clientWidth", {
+      configurable: true,
+      get: () => 960,
+    });
+
+    Object.defineProperty(HTMLCanvasElement.prototype, "clientHeight", {
       configurable: true,
       get: () => 540,
     });
@@ -87,6 +105,31 @@ describe("ParticleField", () => {
     rafCallback(60);
 
     expect(context.clearRect.mock.calls.length - beforeCount).toBe(1);
+  });
+
+  it("reflows the canvas on resize and keeps the animation stable across mobile and desktop sizes", () => {
+    render(<ParticleField density={50} />);
+
+    const canvas = screen.getByTestId("particle-field");
+    const originalWidth = canvas.width;
+    const originalHeight = canvas.height;
+
+    Object.defineProperty(canvas, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ width: 420, height: 760 }),
+    });
+    Object.defineProperty(window, "devicePixelRatio", {
+      configurable: true,
+      value: 2,
+    });
+
+    window.dispatchEvent(new Event("resize"));
+
+    expect(canvas.width).not.toBe(originalWidth);
+    expect(canvas.height).not.toBe(originalHeight);
+    expect(canvas.width).toBe(Math.round(420 * 1.5));
+    expect(canvas.height).toBe(Math.round(760 * 1.5));
+    expect(context.setTransform).toHaveBeenCalled();
   });
 
   it("pauses while the document is hidden and resumes when visible again", () => {
@@ -136,7 +179,7 @@ describe("ParticleField", () => {
     );
   });
 
-  it("checks for reduced motion before running expensive visual passes", () => {
+  it("respects reduced motion and subscribes to viewport resizing on mobile layouts", () => {
     window.matchMedia.mockImplementation((query) => ({
       matches: query === "(prefers-reduced-motion: reduce)",
       media: query,
@@ -151,6 +194,14 @@ describe("ParticleField", () => {
 
     expect(window.matchMedia).toHaveBeenCalledWith(
       "(prefers-reduced-motion: reduce)",
+    );
+    expect(window.visualViewport.addEventListener).toHaveBeenCalledWith(
+      "resize",
+      expect.any(Function),
+    );
+    expect(window.visualViewport.addEventListener).toHaveBeenCalledWith(
+      "scroll",
+      expect.any(Function),
     );
   });
 });

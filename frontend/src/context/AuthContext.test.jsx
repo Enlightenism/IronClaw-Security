@@ -471,6 +471,38 @@ describe("AuthContext", () => {
     );
   });
 
+  it("prefers the newest valid counter snapshot over stale controller state during auth rehydration", async () => {
+    const now = Date.now();
+
+    globalThis.__IC_COUNTERS__ = {
+      __controllers: new Map([
+        [
+          "ic_threats_blocked",
+          {
+            getValue: () => 512,
+            subscribe: () => () => undefined,
+          },
+        ],
+      ]),
+      ic_threats_blocked: { value: 980, updatedAt: now },
+      stale_counter: { value: 12, updatedAt: now - 26 * 60 * 60 * 1000 },
+      invalid_counter: { value: "not-a-number", updatedAt: now },
+    };
+
+    renderWithProvider();
+
+    await waitFor(() =>
+      expect(supabase.auth.onAuthStateChange).toHaveBeenCalledTimes(1),
+    );
+
+    const controller =
+      globalThis.__IC_COUNTERS__.__controllers.get("ic_threats_blocked");
+
+    expect(controller.getValue()).toBe(980);
+    expect(globalThis.__IC_COUNTERS__.stale_counter).toBeUndefined();
+    expect(globalThis.__IC_COUNTERS__.invalid_counter).toBeUndefined();
+  });
+
   it("rebuilds the shared counter registry and preserves valid counters during auth churn", async () => {
     globalThis.__IC_COUNTERS__ = {
       ic_threats_blocked: { value: 6543, updatedAt: Date.now() },

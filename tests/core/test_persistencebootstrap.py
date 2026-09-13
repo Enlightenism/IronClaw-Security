@@ -35,7 +35,7 @@ from app.supabaseclient import IRONCLAW_TABLES
 # Constants
 # ---------------------------------------------------------------------------
 
-_EXPECTED_TABLE_COUNT = 19
+_EXPECTED_TABLE_COUNT = 27
 
 _ALL_EXPECTED_TABLES: frozenset[str] = frozenset(
     {
@@ -58,6 +58,14 @@ _ALL_EXPECTED_TABLES: frozenset[str] = frozenset(
         "sandbox_execution_log",
         "webhook_subscriptions",
         "webhook_deliveries",
+        "billing_purchases",
+        "install_key_records",
+        "install_key_issuance_history",
+        "event_idempotency_ledger",
+        "ironclaw_billing_purchases",
+        "ironclaw_install_key_state",
+        "ironclaw_install_key_history",
+        "ironclaw_event_idempotency",
     }
 )
 
@@ -103,6 +111,15 @@ class TestSupabaseMigrationForBillingDurability:
             "create table if not exists public.install_key_records",
             "create table if not exists public.install_key_issuance_history",
             "create table if not exists public.event_idempotency_ledger",
+            "buyer_name",
+            "package_name",
+            "price_usd",
+            "subscription_id",
+            "purchase_reference",
+            "history_id",
+            "actor_type",
+            "reason",
+            "payload_hash",
         ]
         for statement in required:
             assert statement in sql
@@ -146,6 +163,16 @@ class TestSupabaseMigrationForBillingDurability:
             "trg_ironclaw_billing_purchases_updated_at",
             "trg_ironclaw_install_key_state_updated_at",
             "trg_ironclaw_event_idempotency_updated_at",
+            "buyer_name",
+            "package_name",
+            "price_usd",
+            "purchase_reference",
+            "subscription_id",
+            "history_id",
+            "actor_type",
+            "reason",
+            "payload_hash",
+            "status",
         ]
         for needle in required:
             assert needle in sql
@@ -216,6 +243,19 @@ class TestGetRegisteredTables:
 
     def test_webhook_deliveries_in_registry(self):
         assert "webhook_deliveries" in get_registered_tables()
+
+    def test_critical_durable_tables_registered(self):
+        critical = {
+            "billing_purchases",
+            "install_key_records",
+            "install_key_issuance_history",
+            "event_idempotency_ledger",
+            "ironclaw_billing_purchases",
+            "ironclaw_install_key_state",
+            "ironclaw_install_key_history",
+            "ironclaw_event_idempotency",
+        }
+        assert critical.issubset(get_registered_tables())
 
 
 # ===========================================================================

@@ -25,7 +25,7 @@ from app.persistencebootstrap import (
     get_registered_tables,
 )
 
-_EXPECTED_TABLE_COUNT = 19
+_EXPECTED_TABLE_COUNT = 27
 _BOOTSTRAP_PATCH = "app.bootstrap.get_registered_tables"
 _STORE_PATCH = "app.bootstrap.get_persistence_store"
 
@@ -43,7 +43,7 @@ class TestAssertSchemaCompleteness:
         result = assert_schema_completeness()
         assert isinstance(result, frozenset)
 
-    def test_returns_all_19_tables(self):
+    def test_returns_all_27_tables(self):
         result = assert_schema_completeness()
         assert len(result) == _EXPECTED_TABLE_COUNT
 
@@ -67,7 +67,7 @@ class TestAssertSchemaCompleteness:
 
     def test_raises_runtime_error_on_empty_registry(self):
         with patch(_BOOTSTRAP_PATCH, return_value=frozenset()):
-            with pytest.raises(RuntimeError, match="expected 19 tables"):
+            with pytest.raises(RuntimeError, match=f"expected {_EXPECTED_TABLE_COUNT} tables"):
                 assert_schema_completeness()
 
     def test_raises_runtime_error_on_wrong_count_too_many(self):
@@ -81,7 +81,7 @@ class TestAssertSchemaCompleteness:
         with patch(_BOOTSTRAP_PATCH, return_value=fake):
             with pytest.raises(RuntimeError) as exc_info:
                 assert_schema_completeness()
-        assert "19" in str(exc_info.value)
+        assert str(_EXPECTED_TABLE_COUNT) in str(exc_info.value)
 
     def test_error_message_contains_actual_count(self):
         fake = frozenset({"only_one"})

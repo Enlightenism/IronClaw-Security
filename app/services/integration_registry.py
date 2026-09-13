@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+from app.core.install_key_formats import get_install_key_format_spec, normalize_install_key_program
+
 IntegrationStatus = Literal["planned", "active", "disabled", "deprecated"]
 IntegrationType = Literal["native", "adapter", "cli", "remote"]
 CapabilityName = Literal[
@@ -55,6 +57,11 @@ class IntegrationRecord:
     install_target: str | None = None
     capabilities: list[IntegrationCapability] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    install_key_program: str | None = None
+    install_key_family: str | None = None
+    install_key_prefix: str | None = None
+    install_key_aliases: list[str] = field(default_factory=list)
+    shared_install_key_family: bool = False
     created_at: str = field(default_factory=_utc_now)
     updated_at: str = field(default_factory=_utc_now)
 
@@ -73,6 +80,11 @@ class IntegrationRecord:
             "install_target": self.install_target,
             "capabilities": [capability.to_dict() for capability in self.capabilities],
             "metadata": dict(self.metadata),
+            "install_key_program": self.install_key_program,
+            "install_key_family": self.install_key_family,
+            "install_key_prefix": self.install_key_prefix,
+            "install_key_aliases": list(self.install_key_aliases),
+            "shared_install_key_family": self.shared_install_key_family,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -111,6 +123,54 @@ class IntegrationRegistry:
         return summarize_integration_registry(self)
 
 
+def _hydrate_install_key_metadata(record: IntegrationRecord) -> IntegrationRecord:
+    metadata = dict(record.metadata or {})
+    candidates: list[str | None] = [
+        record.slug,
+        record.platform,
+        metadata.get("runtime"),
+        metadata.get("program"),
+        metadata.get("install_key_program"),
+        metadata.get("platform"),
+    ]
+
+    normalized_program: str | None = None
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        program = normalize_install_key_program(str(candidate).strip())
+        if program is not None:
+            normalized_program = program
+            break
+
+    if normalized_program is not None:
+        spec = get_install_key_format_spec(normalized_program)
+        record.install_key_program = spec.program
+        record.install_key_family = spec.family
+        record.install_key_prefix = spec.prefix
+        record.install_key_aliases = list(dict.fromkeys(spec.platform_aliases))
+        record.shared_install_key_family = len(spec.platform_aliases) > 1 or spec.program == "security_guardian"
+        metadata["install_key_program"] = spec.program
+        metadata["install_key_family"] = spec.family
+        metadata["install_key_prefix"] = spec.prefix
+        metadata["install_key_aliases"] = list(record.install_key_aliases)
+        metadata["shared_install_key_family"] = record.shared_install_key_family
+        metadata.setdefault("runtime", spec.program)
+        metadata.setdefault("one_command_install", True)
+        if spec.command_template:
+            metadata.setdefault("command_template", spec.command_template)
+        record.metadata = metadata
+    else:
+        record.install_key_program = None
+        record.install_key_family = None
+        record.install_key_prefix = None
+        record.install_key_aliases = []
+        record.shared_install_key_family = False
+        record.metadata = metadata
+
+    return record
+
+
 def initialize_integration_registry() -> IntegrationRegistry:
     registry = IntegrationRegistry()
     for record in default_integrations():
@@ -119,7 +179,7 @@ def initialize_integration_registry() -> IntegrationRegistry:
 
 
 def default_integrations() -> list[IntegrationRecord]:
-    return [
+    records = [
         IntegrationRecord(
             integration_id="integration-claude-code",
             name="Claude Code Adapter",
@@ -452,6 +512,9 @@ def default_integrations() -> list[IntegrationRecord]:
             },
         ),
     ]
+    for record in records:
+        _hydrate_install_key_metadata(record)
+    return records
 
 
 def register_integration(
@@ -470,6 +533,7 @@ def register_integration(
     now = _utc_now()
     record.created_at = record.created_at or now
     record.updated_at = now
+    _hydrate_install_key_metadata(record)
     registry.items[record.integration_id] = record
     registry.updated_at = now
     return registry

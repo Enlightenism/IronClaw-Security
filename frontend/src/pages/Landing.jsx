@@ -119,6 +119,7 @@ const COUNTER_SITE_ALIASES = Object.freeze({
   "moving-forward.ca": "moving-forward.ca",
   "www.moving-forward.ca": "moving-forward.ca",
   "ironclaw-security.pages.dev": "ironclaw-security.pages.dev",
+  "www.ironclaw-security.pages.dev": "ironclaw-security.pages.dev",
   localhost: "localhost",
   "127.0.0.1": "localhost",
   "localhost:3000": "localhost",
@@ -127,18 +128,42 @@ const COUNTER_SITE_ALIASES = Object.freeze({
   "127.0.0.1:5173": "localhost",
 });
 
+const canonicalizeCounterHost = (hostname = "", port = "") => {
+  const normalizedHost = hostname.toLowerCase().trim();
+  const hostKey = port ? `${normalizedHost}:${port}` : normalizedHost;
+  const noWwwHost = normalizedHost.replace(/^www\./, "");
+
+  if (COUNTER_SITE_ALIASES[hostKey]) {
+    return COUNTER_SITE_ALIASES[hostKey];
+  }
+
+  if (COUNTER_SITE_ALIASES[normalizedHost]) {
+    return COUNTER_SITE_ALIASES[normalizedHost];
+  }
+
+  if (COUNTER_SITE_ALIASES[noWwwHost]) {
+    return COUNTER_SITE_ALIASES[noWwwHost];
+  }
+
+  if (!normalizedHost || normalizedHost === "localhost") {
+    return "localhost";
+  }
+
+  if (normalizedHost === "127.0.0.1") {
+    return "localhost";
+  }
+
+  return noWwwHost || "default";
+};
+
 const getCounterSiteAlias = () => {
   if (typeof window === "undefined") {
     return "default";
   }
 
-  const host = window.location.hostname.toLowerCase();
-  const port = window.location.port;
-  const hostKey = port ? `${host}:${port}` : host;
-  const fallbackHost = host.replace(/^www\./, "") || "default";
-
-  return (
-    COUNTER_SITE_ALIASES[hostKey] ?? COUNTER_SITE_ALIASES[host] ?? fallbackHost
+  return canonicalizeCounterHost(
+    window.location.hostname,
+    window.location.port,
   );
 };
 
@@ -178,6 +203,32 @@ const isCounterSnapshotFresh = (base, value, updatedAt) => {
   }
 
   return Date.now() - numericUpdatedAt <= 24 * 60 * 60 * 1000;
+};
+
+const chooseMonotonicCounterValue = (entries, base = 0) => {
+  const validEntries = entries.filter(({ value, updatedAt }) => {
+    const numericValue = Number(value);
+    const numericUpdatedAt = Number(updatedAt);
+    return (
+      Number.isFinite(numericValue) &&
+      Number.isFinite(numericUpdatedAt) &&
+      numericValue >= base
+    );
+  });
+
+  if (validEntries.length === 0) {
+    return { value: base, updatedAt: 0 };
+  }
+
+  validEntries.sort((left, right) => {
+    const valueDelta = Number(right.value) - Number(left.value);
+    if (valueDelta !== 0) {
+      return valueDelta;
+    }
+    return Number(right.updatedAt) - Number(left.updatedAt);
+  });
+
+  return validEntries[0];
 };
 
 const collectCounterCandidates = (storageKey) => {
@@ -298,13 +349,7 @@ const readPersistedCounterState = (storageKey, base) => {
     return defaultState;
   }
 
-  candidates.sort(
-    (left, right) =>
-      Number(right.value) - Number(left.value) ||
-      Number(right.updatedAt) - Number(left.updatedAt),
-  );
-
-  const bestCandidate = candidates[0];
+  const bestCandidate = chooseMonotonicCounterValue(candidates, base);
   return {
     value: normalizeCounterValue(base, bestCandidate.value),
     updatedAt: bestCandidate.updatedAt,
@@ -312,23 +357,20 @@ const readPersistedCounterState = (storageKey, base) => {
 };
 
 const syncPersistedCounterState = (storageKey, base, nextValue) => {
-  const existingState = readPersistedCounterState(storageKey, base);
-  const currentValue = Number(existingState.value);
   const safeValue = normalizeCounterValue(base, nextValue);
-  const effectiveValue = Math.max(base, safeValue, currentValue);
-  const snapshot = { value: effectiveValue, updatedAt: Date.now() };
+  const candidateValues = collectCounterCandidates(storageKey);
+  candidateValues.push({
+    value: safeValue,
+    updatedAt: Date.now(),
+    key: storageKey,
+  });
+  const highestCandidate = chooseMonotonicCounterValue(candidateValues, base);
+  const finalValue = normalizeCounterValue(base, highestCandidate.value);
+  const snapshot = { value: finalValue, updatedAt: Date.now() };
 
   if (typeof window !== "undefined") {
     globalThis.__IC_COUNTERS__ = globalThis.__IC_COUNTERS__ || {};
     const memoryKeys = getCounterKeys(storageKey);
-    const memoryValues = memoryKeys
-      .map((key) => Number(globalThis.__IC_COUNTERS__?.[key]?.value))
-      .filter(Number.isFinite);
-    const lastKnownValue =
-      memoryValues.length > 0
-        ? Math.max(base, ...memoryValues, currentValue)
-        : Math.max(base, currentValue);
-    const finalValue = Math.max(base, safeValue, lastKnownValue, currentValue);
 
     for (const key of memoryKeys) {
       globalThis.__IC_COUNTERS__[key] = {

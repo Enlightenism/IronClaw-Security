@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import math
 import os
+import time
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
@@ -357,6 +361,13 @@ def test_purchase_empty_package_id_returns_422(client: TestClient) -> None:
     assert resp.status_code == 422
 
 
+def _signed_stripe_payload(payload: dict[str, object], *, secret: str) -> tuple[bytes, str]:
+    raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    timestamp = str(int(time.time()))
+    signed = hmac.new(secret.encode("utf-8"), f"{timestamp}.".encode() + raw, hashlib.sha256).hexdigest()
+    return raw, f"t={timestamp},v1={signed}"
+
+
 def test_checkout_session_completed_webhook_fulfills_pending_purchase_and_credits_wallet(client: TestClient) -> None:
     owner = "webhook-buyer@ironclaw.test"
     create_resp = client.post(
@@ -371,31 +382,35 @@ def test_checkout_session_completed_webhook_fulfills_pending_purchase_and_credit
     assert create_resp.status_code == 201
     purchase_id = create_resp.json()["purchase"]["purchase_id"]
     checkout_session_id = "cs_webhook_fulfill_123"
+    payload = {
+        "id": "evt_webhook_001",
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": checkout_session_id,
+                "customer": "cus_webhook_123",
+                "payment_status": "paid",
+                "amount_total": 2000,
+                "currency": "usd",
+                "mode": "payment",
+                "customer_details": {"email": owner},
+                "metadata": {
+                    "owner_key": owner,
+                    "purchase_id": purchase_id,
+                    "buyer_email": owner,
+                    "package_id": "pkg_5000",
+                    "checkout_session_id": checkout_session_id,
+                },
+            }
+        },
+    }
+    os.environ["STRIPE_WEBHOOK_SECRET"] = "whsec_test_secret_value_123"
+    raw, signature = _signed_stripe_payload(payload, secret="whsec_test_secret_value_123")
 
     resp = client.post(
         "/billing/webhook",
-        json={
-            "id": "evt_webhook_001",
-            "type": "checkout.session.completed",
-            "data": {
-                "object": {
-                    "id": checkout_session_id,
-                    "customer": "cus_webhook_123",
-                    "payment_status": "paid",
-                    "amount_total": 2000,
-                    "currency": "usd",
-                    "mode": "payment",
-                    "customer_details": {"email": owner},
-                    "metadata": {
-                        "owner_key": owner,
-                        "purchase_id": purchase_id,
-                        "buyer_email": owner,
-                        "package_id": "pkg_5000",
-                        "checkout_session_id": checkout_session_id,
-                    },
-                }
-            },
-        },
+        content=raw,
+        headers={"stripe-signature": signature, "content-type": "application/json"},
     )
 
     assert resp.status_code == 200
@@ -410,6 +425,71 @@ def test_checkout_session_completed_webhook_fulfills_pending_purchase_and_credit
     wallet_resp = client.get(f"/billing/wallet/{owner}")
     assert wallet_resp.status_code == 200
     assert wallet_resp.json()["wallet"]["balance_units"] == 5_000
+
+
+def test_checkout_session_completed_webhook_rejects_missing_signature_and_replays_are_duplicate(client: TestClient) -> None:
+    owner = "webhook-idempotent@ironclaw.test"
+    create_resp = client.post(
+        _PURCHASE_PATH,
+        json={
+            "package_id": "pkg_5000",
+            "buyer_name": "Replay Buyer",
+            "buyer_email": owner,
+            "metadata": {},
+        },
+    )
+    assert create_resp.status_code == 201
+    purchase_id = create_resp.json()["purchase"]["purchase_id"]
+    checkout_session_id = "cs_webhook_replay_123"
+    payload = {
+        "id": "evt_webhook_002",
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": checkout_session_id,
+                "customer": "cus_webhook_replay",
+                "payment_status": "paid",
+                "amount_total": 2000,
+                "currency": "usd",
+                "mode": "payment",
+                "customer_details": {"email": owner},
+                "metadata": {
+                    "owner_key": owner,
+                    "purchase_id": purchase_id,
+                    "buyer_email": owner,
+                    "package_id": "pkg_5000",
+                    "checkout_session_id": checkout_session_id,
+                },
+            }
+        },
+    }
+    os.environ["STRIPE_WEBHOOK_SECRET"] = "whsec_test_secret_value_123"
+    bad_raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    missing_sig = client.post(
+        "/billing/webhook",
+        content=bad_raw,
+        headers={"content-type": "application/json"},
+    )
+    assert missing_sig.status_code == 400
+    assert missing_sig.json()["detail"]["reason"] == "missing_stripe_signature"
+
+    signed_raw, signature = _signed_stripe_payload(payload, secret="whsec_test_secret_value_123")
+    first = client.post(
+        "/billing/webhook",
+        content=signed_raw,
+        headers={"stripe-signature": signature, "content-type": "application/json"},
+    )
+    assert first.status_code == 200
+    assert first.json()["status"] == "fulfilled"
+
+    second = client.post(
+        "/billing/webhook",
+        content=signed_raw,
+        headers={"stripe-signature": signature, "content-type": "application/json"},
+    )
+    assert second.status_code == 200
+    assert second.json()["status"] == "duplicate"
+    assert second.json()["reason"] == "purchase_already_credited"
 
 
 # ---------------------------------------------------------------------------

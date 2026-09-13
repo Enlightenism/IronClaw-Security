@@ -290,6 +290,28 @@ describe("tier purchase buttons", () => {
       "Purchase action is unavailable.",
     );
   });
+
+  it("keeps purchase buttons in pending state while checkout redirect is in progress", async () => {
+    const user = userEvent.setup();
+    const onPurchase = jest.fn();
+    mockApiPost.mockImplementation(() =>
+      Promise.resolve({
+        data: { checkout_url: "https://checkout.stripe.test/pay" },
+      }),
+    );
+
+    await renderWalletCard({ onPurchase, organizationId: "org-001" });
+
+    await user.click(screen.getByTestId("purchase-pkg5000"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("purchase-pkg5000")).toBeDisabled();
+      expect(screen.getByTestId("purchase-pkg25000")).toBeDisabled();
+      expect(screen.getByTestId("purchase-pkg60000")).toBeDisabled();
+    });
+
+    expect(onPurchase).toHaveBeenCalledWith("pkg5000");
+  });
 });
 
 // =============================================================================

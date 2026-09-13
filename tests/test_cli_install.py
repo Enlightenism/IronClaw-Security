@@ -98,3 +98,36 @@ def test_cli_install_builds_canonical_command_only_for_active_paid_key(monkeypat
     assert "ic_install_openclaw_abc123" in result.install_command
     assert "--agent openclaw" in result.install_command
     assert "--scope user" in result.install_command
+
+
+def test_cli_install_rejects_generic_owner_identity_and_platform_auth(monkeypatch) -> None:
+    from cli import install as cli_install
+
+    fake_registry = SimpleNamespace(
+        authenticate_install_key=lambda candidate: SimpleNamespace(
+            active=True,
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=True,
+            owner_key="owner@example.com",
+            program="claude_code",
+            key_id="ik_claude_1",
+        )
+    )
+    monkeypatch.setattr(cli_install, "get_install_key_registry", lambda: fake_registry)
+
+    blocked_owner = build_operator_install_result(
+        platform="claude-code",
+        install_key="ic_install_claude_code_abc123",
+        owner_key="ghp_example_token",
+    )
+    blocked_generic = build_operator_install_result(
+        platform="claude-code",
+        install_key="sk_live_abc123",
+        owner_key="owner@example.com",
+    )
+
+    assert blocked_owner.status == "blocked"
+    assert blocked_owner.install_command is None
+    assert blocked_generic.status == "blocked"
+    assert blocked_generic.install_command is None

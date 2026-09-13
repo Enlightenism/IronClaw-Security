@@ -167,21 +167,29 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at  ON ironclaw_audit_logs (cr
 CREATE TABLE IF NOT EXISTS ironclaw_billing_purchases (
     purchase_id          TEXT        PRIMARY KEY,
     owner_key            TEXT        NOT NULL,
-    package_id           TEXT        NOT NULL,
-    checkout_session_id   TEXT,
     customer_id          TEXT,
+    buyer_name           TEXT        NOT NULL DEFAULT '',
     buyer_email          TEXT,
+    package_id           TEXT        NOT NULL,
+    package_name         TEXT        NOT NULL DEFAULT '',
+    checkout_session_id   TEXT,
+    purchase_reference   TEXT,
+    subscription_id      TEXT,
     payment_status       TEXT        NOT NULL DEFAULT 'pending',
     fulfillment_status   TEXT        NOT NULL DEFAULT 'pending',
     amount_total         NUMERIC(12,2) NOT NULL DEFAULT 0,
+    price_usd            NUMERIC(12,2) NOT NULL DEFAULT 0,
     currency             TEXT        NOT NULL DEFAULT 'usd',
     granted_units        INTEGER     NOT NULL DEFAULT 0,
+    token_coverage       INTEGER     NOT NULL DEFAULT 0,
+    tokens_per_unit      INTEGER     NOT NULL DEFAULT 25000,
     units_credited       BOOLEAN     NOT NULL DEFAULT FALSE,
     install_keys_ready   BOOLEAN     NOT NULL DEFAULT FALSE,
     metadata             JSONB       NOT NULL DEFAULT '{}'::jsonb,
     created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     fulfilled_at         TIMESTAMPTZ,
+    expires_at           TIMESTAMPTZ,
     CONSTRAINT ironclaw_billing_purchases_payment_status_check
         CHECK (payment_status IN ('pending', 'paid', 'failed', 'refunded', 'cancelled')),
     CONSTRAINT ironclaw_billing_purchases_fulfillment_status_check
@@ -192,13 +200,23 @@ CREATE TABLE IF NOT EXISTS ironclaw_billing_purchases (
         CHECK (char_length(trim(package_id)) > 0),
     CONSTRAINT ironclaw_billing_purchases_amount_total_check
         CHECK (amount_total >= 0),
+    CONSTRAINT ironclaw_billing_purchases_price_usd_check
+        CHECK (price_usd >= 0),
     CONSTRAINT ironclaw_billing_purchases_granted_units_check
-        CHECK (granted_units >= 0)
+        CHECK (granted_units >= 0),
+    CONSTRAINT ironclaw_billing_purchases_token_coverage_check
+        CHECK (token_coverage >= 0),
+    CONSTRAINT ironclaw_billing_purchases_tokens_per_unit_check
+        CHECK (tokens_per_unit > 0)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ironclaw_billing_purchases_checkout_session
     ON ironclaw_billing_purchases (checkout_session_id)
     WHERE checkout_session_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ironclaw_billing_purchases_purchase_reference
+    ON ironclaw_billing_purchases (purchase_reference)
+    WHERE purchase_reference IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_ironclaw_billing_purchases_owner_status
     ON ironclaw_billing_purchases (owner_key, payment_status, fulfillment_status, created_at DESC);
@@ -213,6 +231,8 @@ CREATE TRIGGER trg_ironclaw_billing_purchases_updated_at
 CREATE TABLE IF NOT EXISTS ironclaw_install_key_state (
     key_id                TEXT        PRIMARY KEY,
     purchase_id           TEXT        NOT NULL REFERENCES ironclaw_billing_purchases(purchase_id) ON DELETE RESTRICT,
+    purchase_reference    TEXT,
+    subscription_id       TEXT        NOT NULL DEFAULT '',
     owner_key             TEXT        NOT NULL,
     customer_id           TEXT,
     program               TEXT        NOT NULL,
@@ -235,7 +255,9 @@ CREATE TABLE IF NOT EXISTS ironclaw_install_key_state (
     CONSTRAINT ironclaw_install_key_state_raw_key_hash_not_empty_check
         CHECK (char_length(trim(raw_key_hash)) > 0),
     CONSTRAINT ironclaw_install_key_state_masked_key_not_empty_check
-        CHECK (char_length(trim(masked_key)) > 0)
+        CHECK (char_length(trim(masked_key)) > 0),
+    CONSTRAINT ironclaw_install_key_state_subscription_id_check
+        CHECK (char_length(trim(subscription_id)) > 0 OR subscription_id = '')
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ironclaw_install_key_state_active_owner_program
@@ -284,19 +306,25 @@ CREATE TABLE IF NOT EXISTS ironclaw_event_idempotency (
     source                TEXT        NOT NULL DEFAULT 'stripe',
     event_type            TEXT        NOT NULL,
     purchase_id           TEXT        REFERENCES ironclaw_billing_purchases(purchase_id) ON DELETE SET NULL,
+    purchase_reference    TEXT,
     checkout_session_id    TEXT,
     owner_key             TEXT,
     customer_id           TEXT,
     payload_hash          TEXT        NOT NULL,
+    status                TEXT        NOT NULL DEFAULT 'processed',
     processed_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at            TIMESTAMPTZ,
     metadata              JSONB       NOT NULL DEFAULT '{}'::jsonb,
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT ironclaw_event_idempotency_source_check
-        CHECK (source IN ('stripe', 'internal', 'webhook')),
+        CHECK (source IN ('stripe', 'internal', 'webhook', 'install_key', 'install_key_events')),
     CONSTRAINT ironclaw_event_idempotency_event_type_not_empty
         CHECK (char_length(trim(event_type)) > 0),
     CONSTRAINT ironclaw_event_idempotency_payload_hash_not_empty
-        CHECK (char_length(trim(payload_hash)) > 0)
+        CHECK (char_length(trim(payload_hash)) > 0),
+    CONSTRAINT ironclaw_event_idempotency_status_check
+        CHECK (status IN ('processed', 'duplicate', 'rejected', 'expired'))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ironclaw_event_idempotency_fingerprint

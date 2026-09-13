@@ -76,3 +76,36 @@ def test_update_rotates_only_when_existing_and_new_keys_are_verified(monkeypatch
     )
 
     assert result == "ic_install_openclaw_new"
+
+
+def test_update_reads_alias_key_names_and_rejects_generic_keys(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"install_keys": {"claude-code": "ic_install_claude_code_abc123"}}),
+        encoding="utf-8",
+    )
+
+    def fake_authenticate(candidate):
+        if candidate == "ic_install_claude_code_abc123":
+            return _make_key_record(program="claude_code", owner_key="owner@example.com")
+        return None
+
+    monkeypatch.setattr(update_cli, "get_install_key_registry", lambda: SimpleNamespace(authenticate_install_key=fake_authenticate))
+
+    assert (
+        update_cli._resolve_install_key_for_update(
+            config_path,
+            program="claude_code",
+            owner_key="owner@example.com",
+        )
+        == "ic_install_claude_code_abc123"
+    )
+    assert (
+        update_cli._resolve_install_key_for_update(
+            config_path,
+            program="claude_code",
+            proposed_install_key="sk_live_abc123",
+            owner_key="owner@example.com",
+        )
+        == "ic_install_claude_code_abc123"
+    )

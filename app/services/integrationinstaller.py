@@ -61,7 +61,7 @@ class IntegrationInstallResult:
 
 @dataclass(slots=True)
 class InstallStep:
-    stepid: str
+    step_id: str
     label: str
     completed: bool
     detail: str
@@ -69,11 +69,11 @@ class InstallStep:
 
 @dataclass(slots=True)
 class RouteInstallResult:
-    integrationid: str
+    integration_id: str
     status: str
     installed: bool
-    installedat: str | None
-    requestedby: str
+    installed_at: str | None
+    requested_by: str
     steps: list[InstallStep]
     summary: str
 
@@ -306,40 +306,41 @@ def build_integration_installer(
 class _RouteInstaller:
     def install_integration(
         self,
-        integrationid: str,
+        integration_id: str,
         *,
-        requestedby: str = "system",
+        requested_by: str = "system",
     ) -> RouteInstallResult | None:
         from app.services.integrationregistry import get_integration_registry
 
         registry = get_integration_registry()
-        record = registry.install_integration(integrationid)
+        record = registry.install_integration(integration_id)
         if record is None:
             return None
 
         from datetime import UTC, datetime
 
         now = datetime.now(UTC).isoformat()
+        installed_at = record.installedat or now
         steps: list[InstallStep] = [
             InstallStep(
-                stepid="step-preflight",
+                step_id="step-preflight",
                 label="Pre-flight check",
                 completed=True,
                 detail="integration record located",
             ),
             InstallStep(
-                stepid="step-install",
+                step_id="step-install",
                 label="Install runtime",
                 completed=True,
-                detail=f"installed at {record.installedat or now}",
+                detail=f"installed at {installed_at}",
             ),
         ]
         return RouteInstallResult(
-            integrationid=record.integrationid,
+            integration_id=record.integrationid,
             status=record.status,
             installed=True,
-            installedat=record.installedat or now,
-            requestedby=requestedby,
+            installed_at=installed_at,
+            requested_by=requested_by,
             steps=steps,
             summary=f"integration {record.integrationid} installed successfully",
         )

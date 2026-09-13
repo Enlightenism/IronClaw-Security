@@ -64,7 +64,10 @@ class IntegrationVerifier:
         missingcapabilities = self._collect_missing_capabilities(record)
         verified = all(check.passed for check in checks) and (not strict or not missingcapabilities)
 
-        status = "ready" if verified else "degraded"
+        if strict and missingcapabilities:
+            verified = False
+        status = "ready" if verified else ("blocked" if strict and missingcapabilities or any(not check.passed for check in checks) else "degraded")
+
         registry.update_status(record.integrationid, status, verified=verified)
 
         updated_record = registry.get_integration(record.integrationid)

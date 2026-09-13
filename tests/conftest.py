@@ -51,9 +51,9 @@ _TEST_SECRET_DEFAULTS: dict[str, str] = {
 
 def _seed_test_environment() -> None:
     for key, value in _TEST_ENV_DEFAULTS.items():
-        os.environ[key] = os.environ.get(key) or value
+        os.environ[key] = value
     for key, value in _TEST_SECRET_DEFAULTS.items():
-        os.environ[key] = os.environ.get(key) or value
+        os.environ[key] = value
 
 
 _seed_test_environment()
@@ -65,7 +65,6 @@ def _reset_runtime_singletons() -> None:
     _install_keys_module._reset_install_key_registry_for_testing()
 
     wallet = UnitWalletRegistry()
-    wallet._repo = _unit_wallet_module.MemoryUnitWalletRepository()
     _unit_wallet_module._unit_wallet_registry = wallet
 
     _app.dependency_overrides.clear()
@@ -131,11 +130,9 @@ def _refresh_app_settings() -> Generator[None, None, None]:
 @pytest.fixture(scope="function", autouse=True)
 def _reset_unit_wallet_registry() -> Generator[None, None, None]:
     fresh = UnitWalletRegistry()
-    fresh._repo = _unit_wallet_module.MemoryUnitWalletRepository()
     _unit_wallet_module._unit_wallet_registry = fresh
     yield
     fresh2 = UnitWalletRegistry()
-    fresh2._repo = _unit_wallet_module.MemoryUnitWalletRepository()
     _unit_wallet_module._unit_wallet_registry = fresh2
 
 

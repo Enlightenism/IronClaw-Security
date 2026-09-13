@@ -218,6 +218,12 @@ def test_resolve_billing_owner_rejects_generic_platform_org_scope() -> None:
     assert result == "buyer@ironclaw.test"
 
 
+def test_resolve_billing_owner_preserves_canonical_org_owner_key() -> None:
+    ctx = SimpleNamespace(key_type="org", org_id="IC_ORG_TEAM_123")
+    result = resolve_billing_owner(ctx, "Buyer@IronClaw.TEST")
+    assert result == "ic_org_team_123"
+
+
 def test_has_active_subscription_rejects_generic_platform_owner_key(registry: BillingRegistry) -> None:
     assert registry.has_active_subscription("system-platform-api-key") is False
 

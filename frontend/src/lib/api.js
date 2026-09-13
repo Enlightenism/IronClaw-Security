@@ -226,11 +226,69 @@ export const integrations = {
   getToken: () => api.get("/integrations/token"),
 };
 
+const getPaymentStatusValue = (value) => {
+  if (typeof value === "string") {
+    return value.trim().toLowerCase();
+  }
+  return value;
+};
+
+const getInstallKeyFromResponse = (response = {}) => {
+  const fulfilled =
+    response?.payment_status === "paid" || response?.status === "paid";
+
+  if (!fulfilled) {
+    return null;
+  }
+
+  const candidates = [
+    response?.install_key,
+    response?.installKey,
+    response?.generated_install_key,
+    response?.generatedInstallKey,
+    response?.key,
+    response?.data?.install_key,
+    response?.data?.installKey,
+    response?.data?.generated_install_key,
+    response?.data?.generatedInstallKey,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return null;
+};
+
 export const payments = {
   createCheckout: (payload) =>
     api.post("/billing/checkout/sessions", sanitizeCheckoutPayload(payload)),
   getStatus: (sessionId) =>
     api.get(`/billing/checkout/sessions/${encodeURIComponent(sessionId)}`),
+  getState: (response = {}) => {
+    const paymentStatus = getPaymentStatusValue(
+      response?.payment_status ?? response?.status ?? response?.state,
+    );
+
+    if (paymentStatus === "paid" || response?.paid === true) return "fulfilled";
+    if (
+      paymentStatus === "pending" ||
+      paymentStatus === "open" ||
+      paymentStatus === "requires_payment_method" ||
+      paymentStatus === "incomplete" ||
+      response?.checkout_url ||
+      response?.url
+    ) {
+      return "pending";
+    }
+
+    return "unknown";
+  },
+  isPending: (response = {}) => payments.getState(response) === "pending",
+  isFulfilled: (response = {}) => payments.getState(response) === "fulfilled",
+  getInstallKey: (response = {}) => getInstallKeyFromResponse(response),
 };
 
 export const paymentMethods = {

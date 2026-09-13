@@ -9,8 +9,12 @@ from ironclaw_sdk.exceptions import IronclawAPIError, IronclawAuthError, Ironcla
 from ironclaw_sdk.models import (
     BatchScanRequest,
     BatchScanResponse,
+    BillingPackagePurchaseRequest,
+    BillingPackagePurchaseResponse,
+    BillingPackagePurchaseView,
     GuardBundleRequest,
     GuardBundleResponse,
+    InstallKeysResponse,
     ScanRequest,
     ScanResponse,
 )
@@ -134,6 +138,116 @@ class IronclawClient:
             raise IronclawAPIError(
                 status_code=response.status_code,
                 body=f"Batch response validation failed: {exc}",
+            ) from exc
+
+    # ------------------------------------------------------------------
+    # Billing / purchase lifecycle
+    # ------------------------------------------------------------------
+
+    def purchase_package(
+        self,
+        *,
+        package_id: str,
+        buyer_name: str,
+        buyer_email: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> BillingPackagePurchaseResponse:
+        request = BillingPackagePurchaseRequest(
+            package_id=package_id,
+            buyer_name=buyer_name,
+            buyer_email=buyer_email,
+            metadata=metadata or {},
+        )
+        url = f"{self.base_url}/billing/purchase"
+
+        def _call() -> httpx.Response:
+            with httpx.Client(timeout=self._timeout, headers=self._headers()) as client:
+                return client.post(url, content=request.model_dump_json(exclude_none=True))
+
+        try:
+            response = execute_with_retry(_call)
+        except IronclawTimeoutError:
+            raise
+        except IronclawAuthError:
+            raise
+
+        self._handle_response(response)
+
+        try:
+            payload = response.json()
+            return BillingPackagePurchaseResponse.model_validate(payload)
+        except Exception as exc:
+            raise IronclawAPIError(
+                status_code=response.status_code,
+                body=f"Billing purchase response validation failed: {exc}",
+            ) from exc
+
+    def get_purchase_status(self, purchase_id: str) -> BillingPackagePurchaseView:
+        url = f"{self.base_url}/billing/purchases"
+
+        def _call() -> httpx.Response:
+            with httpx.Client(timeout=self._timeout, headers=self._headers()) as client:
+                return client.get(url, params={"limit": 100})
+
+        try:
+            response = execute_with_retry(_call)
+        except IronclawTimeoutError:
+            raise
+        except IronclawAuthError:
+            raise
+
+        self._handle_response(response)
+
+        try:
+            payload = response.json()
+        except Exception as exc:
+            raise IronclawAPIError(
+                status_code=response.status_code,
+                body=f"Billing purchase list response was not JSON: {exc}",
+            ) from exc
+
+        items = payload.get("purchases", []) if isinstance(payload, dict) else []
+        for item in items:
+            if str(item.get("purchase_id") or "") == purchase_id:
+                try:
+                    return BillingPackagePurchaseView.model_validate(item)
+                except Exception as exc:
+                    raise IronclawAPIError(
+                        status_code=response.status_code,
+                        body=f"Purchase response validation failed: {exc}",
+                    ) from exc
+
+        raise IronclawAPIError(
+            status_code=404,
+            body=f"Purchase {purchase_id!r} was not found in the billing list response.",
+        )
+
+    # ------------------------------------------------------------------
+    # Install keys
+    # ------------------------------------------------------------------
+
+    def get_my_install_keys(self, owner_key: str) -> InstallKeysResponse:
+        url = f"{self.base_url}/install-keys/my-keys"
+
+        def _call() -> httpx.Response:
+            with httpx.Client(timeout=self._timeout, headers={**self._headers(), "X-Owner-Key": owner_key}) as client:
+                return client.get(url)
+
+        try:
+            response = execute_with_retry(_call)
+        except IronclawTimeoutError:
+            raise
+        except IronclawAuthError:
+            raise
+
+        self._handle_response(response)
+
+        try:
+            return InstallKeysResponse.model_validate(response.json())
+        except Exception as exc:
+            raise IronclawAPIError(
+                status_code=response.status_code,
+                body=f"Install keys response validation failed: {exc}",
             ) from exc
 
     # ------------------------------------------------------------------

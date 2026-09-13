@@ -22,6 +22,7 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
 os.environ.setdefault("SUPABASE_KEY", "")
 os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
+from app.core.unit_wallet import get_unit_wallet_registry
 from app.services.stripe_service import (
     PACKAGE_CATALOGUE,
     CheckoutSessionResponse,
@@ -584,6 +585,30 @@ class TestUnitBalanceLedger:
         svc.credit_units(_TEST_ORG, _PKG_STARTER_UNITS, StripeUnitEventReason.CHECKOUT_COMPLETE)
         resp = svc.credit_units(_TEST_ORG, _PKG_STARTER_UNITS, StripeUnitEventReason.MANUAL_CREDIT)
         assert resp.balance == _PKG_STARTER_UNITS * 2
+
+    def test_credit_units_syncs_with_canonical_wallet_registry(self, svc: StripeService) -> None:
+        registry = get_unit_wallet_registry()
+        owner_key = f"ic_org_{_TEST_ORG}"
+        registry.get_wallet(owner_key)
+
+        resp = svc.credit_units(_TEST_ORG, 25, StripeUnitEventReason.CHECKOUT_COMPLETE)
+
+        assert resp.balance == 25
+        wallet = registry.get_wallet(owner_key)
+        assert wallet is not None
+        assert wallet.balance_units == 25
+
+    def test_debit_units_syncs_with_canonical_wallet_registry(self, svc: StripeService) -> None:
+        registry = get_unit_wallet_registry()
+        owner_key = f"ic_org_{_TEST_ORG}"
+        svc.credit_units(_TEST_ORG, 40, StripeUnitEventReason.CHECKOUT_COMPLETE)
+
+        resp = svc.debit_units(_TEST_ORG, 15, StripeUnitEventReason.METERED_SYNC)
+
+        assert resp.balance == 25
+        wallet = registry.get_wallet(owner_key)
+        assert wallet is not None
+        assert wallet.balance_units == 25
 
     def test_credit_units_zero_raises(self, svc: StripeService) -> None:
         with pytest.raises(StripeServiceError):

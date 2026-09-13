@@ -103,6 +103,57 @@ def test_install_key_debit_rejects_generic_platform_key_id() -> None:
         )
 
 
+def test_supabase_configured_uses_supabase_repository(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.core.unit_wallet as wallet_module
+
+    monkeypatch.setenv("IRONCLAW_PERSISTENCE_MODE", "supabase")
+    monkeypatch.setattr("app.supabaseclient.is_supabase_configured", lambda settings=None: True, raising=False)
+
+    class _FakeTable:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def select(self, columns: str = "*", *, count: str | None = None):
+            self.calls.append(("select", columns))
+            return self
+
+        def limit(self, value: int):
+            self.calls.append(("limit", value))
+            return self
+
+        def eq(self, column: str, value):
+            self.calls.append(("eq", column, value))
+            return self
+
+        def execute(self):
+            return type("Result", (), {"data": []})()
+
+    class _FakeClient:
+        def table(self, table_name: str):
+            return _FakeTable()
+
+    monkeypatch.setattr("app.supabaseclient.get_supabase_client", lambda: _FakeClient(), raising=False)
+
+    registry = wallet_module.UnitWalletRegistry()
+    assert isinstance(registry._repo, wallet_module.SupabaseUnitWalletRepository)
+
+
+def test_supabase_configured_schema_drift_falls_back_to_memory(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.core.unit_wallet as wallet_module
+
+    monkeypatch.setenv("IRONCLAW_PERSISTENCE_MODE", "supabase")
+    monkeypatch.setattr("app.supabaseclient.is_supabase_configured", lambda settings=None: True, raising=False)
+
+    class _BrokenClient:
+        def table(self, table_name: str):
+            raise RuntimeError(f'relation "{table_name}" does not exist')
+
+    monkeypatch.setattr("app.supabaseclient.get_supabase_client", lambda: _BrokenClient(), raising=False)
+
+    registry = wallet_module.UnitWalletRegistry()
+    assert isinstance(registry._repo, wallet_module.MemoryUnitWalletRepository)
+
+
 def test_successful_payment_credit_is_metadata_gated_and_recorded_in_ledger() -> None:
     registry = UnitWalletRegistry()
     wallet = registry.credit_units(

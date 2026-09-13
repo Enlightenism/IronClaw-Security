@@ -522,6 +522,54 @@ def test_api_integrations_token_ignores_generic_platform_auth_even_with_registry
     assert "system-platform-api-key" not in str(payload)
 
 
+def test_integration_token_exposes_registry_normalized_platform_aliases(client: TestClient) -> None:
+    auth_context = SimpleNamespace(
+        api_key="api-key",
+        principal_id="owner-456",
+        org_id=None,
+        key_type="personal",
+    )
+    registry = SimpleNamespace(
+        get_keys_for_owner=lambda owner_key: [
+            SimpleNamespace(
+                owner_key="owner-456",
+                program="claude_code",
+                active=True,
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+                masked_key="ic_install_claude_code_...abc",
+            ),
+            SimpleNamespace(
+                owner_key="owner-456",
+                program="gemini_cli",
+                active=True,
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+                masked_key="ic_install_gemini_cli_...xyz",
+            ),
+        ]
+    )
+
+    app = client.app
+    app.dependency_overrides[get_auth_context] = lambda: auth_context
+    try:
+        with patch("app.api.routes.integrations.get_install_key_registry", return_value=registry):
+            response = client.get("/integrations/token")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["install_metadata"]["claude-code"]["program"] == "claude_code"
+    assert payload["install_metadata"]["claude-code"]["platform"] == "claude-code"
+    assert payload["install_metadata"]["claude-code"]["slug"] == "claude-code"
+    assert payload["command_metadata"]["claude-code"].endswith("...abc")
+    assert payload["command_metadata"]["gemini-cli"].endswith("...xyz")
+    assert "claude_code" not in payload["command_metadata"]
+
+
 def test_integration_token_rejects_generic_platform_api_key_owner_fallback(client: TestClient) -> None:
     auth_context = SimpleNamespace(
         api_key="system-platform-api-key",

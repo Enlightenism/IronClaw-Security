@@ -38,7 +38,7 @@ from app.supabaseclient import (
 _VALID_URL = "https://test.supabase.co"
 _VALID_KEY = "service-role-key-abc123"
 
-_ALL_19_TABLES: frozenset[str] = frozenset(
+_ALL_27_TABLES: frozenset[str] = frozenset(
     {
         "scan_history",
         "scan_patterns",
@@ -59,6 +59,14 @@ _ALL_19_TABLES: frozenset[str] = frozenset(
         "sandbox_execution_log",
         "webhook_subscriptions",
         "webhook_deliveries",
+        "billing_purchases",
+        "install_key_records",
+        "install_key_issuance_history",
+        "event_idempotency_ledger",
+        "ironclaw_billing_purchases",
+        "ironclaw_install_key_state",
+        "ironclaw_install_key_history",
+        "ironclaw_event_idempotency",
     }
 )
 
@@ -134,11 +142,11 @@ class TestIronclawTables:
     def test_is_frozenset(self) -> None:
         assert isinstance(IRONCLAW_TABLES, frozenset)
 
-    def test_exact_count_is_19(self) -> None:
-        assert len(IRONCLAW_TABLES) == 19, f"Expected 19 tables, got {len(IRONCLAW_TABLES)}. Present: {sorted(IRONCLAW_TABLES)}"
+    def test_exact_count_is_27(self) -> None:
+        assert len(IRONCLAW_TABLES) == 27, f"Expected 27 tables, got {len(IRONCLAW_TABLES)}. Present: {sorted(IRONCLAW_TABLES)}"
 
     def test_matches_canonical_set(self) -> None:
-        assert IRONCLAW_TABLES == _ALL_19_TABLES, f"Missing: {_ALL_19_TABLES - IRONCLAW_TABLES}  Extra: {IRONCLAW_TABLES - _ALL_19_TABLES}"
+        assert IRONCLAW_TABLES == _ALL_27_TABLES, f"Missing: {_ALL_27_TABLES - IRONCLAW_TABLES}  Extra: {IRONCLAW_TABLES - _ALL_27_TABLES}"
 
     def test_webhook_delivery_log_is_absent(self) -> None:
         assert "webhook_delivery_log" not in IRONCLAW_TABLES
@@ -193,6 +201,30 @@ class TestIronclawTables:
 
     def test_rate_limit_state_present(self) -> None:
         assert "rate_limit_state" in IRONCLAW_TABLES
+
+    def test_billing_purchases_present(self) -> None:
+        assert "billing_purchases" in IRONCLAW_TABLES
+
+    def test_install_key_records_present(self) -> None:
+        assert "install_key_records" in IRONCLAW_TABLES
+
+    def test_install_key_issuance_history_present(self) -> None:
+        assert "install_key_issuance_history" in IRONCLAW_TABLES
+
+    def test_event_idempotency_ledger_present(self) -> None:
+        assert "event_idempotency_ledger" in IRONCLAW_TABLES
+
+    def test_ironclaw_billing_purchases_present(self) -> None:
+        assert "ironclaw_billing_purchases" in IRONCLAW_TABLES
+
+    def test_ironclaw_install_key_state_present(self) -> None:
+        assert "ironclaw_install_key_state" in IRONCLAW_TABLES
+
+    def test_ironclaw_install_key_history_present(self) -> None:
+        assert "ironclaw_install_key_history" in IRONCLAW_TABLES
+
+    def test_ironclaw_event_idempotency_present(self) -> None:
+        assert "ironclaw_event_idempotency" in IRONCLAW_TABLES
 
     def test_agent_trust_profiles_present(self) -> None:
         assert "agent_trust_profiles" in IRONCLAW_TABLES

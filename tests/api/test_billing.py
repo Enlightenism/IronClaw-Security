@@ -133,6 +133,27 @@ def test_purchase_billing_package_creates_pending_purchase_without_crediting_wal
     assert durable_record.metadata["owner_key"] == "alice@example.com"
 
 
+def test_canonical_purchase_contract_exposes_lifecycle_fields() -> None:
+    auth_ctx = _PERSONAL_AUTH
+    request = canonical_billing.BillingPackagePurchaseRequest(
+        package_id="pkg_5000",
+        buyer_name="Canonical Buyer",
+        buyer_email="canonical@example.com",
+        metadata={"source": "canonical-contract"},
+    )
+    response = canonical_billing.purchase_package(request, auth_ctx=auth_ctx)
+
+    purchase = response.purchase
+    assert purchase.payment_status == "pending"
+    assert purchase.entitlement_status == "not_active"
+    assert purchase.install_key_id is None
+    assert purchase.masked_key is None
+    assert purchase.program is None
+    assert purchase.usage_summary == {}
+    assert purchase.metadata["payment_status"] == "pending"
+    assert purchase.metadata["fulfillment_status"] == "pending"
+
+
 def test_pending_purchase_fulfills_into_paid_wallet_and_active_install_entitlement() -> None:
     with _client_for(_PERSONAL_AUTH) as c:
         create = c.post(

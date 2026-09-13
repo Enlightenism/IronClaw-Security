@@ -349,6 +349,7 @@ const Dashboard = () => {
   const [pointerGlow, setPointerGlow] = useState({ x: 50, y: 25 });
   const [scrollShift, setScrollShift] = useState(0);
   const [copiedInstallKey, setCopiedInstallKey] = useState("");
+  const [paymentState, setPaymentState] = useState("idle");
   const polledRef = useRef(false);
 
   const isAuthenticated = Boolean(user || session);
@@ -370,17 +371,40 @@ const Dashboard = () => {
     const existingRegistry = store.__controllers;
     const nextRegistry = new Map();
 
+    const registerCounter = (key, value) => {
+      if (!key || !isCounterSnapshot(value)) {
+        return;
+      }
+
+      const currentEntry = nextRegistry.get(key);
+      if (!currentEntry) {
+        nextRegistry.set(key, {
+          value: Number(value.value),
+          updatedAt: Number(value.updatedAt),
+        });
+        return;
+      }
+
+      const currentValue = Number(currentEntry.value);
+      const currentUpdatedAt = Number(currentEntry.updatedAt);
+      const nextValue = Number(value.value);
+      const nextUpdatedAt = Number(value.updatedAt);
+
+      if (
+        nextValue > currentValue ||
+        (nextValue === currentValue && nextUpdatedAt > currentUpdatedAt)
+      ) {
+        nextRegistry.set(key, { value: nextValue, updatedAt: nextUpdatedAt });
+      }
+    };
+
     if (existingRegistry instanceof Map) {
       for (const [key, value] of existingRegistry.entries()) {
-        if (key && isCounterSnapshot(value)) {
-          nextRegistry.set(key, value);
-        }
+        registerCounter(key, value);
       }
     } else if (existingRegistry && typeof existingRegistry === "object") {
       Object.entries(existingRegistry).forEach(([key, value]) => {
-        if (key && isCounterSnapshot(value)) {
-          nextRegistry.set(key, value);
-        }
+        registerCounter(key, value);
       });
     }
 
@@ -395,8 +419,27 @@ const Dashboard = () => {
         return;
       }
 
-      if (!nextRegistry.has(key)) {
-        nextRegistry.set(key, currentValue);
+      const normalizedEntry = {
+        value: Number(currentValue.value),
+        updatedAt: Number(currentValue.updatedAt),
+      };
+
+      const existingEntry = nextRegistry.get(key);
+      if (!existingEntry) {
+        nextRegistry.set(key, normalizedEntry);
+        return;
+      }
+
+      const nextValue = Number(normalizedEntry.value);
+      const currentValueNumber = Number(existingEntry.value);
+      const nextUpdatedAt = Number(normalizedEntry.updatedAt);
+      const currentUpdatedAt = Number(existingEntry.updatedAt);
+
+      if (
+        nextValue > currentValueNumber ||
+        (nextValue === currentValueNumber && nextUpdatedAt > currentUpdatedAt)
+      ) {
+        nextRegistry.set(key, normalizedEntry);
       }
     });
 
@@ -531,6 +574,7 @@ const Dashboard = () => {
         );
 
         if (status?.payment_status === "paid") {
+          setPaymentState("paid");
           const units =
             Number(status?.unit_credits ?? status?.units ?? 0) ||
             getPackageUnits(packageId);
@@ -544,11 +588,14 @@ const Dashboard = () => {
         }
 
         if (status?.status === "expired") {
+          setPaymentState("expired");
           toast.dismiss("pay");
           toast.error("Payment session expired. Please try again.");
           setPurchasingId(null);
           return;
         }
+
+        setPaymentState("pending");
 
         setTimeout(() => pollPayment(sessionId, packageId, attempts + 1), 2000);
       } catch {
@@ -565,6 +612,7 @@ const Dashboard = () => {
     const packageId = normalizePackageId(params.get("package_id") || "");
 
     if (checkoutState === "cancel") {
+      setPaymentState("expired");
       toast.error("Checkout canceled.");
       navigate("/dashboard", { replace: true });
       setPurchasingId(null);
@@ -572,6 +620,7 @@ const Dashboard = () => {
     }
 
     if (checkoutState === "success" && !sessionId) {
+      setPaymentState("paid");
       toast.success("Checkout completed. Refreshing billing state...");
       fetchDashboard();
       navigate("/dashboard", { replace: true });
@@ -580,6 +629,7 @@ const Dashboard = () => {
     }
 
     if (sessionId && !polledRef.current) {
+      setPaymentState("pending");
       polledRef.current = true;
       toast.loading("Verifying your payment...", { id: "pay" });
       pollPayment(sessionId, packageId);
@@ -796,6 +846,43 @@ const Dashboard = () => {
       });
   }, [data?.install_keys, ownerKey]);
 
+  const sessionCheckoutId = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get("session_id") || "";
+  }, [location.search]);
+
+  const hasPaymentFulfillment = useMemo(() => {
+    if (sessionCheckoutId && paymentState !== "paid") {
+      return false;
+    }
+
+    if (data?.has_paid) {
+      return true;
+    }
+
+    if (data?.last_payment && typeof data.last_payment === "object") {
+      return true;
+    }
+
+    return ownerScopedInstallKeys.some((slot) => {
+      const program = normalizeProgramKey(slot?.program);
+      if (!program || program === "security_guardian") {
+        return false;
+      }
+
+      return (
+        String(slot?.status ?? "").toLowerCase() === "active" &&
+        Boolean(slot?.masked_key)
+      );
+    });
+  }, [
+    data?.has_paid,
+    data?.last_payment,
+    ownerScopedInstallKeys,
+    paymentState,
+    sessionCheckoutId,
+  ]);
+
   const installKeyCards = useMemo(() => {
     const selectedByProgram = new Map();
 
@@ -833,7 +920,11 @@ const Dashboard = () => {
         masked_key: "",
         metadata: {},
       };
-      const isActive = slot?.status === "active" && Boolean(slot?.masked_key);
+      const effectiveStatus = hasPaymentFulfillment
+        ? (slot?.status ?? "locked")
+        : "locked";
+      const isActive =
+        effectiveStatus === "active" && Boolean(slot?.masked_key);
       const placeholderText =
         slot?.metadata?.placeholder_text ||
         slot?.metadata?.placeholder ||
@@ -846,12 +937,12 @@ const Dashboard = () => {
         tint,
         commandKey,
         testid: `install-key-card-${program}`,
-        status: slot?.status ?? "locked",
+        status: effectiveStatus,
         maskedKey: isActive ? slot.masked_key : "",
         placeholderText,
       };
     });
-  }, [ownerScopedInstallKeys]);
+  }, [hasPaymentFulfillment, ownerScopedInstallKeys]);
 
   const integrationCards = useMemo(() => {
     const hasUnlockedToken =

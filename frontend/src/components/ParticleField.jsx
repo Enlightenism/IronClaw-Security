@@ -35,6 +35,20 @@ const ParticleField = ({ density = 180, paused = false }) => {
       return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     };
 
+    const getCanvasMetrics = () => {
+      const rect = canvas.getBoundingClientRect();
+      const nextWidth = Math.max(
+        0,
+        rect.width || canvas.clientWidth || canvas.offsetWidth || 0,
+      );
+      const nextHeight = Math.max(
+        0,
+        rect.height || canvas.clientHeight || canvas.offsetHeight || 0,
+      );
+
+      return { width: nextWidth, height: nextHeight };
+    };
+
     const getParticleCount = () => {
       const normalizedDensity = Number.isFinite(Number(density))
         ? Number(density)
@@ -240,8 +254,9 @@ const ParticleField = ({ density = 180, paused = false }) => {
     };
 
     const resize = () => {
-      width = canvas.offsetWidth || canvas.clientWidth || 0;
-      height = canvas.offsetHeight || canvas.clientHeight || 0;
+      const metrics = getCanvasMetrics();
+      width = metrics.width;
+      height = metrics.height;
       if (!width || !height) {
         return;
       }
@@ -293,7 +308,12 @@ const ParticleField = ({ density = 180, paused = false }) => {
     };
 
     const startLoop = () => {
-      if (paused || document.hidden || rafRef.current !== null) {
+      if (
+        prefersReducedMotion() ||
+        paused ||
+        document.hidden ||
+        rafRef.current !== null
+      ) {
         return;
       }
       lastFrameTimeRef.current = 0;
@@ -339,7 +359,7 @@ const ParticleField = ({ density = 180, paused = false }) => {
     };
 
     const handleVisibilityChange = () => {
-      isPaused = document.hidden || paused;
+      isPaused = document.hidden || paused || prefersReducedMotion();
       if (isPaused) {
         clearPointer();
         stopLoop();
@@ -351,12 +371,23 @@ const ParticleField = ({ density = 180, paused = false }) => {
       startLoop();
     };
 
+    const handleViewportResize = () => {
+      resize();
+      if (prefersReducedMotion() || paused || document.hidden) {
+        renderFrame();
+        return;
+      }
+      startLoop();
+    };
+
     resize();
     renderFrame();
-    if (!paused && !document.hidden) {
+    if (!paused && !document.hidden && !prefersReducedMotion()) {
       startLoop();
     }
-    window.addEventListener("resize", resize);
+    window.addEventListener("resize", handleViewportResize);
+    window.visualViewport?.addEventListener("resize", handleViewportResize);
+    window.visualViewport?.addEventListener("scroll", handleViewportResize);
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerdown", onPointerDown);
     window.addEventListener("pointerup", onPointerLeave);
@@ -368,7 +399,15 @@ const ParticleField = ({ density = 180, paused = false }) => {
       isPaused = true;
       clearPointer();
       stopLoop();
-      window.removeEventListener("resize", resize);
+      window.removeEventListener("resize", handleViewportResize);
+      window.visualViewport?.removeEventListener(
+        "resize",
+        handleViewportResize,
+      );
+      window.visualViewport?.removeEventListener(
+        "scroll",
+        handleViewportResize,
+      );
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("pointerup", onPointerLeave);

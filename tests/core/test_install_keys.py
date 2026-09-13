@@ -570,6 +570,20 @@ class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
                     purchase_reference=_PURCHASE_REFERENCE,
                 )
 
+    def test_generate_for_paid_customer_rejects_install_key_value_as_owner(self):
+        reg = self._registry()
+        with self.assertRaises(ValueError):
+            reg.generate_for_paid_customer(
+                owner_key="ic_install_openclaw_secret_value_123",
+                subscription_id=_SUB_ID,
+                program="openclaw",
+                payment_status="paid",
+                entitlements_status="active",
+                issued_after_payment=True,
+                checkout_session_id=_CHECKOUT_SESSION_ID,
+                purchase_reference=_PURCHASE_REFERENCE,
+            )
+
     def test_raw_key_prefix_must_match_program(self):
         with self.assertRaises(ValueError):
             InstallKeyRecord(

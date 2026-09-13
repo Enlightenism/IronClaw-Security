@@ -260,7 +260,7 @@ describe("auth redirect", () => {
     expect(globalThis.__IC_COUNTERS__.__controllers).toBeInstanceOf(Map);
     expect(
       globalThis.__IC_COUNTERS__.__controllers.get("ic_threats_blocked"),
-    ).toMatchObject({ value: 732 });
+    ).toMatchObject({ value: 980 });
   });
 
   it("preserves valid shared counter values when the dashboard registry is incomplete during mount", async () => {
@@ -439,6 +439,61 @@ describe("WalletCard organizationId prop", () => {
 // =============================================================================
 
 describe("session_id payment polling", () => {
+  it("keeps install keys in placeholder state until payment fulfillment is confirmed", async () => {
+    mockLocation.search = "?session_id=cs_test_pending&package_id=pkg_5000";
+
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard/overview") {
+        return Promise.resolve({
+          data: {
+            ...DEFAULT_DASH,
+            install_keys: [
+              {
+                program: "claude_code",
+                status: "active",
+                masked_key: "ic_install_claude_code_...paid",
+                metadata: {},
+              },
+            ],
+          },
+        });
+      }
+      if (url === "/integrations/token") {
+        return Promise.resolve({ data: DEFAULT_TOKENS });
+      }
+      if (url === "/billing/checkout/sessions/cs_test_pending") {
+        return Promise.resolve({
+          data: { payment_status: "pending", status: "open" },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    await renderDashboard();
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("install-key-card-claude_code-value"),
+      ).toHaveValue("Keys will be generated after purchase");
+    });
+  });
+
+  it("does not downgrade the shared counter registry when a lower-valued URL snapshot is rehydrated", async () => {
+    globalThis.__IC_COUNTERS__ = {
+      ic_threats_blocked: { value: 1500, updatedAt: Date.now() },
+      __controllers: new Map([
+        ["ic_threats_blocked", { value: 1200, updatedAt: Date.now() - 5000 }],
+      ]),
+    };
+
+    await renderDashboard();
+
+    expect(globalThis.__IC_COUNTERS__.__controllers).toBeInstanceOf(Map);
+    expect(
+      globalThis.__IC_COUNTERS__.__controllers.get("ic_threats_blocked"),
+    ).toMatchObject({ value: 1500 });
+  });
+
   it("fires toast.loading and navigates replace on session_id in URL", async () => {
     mockLocation.search = "?session_id=cs_test_abc&package_id=pkg_5000";
 

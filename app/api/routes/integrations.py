@@ -24,63 +24,33 @@ _CANONICAL_PLATFORM_ORDER: tuple[str, ...] = (
 
 _RUNTIME_PROGRAMS: frozenset[str] = frozenset(InstallKeyFormatRegistry.list_programs())
 
+
+def _runtime_command_template(program: str) -> str:
+    normalized = InstallKeyFormatRegistry.normalize_program(program)
+    if normalized == "hermes":
+        return "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key {key}"
+    platform_slug = (normalized or str(program)).replace("_", "-")
+    return f"gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent {platform_slug} --scope user --key {{key}}"
+
+
 _SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
-    "claude-code": {
-        "program": "claude_code",
-        "platform": "claude-code",
-        "slug": "claude-code",
+    key: {
+        "program": program,
+        "platform": key,
+        "slug": key,
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key {key}",
-    },
-    "openclaw": {
-        "program": "openclaw",
-        "platform": "openclaw",
-        "slug": "openclaw",
-        "shared_package": False,
-        "shared_install_key_family": False,
-        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user --key {key}",
-    },
-    "cursor": {
-        "program": "cursor",
-        "platform": "cursor",
-        "slug": "cursor",
-        "shared_package": False,
-        "shared_install_key_family": False,
-        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user --key {key}",
-    },
-    "goose": {
-        "program": "goose",
-        "platform": "goose",
-        "slug": "goose",
-        "shared_package": False,
-        "shared_install_key_family": False,
-        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user --key {key}",
-    },
-    "gemini-cli": {
-        "program": "gemini_cli",
-        "platform": "gemini-cli",
-        "slug": "gemini-cli",
-        "shared_package": False,
-        "shared_install_key_family": False,
-        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user --key {key}",
-    },
-    "copilot": {
-        "program": "copilot",
-        "platform": "copilot",
-        "slug": "copilot",
-        "shared_package": False,
-        "shared_install_key_family": False,
-        "command_template": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user --key {key}",
-    },
-    "hermes": {
-        "program": "hermes",
-        "platform": "hermes",
-        "slug": "hermes",
-        "shared_package": False,
-        "shared_install_key_family": False,
-        "command_template": "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key {key}",
-    },
+        "command_template": _runtime_command_template(program),
+    }
+    for program, key in (
+        ("claude_code", "claude-code"),
+        ("openclaw", "openclaw"),
+        ("cursor", "cursor"),
+        ("goose", "goose"),
+        ("gemini_cli", "gemini-cli"),
+        ("copilot", "copilot"),
+        ("hermes", "hermes"),
+    )
 }
 
 

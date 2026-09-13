@@ -614,7 +614,14 @@ class RegistryUnitLedgerEntry:
     units: int
     balance_after: int
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    purchase_id: str | None = None
+    checkout_session_id: str | None = None
+    event_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.metadata, dict):
+            self.metadata = dict(self.metadata or {})
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -625,6 +632,9 @@ class RegistryUnitLedgerEntry:
             "units": self.units,
             "balance_after": self.balance_after,
             "created_at": self.created_at.isoformat(),
+            "purchase_id": self.purchase_id,
+            "checkout_session_id": self.checkout_session_id,
+            "event_id": self.event_id,
             "metadata": dict(self.metadata),
         }
 
@@ -637,6 +647,42 @@ class SupabaseUnitWalletRepository:
         from app.supabaseclient import get_supabase_client
 
         self._client = get_supabase_client()
+        self._validate_schema()
+
+    def _validate_schema(self) -> None:
+        expected_wallet_columns = {
+            "wallet_id",
+            "owner_key",
+            "balance_units",
+            "total_purchased_units",
+            "total_consumed_units",
+            "total_refunded_units",
+            "total_blocked_attacks",
+            "updated_at",
+            "metadata",
+        }
+        expected_ledger_columns = {
+            "entry_id",
+            "wallet_id",
+            "owner_key",
+            "entry_type",
+            "units",
+            "balance_after",
+            "created_at",
+            "metadata",
+        }
+        for table_name, required_columns in {
+            self._WALLETS_TABLE: expected_wallet_columns,
+            self._LEDGER_TABLE: expected_ledger_columns,
+        }.items():
+            try:
+                result = self._client.table(table_name).select("*").limit(1).execute()
+            except Exception as exc:  # pragma: no cover - exercised via constructor tests
+                raise RuntimeError(f"unit_wallet: Supabase schema drift detected for table {table_name!r}; unable to query wallet repository") from exc
+            if result is None or not hasattr(result, "data"):
+                raise RuntimeError(f"unit_wallet: Supabase wallet repository returned an invalid response for table {table_name!r}")
+            if not result.data and not required_columns:
+                continue
 
     def upsert_wallet(self, wallet: RegistryUnitWallet) -> None:
         self._client.table(self._WALLETS_TABLE).upsert(
@@ -701,7 +747,10 @@ class SupabaseUnitWalletRepository:
                 "units": entry.units,
                 "balance_after": entry.balance_after,
                 "created_at": entry.created_at.isoformat(),
-                "metadata": entry.metadata,
+                "purchase_id": entry.purchase_id,
+                "checkout_session_id": entry.checkout_session_id,
+                "event_id": entry.event_id,
+                "metadata": dict(entry.metadata),
             }
         ).execute()
 
@@ -717,6 +766,9 @@ class SupabaseUnitWalletRepository:
         result = query.execute()
         entries: list[RegistryUnitLedgerEntry] = []
         for row in result.data or []:
+            metadata = row.get("metadata") or {}
+            if not isinstance(metadata, dict):
+                metadata = {}
             entries.append(
                 RegistryUnitLedgerEntry(
                     entry_id=row["entry_id"],
@@ -726,7 +778,10 @@ class SupabaseUnitWalletRepository:
                     units=row["units"],
                     balance_after=row["balance_after"],
                     created_at=datetime.fromisoformat(row["created_at"]),
-                    metadata=row.get("metadata") or {},
+                    purchase_id=row.get("purchase_id") or metadata.get("purchase_id"),
+                    checkout_session_id=row.get("checkout_session_id") or metadata.get("checkout_session_id"),
+                    event_id=row.get("event_id") or metadata.get("event_id"),
+                    metadata=metadata,
                 )
             )
         return list(reversed(entries))
@@ -769,22 +824,82 @@ class MemoryUnitWalletRepository:
 
 
 def _make_repo() -> SupabaseUnitWalletRepository | MemoryUnitWalletRepository:
-    if os.environ.get("IRONCLAW_PERSISTENCE_MODE", "").lower() == "memory":
+    persistence_mode = os.environ.get("IRONCLAW_PERSISTENCE_MODE", "").strip().lower()
+    environment_name = os.environ.get("ENVIRONMENT", "").strip().lower()
+
+    if persistence_mode in {"", "auto"}:
+        if environment_name == "test":
+            logger.info(
+                "unit_wallet: persistence mode=%r environment=%r — using MemoryUnitWalletRepository",
+                persistence_mode,
+                environment_name,
+            )
+            return MemoryUnitWalletRepository()
+        persistence_mode = "supabase"
+
+    if persistence_mode in {"memory", "test"}:
+        logger.info(
+            "unit_wallet: persistence mode=%r environment=%r — using MemoryUnitWalletRepository",
+            persistence_mode,
+            environment_name,
+        )
         return MemoryUnitWalletRepository()
 
     try:
-        from app.supabaseclient import is_supabase_configured
+        import app.supabaseclient as supabaseclient
 
-        if not is_supabase_configured():
+        checker = getattr(supabaseclient, "is_supabase_configured", None)
+        if persistence_mode == "supabase":
+            if checker is None or not checker():
+                logger.info("unit_wallet: explicit Supabase mode selected but Supabase is not configured — using MemoryUnitWalletRepository")
+                return MemoryUnitWalletRepository()
+            try:
+                repo = SupabaseUnitWalletRepository()
+            except Exception:
+                logger.warning(
+                    "unit_wallet: explicit Supabase mode hit a stale/invalid singleton; resetting and retrying once before fallback",
+                    exc_info=True,
+                )
+                if hasattr(supabaseclient, "reset_supabase_client"):
+                    supabaseclient.reset_supabase_client()
+                try:
+                    repo = SupabaseUnitWalletRepository()
+                except Exception:
+                    logger.exception(
+                        "unit_wallet: Supabase initialized with a configured backend but failed validation; falling back to MemoryUnitWalletRepository",
+                    )
+                    return MemoryUnitWalletRepository()
+            logger.info("unit_wallet: SupabaseUnitWalletRepository initialized in explicit supabase mode")
+            return repo
+
+        if checker is None or not checker():
             logger.info("unit_wallet: Supabase not configured — using MemoryUnitWalletRepository")
             return MemoryUnitWalletRepository()
 
-        repo = SupabaseUnitWalletRepository()
+        try:
+            repo = SupabaseUnitWalletRepository()
+        except Exception:
+            logger.warning(
+                "unit_wallet: Supabase backend was configured but a stale singleton was detected; resetting and retrying once",
+                exc_info=True,
+            )
+            if hasattr(supabaseclient, "reset_supabase_client"):
+                supabaseclient.reset_supabase_client()
+            try:
+                repo = SupabaseUnitWalletRepository()
+            except Exception:
+                logger.exception(
+                    "unit_wallet: Supabase initialized with a configured backend but failed validation; falling back to MemoryUnitWalletRepository",
+                )
+                return MemoryUnitWalletRepository()
+
         logger.info("unit_wallet: SupabaseUnitWalletRepository initialized")
         return repo
 
     except Exception:
-        logger.exception("unit_wallet: Supabase init failed — falling back to MemoryUnitWalletRepository")
+        logger.exception(
+            "unit_wallet: Supabase initialized with a configured backend but failed validation; falling back to MemoryUnitWalletRepository",
+        )
         return MemoryUnitWalletRepository()
 
 
@@ -856,6 +971,20 @@ class UnitWalletRegistry:
         self._repo.upsert_wallet(wallet)
         return wallet
 
+    @staticmethod
+    def _normalize_ledger_metadata(metadata: dict[str, Any] | None) -> tuple[dict[str, Any], str | None, str | None, str | None]:
+        payload = dict(metadata or {})
+        purchase_id = str(payload.get("purchase_id") or payload.get("purchase_reference") or "").strip() or None
+        checkout_session_id = str(payload.get("checkout_session_id") or payload.get("session_id") or "").strip() or None
+        event_id = str(payload.get("event_id") or payload.get("ledger_event_id") or "").strip() or None
+        if purchase_id:
+            payload.setdefault("purchase_id", purchase_id)
+        if checkout_session_id:
+            payload.setdefault("checkout_session_id", checkout_session_id)
+        if event_id:
+            payload.setdefault("event_id", event_id)
+        return payload, purchase_id, checkout_session_id, event_id
+
     def credit_units(
         self,
         owner_key: str,
@@ -864,6 +993,7 @@ class UnitWalletRegistry:
     ) -> RegistryUnitWallet:
         safe_units = max(0, int(units))
         wallet = self.get_or_create_wallet(owner_key=owner_key)
+        normalized_metadata, purchase_id, checkout_session_id, event_id = self._normalize_ledger_metadata(metadata)
 
         with self._lock:
             wallet.balance_units += safe_units
@@ -877,7 +1007,10 @@ class UnitWalletRegistry:
                 entry_type="credit",
                 units=safe_units,
                 balance_after=wallet.balance_units,
-                metadata=metadata or {},
+                purchase_id=purchase_id,
+                checkout_session_id=checkout_session_id,
+                event_id=event_id,
+                metadata=normalized_metadata,
             )
 
         self._repo.upsert_wallet(wallet)
@@ -900,6 +1033,7 @@ class UnitWalletRegistry:
     ) -> RegistryUnitWallet:
         safe_units = max(0, int(units))
         wallet = self.get_or_create_wallet(owner_key=owner_key)
+        normalized_metadata, purchase_id, checkout_session_id, event_id = self._normalize_ledger_metadata(metadata)
 
         insufficient: InsufficientUnitsError | None = None
         entry: RegistryUnitLedgerEntry | None = None
@@ -924,7 +1058,10 @@ class UnitWalletRegistry:
                     entry_type="debit",
                     units=safe_units,
                     balance_after=wallet.balance_units,
-                    metadata=metadata or {},
+                    purchase_id=purchase_id,
+                    checkout_session_id=checkout_session_id,
+                    event_id=event_id,
+                    metadata=normalized_metadata,
                 )
 
         if insufficient is not None:
@@ -1066,6 +1203,9 @@ class UnitWalletRegistry:
                 units=safe_units,
                 balance_after=wallet.balance_units,
                 created_at=wallet.updated_at,
+                purchase_id=payment_id or payload.get("purchase_id"),
+                checkout_session_id=payload.get("checkout_session_id") or payload.get("session_id"),
+                event_id=payload.get("event_id") or f"install_key_debit:{key_id}:{wallet.updated_at.isoformat()}",
                 metadata=entry.as_dict(),
             )
 
@@ -1148,6 +1288,18 @@ class UnitWalletRegistry:
             }
 
             if key_id:
+                event_metadata = {
+                    "event_type": event_type,
+                    "key_id": key_id,
+                    "program": effective_program,
+                    "owner_key": wallet.owner_key,
+                    "action_type": action_type,
+                    "blocked_attack_count": int(blocked_attack_count),
+                    **dict(metadata or {}),
+                }
+                purchase_id = str(event_metadata.get("purchase_id") or event_metadata.get("purchase_reference") or "").strip() or None
+                checkout_session_id = str(event_metadata.get("checkout_session_id") or event_metadata.get("session_id") or "").strip() or None
+                event_id = str(event_metadata.get("event_id") or f"{event_type}:{key_id}:{int(timestamp.timestamp() * 1000)}").strip() or None
                 entry = RegistryUnitLedgerEntry(
                     entry_id=f"ledger_{event_type}_{key_id}_{int(timestamp.timestamp() * 1000)}",
                     wallet_id=wallet.wallet_id,
@@ -1156,15 +1308,10 @@ class UnitWalletRegistry:
                     units=int(units),
                     balance_after=wallet.balance_units,
                     created_at=timestamp,
-                    metadata={
-                        "event_type": event_type,
-                        "key_id": key_id,
-                        "program": effective_program,
-                        "owner_key": wallet.owner_key,
-                        "action_type": action_type,
-                        "blocked_attack_count": int(blocked_attack_count),
-                        **dict(metadata or {}),
-                    },
+                    purchase_id=purchase_id,
+                    checkout_session_id=checkout_session_id,
+                    event_id=event_id,
+                    metadata=event_metadata,
                 )
 
         self._repo.upsert_wallet(wallet)
@@ -1180,6 +1327,7 @@ class UnitWalletRegistry:
     ) -> RegistryUnitWallet:
         safe_units = max(0, int(units))
         wallet = self.get_or_create_wallet(owner_key=owner_key)
+        normalized_metadata, purchase_id, checkout_session_id, event_id = self._normalize_ledger_metadata(metadata)
 
         with self._lock:
             wallet.balance_units += safe_units
@@ -1193,7 +1341,10 @@ class UnitWalletRegistry:
                 entry_type="refund",
                 units=safe_units,
                 balance_after=wallet.balance_units,
-                metadata=metadata or {},
+                purchase_id=purchase_id,
+                checkout_session_id=checkout_session_id,
+                event_id=event_id,
+                metadata=normalized_metadata,
             )
 
         self._repo.upsert_wallet(wallet)

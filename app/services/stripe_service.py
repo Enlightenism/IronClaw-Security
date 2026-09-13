@@ -13,6 +13,8 @@ from typing import Any
 from uuid import uuid4
 
 from app.core.install_key_formats import InstallKeyFormatRegistry
+from app.core.install_keys import _read_event_ledger_record, _write_event_ledger_record
+from app.core.unit_wallet import get_unit_wallet_registry
 from app.services.install_key_provisioning import InstallKeyProvisioningService
 from app.services.secrets_vault import vault
 from app.supabaseclient import (
@@ -809,10 +811,107 @@ class StripeService:
         self._invoice_cache: dict[str, list[dict[str, Any]]] = {}
         self._idempotency_keys: dict[str, Any] = {}
         self._processed_event_ids: set[str] = set()
+        self._wallet_registry = get_unit_wallet_registry()
         self._client: _StripeHTTPClient | None = None
         self._on_insufficient_units = on_insufficient_units
         # Injected webhook secret — takes precedence over vault when set.
         self._webhook_secret_override: str | None = webhook_secret
+
+    @staticmethod
+    def _canonical_org_owner_key(org_id: str) -> str:
+        normalized = str(org_id).strip().lower()
+        if not normalized:
+            raise ValueError("org_id is required")
+        if normalized.startswith("ic_org_"):
+            return normalized
+        return f"ic_org_{normalized}"
+
+    def _sync_balances_from_wallet(self, org_id: str) -> UnitBalanceResponse:
+        owner_key = self._canonical_org_owner_key(org_id)
+        wallet = self._wallet_registry.get_wallet(owner_key)
+        if wallet is None:
+            with self._lock:
+                self._unit_balances[org_id] = 0
+                self._unit_ledger.setdefault(org_id, [])
+            return UnitBalanceResponse(org_id=org_id, balance=0, ledger_entries=[])
+
+        entries = self._wallet_registry.list_ledger_entries(owner_key=owner_key, limit=50)
+        response_entries = []
+        for entry in entries:
+            response_entries.append(
+                {
+                    "entry_id": entry.entry_id,
+                    "org_id": org_id,
+                    "delta": int(entry.units) if entry.entry_type in {"credit", "refund"} else -int(entry.units),
+                    "reason": str((entry.metadata or {}).get("stripe_reason") or entry.entry_type),
+                    "reference_id": (entry.metadata or {}).get("reference_id"),
+                    "balance_after": int(entry.balance_after),
+                    "recorded_at": entry.created_at.isoformat().replace("+00:00", "Z"),
+                }
+            )
+
+        with self._lock:
+            self._unit_balances[org_id] = wallet.balance_units
+            self._unit_ledger[org_id] = [
+                _UnitLedgerEntry(
+                    entry_id=e["entry_id"],
+                    org_id=org_id,
+                    delta=e["delta"],
+                    reason=e["reason"],
+                    reference_id=e["reference_id"],
+                    balance_after=e["balance_after"],
+                    recorded_at=e["recorded_at"],
+                )
+                for e in response_entries
+            ]
+
+        return UnitBalanceResponse(org_id=org_id, balance=wallet.balance_units, ledger_entries=response_entries)
+
+    def _has_processed_event(self, event_id: str | None, *, purchase_reference: str | None = None, checkout_session_id: str | None = None) -> bool:
+        if not event_id and not purchase_reference and not checkout_session_id:
+            return False
+        with self._lock:
+            if event_id and event_id in self._processed_event_ids:
+                return True
+        if event_id:
+            record = _read_event_ledger_record(event_id=event_id)
+            if record:
+                return True
+        if purchase_reference:
+            record = _read_event_ledger_record(purchase_reference=purchase_reference)
+            if record:
+                return True
+        if checkout_session_id:
+            record = _read_event_ledger_record(checkout_session_id=checkout_session_id)
+            if record:
+                return True
+        return False
+
+    def _mark_processed_event(
+        self,
+        *,
+        event_id: str,
+        event_type: str,
+        purchase_reference: str | None = None,
+        checkout_session_id: str | None = None,
+        owner_key: str | None = None,
+        customer_id: str | None = None,
+        program: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        with self._lock:
+            self._processed_event_ids.add(event_id)
+        event_payload = payload or {}
+        _write_event_ledger_record(
+            event_id=event_id,
+            event_type=event_type,
+            purchase_reference=purchase_reference,
+            checkout_session_id=checkout_session_id,
+            owner_key=owner_key,
+            customer_id=customer_id,
+            program=program,
+            payload=event_payload,
+        )
 
     # ------------------------------------------------------------------
     # Config / client
@@ -1464,44 +1563,34 @@ class StripeService:
     ) -> UnitBalanceResponse:
         """
         Credit units to an org's balance and record a ledger entry.
-        Thread-safe; safe to call from webhook handlers.
-        Each unit protects up to TOKENS_PER_UNIT (25,000) tokens.
+        This path is consolidated with the canonical UnitWalletRegistry so that
+        the Stripe service cannot drift from the durable wallet state.
         """
         if amount <= 0:
             raise StripeServiceError("credit amount must be > 0")
 
+        owner_key = self._canonical_org_owner_key(org_id)
+        wallet = self._wallet_registry.credit_units(
+            owner_key,
+            amount,
+            metadata={
+                "stripe_reason": reason.value,
+                "reference_id": reference_id,
+                "source": "stripe_service",
+            },
+        )
         with self._lock:
-            current = self._unit_balances.get(org_id, 0)
-            new_balance = current + amount
-            self._unit_balances[org_id] = new_balance
-
-            entry = _UnitLedgerEntry(
-                entry_id=_new_id("ule"),
-                org_id=org_id,
-                delta=amount,
-                reason=reason.value,
-                reference_id=reference_id,
-                balance_after=new_balance,
-                recorded_at=_utcnow_iso(),
-            )
-            if org_id not in self._unit_ledger:
-                self._unit_ledger[org_id] = []
-            self._unit_ledger[org_id].append(entry)
-            ledger_snapshot = [e.to_dict() for e in self._unit_ledger[org_id][-50:]]
+            self._unit_balances[org_id] = wallet.balance_units
 
         logger.info(
             "stripe.units_credited org=%s amount=%d reason=%s balance=%d tokens_per_unit=%d",
             org_id,
             amount,
             reason.value,
-            new_balance,
+            wallet.balance_units,
             TOKENS_PER_UNIT,
         )
-        return UnitBalanceResponse(
-            org_id=org_id,
-            balance=new_balance,
-            ledger_entries=ledger_snapshot,
-        )
+        return self._sync_balances_from_wallet(org_id)
 
     def debit_units(
         self,
@@ -1519,44 +1608,37 @@ class StripeService:
         if amount <= 0:
             raise StripeServiceError("debit amount must be > 0")
 
-        with self._lock:
-            current = self._unit_balances.get(org_id, 0)
-            if amount > current:
-                if self._on_insufficient_units is not None:
-                    try:
-                        self._on_insufficient_units(org_id, current, amount)
-                    except Exception:  # noqa: BLE001
-                        logger.warning("stripe.on_insufficient_units_callback_error org=%s", org_id)
-                raise StripeInsufficientUnitsError(org_id=org_id, have=current, need=amount)
-            new_balance = current - amount
-            self._unit_balances[org_id] = new_balance
+        owner_key = self._canonical_org_owner_key(org_id)
+        current_wallet = self._wallet_registry.get_wallet(owner_key)
+        current_balance = current_wallet.balance_units if current_wallet is not None else 0
+        if amount > current_balance:
+            if self._on_insufficient_units is not None:
+                try:
+                    self._on_insufficient_units(org_id, current_balance, amount)
+                except Exception:  # noqa: BLE001
+                    logger.warning("stripe.on_insufficient_units_callback_error org=%s", org_id)
+            raise StripeInsufficientUnitsError(org_id=org_id, have=current_balance, need=amount)
 
-            entry = _UnitLedgerEntry(
-                entry_id=_new_id("ule"),
-                org_id=org_id,
-                delta=-amount,
-                reason=reason.value,
-                reference_id=reference_id,
-                balance_after=new_balance,
-                recorded_at=_utcnow_iso(),
-            )
-            if org_id not in self._unit_ledger:
-                self._unit_ledger[org_id] = []
-            self._unit_ledger[org_id].append(entry)
-            ledger_snapshot = [e.to_dict() for e in self._unit_ledger[org_id][-50:]]
+        wallet = self._wallet_registry.debit_units(
+            owner_key,
+            amount,
+            metadata={
+                "stripe_reason": reason.value,
+                "reference_id": reference_id,
+                "source": "stripe_service",
+            },
+        )
+        with self._lock:
+            self._unit_balances[org_id] = wallet.balance_units
 
         logger.info(
             "stripe.units_debited org=%s amount=%d reason=%s balance=%d",
             org_id,
             amount,
             reason.value,
-            new_balance,
+            wallet.balance_units,
         )
-        return UnitBalanceResponse(
-            org_id=org_id,
-            balance=new_balance,
-            ledger_entries=ledger_snapshot,
-        )
+        return self._sync_balances_from_wallet(org_id)
 
     def debit_units_for_tokens(
         self,
@@ -1588,10 +1670,7 @@ class StripeService:
         return self.debit_units(org_id, units_needed, reason, reference_id)
 
     def get_unit_balance(self, org_id: str) -> UnitBalanceResponse:
-        with self._lock:
-            balance = self._unit_balances.get(org_id, 0)
-            ledger = [e.to_dict() for e in self._unit_ledger.get(org_id, [])[-50:]]
-        return UnitBalanceResponse(org_id=org_id, balance=balance, ledger_entries=ledger)
+        return self._sync_balances_from_wallet(org_id)
 
     def adjust_unit_balance(
         self,
@@ -1607,33 +1686,17 @@ class StripeService:
         if target_balance < 0:
             raise StripeServiceError("target_balance must be >= 0")
 
-        with self._lock:
-            current = self._unit_balances.get(org_id, 0)
-            delta = target_balance - current
-            self._unit_balances[org_id] = target_balance
+        owner_key = self._canonical_org_owner_key(org_id)
+        current = self._wallet_registry.get_wallet(owner_key)
+        current_balance = current.balance_units if current is not None else 0
+        delta = target_balance - current_balance
 
-            entry = _UnitLedgerEntry(
-                entry_id=_new_id("ule"),
-                org_id=org_id,
-                delta=delta,
-                reason=reason.value,
-                reference_id=reference_id,
-                balance_after=target_balance,
-                recorded_at=_utcnow_iso(),
-            )
-            if org_id not in self._unit_ledger:
-                self._unit_ledger[org_id] = []
-            self._unit_ledger[org_id].append(entry)
-            ledger_snapshot = [e.to_dict() for e in self._unit_ledger[org_id][-50:]]
+        if delta > 0:
+            self.credit_units(org_id, delta, reason, reference_id)
+        elif delta < 0:
+            self.debit_units(org_id, -delta, reason, reference_id)
 
-        logger.info(
-            "stripe.units_adjusted org=%s delta=%d balance=%d reason=%s",
-            org_id,
-            delta,
-            target_balance,
-            reason.value,
-        )
-        return UnitBalanceResponse(org_id=org_id, balance=target_balance, ledger_entries=ledger_snapshot)
+        return self.get_unit_balance(org_id)
 
     # ------------------------------------------------------------------
     # Subscription lifecycle
@@ -2043,24 +2106,21 @@ class StripeService:
     def handle_webhook_event(self, event: dict[str, Any]) -> dict[str, Any]:
         """
         Dispatch a verified Stripe event object to the appropriate handler.
-        Enforces event-level idempotency via _processed_event_ids.
-        Duplicate event IDs are silently skipped — returns {"action": "duplicate"}.
-        _idempotency_keys is never written by this method (reserved for
-        payment-method / metered-usage operation deduplication).
+        Enforces event-level idempotency using the canonical durable event ledger
+        and the in-memory cache as a fast-path. Duplicate event IDs are silently
+        skipped — returns {"action": "duplicate"}.
         """
         event_type = event.get("type", "")
         event_id = event.get("id", "")
         data_obj: dict[str, Any] = event.get("data", {}).get("object", {})
 
-        if event_id:
-            with self._lock:
-                if event_id in self._processed_event_ids:
-                    logger.debug(
-                        "stripe.webhook_duplicate_skipped event_type=%s id=%s",
-                        event_type,
-                        event_id,
-                    )
-                    return {"action": "duplicate", "event_type": event_type, "event_id": event_id}
+        if event_id and self._has_processed_event(event_id):
+            logger.debug(
+                "stripe.webhook_duplicate_skipped event_type=%s id=%s",
+                event_type,
+                event_id,
+            )
+            return {"action": "duplicate", "event_type": event_type, "event_id": event_id}
 
         handler_map: dict[str, Any] = {
             StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value: self._handle_checkout_completed,
@@ -2086,8 +2146,16 @@ class StripeService:
         try:
             result = handler(data_obj, event)
             if event_id:
-                with self._lock:
-                    self._processed_event_ids.add(event_id)
+                self._mark_processed_event(
+                    event_id=event_id,
+                    event_type=event_type,
+                    purchase_reference=data_obj.get("metadata", {}).get("purchase_reference") or data_obj.get("metadata", {}).get("purchase_id"),
+                    checkout_session_id=data_obj.get("id") if event_type == StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value else None,
+                    owner_key=data_obj.get("metadata", {}).get("org_id"),
+                    customer_id=data_obj.get("customer"),
+                    program=None,
+                    payload={"raw": data_obj, "event_type": event_type},
+                )
             logger.info("stripe.webhook_handled event_type=%s id=%s", event_type, event_id)
             return {"action": "processed", "event_type": event_type, "event_id": event_id, "detail": result}
         except Exception as exc:  # noqa: BLE001
@@ -2625,6 +2693,8 @@ class StripeService:
 
     def reset(self) -> None:
         """Full state reset. Intended for test isolation between test cases."""
+        import app.core.unit_wallet as wallet_module
+
         with self._lock:
             self._checkout_sessions.clear()
             self._subscriptions.clear()
@@ -2639,6 +2709,9 @@ class StripeService:
             self._processed_event_ids.clear()
             self._client = None
             self._webhook_secret_override = None
+
+        wallet_module._unit_wallet_registry = wallet_module.UnitWalletRegistry()
+        self._wallet_registry = wallet_module.get_unit_wallet_registry()
 
 
 # ---------------------------------------------------------------------------
@@ -2656,3 +2729,6 @@ def get_stripe_service() -> StripeService:
 def reset_stripe_service() -> None:
     """Clear all Stripe state. Intended for use in tests."""
     _STRIPE_SERVICE.reset()
+    import app.core.unit_wallet as wallet_module
+
+    wallet_module._unit_wallet_registry = wallet_module.UnitWalletRegistry()

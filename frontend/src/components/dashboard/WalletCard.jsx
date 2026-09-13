@@ -12,8 +12,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { useCountUp } from "@/hooks/useCountUp";
-import api, { payments, paymentMethods } from "@/lib/api";
-import { ensureFrontEndHasFreshSession } from "@/context/AuthContext";
+import api, { paymentMethods } from "@/lib/api";
 import { toast } from "sonner";
 
 const TOKENS_PER_UNIT = 25_000;
@@ -239,70 +238,6 @@ const StripeKeyWarning = ({ stripeMode }) => {
       </span>
     </div>
   );
-};
-
-const isValidHttpUrl = (value) => {
-  try {
-    const u = new URL(value);
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
-};
-
-const buildCheckoutPayload = ({
-  packageId,
-  priceId,
-  mode,
-  quantity,
-  unitCredits,
-  organizationId,
-}) => {
-  const normalizedMode = (mode || "payment").toString().trim();
-  if (!["payment", "subscription", "setup"].includes(normalizedMode)) {
-    throw new Error("Invalid mode");
-  }
-
-  const qty = Number(quantity) || 1;
-  if (!Number.isFinite(qty) || qty < 1)
-    throw new Error("Quantity must be >= 1");
-
-  const hasPackage = !!(packageId && String(packageId).trim());
-  const hasPrice = !!(priceId && String(priceId).trim());
-  if (hasPackage && hasPrice)
-    throw new Error("Send either packageId or priceId, not both");
-  if (!hasPackage && !hasPrice)
-    throw new Error("Either packageId or priceId is required");
-
-  const payload = {
-    mode: normalizedMode,
-    quantity: qty,
-    successUrl: `${window.location.origin}/billing/success`,
-    cancelUrl: `${window.location.origin}/billing/cancel`,
-    organizationId: organizationId || "",
-    metadata: {},
-  };
-
-  if (hasPackage) {
-    payload.packageId = String(packageId).trim();
-  } else {
-    payload.priceId = String(priceId).trim();
-    const uc = Number(unitCredits) || 0;
-    if (!Number.isFinite(uc) || uc <= 0)
-      throw new Error("unitCredits must be > 0 when using priceId");
-    payload.unitCredits = uc;
-  }
-
-  if (
-    !isValidHttpUrl(payload.successUrl) ||
-    !isValidHttpUrl(payload.cancelUrl)
-  ) {
-    throw new Error("Invalid success or cancel URL");
-  }
-
-  if (!payload.organizationId) throw new Error("Organization ID is required");
-
-  return payload;
 };
 
 const PaymentMethodPanel = ({
@@ -577,8 +512,9 @@ const WalletCard = ({
   const animated = useCountUp(balance, 1500, [balance]);
   const stripePublishableKey = getStripePublishableKey();
   const stripeMode = getStripeMode(stripePublishableKey);
+  const [checkoutState, setCheckoutState] = useState("idle");
 
-  const handleTierPurchase = useCallback(
+  const handleCheckoutPurchase = useCallback(
     (tierId) => {
       if (!VALID_PACKAGE_IDS.has(tierId)) {
         toast.error("Invalid package selected.");
@@ -590,70 +526,10 @@ const WalletCard = ({
         return;
       }
 
+      setCheckoutState("pending");
       onPurchase(tierId);
     },
     [onPurchase],
-  );
-
-  const handleCheckoutPurchase = useCallback(
-    async (tierId) => {
-      if (!VALID_PACKAGE_IDS.has(tierId)) {
-        toast.error("Invalid package selected.");
-        return;
-      }
-
-      if (typeof onPurchase !== "function") {
-        toast.error("Purchase action is unavailable.");
-        return;
-      }
-
-      const tier = TIERS.find((t) => t.id === tierId);
-      if (!tier) {
-        toast.error("Package not found.");
-        return;
-      }
-
-      try {
-        await ensureFrontEndHasFreshSession();
-      } catch {
-        // Continue even if refresh fails; backend will surface token errors
-      }
-
-      try {
-        const payload = buildCheckoutPayload({
-          packageId: tierId,
-          mode: "payment",
-          quantity: 1,
-          organizationId: organizationId || "org-001",
-        });
-
-        const { data } = await payments.createCheckout(payload);
-        const redirectUrl = data?.checkout_url || data?.url;
-        if (!redirectUrl) {
-          throw new Error("Missing checkout URL.");
-        }
-        onPurchase(tierId);
-        if (typeof window.location.assign === "function") {
-          window.location.assign(redirectUrl);
-        } else {
-          window.location.href = redirectUrl;
-        }
-      } catch (error) {
-        const backendDetail =
-          error?.response?.data?.detail?.error ||
-          error?.response?.data?.detail ||
-          error?.response?.data ||
-          error?.message ||
-          "Checkout failed. Please try again.";
-
-        toast.error(
-          typeof backendDetail === "string"
-            ? backendDetail
-            : "Checkout failed. Please try again.",
-        );
-      }
-    },
-    [onPurchase, organizationId],
   );
 
   const handleAddCardClick = useCallback(() => {
@@ -706,8 +582,12 @@ const WalletCard = ({
             )}
             <button
               type="button"
-              onClick={() => handleTierPurchase(t.id)}
-              disabled={!!purchasingId}
+              onClick={() => handleCheckoutPurchase(t.id)}
+              disabled={
+                !!purchasingId ||
+                checkoutState === "pending" ||
+                checkoutState === "redirecting"
+              }
               data-testid={`purchase-${t.id}`}
               title={
                 stripeMode === "unconfigured"
@@ -727,7 +607,7 @@ const WalletCard = ({
                 {t.tokensPerUnit.toLocaleString()} tokens / unit
               </span>
               <span className="mt-2 flex items-center gap-1 text-lg font-semibold text-[#FFD700]">
-                {purchasingId === t.id ? (
+                {purchasingId === t.id || checkoutState === "pending" ? (
                   <Loader2 size={16} className="animate-spin" />
                 ) : (
                   t.price

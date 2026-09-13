@@ -22,15 +22,7 @@ DEFAULT_BACKUP_TARGET: Final[str] = "primary"
 DEFAULT_RESTORE_TARGET: Final[str] = "primary"
 DEFAULT_RETENTION_DAYS: Final[int] = 30
 DEFAULT_PROVIDER_TARGETS: Final[tuple[str, ...]] = tuple(InstallKeyFormatRegistry.list_programs())
-_CANONICAL_RUNTIME_TARGETS: Final[tuple[str, ...]] = (
-    "openclaw",
-    "claude_code",
-    "cursor",
-    "goose",
-    "gemini_cli",
-    "copilot",
-    "hermes",
-)
+_CANONICAL_RUNTIME_TARGETS: Final[tuple[str, ...]] = DEFAULT_PROVIDER_TARGETS
 _GENERIC_INSTALL_KEY_PREFIXES: Final[tuple[str, ...]] = (
     "sk_",
     "ghp_",
@@ -50,15 +42,24 @@ _GENERIC_INSTALL_KEY_PREFIXES: Final[tuple[str, ...]] = (
     "bearer ",
     "x-api-key",
 )
-_CANONICAL_INSTALL_COMMANDS: Final[dict[str, str]] = {
-    "claude_code": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key {key}",
-    "openclaw": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user --key {key}",
-    "cursor": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user --key {key}",
-    "goose": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user --key {key}",
-    "gemini_cli": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user --key {key}",
-    "copilot": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user --key {key}",
-    "hermes": "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key {key}",
-}
+
+
+def _runtime_platform_slug(program: str) -> str:
+    normalized = InstallKeyFormatRegistry.normalize_program(program)
+    if normalized is None:
+        return str(program).strip().replace("_", "-")
+    return normalized.replace("_", "-")
+
+
+def _runtime_command_template(program: str) -> str:
+    normalized = InstallKeyFormatRegistry.normalize_program(program)
+    if normalized == "hermes":
+        return "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key {key}"
+    agent_slug = _runtime_platform_slug(normalized or program)
+    return f"gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent {agent_slug} --scope user --key {{key}}"
+
+
+_CANONICAL_INSTALL_COMMANDS: Final[dict[str, str]] = {program: _runtime_command_template(program) for program in _CANONICAL_RUNTIME_TARGETS}
 _SUBPROCESS_TIMEOUT: Final[int] = 300
 
 

@@ -67,6 +67,11 @@ class InstallKeyFormatSpec:
     prefix: str
     aliases: tuple[str, ...]
     platform_aliases: tuple[str, ...]
+    command_template: str = ""
+
+    @property
+    def canonical_slug(self) -> str:
+        return self.program.replace("_", "-")
 
     def __post_init__(self) -> None:
         if not self.prefix:
@@ -75,6 +80,20 @@ class InstallKeyFormatSpec:
             raise ValueError("program is required")
         if self.family != self.program:
             raise ValueError(f"family and program must match: {self.family!r} != {self.program!r}")
+        if not self.command_template:
+            object.__setattr__(self, "command_template", self._default_command_template())
+
+    def _default_command_template(self) -> str:
+        if self.program == "hermes":
+            return "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key {key}"
+        return f"gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent {self.canonical_slug} --scope user --key {{key}}"
+
+    def format_command(self, install_key: str | None) -> str:
+        normalized_key = str(install_key).strip() if install_key is not None else ""
+        if not normalized_key:
+            raise ValueError("install_key is required")
+        payload: dict[str, str] = {"key": normalized_key, "platform": self.canonical_slug, "program": self.program}
+        return self.command_template.format(**payload)
 
     def matches_key(self, candidate: str | None) -> bool:
         if candidate is None:
@@ -131,6 +150,7 @@ class InstallKeyFormatRegistry:
                 "openclaw cli",
                 "ironclaw",
             ),
+            command_template="gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent {platform} --scope user --key {key}",
         ),
         "claude_code": InstallKeyFormatSpec(
             family="claude_code",
@@ -157,6 +177,7 @@ class InstallKeyFormatRegistry:
                 "claude code cli",
                 "anthropic",
             ),
+            command_template="gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent {platform} --scope user --key {key}",
         ),
         "cursor": InstallKeyFormatSpec(
             family="cursor",
@@ -181,6 +202,7 @@ class InstallKeyFormatRegistry:
                 "cursor-cli",
                 "cursor cli",
             ),
+            command_template="gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent {platform} --scope user --key {key}",
         ),
         "goose": InstallKeyFormatSpec(
             family="goose",
@@ -205,6 +227,7 @@ class InstallKeyFormatRegistry:
                 "goose-cli",
                 "goose cli",
             ),
+            command_template="gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent {platform} --scope user --key {key}",
         ),
         "gemini_cli": InstallKeyFormatSpec(
             family="gemini_cli",
@@ -227,6 +250,7 @@ class InstallKeyFormatRegistry:
                 "gemini_cli_agent",
                 "gemini-cli-agent",
             ),
+            command_template="gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent {platform} --scope user --key {key}",
         ),
         "copilot": InstallKeyFormatSpec(
             family="copilot",
@@ -251,6 +275,7 @@ class InstallKeyFormatRegistry:
                 "github_copilot_cli",
                 "github-copilot-cli",
             ),
+            command_template="gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent {platform} --scope user --key {key}",
         ),
         "hermes": InstallKeyFormatSpec(
             family="hermes",
@@ -275,6 +300,7 @@ class InstallKeyFormatRegistry:
                 "hermes-cli",
                 "hermes cli",
             ),
+            command_template="hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key {key}",
         ),
         "security_guardian": InstallKeyFormatSpec(
             family="security_guardian",
@@ -292,6 +318,7 @@ class InstallKeyFormatRegistry:
                 "skills",
             ),
             platform_aliases=(),
+            command_template="gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent {platform} --scope user --key {key}",
         ),
     }
 
@@ -361,18 +388,20 @@ class InstallKeyFormatRegistry:
 
     @classmethod
     def supported_platforms(cls) -> tuple[str, ...]:
-        seen: set[str] = set()
         ordered: list[str] = []
+        seen: set[str] = set()
         for program in cls.list_programs():
             if program == "security_guardian":
                 continue
-            spec = cls._SPEC_BY_PROGRAM[program]
-            for alias in spec.platform_aliases:
-                key = _normalize_platform_token(alias)
-                if key and key not in seen:
-                    seen.add(key)
-                    ordered.append(key)
+            platform_slug = _normalize_platform_token(cls._SPEC_BY_PROGRAM[program].program)
+            if platform_slug and platform_slug not in seen:
+                seen.add(platform_slug)
+                ordered.append(platform_slug)
         return tuple(ordered)
+
+    @classmethod
+    def list_platforms(cls) -> tuple[str, ...]:
+        return cls.supported_platforms()
 
 
 _default_registry = InstallKeyFormatRegistry()

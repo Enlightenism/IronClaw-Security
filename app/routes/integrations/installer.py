@@ -365,7 +365,7 @@ def install_integration(
     service = get_integration_installer()
     result = service.install_integration(
         normalized_id,
-        requestedby=effective_request.initiated_by or "system",
+        requested_by=effective_request.initiated_by or "system",
     )
 
     if result is None:

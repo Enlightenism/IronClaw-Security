@@ -54,6 +54,14 @@ IRONCLAW_TABLES: frozenset[str] = frozenset(
         "sandbox_execution_log",
         "webhook_subscriptions",
         "webhook_deliveries",
+        "billing_purchases",
+        "install_key_records",
+        "install_key_issuance_history",
+        "event_idempotency_ledger",
+        "ironclaw_billing_purchases",
+        "ironclaw_install_key_state",
+        "ironclaw_install_key_history",
+        "ironclaw_event_idempotency",
     }
 )
 
@@ -819,6 +827,10 @@ _client: SupabaseClient | None = None
 _client_lock: threading.Lock = threading.Lock()
 
 
+def _config_signature(settings: Any | None = None) -> tuple[str | None, str | None]:
+    return (_resolve_supabase_url(settings), _resolve_supabase_key(settings))
+
+
 def get_supabase_client(
     *,
     timeout: float = SUPABASE_TIMEOUT_SECONDS,
@@ -826,14 +838,31 @@ def get_supabase_client(
     settings: Any | None = None,
 ) -> SupabaseClient:
     global _client
+
+    desired_signature = _config_signature(settings)
+    if _client is not None:
+        current_signature = (
+            _client._config.url if _client._config is not None else _resolve_supabase_url(_client._settings),
+            _client._config.key if _client._config is not None else _resolve_supabase_key(_client._settings),
+        )
+        if current_signature != desired_signature:
+            _client = None
+
     if _client is None:
         with _client_lock:
-            if _client is None:
-                _client = SupabaseClient(
-                    timeout=timeout,
-                    session=session,
-                    settings=settings,
+            desired_signature = _config_signature(settings)
+            if _client is not None:
+                current_signature = (
+                    _client._config.url if _client._config is not None else _resolve_supabase_url(_client._settings),
+                    _client._config.key if _client._config is not None else _resolve_supabase_key(_client._settings),
                 )
+                if current_signature == desired_signature:
+                    return _client
+            _client = SupabaseClient(
+                timeout=timeout,
+                session=session,
+                settings=settings,
+            )
     return _client
 
 

@@ -167,15 +167,23 @@ def resolve_billing_owner(auth_ctx: Any, buyer_email: str) -> str:
     """Return the canonical wallet owner key for a billing operation.
 
     Only an explicit org-auth context can route to the shared org wallet via
-    ``ic_org_{org_id}``. Every other auth context resolves to the paid buyer's
-    canonical email address, ensuring install-key generation follows the
-    subscription owner path rather than a generic system or API identity.
+    ``ic_org_{org_id}``. If the org identifier is already in canonical owner-key
+    form, it is preserved exactly instead of being double-prefixed. Every other
+    auth context resolves to the paid buyer's canonical email address, ensuring
+    install-key generation follows the subscription owner path rather than a
+    generic system or API identity.
     """
     normalized_email = _normalize_owner_value(buyer_email)
     if _is_org_owner_context(auth_ctx):
         org_id = getattr(auth_ctx, "org_id", None)
         normalized_org_id = _normalize_owner_value(org_id)
-        if not normalized_org_id or not _is_real_billing_owner(normalized_org_id):
+        if not normalized_org_id:
+            return normalized_email if _is_real_billing_owner(normalized_email) else ""
+        if normalized_org_id.startswith("ic_org_"):
+            return normalized_org_id if _is_real_billing_owner(normalized_org_id) else normalized_email if _is_real_billing_owner(normalized_email) else ""
+        if _looks_like_generic_platform_auth(normalized_org_id):
+            return normalized_email if _is_real_billing_owner(normalized_email) else ""
+        if not _is_real_billing_owner(normalized_org_id):
             return normalized_email if _is_real_billing_owner(normalized_email) else ""
         return f"ic_org_{normalized_org_id}"
 
@@ -867,13 +875,41 @@ class BillingRegistry:
         registry = self._get_install_key_registry()
         result: dict[str, Any] = {}
         for program in InstallKeyFormatRegistry.list_programs():
-            record = registry.generate_install_key(
-                normalized_owner,
-                subscription_id,
-                program,
-                label="auto-provisioned",
-                metadata={"customer_id": customer_id, "provisioned_by": "billing"},
-            )
+            metadata = {
+                "customer_id": customer_id,
+                "provisioned_by": "billing",
+                "source": "billing_purchase",
+                "purchase_reference": subscription_id,
+                "checkout_session_id": subscription_id,
+                "payment_status": "paid",
+                "entitlements_status": "active",
+                "issued_after_payment": True,
+            }
+
+            if hasattr(registry, "generate_for_paid_customer"):
+                record = registry.generate_for_paid_customer(
+                    normalized_owner,
+                    subscription_id,
+                    program,
+                    customer_id=customer_id,
+                    payment_status="paid",
+                    entitlements_status="active",
+                    issued_after_payment=True,
+                    purchase_reference=subscription_id,
+                    checkout_session_id=subscription_id,
+                    label="auto-provisioned",
+                    metadata=metadata,
+                )
+            elif hasattr(registry, "generate_install_key"):
+                record = registry.generate_install_key(
+                    normalized_owner,
+                    subscription_id,
+                    program,
+                    label="auto-provisioned",
+                    metadata=metadata,
+                )
+            else:
+                raise AttributeError("Install key registry must expose generate_for_paid_customer() or generate_install_key().")
             result[program] = record
 
         logger.info(

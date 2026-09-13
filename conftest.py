@@ -65,7 +65,6 @@ def _reset_runtime_singletons() -> None:
     install_keys_module._reset_install_key_registry_for_testing()
 
     wallet = unit_wallet_module.UnitWalletRegistry()
-    wallet._repo = unit_wallet_module.MemoryUnitWalletRepository()
     unit_wallet_module._unit_wallet_registry = wallet
 
     app.dependency_overrides.clear()

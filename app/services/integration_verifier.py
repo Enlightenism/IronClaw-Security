@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from app.services.integration_registry import (
+    CapabilityName,
     IntegrationRecord,
     IntegrationRegistry,
     get_integration,
@@ -12,6 +13,13 @@ from app.services.integration_registry import (
 )
 
 VerificationState = Literal["pass", "warn", "fail"]
+
+_REQUIRED_CAPABILITIES: tuple[CapabilityName, ...] = (
+    "prompt_interception",
+    "tool_interception",
+    "execution_interception",
+    "telemetry",
+)
 
 
 def _utc_now() -> str:
@@ -44,6 +52,10 @@ class IntegrationVerificationResult:
     checked_at: str
     checks: list[VerificationCheckResult] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    requested_by: str | None = None
+    strict: bool = False
+    missing_capabilities: list[CapabilityName] = field(default_factory=list)
+    summary: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -55,7 +67,33 @@ class IntegrationVerificationResult:
             "checked_at": self.checked_at,
             "checks": [check.to_dict() for check in self.checks],
             "metadata": dict(self.metadata),
+            "requested_by": self.requested_by,
+            "strict": self.strict,
+            "missing_capabilities": list(self.missing_capabilities),
+            "summary": self.summary,
         }
+
+
+def _collect_missing_capabilities(record: IntegrationRecord) -> list[CapabilityName]:
+    available = {cap.name for cap in record.capabilities if cap.enabled}
+    return [capability for capability in _REQUIRED_CAPABILITIES if capability not in available]
+
+
+def _derive_verification_status(
+    *,
+    checks: list[VerificationCheckResult],
+    missing_capabilities: list[CapabilityName],
+    strict: bool,
+) -> str:
+    if any(check.state == "fail" for check in checks):
+        return "blocked"
+    if missing_capabilities and strict:
+        return "blocked"
+    if any(check.state == "warn" for check in checks):
+        return "degraded"
+    if checks:
+        return "ready"
+    return "unknown"
 
 
 def verify_integration(
@@ -70,24 +108,44 @@ def verify_integration(
     if record is None:
         raise KeyError(f"unknown integration_id: {integration_id}")
 
-    checks = _build_verification_checks(record, strict=strict)
+    missing_capabilities = _collect_missing_capabilities(record)
+    checks = _build_verification_checks(record, strict=strict, missing_capabilities=missing_capabilities)
     verified = all(check.state != "fail" for check in checks) and any(check.state == "pass" for check in checks)
+    if strict and missing_capabilities:
+        verified = False
 
     metadata = dict(extra_metadata or {})
     if requested_by:
         metadata["requested_by"] = requested_by
     if strict:
         metadata["strict"] = True
+    if missing_capabilities:
+        metadata["missing_capabilities"] = list(missing_capabilities)
+
+    status = _derive_verification_status(
+        checks=checks,
+        missing_capabilities=missing_capabilities,
+        strict=strict,
+    )
+    summary = (
+        f"Integration '{record.slug}' verification passed with a ready status."
+        if verified
+        else (f"Integration '{record.slug}' verification is degraded; missing required capabilities: {', '.join(missing_capabilities)}." if missing_capabilities else f"Integration '{record.slug}' verification requires attention.")
+    )
 
     return IntegrationVerificationResult(
         integration_id=record.integration_id,
         slug=record.slug,
         platform=record.platform,
-        status=record.status,
+        status=status,
         verified=verified,
         checked_at=_utc_now(),
         checks=checks,
         metadata=metadata,
+        requested_by=requested_by or "system",
+        strict=strict,
+        missing_capabilities=missing_capabilities,
+        summary=summary,
     )
 
 
@@ -95,6 +153,7 @@ def _build_verification_checks(
     record: IntegrationRecord,
     *,
     strict: bool,
+    missing_capabilities: list[CapabilityName],
 ) -> list[VerificationCheckResult]:
     checks: list[VerificationCheckResult] = []
 
@@ -137,20 +196,31 @@ def _build_verification_checks(
     checks.append(
         VerificationCheckResult(
             name="capabilities-present",
-            state="pass" if enabled_capabilities else "fail",
-            message="Integration capabilities are present." if enabled_capabilities else "No enabled capabilities are registered.",
-            metadata={"capabilities": enabled_capabilities},
+            state="fail" if not enabled_capabilities else ("fail" if missing_capabilities and strict else "pass"),
+            message=("Integration capabilities are present." if enabled_capabilities and not missing_capabilities else "Required integration capabilities are missing."),
+            metadata={"capabilities": enabled_capabilities, "missing_capabilities": list(missing_capabilities)},
         ),
     )
 
+    is_active = record.status == "active"
     checks.append(
         VerificationCheckResult(
             name="status-active",
-            state="pass" if record.status == "active" else ("fail" if strict else "warn"),
-            message="Integration is active." if record.status == "active" else f"Integration status is '{record.status}'.",
+            state="pass" if is_active else ("fail" if strict else "warn"),
+            message="Integration is active." if is_active else f"Integration status is '{record.status}'.",
             metadata={"status": record.status},
         ),
     )
+
+    if missing_capabilities:
+        checks.append(
+            VerificationCheckResult(
+                name="required-capabilities",
+                state="fail" if strict else "warn",
+                message=("Required security capabilities are missing: " + ", ".join(missing_capabilities) if missing_capabilities else "Required capabilities are present."),
+                metadata={"missing_capabilities": list(missing_capabilities)},
+            )
+        )
 
     return checks
 

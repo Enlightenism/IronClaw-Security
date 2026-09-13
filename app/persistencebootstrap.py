@@ -41,6 +41,14 @@ _IRONCLAW_DDL_TABLE_REGISTRY: frozenset[str] = frozenset(
         "sandbox_execution_log",
         "webhook_subscriptions",
         "webhook_deliveries",
+        "billing_purchases",
+        "install_key_records",
+        "install_key_issuance_history",
+        "event_idempotency_ledger",
+        "ironclaw_billing_purchases",
+        "ironclaw_install_key_state",
+        "ironclaw_install_key_history",
+        "ironclaw_event_idempotency",
     }
 )
 
@@ -424,22 +432,27 @@ def build_store(
         return _build_memory_store(reason="explicit-memory-mode")
 
     if resolved == SUPABASE_MODE:
-        if not _supabase_env_present() and not allow_fallback:
-            raise PersistenceBootstrapError(
-                "SUPABASE_MODE requested but SUPABASE_URL / key env vars are not set",
-            )
         try:
-            return _build_supabase_store(client_factory=client_factory)
+            store = _build_supabase_store(client_factory=client_factory)
+            if not getattr(store, "ready", True):
+                raise PersistenceBootstrapError("supabase store did not report readiness")
+            return store
         except (SupabaseConfigurationError, PersistenceBootstrapError, RuntimeError) as exc:
             if not allow_fallback:
                 raise
-            logger.warning("supabase store init failed, falling back to memory: %s", exc)
+            if not _supabase_env_present():
+                logger.warning("supabase mode selected but environment is not configured; falling back to memory for non-critical tests")
+            else:
+                logger.warning("supabase store init failed, falling back to memory: %s", exc)
             return _build_memory_store(reason=str(exc))
 
     # auto mode
     if _supabase_env_present():
         try:
-            return _build_supabase_store(client_factory=client_factory)
+            store = _build_supabase_store(client_factory=client_factory)
+            if not getattr(store, "ready", True):
+                raise PersistenceBootstrapError("supabase store did not report readiness")
+            return store
         except (SupabaseConfigurationError, RuntimeError) as exc:
             if not allow_fallback:
                 raise

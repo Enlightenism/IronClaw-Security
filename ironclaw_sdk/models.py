@@ -19,6 +19,18 @@ ReviewStatus = Literal["none", "pending", "approved", "rejected"]
 MaxSeverity = Literal["low", "medium", "high", "critical"]
 
 TargetType = Literal["prompt", "github_repo", "skill", "archive", "url", "text", "local_path"]
+InstallKeyProgram = Literal[
+    "openclaw",
+    "claude_code",
+    "cursor",
+    "goose",
+    "gemini_cli",
+    "copilot",
+    "hermes",
+    "security_guardian",
+]
+PaymentStatus = Literal["pending", "paid", "failed", "refunded", "cancelled", "expired", "unpaid"]
+EntitlementStatus = Literal["not_active", "active", "disabled", "revoked"]
 
 
 class ScanRequest(BaseModel):
@@ -67,6 +79,120 @@ class BatchScanRequest(BaseModel):
 class BatchScanResponse(BaseModel):
     count: int
     items: list[ScanResponse]
+
+
+# ------------------------------------------------------------------
+# Billing / install-key models  (mirror the canonical backend contract)
+# ------------------------------------------------------------------
+
+
+class BillingPackagePurchaseRequest(BaseModel):
+    package_id: str = Field(min_length=1, max_length=120)
+    buyer_name: str = Field(min_length=1, max_length=120)
+    buyer_email: str = Field(min_length=3, max_length=254)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class BillingPackagePurchaseView(BaseModel):
+    purchase_id: str
+    package_id: str
+    package_name: str
+    buyer_name: str
+    buyer_email: str
+    owner_key: str
+    price_usd: float
+    granted_units: int
+    token_coverage: int
+    tokens_per_unit: int
+    created_at: str
+    payment_id: str | None = None
+    payment_status: str = "pending"
+    entitlement_status: str = "not_active"
+    install_key_id: str | None = None
+    masked_key: str | None = None
+    program: str | None = None
+    usage_summary: dict[str, Any] = Field(default_factory=dict)
+    openclaw_install_key: str | None = None
+    claude_code_install_key: str | None = None
+    hermes_install_key: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WalletBalanceView(BaseModel):
+    wallet_id: str
+    owner_key: str
+    balance_units: int
+    total_purchased_units: int
+    total_consumed_units: int
+    total_refunded_units: int
+    updated_at: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class OwnerKeyBinding(BaseModel):
+    owner_key: str
+    org_id: str | None = None
+    customer_id: str | None = None
+    buyer_email: str | None = None
+
+
+class BillingPackagePurchaseResponse(BaseModel):
+    status: str
+    service: str
+    timestamp: str
+    purchase: BillingPackagePurchaseView
+    wallet: WalletBalanceView
+
+
+class InstallKeySlotView(BaseModel):
+    key_id: str | None = None
+    program: InstallKeyProgram | str
+    platform: str | None = None
+    masked_key: str | None = None
+    label: str = ""
+    status: str = "locked"
+    active: bool = False
+    payment_status: PaymentStatus | str = "unpaid"
+    entitlements_status: EntitlementStatus | str = "not_active"
+    issued_after_payment: bool = False
+    units_used: int = 0
+    units_remaining: int = 0
+    blocked_attacks: int = 0
+    created_at: str | None = None
+    last_used_at: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    usage_summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class InstallKeyRecordView(BaseModel):
+    key_id: str
+    owner_key: str
+    program: InstallKeyProgram | str
+    platform: str | None = None
+    masked_key: str | None = None
+    label: str = ""
+    active: bool = True
+    payment_status: PaymentStatus | str = "unpaid"
+    entitlements_status: EntitlementStatus | str = "not_active"
+    issued_after_payment: bool = False
+    org_id: str | None = None
+    customer_id: str | None = None
+    units_consumed: int = 0
+    created_at: str | None = None
+    last_used_at: str | None = None
+    revoked_at: str | None = None
+    purchase_reference: str | None = None
+    checkout_session_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class InstallKeysResponse(BaseModel):
+    status: str
+    service: str
+    timestamp: str
+    owner_key: str
+    has_active_entitlement: bool
+    keys: list[InstallKeySlotView]
 
 
 # ------------------------------------------------------------------
@@ -136,6 +262,17 @@ __all__ = [
     "ScanResponse",
     "BatchScanRequest",
     "BatchScanResponse",
+    "BillingPackagePurchaseRequest",
+    "BillingPackagePurchaseView",
+    "BillingPackagePurchaseResponse",
+    "WalletBalanceView",
+    "OwnerKeyBinding",
+    "InstallKeyProgram",
+    "PaymentStatus",
+    "EntitlementStatus",
+    "InstallKeySlotView",
+    "InstallKeyRecordView",
+    "InstallKeysResponse",
     "GuardBundleRequest",
     "GuardBundleResponse",
     "GuardBundleSlotResult",

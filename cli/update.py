@@ -169,15 +169,31 @@ def _read_config_install_key(config_path: Path) -> str | None:
         "paidInstallKey",
     ):
         value = payload.get(key_name)
-        if isinstance(value, str) and value.strip():
+        if isinstance(value, str) and value.strip() and not _looks_like_generic_install_key(value):
             return value.strip()
 
     nested = payload.get("install_keys")
     if isinstance(nested, dict):
-        for program in InstallKeyFormatRegistry.list_programs():
-            value = nested.get(program)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
+        for key_name, value in nested.items():
+            if not isinstance(value, str):
+                continue
+            candidate = value.strip()
+            if not candidate:
+                continue
+            if _looks_like_generic_install_key(candidate):
+                continue
+            normalized_name = _normalize_runtime_program(key_name)
+            if normalized_name is not None:
+                return candidate
+            parsed_program = InstallKeyFormatRegistry.parse_program_from_key(candidate)
+            if parsed_program is not None:
+                return candidate
+
+    for program in InstallKeyFormatRegistry.list_programs():
+        value = payload.get(program)
+        if isinstance(value, str) and value.strip() and not _looks_like_generic_install_key(value):
+            return value.strip()
+
     return None
 
 

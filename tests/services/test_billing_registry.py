@@ -31,18 +31,25 @@ from app.persistencebootstrap import build_store
 
 
 class _StubInstallKeyRegistry:
-    """Minimal stub that satisfies BillingRegistry.provision_install_keys_on_purchase."""
+    """Minimal stub that matches the paid-entitlement install-key API."""
 
     def __init__(self) -> None:
         self._keys: dict[str, Any] = {}
         self.calls: list[dict[str, Any]] = []
 
-    def generate_install_key(
+    def generate_for_paid_customer(
         self,
         owner_key: str,
         subscription_id: str,
         program: str,
         *,
+        org_id: str | None = None,
+        customer_id: str | None = None,
+        payment_status: str | None = "paid",
+        entitlements_status: str | None = "active",
+        issued_after_payment: bool = True,
+        purchase_reference: str | None = None,
+        checkout_session_id: str | None = None,
         label: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> Any:
@@ -58,10 +65,33 @@ class _StubInstallKeyRegistry:
                 "subscription_id": subscription_id,
                 "program": program,
                 "label": label,
+                "customer_id": customer_id,
+                "payment_status": payment_status,
+                "entitlements_status": entitlements_status,
+                "issued_after_payment": issued_after_payment,
+                "purchase_reference": purchase_reference,
+                "checkout_session_id": checkout_session_id,
                 "metadata": metadata or {},
             }
         )
         return record
+
+    def generate_install_key(
+        self,
+        owner_key: str,
+        subscription_id: str,
+        program: str,
+        *,
+        label: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> Any:
+        return self.generate_for_paid_customer(
+            owner_key,
+            subscription_id,
+            program,
+            label=label,
+            metadata=metadata,
+        )
 
 
 # ---------------------------------------------------------------------------

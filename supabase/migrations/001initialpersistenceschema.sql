@@ -73,17 +73,24 @@ create table if not exists public.billing_purchases (
     purchase_id text not null unique,
     owner_key text not null,
     customer_id text,
+    buyer_name text not null default '',
     buyer_email text,
     package_id text not null default '',
+    package_name text not null default '',
     checkout_session_id text,
     stripe_payment_intent_id text,
+    price_usd numeric(12,2) not null default 0,
     amount_total numeric(12,2) not null default 0,
     currency text not null default 'usd',
     payment_status text not null default 'pending',
     fulfillment_status text not null default 'pending',
     granted_units integer not null default 0,
+    token_coverage integer not null default 0,
+    tokens_per_unit integer not null default 25000,
     units_credited boolean not null default false,
     install_keys_provisioned boolean not null default false,
+    openclaw_install_key text,
+    claude_code_install_key text,
     raw_metadata jsonb not null default '{}'::jsonb,
     created_at timestamptz not null default timezone('utc', now()),
     updated_at timestamptz not null default timezone('utc', now()),
@@ -95,6 +102,8 @@ create table if not exists public.billing_purchases (
         check (fulfillment_status in ('pending', 'fulfilled', 'failed', 'retrying')),
     constraint billing_purchases_amount_total_check
         check (amount_total >= 0),
+    constraint billing_purchases_price_usd_check
+        check (price_usd >= 0),
     constraint billing_purchases_granted_units_check
         check (granted_units >= 0),
     constraint billing_purchases_owner_key_not_empty_check
@@ -109,7 +118,10 @@ create table if not exists public.install_key_records (
     id uuid primary key default gen_random_uuid(),
     key_id text not null unique,
     purchase_id text references public.billing_purchases(purchase_id) on delete set null,
+    purchase_reference text,
+    subscription_id text not null default '',
     owner_key text not null,
+    org_id text,
     customer_id text,
     program text not null,
     checkout_session_id text,
@@ -134,11 +146,14 @@ create table if not exists public.install_key_records (
     constraint install_key_records_program_not_empty_check
         check (char_length(trim(program)) > 0),
     constraint install_key_records_key_hash_not_empty_check
-        check (raw_key_hash = '' or char_length(trim(raw_key_hash)) > 0)
+        check (raw_key_hash = '' or char_length(trim(raw_key_hash)) > 0),
+    constraint install_key_records_subscription_id_not_empty_check
+        check (char_length(trim(subscription_id)) > 0 or subscription_id = '')
 );
 
 create table if not exists public.install_key_issuance_history (
     id uuid primary key default gen_random_uuid(),
+    history_id text not null unique default gen_random_uuid()::text,
     key_id text not null references public.install_key_records(key_id) on delete cascade,
     purchase_id text references public.billing_purchases(purchase_id) on delete set null,
     owner_key text not null,
@@ -146,6 +161,8 @@ create table if not exists public.install_key_issuance_history (
     program text not null,
     event_type text not null default 'issued',
     status text not null default 'issued',
+    actor_type text not null default 'system',
+    reason text not null default '',
     issued_at timestamptz not null default timezone('utc', now()),
     updated_at timestamptz not null default timezone('utc', now()),
     metadata jsonb not null default '{}'::jsonb,

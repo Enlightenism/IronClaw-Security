@@ -393,6 +393,22 @@ describe("payments.getStatus", () => {
       "/billing/checkout/sessions/cs_test_abc123",
     );
   });
+
+  it("separates checkout creation from fulfillment polling and never infers install keys from the checkout response", () => {
+    const checkoutResponse = {
+      checkout_url: "https://checkout.stripe.com/pay/cs_test_123",
+      session_id: "cs_test_123",
+    };
+
+    expect(payments.isPending(checkoutResponse)).toBe(true);
+    expect(payments.isFulfilled(checkoutResponse)).toBe(false);
+    expect(payments.getState(checkoutResponse)).toBe("pending");
+    expect(payments.getInstallKey(checkoutResponse)).toBeNull();
+
+    expect(payments.getState({ payment_status: "paid" })).toBe("fulfilled");
+    expect(payments.isFulfilled({ payment_status: "paid" })).toBe(true);
+    expect(payments.isPending({ payment_status: "paid" })).toBe(false);
+  });
 });
 
 describe("paymentMethods.list", () => {

@@ -40,15 +40,20 @@ class UninstallPlan:
 
 
 def _default_install_root() -> Path:
-    return Path.cwd()
+    home = Path.home()
+    if sys.platform.lower().startswith("win"):
+        return home / "IronClaw-Security"
+    return home / ".ironclaw-security"
 
 
-def _default_config_root() -> Path:
-    return Path.home() / ".ironclaw-security"
+def _default_config_root(root: Path | None = None) -> Path:
+    resolved_root = (root or _default_install_root()).resolve()
+    return resolved_root / "config.json"
 
 
-def _default_data_root() -> Path:
-    return Path.home() / ".ironclaw-security-data"
+def _default_data_root(root: Path | None = None) -> Path:
+    resolved_root = (root or _default_install_root()).resolve()
+    return resolved_root / "data"
 
 
 def _path_state(path: Path) -> tuple[bool, bool]:
@@ -142,8 +147,8 @@ def build_uninstall_plan(
     dry_run: bool = True,
 ) -> UninstallPlan:
     resolved_install_root = (install_root or _default_install_root()).resolve()
-    resolved_config_root = (config_root or _default_config_root()).resolve()
-    resolved_data_root = (data_root or _default_data_root()).resolve()
+    resolved_config_root = (config_root or _default_config_root(resolved_install_root)).resolve()
+    resolved_data_root = (data_root or _default_data_root(resolved_install_root)).resolve()
 
     targets = _build_targets(
         install_root=resolved_install_root,

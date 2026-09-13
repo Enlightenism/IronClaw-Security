@@ -64,6 +64,43 @@ const isCounterSnapshot = (value) =>
     Number.isFinite(Number(value.updatedAt)),
   );
 
+const isCounterSnapshotFresh = (value) => {
+  if (!isCounterSnapshot(value)) {
+    return false;
+  }
+
+  const numericValue = Number(value.value);
+  const numericUpdatedAt = Number(value.updatedAt);
+
+  if (!Number.isFinite(numericValue) || numericValue < 0) {
+    return false;
+  }
+
+  if (!Number.isFinite(numericUpdatedAt)) {
+    return false;
+  }
+
+  return Date.now() - numericUpdatedAt <= 24 * 60 * 60 * 1000;
+};
+
+const createCounterController = (snapshot, fallback = null) => ({
+  getValue: () => {
+    const nextSnapshot =
+      snapshot && typeof snapshot === "object" ? snapshot : null;
+    const numericValue = Number(nextSnapshot?.value);
+    if (Number.isFinite(numericValue) && numericValue >= 0) {
+      return numericValue;
+    }
+
+    const fallbackValue =
+      fallback && typeof fallback === "object"
+        ? Number(fallback.getValue?.())
+        : Number.NaN;
+    return Number.isFinite(fallbackValue) ? fallbackValue : 0;
+  },
+  subscribe: fallback?.subscribe ?? (() => () => undefined),
+});
+
 const ensureSharedCounterRegistry = () => {
   if (typeof globalThis === "undefined") {
     return null;
@@ -72,20 +109,7 @@ const ensureSharedCounterRegistry = () => {
   const store = globalThis.__IC_COUNTERS__ || {};
   const existingRegistry = store.__controllers;
   const nextRegistry = new Map();
-
-  if (existingRegistry instanceof Map) {
-    for (const [key, value] of existingRegistry.entries()) {
-      if (key && value !== undefined) {
-        nextRegistry.set(key, value);
-      }
-    }
-  } else if (existingRegistry && typeof existingRegistry === "object") {
-    Object.entries(existingRegistry).forEach(([key, value]) => {
-      if (key && value !== undefined) {
-        nextRegistry.set(key, value);
-      }
-    });
-  }
+  const validSnapshots = new Map();
 
   Object.keys(store).forEach((key) => {
     if (key === "__controllers" || key === "__appMounted") {
@@ -93,22 +117,40 @@ const ensureSharedCounterRegistry = () => {
     }
 
     const currentValue = store[key];
-
-    if (isCounterSnapshot(currentValue)) {
-      if (!nextRegistry.has(key)) {
-        nextRegistry.set(key, {
-          getValue: () => Number(currentValue.value),
-          subscribe: () => () => undefined,
-        });
-      }
+    if (isCounterSnapshotFresh(currentValue)) {
+      validSnapshots.set(key, currentValue);
       return;
     }
 
-    if (nextRegistry.has(key)) {
-      nextRegistry.delete(key);
-    }
-
     delete store[key];
+  });
+
+  const existingEntries = new Map();
+  if (existingRegistry instanceof Map) {
+    for (const [key, value] of existingRegistry.entries()) {
+      if (key && value !== undefined) {
+        existingEntries.set(key, value);
+      }
+    }
+  } else if (existingRegistry && typeof existingRegistry === "object") {
+    Object.entries(existingRegistry).forEach(([key, value]) => {
+      if (key && value !== undefined) {
+        existingEntries.set(key, value);
+      }
+    });
+  }
+
+  validSnapshots.forEach((snapshot, key) => {
+    const fallbackController = existingEntries.get(key);
+    const nextController = createCounterController(
+      snapshot,
+      fallbackController,
+    );
+    nextRegistry.set(key, nextController);
+    store[key] = {
+      value: Number(snapshot.value),
+      updatedAt: Number(snapshot.updatedAt),
+    };
   });
 
   store.__controllers = nextRegistry;
