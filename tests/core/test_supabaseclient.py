@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 import requests
 
+import app
 from app.supabaseclient import (
     BILLING_TIER_5K_PRICE_USD,
     BILLING_TIER_5K_UNITS,
@@ -91,6 +92,7 @@ class TestImportTimeSafety:
         # Force a fresh import without cached module state
         mod_name = "app.supabaseclient"
         saved = sys.modules.pop(mod_name, None)
+        saved_attr = getattr(app, "supabaseclient", None)
         try:
             imported = importlib.import_module(mod_name)
             assert imported is not None
@@ -99,6 +101,10 @@ class TestImportTimeSafety:
                 sys.modules[mod_name] = saved
             else:
                 sys.modules.pop(mod_name, None)
+            if saved_attr is not None:
+                app.supabaseclient = saved_attr
+            elif hasattr(app, "supabaseclient"):
+                delattr(app, "supabaseclient")
 
 
 # ---------------------------------------------------------------------------
