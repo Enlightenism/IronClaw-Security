@@ -1271,6 +1271,54 @@ describe("dashboard structure", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("renders the full paid runtime card set whenever valid paid commands are available", async () => {
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard/overview") {
+        return Promise.resolve({
+          data: {
+            ...DEFAULT_DASH,
+            owner_key: "org-abc",
+            metadata: { owner_key: "org-abc" },
+            install_keys: [
+              {
+                program: "claude_code",
+                owner_key: "org-abc",
+                status: "active",
+                masked_key: "ic_install_claude_code_...abcd",
+                metadata: {},
+              },
+              {
+                program: "goose",
+                owner_key: "org-abc",
+                status: "locked",
+                masked_key: "",
+                metadata: {
+                  placeholder: "Keys will be generated after purchase",
+                },
+              },
+            ],
+          },
+        });
+      }
+      if (url === "/integrations/token") {
+        return Promise.resolve({ data: DEFAULT_TOKENS });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    await renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("openclaw-card")).toBeInTheDocument();
+      expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
+      expect(screen.getByTestId("cursor-card")).toBeInTheDocument();
+      expect(screen.getByTestId("goose-card")).toBeInTheDocument();
+      expect(screen.getByTestId("gemini_cli-card")).toBeInTheDocument();
+      expect(screen.getByTestId("copilot-card")).toBeInTheDocument();
+      expect(screen.getByTestId("hermes-card")).toBeInTheDocument();
+    });
+  });
+
   it("renders canonical runtime labels and excludes Security Guardian as a platform", async () => {
     await renderDashboard();
 

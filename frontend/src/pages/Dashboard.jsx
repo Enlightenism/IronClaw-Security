@@ -886,43 +886,15 @@ const Dashboard = () => {
       }
     };
 
-    const activeOwnerScopedPrograms = new Set(
-      ownerScopedInstallKeys
-        .filter((slot) => {
-          const program = normalizeProgramKey(slot?.program);
-          if (!program || program === "security_guardian") {
-            return false;
-          }
-
-          const status = String(slot?.status ?? "").toLowerCase();
-          return status === "active" || Boolean(slot?.masked_key);
-        })
-        .map((slot) => normalizeProgramKey(slot?.program))
-        .filter(Boolean),
-    );
-
-    const runtimePrograms = INSTALL_KEY_PROGRAMS.filter(({ program, commandKey }) => {
-      const command = tokens?.[commandKey] || "";
-      if (!hasEmbeddedInstallCommand(command)) {
-        return false;
-      }
-
-      if (activeOwnerScopedPrograms.size > 0) {
-        return activeOwnerScopedPrograms.has(program);
-      }
-
-      return true;
-    });
-
-    return runtimePrograms
-      .map(({ label, tint, program, commandKey }) => ({
-        title: label,
-        command: tokens?.[commandKey] || "",
-        tint,
-        testid: toCardTestId(program),
-      }))
-      .filter((card) => Boolean(card.command));
-  }, [ownerScopedInstallKeys, tokens]);
+    return INSTALL_KEY_PROGRAMS.filter(({ commandKey }) =>
+      hasEmbeddedInstallCommand(tokens?.[commandKey]),
+    ).map(({ label, tint, program, commandKey }) => ({
+      title: label,
+      command: tokens?.[commandKey] || "",
+      tint,
+      testid: toCardTestId(program),
+    }));
+  }, [tokens]);
 
   const attackFeedItems = useMemo(() => data?.attacks ?? [], [data?.attacks]);
 
