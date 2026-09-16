@@ -17,6 +17,20 @@
 -- =============================================================================
 
 -- ===========================================================================
+-- PRIVATE SECRET RECOVERY TABLE (004)
+-- ===========================================================================
+
+ALTER TABLE private.install_key_secrets ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'private' AND tablename = 'install_key_secrets' AND policyname = 'private_install_key_secrets_service_role_all') THEN
+    CREATE POLICY private_install_key_secrets_service_role_all ON private.install_key_secrets AS PERMISSIVE FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+
+-- ===========================================================================
 -- SECTION 1 — ironclaw behavioral tables (004)
 -- ===========================================================================
 

@@ -212,6 +212,47 @@ def _platform_install_command(program: str | None, install_key: str) -> str:
     return f"npx ironclaw-install --key {install_key} --platform {spec.program}"
 
 
+def _reject_non_production_install_key(candidate: str, *, expected_program: str | None = None) -> bool:
+    normalized = str(candidate).strip().lower()
+    if not normalized:
+        return True
+
+    rejected_markers = (
+        "...",
+        "placeholder",
+        "demo",
+        "example",
+        "fake",
+        "staging",
+        "test_key",
+        "testkey",
+        "redacted",
+        "masked",
+        "replaceme",
+        "sample",
+        "dummy",
+        "not-a-real-key",
+        "invalid-key",
+        "token",
+        "secret",
+        "api_key",
+        "api-key",
+        "auth_token",
+        "bearer ",
+    )
+    if any(marker in normalized for marker in rejected_markers):
+        return True
+
+    if expected_program is not None:
+        candidate_program = _canonicalize_platform_name(expected_program)
+        if candidate_program and f"ic_install_{candidate_program}_" in normalized:
+            suffix = normalized.split(f"ic_install_{candidate_program}_", 1)[1]
+            if not suffix or any(token in suffix for token in ("demo", "placeholder", "fake", "test", "sample", "example", "redacted", "masked")):
+                return True
+
+    return False
+
+
 def _require_paid_install_key(
     install_key: str | None,
     owner_key: str | None,
@@ -266,6 +307,7 @@ def _require_paid_install_key(
         or candidate.startswith("api_")
         or (candidate.startswith("ic_") and not candidate.startswith(valid_prefixes))
         or not candidate.startswith(valid_prefixes)
+        or _reject_non_production_install_key(candidate, expected_program=expected_program)
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

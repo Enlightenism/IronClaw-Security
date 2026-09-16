@@ -1,10 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
-  Check,
   ChevronLeft,
   ChevronRight,
-  Copy,
   Loader2,
   RefreshCw,
 } from "lucide-react";
@@ -348,7 +346,6 @@ const Dashboard = () => {
   const [purchasingId, setPurchasingId] = useState(null);
   const [pointerGlow, setPointerGlow] = useState({ x: 50, y: 25 });
   const [scrollShift, setScrollShift] = useState(0);
-  const [copiedInstallKey, setCopiedInstallKey] = useState("");
   const [paymentState, setPaymentState] = useState("idle");
   const polledRef = useRef(false);
 
@@ -745,32 +742,6 @@ const Dashboard = () => {
     fetchDashboard();
   }, [fetchDashboard]);
 
-  const copyInstallKey = useCallback(async (value, keyId) => {
-    if (!value) return;
-
-    try {
-      await navigator.clipboard.writeText(value);
-    } catch {
-      const textarea = document.createElement("textarea");
-      textarea.value = value;
-      textarea.setAttribute("readonly", "true");
-      textarea.style.position = "fixed";
-      textarea.style.opacity = "0";
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand("copy");
-      document.body.removeChild(textarea);
-    }
-
-    setCopiedInstallKey(keyId);
-    toast.success("Install key copied");
-    globalThis.setTimeout(
-      () =>
-        setCopiedInstallKey((current) => (current === keyId ? "" : current)),
-      1800,
-    );
-  }, []);
-
   const walletProps = useMemo(
     () => ({
       balance: data?.wallet_units ?? 0,
@@ -883,67 +854,6 @@ const Dashboard = () => {
     sessionCheckoutId,
   ]);
 
-  const installKeyCards = useMemo(() => {
-    const selectedByProgram = new Map();
-
-    for (const slot of ownerScopedInstallKeys) {
-      const program = normalizeProgramKey(slot?.program);
-      if (!program || program === "security_guardian") {
-        continue;
-      }
-
-      const existing = selectedByProgram.get(program);
-      if (!existing) {
-        selectedByProgram.set(program, slot);
-        continue;
-      }
-
-      const currentStatus = String(existing?.status ?? "locked").toLowerCase();
-      const nextStatus = String(slot?.status ?? "locked").toLowerCase();
-      const statusRank = { active: 3, locked: 2, revoked: 1 };
-
-      const shouldReplace =
-        statusRank[nextStatus] > statusRank[currentStatus] ||
-        (statusRank[nextStatus] === statusRank[currentStatus] &&
-          String(slot?.masked_key ?? "").length >
-            String(existing?.masked_key ?? "").length);
-
-      if (shouldReplace) {
-        selectedByProgram.set(program, slot);
-      }
-    }
-
-    return INSTALL_KEY_PROGRAMS.map(({ program, label, tint, commandKey }) => {
-      const slot = selectedByProgram.get(program) ?? {
-        program,
-        status: "locked",
-        masked_key: "",
-        metadata: {},
-      };
-      const effectiveStatus = hasPaymentFulfillment
-        ? (slot?.status ?? "locked")
-        : "locked";
-      const isActive =
-        effectiveStatus === "active" && Boolean(slot?.masked_key);
-      const placeholderText =
-        slot?.metadata?.placeholder_text ||
-        slot?.metadata?.placeholder ||
-        slot?.metadata?.status_message ||
-        "Keys will be generated after purchase";
-
-      return {
-        program,
-        title: label,
-        tint,
-        commandKey,
-        testid: `install-key-card-${program}`,
-        status: effectiveStatus,
-        maskedKey: isActive ? slot.masked_key : "",
-        placeholderText,
-      };
-    });
-  }, [hasPaymentFulfillment, ownerScopedInstallKeys]);
-
   const integrationCards = useMemo(() => {
     const hasUnlockedToken =
       tokens?.status === "ok" &&
@@ -976,20 +886,33 @@ const Dashboard = () => {
       }
     };
 
-    const ownerScopedPrograms = new Set(
+    const activeOwnerScopedPrograms = new Set(
       ownerScopedInstallKeys
+        .filter((slot) => {
+          const program = normalizeProgramKey(slot?.program);
+          if (!program || program === "security_guardian") {
+            return false;
+          }
+
+          const status = String(slot?.status ?? "").toLowerCase();
+          return status === "active" || Boolean(slot?.masked_key);
+        })
         .map((slot) => normalizeProgramKey(slot?.program))
         .filter(Boolean),
     );
 
-    const runtimePrograms = INSTALL_KEY_PROGRAMS.filter(
-      ({ program, commandKey }) => {
-        if (ownerScopedPrograms.size > 0) {
-          return ownerScopedPrograms.has(program);
-        }
-        return hasEmbeddedInstallCommand(tokens?.[commandKey]);
-      },
-    );
+    const runtimePrograms = INSTALL_KEY_PROGRAMS.filter(({ program, commandKey }) => {
+      const command = tokens?.[commandKey] || "";
+      if (!hasEmbeddedInstallCommand(command)) {
+        return false;
+      }
+
+      if (activeOwnerScopedPrograms.size > 0) {
+        return activeOwnerScopedPrograms.has(program);
+      }
+
+      return true;
+    });
 
     return runtimePrograms
       .map(({ label, tint, program, commandKey }) => ({
@@ -1137,85 +1060,6 @@ const Dashboard = () => {
           </div>
 
           <div className="space-y-6">
-            <div className="grid grid-cols-1 gap-6">
-              {installKeyCards.map((card) => {
-                const accent =
-                  CARD_TINT_STYLES[card.tint] ?? CARD_TINT_STYLES.gold;
-                return (
-                  <div
-                    key={card.testid}
-                    data-testid={card.testid}
-                    className="relative overflow-hidden rounded-2xl border p-5 backdrop-blur-xl transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_0_28px_rgba(255,215,0,0.12)]"
-                    style={{
-                      background: accent.card,
-                      borderColor: accent.border,
-                      boxShadow: `inset 0 1px 0 rgba(255,255,255,0.08), 0 18px 32px rgba(0,0,0,0.25), 0 0 0 1px ${accent.glow}`,
-                    }}
-                  >
-                    <div
-                      className="pointer-events-none absolute inset-0 opacity-90"
-                      style={{
-                        background: `radial-gradient(circle at 20% 0%, ${accent.glow}, transparent 32%)`,
-                      }}
-                    />
-                    <div className="relative">
-                      <div className="mb-3 flex items-center justify-between gap-3">
-                        <h2 className="text-lg font-semibold tracking-tight text-white">
-                          {card.title}
-                        </h2>
-                        <span
-                          className={`rounded-full border px-2 py-1 text-[10px] font-medium uppercase tracking-wide ${
-                            card.status === "active"
-                              ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-300"
-                              : "border-amber-400/30 bg-amber-500/10 text-amber-200"
-                          }`}
-                        >
-                          {card.status}
-                        </span>
-                      </div>
-
-                      <div className="space-y-3">
-                        {card.maskedKey ? (
-                          <div className="text-xs uppercase tracking-[0.2em] text-[#BFC1C2]">
-                            Active install key
-                          </div>
-                        ) : null}
-                        <div className="flex items-start gap-2">
-                          <textarea
-                            readOnly
-                            value={card.maskedKey || card.placeholderText}
-                            data-testid={`${card.testid}-value`}
-                            className={`min-h-[92px] flex-1 resize-none rounded-xl border px-3 py-2 font-mono text-sm outline-none ${
-                              card.maskedKey
-                                ? "border-emerald-400/20 bg-emerald-500/5 text-emerald-100"
-                                : "border-white/10 bg-white/5 text-[#BFC1C2]"
-                            }`}
-                          />
-                          {card.maskedKey ? (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                copyInstallKey(card.maskedKey, card.testid)
-                              }
-                              data-testid={`${card.testid}-copy`}
-                              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-400/30 bg-emerald-500/10 text-emerald-200 transition hover:border-emerald-300/60 hover:text-white"
-                              aria-label={`Copy ${card.title} install key`}
-                            >
-                              {copiedInstallKey === card.testid ? (
-                                <Check size={16} />
-                              ) : (
-                                <Copy size={16} />
-                              )}
-                            </button>
-                          ) : null}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
             <div className="grid grid-cols-1 gap-6">
               {integrationCards.map((card) => (
                 <MemoIntegrationCard

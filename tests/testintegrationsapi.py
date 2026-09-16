@@ -217,6 +217,53 @@ def test_integration_install_route_rejects_generic_and_mismatched_keys(installer
         assert "paid install key" in response.json()["detail"].lower()
 
 
+def test_integration_install_route_rejects_masked_and_placeholder_install_keys(installer_client: TestClient) -> None:
+    class _Record:
+        key_id = "ik_paid_123"
+        owner_key = "owner-456"
+        program = "openclaw"
+        active = True
+        payment_status = "paid"
+        entitlements_status = "active"
+        issued_after_payment = True
+
+    with patch("app.routes.integrations.installer.get_install_key_registry") as mock_registry:
+        mock_registry.return_value.authenticate_install_key.return_value = _Record()
+
+        for bad_key in (
+            "ic_install_openclaw_...abcd",
+            "ic_install_openclaw_placeholder",
+            "ic_install_openclaw_demo",
+            "ic_install_openclaw_replaceme",
+            "ic_install_openclaw_test_key",
+            "ic_install_openclaw_redacted",
+            "ic_install_openclaw_fake",
+        ):
+            response = installer_client.post(
+                "/integrations/integration-openclaw/install",
+                json={
+                    "initiated_by": "tester",
+                    "platform": "openclaw",
+                    "install_key": bad_key,
+                    "owner_key": "owner-456",
+                },
+            )
+            assert response.status_code == 403, response.text
+            assert "paid install key" in response.json()["detail"].lower()
+
+        response = installer_client.post(
+            "/integrations/integration-openclaw/install",
+            json={
+                "initiated_by": "tester",
+                "platform": "openclaw",
+                "install_key": "ic_install_openclaw_validkey",
+                "owner_key": "placeholder-owner",
+            },
+        )
+        assert response.status_code == 403, response.text
+        assert "paid install key" in response.json()["detail"].lower()
+
+
 def test_integration_install_route_rejects_raw_key_that_does_not_match_requested_platform_family(installer_client: TestClient) -> None:
     class _Record:
         key_id = "ik_paid_cursor_123"
@@ -497,7 +544,7 @@ def test_api_integrations_token_ignores_generic_platform_auth_even_with_registry
 
         api_app.dependency_overrides[get_auth_context] = lambda: auth_context
         try:
-            with patch("app.api.integrations.get_install_key_registry", return_value=registry):
+            with patch("app.api.routes.integrations.get_install_key_registry", return_value=registry):
                 response = api_client.get("/integrations/token")
         finally:
             api_app.dependency_overrides.clear()

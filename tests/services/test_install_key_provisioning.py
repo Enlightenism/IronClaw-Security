@@ -602,6 +602,85 @@ def test_provision_for_purchase_rejects_unconfirmed_payment() -> None:
         )
 
 
+def test_provision_for_program_reuses_valid_key_for_matching_checkout_reference() -> None:
+    existing = _make_install_key_record(
+        owner_key="buyer@ironclaw.test",
+        subscription_id="sub_123",
+        program="openclaw",
+        key_id="ik_existing_checkout_001",
+        raw_key="ic_install_openclaw_existing_checkout_secret_9",
+        purchase_reference="purchase_ref_abc",
+        checkout_session_id="cs_abc",
+    )
+    service, install_key_registry, _, _ = _make_service(existing_records=[existing])
+
+    issued = service.provision_for_program(
+        owner_key="buyer@ironclaw.test",
+        subscription_id="sub_123",
+        program="openclaw",
+        payment_status="paid",
+        entitlements_status="active",
+        issued_after_payment=True,
+        checkout_session_id="cs_abc",
+        purchase_reference="purchase_ref_other",
+    )
+
+    assert issued.record.key_id == "ik_existing_checkout_001"
+    assert issued.raw_key == ""
+    install_key_registry.generate_for_paid_customer.assert_not_called()
+
+
+def test_provision_for_program_generates_new_key_when_checkout_reference_differs() -> None:
+    existing = _make_install_key_record(
+        owner_key="buyer@ironclaw.test",
+        subscription_id="sub_123",
+        program="openclaw",
+        key_id="ik_existing_old_001",
+        raw_key="ic_install_openclaw_existing_old_secret_9",
+        purchase_reference="purchase_ref_old",
+        checkout_session_id="cs_old",
+    )
+    service, install_key_registry, _, _ = _make_service(existing_records=[existing])
+    replacement = _make_install_key_record(
+        owner_key="buyer@ironclaw.test",
+        subscription_id="sub_123",
+        program="openclaw",
+        key_id="ik_new_checkout_001",
+        raw_key="ic_install_openclaw_new_checkout_secret_9",
+        purchase_reference="purchase_ref_new",
+        checkout_session_id="cs_new",
+    )
+    install_key_registry.generate_for_paid_customer.return_value = replacement
+
+    issued = service.provision_for_program(
+        owner_key="buyer@ironclaw.test",
+        subscription_id="sub_123",
+        program="openclaw",
+        payment_status="paid",
+        entitlements_status="active",
+        issued_after_payment=True,
+        checkout_session_id="cs_new",
+        purchase_reference="purchase_ref_new",
+    )
+
+    assert issued.record.key_id == "ik_new_checkout_001"
+    install_key_registry.generate_for_paid_customer.assert_called_once()
+
+
+def test_issue_install_key_requires_payment_verification_gate() -> None:
+    service, _, _, _ = _make_service()
+
+    with pytest.raises(ValueError, match="successful payment confirmation"):
+        service.issue_install_key(
+            owner_key="buyer@ironclaw.test",
+            subscription_id="sub_123",
+            program="openclaw",
+            payment_status="pending",
+            entitlements_status="active",
+            issued_after_payment=True,
+        )
+
+
 # ---------------------------------------------------------------------------
 # public API / singleton
 # ---------------------------------------------------------------------------

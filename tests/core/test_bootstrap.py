@@ -25,7 +25,7 @@ from app.persistencebootstrap import (
     get_registered_tables,
 )
 
-_EXPECTED_TABLE_COUNT = 27
+_EXPECTED_TABLE_COUNT = 28
 _BOOTSTRAP_PATCH = "app.bootstrap.get_registered_tables"
 _STORE_PATCH = "app.bootstrap.get_persistence_store"
 
@@ -43,7 +43,7 @@ class TestAssertSchemaCompleteness:
         result = assert_schema_completeness()
         assert isinstance(result, frozenset)
 
-    def test_returns_all_27_tables(self):
+    def test_returns_all_28_tables(self):
         result = assert_schema_completeness()
         assert len(result) == _EXPECTED_TABLE_COUNT
 

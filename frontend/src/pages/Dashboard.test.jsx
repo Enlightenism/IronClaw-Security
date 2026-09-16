@@ -94,8 +94,18 @@ jest.mock("@/components/dashboard/SecurityAnalysis", () => ({
 // â”€â”€ IntegrationCard stub â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 jest.mock("@/components/dashboard/IntegrationCard", () => ({
   __esModule: true,
-  default: ({ title, testid }) => (
-    <div data-testid={testid || `integration-card-${title}`}>{title}</div>
+  default: ({ title, command, testid }) => (
+    <div data-testid={testid || `integration-card-${title}`}>
+      <div>{title}</div>
+      {command ? (
+        <>
+          <div data-testid={`${testid}-value`}>{command}</div>
+          <button type="button" data-testid={`${testid}-copy`}>
+            Copy
+          </button>
+        </>
+      ) : null}
+    </div>
   ),
 }));
 
@@ -473,8 +483,9 @@ describe("session_id payment polling", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByTestId("install-key-card-claude_code-value"),
-      ).toHaveValue("Keys will be generated after purchase");
+        screen.queryByText("ic_install_claude_code_...paid"),
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
     });
   });
 
@@ -948,7 +959,7 @@ describe("dashboard structure", () => {
     expect(capturedWalletProps.balance).toBe(9999);
   });
 
-  it("renders the canonical Hermes card and all platform cards until a paid active key exists", async () => {
+  it("keeps runtime command cards hidden until a valid unlocked token is available", async () => {
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard/overview") {
         return Promise.resolve({
@@ -967,32 +978,17 @@ describe("dashboard structure", () => {
     await renderDashboard();
 
     await waitFor(() => {
+      expect(screen.queryByTestId("claude-code-card")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("openclaw-card")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("cursor-card")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("goose-card")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("gemini_cli-card")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("copilot-card")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("hermes-card")).not.toBeInTheDocument();
       expect(
-        screen.getByTestId("install-key-card-claude_code"),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByTestId("install-key-card-openclaw"),
-      ).toBeInTheDocument();
-      expect(screen.getByTestId("install-key-card-cursor")).toBeInTheDocument();
-      expect(screen.getByTestId("install-key-card-goose")).toBeInTheDocument();
-      expect(
-        screen.getByTestId("install-key-card-gemini_cli"),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByTestId("install-key-card-copilot"),
-      ).toBeInTheDocument();
-      expect(screen.getByTestId("install-key-card-hermes")).toBeInTheDocument();
-      expect(
-        screen.queryByTestId("install-key-card-security_guardian"),
+        screen.queryByTestId("security_guardian-card"),
       ).not.toBeInTheDocument();
     });
-
-    expect(
-      screen.getByTestId("install-key-card-claude_code-value"),
-    ).toHaveValue("Keys will be generated after purchase");
-    expect(
-      screen.queryByTestId("install-key-card-claude_code-copy"),
-    ).not.toBeInTheDocument();
   });
 
   it("hides keyless runtime commands even when a valid install key exists", async () => {
@@ -1027,10 +1023,42 @@ describe("dashboard structure", () => {
     await renderDashboard();
 
     await waitFor(() => {
-      expect(
-        screen.getByTestId("install-key-card-claude_code-value"),
-      ).toHaveValue("ic_install_claude_code_...abcd");
       expect(screen.queryByTestId("claude-code-card")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("ic_install_claude_code_...abcd"),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("rejects placeholder and generic token payloads instead of rendering a command card", async () => {
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard/overview") {
+        return Promise.resolve({ data: DEFAULT_DASH });
+      }
+      if (url === "/integrations/token") {
+        return Promise.resolve({
+          data: {
+            status: "ok",
+            claude_code_command:
+              "gh auth login --token placeholder",
+            goose_command:
+              "export IRONCLAW_API_KEY=demo-token",
+            hermes_command:
+              "hermes skills install https://example.com --name ironclaw-security --key placeholder",
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    await renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("claude-code-card")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("goose-card")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("hermes-card")).not.toBeInTheDocument();
+      expect(screen.queryByText("placeholder")).not.toBeInTheDocument();
+      expect(screen.queryByText("demo-token")).not.toBeInTheDocument();
     });
   });
 
@@ -1148,16 +1176,15 @@ describe("dashboard structure", () => {
     await renderDashboard();
 
     await waitFor(() => {
-      expect(
-        screen.getByTestId("install-key-card-claude_code-value"),
-      ).toHaveValue("ic_install_claude_code_...current");
-      expect(
-        screen.getByTestId("install-key-card-claude_code-copy"),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
+      expect(screen.getByTestId("claude-code-card")).toHaveTextContent(
+        "gh skill install",
+      );
+      expect(screen.getByTestId("claude-code-card-copy")).toBeInTheDocument();
     });
   });
 
-  it("renders a copyable textarea for a generated Hermes install key", async () => {
+  it("renders a copyable command card for a generated Hermes install key", async () => {
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard/overview") {
         return Promise.resolve({
@@ -1189,17 +1216,16 @@ describe("dashboard structure", () => {
     await renderDashboard();
 
     await waitFor(() => {
-      expect(screen.getByTestId("install-key-card-hermes-value")).toHaveValue(
-        "ic_install_hermes_...abcd",
+      expect(screen.getByTestId("hermes-card")).toBeInTheDocument();
+      expect(screen.getByTestId("hermes-card")).toHaveTextContent(
+        "hermes skills install",
       );
     });
 
-    expect(
-      screen.getByTestId("install-key-card-hermes-copy"),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("hermes-card-copy")).toBeInTheDocument();
   });
 
-  it("renders the masked paid install key only when a valid active install key exists", async () => {
+  it("renders the command card without exposing the embedded install key value", async () => {
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard/overview") {
         return Promise.resolve({
@@ -1231,9 +1257,13 @@ describe("dashboard structure", () => {
     await renderDashboard();
 
     await waitFor(() => {
+      expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
+      expect(screen.getByTestId("claude-code-card")).toHaveTextContent(
+        "gh skill install",
+      );
       expect(
-        screen.getByText("ic_install_claude_code_...abcd"),
-      ).toBeInTheDocument();
+        screen.queryByText("ic_install_claude_code_...abcd"),
+      ).not.toBeInTheDocument();
     });
 
     expect(
@@ -1277,26 +1307,17 @@ describe("dashboard structure", () => {
     await renderDashboard();
 
     await waitFor(() => {
-      expect(screen.getByTestId("install-key-card-hermes")).toBeInTheDocument();
+      expect(screen.getByTestId("openclaw-card")).toBeInTheDocument();
+      expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
+      expect(screen.getByTestId("cursor-card")).toBeInTheDocument();
+      expect(screen.getByTestId("goose-card")).toBeInTheDocument();
+      expect(screen.getByTestId("gemini_cli-card")).toBeInTheDocument();
+      expect(screen.getByTestId("copilot-card")).toBeInTheDocument();
+      expect(screen.getByTestId("hermes-card")).toBeInTheDocument();
     });
 
-    const runtimeOrder = Array.from(
-      document.querySelectorAll('[data-testid^="install-key-card-"]'),
-    )
-      .map((node) => node.getAttribute("data-testid"))
-      .filter((id) => !id.endsWith("-value") && !id.endsWith("-copy"));
-
-    expect(runtimeOrder).toEqual([
-      "install-key-card-openclaw",
-      "install-key-card-claude_code",
-      "install-key-card-cursor",
-      "install-key-card-goose",
-      "install-key-card-gemini_cli",
-      "install-key-card-copilot",
-      "install-key-card-hermes",
-    ]);
     expect(
-      screen.queryByTestId("install-key-card-security_guardian"),
+      screen.queryByTestId("security_guardian-card"),
     ).not.toBeInTheDocument();
   });
 
@@ -1354,26 +1375,14 @@ describe("dashboard structure", () => {
     await renderDashboard();
 
     await waitFor(() => {
-      expect(
-        screen.getByTestId("install-key-card-claude_code-value"),
-      ).toHaveValue("ic_install_claude_code_...abcd");
-      expect(screen.getByTestId("install-key-card-hermes-value")).toHaveValue(
-        "ic_install_hermes_...efgh",
-      );
-      expect(screen.getByTestId("install-key-card-goose-value")).toHaveValue(
-        "Keys will be generated after purchase",
-      );
+      expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
+      expect(screen.getByTestId("hermes-card")).toBeInTheDocument();
+      expect(screen.queryByTestId("goose-card")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("goose-card-copy")).not.toBeInTheDocument();
     });
 
-    expect(
-      screen.getByTestId("install-key-card-claude_code-copy"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByTestId("install-key-card-hermes-copy"),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("install-key-card-goose-copy"),
-    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("claude-code-card-copy")).toBeInTheDocument();
+    expect(screen.getByTestId("hermes-card-copy")).toBeInTheDocument();
   });
 
   it("keeps the UI consistent across issued, locked, and reactivated runtime states", async () => {
@@ -1418,22 +1427,17 @@ describe("dashboard structure", () => {
     await renderDashboard();
 
     await waitFor(() => {
-      expect(screen.getByTestId("install-key-card-cursor-value")).toHaveValue(
-        "Keys will be generated after purchase",
-      );
-      expect(screen.getByTestId("install-key-card-copilot-value")).toHaveValue(
-        "ic_install_copilot_...wxyz",
+      expect(screen.queryByTestId("cursor-card")).not.toBeInTheDocument();
+      expect(screen.getByTestId("copilot-card")).toBeInTheDocument();
+      expect(screen.getByTestId("copilot-card")).toHaveTextContent(
+        "gh skill install",
       );
     });
 
+    expect(screen.queryByTestId("cursor-card-copy")).not.toBeInTheDocument();
+    expect(screen.getByTestId("copilot-card-copy")).toBeInTheDocument();
     expect(
-      screen.queryByTestId("install-key-card-cursor-copy"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByTestId("install-key-card-copilot-copy"),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("install-key-card-security_guardian"),
+      screen.queryByTestId("security_guardian-card"),
     ).not.toBeInTheDocument();
   });
 

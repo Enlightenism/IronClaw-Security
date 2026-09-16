@@ -216,13 +216,35 @@ class InstallKeyProvisioningService:
         normalized = self._normalize_owner_key(owner_key)
         return self._wallet_registry.get_or_create_wallet(normalized, metadata=metadata or {})
 
-    def _find_reusable_key(self, owner_key: str, program: ProgramCode) -> InstallKeyRecord | None:
+    def _find_reusable_key(
+        self,
+        owner_key: str,
+        program: ProgramCode,
+        *,
+        checkout_session_id: str | None = None,
+        purchase_reference: str | None = None,
+    ) -> InstallKeyRecord | None:
+        lookup_references = {
+            str(checkout_session_id or "").strip().lower(),
+            str(purchase_reference or "").strip().lower(),
+        }
+        if not any(lookup_references):
+            lookup_references = set()
+
         for record in self._install_key_registry.get_keys_for_owner(owner_key):
             if str(getattr(record, "program", "")).strip().lower() != program:
                 continue
             if not self._has_valid_paid_entitlement(record):
                 continue
             if str(getattr(record, "owner_key", "")).strip().lower() != owner_key:
+                continue
+            if lookup_references:
+                record_references = {
+                    str(getattr(record, "purchase_reference", "") or "").strip().lower(),
+                    str(getattr(record, "checkout_session_id", "") or "").strip().lower(),
+                }
+                if record_references & lookup_references:
+                    return record
                 continue
             return record
         return None
@@ -265,7 +287,12 @@ class InstallKeyProvisioningService:
         if not bool(issued_after_payment):
             raise ValueError("Install keys must be issued only after successful payment confirmation.")
 
-        existing = self._find_reusable_key(normalized_owner, canonical_program)
+        existing = self._find_reusable_key(
+            normalized_owner,
+            canonical_program,
+            checkout_session_id=checkout_session_id,
+            purchase_reference=purchase_reference,
+        )
         if existing is not None:
             _logger.info(
                 "install_key_reused",
@@ -473,6 +500,14 @@ class InstallKeyProvisioningService:
         source: str = "manual",
         label: str = "manual-issued",
         metadata: dict[str, Any] | None = None,
+        payment_status: str | None = "paid",
+        entitlements_status: str | None = "active",
+        issued_after_payment: bool = True,
+        checkout_session_id: str | None = None,
+        purchase_reference: str | None = None,
+        customer_id: str | None = None,
+        org_id: str | None = None,
+        payment_confirmed: bool | None = None,
     ) -> InstallKeyIssued:
         return self.provision_for_program(
             owner_key=owner_key,
@@ -481,6 +516,14 @@ class InstallKeyProvisioningService:
             source=source,
             label=label,
             metadata=metadata,
+            payment_status=payment_status,
+            entitlements_status=entitlements_status,
+            issued_after_payment=issued_after_payment,
+            checkout_session_id=checkout_session_id,
+            purchase_reference=purchase_reference,
+            customer_id=customer_id,
+            org_id=org_id,
+            payment_confirmed=payment_confirmed,
         )
 
 

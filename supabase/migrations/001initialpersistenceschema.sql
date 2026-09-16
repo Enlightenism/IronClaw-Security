@@ -89,8 +89,6 @@ create table if not exists public.billing_purchases (
     tokens_per_unit integer not null default 25000,
     units_credited boolean not null default false,
     install_keys_provisioned boolean not null default false,
-    openclaw_install_key text,
-    claude_code_install_key text,
     raw_metadata jsonb not null default '{}'::jsonb,
     created_at timestamptz not null default timezone('utc', now()),
     updated_at timestamptz not null default timezone('utc', now()),

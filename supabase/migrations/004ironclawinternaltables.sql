@@ -339,3 +339,48 @@ CREATE INDEX IF NOT EXISTS idx_ironclaw_event_idempotency_purchase
 CREATE TRIGGER trg_ironclaw_event_idempotency_updated_at
     BEFORE UPDATE ON ironclaw_event_idempotency
     FOR EACH ROW EXECUTE FUNCTION ironclaw_set_updated_at();
+
+-- ---------------------------------------------------------------------------
+-- Private recovery store for raw install secret material
+-- This table is intentionally isolated outside the public ledger. It exists only
+-- for service-controlled operational recovery and must never be surfaced through
+-- dashboard/frontend APIs or public queries.
+-- ---------------------------------------------------------------------------
+
+CREATE SCHEMA IF NOT EXISTS private;
+
+REVOKE ALL ON SCHEMA private FROM PUBLIC;
+REVOKE ALL ON ALL TABLES IN SCHEMA private FROM PUBLIC;
+
+CREATE TABLE IF NOT EXISTS private.install_key_secrets (
+    key_id            TEXT        PRIMARY KEY REFERENCES public.install_key_records(key_id) ON DELETE CASCADE,
+    encrypted_key     BYTEA       NOT NULL,
+    key_version       TEXT        NOT NULL DEFAULT 'v1',
+    owner_key         TEXT        NOT NULL,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at        TIMESTAMPTZ,
+    metadata          JSONB       NOT NULL DEFAULT '{}'::jsonb,
+    CONSTRAINT private_install_key_secrets_key_id_not_empty
+        CHECK (char_length(trim(key_id)) > 0),
+    CONSTRAINT private_install_key_secrets_owner_key_not_empty
+        CHECK (char_length(trim(owner_key)) > 0),
+    CONSTRAINT private_install_key_secrets_encrypted_key_not_empty
+        CHECK (octet_length(encrypted_key) > 0)
+);
+
+REVOKE ALL ON TABLE private.install_key_secrets FROM PUBLIC;
+REVOKE ALL ON TABLE private.install_key_secrets FROM authenticated;
+REVOKE ALL ON TABLE private.install_key_secrets FROM anon;
+GRANT ALL ON TABLE private.install_key_secrets TO service_role;
+
+CREATE INDEX IF NOT EXISTS idx_private_install_key_secrets_owner_key
+    ON private.install_key_secrets (owner_key, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_private_install_key_secrets_expiry
+    ON private.install_key_secrets (expires_at)
+    WHERE expires_at IS NOT NULL;
+
+CREATE TRIGGER trg_private_install_key_secrets_updated_at
+    BEFORE UPDATE ON private.install_key_secrets
+    FOR EACH ROW EXECUTE FUNCTION ironclaw_set_updated_at();

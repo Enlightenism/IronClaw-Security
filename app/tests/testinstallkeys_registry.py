@@ -115,6 +115,25 @@ class TestGenerateInstallKeyHappyPath:
         assert record.raw_key not in record.masked_key
         assert "..." in record.masked_key
 
+    def test_secret_like_metadata_is_sanitized_before_public_persistence(self) -> None:
+        client = _empty_client()
+        registry = _fresh_registry(client)
+        with patch(_MOCK_TARGET, return_value=client):
+            record = registry.generate_install_key(
+                _OWNER,
+                _SUB,
+                "openclaw",
+                metadata={
+                    "safe": "ok",
+                    "raw_key": "ic_install_openclaw_secret_payload",
+                    "token": "secret-token",
+                    "nested": {"api_key": "leak-me"},
+                },
+            )
+        assert record.metadata == {"safe": "ok", "nested": {}}
+        assert "raw_key" not in record.to_db_row()["metadata"]
+        assert "token" not in record.public_dict()["metadata"]
+
     def test_key_id_starts_with_ik_prefix(self) -> None:
         client = _empty_client()
         registry = _fresh_registry(client)

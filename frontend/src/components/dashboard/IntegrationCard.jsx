@@ -95,25 +95,34 @@ const isSecurityGuardian = (value) => {
   return Boolean(key) && SECURITY_GUARDIAN_ALIASES.has(key);
 };
 
+const GENERIC_TOKEN_PATTERNS = [
+  /--token\s*(?:=|\b)/i,
+  /token\s+(?:placeholder|loading|example|your|demo)/i,
+  /api[-_\s]?key\s*(?:=|\b)/i,
+  /gh\s+auth\s+(?:login|status|token)/i,
+  /placeholder/i,
+  /loading/i,
+  /<token>/i,
+  /your\s+(?:api|install)\s+(?:key|token)/i,
+  /example\s+(?:key|token)/i,
+  /\b(?:demo|sample)\b/i,
+];
+
 const looksLikeTokenCommand = (value) => {
   if (typeof value !== "string") {
-    return false;
+    return true;
   }
 
   const candidate = value.trim();
   if (!candidate) {
-    return false;
+    return true;
   }
 
-  return (
-    candidate.includes("--token") ||
-    candidate.includes("token ") ||
-    candidate.includes("api-key") ||
-    candidate.includes("api key") ||
-    candidate.includes("gh auth") ||
-    candidate.includes("placeholder") ||
-    candidate.includes("loading")
-  );
+  if (GENERIC_TOKEN_PATTERNS.some((pattern) => pattern.test(candidate))) {
+    return true;
+  }
+
+  return !/--key\s+ic_install_[A-Za-z0-9_./~:-]+/i.test(candidate);
 };
 
 const hasEmbeddedInstallKey = (command, runtimeKey) => {
@@ -122,7 +131,7 @@ const hasEmbeddedInstallKey = (command, runtimeKey) => {
   }
 
   const candidate = command.trim();
-  if (!candidate) {
+  if (!candidate || looksLikeTokenCommand(candidate)) {
     return false;
   }
 
@@ -132,7 +141,7 @@ const hasEmbeddedInstallKey = (command, runtimeKey) => {
   }
 
   return new RegExp(
-    `--key\\s+${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` + "[^\\s]+",
+    `--key\\s+${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[A-Za-z0-9_./~:-]+`,
     "i",
   ).test(candidate);
 };
@@ -153,34 +162,32 @@ const commandMatchesRuntime = (command, runtimeKey) => {
 
   switch (runtimeKey) {
     case "claude_code":
-      return (
-        candidate.includes("--agent claude-code") ||
-        candidate.includes("claude-code")
+      return /^gh\s+skill\s+install\b.*--agent\s+claude-code\b.*--key\s+ic_install_claude_code_[A-Za-z0-9_./~:-]+/i.test(
+        candidate,
       );
     case "openclaw":
-      return (
-        candidate.includes("--agent openclaw") || candidate.includes("openclaw")
+      return /^gh\s+skill\s+install\b.*--agent\s+openclaw\b.*--key\s+ic_install_openclaw_[A-Za-z0-9_./~:-]+/i.test(
+        candidate,
       );
     case "cursor":
-      return (
-        candidate.includes("--agent cursor") || candidate.includes("cursor")
+      return /^gh\s+skill\s+install\b.*--agent\s+cursor\b.*--key\s+ic_install_cursor_[A-Za-z0-9_./~:-]+/i.test(
+        candidate,
       );
     case "goose":
-      return candidate.includes("--agent goose") || candidate.includes("goose");
+      return /^gh\s+skill\s+install\b.*--agent\s+goose\b.*--key\s+ic_install_goose_[A-Za-z0-9_./~:-]+/i.test(
+        candidate,
+      );
     case "gemini_cli":
-      return (
-        candidate.includes("--agent gemini-cli") ||
-        candidate.includes("gemini-cli")
+      return /^gh\s+skill\s+install\b.*--agent\s+gemini-cli\b.*--key\s+ic_install_gemini_cli_[A-Za-z0-9_./~:-]+/i.test(
+        candidate,
       );
     case "copilot":
-      return (
-        candidate.includes("--agent copilot") || candidate.includes("copilot")
+      return /^gh\s+skill\s+install\b.*--agent\s+copilot\b.*--key\s+ic_install_copilot_[A-Za-z0-9_./~:-]+/i.test(
+        candidate,
       );
     case "hermes":
-      return (
-        candidate.includes("hermes skills install") ||
-        (candidate.includes("ironclaw-security") &&
-          candidate.includes("hermes"))
+      return /^hermes\s+skills\s+install\b.*--key\s+ic_install_hermes_[A-Za-z0-9_./~:-]+/i.test(
+        candidate,
       );
     default:
       return false;
@@ -194,12 +201,11 @@ const resolveCommand = (title, command) => {
   }
 
   const rawCommand = typeof command === "string" ? command.trim() : "";
-
-  if (rawCommand && commandMatchesRuntime(rawCommand, runtimeKey)) {
-    return rawCommand;
+  if (!rawCommand) {
+    return "";
   }
 
-  return "";
+  return commandMatchesRuntime(rawCommand, runtimeKey) ? rawCommand : "";
 };
 
 const IntegrationCard = ({ title, command, tint = "gold", testid }) => {

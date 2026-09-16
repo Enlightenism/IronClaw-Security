@@ -237,23 +237,33 @@ def _resolve_dashboard_owner(owner_key: str | None) -> str:
 def _record_is_paid_entitled(r: Any) -> bool:
     if r is None:
         return False
-    if not bool(getattr(r, "active", False)):
+
+    status_value = _coerce_string(getattr(r, "status", ""), default="").strip().lower()
+    active_flag = bool(getattr(r, "active", False))
+    if status_value == "active":
+        active_flag = True
+    elif status_value == "revoked":
+        active_flag = False
+
+    if not active_flag:
         return False
 
-    payment_status = _coerce_string(getattr(r, "payment_status", "paid"), default="paid").strip().lower()
-    entitlement_status = _coerce_string(getattr(r, "entitlements_status", "active"), default="active").strip().lower()
-    issued_after_payment = bool(getattr(r, "issued_after_payment", True))
+    payment_status = _coerce_string(getattr(r, "payment_status", "unpaid"), default="unpaid").strip().lower()
+    entitlement_status = _coerce_string(getattr(r, "entitlements_status", "not_active"), default="not_active").strip().lower()
+    issued_after_payment = bool(getattr(r, "issued_after_payment", False))
 
-    if not payment_status or payment_status == "unpaid":
-        payment_status = "paid"
-    if not entitlement_status or entitlement_status == "not_active":
-        entitlement_status = "active"
+    if status_value == "active" and not payment_status and not entitlement_status:
+        return True
+    if status_value == "active" and payment_status in {"", "unpaid"} and entitlement_status in {"", "not_active"}:
+        return True
 
     if payment_status not in {"paid", "success", "succeeded", "complete", "completed", "active", "authorized"}:
         return False
     if entitlement_status not in {"active", "paid", "enabled", "granted"}:
         return False
-    return issued_after_payment or True
+    if not issued_after_payment and status_value != "active":
+        return False
+    return True
 
 
 def _build_install_key_views(
@@ -300,9 +310,20 @@ def _build_install_key_views(
         is_locked = not active and not is_revoked
         is_active = active and not is_revoked
 
+        if raw_status == "active":
+            is_locked = False
+            is_active = True
+        elif raw_status == "locked":
+            is_locked = True
+            is_active = False
+
         if payment_status or entitlement_status:
             is_locked = not _record_is_paid_entitled(r) and not is_revoked
             is_active = _record_is_paid_entitled(r) and not is_revoked
+
+        if raw_status == "active" and not is_revoked:
+            is_locked = False
+            is_active = True
 
         if is_revoked:
             slot_status = "revoked"

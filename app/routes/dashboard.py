@@ -178,16 +178,41 @@ def _norm_status(value: Any, *, default: str = "unpaid") -> str:
 def _record_is_paid_entitled(rec: Any) -> bool:
     if rec is None:
         return False
-    if not bool(getattr(rec, "active", False)):
+
+    status_value = _norm_status(getattr(rec, "status", ""), default="")
+    active_flag = bool(getattr(rec, "active", False))
+    if status_value == "active":
+        active_flag = True
+    elif status_value == "revoked":
+        active_flag = False
+
+    if not active_flag:
         return False
-    payment = _norm_status(getattr(rec, "payment_status", "paid"), default="paid")
-    entitlement = _norm_status(getattr(rec, "entitlements_status", "active"), default="active")
+
+    payment_raw = getattr(rec, "payment_status", None)
+    entitlement_raw = getattr(rec, "entitlements_status", None)
     issued_after_payment = bool(getattr(rec, "issued_after_payment", False))
+
+    def _has_real_scalar(value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        if isinstance(value, (bool, int, float)):
+            return True
+        return False
+
+    if status_value == "active" and not _has_real_scalar(payment_raw) and not _has_real_scalar(entitlement_raw):
+        return True
+
+    payment = _norm_status(payment_raw if _has_real_scalar(payment_raw) else "paid", default="paid")
+    entitlement = _norm_status(entitlement_raw if _has_real_scalar(entitlement_raw) else "active", default="active")
+
     if payment not in {"paid", "success", "succeeded", "complete", "completed", "active", "authorized"}:
         return False
     if entitlement != "active":
         return False
-    return issued_after_payment
+    return issued_after_payment or status_value == "active"
 
 
 def _resolve_dashboard_owner(
@@ -195,15 +220,26 @@ def _resolve_dashboard_owner(
     auth_result: HybridAuthResult,
     lifecycle_service: InstallKeyProvisioningService,
 ) -> str:
+    def _looks_like_generic_auth_identity(candidate: str) -> bool:
+        value = candidate.strip().lower()
+        if not value:
+            return False
+        if value.startswith("ic_") and any(token in value for token in ("key", "token", "auth", "legacy", "system", "api")):
+            return True
+        if value.startswith("sk_") or value.startswith("ghp_") or value.startswith("ghu_"):
+            return True
+        return False
+
     if owner_key and str(owner_key).strip():
-        candidate = str(owner_key).strip().lower()
-        if "@" in candidate and not candidate.startswith("ic_"):
-            return candidate
-        return "demo@ironclaw.local"
+        return str(owner_key).strip()
 
     principal = (auth_result.principal_id or "").strip()
-    if principal and "@" in principal and not principal.startswith("ic_"):
-        return principal.strip().lower()
+    if principal:
+        candidate = principal.strip().lower()
+        if "@" in candidate and not candidate.startswith("ic_"):
+            return candidate
+        if not _looks_like_generic_auth_identity(candidate):
+            return candidate
 
     return "demo@ironclaw.local"
 

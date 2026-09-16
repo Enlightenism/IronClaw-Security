@@ -130,6 +130,25 @@ _KNOWN_PREFIXES: Final[tuple[str, ...]] = tuple(sorted(_PREFIX_BY_PROGRAM.values
 
 _PAID_PAYMENT_STATUSES: Final[frozenset[str]] = frozenset({"paid", "success", "succeeded", "complete", "completed", "active", "authorized"})
 _ACTIVE_ENTITLEMENT_STATUSES: Final[frozenset[str]] = frozenset({"active", "paid", "enabled", "granted"})
+_PUBLIC_METADATA_BLOCKLIST: Final[frozenset[str]] = frozenset(
+    {
+        "raw_key",
+        "rawvalue",
+        "secret",
+        "secret_key",
+        "api_key",
+        "apikey",
+        "token",
+        "access_token",
+        "refresh_token",
+        "private_key",
+        "key_material",
+        "key_value",
+        "install_key",
+        "installkey",
+        "password",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +340,29 @@ def _is_active_entitlement_status(value: Any) -> bool:
     return _normalize_entitlement_status(value) == "active"
 
 
+def _sanitize_public_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(metadata, dict):
+        return {}
+
+    sanitized: dict[str, Any] = {}
+    for key, value in metadata.items():
+        normalized_key = str(key).strip().lower()
+        if not normalized_key:
+            continue
+        if normalized_key in _PUBLIC_METADATA_BLOCKLIST:
+            continue
+        if any(token in normalized_key for token in ("raw_key", "secret", "token", "api_key", "private_key", "key_material", "key_value", "install_key", "password")):
+            continue
+        if isinstance(value, dict):
+            cleaned_value = _sanitize_public_metadata(value)
+        elif isinstance(value, list):
+            cleaned_value = [_sanitize_public_metadata(item) if isinstance(item, dict) else item for item in value]
+        else:
+            cleaned_value = value
+        sanitized[str(key)] = cleaned_value
+    return sanitized
+
+
 # ---------------------------------------------------------------------------
 # Dataclass
 # ---------------------------------------------------------------------------
@@ -356,6 +398,8 @@ class InstallKeyRecord:
             raise ValueError(f"Invalid program: {self.program!r}. Must be one of {sorted(_VALID_PROGRAMS)}")
         if self.units_consumed < 0:
             raise ValueError("units_consumed cannot be negative")
+
+        self.metadata = _sanitize_public_metadata(self.metadata)
 
         if self.raw_key:
             expected_prefix = _PREFIX_BY_PROGRAM.get(self.program, "")
@@ -415,7 +459,7 @@ class InstallKeyRecord:
             "revoked_at": self.revoked_at.isoformat() if self.revoked_at else None,
             "purchase_reference": self.purchase_reference,
             "checkout_session_id": self.checkout_session_id,
-            "metadata": self.metadata,
+            "metadata": _sanitize_public_metadata(self.metadata),
         }
 
     def public_dict(self) -> dict[str, Any]:
@@ -438,7 +482,7 @@ class InstallKeyRecord:
             "revoked_at": self.revoked_at.isoformat() if self.revoked_at else None,
             "purchase_reference": self.purchase_reference,
             "checkout_session_id": self.checkout_session_id,
-            "metadata": dict(self.metadata),
+            "metadata": _sanitize_public_metadata(self.metadata),
         }
 
 
@@ -678,8 +722,7 @@ def _persist_install_key_state_record(record: InstallKeyRecord) -> None:
         "updated_at": _utc_now_iso(),
         "revoked_at": record.revoked_at.isoformat() if record.revoked_at else None,
         "metadata": {
-            **record.metadata,
-            "purchase_reference": record.purchase_reference,
+            **_sanitize_public_metadata(record.metadata),
             "checkout_session_id": record.checkout_session_id,
             "raw_key_hash": record.raw_key_hash,
         },
@@ -705,7 +748,7 @@ def _persist_install_key_history_record(*, record: InstallKeyRecord, event_type:
             "owner_key": record.owner_key,
             "program": record.program,
             "checkout_session_id": record.checkout_session_id,
-            **(metadata or {}),
+            **_sanitize_public_metadata(metadata or {}),
         },
         "created_at": _utc_now_iso(),
         "updated_at": _utc_now_iso(),
@@ -1240,11 +1283,32 @@ class InstallKeyRegistry:
         if checkout_session_id is None and metadata is not None:
             checkout_session_id = metadata.get("checkout_session_id")
 
-        if purchase_reference is None and checkout_session_id is None:
+        normalized_payment_status = _normalize_payment_status(effective_payment_status)
+        normalized_entitlements_status = _normalize_entitlement_status(effective_entitlements_status)
+        has_paid_active_status = _is_paid_payment_status(normalized_payment_status) and _is_active_entitlement_status(normalized_entitlements_status)
+
+        effective_purchase_reference = purchase_reference
+        effective_checkout_session_id = checkout_session_id
+        if metadata is not None and isinstance(metadata, dict):
+            if effective_purchase_reference is None:
+                effective_purchase_reference = metadata.get("purchase_reference")
+            if effective_checkout_session_id is None:
+                effective_checkout_session_id = metadata.get("checkout_session_id")
+
+        has_real_payment_reference = bool((str(effective_purchase_reference or "").strip()) or (str(effective_checkout_session_id or "").strip()))
+
+        if not has_real_payment_reference:
             raise InstallKeyPaymentRequiredError(
                 owner_key,
                 normalized_program,
                 reason="legacy install-key generation requires a real purchase_reference or checkout_session_id from a completed paid checkout.",
+            )
+
+        if not has_paid_active_status:
+            raise InstallKeyPaymentRequiredError(
+                owner_key,
+                normalized_program,
+                reason="legacy install-key generation requires a paid-active entitlement with a real purchase_reference / checkout_session_id from a completed paid checkout.",
             )
 
         return self.generate_for_paid_customer(

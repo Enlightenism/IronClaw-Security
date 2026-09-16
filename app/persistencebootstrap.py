@@ -45,6 +45,7 @@ _IRONCLAW_DDL_TABLE_REGISTRY: frozenset[str] = frozenset(
         "install_key_records",
         "install_key_issuance_history",
         "event_idempotency_ledger",
+        "private_install_key_secrets",
         "ironclaw_billing_purchases",
         "ironclaw_install_key_state",
         "ironclaw_install_key_history",

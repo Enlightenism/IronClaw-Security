@@ -39,7 +39,7 @@ from app.supabaseclient import (
 _VALID_URL = "https://test.supabase.co"
 _VALID_KEY = "service-role-key-abc123"
 
-_ALL_27_TABLES: frozenset[str] = frozenset(
+_ALL_28_TABLES: frozenset[str] = frozenset(
     {
         "scan_history",
         "scan_patterns",
@@ -64,6 +64,7 @@ _ALL_27_TABLES: frozenset[str] = frozenset(
         "install_key_records",
         "install_key_issuance_history",
         "event_idempotency_ledger",
+        "private_install_key_secrets",
         "ironclaw_billing_purchases",
         "ironclaw_install_key_state",
         "ironclaw_install_key_history",
@@ -148,11 +149,11 @@ class TestIronclawTables:
     def test_is_frozenset(self) -> None:
         assert isinstance(IRONCLAW_TABLES, frozenset)
 
-    def test_exact_count_is_27(self) -> None:
-        assert len(IRONCLAW_TABLES) == 27, f"Expected 27 tables, got {len(IRONCLAW_TABLES)}. Present: {sorted(IRONCLAW_TABLES)}"
+    def test_exact_count_is_28(self) -> None:
+        assert len(IRONCLAW_TABLES) == 28, f"Expected 28 tables, got {len(IRONCLAW_TABLES)}. Present: {sorted(IRONCLAW_TABLES)}"
 
     def test_matches_canonical_set(self) -> None:
-        assert IRONCLAW_TABLES == _ALL_27_TABLES, f"Missing: {_ALL_27_TABLES - IRONCLAW_TABLES}  Extra: {IRONCLAW_TABLES - _ALL_27_TABLES}"
+        assert IRONCLAW_TABLES == _ALL_28_TABLES, f"Missing: {_ALL_28_TABLES - IRONCLAW_TABLES}  Extra: {IRONCLAW_TABLES - _ALL_28_TABLES}"
 
     def test_webhook_delivery_log_is_absent(self) -> None:
         assert "webhook_delivery_log" not in IRONCLAW_TABLES
@@ -219,6 +220,9 @@ class TestIronclawTables:
 
     def test_event_idempotency_ledger_present(self) -> None:
         assert "event_idempotency_ledger" in IRONCLAW_TABLES
+
+    def test_private_install_key_secrets_present(self) -> None:
+        assert "private_install_key_secrets" in IRONCLAW_TABLES
 
     def test_ironclaw_billing_purchases_present(self) -> None:
         assert "ironclaw_billing_purchases" in IRONCLAW_TABLES

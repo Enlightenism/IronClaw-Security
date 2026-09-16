@@ -35,7 +35,7 @@ from app.supabaseclient import IRONCLAW_TABLES
 # Constants
 # ---------------------------------------------------------------------------
 
-_EXPECTED_TABLE_COUNT = 27
+_EXPECTED_TABLE_COUNT = 28
 
 _ALL_EXPECTED_TABLES: frozenset[str] = frozenset(
     {
@@ -62,6 +62,7 @@ _ALL_EXPECTED_TABLES: frozenset[str] = frozenset(
         "install_key_records",
         "install_key_issuance_history",
         "event_idempotency_ledger",
+        "private_install_key_secrets",
         "ironclaw_billing_purchases",
         "ironclaw_install_key_state",
         "ironclaw_install_key_history",
@@ -120,9 +121,15 @@ class TestSupabaseMigrationForBillingDurability:
             "actor_type",
             "reason",
             "payload_hash",
+            "raw_key_hash",
+            "masked_key",
         ]
         for statement in required:
             assert statement in sql
+        assert "openclaw_install_key" not in sql
+        assert "claude_code_install_key" not in sql
+        assert "raw_key text" not in sql.lower()
+        assert "raw_key" not in sql.lower() or "raw_key_hash" in sql
 
     def test_unique_indexes_guard_duplicate_paid_purchases_and_active_keys(self) -> None:
         sql = _MIGRATION_PATH.read_text(encoding="utf-8")
@@ -160,9 +167,11 @@ class TestSupabaseMigrationForBillingDurability:
             "CREATE TABLE IF NOT EXISTS ironclaw_install_key_state",
             "CREATE TABLE IF NOT EXISTS ironclaw_install_key_history",
             "CREATE TABLE IF NOT EXISTS ironclaw_event_idempotency",
+            "CREATE TABLE IF NOT EXISTS private.install_key_secrets",
             "trg_ironclaw_billing_purchases_updated_at",
             "trg_ironclaw_install_key_state_updated_at",
             "trg_ironclaw_event_idempotency_updated_at",
+            "trg_private_install_key_secrets_updated_at",
             "buyer_name",
             "package_name",
             "price_usd",
@@ -173,9 +182,15 @@ class TestSupabaseMigrationForBillingDurability:
             "reason",
             "payload_hash",
             "status",
+            "service_role",
         ]
         for needle in required:
             assert needle in sql
+        assert "raw_key text" not in sql.lower()
+        assert "raw_key_hash" in sql.lower()
+        assert "public.install_key_secrets" not in sql.lower()
+        assert "private.install_key_secrets" in sql.lower()
+        assert "grant all on table private.install_key_secrets to service_role;" in sql.lower()
 
     def test_009_webhook_migration_hardens_stripe_idempotency_and_append_only_logs(self) -> None:
         sql = (Path(__file__).resolve().parents[2] / "supabase" / "migrations" / "009_webhooks.sql").read_text(encoding="utf-8")
@@ -250,6 +265,7 @@ class TestGetRegisteredTables:
             "install_key_records",
             "install_key_issuance_history",
             "event_idempotency_ledger",
+            "private_install_key_secrets",
             "ironclaw_billing_purchases",
             "ironclaw_install_key_state",
             "ironclaw_install_key_history",

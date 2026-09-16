@@ -243,6 +243,33 @@ class TestDashboardOverview:
         assert slot["payment_status"] == "pending"
         assert slot["entitlements_status"] == "not_active"
 
+    def test_dashboard_marks_postpayment_gate_required_key_as_locked(self, app: FastAPI, client: TestClient) -> None:
+        record = _make_record(
+            key_id="ik_gate_fail",
+            owner_key=_OWNER,
+            program="cursor",
+            masked_key="ic_install_cursor_...dead",
+            active=True,
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=False,
+            units_consumed=7,
+        )
+        wallet = _make_wallet_registry(balance_units=9, total_consumed_units=7, total_blocked_attacks=0)
+        reg = _make_registry(records=[record])
+        app.dependency_overrides[get_install_key_registry] = lambda: reg
+        app.dependency_overrides[get_unit_wallet_registry] = lambda: wallet
+        app.dependency_overrides[require_hybrid_auth] = lambda: _auth_override()
+        try:
+            body = client.get(f"/dashboard/overview?owner_key={_OWNER}").json()
+        finally:
+            app.dependency_overrides.clear()
+        slot = next(item for item in body["install_keys"] if item["program"] == "cursor")
+        assert slot["status"] == "locked"
+        assert slot["active"] is False
+        assert slot["payment_status"] == "paid"
+        assert slot["entitlements_status"] == "active"
+
     def test_dashboard_includes_all_supported_runtime_slots(self, app: FastAPI, client: TestClient) -> None:
         records = [
             _make_record(key_id="ik_cursor_1", owner_key=_OWNER, program="cursor", masked_key="ic_install_cursor_...ffff"),
