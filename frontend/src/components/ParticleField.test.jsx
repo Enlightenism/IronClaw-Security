@@ -179,6 +179,33 @@ describe("ParticleField", () => {
     );
   });
 
+  it("registers passive raw touch listeners so scroll-cancelled pointer gestures still track finger position on mobile", () => {
+    const addEventListenerSpy = jest.spyOn(window, "addEventListener");
+
+    render(<ParticleField density={50} />);
+
+    expect(addEventListenerSpy).toHaveBeenCalledWith(
+      "touchstart",
+      expect.any(Function),
+      { passive: true },
+    );
+    expect(addEventListenerSpy).toHaveBeenCalledWith(
+      "touchmove",
+      expect.any(Function),
+      { passive: true },
+    );
+    expect(addEventListenerSpy).toHaveBeenCalledWith(
+      "touchend",
+      expect.any(Function),
+      { passive: true },
+    );
+    expect(addEventListenerSpy).toHaveBeenCalledWith(
+      "touchcancel",
+      expect.any(Function),
+      { passive: true },
+    );
+  });
+
   it("respects reduced motion and subscribes to viewport resizing on mobile layouts", () => {
     window.matchMedia.mockImplementation((query) => ({
       matches: query === "(prefers-reduced-motion: reduce)",

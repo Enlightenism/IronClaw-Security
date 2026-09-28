@@ -1,11 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import {
-  ChevronLeft,
-  ChevronRight,
-  Loader2,
-  RefreshCw,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import IntegrationCard from "@/components/dashboard/IntegrationCard";

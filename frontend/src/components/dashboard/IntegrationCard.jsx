@@ -35,6 +35,18 @@ const RUNTIME_TITLE_ALIASES = {
   hermes: "Hermes",
 };
 
+const TINT_STYLES = {
+  gold: { surface: "glass-gold", accent: "#FFD700" },
+  platinum: { surface: "glass-platinum", accent: "#E5E4E2" },
+  cyan: { surface: "glass-blue", accent: "#38BDF8" },
+  violet: { surface: "glass-violet", accent: "#A855F7" },
+  emerald: { surface: "glass-emerald", accent: "#34D399" },
+  indigo: { surface: "glass-indigo", accent: "#818CF8" },
+  amber: { surface: "glass-amber", accent: "#FDE047" },
+};
+
+const DEFAULT_TINT_STYLE = TINT_STYLES.platinum;
+
 const normalizeRuntimeKey = (value) => {
   if (typeof value !== "string") {
     return "";
@@ -242,8 +254,7 @@ const IntegrationCard = ({ title, command, tint = "gold", testid }) => {
   const normalizedCommand = resolveCommand(canonicalTitle, command);
   const isLocked = !normalizedCommand;
 
-  const surface = tint === "gold" ? "glass-gold" : "glass-platinum";
-  const accent = tint === "gold" ? "#FFD700" : "#E5E4E2";
+  const { surface, accent } = TINT_STYLES[tint] || DEFAULT_TINT_STYLE;
 
   const handlePointerMove = (event) => {
     if (reducedMotionRef.current || !finePointerRef.current) {
