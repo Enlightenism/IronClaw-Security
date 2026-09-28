@@ -15,7 +15,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// â”€â”€ react-router-dom mock â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── react-router-dom mock ─────────────────────────────────────────────────
 const mockNavigate = jest.fn();
 const mockLocation = { search: "" };
 
@@ -29,7 +29,7 @@ jest.mock("react-router-dom", () => ({
   ),
 }));
 
-// â”€â”€ AuthContext mock â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── AuthContext mock ────────────────────────────────────────────────────
 const mockLogout = jest.fn();
 let mockAuthState = {
   user: { email: "test@ironclaw.io" },
@@ -42,7 +42,7 @@ jest.mock("@/context/AuthContext", () => ({
   useAuth: () => mockAuthState,
 }));
 
-// â”€â”€ api mock â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── api mock ────────────────────────────────────────────────────────────
 const mockApiGet = jest.fn();
 const mockApiPost = jest.fn();
 
@@ -54,7 +54,7 @@ jest.mock("@/lib/api", () => ({
   },
 }));
 
-// â”€â”€ sonner mock â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── sonner mock ─────────────────────────────────────────────────────────
 const mockToastSuccess = jest.fn();
 const mockToastError = jest.fn();
 const mockToastLoading = jest.fn();
@@ -69,7 +69,7 @@ jest.mock("sonner", () => ({
   },
 }));
 
-// â”€â”€ WalletCard mock â€” captures props â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── WalletCard mock — captures props ───────────────────────────────────
 let capturedWalletProps = null;
 
 jest.mock("@/components/dashboard/WalletCard", () => ({
@@ -80,7 +80,7 @@ jest.mock("@/components/dashboard/WalletCard", () => ({
   },
 }));
 
-// â”€â”€ SecurityAnalysis stub â€” captures props â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── SecurityAnalysis stub — captures props ─────────────────────────────
 let capturedSecurityProps = null;
 
 jest.mock("@/components/dashboard/SecurityAnalysis", () => ({
@@ -91,7 +91,7 @@ jest.mock("@/components/dashboard/SecurityAnalysis", () => ({
   },
 }));
 
-// â”€â”€ IntegrationCard stub â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── IntegrationCard stub ────────────────────────────────────────────────
 jest.mock("@/components/dashboard/IntegrationCard", () => ({
   __esModule: true,
   default: ({ title, command, testid }) => (
@@ -109,10 +109,10 @@ jest.mock("@/components/dashboard/IntegrationCard", () => ({
   ),
 }));
 
-// â”€â”€ Module under test â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Module under test ───────────────────────────────────────────────────
 import Dashboard from "./Dashboard";
 
-// â”€â”€ Default API responses â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Default API responses ──────────────────────────────────────────────
 const DEFAULT_DASH = {
   wallet_units: 100,
   organization_id: "org-abc",
@@ -192,7 +192,7 @@ async function renderDashboard() {
   });
 }
 
-// â”€â”€ Setup / teardown â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Setup / teardown ────────────────────────────────────────────────────
 beforeEach(() => {
   jest.clearAllMocks();
   cleanup();
@@ -586,10 +586,10 @@ describe("session_id payment polling", () => {
 });
 
 // =============================================================================
-// handlePurchase â€” invalid package guard
+// handlePurchase — invalid package guard
 // =============================================================================
 
-describe("handlePurchase â€” invalid package", () => {
+describe("handlePurchase — invalid package", () => {
   it("calls toast.error for an unknown package ID", async () => {
     await renderDashboard();
 
@@ -624,10 +624,10 @@ describe("handlePurchase â€” invalid package", () => {
 });
 
 // =============================================================================
-// handlePurchase â€” valid package
+// handlePurchase — valid package
 // =============================================================================
 
-describe("handlePurchase â€” valid package", () => {
+describe("handlePurchase — valid package", () => {
   it("calls api.post /billing/checkout/sessions with the current request shape used by Dashboard", async () => {
     mockApiPost.mockImplementation((url) => {
       if (url === "/billing/checkout/sessions") {
@@ -959,7 +959,7 @@ describe("dashboard structure", () => {
     expect(capturedWalletProps.balance).toBe(9999);
   });
 
-  it("keeps runtime command cards hidden until a valid unlocked token is available", async () => {
+  it("always renders all seven platform cards in placeholder state when no install key or token is unlocked yet", async () => {
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard/overview") {
         return Promise.resolve({
@@ -978,20 +978,29 @@ describe("dashboard structure", () => {
     await renderDashboard();
 
     await waitFor(() => {
-      expect(screen.queryByTestId("claude-code-card")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("openclaw-card")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("cursor-card")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("goose-card")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("gemini_cli-card")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("copilot-card")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("hermes-card")).not.toBeInTheDocument();
-      expect(
-        screen.queryByTestId("security_guardian-card"),
-      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
+      expect(screen.getByTestId("openclaw-card")).toBeInTheDocument();
+      expect(screen.getByTestId("cursor-card")).toBeInTheDocument();
+      expect(screen.getByTestId("goose-card")).toBeInTheDocument();
+      expect(screen.getByTestId("gemini_cli-card")).toBeInTheDocument();
+      expect(screen.getByTestId("copilot-card")).toBeInTheDocument();
+      expect(screen.getByTestId("hermes-card")).toBeInTheDocument();
     });
+
+    expect(
+      screen.queryByTestId("security_guardian-card"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("claude-code-card-value"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("claude-code-card-copy"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("hermes-card-value")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("hermes-card-copy")).not.toBeInTheDocument();
   });
 
-  it("hides keyless runtime commands even when a valid install key exists", async () => {
+  it("hides the runtime command value for a keyless install_keys slot instead of hiding the card", async () => {
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard/overview") {
         return Promise.resolve({
@@ -1001,7 +1010,7 @@ describe("dashboard structure", () => {
               {
                 program: "claude_code",
                 status: "active",
-                masked_key: "ic_install_claude_code_...abcd",
+                masked_key: "",
                 metadata: {},
               },
             ],
@@ -1023,14 +1032,21 @@ describe("dashboard structure", () => {
     await renderDashboard();
 
     await waitFor(() => {
-      expect(screen.queryByTestId("claude-code-card")).not.toBeInTheDocument();
-      expect(
-        screen.queryByText("ic_install_claude_code_...abcd"),
-      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
     });
+
+    expect(
+      screen.queryByTestId("claude-code-card-value"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("claude-code-card-copy"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("ic_install_claude_code_...abcd"),
+    ).not.toBeInTheDocument();
   });
 
-  it("rejects placeholder and generic token payloads instead of rendering a command card", async () => {
+  it("rejects placeholder and generic token payloads instead of rendering a command value", async () => {
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard/overview") {
         return Promise.resolve({ data: DEFAULT_DASH });
@@ -1039,10 +1055,8 @@ describe("dashboard structure", () => {
         return Promise.resolve({
           data: {
             status: "ok",
-            claude_code_command:
-              "gh auth login --token placeholder",
-            goose_command:
-              "export IRONCLAW_API_KEY=demo-token",
+            claude_code_command: "gh auth login --token placeholder",
+            goose_command: "export IRONCLAW_API_KEY=demo-token",
             hermes_command:
               "hermes skills install https://example.com --name ironclaw-security --key placeholder",
           },
@@ -1054,12 +1068,18 @@ describe("dashboard structure", () => {
     await renderDashboard();
 
     await waitFor(() => {
-      expect(screen.queryByTestId("claude-code-card")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("goose-card")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("hermes-card")).not.toBeInTheDocument();
-      expect(screen.queryByText("placeholder")).not.toBeInTheDocument();
-      expect(screen.queryByText("demo-token")).not.toBeInTheDocument();
+      expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
+      expect(screen.getByTestId("goose-card")).toBeInTheDocument();
+      expect(screen.getByTestId("hermes-card")).toBeInTheDocument();
     });
+
+    expect(
+      screen.queryByTestId("claude-code-card-value"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("goose-card-value")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("hermes-card-value")).not.toBeInTheDocument();
+    expect(screen.queryByText("placeholder")).not.toBeInTheDocument();
+    expect(screen.queryByText("demo-token")).not.toBeInTheDocument();
   });
 
   it("uses the current owner-scoped install_keys to map runtime cards and commands", async () => {
@@ -1118,11 +1138,20 @@ describe("dashboard structure", () => {
       expect(
         screen.queryByTestId("security_guardian-card"),
       ).not.toBeInTheDocument();
-      expect(screen.queryByTestId("claude-code-card")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("openclaw-card")).not.toBeInTheDocument();
+      expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
+      expect(screen.getByTestId("openclaw-card")).toBeInTheDocument();
     });
 
     expect(screen.getByTestId("hermes-card")).toHaveTextContent("Hermes");
+    expect(
+      screen.queryByTestId("claude-code-card-value"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("claude-code-card-copy"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("ic_install_claude_code_...foreign"),
+    ).not.toBeInTheDocument();
   });
 
   it("prefers the current owner's active runtime key over stale duplicate entries", async () => {
@@ -1317,6 +1346,9 @@ describe("dashboard structure", () => {
       expect(screen.getByTestId("copilot-card")).toBeInTheDocument();
       expect(screen.getByTestId("hermes-card")).toBeInTheDocument();
     });
+
+    expect(screen.queryByTestId("goose-card-value")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("goose-card-copy")).not.toBeInTheDocument();
   });
 
   it("renders canonical runtime labels and excludes Security Guardian as a platform", async () => {
@@ -1369,7 +1401,7 @@ describe("dashboard structure", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows masked keys only for active runtime slots and keeps locked slots in placeholder state", async () => {
+  it("shows masked-key-backed commands only for active runtime slots and keeps locked slots visible in placeholder state", async () => {
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard/overview") {
         return Promise.resolve({
@@ -1425,12 +1457,16 @@ describe("dashboard structure", () => {
     await waitFor(() => {
       expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
       expect(screen.getByTestId("hermes-card")).toBeInTheDocument();
-      expect(screen.queryByTestId("goose-card")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("goose-card-copy")).not.toBeInTheDocument();
+      expect(screen.getByTestId("goose-card")).toBeInTheDocument();
     });
 
     expect(screen.getByTestId("claude-code-card-copy")).toBeInTheDocument();
     expect(screen.getByTestId("hermes-card-copy")).toBeInTheDocument();
+    expect(screen.queryByTestId("goose-card-value")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("goose-card-copy")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("ic_install_goose_...mnop"),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps the UI consistent across issued, locked, and reactivated runtime states", async () => {
@@ -1475,14 +1511,18 @@ describe("dashboard structure", () => {
     await renderDashboard();
 
     await waitFor(() => {
-      expect(screen.queryByTestId("cursor-card")).not.toBeInTheDocument();
+      expect(screen.getByTestId("cursor-card")).toBeInTheDocument();
       expect(screen.getByTestId("copilot-card")).toBeInTheDocument();
       expect(screen.getByTestId("copilot-card")).toHaveTextContent(
         "gh skill install",
       );
     });
 
+    expect(screen.queryByTestId("cursor-card-value")).not.toBeInTheDocument();
     expect(screen.queryByTestId("cursor-card-copy")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("ic_install_cursor_...ijkl"),
+    ).not.toBeInTheDocument();
     expect(screen.getByTestId("copilot-card-copy")).toBeInTheDocument();
     expect(
       screen.queryByTestId("security_guardian-card"),

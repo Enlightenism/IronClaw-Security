@@ -59,7 +59,7 @@ const RUNTIME_CARDS = [
     title: "Hermes",
     metadataKey: "hermes",
     command:
-      "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ic_install_hermes_...abcd",
+      "hermes skills install [https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md](https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md) --name ironclaw-security --key ic_install_hermes_...abcd",
     testid: "hermes-card",
   },
 ];
@@ -139,7 +139,7 @@ describe("IntegrationCard", () => {
         expect.objectContaining({
           title: "Hermes",
           command:
-            "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ic_install_hermes_...abcd",
+            "hermes skills install [https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md](https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md) --name ironclaw-security --key ic_install_hermes_...abcd",
         }),
       ]),
     );
@@ -195,8 +195,8 @@ describe("IntegrationCard", () => {
     );
   });
 
-  it("ignores keyless fallback commands and does not render a copyable install command without --key", () => {
-    const { container } = render(
+  it("shows a locked placeholder instead of disappearing when no --key is embedded", () => {
+    render(
       <IntegrationCard
         title="Claude Code"
         command="gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user"
@@ -205,7 +205,11 @@ describe("IntegrationCard", () => {
       />,
     );
 
-    expect(container.firstChild).toBeNull();
+    expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
+    expect(screen.getByTestId("claude-code-card")).toHaveTextContent(
+      "Install key will be generated after purchase",
+    );
+    expect(screen.getByTestId("claude-code-card-copy")).toBeDisabled();
   });
 
   it("copies the runtime command when the copy button is clicked", async () => {

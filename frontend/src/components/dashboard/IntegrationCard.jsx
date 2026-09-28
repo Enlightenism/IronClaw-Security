@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Copy, Check, Terminal } from "lucide-react";
 import { toast } from "sonner";
 
@@ -208,8 +208,29 @@ const resolveCommand = (title, command) => {
   return commandMatchesRuntime(rawCommand, runtimeKey) ? rawCommand : "";
 };
 
+const PLACEHOLDER_TEXT = "Install key will be generated after purchase";
+
+const prefersReducedMotion = () =>
+  typeof window !== "undefined" &&
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const supportsFinePointer = () =>
+  typeof window !== "undefined" &&
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+
 const IntegrationCard = ({ title, command, tint = "gold", testid }) => {
   const [copied, setCopied] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  const cardRef = useRef(null);
+  const reducedMotionRef = useRef(false);
+  const finePointerRef = useRef(false);
+
+  useEffect(() => {
+    reducedMotionRef.current = prefersReducedMotion();
+    finePointerRef.current = supportsFinePointer();
+  }, []);
 
   const canonicalTitle = resolveCanonicalTitle(title);
   const runtimeKey = resolveCanonicalRuntimeKey(canonicalTitle);
@@ -219,15 +240,60 @@ const IntegrationCard = ({ title, command, tint = "gold", testid }) => {
   }
 
   const normalizedCommand = resolveCommand(canonicalTitle, command);
-
-  if (!normalizedCommand) {
-    return null;
-  }
+  const isLocked = !normalizedCommand;
 
   const surface = tint === "gold" ? "glass-gold" : "glass-platinum";
   const accent = tint === "gold" ? "#FFD700" : "#E5E4E2";
 
+  const handlePointerMove = (event) => {
+    if (reducedMotionRef.current || !finePointerRef.current) {
+      return;
+    }
+
+    const node = cardRef.current;
+    if (!node) {
+      return;
+    }
+
+    const rect = node.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * 100;
+    const y = ((event.clientY - rect.top) / rect.height) * 100;
+    const tiltX = ((event.clientY - rect.top) / rect.height - 0.5) * -6;
+    const tiltY = ((event.clientX - rect.left) / rect.width - 0.5) * 6;
+
+    node.style.setProperty("--mx", `${x}%`);
+    node.style.setProperty("--my", `${y}%`);
+    node.style.transform = `perspective(800px) rotateX(${tiltX}deg) rotateY(${tiltY}deg) translateZ(0)`;
+  };
+
+  const handlePointerLeave = () => {
+    const node = cardRef.current;
+    if (!node) {
+      return;
+    }
+
+    node.style.transform =
+      "perspective(800px) rotateX(0deg) rotateY(0deg) translateZ(0)";
+    node.style.setProperty("--mx", "50%");
+    node.style.setProperty("--my", "50%");
+  };
+
+  const handleTouchStart = () => {
+    if (reducedMotionRef.current) {
+      return;
+    }
+    setPressed(true);
+  };
+
+  const handleTouchEnd = () => {
+    setPressed(false);
+  };
+
   const copy = async () => {
+    if (isLocked) {
+      return;
+    }
+
     try {
       if (navigator?.clipboard?.writeText) {
         await navigator.clipboard.writeText(normalizedCommand);
@@ -254,7 +320,24 @@ const IntegrationCard = ({ title, command, tint = "gold", testid }) => {
   };
 
   return (
-    <div className={`${surface} rounded-xl p-6`} data-testid={testid}>
+    <div
+      ref={cardRef}
+      className={`${surface} touch-manipulation rounded-xl p-6 transition-transform duration-200 ease-out will-change-transform ${
+        pressed ? "scale-[0.97]" : "scale-100"
+      }`}
+      style={{
+        "--mx": "50%",
+        "--my": "50%",
+        backgroundImage:
+          "radial-gradient(circle at var(--mx) var(--my), rgba(255,255,255,0.06), transparent 55%)",
+      }}
+      onMouseMove={handlePointerMove}
+      onMouseLeave={handlePointerLeave}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
+      data-testid={testid}
+    >
       <div className="mb-4 flex items-center gap-2">
         <Terminal size={16} style={{ color: accent }} />
         <h3
@@ -271,12 +354,17 @@ const IntegrationCard = ({ title, command, tint = "gold", testid }) => {
       </p>
 
       <div className="flex items-stretch gap-2">
-        <code className="font-tech flex-1 overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-white/10 bg-black/50 px-4 py-3 text-xs leading-relaxed text-white/90">
-          {normalizedCommand}
+        <code
+          className={`font-tech flex-1 overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-white/10 bg-black/50 px-4 py-3 text-xs leading-relaxed ${
+            isLocked ? "italic text-white/40" : "text-white/90"
+          }`}
+        >
+          {isLocked ? PLACEHOLDER_TEXT : normalizedCommand}
         </code>
         <button
           type="button"
           onClick={copy}
+          disabled={isLocked}
           data-testid={`${testid}-copy`}
           className="flex w-12 shrink-0 items-center justify-center rounded-lg border transition disabled:cursor-not-allowed disabled:opacity-50"
           style={{
@@ -284,7 +372,11 @@ const IntegrationCard = ({ title, command, tint = "gold", testid }) => {
             background: `${accent}14`,
             color: accent,
           }}
-          aria-label={`Copy ${canonicalTitle} install command`}
+          aria-label={
+            isLocked
+              ? `${canonicalTitle} install command locked until purchase`
+              : `Copy ${canonicalTitle} install command`
+          }
         >
           {copied ? <Check size={18} /> : <Copy size={18} />}
         </button>

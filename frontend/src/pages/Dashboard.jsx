@@ -63,42 +63,21 @@ const INSTALL_KEY_PROGRAMS = [
   },
 ];
 
-const CARD_TINT_STYLES = {
-  gold: {
-    card: "linear-gradient(135deg, rgba(255,214,102,0.18), rgba(10,12,15,0.9))",
-    border: "rgba(255,215,0,0.42)",
-    glow: "rgba(255,215,0,0.38)",
-  },
-  platinum: {
-    card: "linear-gradient(135deg, rgba(210,221,232,0.15), rgba(10,12,15,0.9))",
-    border: "rgba(180,188,196,0.45)",
-    glow: "rgba(192,208,223,0.32)",
-  },
-  cyan: {
-    card: "linear-gradient(135deg, rgba(69,182,255,0.14), rgba(10,12,15,0.9))",
-    border: "rgba(56,189,248,0.42)",
-    glow: "rgba(56,189,248,0.34)",
-  },
-  violet: {
-    card: "linear-gradient(135deg, rgba(167,139,250,0.16), rgba(10,12,15,0.9))",
-    border: "rgba(168,85,247,0.42)",
-    glow: "rgba(168,85,247,0.28)",
-  },
-  emerald: {
-    card: "linear-gradient(135deg, rgba(16,185,129,0.16), rgba(10,12,15,0.9))",
-    border: "rgba(52,211,153,0.4)",
-    glow: "rgba(52,211,153,0.3)",
-  },
-  indigo: {
-    card: "linear-gradient(135deg, rgba(99,102,241,0.17), rgba(10,12,15,0.9))",
-    border: "rgba(129,140,248,0.42)",
-    glow: "rgba(129,140,248,0.32)",
-  },
-  amber: {
-    card: "linear-gradient(135deg, rgba(251,191,36,0.16), rgba(10,12,15,0.9))",
-    border: "rgba(253,224,71,0.42)",
-    glow: "rgba(253,224,71,0.32)",
-  },
+const INSTALL_COMMAND_BUILDERS = {
+  claude_code: (key) =>
+    `gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ${key}`,
+  openclaw: (key) =>
+    `gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user --key ${key}`,
+  cursor: (key) =>
+    `gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user --key ${key}`,
+  goose: (key) =>
+    `gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user --key ${key}`,
+  gemini_cli: (key) =>
+    `gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user --key ${key}`,
+  copilot: (key) =>
+    `gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user --key ${key}`,
+  hermes: (key) =>
+    `hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ${key}`,
 };
 
 const MemoWalletCard = memo(WalletCard);
@@ -346,7 +325,7 @@ const Dashboard = () => {
   const [purchasingId, setPurchasingId] = useState(null);
   const [pointerGlow, setPointerGlow] = useState({ x: 50, y: 25 });
   const [scrollShift, setScrollShift] = useState(0);
-  const [paymentState, setPaymentState] = useState("idle");
+  const [_paymentState, setPaymentState] = useState("idle");
   const polledRef = useRef(false);
 
   const isAuthenticated = Boolean(user || session);
@@ -500,19 +479,20 @@ const Dashboard = () => {
   }, [fetchDashboard, isAuthenticated]);
 
   const simulateEvent = useCallback(async () => {
+    const organizationId = data?.organization_id;
+    if (!organizationId) {
+      return;
+    }
+
     try {
-      const organizationId = data?.organization_id;
       const payload = {
         event_type: "prompt_injection",
-        organization_id: organizationId || "org-001",
+        organization_id: organizationId,
         payload: {
           source: "dashboard_live_sim",
           timestamp: new Date().toISOString(),
         },
       };
-      if (organizationId) {
-        payload.organization_id = organizationId;
-      }
       await api.post("/events/simulate", payload);
     } catch (err) {
       const detail = err?.response?.data?.detail;
@@ -817,54 +797,7 @@ const Dashboard = () => {
       });
   }, [data?.install_keys, ownerKey]);
 
-  const sessionCheckoutId = useMemo(() => {
-    const params = new URLSearchParams(location.search);
-    return params.get("session_id") || "";
-  }, [location.search]);
-
-  const hasPaymentFulfillment = useMemo(() => {
-    if (sessionCheckoutId && paymentState !== "paid") {
-      return false;
-    }
-
-    if (data?.has_paid) {
-      return true;
-    }
-
-    if (data?.last_payment && typeof data.last_payment === "object") {
-      return true;
-    }
-
-    return ownerScopedInstallKeys.some((slot) => {
-      const program = normalizeProgramKey(slot?.program);
-      if (!program || program === "security_guardian") {
-        return false;
-      }
-
-      return (
-        String(slot?.status ?? "").toLowerCase() === "active" &&
-        Boolean(slot?.masked_key)
-      );
-    });
-  }, [
-    data?.has_paid,
-    data?.last_payment,
-    ownerScopedInstallKeys,
-    paymentState,
-    sessionCheckoutId,
-  ]);
-
   const integrationCards = useMemo(() => {
-    const hasUnlockedToken =
-      tokens?.status === "ok" &&
-      INSTALL_KEY_PROGRAMS.some(({ commandKey }) =>
-        hasEmbeddedInstallCommand(tokens?.[commandKey]),
-      );
-
-    if (!hasUnlockedToken) {
-      return [];
-    }
-
     const toCardTestId = (program) => {
       switch (program) {
         case "claude_code":
@@ -886,15 +819,50 @@ const Dashboard = () => {
       }
     };
 
-    return INSTALL_KEY_PROGRAMS.filter(({ commandKey }) =>
-      hasEmbeddedInstallCommand(tokens?.[commandKey]),
-    ).map(({ label, tint, program, commandKey }) => ({
-      title: label,
-      command: tokens?.[commandKey] || "",
-      tint,
-      testid: toCardTestId(program),
-    }));
-  }, [tokens]);
+    const rawInstallKeys = Array.isArray(data?.install_keys)
+      ? data.install_keys
+      : [];
+
+    return INSTALL_KEY_PROGRAMS.map(({ program, label, tint, commandKey }) => {
+      const hasAnyRawSlot = rawInstallKeys.some(
+        (entry) => normalizeProgramKey(entry?.program) === program,
+      );
+
+      const ownedMatches = ownerScopedInstallKeys.filter(
+        (entry) => normalizeProgramKey(entry?.program) === program,
+      );
+      const ownedSlot =
+        ownedMatches.find((entry) => Boolean(entry?.masked_key)) ??
+        ownedMatches[0] ??
+        null;
+
+      let command = "";
+
+      if (hasAnyRawSlot) {
+        const maskedKey =
+          typeof ownedSlot?.masked_key === "string"
+            ? ownedSlot.masked_key.trim()
+            : "";
+        const builder = INSTALL_COMMAND_BUILDERS[program];
+        command = maskedKey && builder ? builder(maskedKey) : "";
+      } else {
+        command = hasEmbeddedInstallCommand(tokens?.[commandKey])
+          ? tokens[commandKey]
+          : "";
+      }
+
+      if (!hasEmbeddedInstallCommand(command)) {
+        command = "";
+      }
+
+      return {
+        title: label,
+        command,
+        tint,
+        testid: toCardTestId(program),
+      };
+    });
+  }, [data?.install_keys, ownerScopedInstallKeys, tokens]);
 
   const attackFeedItems = useMemo(() => data?.attacks ?? [], [data?.attacks]);
 
