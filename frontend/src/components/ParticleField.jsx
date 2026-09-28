@@ -358,6 +358,13 @@ const ParticleField = ({ density = 180, paused = false }) => {
       clearPointer();
     };
 
+    const onPointerRelease = (event) => {
+      if (event?.pointerType === "touch") {
+        return;
+      }
+      clearPointer();
+    };
+
     const onTouchTrack = (event) => {
       if (paused || document.hidden) {
         return;
@@ -366,9 +373,7 @@ const ParticleField = ({ density = 180, paused = false }) => {
       updatePointerPosition(event);
     };
 
-    const onTouchEnd = () => {
-      clearPointer();
-    };
+    const onTouchRelease = () => {};
 
     const handleVisibilityChange = () => {
       isPaused = document.hidden || paused || prefersReducedMotion();
@@ -402,14 +407,14 @@ const ParticleField = ({ density = 180, paused = false }) => {
     window.visualViewport?.addEventListener("scroll", handleViewportResize);
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerdown", onPointerDown);
-    window.addEventListener("pointerup", onPointerLeave);
-    window.addEventListener("pointercancel", onPointerLeave);
+    window.addEventListener("pointerup", onPointerRelease);
+    window.addEventListener("pointercancel", onPointerRelease);
     canvas.addEventListener("pointerleave", onPointerLeave);
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("touchstart", onTouchTrack, { passive: true });
     window.addEventListener("touchmove", onTouchTrack, { passive: true });
-    window.addEventListener("touchend", onTouchEnd, { passive: true });
-    window.addEventListener("touchcancel", onTouchEnd, { passive: true });
+    window.addEventListener("touchend", onTouchRelease, { passive: true });
+    window.addEventListener("touchcancel", onTouchRelease, { passive: true });
 
     return () => {
       isPaused = true;
@@ -426,14 +431,14 @@ const ParticleField = ({ density = 180, paused = false }) => {
       );
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("pointerup", onPointerLeave);
-      window.removeEventListener("pointercancel", onPointerLeave);
+      window.removeEventListener("pointerup", onPointerRelease);
+      window.removeEventListener("pointercancel", onPointerRelease);
       canvas.removeEventListener("pointerleave", onPointerLeave);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("touchstart", onTouchTrack);
       window.removeEventListener("touchmove", onTouchTrack);
-      window.removeEventListener("touchend", onTouchEnd);
-      window.removeEventListener("touchcancel", onTouchEnd);
+      window.removeEventListener("touchend", onTouchRelease);
+      window.removeEventListener("touchcancel", onTouchRelease);
     };
   }, [density, paused]);
 

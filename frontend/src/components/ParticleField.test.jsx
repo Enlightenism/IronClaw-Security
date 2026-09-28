@@ -206,6 +206,73 @@ describe("ParticleField", () => {
     );
   });
 
+  it("keeps the attraction point active at the last touched location after the finger lifts (sticky touch)", () => {
+    const addEventListenerSpy = jest.spyOn(window, "addEventListener");
+
+    render(<ParticleField density={50} />);
+
+    const rafCallback = window.requestAnimationFrame.mock.calls.at(-1)[0];
+    const pointerDownHandler = addEventListenerSpy.mock.calls.find(
+      ([type]) => type === "pointerdown",
+    )[1];
+    const pointerUpHandler = addEventListenerSpy.mock.calls.find(
+      ([type]) => type === "pointerup",
+    )[1];
+
+    context.createRadialGradient.mockClear();
+    rafCallback(1000);
+    rafCallback(1040);
+    const baselineGradientCalls = context.createRadialGradient.mock.calls.length;
+
+    pointerDownHandler({ clientX: 100, clientY: 100, pointerType: "touch" });
+
+    context.createRadialGradient.mockClear();
+    rafCallback(1080);
+    const activeTouchGradientCalls =
+      context.createRadialGradient.mock.calls.length;
+
+    expect(activeTouchGradientCalls).toBe(baselineGradientCalls + 1);
+
+    pointerUpHandler({ pointerType: "touch" });
+
+    context.createRadialGradient.mockClear();
+    rafCallback(1120);
+    const afterReleaseGradientCalls =
+      context.createRadialGradient.mock.calls.length;
+
+    expect(afterReleaseGradientCalls).toBe(activeTouchGradientCalls);
+  });
+
+  it("moves the sticky attraction point to a new location when a fresh touch begins elsewhere", () => {
+    const addEventListenerSpy = jest.spyOn(window, "addEventListener");
+
+    render(<ParticleField density={50} />);
+
+    const rafCallback = window.requestAnimationFrame.mock.calls.at(-1)[0];
+    const pointerDownHandler = addEventListenerSpy.mock.calls.find(
+      ([type]) => type === "pointerdown",
+    )[1];
+    const pointerUpHandler = addEventListenerSpy.mock.calls.find(
+      ([type]) => type === "pointerup",
+    )[1];
+
+    pointerDownHandler({ clientX: 100, clientY: 100, pointerType: "touch" });
+    pointerUpHandler({ pointerType: "touch" });
+
+    context.createRadialGradient.mockClear();
+    rafCallback(2000);
+    rafCallback(2040);
+    const stickyCallCount = context.createRadialGradient.mock.calls.length;
+
+    pointerDownHandler({ clientX: 500, clientY: 300, pointerType: "touch" });
+
+    context.createRadialGradient.mockClear();
+    rafCallback(2080);
+    const movedCallCount = context.createRadialGradient.mock.calls.length;
+
+    expect(movedCallCount).toBe(stickyCallCount);
+  });
+
   it("respects reduced motion and subscribes to viewport resizing on mobile layouts", () => {
     window.matchMedia.mockImplementation((query) => ({
       matches: query === "(prefers-reduced-motion: reduce)",
