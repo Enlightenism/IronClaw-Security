@@ -222,7 +222,8 @@ describe("ParticleField", () => {
     context.createRadialGradient.mockClear();
     rafCallback(1000);
     rafCallback(1040);
-    const baselineGradientCalls = context.createRadialGradient.mock.calls.length;
+    const baselineGradientCalls =
+      context.createRadialGradient.mock.calls.length;
 
     pointerDownHandler({ clientX: 100, clientY: 100, pointerType: "touch" });
 

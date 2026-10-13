@@ -7,6 +7,14 @@ import {
 } from "@testing-library/react";
 import Landing from "@/pages/Landing";
 import { useAuth } from "@/context/AuthContext";
+import {
+  computeCounterValue,
+  LANDING_COUNTER_FALLBACKS,
+  resetLandingCounters,
+  syncLandingCounters,
+  useLandingCounter,
+} from "@/lib/landingCounters";
+import { supabase } from "@/lib/supabase";
 import { MemoryRouter } from "react-router-dom";
 
 const mockNavigate = jest.fn();
@@ -86,6 +94,15 @@ jest.mock("@/context/AuthContext", () => ({
   useAuth: jest.fn(),
 }));
 
+jest.mock("@/lib/supabase", () => ({
+  supabase: { rpc: jest.fn() },
+}));
+
+jest.mock("@/lib/landingCounters", () => ({
+  ...jest.requireActual("@/lib/landingCounters"),
+  useLandingCounter: jest.fn(),
+}));
+
 jest.mock("react-router-dom", () => {
   const actual = jest.requireActual("react-router-dom");
 
@@ -132,10 +149,77 @@ const renderLanding = async (authState = { user: null }) => {
   return result;
 };
 
+const START_MS = Date.UTC(2026, 9, 13, 6, 0, 0);
+const HOUR_MS = 60 * 60 * 1000;
+const MIN_KEY_PREFIX = "ironclaw:landing-counter-min:";
+
+const formatCount = (value) => value.toLocaleString();
+const parseCount = (text) => Number(text.replace(/,/g, ""));
+
+const readCounters = () => ({
+  threat: screen.getByTestId("threat-counter").textContent,
+  users: screen.getByTestId("user-counter").textContent,
+});
+
+const expectedFormula = (nowMs) => ({
+  threat: formatCount(
+    computeCounterValue(LANDING_COUNTER_FALLBACKS.threats_blocked, nowMs),
+  ),
+  users: formatCount(
+    computeCounterValue(LANDING_COUNTER_FALLBACKS.engineers_protected, nowMs),
+  ),
+});
+
+const buildServerRow = (counterKey, value, nowMs) => {
+  const config = LANDING_COUNTER_FALLBACKS[counterKey];
+
+  return {
+    counter_key: counterKey,
+    value,
+    server_time: new Date(nowMs).toISOString(),
+    anchor_value: config.anchorValue,
+    anchor_at: new Date(config.anchorAtMs).toISOString(),
+    tick_seconds: config.tickMs / 1000,
+    step_min: config.stepMin,
+    step_max: config.stepMax,
+    seed: config.seed,
+  };
+};
+
+const installMemoryStorage = (initial = {}) => {
+  const entries = new Map(Object.entries(initial));
+
+  Object.defineProperty(window, "localStorage", {
+    value: {
+      getItem: jest.fn((key) => (entries.has(key) ? entries.get(key) : null)),
+      setItem: jest.fn((key, value) => {
+        entries.set(key, String(value));
+      }),
+      removeItem: jest.fn((key) => {
+        entries.delete(key);
+      }),
+      clear: jest.fn(() => entries.clear()),
+    },
+    configurable: true,
+  });
+
+  return entries;
+};
+
+const freezeTimeAt = (nowMs) => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date(nowMs));
+};
+
 describe("Landing", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    globalThis.__IC_COUNTERS__ = {};
+    resetLandingCounters();
+
+    useLandingCounter.mockImplementation(
+      jest.requireActual("@/lib/landingCounters").useLandingCounter,
+    );
+    supabase.rpc.mockResolvedValue({ data: [], error: null });
 
     Object.defineProperty(window, "localStorage", {
       value: {
@@ -162,6 +246,11 @@ describe("Landing", () => {
     window.cancelAnimationFrame = jest.fn();
   });
 
+  afterEach(() => {
+    resetLandingCounters();
+    jest.useRealTimers();
+  });
+
   it("renders hero content on first paint", async () => {
     await renderLanding();
 
@@ -173,422 +262,140 @@ describe("Landing", () => {
     expect(screen.getByTestId("user-counter")).toBeInTheDocument();
   });
 
-  it("uses the canonical baselines and enforces a strict 10-minute cadence", async () => {
-    jest.useFakeTimers();
-    jest.spyOn(Math, "random").mockReturnValue(0.25);
+  it("shows the server value for each counter key", async () => {
+    const nowMs = START_MS + HOUR_MS;
+    freezeTimeAt(nowMs);
+    installMemoryStorage();
+    supabase.rpc.mockResolvedValue({
+      data: [
+        buildServerRow("threats_blocked", 987654, nowMs),
+        buildServerRow("engineers_protected", 456789, nowMs),
+      ],
+      error: null,
+    });
 
-    try {
-      await renderLanding();
+    await renderLanding();
+    await act(async () => {
+      await syncLandingCounters();
+    });
 
-      expect(screen.getByTestId("threat-counter")).toHaveTextContent("732");
-      expect(screen.getByTestId("user-counter")).toHaveTextContent("344");
-
-      const threatCounter = screen.getByTestId("threat-counter");
-      const userCounter = screen.getByTestId("user-counter");
-      const beforeThreat = Number(threatCounter.textContent.replace(/,/g, ""));
-      const beforeUsers = Number(userCounter.textContent.replace(/,/g, ""));
-
-      act(() => {
-        jest.advanceTimersByTime(9 * 60 * 1000);
-      });
-
-      expect(Number(threatCounter.textContent.replace(/,/g, ""))).toBe(
-        beforeThreat,
-      );
-      expect(Number(userCounter.textContent.replace(/,/g, ""))).toBe(
-        beforeUsers,
-      );
-
-      act(() => {
-        jest.advanceTimersByTime(60 * 1000);
-      });
-
-      const afterThreat = Number(threatCounter.textContent.replace(/,/g, ""));
-      const afterUsers = Number(userCounter.textContent.replace(/,/g, ""));
-
-      expect(afterThreat - beforeThreat).toBe(2);
-      expect(afterUsers - beforeUsers).toBe(1);
-    } finally {
-      jest.restoreAllMocks();
-      jest.useRealTimers();
-    }
+    expect(supabase.rpc).toHaveBeenCalledWith("get_landing_counters");
+    expect(useLandingCounter).toHaveBeenCalledWith("threats_blocked");
+    expect(useLandingCounter).toHaveBeenCalledWith("engineers_protected");
+    expect(readCounters()).toEqual({
+      threat: formatCount(987654),
+      users: formatCount(456789),
+    });
   });
 
-  it("keeps threat values in the 2-or-3 band and engineer values at exactly 1", async () => {
-    jest.useFakeTimers();
+  it("shows the local formula value when the counter request fails", async () => {
+    const nowMs = START_MS + 5 * HOUR_MS;
+    freezeTimeAt(nowMs);
+    installMemoryStorage();
+    supabase.rpc.mockRejectedValue(new Error("offline"));
 
-    try {
-      const randomValues = [0.25, 0.75, 0.1, 0.9];
-      const randomSpy = jest.spyOn(Math, "random");
-      randomValues.forEach((value) => randomSpy.mockReturnValueOnce(value));
+    await renderLanding();
+    await act(async () => {
+      await syncLandingCounters();
+    });
 
-      await renderLanding();
+    const shown = readCounters();
 
-      const threatCounter = screen.getByTestId("threat-counter");
-      const userCounter = screen.getByTestId("user-counter");
-
-      const beforeThreat = Number(threatCounter.textContent.replace(/,/g, ""));
-      const beforeUsers = Number(userCounter.textContent.replace(/,/g, ""));
-
-      act(() => {
-        jest.advanceTimersByTime(10 * 60 * 1000);
-      });
-
-      const threatDelta =
-        Number(threatCounter.textContent.replace(/,/g, "")) - beforeThreat;
-      const userDelta =
-        Number(userCounter.textContent.replace(/,/g, "")) - beforeUsers;
-
-      expect([2, 3]).toContain(threatDelta);
-      expect(userDelta).toBe(1);
-
-      act(() => {
-        jest.advanceTimersByTime(10 * 60 * 1000);
-      });
-
-      const nextThreatDelta =
-        Number(threatCounter.textContent.replace(/,/g, "")) -
-        (beforeThreat + threatDelta);
-      const nextUserDelta =
-        Number(userCounter.textContent.replace(/,/g, "")) -
-        (beforeUsers + userDelta);
-
-      expect(nextThreatDelta).toBeGreaterThanOrEqual(0);
-      expect(nextThreatDelta).toBeLessThanOrEqual(3);
-      expect(nextUserDelta).toBe(1);
-    } finally {
-      jest.restoreAllMocks();
-      jest.useRealTimers();
-    }
+    expect(supabase.rpc).toHaveBeenCalledWith("get_landing_counters");
+    expect(shown).toEqual(expectedFormula(nowMs));
+    expect(parseCount(shown.threat)).toBeGreaterThan(732);
+    expect(parseCount(shown.users)).toBeGreaterThan(344);
   });
 
-  it("keeps progressing from the live value instead of snapping back to the canonical baseline", async () => {
-    const currentThreatValue = 980;
-    const currentEngineerValue = 460;
-
-    globalThis.__IC_COUNTERS__ = {
-      __controllers: new Map([
-        [
-          "ic_threats_blocked",
-          {
-            getValue: () => currentThreatValue,
-            subscribe: () => () => undefined,
-          },
-        ],
-        [
-          "ic_engineers_protected",
-          {
-            getValue: () => currentEngineerValue,
-            subscribe: () => () => undefined,
-          },
-        ],
-      ]),
-      ic_threats_blocked: {
-        value: currentThreatValue,
-        updatedAt: Date.now(),
-      },
-      ic_engineers_protected: {
-        value: currentEngineerValue,
-        updatedAt: Date.now(),
-      },
-    };
-
-    window.localStorage.getItem = jest.fn((key) => {
-      if (key === "ic_threats_blocked") {
-        return JSON.stringify({ value: 732, updatedAt: Date.now() });
-      }
-      if (key === "ic_engineers_protected") {
-        return JSON.stringify({ value: 344, updatedAt: Date.now() });
-      }
-      return null;
+  it("never displays less than the saved minimum", async () => {
+    const nowMs = START_MS + HOUR_MS;
+    const savedThreat = 7654321;
+    const savedUsers = 1234567;
+    freezeTimeAt(nowMs);
+    installMemoryStorage({
+      [`${MIN_KEY_PREFIX}threats_blocked`]: String(savedThreat),
+      [`${MIN_KEY_PREFIX}engineers_protected`]: String(savedUsers),
+    });
+    const lowerServerState = expectedFormula(nowMs);
+    supabase.rpc.mockResolvedValue({
+      data: [
+        buildServerRow(
+          "threats_blocked",
+          parseCount(lowerServerState.threat),
+          nowMs,
+        ),
+        buildServerRow(
+          "engineers_protected",
+          parseCount(lowerServerState.users),
+          nowMs,
+        ),
+      ],
+      error: null,
     });
 
     await renderLanding();
 
-    expect(screen.getByTestId("threat-counter")).toHaveTextContent("980");
-    expect(screen.getByTestId("user-counter")).toHaveTextContent("460");
+    expect(readCounters()).toEqual({
+      threat: formatCount(savedThreat),
+      users: formatCount(savedUsers),
+    });
+
+    await act(async () => {
+      await syncLandingCounters();
+    });
+    act(() => {
+      jest.advanceTimersByTime(10 * 60 * 1000);
+    });
+
+    expect(readCounters()).toEqual({
+      threat: formatCount(savedThreat),
+      users: formatCount(savedUsers),
+    });
   });
 
-  it("does not revert to the canonical baseline when the live value is still higher", async () => {
-    globalThis.__IC_COUNTERS__ = {
-      __controllers: new Map([
-        [
-          "ic_threats_blocked",
-          { getValue: () => 980, subscribe: () => () => undefined },
-        ],
-        [
-          "ic_engineers_protected",
-          { getValue: () => 460, subscribe: () => () => undefined },
-        ],
-      ]),
-      ic_threats_blocked: { value: 980, updatedAt: Date.now() },
-      ic_engineers_protected: { value: 460, updatedAt: Date.now() },
-    };
+  it("shows the same value on two fresh devices at the same time", async () => {
+    const nowMs = START_MS + 3 * HOUR_MS + 123456;
+    freezeTimeAt(nowMs);
+    installMemoryStorage();
+    supabase.rpc.mockRejectedValue(new Error("offline"));
 
-    window.localStorage.getItem = jest.fn((key) => {
-      if (key === "ic_threats_blocked") {
-        return JSON.stringify({ value: 732, updatedAt: Date.now() });
-      }
-      if (key === "ic_engineers_protected") {
-        return JSON.stringify({ value: 344, updatedAt: Date.now() });
-      }
-      return null;
-    });
+    const deviceA = await renderLanding();
+    const shownByA = readCounters();
+    deviceA.unmount();
+
+    resetLandingCounters();
+    installMemoryStorage();
 
     await renderLanding();
+    const shownByB = readCounters();
 
-    expect(screen.getByTestId("threat-counter")).toHaveTextContent("980");
-    expect(screen.getByTestId("user-counter")).toHaveTextContent("460");
-    expect(globalThis.__IC_COUNTERS__.ic_threats_blocked.value).toBe(980);
-    expect(globalThis.__IC_COUNTERS__.ic_engineers_protected.value).toBe(460);
+    expect(shownByB).toEqual(shownByA);
+    expect(shownByA).toEqual(expectedFormula(nowMs));
   });
 
-  it("keeps the canonical counter identity stable across host aliases such as www and localhost variants", async () => {
-    const originalLocation = window.location;
-    const locationDescriptor = Object.getOwnPropertyDescriptor(
-      window,
-      "location",
-    );
+  it("never falls back to 732 or 344 after the start time, even after 24 hours away", async () => {
+    installMemoryStorage();
+    freezeTimeAt(START_MS + HOUR_MS);
+    supabase.rpc.mockRejectedValue(new Error("offline"));
 
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      value: {
-        ...originalLocation,
-        hostname: "www.moving-forward.ca",
-        port: "",
-        href: "https://www.moving-forward.ca/",
-        origin: "https://www.moving-forward.ca",
-      },
-    });
+    const firstVisit = await renderLanding();
+    const before = readCounters();
+    firstVisit.unmount();
+    resetLandingCounters();
 
-    globalThis.__IC_COUNTERS__ = {
-      __controllers: new Map([
-        [
-          "ic_threats_blocked",
-          { getValue: () => 980, subscribe: () => () => undefined },
-        ],
-        [
-          "ic_engineers_protected",
-          { getValue: () => 460, subscribe: () => () => undefined },
-        ],
-      ]),
-      "moving-forward.ca:ic_threats_blocked": {
-        value: 980,
-        updatedAt: Date.now(),
-      },
-      "moving-forward.ca:ic_engineers_protected": {
-        value: 460,
-        updatedAt: Date.now(),
-      },
-      ic_threats_blocked: { value: 732, updatedAt: Date.now() },
-      ic_engineers_protected: { value: 344, updatedAt: Date.now() },
-    };
-
-    window.localStorage.getItem = jest.fn((key) => {
-      if (key === "moving-forward.ca:ic_threats_blocked") {
-        return JSON.stringify({ value: 980, updatedAt: Date.now() });
-      }
-      if (key === "moving-forward.ca:ic_engineers_protected") {
-        return JSON.stringify({ value: 460, updatedAt: Date.now() });
-      }
-      return null;
-    });
-
-    try {
-      await renderLanding();
-
-      expect(screen.getByTestId("threat-counter")).toHaveTextContent("980");
-      expect(screen.getByTestId("user-counter")).toHaveTextContent("460");
-    } finally {
-      if (locationDescriptor) {
-        Object.defineProperty(window, "location", locationDescriptor);
-      } else {
-        delete window.location;
-      }
-    }
-  });
-
-  it("rejects stale persisted values lower than the valid baseline", async () => {
-    const staleThreat = JSON.stringify({ value: 100, updatedAt: Date.now() });
-    const staleUsers = JSON.stringify({ value: 50, updatedAt: Date.now() });
-    const originalGetItem = window.localStorage.getItem;
-    const originalSetItem = window.localStorage.setItem;
-
-    window.localStorage.getItem = jest.fn((key) => {
-      if (key === "ic_threats_blocked") return staleThreat;
-      if (key === "ic_engineers_protected") return staleUsers;
-      return null;
-    });
-    window.localStorage.setItem = jest.fn((key, value) => {
-      if (key === "ic_threats_blocked" || key === "ic_engineers_protected") {
-        return originalSetItem.call(window.localStorage, key, value);
-      }
-      return undefined;
-    });
-
-    try {
-      await renderLanding();
-      expect(screen.getByTestId("threat-counter")).toHaveTextContent("732");
-      expect(screen.getByTestId("user-counter")).toHaveTextContent("344");
-      expect(globalThis.__IC_COUNTERS__.ic_threats_blocked.value).toBe(732);
-      expect(globalThis.__IC_COUNTERS__.ic_engineers_protected.value).toBe(344);
-    } finally {
-      window.localStorage.getItem = originalGetItem;
-      window.localStorage.setItem = originalSetItem;
-    }
-  });
-
-  it("resets to the canonical baseline when stale inflated persisted values are found", async () => {
-    const staleHighThreat = JSON.stringify({
-      value: 12500,
-      updatedAt: Date.now() - 25 * 60 * 60 * 1000,
-    });
-    const staleHighUsers = JSON.stringify({
-      value: 5400,
-      updatedAt: Date.now() - 25 * 60 * 60 * 1000,
-    });
-
-    const originalGetItem = window.localStorage.getItem;
-    const originalSetItem = window.localStorage.setItem;
-
-    globalThis.__IC_COUNTERS__ = {
-      __controllers: new Map([
-        ["ic_threats_blocked", { getValue: () => 12500 }],
-        ["ic_engineers_protected", { getValue: () => 5400 }],
-      ]),
-      ic_threats_blocked: {
-        value: 12500,
-        updatedAt: Date.now() - 25 * 60 * 60 * 1000,
-      },
-      ic_engineers_protected: {
-        value: 5400,
-        updatedAt: Date.now() - 25 * 60 * 60 * 1000,
-      },
-    };
-
-    window.localStorage.getItem = jest.fn((key) => {
-      if (key === "ic_threats_blocked") return staleHighThreat;
-      if (key === "ic_engineers_protected") return staleHighUsers;
-      return null;
-    });
-    window.localStorage.setItem = jest.fn((key, value) => {
-      if (key === "ic_threats_blocked" || key === "ic_engineers_protected") {
-        return originalSetItem.call(window.localStorage, key, value);
-      }
-      return undefined;
-    });
-
-    try {
-      await renderLanding();
-      expect(screen.getByTestId("threat-counter")).toHaveTextContent("732");
-      expect(screen.getByTestId("user-counter")).toHaveTextContent("344");
-      expect(globalThis.__IC_COUNTERS__.ic_threats_blocked.value).toBe(732);
-      expect(globalThis.__IC_COUNTERS__.ic_engineers_protected.value).toBe(344);
-      expect(window.localStorage.setItem).toHaveBeenCalledWith(
-        "ic_threats_blocked",
-        expect.stringContaining('"value":732'),
-      );
-      expect(window.localStorage.setItem).toHaveBeenCalledWith(
-        "ic_engineers_protected",
-        expect.stringContaining('"value":344'),
-      );
-    } finally {
-      window.localStorage.getItem = originalGetItem;
-      window.localStorage.setItem = originalSetItem;
-    }
-  });
-
-  it("rebuilds stale shared controllers instead of reusing the global override", async () => {
-    const staleThreatValue = 12000;
-    const staleUserValue = 5200;
-    const staleUpdatedAt = Date.now() - 25 * 60 * 60 * 1000;
-
-    globalThis.__IC_COUNTERS__ = {
-      __controllers: new Map([
-        ["ic_threats_blocked", { getValue: () => staleThreatValue }],
-        ["ic_engineers_protected", { getValue: () => staleUserValue }],
-      ]),
-      ic_threats_blocked: {
-        value: staleThreatValue,
-        updatedAt: staleUpdatedAt,
-      },
-      ic_engineers_protected: {
-        value: staleUserValue,
-        updatedAt: staleUpdatedAt,
-      },
-    };
+    const returnMs = START_MS + 31 * HOUR_MS;
+    jest.setSystemTime(new Date(returnMs));
 
     await renderLanding();
+    const after = readCounters();
 
-    expect(screen.getByTestId("threat-counter")).toHaveTextContent("732");
-    expect(screen.getByTestId("user-counter")).toHaveTextContent("344");
-  });
-
-  it("keeps counter movement monotonic-only across rerenders and timer ticks", async () => {
-    jest.useFakeTimers();
-    jest.spyOn(Math, "random").mockReturnValue(0.25);
-
-    try {
-      const { rerender } = await renderLanding();
-
-      const threatCounter = screen.getByTestId("threat-counter");
-      const userCounter = screen.getByTestId("user-counter");
-
-      const beforeThreat = Number(threatCounter.textContent.replace(/,/g, ""));
-      const beforeUsers = Number(userCounter.textContent.replace(/,/g, ""));
-
-      rerender(
-        <MemoryRouter>
-          <Landing />
-        </MemoryRouter>,
-      );
-
-      act(() => {
-        jest.advanceTimersByTime(10 * 60 * 1000);
-      });
-
-      const afterThreat = Number(threatCounter.textContent.replace(/,/g, ""));
-      const afterUsers = Number(userCounter.textContent.replace(/,/g, ""));
-
-      expect(afterThreat).toBeGreaterThanOrEqual(beforeThreat);
-      expect(afterThreat - beforeThreat).toBe(2);
-      expect(afterUsers).toBeGreaterThanOrEqual(beforeUsers);
-      expect(afterUsers - beforeUsers).toBe(1);
-    } finally {
-      jest.restoreAllMocks();
-      jest.useRealTimers();
-    }
-  });
-
-  it("keeps the counters advancing after the landing component unmounts", async () => {
-    jest.useFakeTimers();
-    jest.spyOn(Math, "random").mockReturnValue(0.25);
-
-    try {
-      const { unmount } = await renderLanding();
-      const threatCounter = screen.getByTestId("threat-counter");
-      const beforeThreat = Number(threatCounter.textContent.replace(/,/g, ""));
-
-      unmount();
-
-      act(() => {
-        jest.advanceTimersByTime(10 * 60 * 1000);
-      });
-
-      const persistedThreatCalls =
-        window.localStorage.setItem.mock.calls.filter(
-          ([key]) => key === "ic_threats_blocked",
-        );
-      const persistedThreat = persistedThreatCalls.at(-1);
-
-      expect(persistedThreat).toBeTruthy();
-      expect(
-        globalThis.__IC_COUNTERS__?.ic_threats_blocked?.value,
-      ).toBeGreaterThan(beforeThreat);
-    } finally {
-      jest.restoreAllMocks();
-      jest.useRealTimers();
-    }
+    expect(after).toEqual(expectedFormula(returnMs));
+    expect(parseCount(after.threat)).toBeGreaterThan(parseCount(before.threat));
+    expect(parseCount(after.users)).toBeGreaterThan(parseCount(before.users));
+    expect(parseCount(after.threat)).toBeGreaterThan(732);
+    expect(parseCount(after.users)).toBeGreaterThan(344);
+    expect(after.threat).not.toBe(formatCount(732));
+    expect(after.users).not.toBe(formatCount(344));
   });
 
   it("opens signin auth modal when signin is clicked and no user exists", async () => {

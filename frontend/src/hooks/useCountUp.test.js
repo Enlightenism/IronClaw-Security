@@ -192,6 +192,22 @@ describe("useCountUp", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
+  it("does not crash and still animates to the target when window.matchMedia is missing", () => {
+    window.matchMedia = undefined;
+    expect(typeof window.matchMedia).toBe("undefined");
+
+    const { result } = renderHook(() => useCountUp(100, 1000, [], 0));
+
+    expect(result.current).toBe(0);
+
+    advance(500);
+    expect(result.current).toBeGreaterThan(0);
+    expect(result.current).toBeLessThan(100);
+
+    advance(600);
+    expect(result.current).toBe(100);
+  });
+
   it("treats NaN and equal values as stable targets without scheduling animation", () => {
     const spy = jest.spyOn(window, "requestAnimationFrame");
 

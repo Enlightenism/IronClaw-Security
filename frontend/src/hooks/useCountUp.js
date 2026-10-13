@@ -43,6 +43,7 @@ export function useCountUp(end, duration = 1400, deps = [], from = 0) {
 
   const prefersReduced =
     typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   const [value, setValue] = useState(() => {
@@ -76,6 +77,7 @@ export function useCountUp(end, duration = 1400, deps = [], from = 0) {
 
     if (
       typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches
     ) {
       setValue(safeTarget);
