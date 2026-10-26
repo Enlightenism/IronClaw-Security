@@ -62,6 +62,7 @@ def test_example_skill_config_uses_canonical_multi_platform_targets(install_modu
 
     assert payload["ironclaw"]["provider_targets"] == expected
     assert set(payload["ironclaw"]["provider_targets"]) == set(install_module.DEFAULT_PROVIDER_TARGETS)
+    assert "groq_api_key" not in payload["providers"]
 
 
 def test_build_install_config_defaults(install_module: Any, tmp_path: Path) -> None:

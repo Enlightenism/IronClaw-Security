@@ -21,7 +21,7 @@ of modeling it as a single-agent or one-off package.
 | [integration_guides/sdk.md](./integration_guides/sdk.md)       | IronClaw Python SDK (`ironclaw_sdk`) — full client usage reference                             |
 | [integration_guides/claude.md](./claude_guard_client.md)       | Claude / Anthropic integration guide                                                           |
 | [integration_guides/openai.md](./integration_guides/openai.md) | OpenAI integration guide                                                                       |
-| [integration_guides/groq.md](./integration_guides/groq.md)     | Groq integration guide                                                                         |
+| [integration_guides/guard.md](./integration_guides/guard.md)   | Local Prompt Guard classifier and configuration guide                                          |
 | [integration_guides/mcp.md](./integration_guides/mcp.md)       | MCP-style toolchain integration guide                                                          |
 
 ---

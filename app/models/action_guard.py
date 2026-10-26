@@ -83,13 +83,13 @@ class ActionDecisionResponse(BaseModel):
     categories: list[str] = Field(default_factory=list)
     drift_report: dict[str, Any] | None = None
     reasons: list[ActionReason] = Field(default_factory=list)
-    # Groq telemetry — full EnforcedVerdict surface
-    groq_verdict: str | None = None
-    groq_risk_score: int | None = None
-    groq_confidence: float | None = None
-    groq_latency_ms: float | None = None
-    groq_model_name: str | None = None
-    groq_signals: list[str] = Field(default_factory=list)
-    groq_summary: str | None = None
-    groq_decided_at: str | None = None
+    # Guard telemetry — full EnforcedVerdict surface
+    guard_verdict: str | None = None
+    guard_risk_score: int | None = None
+    guard_confidence: float | None = None
+    guard_latency_ms: float | None = None
+    guard_model_name: str | None = None
+    guard_signals: list[str] = Field(default_factory=list)
+    guard_summary: str | None = None
+    guard_decided_at: str | None = None
     enforced_at: str | None = None

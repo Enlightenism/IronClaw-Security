@@ -207,23 +207,19 @@ class _SecretsVault:
         return os.getenv("STRIPE_WEBHOOK_SECRET", "")
 
     # ------------------------------------------------------------------
-    # Groq / AI
+    # Local prompt guard
     # ------------------------------------------------------------------
     @staticmethod
-    def groq_enabled() -> bool:
-        return os.getenv("GROQ_ENABLED", "false").lower() in ("1", "true", "yes")
+    def guard_enabled() -> bool:
+        return os.getenv("GUARD_ENABLED", "false").lower() in ("1", "true", "yes")
 
     @staticmethod
-    def groq_api_key() -> str:
-        return os.getenv("GROQ_API_KEY", "")
+    def guard_model_path() -> str:
+        return os.getenv("GUARD_MODEL_PATH", "models/prompt-guard-86m")
 
     @staticmethod
-    def groq_model() -> str:
-        return os.getenv("GROQ_MODEL", "llama3-8b-8192")
-
-    @staticmethod
-    def groq_timeout_seconds() -> float:
-        return float(os.getenv("GROQ_TIMEOUT_SECONDS", "60.0"))
+    def guard_threshold() -> float:
+        return float(os.getenv("GUARD_THRESHOLD", "0.5"))
 
     # ------------------------------------------------------------------
     # OpenAI

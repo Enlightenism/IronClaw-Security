@@ -30,7 +30,7 @@ class IronClawSkillContext:
     env_file: Path
     base_url: str
     openai_api_key: str | None
-    groq_api_key: str | None
+    guard_model_path: str | None
     api_secret: str | None
     jwt_secret: str | None
     backup_target: str
@@ -194,7 +194,7 @@ def resolve_skill_context(
         env_file=resolved_env_file,
         base_url=base_url,
         openai_api_key=_normalize_optional_text(env.get("OPENAI_API_KEY")),
-        groq_api_key=_normalize_optional_text(env.get("GROQ_API_KEY")),
+        guard_model_path=_normalize_optional_text(env.get("GUARD_MODEL_PATH")),
         api_secret=_normalize_optional_text(env.get("API_SECRET")),
         jwt_secret=_normalize_optional_text(env.get("JWT_SECRET")),
         backup_target=backup_target,
@@ -237,8 +237,8 @@ def skill_env_overrides(context: IronClawSkillContext) -> dict[str, str]:
 
     if context.openai_api_key:
         overrides["OPENAI_API_KEY"] = context.openai_api_key
-    if context.groq_api_key:
-        overrides["GROQ_API_KEY"] = context.groq_api_key
+    if context.guard_model_path:
+        overrides["GUARD_MODEL_PATH"] = context.guard_model_path
     if context.api_secret:
         overrides["API_SECRET"] = context.api_secret
     if context.jwt_secret:

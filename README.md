@@ -137,8 +137,9 @@ One locked, shipping mission:
   Goose and Gemini CLI
 - **Intercept every inbound agent return** before it reaches the user workflow.
 - **Sandbox-isolate** every artifact for evaluation.
-- **AI brain + policy engine** evaluate every artifact with LLM-assisted
-  reasoning and deterministic rule enforcement.
+- **Local Prompt Guard classifier + policy engine** combine optional,
+  model-based malicious-content classification with deterministic rule
+  enforcement.
 - **Return one final verdict** — no ambiguity, no silent pass-through:
   - `allow` — safe, released.
   - `warn` — risky, surfaced with caution.
@@ -162,9 +163,8 @@ IronClaw's prompt injection defense operates at multiple layers simultaneously:
 - **Pattern-based heuristics** scan inbound content for known injection
   signatures, role-override attempts, instruction-smuggling patterns, and
   jailbreak constructs before the content is released.
-- **Groq-powered AI brain analysis** applies LLM-assisted semantic reasoning to
-  detect novel, obfuscated, or context-dependent injection attempts that
-  rule-based systems miss.
+- **Local Prompt Guard classification** can add a malicious-content signal to
+  the rule-based assessment when `GUARD_ENABLED=true`.
 - **Risk scoring** assigns a 0–100 score to every artifact. Scores above
   configurable thresholds route to quarantine or block automatically.
 - **Policy enforcement** applies organization-level rules on top of the brain
@@ -202,8 +202,8 @@ Artifact Normalizer │ ← Canonical runtime artifact contract
 Sandbox Router │ ← Isolated evaluation boundary
 └─────────────────────────────────┘ │ ▼ ┌─────────────────────────────────┐ │
 Heuristic + Pattern Engine │ ← Rule-based threat detection
-└─────────────────────────────────┘ │ ▼ ┌─────────────────────────────────┐ │ AI
-Brain (Groq LLM) │ ← Semantic reasoning, injection detection
+└─────────────────────────────────┘ │ ▼ ┌─────────────────────────────────┐ │ Local
+Prompt Guard Classifier │ ← Malicious-content classification
 └─────────────────────────────────┘ │ ▼ ┌─────────────────────────────────┐ │
 Policy Enforcer │ ← Org-level policy rules applied
 └─────────────────────────────────┘ │ ▼ ┌─────────────────────────────────┐ │
@@ -324,7 +324,7 @@ security control plane for AI-native tooling.
 
 - `app/services/` — service layer for evaluation, policy, decisioning, and
   response.
-- `app/services/groq_security_brain.py` — Groq-backed security reasoning.
+- `app/services/guard_security_brain.py` — local Prompt Guard security evaluation.
 - `app/services/policy.py` — policy evaluation and rule enforcement.
 - `app/services/verdict_enforcer.py` — final allow / warn / quarantine / block
   enforcement.

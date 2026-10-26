@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import pytest
 
-from app.runtime.networkguard import build_network_guard
+from app.runtime.networkguard import DEFAULT_ALLOWED_HOSTS, build_network_guard
 
 
 @pytest.fixture
 def guard():
     return build_network_guard()
+
+
+def test_groq_api_host_is_not_default_allowlisted() -> None:
+    assert "api.groq.com" not in DEFAULT_ALLOWED_HOSTS
 
 
 def test_allow_safe_https_request(guard):

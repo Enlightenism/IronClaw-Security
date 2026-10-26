@@ -19,6 +19,7 @@ def test_package_dir_includes_expected_public_modules() -> None:
     names = dir(package)
 
     for expected in (
+        "adapterguard",
         "adapterclaude",
         "adapteropenclaw",
         "billing",
@@ -39,6 +40,7 @@ def test_package_dir_includes_expected_public_modules() -> None:
 @pytest.mark.parametrize(
     "module_name",
     [
+        "adapterguard",
         "adapterclaude",
         "adapteropenclaw",
         "billing",
@@ -75,6 +77,7 @@ def test_package_all_exports_match_public_contract() -> None:
     assert "__version__" in package.__all__
 
     expected_modules = {
+        "adapterguard",
         "adapterclaude",
         "adapteropenclaw",
         "billing",
@@ -88,3 +91,16 @@ def test_package_all_exports_match_public_contract() -> None:
         "runtime",
     }
     assert expected_modules.issubset(set(package.__all__))
+
+
+def test_package_exports_guard_adapter_symbols() -> None:
+    package = importlib.import_module("ironclawskill")
+
+    for expected in (
+        "GuardAdapter",
+        "GuardSkillAdapter",
+        "adaptguardrequest",
+        "adaptguardresponse",
+    ):
+        assert expected in package.__all__
+        assert getattr(package, expected) is not None

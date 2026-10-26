@@ -231,22 +231,22 @@ def test_installer_returns_install_result_without_activation_when_activate_false
         verification=_VerificationResult(
             ok=True,
             allowed=True,
-            runtime="groq",
+            runtime="guard",
             verdict="allow",
             matched_rules=["bundle:verified"],
         ),
         install_result=_RegistryInstallResult(
             ok=True,
             installed=True,
-            runtime="groq",
-            adapter="groq",
+            runtime="guard",
+            adapter="guard",
             status="installed",
             matched_rules=["install:complete"],
         ),
     )
 
     result = installer.install(
-        runtime="groq",
+        runtime="guard",
         bundle=_bundle(),
         signature="signed-bundle",
         secret="ironclaw-secret",
@@ -258,7 +258,7 @@ def test_installer_returns_install_result_without_activation_when_activate_false
     assert result.ok is True
     assert result.installed is True
     assert result.active is False
-    assert result.runtime == "groq"
+    assert result.runtime == "guard"
     assert "install:complete" in result.matched_rules
     assert len(registry.install_calls) == 1
     assert len(registry.activate_calls) == 0
@@ -434,7 +434,7 @@ def test_missing_signature_is_rejected_early():
     assert len(verifier.calls) == 0
 
 
-@pytest.mark.parametrize("runtime_name", ["openclaw", "claude", "groq", "future-runtime"])
+@pytest.mark.parametrize("runtime_name", ["openclaw", "claude", "guard", "future-runtime"])
 def test_installer_supports_cross_platform_runtimes(runtime_name: str):
     installer, verifier, registry = _build(
         verification=_VerificationResult(

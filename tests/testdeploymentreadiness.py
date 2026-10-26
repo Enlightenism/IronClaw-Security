@@ -48,7 +48,7 @@ def _base_env() -> dict[str, str]:
             "SUPABASE_KEY": "supabase_key_for_test_validation",
             "SUPABASE_SERVICE_ROLE_KEY": "supabase_service_role_for_test_validation",
             "OPENAI_API_KEY": "openai_key_for_test_validation",
-            "GROQ_API_KEY": "groq_key_for_test_validation",
+            "GUARD_MODEL_PATH": "models/prompt-guard-86m",
             "SECRET_KEY": "very_strong_secret_key_value",
             "JWT_SECRET": "very_strong_jwt_secret_value",
             "API_SECRET": "very_strong_api_secret_value",
@@ -163,6 +163,9 @@ def test_deployment_readiness_passes_with_valid_environment() -> None:
     normalized = [_check_ok(check) for check in checks]
     assert normalized
     assert all(value is True for value in normalized if value is not None)
+    provider_check = next(check for check in checks if _check_name(check) == "external-integrations")
+    assert _check_ok(provider_check) is True
+    assert "guard" in provider_check["detail"]
 
 
 def test_deployment_readiness_fails_with_missing_supabase_configuration() -> None:

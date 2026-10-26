@@ -57,7 +57,7 @@ def test_ui_manifest_endpoint_is_available() -> None:
     assert response.status_code == 200
 
 
-def test_groq_registry_endpoint_is_available() -> None:
-    response = client.get("/api/groq-registry")
+def test_guard_registry_endpoint_is_available() -> None:
+    response = client.get("/api/guard-registry")
 
     assert response.status_code == 200

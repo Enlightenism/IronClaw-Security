@@ -4423,9 +4423,47 @@
             "title": "Created At",
             "type": "string"
           },
+          "entitlement_status": {
+            "default": "not_active",
+            "title": "Entitlement Status",
+            "type": "string"
+          },
           "granted_units": {
             "title": "Granted Units",
             "type": "integer"
+          },
+          "hermes_install_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hermes Install Key"
+          },
+          "install_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Install Key Id"
+          },
+          "masked_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Masked Key"
           },
           "metadata": {
             "additionalProperties": true,
@@ -4455,9 +4493,36 @@
             "title": "Package Name",
             "type": "string"
           },
+          "payment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Id"
+          },
+          "payment_status": {
+            "default": "pending",
+            "title": "Payment Status",
+            "type": "string"
+          },
           "price_usd": {
             "title": "Price Usd",
             "type": "number"
+          },
+          "program": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Program"
           },
           "purchase_id": {
             "title": "Purchase Id",
@@ -4470,6 +4535,11 @@
           "tokens_per_unit": {
             "title": "Tokens Per Unit",
             "type": "integer"
+          },
+          "usage_summary": {
+            "additionalProperties": true,
+            "title": "Usage Summary",
+            "type": "object"
           }
         },
         "required": [
@@ -13300,86 +13370,6 @@
         "title": "GooseManifestResponse",
         "type": "object"
       },
-      "GroqRegistryEntry": {
-        "properties": {
-          "enabled": {
-            "default": true,
-            "title": "Enabled",
-            "type": "boolean"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "title": "Metadata",
-            "type": "object"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "prefix": {
-            "title": "Prefix",
-            "type": "string"
-          },
-          "tags": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Tags",
-            "type": "array"
-          }
-        },
-        "required": [
-          "name",
-          "prefix"
-        ],
-        "title": "GroqRegistryEntry",
-        "type": "object"
-      },
-      "GroqRegistryResponse": {
-        "properties": {
-          "metadata": {
-            "additionalProperties": true,
-            "title": "Metadata",
-            "type": "object"
-          },
-          "provider": {
-            "title": "Provider",
-            "type": "string"
-          },
-          "routes": {
-            "items": {
-              "$ref": "#/components/schemas/GroqRegistryEntry"
-            },
-            "title": "Routes",
-            "type": "array"
-          },
-          "service": {
-            "title": "Service",
-            "type": "string"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          },
-          "total_routes": {
-            "title": "Total Routes",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "status",
-          "service",
-          "provider",
-          "timestamp",
-          "total_routes"
-        ],
-        "title": "GroqRegistryResponse",
-        "type": "object"
-      },
       "GuardBundleRequest": {
         "properties": {
           "model_output": {
@@ -13683,6 +13673,86 @@
           "score"
         ],
         "title": "GuardReasonView",
+        "type": "object"
+      },
+      "GuardRegistryEntry": {
+        "properties": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "prefix": {
+            "title": "Prefix",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "prefix"
+        ],
+        "title": "GuardRegistryEntry",
+        "type": "object"
+      },
+      "GuardRegistryResponse": {
+        "properties": {
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "routes": {
+            "items": {
+              "$ref": "#/components/schemas/GuardRegistryEntry"
+            },
+            "title": "Routes",
+            "type": "array"
+          },
+          "service": {
+            "title": "Service",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "total_routes": {
+            "title": "Total Routes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "service",
+          "provider",
+          "timestamp",
+          "total_routes"
+        ],
+        "title": "GuardRegistryResponse",
         "type": "object"
       },
       "GuardedTextResponse": {
@@ -25973,7 +26043,7 @@
             "title": "Filepath",
             "type": "string"
           },
-          "groq_confidence": {
+          "guard_confidence": {
             "anyOf": [
               {
                 "type": "number"
@@ -25982,9 +26052,9 @@
                 "type": "null"
               }
             ],
-            "title": "Groq Confidence"
+            "title": "Guard Confidence"
           },
-          "groq_decided_at": {
+          "guard_decided_at": {
             "anyOf": [
               {
                 "type": "string"
@@ -25993,9 +26063,9 @@
                 "type": "null"
               }
             ],
-            "title": "Groq Decided At"
+            "title": "Guard Decided At"
           },
-          "groq_latency_ms": {
+          "guard_latency_ms": {
             "anyOf": [
               {
                 "type": "number"
@@ -26004,9 +26074,9 @@
                 "type": "null"
               }
             ],
-            "title": "Groq Latency Ms"
+            "title": "Guard Latency Ms"
           },
-          "groq_model_name": {
+          "guard_model_name": {
             "anyOf": [
               {
                 "type": "string"
@@ -26015,9 +26085,9 @@
                 "type": "null"
               }
             ],
-            "title": "Groq Model Name"
+            "title": "Guard Model Name"
           },
-          "groq_risk_score": {
+          "guard_risk_score": {
             "anyOf": [
               {
                 "type": "integer"
@@ -26026,16 +26096,16 @@
                 "type": "null"
               }
             ],
-            "title": "Groq Risk Score"
+            "title": "Guard Risk Score"
           },
-          "groq_signals": {
+          "guard_signals": {
             "items": {
               "type": "string"
             },
-            "title": "Groq Signals",
+            "title": "Guard Signals",
             "type": "array"
           },
-          "groq_summary": {
+          "guard_summary": {
             "anyOf": [
               {
                 "type": "string"
@@ -26044,9 +26114,9 @@
                 "type": "null"
               }
             ],
-            "title": "Groq Summary"
+            "title": "Guard Summary"
           },
-          "groq_verdict": {
+          "guard_verdict": {
             "anyOf": [
               {
                 "type": "string"
@@ -26055,7 +26125,7 @@
                 "type": "null"
               }
             ],
-            "title": "Groq Verdict"
+            "title": "Guard Verdict"
           },
           "hostilecontext": {
             "additionalProperties": true,
@@ -31647,7 +31717,7 @@
             "title": "Filepath",
             "type": "string"
           },
-          "groq_confidence": {
+          "guard_confidence": {
             "anyOf": [
               {
                 "type": "number"
@@ -31656,9 +31726,9 @@
                 "type": "null"
               }
             ],
-            "title": "Groq Confidence"
+            "title": "Guard Confidence"
           },
-          "groq_decided_at": {
+          "guard_decided_at": {
             "anyOf": [
               {
                 "type": "string"
@@ -31667,9 +31737,9 @@
                 "type": "null"
               }
             ],
-            "title": "Groq Decided At"
+            "title": "Guard Decided At"
           },
-          "groq_latency_ms": {
+          "guard_latency_ms": {
             "anyOf": [
               {
                 "type": "number"
@@ -31678,9 +31748,9 @@
                 "type": "null"
               }
             ],
-            "title": "Groq Latency Ms"
+            "title": "Guard Latency Ms"
           },
-          "groq_model_name": {
+          "guard_model_name": {
             "anyOf": [
               {
                 "type": "string"
@@ -31689,9 +31759,9 @@
                 "type": "null"
               }
             ],
-            "title": "Groq Model Name"
+            "title": "Guard Model Name"
           },
-          "groq_risk_score": {
+          "guard_risk_score": {
             "anyOf": [
               {
                 "type": "integer"
@@ -31700,16 +31770,16 @@
                 "type": "null"
               }
             ],
-            "title": "Groq Risk Score"
+            "title": "Guard Risk Score"
           },
-          "groq_signals": {
+          "guard_signals": {
             "items": {
               "type": "string"
             },
-            "title": "Groq Signals",
+            "title": "Guard Signals",
             "type": "array"
           },
-          "groq_summary": {
+          "guard_summary": {
             "anyOf": [
               {
                 "type": "string"
@@ -31718,9 +31788,9 @@
                 "type": "null"
               }
             ],
-            "title": "Groq Summary"
+            "title": "Guard Summary"
           },
-          "groq_verdict": {
+          "guard_verdict": {
             "anyOf": [
               {
                 "type": "string"
@@ -31729,7 +31799,7 @@
                 "type": "null"
               }
             ],
-            "title": "Groq Verdict"
+            "title": "Guard Verdict"
           },
           "haltedbyboundary": {
             "title": "Haltedbyboundary",
@@ -31910,7 +31980,7 @@
             "title": "Filepath",
             "type": "string"
           },
-          "groq_confidence": {
+          "guard_confidence": {
             "anyOf": [
               {
                 "type": "number"
@@ -31919,10 +31989,10 @@
                 "type": "null"
               }
             ],
-            "description": "Confidence score from Groq AI analysis.",
-            "title": "Groq Confidence"
+            "description": "Confidence score from local guard analysis.",
+            "title": "Guard Confidence"
           },
-          "groq_model": {
+          "guard_model": {
             "anyOf": [
               {
                 "type": "string"
@@ -31931,10 +32001,10 @@
                 "type": "null"
               }
             ],
-            "description": "Groq model identifier used for analysis.",
-            "title": "Groq Model"
+            "description": "Local guard model identifier used for analysis.",
+            "title": "Guard Model"
           },
-          "groq_reasoning": {
+          "guard_reasoning": {
             "anyOf": [
               {
                 "type": "string"
@@ -31943,10 +32013,10 @@
                 "type": "null"
               }
             ],
-            "description": "Reasoning text from Groq AI analysis.",
-            "title": "Groq Reasoning"
+            "description": "Reasoning text from local guard analysis.",
+            "title": "Guard Reasoning"
           },
-          "groq_verdict": {
+          "guard_verdict": {
             "anyOf": [
               {
                 "type": "string"
@@ -31955,8 +32025,8 @@
                 "type": "null"
               }
             ],
-            "description": "Verdict returned by Groq AI analysis layer.",
-            "title": "Groq Verdict"
+            "description": "Verdict returned by local guard analysis layer.",
+            "title": "Guard Verdict"
           },
           "haltedbyboundary": {
             "title": "Haltedbyboundary",
@@ -32133,7 +32203,7 @@
             "title": "Filepath",
             "type": "string"
           },
-          "groq_confidence": {
+          "guard_confidence": {
             "anyOf": [
               {
                 "type": "number"
@@ -32142,10 +32212,10 @@
                 "type": "null"
               }
             ],
-            "description": "Confidence score from Groq AI analysis.",
-            "title": "Groq Confidence"
+            "description": "Confidence score from local guard analysis.",
+            "title": "Guard Confidence"
           },
-          "groq_model": {
+          "guard_model": {
             "anyOf": [
               {
                 "type": "string"
@@ -32154,10 +32224,10 @@
                 "type": "null"
               }
             ],
-            "description": "Groq model identifier used for analysis.",
-            "title": "Groq Model"
+            "description": "Local guard model identifier used for analysis.",
+            "title": "Guard Model"
           },
-          "groq_reasoning": {
+          "guard_reasoning": {
             "anyOf": [
               {
                 "type": "string"
@@ -32166,10 +32236,10 @@
                 "type": "null"
               }
             ],
-            "description": "Reasoning text from Groq AI analysis.",
-            "title": "Groq Reasoning"
+            "description": "Reasoning text from local guard analysis.",
+            "title": "Guard Reasoning"
           },
-          "groq_verdict": {
+          "guard_verdict": {
             "anyOf": [
               {
                 "type": "string"
@@ -32178,8 +32248,8 @@
                 "type": "null"
               }
             ],
-            "description": "Verdict returned by Groq AI analysis layer.",
-            "title": "Groq Verdict"
+            "description": "Verdict returned by local guard analysis layer.",
+            "title": "Guard Verdict"
           },
           "indirectpromptinjectionflagged": {
             "title": "Indirectpromptinjectionflagged",
@@ -34966,7 +35036,7 @@
             ],
             "title": "Enforced At"
           },
-          "groq_confidence": {
+          "guard_confidence": {
             "anyOf": [
               {
                 "type": "number"
@@ -34975,9 +35045,9 @@
                 "type": "null"
               }
             ],
-            "title": "Groq Confidence"
+            "title": "Guard Confidence"
           },
-          "groq_decided_at": {
+          "guard_decided_at": {
             "anyOf": [
               {
                 "type": "string"
@@ -34986,9 +35056,9 @@
                 "type": "null"
               }
             ],
-            "title": "Groq Decided At"
+            "title": "Guard Decided At"
           },
-          "groq_latency_ms": {
+          "guard_latency_ms": {
             "anyOf": [
               {
                 "type": "number"
@@ -34997,9 +35067,9 @@
                 "type": "null"
               }
             ],
-            "title": "Groq Latency Ms"
+            "title": "Guard Latency Ms"
           },
-          "groq_model_name": {
+          "guard_model_name": {
             "anyOf": [
               {
                 "type": "string"
@@ -35008,9 +35078,9 @@
                 "type": "null"
               }
             ],
-            "title": "Groq Model Name"
+            "title": "Guard Model Name"
           },
-          "groq_risk_score": {
+          "guard_risk_score": {
             "anyOf": [
               {
                 "type": "integer"
@@ -35019,16 +35089,16 @@
                 "type": "null"
               }
             ],
-            "title": "Groq Risk Score"
+            "title": "Guard Risk Score"
           },
-          "groq_signals": {
+          "guard_signals": {
             "items": {
               "type": "string"
             },
-            "title": "Groq Signals",
+            "title": "Guard Signals",
             "type": "array"
           },
-          "groq_summary": {
+          "guard_summary": {
             "anyOf": [
               {
                 "type": "string"
@@ -35037,9 +35107,9 @@
                 "type": "null"
               }
             ],
-            "title": "Groq Summary"
+            "title": "Guard Summary"
           },
-          "groq_verdict": {
+          "guard_verdict": {
             "anyOf": [
               {
                 "type": "string"
@@ -35048,7 +35118,7 @@
                 "type": "null"
               }
             ],
-            "title": "Groq Verdict"
+            "title": "Guard Verdict"
           },
           "matched_patterns": {
             "items": {
@@ -37816,7 +37886,7 @@
         "title": "ExecutionDetailResponse",
         "type": "object"
       },
-      "app__ui__groq__incidents__IncidentListResponse": {
+      "app__ui__guard__incidents__IncidentListResponse": {
         "properties": {
           "generated_at": {
             "title": "Generated At",
@@ -43201,26 +43271,32 @@
     },
     "/api/billing/webhook": {
       "post": {
-        "operationId": "handle_checkout_session_completed_webhook_api_billing_webhook_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "title": "Payload",
-                "type": "object"
-              }
+        "operationId": "_handle_checkout_session_completed_webhook_route_api_billing_webhook_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "stripe-signature",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Stripe-Signature"
             }
-          },
-          "required": true
-        },
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Handle Checkout Session Completed Webhook Api Billing Webhook Post",
+                  "title": "Response  Handle Checkout Session Completed Webhook Route Api Billing Webhook Post",
                   "type": "object"
                 }
               }
@@ -43792,25 +43868,25 @@
         ]
       }
     },
-    "/api/groq-registry": {
+    "/api/guard-registry": {
       "get": {
-        "operationId": "read_groq_registry_api_groq_registry_get",
+        "operationId": "read_guard_registry_api_guard_registry_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GroqRegistryResponse"
+                  "$ref": "#/components/schemas/GuardRegistryResponse"
                 }
               }
             },
             "description": "Successful Response"
           }
         },
-        "summary": "Read Groq Registry",
+        "summary": "Read Guard Registry",
         "tags": [
           "api",
-          "groq-registry"
+          "guard-registry"
         ]
       }
     },
@@ -52878,26 +52954,32 @@
     },
     "/billing/webhook": {
       "post": {
-        "operationId": "handle_checkout_session_completed_webhook_billing_webhook_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "title": "Payload",
-                "type": "object"
-              }
+        "operationId": "_handle_checkout_session_completed_webhook_route_billing_webhook_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "stripe-signature",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Stripe-Signature"
             }
-          },
-          "required": true
-        },
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Handle Checkout Session Completed Webhook Billing Webhook Post",
+                  "title": "Response  Handle Checkout Session Completed Webhook Route Billing Webhook Post",
                   "type": "object"
                 }
               }
@@ -64114,9 +64196,9 @@
         ]
       }
     },
-    "/ui/groq/copilot/chat": {
+    "/ui/guard/copilot/chat": {
       "post": {
-        "operationId": "post_copilot_chat_ui_groq_copilot_chat_post",
+        "operationId": "post_copilot_chat_ui_guard_copilot_chat_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -64151,13 +64233,13 @@
         },
         "summary": "Post Copilot Chat",
         "tags": [
-          "groq-copilot"
+          "guard-copilot"
         ]
       }
     },
-    "/ui/groq/incidents": {
+    "/ui/guard/incidents": {
       "get": {
-        "operationId": "list_incidents_ui_groq_incidents_get",
+        "operationId": "list_incidents_ui_guard_incidents_get",
         "parameters": [
           {
             "description": "Page number for the incidents queue.",
@@ -64240,7 +64322,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__ui__groq__incidents__IncidentListResponse"
+                  "$ref": "#/components/schemas/app__ui__guard__incidents__IncidentListResponse"
                 }
               }
             },
@@ -64259,13 +64341,13 @@
         },
         "summary": "List Incidents",
         "tags": [
-          "groq-incidents"
+          "guard-incidents"
         ]
       }
     },
-    "/ui/groq/incidents/{incident_id}": {
+    "/ui/guard/incidents/{incident_id}": {
       "get": {
-        "operationId": "get_incident_ui_groq_incidents__incident_id__get",
+        "operationId": "get_incident_ui_guard_incidents__incident_id__get",
         "parameters": [
           {
             "in": "path",
@@ -64301,13 +64383,13 @@
         },
         "summary": "Get Incident",
         "tags": [
-          "groq-incidents"
+          "guard-incidents"
         ]
       }
     },
-    "/ui/groq/incidents/{incident_id}/status": {
+    "/ui/guard/incidents/{incident_id}/status": {
       "patch": {
-        "operationId": "update_incident_status_ui_groq_incidents__incident_id__status_patch",
+        "operationId": "update_incident_status_ui_guard_incidents__incident_id__status_patch",
         "parameters": [
           {
             "in": "path",
@@ -64353,13 +64435,13 @@
         },
         "summary": "Update Incident Status",
         "tags": [
-          "groq-incidents"
+          "guard-incidents"
         ]
       }
     },
-    "/ui/groq/posture-summary": {
+    "/ui/guard/posture-summary": {
       "get": {
-        "operationId": "get_posture_summary_ui_groq_posture_summary_get",
+        "operationId": "get_posture_summary_ui_guard_posture_summary_get",
         "responses": {
           "200": {
             "content": {
@@ -64374,14 +64456,14 @@
         },
         "summary": "Get Posture Summary",
         "tags": [
-          "groq-posture-summary"
+          "guard-posture-summary"
         ]
       }
     },
-    "/ui/groq/prompt-guard/activity-feed": {
+    "/ui/guard/prompt-guard/activity-feed": {
       "get": {
         "description": "Unified operational activity stream for the prompt guard UI.\n\nThis aggregates policy changes, key KPIs, incident coverage, trend snapshots,\nand recommendations into a single normalized feed for dashboard consumption.",
-        "operationId": "get_prompt_guard_activity_feed_ui_groq_prompt_guard_activity_feed_get",
+        "operationId": "get_prompt_guard_activity_feed_ui_guard_prompt_guard_activity_feed_get",
         "responses": {
           "200": {
             "content": {
@@ -64396,13 +64478,13 @@
         },
         "summary": "Get Prompt Guard Activity Feed",
         "tags": [
-          "groq-prompt-guard-activity-feed"
+          "guard-prompt-guard-activity-feed"
         ]
       }
     },
-    "/ui/groq/prompt-guard/alerts-overview": {
+    "/ui/guard/prompt-guard/alerts-overview": {
       "get": {
-        "operationId": "get_prompt_guard_alerts_overview_ui_groq_prompt_guard_alerts_overview_get",
+        "operationId": "get_prompt_guard_alerts_overview_ui_guard_prompt_guard_alerts_overview_get",
         "responses": {
           "200": {
             "content": {
@@ -64417,13 +64499,13 @@
         },
         "summary": "Get Prompt Guard Alerts Overview",
         "tags": [
-          "groq-prompt-guard-alerts-overview"
+          "guard-prompt-guard-alerts-overview"
         ]
       }
     },
-    "/ui/groq/prompt-guard/alerts-timeline-summary": {
+    "/ui/guard/prompt-guard/alerts-timeline-summary": {
       "get": {
-        "operationId": "get_prompt_guard_alerts_timeline_summary_ui_groq_prompt_guard_alerts_timeline_summary_get",
+        "operationId": "get_prompt_guard_alerts_timeline_summary_ui_guard_prompt_guard_alerts_timeline_summary_get",
         "responses": {
           "200": {
             "content": {
@@ -64438,13 +64520,13 @@
         },
         "summary": "Get Prompt Guard Alerts Timeline Summary",
         "tags": [
-          "groq-prompt-guard-alerts-timeline-summary"
+          "guard-prompt-guard-alerts-timeline-summary"
         ]
       }
     },
-    "/ui/groq/prompt-guard/coverage-summary": {
+    "/ui/guard/prompt-guard/coverage-summary": {
       "get": {
-        "operationId": "get_prompt_guard_coverage_summary_ui_groq_prompt_guard_coverage_summary_get",
+        "operationId": "get_prompt_guard_coverage_summary_ui_guard_prompt_guard_coverage_summary_get",
         "responses": {
           "200": {
             "content": {
@@ -64459,13 +64541,13 @@
         },
         "summary": "Get Prompt Guard Coverage Summary",
         "tags": [
-          "groq-prompt-guard-coverage-summary"
+          "guard-prompt-guard-coverage-summary"
         ]
       }
     },
-    "/ui/groq/prompt-guard/dashboard-index": {
+    "/ui/guard/prompt-guard/dashboard-index": {
       "get": {
-        "operationId": "get_prompt_guard_dashboard_index_ui_groq_prompt_guard_dashboard_index_get",
+        "operationId": "get_prompt_guard_dashboard_index_ui_guard_prompt_guard_dashboard_index_get",
         "responses": {
           "200": {
             "content": {
@@ -64480,13 +64562,13 @@
         },
         "summary": "Get Prompt Guard Dashboard Index",
         "tags": [
-          "groq-prompt-guard-dashboard-index"
+          "guard-prompt-guard-dashboard-index"
         ]
       }
     },
-    "/ui/groq/prompt-guard/executive-summary": {
+    "/ui/guard/prompt-guard/executive-summary": {
       "get": {
-        "operationId": "get_prompt_guard_executive_summary_ui_groq_prompt_guard_executive_summary_get",
+        "operationId": "get_prompt_guard_executive_summary_ui_guard_prompt_guard_executive_summary_get",
         "responses": {
           "200": {
             "content": {
@@ -64501,13 +64583,13 @@
         },
         "summary": "Get Prompt Guard Executive Summary",
         "tags": [
-          "groq-prompt-guard-executive-summary"
+          "guard-prompt-guard-executive-summary"
         ]
       }
     },
-    "/ui/groq/prompt-guard/health-snapshot": {
+    "/ui/guard/prompt-guard/health-snapshot": {
       "get": {
-        "operationId": "get_prompt_guard_health_snapshot_ui_groq_prompt_guard_health_snapshot_get",
+        "operationId": "get_prompt_guard_health_snapshot_ui_guard_prompt_guard_health_snapshot_get",
         "responses": {
           "200": {
             "content": {
@@ -64522,13 +64604,13 @@
         },
         "summary": "Get Prompt Guard Health Snapshot",
         "tags": [
-          "groq-prompt-guard-health-snapshot"
+          "guard-prompt-guard-health-snapshot"
         ]
       }
     },
-    "/ui/groq/prompt-guard/incident-summary": {
+    "/ui/guard/prompt-guard/incident-summary": {
       "get": {
-        "operationId": "get_prompt_guard_incident_summary_ui_groq_prompt_guard_incident_summary_get",
+        "operationId": "get_prompt_guard_incident_summary_ui_guard_prompt_guard_incident_summary_get",
         "responses": {
           "200": {
             "content": {
@@ -64543,13 +64625,13 @@
         },
         "summary": "Get Prompt Guard Incident Summary",
         "tags": [
-          "groq-prompt-guard-incident-summary"
+          "guard-prompt-guard-incident-summary"
         ]
       }
     },
-    "/ui/groq/prompt-guard/kpi-summary": {
+    "/ui/guard/prompt-guard/kpi-summary": {
       "get": {
-        "operationId": "get_prompt_guard_kpi_summary_ui_groq_prompt_guard_kpi_summary_get",
+        "operationId": "get_prompt_guard_kpi_summary_ui_guard_prompt_guard_kpi_summary_get",
         "responses": {
           "200": {
             "content": {
@@ -64564,13 +64646,13 @@
         },
         "summary": "Get Prompt Guard Kpi Summary",
         "tags": [
-          "groq-prompt-guard-kpi-summary"
+          "guard-prompt-guard-kpi-summary"
         ]
       }
     },
-    "/ui/groq/prompt-guard/metrics": {
+    "/ui/guard/prompt-guard/metrics": {
       "get": {
-        "operationId": "get_prompt_guard_metrics_ui_groq_prompt_guard_metrics_get",
+        "operationId": "get_prompt_guard_metrics_ui_guard_prompt_guard_metrics_get",
         "responses": {
           "200": {
             "content": {
@@ -64585,13 +64667,13 @@
         },
         "summary": "Get Prompt Guard Metrics",
         "tags": [
-          "groq-prompt-guard-metrics"
+          "guard-prompt-guard-metrics"
         ]
       }
     },
-    "/ui/groq/prompt-guard/ops-dashboard": {
+    "/ui/guard/prompt-guard/ops-dashboard": {
       "get": {
-        "operationId": "get_prompt_guard_ops_dashboard_ui_groq_prompt_guard_ops_dashboard_get",
+        "operationId": "get_prompt_guard_ops_dashboard_ui_guard_prompt_guard_ops_dashboard_get",
         "responses": {
           "200": {
             "content": {
@@ -64606,13 +64688,13 @@
         },
         "summary": "Get Prompt Guard Ops Dashboard",
         "tags": [
-          "groq-prompt-guard-ops-dashboard"
+          "guard-prompt-guard-ops-dashboard"
         ]
       }
     },
-    "/ui/groq/prompt-guard/performance-snapshot": {
+    "/ui/guard/prompt-guard/performance-snapshot": {
       "get": {
-        "operationId": "get_prompt_guard_performance_snapshot_ui_groq_prompt_guard_performance_snapshot_get",
+        "operationId": "get_prompt_guard_performance_snapshot_ui_guard_prompt_guard_performance_snapshot_get",
         "responses": {
           "200": {
             "content": {
@@ -64627,13 +64709,13 @@
         },
         "summary": "Get Prompt Guard Performance Snapshot",
         "tags": [
-          "groq-prompt-guard-performance-snapshot"
+          "guard-prompt-guard-performance-snapshot"
         ]
       }
     },
-    "/ui/groq/prompt-guard/policy": {
+    "/ui/guard/prompt-guard/policy": {
       "get": {
-        "operationId": "get_prompt_guard_policy_ui_groq_prompt_guard_policy_get",
+        "operationId": "get_prompt_guard_policy_ui_guard_prompt_guard_policy_get",
         "responses": {
           "200": {
             "content": {
@@ -64648,13 +64730,13 @@
         },
         "summary": "Get Prompt Guard Policy",
         "tags": [
-          "groq-prompt-guard-policy"
+          "guard-prompt-guard-policy"
         ]
       }
     },
-    "/ui/groq/prompt-guard/recommendations": {
+    "/ui/guard/prompt-guard/recommendations": {
       "get": {
-        "operationId": "get_prompt_guard_recommendations_ui_groq_prompt_guard_recommendations_get",
+        "operationId": "get_prompt_guard_recommendations_ui_guard_prompt_guard_recommendations_get",
         "responses": {
           "200": {
             "content": {
@@ -64669,13 +64751,13 @@
         },
         "summary": "Get Prompt Guard Recommendations",
         "tags": [
-          "groq-prompt-guard-recommendations"
+          "guard-prompt-guard-recommendations"
         ]
       }
     },
-    "/ui/groq/prompt-guard/review-queue-summary": {
+    "/ui/guard/prompt-guard/review-queue-summary": {
       "get": {
-        "operationId": "get_prompt_guard_review_queue_summary_ui_groq_prompt_guard_review_queue_summary_get",
+        "operationId": "get_prompt_guard_review_queue_summary_ui_guard_prompt_guard_review_queue_summary_get",
         "responses": {
           "200": {
             "content": {
@@ -64690,13 +64772,13 @@
         },
         "summary": "Get Prompt Guard Review Queue Summary",
         "tags": [
-          "groq-prompt-guard-review-queue-summary"
+          "guard-prompt-guard-review-queue-summary"
         ]
       }
     },
-    "/ui/groq/prompt-guard/risk-posture-summary": {
+    "/ui/guard/prompt-guard/risk-posture-summary": {
       "get": {
-        "operationId": "get_prompt_guard_risk_posture_summary_ui_groq_prompt_guard_risk_posture_summary_get",
+        "operationId": "get_prompt_guard_risk_posture_summary_ui_guard_prompt_guard_risk_posture_summary_get",
         "responses": {
           "200": {
             "content": {
@@ -64711,13 +64793,13 @@
         },
         "summary": "Get Prompt Guard Risk Posture Summary",
         "tags": [
-          "groq-prompt-guard-risk-posture-summary"
+          "guard-prompt-guard-risk-posture-summary"
         ]
       }
     },
-    "/ui/groq/prompt-guard/signals-summary": {
+    "/ui/guard/prompt-guard/signals-summary": {
       "get": {
-        "operationId": "get_prompt_guard_signals_summary_ui_groq_prompt_guard_signals_summary_get",
+        "operationId": "get_prompt_guard_signals_summary_ui_guard_prompt_guard_signals_summary_get",
         "responses": {
           "200": {
             "content": {
@@ -64732,13 +64814,13 @@
         },
         "summary": "Get Prompt Guard Signals Summary",
         "tags": [
-          "groq-prompt-guard-signals-summary"
+          "guard-prompt-guard-signals-summary"
         ]
       }
     },
-    "/ui/groq/prompt-guard/status-board-summary": {
+    "/ui/guard/prompt-guard/status-board-summary": {
       "get": {
-        "operationId": "get_prompt_guard_status_board_summary_ui_groq_prompt_guard_status_board_summary_get",
+        "operationId": "get_prompt_guard_status_board_summary_ui_guard_prompt_guard_status_board_summary_get",
         "responses": {
           "200": {
             "content": {
@@ -64753,13 +64835,13 @@
         },
         "summary": "Get Prompt Guard Status Board Summary",
         "tags": [
-          "groq-prompt-guard-status-board-summary"
+          "guard-prompt-guard-status-board-summary"
         ]
       }
     },
-    "/ui/groq/prompt-guard/timeline-summary": {
+    "/ui/guard/prompt-guard/timeline-summary": {
       "get": {
-        "operationId": "get_prompt_guard_timeline_summary_ui_groq_prompt_guard_timeline_summary_get",
+        "operationId": "get_prompt_guard_timeline_summary_ui_guard_prompt_guard_timeline_summary_get",
         "responses": {
           "200": {
             "content": {
@@ -64774,13 +64856,13 @@
         },
         "summary": "Get Prompt Guard Timeline Summary",
         "tags": [
-          "groq-prompt-guard-timeline-summary"
+          "guard-prompt-guard-timeline-summary"
         ]
       }
     },
-    "/ui/groq/prompt-guard/trends": {
+    "/ui/guard/prompt-guard/trends": {
       "get": {
-        "operationId": "get_prompt_guard_trends_ui_groq_prompt_guard_trends_get",
+        "operationId": "get_prompt_guard_trends_ui_guard_prompt_guard_trends_get",
         "parameters": [
           {
             "description": "Trend interval in minutes.",
@@ -64835,13 +64917,13 @@
         },
         "summary": "Get Prompt Guard Trends",
         "tags": [
-          "groq-prompt-guard-trends"
+          "guard-prompt-guard-trends"
         ]
       }
     },
-    "/ui/groq/prompt-guard/trends-summary": {
+    "/ui/guard/prompt-guard/trends-summary": {
       "get": {
-        "operationId": "get_prompt_guard_trends_summary_ui_groq_prompt_guard_trends_summary_get",
+        "operationId": "get_prompt_guard_trends_summary_ui_guard_prompt_guard_trends_summary_get",
         "responses": {
           "200": {
             "content": {
@@ -64856,7 +64938,7 @@
         },
         "summary": "Get Prompt Guard Trends Summary",
         "tags": [
-          "groq-prompt-guard-trends-summary"
+          "guard-prompt-guard-trends-summary"
         ]
       }
     },

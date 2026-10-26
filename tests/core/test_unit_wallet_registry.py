@@ -791,7 +791,7 @@ def test_debit_units_for_install_key_raises_insufficient_units_error(registry: U
         registry.debit_units_for_install_key(
             owner_key="key_broke@ironclaw.test",
             key_id="key_over",
-            program="groq",
+            program="guard",
             units=999,
         )
 
@@ -802,7 +802,7 @@ def test_debit_units_for_install_key_error_have_attribute_is_correct(registry: U
         registry.debit_units_for_install_key(
             owner_key="key_broke@ironclaw.test",
             key_id="key_over",
-            program="groq",
+            program="guard",
             units=999,
         )
     assert exc_info.value.have == 10
@@ -814,7 +814,7 @@ def test_debit_units_for_install_key_error_need_attribute_is_correct(registry: U
         registry.debit_units_for_install_key(
             owner_key="key_broke@ironclaw.test",
             key_id="key_over",
-            program="groq",
+            program="guard",
             units=999,
         )
     assert exc_info.value.need == 999
@@ -826,7 +826,7 @@ def test_debit_units_for_install_key_error_does_not_mutate_balance(registry: Uni
         registry.debit_units_for_install_key(
             owner_key="key_broke@ironclaw.test",
             key_id="key_over",
-            program="groq",
+            program="guard",
             units=999,
         )
     wallet = registry.get_wallet("key_broke@ironclaw.test")

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any, Protocol
 from uuid import uuid4
 
+from app.services.prompt_guard import PromptGuardResult
+
 from .adapterclaude import ClaudeSkillAdapter
-from .adaptergroq import GroqSkillAdapter
+from .adapterguard import GuardSkillAdapter, _format_classification
 from .adapteropenclaw import OpenClawSkillAdapter
 from .config import IronClawSkillConfig, load_config
 from .contracts import (
@@ -17,6 +20,7 @@ from .contracts import (
     SkillExecutionResult,
     SkillProvider,
     SkillProviderDecision,
+    SkillReason,
     SkillUsage,
 )
 from .errors import IronClawConfigurationError, IronClawRuntimeError
@@ -46,8 +50,8 @@ def _coerce_provider(value: Any, default: SkillProvider) -> SkillProvider:
         return SkillProvider.CLAUDE
     if normalized == SkillProvider.OPENCLAW.value:
         return SkillProvider.OPENCLAW
-    if normalized == SkillProvider.GROQ.value:
-        return SkillProvider.GROQ
+    if normalized == SkillProvider.GUARD.value:
+        return SkillProvider.GUARD
     return default
 
 
@@ -157,7 +161,11 @@ class IronClawRuntime:
         try:
             provider_name = self._resolve_provider_name(request)
             adapter = self._require_adapter(provider_name)
-            decision = adapter.execute(request)
+            if isinstance(adapter, GuardSkillAdapter):
+                classification = adapter.classify(request)
+                decision = self._build_guard_decision(request, classification)
+            else:
+                decision = adapter.execute(request)
             result = self._build_result(
                 request=request,
                 provider_name=provider_name,
@@ -171,6 +179,11 @@ class IronClawRuntime:
             if isinstance(exc, IronClawRuntimeError):
                 raise
             raise IronClawRuntimeError(str(exc)) from exc
+
+    async def execute_async(self, request: SkillExecutionRequest) -> SkillExecutionResult:
+        if self._resolve_provider_name(request) == SkillProvider.GUARD.value:
+            return await asyncio.to_thread(self.execute, request)
+        return self.execute(request)
 
     def run(self, request: SkillExecutionRequest) -> SkillExecutionResult:
         return self.execute(request)
@@ -223,9 +236,9 @@ class IronClawRuntime:
         claude_cfg = self.config.providers.get("claude")
         if claude_cfg and claude_cfg.enabled:
             adapters["claude"] = ClaudeSkillAdapter(config=self.config)
-        groq_cfg = self.config.providers.get("groq")
-        if groq_cfg and groq_cfg.enabled:
-            adapters["groq"] = GroqSkillAdapter(config=self.config)
+        guard_cfg = self.config.providers.get("guard")
+        if guard_cfg and guard_cfg.enabled:
+            adapters["guard"] = GuardSkillAdapter(config=guard_cfg)
         return adapters
 
     def _require_adapter(self, provider_name: str) -> RuntimeAdapter:
@@ -292,16 +305,58 @@ class IronClawRuntime:
             SkillDecision.REVIEW: "review",
             SkillDecision.ERROR: "failed",
         }
+        output_text = decision.metadata.get("output_text")
+        if not isinstance(output_text, str):
+            output_text = None
         return SkillExecutionResult(
             requestid=request.requestid,
             provider=provider,
             decision=coerced_decision,
             risk=coerced_risk,
             status=status_map.get(coerced_decision, "completed"),
+            outputtext=output_text,
             usage=updated_usage,
             metadata=metadata,
             startedat=started_at,
             finishedat=finished_at,
+        )
+
+    @staticmethod
+    def _build_guard_decision(
+        request: SkillExecutionRequest,
+        classification: PromptGuardResult,
+    ) -> SkillProviderDecision:
+        output_text = _format_classification(classification)
+        reason_label = f"Prompt Guard classified input as {classification.label.lower()}"
+        reason = SkillReason(
+            source="guard",
+            label=reason_label,
+            details=output_text,
+            score=classification.malicious_score,
+            metadata={"model_name": classification.model_name},
+        )
+        if classification.label == "MALICIOUS":
+            decision = SkillDecision.BLOCK
+            risk = RiskLevel.HIGH
+        elif classification.label == "BENIGN":
+            decision = SkillDecision.ALLOW
+            risk = RiskLevel.LOW
+        else:
+            decision = SkillDecision.ERROR
+            risk = RiskLevel.CRITICAL
+
+        return SkillProviderDecision(
+            requestid=request.requestid,
+            provider=SkillProvider.GUARD,
+            decision=decision,
+            risk=risk,
+            reasons=(reason,),
+            metadata={
+                "guard_label": classification.label,
+                "guard_malicious_score": classification.malicious_score,
+                "guard_model_name": classification.model_name,
+                "output_text": output_text,
+            },
         )
 
     def _enforce_fail_closed(self, result: SkillExecutionResult) -> None:

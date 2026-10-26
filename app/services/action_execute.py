@@ -26,14 +26,14 @@ class ActionExecuteResult(TypedDict):
     execution_status: str
     execution_message: str
     reasons: list[dict[str, object]]
-    groq_verdict: str | None
-    groq_risk_score: int | None
-    groq_confidence: float | None
-    groq_latency_ms: float | None
-    groq_model_name: str | None
-    groq_signals: list[str]
-    groq_summary: str | None
-    groq_decided_at: str | None
+    guard_verdict: str | None
+    guard_risk_score: int | None
+    guard_confidence: float | None
+    guard_latency_ms: float | None
+    guard_model_name: str | None
+    guard_signals: list[str]
+    guard_summary: str | None
+    guard_decided_at: str | None
     enforced_at: str
 
 
@@ -84,13 +84,13 @@ def execute_guarded_action(
         execution_status=execution_status,
         execution_message=execution_message,
         reasons=decision["reasons"],
-        groq_verdict=decision["groq_verdict"],
-        groq_risk_score=decision["groq_risk_score"],
-        groq_confidence=decision["groq_confidence"],
-        groq_latency_ms=decision["groq_latency_ms"],
-        groq_model_name=decision["groq_model_name"],
-        groq_signals=decision["groq_signals"],
-        groq_summary=decision["groq_summary"],
-        groq_decided_at=decision["groq_decided_at"],
+        guard_verdict=decision["guard_verdict"],
+        guard_risk_score=decision["guard_risk_score"],
+        guard_confidence=decision["guard_confidence"],
+        guard_latency_ms=decision["guard_latency_ms"],
+        guard_model_name=decision["guard_model_name"],
+        guard_signals=decision["guard_signals"],
+        guard_summary=decision["guard_summary"],
+        guard_decided_at=decision["guard_decided_at"],
         enforced_at=decision["enforced_at"],
     )

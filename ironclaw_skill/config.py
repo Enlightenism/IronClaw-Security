@@ -40,7 +40,7 @@ class IronClawSkillConfig:
     backup_target: str
     restore_target: str
     openai_api_key: str | None
-    groq_api_key: str | None
+    guard_model_path: str | None
     api_secret: str | None
     jwt_secret: str | None
     skill_enabled: bool
@@ -264,7 +264,7 @@ def load_skill_config(
         backup_target=backup_target,
         restore_target=restore_target,
         openai_api_key=_normalize_optional_text(env.get("OPENAI_API_KEY")),
-        groq_api_key=_normalize_optional_text(env.get("GROQ_API_KEY")),
+        guard_model_path=_normalize_optional_text(env.get("GUARD_MODEL_PATH")),
         api_secret=_normalize_optional_text(env.get("API_SECRET")),
         jwt_secret=_normalize_optional_text(env.get("JWT_SECRET")),
         skill_enabled=skill_enabled,
@@ -337,8 +337,8 @@ def save_skill_config(
         ]
         if config.openai_api_key:
             env_lines.append(f"OPENAI_API_KEY={config.openai_api_key}")
-        if config.groq_api_key:
-            env_lines.append(f"GROQ_API_KEY={config.groq_api_key}")
+        if config.guard_model_path:
+            env_lines.append(f"GUARD_MODEL_PATH={config.guard_model_path}")
         if config.api_secret:
             env_lines.append(f"API_SECRET={config.api_secret}")
         if config.jwt_secret:
@@ -360,8 +360,8 @@ def skill_config_env(config: IronClawSkillConfig) -> dict[str, str]:
 
     if config.openai_api_key:
         env["OPENAI_API_KEY"] = config.openai_api_key
-    if config.groq_api_key:
-        env["GROQ_API_KEY"] = config.groq_api_key
+    if config.guard_model_path:
+        env["GUARD_MODEL_PATH"] = config.guard_model_path
     if config.api_secret:
         env["API_SECRET"] = config.api_secret
     if config.jwt_secret:

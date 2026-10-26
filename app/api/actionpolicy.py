@@ -55,11 +55,11 @@ class ActionPolicyResponse(BaseModel):
     summary: str
     reasons: list[PolicyReasonView] = Field(default_factory=list)
     promptinjection: dict[str, Any] = Field(default_factory=dict)
-    # Groq AI enrichment passthrough — populated by upstream enrichment callers
-    groq_verdict: str | None = Field(None, description="Verdict returned by Groq AI analysis layer.")
-    groq_reasoning: str | None = Field(None, description="Reasoning text from Groq AI analysis.")
-    groq_confidence: float | None = Field(None, description="Confidence score from Groq AI analysis.")
-    groq_model: str | None = Field(None, description="Groq model identifier used for analysis.")
+    # Local guard enrichment passthrough — populated by upstream enrichment callers
+    guard_verdict: str | None = Field(None, description="Verdict returned by local guard analysis layer.")
+    guard_reasoning: str | None = Field(None, description="Reasoning text from local guard analysis.")
+    guard_confidence: float | None = Field(None, description="Confidence score from local guard analysis.")
+    guard_model: str | None = Field(None, description="Local guard model identifier used for analysis.")
     enforced_at: str | None = Field(None, description="ISO timestamp when the enforcement decision was recorded.")
 
 
@@ -82,11 +82,11 @@ def evaluateactionpolicy(
     sessionid: str | None = None,
     filepath: str | None = None,
     metadata: dict[str, Any] | None = None,
-    # Groq enrichment passthrough — callers may inject these after external AI analysis
-    groq_verdict: str | None = None,
-    groq_reasoning: str | None = None,
-    groq_confidence: float | None = None,
-    groq_model: str | None = None,
+    # Local guard enrichment passthrough — callers may inject these after external AI analysis
+    guard_verdict: str | None = None,
+    guard_reasoning: str | None = None,
+    guard_confidence: float | None = None,
+    guard_model: str | None = None,
 ) -> dict[str, Any]:
     effective_filepath = filepath or "app/api/actionexecute.py"
     effectivemetadata = dict(metadata or {})
@@ -111,10 +111,10 @@ def evaluateactionpolicy(
     shouldblock = adjustedriskscore >= 85 and not shouldquarantine
     shouldreview = bool(promptscan.get("shouldreview")) or adjustedriskscore >= 50
 
-    # Escalate verdict if Groq AI signals a stronger enforcement action
-    if groq_verdict in ("quarantine", "block") and not shouldquarantine:
-        shouldquarantine = groq_verdict == "quarantine"
-        shouldblock = groq_verdict == "block" and not shouldquarantine
+    # Escalate verdict if local guard signals a stronger enforcement action
+    if guard_verdict in ("quarantine", "block") and not shouldquarantine:
+        shouldquarantine = guard_verdict == "quarantine"
+        shouldblock = guard_verdict == "block" and not shouldquarantine
 
     if shouldquarantine:
         verdict: PolicyVerdict = "quarantine"
@@ -142,13 +142,13 @@ def evaluateactionpolicy(
         ),
     ]
 
-    if groq_reasoning:
+    if guard_reasoning:
         reasons.append(
             _build_policy_reason(
-                source="groq",
-                label="Groq AI policy signal",
-                details=groq_reasoning,
-                score=int((groq_confidence or 0.0) * 100),
+                source="guard",
+                label="Guard AI policy signal",
+                details=guard_reasoning,
+                score=int((guard_confidence or 0.0) * 100),
             ),
         )
 
@@ -188,10 +188,10 @@ def evaluateactionpolicy(
         "summary": summary,
         "reasons": reasons,
         "promptinjection": promptscan,
-        "groq_verdict": groq_verdict,
-        "groq_reasoning": groq_reasoning,
-        "groq_confidence": groq_confidence,
-        "groq_model": groq_model,
+        "guard_verdict": guard_verdict,
+        "guard_reasoning": guard_reasoning,
+        "guard_confidence": guard_confidence,
+        "guard_model": guard_model,
         "enforced_at": datetime.now(UTC).isoformat(),
     }
 

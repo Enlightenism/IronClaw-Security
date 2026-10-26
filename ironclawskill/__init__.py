@@ -9,7 +9,7 @@ __package_name__: Final[str] = "ironclawskill"
 
 _MODULE_NAMES: Final[tuple[str, ...]] = (
     "adapterclaude",
-    "adaptergroq",
+    "adapterguard",
     "adapteropenclaw",
     "billing",
     "cli",
@@ -115,11 +115,11 @@ _EXPORT_NAMES: Final[dict[str, str]] = {
     "ClaudeSkillAdapter": "adapterclaude",
     "adaptclauderequest": "adapterclaude",
     "adaptclauderesponse": "adapterclaude",
-    # adaptergroq
-    "GroqAdapter": "adaptergroq",
-    "GroqSkillAdapter": "adaptergroq",
-    "adaptgroqrequest": "adaptergroq",
-    "adaptgroqresponse": "adaptergroq",
+    # adapterguard
+    "GuardAdapter": "adapterguard",
+    "GuardSkillAdapter": "adapterguard",
+    "adaptguardrequest": "adapterguard",
+    "adaptguardresponse": "adapterguard",
     # adapteropenclaw
     "OPENCLAW_PLATFORM": "adapteropenclaw",
     "OpenClawAdapterError": "adapteropenclaw",

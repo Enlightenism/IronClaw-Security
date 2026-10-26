@@ -61,10 +61,10 @@ def test_integrations_list_can_filter_by_platform(test_client: TestClient) -> No
 
 
 def test_integrations_list_can_filter_by_capability(test_client: TestClient) -> None:
-    response = test_client.get("/integrations", params={"capability": "groq_assist"})
+    response = test_client.get("/integrations", params={"capability": "guard_assist"})
 
     assert response.status_code == 200
     payload = response.json()
 
     assert payload["total"] >= 1
-    assert all(any(capability["name"] == "groq_assist" and capability["enabled"] is True for capability in item["capabilities"]) for item in payload["items"])
+    assert all(any(capability["name"] == "guard_assist" and capability["enabled"] is True for capability in item["capabilities"]) for item in payload["items"])

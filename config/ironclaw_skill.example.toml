@@ -37,7 +37,6 @@ jwt_secret = "replace_me"
 
 [providers]
 openai_api_key = "replace_me"
-groq_api_key = "replace_me"
 
 [units]
 enabled = false

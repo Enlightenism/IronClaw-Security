@@ -98,10 +98,11 @@ class ProviderConfig:
     project: str | None = None
     headers: Mapping[str, str] = field(default_factory=dict)
     metadata: Mapping[str, JsonValue] = field(default_factory=dict)
+    model_path: str | None = None
 
     @property
     def configured(self) -> bool:
-        return bool(self.endpoint or self.api_key or self.model)
+        return bool(self.endpoint or self.api_key or self.model or self.model_path)
 
     def require_ready(self) -> None:
         if not self.enabled:
@@ -150,7 +151,7 @@ class PathsConfig:
 # Providers that receive first-class env-var override support.
 # Adding a name here is the single change required to wire a new provider
 # into the IRONCLAWSKILL_<PROVIDER>_* environment variable block.
-_ENV_OVERRIDE_PROVIDERS: tuple[str, ...] = ("openclaw", "claude", "groq")
+_ENV_OVERRIDE_PROVIDERS: tuple[str, ...] = ("openclaw", "claude", "guard")
 
 
 @dataclass(slots=True, frozen=True)
@@ -279,9 +280,10 @@ class IronClawSkillConfig:
             providers[provider_name] = ProviderConfig(
                 name=provider_name,
                 enabled=bool(item_map.get("enabled", True)),
-                model=_first_present(item_map.get("model")),
-                endpoint=_first_present(item_map.get("endpoint")),
-                api_key=_first_present(item_map.get("api_key")),
+                model=(None if provider_name == "guard" else _first_present(item_map.get("model"))),
+                model_path=_first_present(item_map.get("model_path")),
+                endpoint=(None if provider_name == "guard" else _first_present(item_map.get("endpoint"))),
+                api_key=(None if provider_name == "guard" else _first_present(item_map.get("api_key"))),
                 timeout_seconds=int(item_map.get("timeout_seconds", 30)),
                 connect_timeout_seconds=int(item_map.get("connect_timeout_seconds", 10)),
                 max_retries=int(item_map.get("max_retries", 2)),
@@ -356,16 +358,34 @@ class IronClawSkillConfig:
         for provider_name in _ENV_OVERRIDE_PROVIDERS:
             prefix = f"IRONCLAWSKILL_{provider_name.upper()}_"
             existing = providers.get(provider_name, ProviderConfig(name=provider_name, enabled=False))
-            providers[provider_name] = ProviderConfig(
-                name=provider_name,
-                enabled=_env_bool(f"{prefix}ENABLED", existing.enabled),
-                model=_first_present(_env(f"{prefix}MODEL"), existing.model),
-                endpoint=_first_present(_env(f"{prefix}ENDPOINT"), existing.endpoint),
-                api_key=_first_present(
+            if provider_name == "guard":
+                model = None
+                model_path = _first_present(
+                    _env(f"{prefix}MODEL_PATH"),
+                    _env("GUARD_MODEL_PATH"),
+                    existing.model_path,
+                )
+                endpoint = None
+                api_key = None
+            else:
+                model = _first_present(_env(f"{prefix}MODEL"), existing.model)
+                model_path = _first_present(
+                    _env(f"{prefix}MODEL_PATH"),
+                    existing.model_path,
+                )
+                endpoint = _first_present(_env(f"{prefix}ENDPOINT"), existing.endpoint)
+                api_key = _first_present(
                     _env(f"{prefix}API_KEY"),
                     _env(f"{provider_name.upper()}_API_KEY"),
                     existing.api_key,
-                ),
+                )
+            providers[provider_name] = ProviderConfig(
+                name=provider_name,
+                enabled=_env_bool(f"{prefix}ENABLED", existing.enabled),
+                model=model,
+                model_path=model_path,
+                endpoint=endpoint,
+                api_key=api_key,
                 timeout_seconds=_env_int(f"{prefix}TIMEOUT_SECONDS", existing.timeout_seconds),
                 connect_timeout_seconds=_env_int(
                     f"{prefix}CONNECT_TIMEOUT_SECONDS",

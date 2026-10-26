@@ -10,7 +10,7 @@ from app.main import app
 
 EXPECTED_API_PATHS: Final[set[str]] = {
     "/api/actionhistorytest",
-    "/api/groq-registry",
+    "/api/guard-registry",
     "/api/incidents",
     "/api/integrations",
     "/api/review-queue",
@@ -146,7 +146,7 @@ def test_expected_ui_routes_are_registered() -> None:
 def test_api_route_inventory_contains_core_pages() -> None:
     api_paths = _paths_with_prefix("/api/")
     assert "/api/actionhistorytest" in api_paths
-    assert "/api/groq-registry" in api_paths
+    assert "/api/guard-registry" in api_paths
     assert "/api/incidents" in api_paths
     assert "/api/integrations" in api_paths
     assert "/api/review-queue" in api_paths

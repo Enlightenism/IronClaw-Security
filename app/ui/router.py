@@ -63,8 +63,8 @@ UI_ROUTERS: Final[tuple[APIRouter, ...]] = (
             # ── admin ────────────────────────────────────────────────────────
             _optional_router("app.ui.admin.operators"),
             _optional_router("app.ui.admin.roles"),
-            # ── groq ─────────────────────────────────────────────────────────
-            _optional_router("app.ui.groq"),
+            # ── guard ────────────────────────────────────────────────────────
+            _optional_router("app.ui.guard"),
             # ── billing ──────────────────────────────────────────────────────
             _optional_router("app.ui.billing_manifest"),
             _optional_router("app.ui.billing_registry"),

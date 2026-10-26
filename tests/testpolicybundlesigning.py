@@ -33,7 +33,7 @@ def _canonical_bundle(
         or {
             "issuer": "ironclaw",
             "environment": "test",
-            "targets": ["openclaw", "claude", "groq"],
+            "targets": ["openclaw", "claude", "guard"],
         },
     }
 

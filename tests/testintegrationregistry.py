@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.integrationregistry import build_integration_registry
+from app.services.integrationregistry import IntegrationRegistry, build_integration_registry
 
 
 def test_build_integration_registry_returns_dictionary() -> None:
@@ -49,7 +49,24 @@ def test_registry_contains_expected_provider_entries() -> None:
     providers = {item["provider"] for item in registry["integrations"]}
     assert "claude" in providers
     assert "openclaw" in providers
-    assert "groq" in providers
+    assert "guard" in providers
+
+
+def test_guard_integration_uses_guard_assist_identity() -> None:
+    integration = IntegrationRegistry().get_integration("integration-guard")
+
+    assert integration is not None
+    assert integration.integrationid == "integration-guard"
+    assert integration.platform == "guard"
+    assert integration.displayname == "Prompt Guard (local model)"
+    assert "local Prompt Guard classification" in integration.description
+    assert integration.adaptermodule == "app.services.guard_client"
+    assert integration.verificationroute == "/integrations/integration-guard/verify"
+    assert integration.settingsroute == "/ui/integrations/settings"
+    assert integration.manifestroute == "/integrations/integration-guard/manifest"
+    assert integration.metadata["provider"] == "guard"
+    assert integration.metadata["slug"] == "guard"
+    assert any(capability.name == "guard_assist" for capability in integration.capabilities)
 
 
 def test_total_integrations_matches_integrations_length() -> None:
@@ -116,7 +133,7 @@ def test_registry_supports_cross_platform_policy_targets() -> None:
     providers = {item["provider"] for item in registry["integrations"]}
     assert "openclaw" in providers
     assert "claude" in providers
-    assert "groq" in providers
+    assert "guard" in providers
 
 
 def test_integrations_expose_policy_related_metadata_when_present() -> None:
@@ -158,7 +175,7 @@ def test_registry_is_stable_across_multiple_calls_for_provider_set() -> None:
     assert first_providers == second_providers
 
 
-@pytest.mark.parametrize("required_provider", ["openclaw", "claude", "groq"])
+@pytest.mark.parametrize("required_provider", ["openclaw", "claude", "guard"])
 def test_required_policy_runtime_exists(required_provider: str) -> None:
     registry = build_integration_registry()
 

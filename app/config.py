@@ -199,15 +199,18 @@ EFFECTIVE_AUTH_REQUIRED: Final[bool] = bool(
 
 
 # ---------------------------------------------------------------------------
-# Groq — LLM-assisted analysis
+# Local prompt guard
 # ---------------------------------------------------------------------------
-GROQ_ENABLED: Final[bool] = _get_bool("groq_enabled", "GROQ_ENABLED", default=False)
-GROQ_API_KEY: Final[str] = _get_str("groq_api_key", "GROQ_API_KEY", default="")
-GROQ_MODEL: Final[str] = _get_str("groq_model", "GROQ_MODEL", default="")
-GROQ_TIMEOUT_SECONDS: Final[float] = _get_float(
-    "groq_timeout_seconds",
-    "GROQ_TIMEOUT_SECONDS",
-    default=60.0,
+GUARD_ENABLED: Final[bool] = _get_bool("guard_enabled", "GUARD_ENABLED", default=False)
+GUARD_MODEL_PATH: Final[str] = _get_str(
+    "guard_model_path",
+    "GUARD_MODEL_PATH",
+    default="models/prompt-guard-86m",
+)
+GUARD_THRESHOLD: Final[float] = _get_float(
+    "guard_threshold",
+    "GUARD_THRESHOLD",
+    default=0.5,
 )
 
 
@@ -371,10 +374,9 @@ __all__ = [
     "ENABLE_TEXT_SCANNING",
     "ENABLE_URL_SCANNING",
     "ENVIRONMENT",
-    "GROQ_API_KEY",
-    "GROQ_ENABLED",
-    "GROQ_MODEL",
-    "GROQ_TIMEOUT_SECONDS",
+    "GUARD_ENABLED",
+    "GUARD_MODEL_PATH",
+    "GUARD_THRESHOLD",
     "INTERNAL_PLATFORM_API_KEY",
     "IRONCLAW_API_KEY",
     "JWT_ALGORITHM",

@@ -51,5 +51,6 @@
   "python.analysis.exclude": [
     "**/__pycache__",
     "**/.venv"
-  ]
+  ],
+  "chat.sessionSync.enabled": true
 }

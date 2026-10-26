@@ -17,9 +17,9 @@ def test_create_integration_secret_returns_revealed_once_value(monkeypatch) -> N
     response = client.post(
         "/integrations/secrets",
         json={
-            "name": "groq-primary",
-            "value": "gsk_live_primary_secret",
-            "provider": "groq",
+            "name": "openai-primary",
+            "value": "openai_test_primary_secret",
+            "provider": "openai",
             "kind": "api_key",
             "metadata": {"environment": "production"},
         },
@@ -31,11 +31,11 @@ def test_create_integration_secret_returns_revealed_once_value(monkeypatch) -> N
     data = response.json()
     assert data["status"] == "ok"
     assert data["operation"] == "create"
-    assert data["name"] == "groq-primary"
-    assert data["provider"] == "groq"
+    assert data["name"] == "openai-primary"
+    assert data["provider"] == "openai"
     assert data["kind"] == "api_key"
     assert data["secret_status"] == "active"
-    assert data["revealed_once_value"] == "gsk_live_primary_secret"
+    assert data["revealed_once_value"] == "openai_test_primary_secret"
     assert data["masked_value"] != data["revealed_once_value"]
 
 
@@ -46,9 +46,9 @@ def test_list_integration_secrets_returns_created_records(monkeypatch) -> None:
     monkeypatch.setattr(secrets_module, "get_secret_service", lambda: service)
 
     service.create_secret(
-        name="groq-primary",
-        value="gsk_live_primary_secret",
-        provider="groq",
+        name="openai-primary",
+        value="openai_test_primary_secret",
+        provider="openai",
         kind="api_key",
         metadata={"environment": "production"},
     )
@@ -69,7 +69,7 @@ def test_list_integration_secrets_returns_created_records(monkeypatch) -> None:
     assert data["active"] == 2
     assert data["inactive"] == 0
     assert len(data["secrets"]) == 2
-    assert {item["name"] for item in data["secrets"]} == {"groq-primary", "claude-secondary"}
+    assert {item["name"] for item in data["secrets"]} == {"openai-primary", "claude-secondary"}
 
 
 def test_rotate_integration_secret_returns_new_revealed_value(monkeypatch) -> None:
@@ -79,9 +79,9 @@ def test_rotate_integration_secret_returns_new_revealed_value(monkeypatch) -> No
     monkeypatch.setattr(secrets_module, "get_secret_service", lambda: service)
 
     created = service.create_secret(
-        name="groq-primary",
-        value="gsk_live_primary_secret",
-        provider="groq",
+        name="openai-primary",
+        value="openai_test_primary_secret",
+        provider="openai",
         kind="api_key",
         metadata={"environment": "production"},
     )
@@ -89,7 +89,7 @@ def test_rotate_integration_secret_returns_new_revealed_value(monkeypatch) -> No
     response = client.post(
         f"/integrations/secrets/{created.secret_id}/rotate",
         json={
-            "value": "gsk_live_rotated_secret",
+            "value": "openai_test_rotated_secret",
             "metadata": {"rotation_reason": "scheduled"},
         },
     )
@@ -99,13 +99,13 @@ def test_rotate_integration_secret_returns_new_revealed_value(monkeypatch) -> No
     assert data["status"] == "ok"
     assert data["operation"] == "rotate"
     assert data["secret_id"] == created.secret_id
-    assert data["revealed_once_value"] == "gsk_live_rotated_secret"
+    assert data["revealed_once_value"] == "openai_test_rotated_secret"
     assert data["metadata"]["rotation_reason"] == "scheduled"
 
     rotated = service.get_secret(created.secret_id)
     assert rotated is not None
-    assert service.verify_secret_value(created.secret_id, "gsk_live_rotated_secret") is True
-    assert service.verify_secret_value(created.secret_id, "gsk_live_primary_secret") is False
+    assert service.verify_secret_value(created.secret_id, "openai_test_rotated_secret") is True
+    assert service.verify_secret_value(created.secret_id, "openai_test_primary_secret") is False
 
 
 def test_revoke_integration_secret_marks_secret_inactive(monkeypatch) -> None:
@@ -146,9 +146,9 @@ def test_create_duplicate_secret_returns_400(monkeypatch) -> None:
     first_response = client.post(
         "/integrations/secrets",
         json={
-            "name": "groq-primary",
-            "value": "gsk_live_primary_secret",
-            "provider": "groq",
+            "name": "openai-primary",
+            "value": "openai_test_primary_secret",
+            "provider": "openai",
             "kind": "api_key",
             "metadata": {},
         },
@@ -158,9 +158,9 @@ def test_create_duplicate_secret_returns_400(monkeypatch) -> None:
     duplicate_response = client.post(
         "/integrations/secrets",
         json={
-            "name": "groq-primary",
-            "value": "gsk_other_secret",
-            "provider": "groq",
+            "name": "openai-primary",
+            "value": "openai_other_secret",
+            "provider": "openai",
             "kind": "api_key",
             "metadata": {},
         },

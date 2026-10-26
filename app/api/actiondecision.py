@@ -50,15 +50,15 @@ class ActionDecisionResponse(BaseModel):
     reason: str
     reasons: list[DecisionReasonView] = Field(default_factory=list)
     promptinjection: dict[str, Any] = Field(default_factory=dict)
-    # Groq telemetry — propagated from enforce_verdict to review records
-    groq_verdict: str | None = None
-    groq_risk_score: int | None = None
-    groq_confidence: float | None = None
-    groq_latency_ms: float | None = None
-    groq_model_name: str | None = None
-    groq_signals: list[str] = Field(default_factory=list)
-    groq_summary: str | None = None
-    groq_decided_at: str | None = None
+    # Guard telemetry — propagated from enforce_verdict to review records
+    guard_verdict: str | None = None
+    guard_risk_score: int | None = None
+    guard_confidence: float | None = None
+    guard_latency_ms: float | None = None
+    guard_model_name: str | None = None
+    guard_signals: list[str] = Field(default_factory=list)
+    guard_summary: str | None = None
+    guard_decided_at: str | None = None
     enforced_at: str | None = None
 
 
@@ -164,15 +164,15 @@ def decideaction(
         "reason": reason,
         "reasons": enforced["reasons"],
         "promptinjection": guard["promptinjection"],
-        # Groq telemetry — now populated via enforce_verdict, flows to review.py
-        "groq_verdict": enforced["groq_verdict"],
-        "groq_risk_score": enforced["groq_risk_score"],
-        "groq_confidence": enforced["groq_confidence"],
-        "groq_latency_ms": enforced["groq_latency_ms"],
-        "groq_model_name": enforced["groq_model_name"],
-        "groq_signals": enforced["groq_signals"],
-        "groq_summary": enforced["groq_summary"],
-        "groq_decided_at": enforced["groq_decided_at"],
+        # Guard telemetry — now populated via enforce_verdict, flows to review.py
+        "guard_verdict": enforced["guard_verdict"],
+        "guard_risk_score": enforced["guard_risk_score"],
+        "guard_confidence": enforced["guard_confidence"],
+        "guard_latency_ms": enforced["guard_latency_ms"],
+        "guard_model_name": enforced["guard_model_name"],
+        "guard_signals": enforced["guard_signals"],
+        "guard_summary": enforced["guard_summary"],
+        "guard_decided_at": enforced["guard_decided_at"],
         "enforced_at": enforced["enforced_at"],
     }
 

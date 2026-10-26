@@ -575,56 +575,49 @@ class TestSupabaseDefaults:
 
 
 # ---------------------------------------------------------------------------
-# Groq / AI defaults
+# Local prompt guard defaults
 # ---------------------------------------------------------------------------
 
 
-class TestGroqDefaults:
-    def test_groq_enabled_default(self, monkeypatch):
+class TestGuardDefaults:
+    def test_guard_enabled_default(self, monkeypatch):
         get_settings.cache_clear()
         _set_required_secrets(monkeypatch)
-        monkeypatch.delenv("GROQ_ENABLED", raising=False)
+        monkeypatch.delenv("GUARD_ENABLED", raising=False)
         s = get_settings()
-        assert s.groq_enabled is False
-        assert isinstance(s.groq_enabled, bool)
+        assert s.guard_enabled is False
+        assert isinstance(s.guard_enabled, bool)
 
-    def test_groq_api_key_default(self, monkeypatch):
+    def test_guard_model_path_default(self, monkeypatch):
         get_settings.cache_clear()
         _set_required_secrets(monkeypatch)
-        monkeypatch.delenv("GROQ_API_KEY", raising=False)
+        monkeypatch.delenv("GUARD_MODEL_PATH", raising=False)
         s = get_settings()
-        assert s.groq_api_key == ""
-        assert isinstance(s.groq_api_key, str)
+        assert s.guard_model_path == "models/prompt-guard-86m"
+        assert isinstance(s.guard_model_path, str)
 
-    def test_groq_model_default(self, monkeypatch):
+    def test_guard_threshold_default(self, monkeypatch):
         get_settings.cache_clear()
         _set_required_secrets(monkeypatch)
-        monkeypatch.delenv("GROQ_MODEL", raising=False)
+        monkeypatch.delenv("GUARD_THRESHOLD", raising=False)
         s = get_settings()
-        assert s.groq_model == "llama3-8b-8192"
-        assert isinstance(s.groq_model, str)
+        assert s.guard_threshold == 0.5
+        assert isinstance(s.guard_threshold, float)
 
-    def test_groq_timeout_seconds_default(self, monkeypatch):
-        get_settings.cache_clear()
-        _set_required_secrets(monkeypatch)
-        monkeypatch.delenv("GROQ_TIMEOUT_SECONDS", raising=False)
-        s = get_settings()
-        assert s.groq_timeout_seconds == 60.0
-        assert isinstance(s.groq_timeout_seconds, float)
+    def test_guard_enabled_override(self, monkeypatch):
+        s = _fresh(monkeypatch, GUARD_ENABLED="true")
+        assert s.guard_enabled is True
+        assert isinstance(s.guard_enabled, bool)
 
-    def test_groq_enabled_override_true(self, monkeypatch):
-        s = _fresh(monkeypatch, GROQ_ENABLED="true")
-        assert s.groq_enabled is True
-        assert isinstance(s.groq_enabled, bool)
+    def test_guard_model_path_override(self, monkeypatch):
+        s = _fresh(monkeypatch, GUARD_MODEL_PATH="models/custom-prompt-guard")
+        assert s.guard_model_path == "models/custom-prompt-guard"
+        assert isinstance(s.guard_model_path, str)
 
-    def test_groq_timeout_seconds_override(self, monkeypatch):
-        s = _fresh(monkeypatch, GROQ_TIMEOUT_SECONDS="120.0")
-        assert s.groq_timeout_seconds == 120.0
-        assert isinstance(s.groq_timeout_seconds, float)
-
-    def test_groq_model_override(self, monkeypatch):
-        s = _fresh(monkeypatch, GROQ_MODEL="llama3-70b-8192")
-        assert s.groq_model == "llama3-70b-8192"
+    def test_guard_threshold_override(self, monkeypatch):
+        s = _fresh(monkeypatch, GUARD_THRESHOLD="0.75")
+        assert s.guard_threshold == 0.75
+        assert isinstance(s.guard_threshold, float)
 
 
 # ---------------------------------------------------------------------------
@@ -1273,16 +1266,18 @@ class TestSettingsDirectInstantiation:
         assert isinstance(s.risk_threshold_quarantine_min, int)
         assert isinstance(s.risk_threshold_block_min, int)
 
-    def test_instantiate_groq_fields_explicit(self):
+    def test_instantiate_guard_fields_explicit(self):
         s = Settings(
-            GROQ_ENABLED=True,
-            GROQ_API_KEY="gsk-test",
-            GROQ_TIMEOUT_SECONDS=90.0,
+            GUARD_ENABLED=True,
+            GUARD_MODEL_PATH="models/custom-prompt-guard",
+            GUARD_THRESHOLD=0.75,
         )
-        assert s.groq_enabled is True
-        assert s.groq_api_key == "gsk-test"
-        assert s.groq_timeout_seconds == 90.0
-        assert isinstance(s.groq_timeout_seconds, float)
+        assert s.guard_enabled is True
+        assert s.guard_model_path == "models/custom-prompt-guard"
+        assert s.guard_threshold == 0.75
+        assert isinstance(s.guard_enabled, bool)
+        assert isinstance(s.guard_model_path, str)
+        assert isinstance(s.guard_threshold, float)
 
     def test_instantiate_returns_settings_type(self):
         s = Settings()

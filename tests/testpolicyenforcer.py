@@ -231,7 +231,7 @@ def test_active_allow_override_can_lift_policy_decision():
         signature="good",
         secret="ironclaw-secret",
         manifest={"bundleid": "bundle-001", "version": "2026.04.25"},
-        runtime="groq",
+        runtime="guard",
         action="execute",
         context={"risk": "medium"},
     )
@@ -350,7 +350,7 @@ def test_review_policy_decision_flows_through_when_no_override():
         signature="good",
         secret="ironclaw-secret",
         manifest={"bundleid": "bundle-001", "version": "2026.04.25"},
-        runtime="groq",
+        runtime="guard",
         action="execute",
     )
 
@@ -503,7 +503,7 @@ def test_result_as_dict_contains_expected_shapes():
         signature="good",
         secret="ironclaw-secret",
         manifest={"bundleid": "bundle-001", "version": "2026.04.25"},
-        runtime="groq",
+        runtime="guard",
         action="execute",
     )
     body = result.as_dict()
@@ -511,7 +511,7 @@ def test_result_as_dict_contains_expected_shapes():
     assert body["allowed"] is True
     assert body["verdict"] == "allow"
     assert body["bundleid"] == "bundle-001"
-    assert body["runtime"] == "groq"
+    assert body["runtime"] == "guard"
     assert isinstance(body["matchedrules"], list)
     assert isinstance(body["reasons"], list)
     assert isinstance(body["bundleverification"], dict)
@@ -564,7 +564,7 @@ def test_deduplicates_rules_and_reasons_across_stages():
     assert result.matched_rules.count("dup-rule") == 1
 
 
-@pytest.mark.parametrize("runtime", ["openclaw", "claude", "groq", "future-runtime"])
+@pytest.mark.parametrize("runtime", ["openclaw", "claude", "guard", "future-runtime"])
 def test_supports_cross_platform_runtime_names(runtime: str):
     enforcer, signing, overrides, release = _build(
         verification=_BundleVerification(

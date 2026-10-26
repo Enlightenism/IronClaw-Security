@@ -103,7 +103,7 @@ def test_normalize_platform_returns_canonical_lowercase_slug(value: str | None, 
         ("hermes-cli", "hermes", True),
         ("securityguardian", "security_guardian", True),
         ("generic", "openclaw", False),
-        ("groq", "claude_code", False),
+        ("guard", "claude_code", False),
     ],
 )
 def test_is_compatible_install_key_platform_checks_platform_to_program_mapping(platform_name: str, program: str, expected: bool) -> None:
@@ -259,7 +259,7 @@ def test_install_key_registry_exposes_canonical_command_metadata_and_supported_p
     [
         "",
         "generic",
-        "groq",
+        "guard",
         "not_a_platform",
     ],
 )

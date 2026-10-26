@@ -132,11 +132,11 @@ def _pages() -> list[dict[str, str]]:
             "path": "/ui/executions/test-console",
         },
         {
-            "id": "groq",
-            "slug": "groq",
-            "title": "Groq",
-            "group": "groq",
-            "path": "/ui/groq",
+            "id": "guard",
+            "slug": "guard",
+            "title": "Guard",
+            "group": "guard",
+            "path": "/ui/guard",
         },
         {
             "id": "incidents-triage",

@@ -43,10 +43,9 @@ _ALL_VAULT_KEYS = (
     "STRIPE_SECRET_KEY",
     "STRIPE_PUBLISHABLE_KEY",
     "STRIPE_WEBHOOK_SECRET",
-    "GROQ_ENABLED",
-    "GROQ_API_KEY",
-    "GROQ_MODEL",
-    "GROQ_TIMEOUT_SECONDS",
+    "GUARD_ENABLED",
+    "GUARD_MODEL_PATH",
+    "GUARD_THRESHOLD",
     "OPENAI_API_KEY",
     "DEFAULT_SCAN_VERDICT",
     "DEFAULT_REVIEW_STATUS",
@@ -580,45 +579,37 @@ class TestStripe:
 
 
 # ===========================================================================
-# Groq / AI
+# Local prompt guard
 # ===========================================================================
 
 
-class TestGroq:
-    def test_groq_enabled_default_false(self, fresh_vault):
-        assert fresh_vault.groq_enabled() is False
-        assert isinstance(fresh_vault.groq_enabled(), bool)
+class TestGuard:
+    def test_guard_enabled_default_false(self, fresh_vault):
+        assert fresh_vault.guard_enabled() is False
+        assert isinstance(fresh_vault.guard_enabled(), bool)
 
-    def test_groq_enabled_override(self, monkeypatch):
-        monkeypatch.setenv("GROQ_ENABLED", "true")
+    def test_guard_enabled_override(self, monkeypatch):
+        monkeypatch.setenv("GUARD_ENABLED", "true")
         v = _reload_vault()
-        assert v.groq_enabled() is True
+        assert v.guard_enabled() is True
 
-    def test_groq_api_key_default_empty(self, fresh_vault):
-        assert fresh_vault.groq_api_key() == ""
+    def test_guard_model_path_default(self, fresh_vault):
+        assert fresh_vault.guard_model_path() == "models/prompt-guard-86m"
+        assert isinstance(fresh_vault.guard_model_path(), str)
 
-    def test_groq_api_key_override(self, monkeypatch):
-        monkeypatch.setenv("GROQ_API_KEY", "groq-key-xyz")
+    def test_guard_model_path_override(self, monkeypatch):
+        monkeypatch.setenv("GUARD_MODEL_PATH", "models/custom-guard")
         v = _reload_vault()
-        assert v.groq_api_key() == "groq-key-xyz"
+        assert v.guard_model_path() == "models/custom-guard"
 
-    def test_groq_model_default(self, fresh_vault):
-        assert fresh_vault.groq_model() == "llama3-8b-8192"
-        assert isinstance(fresh_vault.groq_model(), str)
+    def test_guard_threshold_default(self, fresh_vault):
+        assert fresh_vault.guard_threshold() == 0.5
+        assert isinstance(fresh_vault.guard_threshold(), float)
 
-    def test_groq_model_override(self, monkeypatch):
-        monkeypatch.setenv("GROQ_MODEL", "mixtral-8x7b-32768")
+    def test_guard_threshold_override(self, monkeypatch):
+        monkeypatch.setenv("GUARD_THRESHOLD", "0.75")
         v = _reload_vault()
-        assert v.groq_model() == "mixtral-8x7b-32768"
-
-    def test_groq_timeout_default(self, fresh_vault):
-        assert fresh_vault.groq_timeout_seconds() == 60.0
-        assert isinstance(fresh_vault.groq_timeout_seconds(), float)
-
-    def test_groq_timeout_override(self, monkeypatch):
-        monkeypatch.setenv("GROQ_TIMEOUT_SECONDS", "30.0")
-        v = _reload_vault()
-        assert v.groq_timeout_seconds() == 30.0
+        assert v.guard_threshold() == 0.75
 
 
 # ===========================================================================
@@ -923,8 +914,7 @@ class TestReturnTypeContracts:
             fresh_vault.stripe_secret_key,
             fresh_vault.stripe_publishable_key,
             fresh_vault.stripe_webhook_secret,
-            fresh_vault.groq_api_key,
-            fresh_vault.groq_model,
+            fresh_vault.guard_model_path,
             fresh_vault.openai_api_key,
             fresh_vault.default_scan_verdict,
             fresh_vault.default_review_status,
@@ -953,7 +943,7 @@ class TestReturnTypeContracts:
 
     def test_all_float_accessors_return_float(self, fresh_vault):
         float_accessors = [
-            fresh_vault.groq_timeout_seconds,
+            fresh_vault.guard_threshold,
             fresh_vault.ironclaw_auth_edge_fn_timeout_seconds,
         ]
         for accessor in float_accessors:
@@ -966,7 +956,7 @@ class TestReturnTypeContracts:
             fresh_vault.reload,
             fresh_vault.structured_logging_enabled,
             fresh_vault.auth_required,
-            fresh_vault.groq_enabled,
+            fresh_vault.guard_enabled,
         ]
         for accessor in bool_accessors:
             result = accessor()

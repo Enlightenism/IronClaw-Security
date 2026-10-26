@@ -26,7 +26,6 @@ DEFAULT_BLOCKED_SCHEMES = {
 }
 DEFAULT_ALLOWED_HOSTS = {
     "api.openai.com",
-    "api.groq.com",
     "github.com",
     "raw.githubusercontent.com",
     "pypi.org",

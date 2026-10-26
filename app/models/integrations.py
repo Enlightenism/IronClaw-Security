@@ -33,7 +33,7 @@ class CapabilityName(StrEnum):
     AUDIT_EXPORT = "audit_export"
     POLICY_SYNC = "policy_sync"
     TELEMETRY = "telemetry"
-    GROQ_ASSIST = "groq_assist"
+    GUARD_ASSIST = "guard_assist"
 
 
 class VerificationState(StrEnum):

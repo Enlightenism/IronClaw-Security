@@ -44,6 +44,7 @@ def test_skill_provider_and_risk_level_values_are_stable():
 
     assert contracts.SkillProvider.OPENCLAW.value == "openclaw"
     assert contracts.SkillProvider.CLAUDE.value == "claude"
+    assert contracts.SkillProvider.GUARD.value == "guard"
     assert contracts.SkillProvider.UNKNOWN.value == "unknown"
 
     assert contracts.RiskLevel.LOW.value == "low"

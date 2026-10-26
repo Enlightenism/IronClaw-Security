@@ -286,7 +286,7 @@ def test_create_override_route_saves_override(api):
     client, service = api
     service.override_result = {
         "overrideid": "override-777",
-        "runtime": "groq",
+        "runtime": "guard",
         "action": "block",
         "active": True,
         "scope": "organization",
@@ -297,7 +297,7 @@ def test_create_override_route_saves_override(api):
         client,
         ["/api/release-policy/overrides", "/api/policy/release/overrides"],
         {
-            "runtime": "groq",
+            "runtime": "guard",
             "environment": "prod",
             "action": "block",
             "scope": "organization",
@@ -310,7 +310,7 @@ def test_create_override_route_saves_override(api):
     assert response.status_code == 200, (used_path, response.text)
     body = response.json()
     assert body["overrideid"] == "override-777"
-    assert body["runtime"] == "groq"
+    assert body["runtime"] == "guard"
     assert body["action"] == "block"
     assert body["active"] is True
     assert len(service.override_calls) == 1
@@ -323,7 +323,7 @@ def test_create_override_route_rejects_missing_action(api):
         client,
         ["/api/release-policy/overrides", "/api/policy/release/overrides"],
         {
-            "runtime": "groq",
+            "runtime": "guard",
             "environment": "prod",
             "scope": "organization",
             "scope_id": "org-001",
@@ -420,7 +420,7 @@ def test_rollback_release_policy_route_requires_target_version(api):
     assert len(service.rollback_calls) == 0
 
 
-@pytest.mark.parametrize("runtime", ["openclaw", "claude", "groq", "future-runtime"])
+@pytest.mark.parametrize("runtime", ["openclaw", "claude", "guard", "future-runtime"])
 def test_evaluate_route_supports_cross_platform_runtimes(api, runtime: str):
     client, service = api
     service.evaluate_result = {

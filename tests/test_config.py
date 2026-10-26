@@ -78,14 +78,12 @@ def _build_settings(**overrides: Any) -> SimpleNamespace:
         "api_key_auth_configured": True,
         "bearer_auth_configured": True,
         "auth_configured": True,
-        "groq_enabled": False,
-        "GROQ_ENABLED": None,
-        "groq_api_key": "",
-        "GROQ_API_KEY": None,
-        "groq_model": "",
-        "GROQ_MODEL": None,
-        "groq_timeout_seconds": 60.0,
-        "GROQ_TIMEOUT_SECONDS": None,
+        "guard_enabled": False,
+        "GUARD_ENABLED": None,
+        "guard_model_path": "models/prompt-guard-86m",
+        "GUARD_MODEL_PATH": None,
+        "guard_threshold": 0.5,
+        "GUARD_THRESHOLD": None,
         "default_scan_verdict": "allow",
         "DEFAULT_SCAN_VERDICT": None,
         "default_review_status": "not_required",
@@ -319,24 +317,22 @@ def test_auth_configuration_flags_export_from_settings(load_config: Any) -> None
     assert config.AUTH_REQUIRED is False
 
 
-def test_logging_and_groq_exports_round_trip(load_config: Any) -> None:
+def test_logging_and_guard_exports_round_trip(load_config: Any) -> None:
     config = load_config(
         _build_settings(
             log_level="DEBUG",
             structured_logging_enabled=False,
-            groq_enabled=True,
-            groq_api_key="groq-secret",
-            groq_model="llama3-70b-8192",
-            groq_timeout_seconds=120.5,
+            guard_enabled=True,
+            guard_model_path="models/custom-prompt-guard",
+            guard_threshold=0.75,
         )
     )
 
     assert config.LOG_LEVEL == "DEBUG"
     assert config.STRUCTURED_LOGGING_ENABLED is False
-    assert config.GROQ_ENABLED is True
-    assert config.GROQ_API_KEY == "groq-secret"
-    assert config.GROQ_MODEL == "llama3-70b-8192"
-    assert config.GROQ_TIMEOUT_SECONDS == pytest.approx(120.5)
+    assert config.GUARD_ENABLED is True
+    assert config.GUARD_MODEL_PATH == "models/custom-prompt-guard"
+    assert config.GUARD_THRESHOLD == pytest.approx(0.75)
 
 
 def test_policy_thresholds_flags_and_limits_round_trip(load_config: Any) -> None:
@@ -454,10 +450,9 @@ def test_all_contains_compatibility_exports(load_config: Any) -> None:
         "ENABLE_TEXT_SCANNING",
         "ENABLE_URL_SCANNING",
         "ENVIRONMENT",
-        "GROQ_API_KEY",
-        "GROQ_ENABLED",
-        "GROQ_MODEL",
-        "GROQ_TIMEOUT_SECONDS",
+        "GUARD_ENABLED",
+        "GUARD_MODEL_PATH",
+        "GUARD_THRESHOLD",
         "INTERNAL_PLATFORM_API_KEY",
         "IRONCLAW_API_KEY",
         "JWT_ALGORITHM",

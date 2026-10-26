@@ -207,7 +207,7 @@ class McpToolAdapter(BaseIntegrationAdapter):
         matched_rules: list[str] | None = None,
         reasons: list[dict[str, Any]] | None = None,
     ) -> McpToolGuardDecision:
-        """Placeholder hook where policy / Groq verdict logic will plug in."""
+        """Placeholder hook where policy / Guard verdict logic will plug in."""
         should_review = mode == "enforce" and invocation.phase != "plan"
         verdict = "allow"
         status: AdapterExecutionStatus = "guarded"

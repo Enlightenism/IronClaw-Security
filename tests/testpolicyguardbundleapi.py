@@ -178,7 +178,7 @@ def _bundle_payload(version: str = "2026.04.25") -> dict[str, Any]:
         },
         "metadata": {
             "issuer": "ironclaw",
-            "targets": ["openclaw", "claude", "groq"],
+            "targets": ["openclaw", "claude", "guard"],
         },
     }
 

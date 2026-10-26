@@ -229,7 +229,7 @@ def test_provision_for_platform_delegates_to_canonical_install_key_service() -> 
     assert kwargs["entitlements_status"] == "active"
 
 
-@pytest.mark.parametrize("bad_platform", [None, "", "generic", "groq", "not_a_platform", "security-guardian", "security_guardian", "skill", "skills"])
+@pytest.mark.parametrize("bad_platform", [None, "", "generic", "guard", "not_a_platform", "security-guardian", "security_guardian", "skill", "skills"])
 def test_unsupported_platforms_are_rejected(bad_platform: str | None) -> None:
     router = PlatformInstallKeyRouter()
     with pytest.raises(ValueError):

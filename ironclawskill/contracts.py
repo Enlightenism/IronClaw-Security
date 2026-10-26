@@ -23,7 +23,7 @@ def newid(prefix: str = "") -> str:
 
 class SkillProvider(StrEnum):
     CLAUDE = "claude"
-    GROQ = "groq"
+    GUARD = "guard"
     OPENCLAW = "openclaw"
     UNKNOWN = "unknown"
 

@@ -22,7 +22,7 @@ CapabilityName = Literal[
     "telemetry",
     "policy_bundle",
     "secrets_redaction",
-    "groq_assist",
+    "guard_assist",
 ]
 
 
@@ -144,34 +144,34 @@ class IntegrationRegistry:
                     "slug": "generic-agent",
                 },
             ),
-            "integration-groq": IntegrationRecord(
-                integrationid="integration-groq",
-                platform="groq",
-                displayname="Groq Assist",
+            "integration-guard": IntegrationRecord(
+                integrationid="integration-guard",
+                platform="guard",
+                displayname="Prompt Guard (local model)",
                 status="configured",
-                description="IronClaw adapter for Groq inference and secured runtime routing.",
+                description="IronClaw adapter for local Prompt Guard classification and secured runtime routing.",
                 version="gen1",
-                adaptermodule="app.services.groqclient",
-                verificationroute="/integrations/integration-groq/verify",
+                adaptermodule="app.services.guard_client",
+                verificationroute="/integrations/integration-guard/verify",
                 settingsroute="/ui/integrations/settings",
-                manifestroute="/integrations/integration-groq/manifest",
+                manifestroute="/integrations/integration-guard/manifest",
                 installedat=seeded_at,
                 verifiedat=None,
-                tags=["llm", "inference", "runtime"],
+                tags=["local-model", "classification", "runtime"],
                 capabilities=_base_capabilities()
                 + [
                     IntegrationCapability(
-                        name="groq_assist",
+                        name="guard_assist",
                         enabled=True,
                         maturity="gen1",
-                        notes="Groq Assist-specific capabilities.",
+                        notes="Local Prompt Guard classification.",
                     ),
                 ],
                 metadata={
-                    "provider": "groq",
-                    "runtime": "api",
+                    "provider": "guard",
+                    "runtime": "local",
                     "defaultpolicy": "strict",
-                    "slug": "groq-assist",
+                    "slug": "guard",
                 },
             ),
         }

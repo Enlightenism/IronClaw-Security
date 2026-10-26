@@ -11,7 +11,7 @@
 # The environment block below pins runtime-critical values that must
 # never be sourced from an absent .env — these are safe, non-secret
 # defaults that prevent silent failure on a fresh install.
-# Secret keys (SUPABASE_*, GROQ_API_KEY, *_API_KEY) are loaded
+# Secret keys (SUPABASE_*, *_API_KEY) are loaded
 # exclusively from .env and are intentionally absent here.
 
 services:
@@ -105,13 +105,11 @@ services:
       AUTH_REQUIRED: "false"
 
       # -----------------------------------------------------------------------
-      # Groq
-      # IMPORTANT: Set GROQ_ENABLED=true only after setting GROQ_API_KEY in .env.
-      # GROQ_API_KEY must be set in .env — never hardcoded here.
+      # Local prompt guard
       # -----------------------------------------------------------------------
-      GROQ_ENABLED: "false"
-      GROQ_MODEL: "llama-3.3-70b-versatile"
-      GROQ_TIMEOUT_SECONDS: "60.0"
+      GUARD_ENABLED: "true"
+      GUARD_MODEL_PATH: "models/prompt-guard-86m"
+      GUARD_THRESHOLD: "0.5"
 
       # -----------------------------------------------------------------------
       # File storage paths (mapped to the ./data volume mount)

@@ -43,10 +43,9 @@ _ALL_VAULT_ENV_KEYS = (
     "STRIPE_SECRET_KEY",
     "STRIPE_PUBLISHABLE_KEY",
     "STRIPE_WEBHOOK_SECRET",
-    "GROQ_ENABLED",
-    "GROQ_API_KEY",
-    "GROQ_MODEL",
-    "GROQ_TIMEOUT_SECONDS",
+    "GUARD_ENABLED",
+    "GUARD_MODEL_PATH",
+    "GUARD_THRESHOLD",
     "OPENAI_API_KEY",
     "DEFAULT_SCAN_VERDICT",
     "DEFAULT_REVIEW_STATUS",
@@ -145,22 +144,31 @@ def test_supabase_service_role_key_returns_value():
         assert fresh_vault().supabase_service_role_key() == "srk-xyz"
 
 
-def test_groq_api_key_empty_default():
-    assert fresh_vault().groq_api_key() == ""
+def test_guard_enabled_default_false():
+    assert fresh_vault().guard_enabled() is False
 
 
-def test_groq_api_key_override():
-    with patch.dict(os.environ, {"GROQ_API_KEY": "gsk-test-key"}, clear=False):
-        assert fresh_vault().groq_api_key() == "gsk-test-key"
+def test_guard_enabled_override():
+    with patch.dict(os.environ, {"GUARD_ENABLED": "true"}, clear=False):
+        assert fresh_vault().guard_enabled() is True
 
 
-def test_groq_model_default():
-    assert fresh_vault().groq_model() == "llama3-8b-8192"
+def test_guard_model_path_default():
+    assert fresh_vault().guard_model_path() == "models/prompt-guard-86m"
 
 
-def test_groq_model_override():
-    with patch.dict(os.environ, {"GROQ_MODEL": "mixtral-8x7b-32768"}, clear=False):
-        assert fresh_vault().groq_model() == "mixtral-8x7b-32768"
+def test_guard_model_path_override():
+    with patch.dict(os.environ, {"GUARD_MODEL_PATH": "models/custom-guard"}, clear=False):
+        assert fresh_vault().guard_model_path() == "models/custom-guard"
+
+
+def test_guard_threshold_default():
+    assert fresh_vault().guard_threshold() == 0.5
+
+
+def test_guard_threshold_override():
+    with patch.dict(os.environ, {"GUARD_THRESHOLD": "0.75"}, clear=False):
+        assert fresh_vault().guard_threshold() == 0.75
 
 
 def test_secret_key_empty_default():

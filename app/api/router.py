@@ -61,7 +61,7 @@ OPTIONAL_API_MODULES: Final[tuple[str, ...]] = _dedupe_api_modules(
 
 CORE_API_MODULES: Final[tuple[str, ...]] = (
     "app.api.ui_manifest",
-    "app.ui.groq_registry",
+    "app.ui.guard_registry",
     "app.api.routes.unit_wallet",
     "app.api.routes.unit_ledger",
     "app.api.routes.actionhistorytest",
@@ -145,8 +145,8 @@ def validate_api_routers() -> None:
             seen_route_signatures[signature] = label
 
 
-# NOTE: /ui-manifest and /groq-registry are intentionally OMITTED here.
-# Those paths are already served by app.api.ui_manifest and app.ui.groq_registry
+# NOTE: /ui-manifest and /guard-registry are intentionally OMITTED here.
+# Those paths are already served by app.api.ui_manifest and app.ui.guard_registry
 # (loaded via CORE_API_MODULES). Adding them here would cause duplicate route registration.
 @inventory_router.get("/incidents", summary="Api Incidents Inventory")
 def api_incidents_inventory() -> dict[str, str]:

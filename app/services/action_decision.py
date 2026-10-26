@@ -127,5 +127,5 @@ def evaluate_action_execution(
         agent_id=agent_id,
         reasons=reasons,
         drift_report=guard_decision.get("drift_report"),
-        groq_decision=None,
+        guard_decision=None,
     )

@@ -48,8 +48,8 @@ def _provider_value(value: Any) -> SkillProvider:
     normalized = str(value or "").strip().lower()
     if normalized == SkillProvider.CLAUDE.value:
         return SkillProvider.CLAUDE
-    if normalized == SkillProvider.GROQ.value:
-        return SkillProvider.GROQ
+    if normalized == SkillProvider.GUARD.value:
+        return SkillProvider.GUARD
     if normalized == SkillProvider.OPENCLAW.value:
         return SkillProvider.OPENCLAW
     return SkillProvider.OPENCLAW

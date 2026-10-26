@@ -108,7 +108,7 @@ def _check_supabase_config(results: list[dict[str, Any]]) -> None:
 def _check_external_integrations(results: list[dict[str, Any]]) -> None:
     groups = {
         "openai": ["OPENAI_API_KEY"],
-        "groq": ["GROQ_API_KEY"],
+        "guard": ["GUARD_MODEL_PATH"],
     }
 
     configured: list[str] = []
@@ -121,7 +121,7 @@ def _check_external_integrations(results: list[dict[str, Any]]) -> None:
             results,
             "external-integrations",
             False,
-            "no external integration credentials are configured",
+            "no integration provider configuration is present",
         )
         return
 
@@ -141,7 +141,6 @@ def _check_secrets_quality(results: list[dict[str, Any]]) -> None:
         "SUPABASE_KEY",
         "SUPABASE_SERVICE_ROLE_KEY",
         "OPENAI_API_KEY",
-        "GROQ_API_KEY",
     ]
 
     bad: list[str] = []

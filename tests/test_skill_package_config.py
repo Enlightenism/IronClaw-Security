@@ -169,3 +169,65 @@ def test_enabledproviders_matches_enabled_provider_configs() -> None:
     actual = sorted(config.enabledproviders)
 
     assert actual == expected
+
+
+def test_guard_provider_uses_local_model_path(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("IRONCLAWSKILL_GUARD_MODEL_PATH", raising=False)
+    monkeypatch.delenv("GUARD_MODEL_PATH", raising=False)
+    config = IronClawSkillConfig.from_mapping(
+        {
+            "default_provider": "guard",
+            "providers": {
+                "guard": {
+                    "enabled": True,
+                    "model_path": "models/custom-prompt-guard",
+                    "api_key": "unused",
+                    "endpoint": "https://example.invalid",
+                },
+            },
+        },
+        root_dir=tmp_path,
+    )
+
+    guard = config.providers["guard"]
+    assert guard.model_path == "models/custom-prompt-guard"
+    assert guard.api_key is None
+    assert guard.endpoint is None
+    assert guard.configured is True
+
+
+def test_legacy_skill_config_and_context_propagate_guard_model_path(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from ironclaw_skill.config import load_skill_config, save_skill_config, skill_config_env
+    from ironclaw_skill.context import resolve_skill_context, skill_env_overrides
+
+    model_path = str(tmp_path / "models" / "prompt-guard-86m")
+    monkeypatch.setenv("GUARD_MODEL_PATH", model_path)
+    for name in ("OPENAI_API_KEY", "API_SECRET", "JWT_SECRET"):
+        monkeypatch.delenv(name, raising=False)
+
+    config = load_skill_config(
+        project_root=tmp_path,
+        config_dir=tmp_path / ".ironclaw-config",
+        load_dotenv_file=False,
+    )
+
+    assert config.guard_model_path == model_path
+    assert skill_config_env(config)["GUARD_MODEL_PATH"] == model_path
+
+    save_skill_config(config, include_secrets=True)
+    assert f"GUARD_MODEL_PATH={model_path}" in config.env_file.read_text(encoding="utf-8")
+
+    context = resolve_skill_context(
+        project_root=tmp_path,
+        config_dir=tmp_path / ".ironclaw-context",
+        load_dotenv_file=False,
+    )
+
+    assert context.guard_model_path == model_path
+    assert skill_env_overrides(context)["GUARD_MODEL_PATH"] == model_path

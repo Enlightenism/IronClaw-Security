@@ -88,8 +88,8 @@ def _category_from_tags(tags: list[str]) -> str:
     if tag in {"ui-manifest"}:
         return "platform"
 
-    if tag.startswith("groq"):
-        return "groq"
+    if tag.startswith("guard"):
+        return "guard"
 
     if tag.startswith("billing"):
         return "billing"

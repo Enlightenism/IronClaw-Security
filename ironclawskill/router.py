@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -9,10 +10,16 @@ from .adapterclaude import ClaudeSkillAdapter, adaptclauderequest, adaptclaudere
 from .adapteropenclaw import OpenClawSkillAdapter, adaptopenclawrequest, adaptopenclawresponse
 from .config import IronClawSkillConfig, loadconfig
 from .contracts import (
+    SkillActor,
+    SkillContextSnapshot,
     SkillDecision,
     SkillExecutionRequest,
     SkillExecutionResult,
+    SkillExecutionTarget,
+    SkillInputArtifact,
+    SkillPolicyHint,
     SkillProvider,
+    newid,
 )
 from .errors import (
     ErrorContext,
@@ -69,6 +76,10 @@ def _provider_value(value: Any) -> SkillProvider:
     normalized = str(value or "").strip().lower()
     if normalized == SkillProvider.CLAUDE.value:
         return SkillProvider.CLAUDE
+    if normalized == SkillProvider.GUARD.value:
+        return SkillProvider.GUARD
+    if normalized == SkillProvider.OPENCLAW.value:
+        return SkillProvider.OPENCLAW
     return SkillProvider.OPENCLAW
 
 
@@ -227,7 +238,9 @@ class _RouterState:
         payload = request.model_dump(mode="json")
 
         async def handler(guardedpayload: dict[str, Any]) -> dict[str, Any]:
-            result = self.runtime.execute(self._to_execution_request(guardedpayload))
+            result = await self.runtime.execute_async(
+                self._to_execution_request(guardedpayload),
+            )
             return self._result_payload(result)
 
         result = await self.middleware.dispatch(payload, handler)
@@ -257,33 +270,57 @@ class _RouterState:
 
     def _to_execution_request(self, payload: dict[str, Any]) -> SkillExecutionRequest:
         try:
+            request_id = self._optional_text(payload.get("requestid")) or newid("req_")
+            provider = _provider_value(
+                payload.get("provider") or self.config.default_provider,
+            )
+            organization_id = self._optional_text(payload.get("organizationid"))
+            metadata = dict(payload.get("metadata") or {})
+            target_id = self._optional_text(payload.get("target")) or "runtime"
             return SkillExecutionRequest(
-                provider=str(payload.get("provider") or self.config.defaultprovider),
-                requestid=str(payload.get("requestid") or ""),
-                traceid=str(payload.get("traceid") or ""),
-                sessionid=self._optional_text(payload.get("sessionid")),
-                organizationid=self._optional_text(payload.get("organizationid")),
-                customerid=self._optional_text(payload.get("customerid")),
-                actorid=self._optional_text(payload.get("actorid")),
+                requestid=request_id,
+                provider=provider,
                 operation=str(payload.get("operation") or "execute"),
-                action=str(payload.get("action") or payload.get("actiontype") or "execute"),
-                target=str(payload.get("target") or "runtime"),
-                content=str(payload.get("content") or ""),
-                model=self._optional_text(payload.get("model")),
+                actor=SkillActor(
+                    actorid=self._optional_text(payload.get("actorid")) or "anonymous",
+                    organizationid=organization_id,
+                ),
+                target=SkillExecutionTarget(
+                    targetid=target_id,
+                    targettype="runtime",
+                    name=target_id,
+                ),
+                context=SkillContextSnapshot(
+                    requestid=request_id,
+                    sessionid=self._optional_text(payload.get("sessionid")),
+                    traceid=self._optional_text(payload.get("traceid")),
+                    organizationid=organization_id,
+                    customerid=self._optional_text(payload.get("customerid")),
+                    environment=self.config.environment,
+                    metadata=metadata,
+                ),
+                prompt=self._optional_text(payload.get("content")),
                 systemprompt=self._optional_text(payload.get("systemprompt")),
-                messages=list(payload.get("messages") or []),
-                metadata=dict(payload.get("metadata") or {}),
-                reviewrequired=bool(payload.get("reviewrequired", False)),
-                sandboxenabled=self._coerce_bool(payload.get("sandboxenabled"), self.config.security.enablesandbox),
-                networkallowed=self._coerce_bool(payload.get("networkallowed"), self.config.security.allownetwork),
-                filesystemwriteallowed=self._coerce_bool(
-                    payload.get("filesystemwriteallowed"),
-                    self.config.security.allowfilesystemwrite,
+                inputartifacts=self._build_input_artifacts(payload),
+                policy=SkillPolicyHint(
+                    allownetwork=self._coerce_bool(
+                        payload.get("networkallowed"),
+                        self.config.security.allow_network,
+                    ),
+                    allowfilesystemwrite=self._coerce_bool(
+                        payload.get("filesystemwriteallowed"),
+                        self.config.security.allow_filesystem_write,
+                    ),
+                    allowtoolinvocation=self._coerce_bool(
+                        payload.get("toolinvocationallowed"),
+                        self.config.security.allow_tool_invocation,
+                    ),
+                    requiredcontrols=(("human_review",) if bool(payload.get("reviewrequired", False)) else ()),
+                    metadata=metadata,
                 ),
-                toolinvocationallowed=self._coerce_bool(
-                    payload.get("toolinvocationallowed"),
-                    self.config.security.allowtoolinvocation,
-                ),
+                capabilities=self._string_tuple(payload.get("capabilities")),
+                tags=self._string_tuple(payload.get("tags")),
+                metadata=metadata,
             )
         except Exception as exc:
             raise self._http_error(
@@ -291,12 +328,75 @@ class _RouterState:
                     "Invalid skill execution request.",
                     context=ErrorContext(
                         requestid=str(payload.get("requestid") or ""),
-                        provider=_provider_value(payload.get("provider") or self.config.defaultprovider),
+                        provider=_provider_value(payload.get("provider") or self.config.default_provider),
                         operation=str(payload.get("operation") or "execute"),
                     ),
                     details={"error": str(exc)},
                 ),
             ) from exc
+
+    def _build_input_artifacts(
+        self,
+        payload: Mapping[str, Any],
+    ) -> tuple[SkillInputArtifact, ...]:
+        artifacts: list[SkillInputArtifact] = []
+        messages = payload.get("messages")
+        if isinstance(messages, list | tuple):
+            for index, message in enumerate(messages):
+                if not isinstance(message, Mapping):
+                    continue
+                role = str(message.get("role") or "user").strip().casefold()
+                content = message.get("content")
+                if role != "user" or content is None:
+                    continue
+                text = content if isinstance(content, str) else str(content)
+                if text.strip():
+                    artifacts.append(
+                        SkillInputArtifact(
+                            artifactid=newid("artifact_"),
+                            kind="text",
+                            name=f"user-message-{index + 1}",
+                            mimetype="text/plain",
+                            content=text,
+                            metadata={"role": "user"},
+                        ),
+                    )
+
+        raw_artifacts = payload.get("inputartifacts")
+        if raw_artifacts is None:
+            raw_artifacts = payload.get("input_artifacts")
+        if isinstance(raw_artifacts, list | tuple):
+            for artifact in raw_artifacts:
+                if isinstance(artifact, SkillInputArtifact):
+                    artifacts.append(artifact)
+                    continue
+                if not isinstance(artifact, Mapping):
+                    raise ValueError("Input artifacts must be JSON objects.")
+                content = artifact.get("content")
+                if content is None:
+                    continue
+                text = content if isinstance(content, str) else str(content)
+                if text.strip():
+                    artifact_id = self._optional_text(
+                        artifact.get("artifactid") or artifact.get("artifact_id"),
+                    ) or newid("artifact_")
+                    artifacts.append(
+                        SkillInputArtifact(
+                            artifactid=artifact_id,
+                            kind="text",
+                            name=self._optional_text(artifact.get("name")),
+                            mimetype=self._optional_text(artifact.get("mimetype")),
+                            content=text,
+                            metadata=(dict(artifact["metadata"]) if isinstance(artifact.get("metadata"), Mapping) else {}),
+                        ),
+                    )
+        return tuple(artifacts)
+
+    @staticmethod
+    def _string_tuple(value: Any) -> tuple[str, ...]:
+        if not isinstance(value, list | tuple):
+            return ()
+        return tuple(str(item) for item in value if str(item).strip())
 
     def _result_payload(self, result: SkillExecutionResult) -> dict[str, Any]:
         if hasattr(result, "asdict") and callable(result.asdict):
@@ -320,7 +420,7 @@ class _RouterState:
         return SkillExecutionEnvelope(
             requestid=str(result.get("requestid") or ""),
             traceid=str(result.get("traceid") or ""),
-            provider=str(result.get("provider") or self.config.defaultprovider),
+            provider=str(result.get("provider") or self.config.default_provider),
             decision=decision.value,
             summary=str(result.get("summary") or ""),
             allowed=bool(result.get("allowed", decision is SkillDecision.ALLOW)),

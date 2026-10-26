@@ -248,7 +248,7 @@ def test_verifier_rejects_disabled_rollout():
     )
 
     result = verifier.verify(
-        runtime="groq",
+        runtime="guard",
         bundle=_bundle(),
         signature="signed-bundle",
         secret="ironclaw-secret",
@@ -386,7 +386,7 @@ def test_missing_runtime_is_rejected_early():
 
 
 def test_verifier_supports_cross_platform_runtimes():
-    for runtime_name in ["openclaw", "claude", "groq", "future-runtime"]:
+    for runtime_name in ["openclaw", "claude", "guard", "future-runtime"]:
         verifier, signing, release, registry = _build(
             adapter_probe=_AdapterProbeResult(
                 ok=True,

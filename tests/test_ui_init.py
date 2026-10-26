@@ -35,7 +35,7 @@ from app.ui.executions.dashboard import router as execution_dashboard_router
 from app.ui.executions.detail import router as execution_detail_router
 from app.ui.executions.explorer import router as execution_explorer_router
 from app.ui.executions.testconsole import router as execution_test_console_router
-from app.ui.groq import router as groq_ui_router
+from app.ui.guard import router as guard_ui_router
 from app.ui.health_snapshot import router as health_snapshot_router
 from app.ui.incidents.triage import router as incident_triage_router
 from app.ui.insights.policy import router as policy_insights_router
@@ -73,7 +73,7 @@ _EXPECTED_ROUTERS: tuple[APIRouter, ...] = (
     incident_triage_router,
     operator_management_router,
     access_control_roles_router,
-    groq_ui_router,
+    guard_ui_router,
     billing_manifest_router,
     billing_registry_router,
     billing_index_router,
@@ -401,8 +401,8 @@ def test_ui_routers_contains_incident_triage_router() -> None:
     assert incident_triage_router in UI_ROUTERS
 
 
-def test_ui_routers_contains_groq_ui_router() -> None:
-    assert groq_ui_router in UI_ROUTERS
+def test_ui_routers_contains_guard_ui_router() -> None:
+    assert guard_ui_router in UI_ROUTERS
 
 
 def test_ui_routers_contains_usage_reports_router() -> None:

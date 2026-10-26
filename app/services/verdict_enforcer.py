@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Literal, TypedDict
 
-from app.services.groq_security_brain import GroqSecurityDecision
+from app.services.guard_security_brain import GuardSecurityDecision
 
 VerdictType = Literal["allow", "warn", "quarantine", "block"]
 
@@ -30,15 +30,15 @@ class EnforcedVerdict(TypedDict):
     agent_id: str | None
     reasons: list[dict[str, object]]
     drift_report: dict[str, Any] | None
-    # Groq telemetry
-    groq_verdict: str | None
-    groq_risk_score: int | None
-    groq_confidence: float | None
-    groq_latency_ms: float | None
-    groq_model_name: str | None
-    groq_signals: list[str]
-    groq_summary: str | None
-    groq_decided_at: str | None
+    # Guard telemetry
+    guard_verdict: str | None
+    guard_risk_score: int | None
+    guard_confidence: float | None
+    guard_latency_ms: float | None
+    guard_model_name: str | None
+    guard_signals: list[str]
+    guard_summary: str | None
+    guard_decided_at: str | None
     # Enforcer stamp
     enforced_at: str
 
@@ -55,29 +55,29 @@ def _max_verdict(a: str, b: str) -> VerdictType:
     return a if _verdict_rank(a) >= _verdict_rank(b) else b  # type: ignore[return-value]
 
 
-def _extract_groq_telemetry(
-    decision: GroqSecurityDecision | None,
+def _extract_guard_telemetry(
+    decision: GuardSecurityDecision | None,
 ) -> dict[str, Any]:
     if decision is None:
         return {
-            "groq_verdict": None,
-            "groq_risk_score": None,
-            "groq_confidence": None,
-            "groq_latency_ms": None,
-            "groq_model_name": None,
-            "groq_signals": [],
-            "groq_summary": None,
-            "groq_decided_at": None,
+            "guard_verdict": None,
+            "guard_risk_score": None,
+            "guard_confidence": None,
+            "guard_latency_ms": None,
+            "guard_model_name": None,
+            "guard_signals": [],
+            "guard_summary": None,
+            "guard_decided_at": None,
         }
     return {
-        "groq_verdict": decision.verdict,
-        "groq_risk_score": decision.risk_score,
-        "groq_confidence": getattr(decision, "confidence", None),
-        "groq_latency_ms": getattr(decision, "latency_ms", None),
-        "groq_model_name": decision.model_name,
-        "groq_signals": list(decision.signals),
-        "groq_summary": decision.summary,
-        "groq_decided_at": decision.decided_at,
+        "guard_verdict": decision.verdict,
+        "guard_risk_score": decision.risk_score,
+        "guard_confidence": getattr(decision, "confidence", None),
+        "guard_latency_ms": getattr(decision, "latency_ms", None),
+        "guard_model_name": decision.model_name,
+        "guard_signals": list(decision.signals),
+        "guard_summary": decision.summary,
+        "guard_decided_at": decision.decided_at,
     }
 
 
@@ -101,22 +101,22 @@ def enforce_verdict(
     agent_id: str | None = None,
     reasons: list[dict[str, object]] | None = None,
     drift_report: dict[str, Any] | None = None,
-    groq_decision: GroqSecurityDecision | None = None,
+    guard_decision: GuardSecurityDecision | None = None,
 ) -> EnforcedVerdict:
-    groq_telemetry = _extract_groq_telemetry(groq_decision)
+    guard_telemetry = _extract_guard_telemetry(guard_decision)
 
-    # If Groq produced a harder verdict, escalate; never downgrade.
+    # If the local guard produced a harder verdict, escalate; never downgrade.
     final_verdict: VerdictType = verdict
-    if groq_decision is not None:
-        final_verdict = _max_verdict(verdict, groq_decision.verdict)
+    if guard_decision is not None:
+        final_verdict = _max_verdict(verdict, guard_decision.verdict)
         if final_verdict != verdict:
-            groq_reason: dict[str, object] = {
+            guard_reason: dict[str, object] = {
                 "source": "ai",
-                "label": "Groq security brain escalation",
-                "details": groq_decision.summary,
-                "score": min(groq_decision.risk_score / 100.0, 1.0),
+                "label": "Guard security brain escalation",
+                "details": guard_decision.summary,
+                "score": min(guard_decision.risk_score / 100.0, 1.0),
             }
-            reasons = list(reasons or []) + [groq_reason]
+            reasons = list(reasons or []) + [guard_reason]
 
     return EnforcedVerdict(
         action_type=action_type,
@@ -137,13 +137,13 @@ def enforce_verdict(
         agent_id=agent_id,
         reasons=list(reasons or []),
         drift_report=drift_report,
-        groq_verdict=groq_telemetry["groq_verdict"],
-        groq_risk_score=groq_telemetry["groq_risk_score"],
-        groq_confidence=groq_telemetry["groq_confidence"],
-        groq_latency_ms=groq_telemetry["groq_latency_ms"],
-        groq_model_name=groq_telemetry["groq_model_name"],
-        groq_signals=groq_telemetry["groq_signals"],
-        groq_summary=groq_telemetry["groq_summary"],
-        groq_decided_at=groq_telemetry["groq_decided_at"],
+        guard_verdict=guard_telemetry["guard_verdict"],
+        guard_risk_score=guard_telemetry["guard_risk_score"],
+        guard_confidence=guard_telemetry["guard_confidence"],
+        guard_latency_ms=guard_telemetry["guard_latency_ms"],
+        guard_model_name=guard_telemetry["guard_model_name"],
+        guard_signals=guard_telemetry["guard_signals"],
+        guard_summary=guard_telemetry["guard_summary"],
+        guard_decided_at=guard_telemetry["guard_decided_at"],
         enforced_at=_utc_now(),
     )

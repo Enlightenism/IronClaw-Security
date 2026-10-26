@@ -20,7 +20,7 @@ CapabilityName = Literal[
     "audit_export",
     "policy_sync",
     "telemetry",
-    "groq_assist",
+    "guard_assist",
 ]
 
 
@@ -198,7 +198,11 @@ def default_integrations() -> list[IntegrationRecord]:
                 IntegrationCapability("execution_interception", True, "Evaluate execution plans and outcomes."),
                 IntegrationCapability("review_queue", True, "Hold risky actions for review."),
                 IntegrationCapability("telemetry", True, "Publish integration telemetry events."),
-                IntegrationCapability("groq_assist", True, "Optional Groq second-opinion security reasoning."),
+                IntegrationCapability(
+                    "guard_assist",
+                    True,
+                    "Provide Guard assistance through local Prompt Guard classification.",
+                ),
             ],
             metadata={
                 "priority": 1,

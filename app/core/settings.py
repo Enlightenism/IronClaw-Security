@@ -256,15 +256,14 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------
-    # Groq / AI
+    # Local prompt guard
     # ------------------------------------------------------------------
-    groq_enabled: bool = Field(default=False, alias="GROQ_ENABLED")
-    groq_api_key: str = Field(default="", alias="GROQ_API_KEY")
-    groq_model: str = Field(default="llama3-8b-8192", alias="GROQ_MODEL")
-    groq_timeout_seconds: float = Field(
-        default=60.0,
-        alias="GROQ_TIMEOUT_SECONDS",
+    guard_enabled: bool = Field(default=False, alias="GUARD_ENABLED")
+    guard_model_path: str = Field(
+        default="models/prompt-guard-86m",
+        alias="GUARD_MODEL_PATH",
     )
+    guard_threshold: float = Field(default=0.5, alias="GUARD_THRESHOLD")
 
     # ------------------------------------------------------------------
     # OpenAI

@@ -50,6 +50,7 @@ def base_config() -> IronClawSkillConfig:
     assert isinstance(config.default_provider, str)
     assert config.default_provider in {
         SkillProvider.CLAUDE.value,
+        SkillProvider.GUARD.value,
         SkillProvider.OPENCLAW.value,
     }
     return config

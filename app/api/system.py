@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from functools import lru_cache
-import os
 from typing import Any
 
 from fastapi import APIRouter, Response, status
 from pydantic import BaseModel, Field
 
+from app.core.settings import get_settings
+from app.services.prompt_guard import resolve_prompt_guard_path
 from app.services.review_queue_service import get_review_queue_summary
 from app.services.telemetry import (
     append_telemetry_event,
@@ -136,31 +137,17 @@ def _build_component_status(
     )
 
 
-def _probe_groq_enabled() -> ComponentStatus:
-    """
-    Check whether Groq is configured and the client can be instantiated.
-    Reads GROQ_API_KEY from the environment — no network call is made.
-    """
-    api_key_present = bool(os.environ.get("GROQ_API_KEY", "").strip())
-    client_ok = False
-    client_error: str | None = None
-
-    if api_key_present:
-        try:
-            from app.services.groq_client import GroqClient
-
-            instance = GroqClient()
-            client_ok = instance is not None
-        except Exception as exc:
-            client_error = str(exc)
-
+def _probe_prompt_guard() -> ComponentStatus:
+    settings = get_settings()
+    model_path = resolve_prompt_guard_path(settings.guard_model_path)
+    model_files_present = model_path.is_dir() and (model_path / "config.json").is_file() and (model_path / "model.safetensors").is_file()
     return _build_component_status(
-        name="groq_client",
-        ok=api_key_present and client_ok,
+        name="prompt_guard",
+        ok=not settings.guard_enabled or model_files_present,
         details={
-            "api_key_configured": api_key_present,
-            "client_initialized": client_ok,
-            **({"error": client_error} if client_error else {}),
+            "enabled": settings.guard_enabled,
+            "model_path": str(model_path),
+            "model_files_present": model_files_present,
         },
     )
 
@@ -295,7 +282,7 @@ def _build_readiness_checks() -> list[ComponentStatus]:
     )
 
     # ── production-quality signals absorbed from app_init.py ──────────────
-    checks.append(_probe_groq_enabled())
+    checks.append(_probe_prompt_guard())
     checks.append(_probe_scanner_service())
     checks.append(_probe_history_service())
 
